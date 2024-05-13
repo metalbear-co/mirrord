@@ -5,7 +5,7 @@
 //! or disable file operations;
 //!
 //! 2. [`FsUserConfig::Advanced`]: All of the above, plus allows setting up
-//! [`mirrord_layer::file::filter::FileFilter`] to control which files should be opened
+//! `mirrord_layer::file::filter::FileFilter` to control which files should be opened
 //! locally or remotely.
 use schemars::JsonSchema;
 use serde::Deserialize;

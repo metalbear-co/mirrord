@@ -260,7 +260,7 @@ pub trait IsLayerRequest: Sized {
 
 /// A helper trait for `layer -> proxy` requests that require a response from the proxy.
 /// Not all layer requests require a response, e.g.
-/// [`CloseFileRequest`](mirrord_protocol::file::CloseFileRequest).
+/// [`CloseFileRequest`].
 ///
 /// # Note
 ///

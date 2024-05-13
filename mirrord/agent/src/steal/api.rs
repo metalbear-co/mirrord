@@ -85,7 +85,7 @@ impl TcpStealerApi {
     /// Helper function that passes the [`DaemonTcp`] messages we generated in the
     /// [`TcpConnectionStealer`] task, back to the agent.
     ///
-    /// Called in the [`ClientConnectionHandler`].
+    /// Called in the `ClientConnectionHandler`.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn recv(&mut self) -> Result<DaemonTcp> {
         match self.daemon_rx.recv().await {
@@ -122,7 +122,7 @@ impl TcpStealerApi {
             .await
     }
 
-    /// Handles the conversion of [`LayerTcpSteal::TcpData`], that is passed from the
+    /// Handles the conversion of [`TcpData`], that is passed from the
     /// agent, to an internal stealer command [`Command::ResponseData`].
     ///
     /// The actual handling of this message is done in [`TcpConnectionStealer`].

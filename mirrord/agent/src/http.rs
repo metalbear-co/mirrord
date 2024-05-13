@@ -23,9 +23,9 @@ impl HttpVersion {
     pub const MINIMAL_HEADER_SIZE: usize = 10;
 
     /// Checks if `buffer` contains a prefix of a valid HTTP/1.x request, or if it could be an
-    /// HTTP/2 request by comparing it with a slice of [`H2_PREFACE`].
+    /// HTTP/2 request by comparing it with a slice of [`Self::H2_PREFACE`].
     ///
-    /// The given `buffer` must contain at least [`MINIMAL_HEADER_SIZE`] bytes, otherwise this
+    /// The given `buffer` must contain at least [`Self::MINIMAL_HEADER_SIZE`] bytes, otherwise this
     /// function always returns [`None`].
     #[tracing::instrument(level = "trace")]
     pub fn new(buffer: &[u8]) -> Option<Self> {

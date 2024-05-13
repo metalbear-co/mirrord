@@ -85,7 +85,7 @@ impl Drop for DetourGuard {
     }
 }
 
-/// Wrapper around [`OnceLock`](std::sync::OnceLock), mainly used for the [`Deref`] implementation
+/// Wrapper around [`OnceLock`], mainly used for the [`Deref`] implementation
 /// to simplify calls to the original functions as `FN_ORIGINAL()`, instead of
 /// `FN_ORIGINAL.get().unwrap()`.
 #[derive(Debug)]
@@ -100,7 +100,7 @@ impl<T> Deref for HookFn<T> {
 }
 
 impl<T> HookFn<T> {
-    /// Helper function to set the inner [`OnceLock`](std::sync::OnceLock) `T` of `self`.
+    /// Helper function to set the inner [`OnceLock`] `T` of `self`.
     pub(crate) fn set(&self, value: T) -> Result<(), T> {
         self.0.set(value)
     }
@@ -134,7 +134,7 @@ pub(crate) enum Bypass {
     /// Similar to `LocalFdNotFound`, but for [`OPEN_DIRS`](crate::file::open_dirs::OPEN_DIRS).
     LocalDirStreamNotFound(usize),
 
-    /// A conversion from [`SockAddr`](socket2::sockaddr::SockAddr) to
+    /// A conversion from [`SockAddr`](socket2::SockAddr) to
     /// [`SocketAddr`](std::net::SocketAddr) failed.
     AddressConversion,
 

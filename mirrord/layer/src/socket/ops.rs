@@ -769,7 +769,7 @@ pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), Hoo
 }
 
 /// Managed part of our [`dup_detour`], that clones the `Arc<T>` thing we have keyed by `fd`
-/// ([`UserSocket`], or [`RemoteFile`]).
+/// ([`UserSocket`], or [`file::ops::RemoteFile`]).
 ///
 /// - `SWITCH_MAP`:
 ///
@@ -1055,10 +1055,10 @@ pub(super) fn gethostname() -> Detour<&'static CString> {
 /// we don't actually [`libc::connect`] `sockfd`, but we change the respective [`UserSocket`] to
 /// [`SocketState::Connected`].
 ///
-/// Here we check for this invariant, so if a user calls [`libc::recv_from`] without previously
-/// either connecting this `sockfd`, or calling [`libc::send_to`], we're going to panic.
+/// Here we check for this invariant, so if a user calls [`libc::recvmsg`] without previously
+/// either connecting this `sockfd`, or calling [`libc::sendto`], we're going to panic.
 ///
-/// It performs the [`fill_address`] requirement of [`libc::recv_from`] with the correct remote
+/// It performs the [`fill_address`] requirement of [`libc::recvmsg`] with the correct remote
 /// address (instead of using our interceptor address).
 ///
 /// ## Any other port
@@ -1150,7 +1150,7 @@ fn send_dns_patch(
 ///
 /// There is a bit of trickery going on here, as this function first triggers a _semantical_
 /// connection to an interceptor socket (we don't [`libc::connect`] this `sockfd`, just change the
-/// [`UserSocket`] state), and only then calls the actual [`libc::send_to`] to send `raw_message` to
+/// [`UserSocket`] state), and only then calls the actual [`libc::sendto`] to send `raw_message` to
 /// the interceptor address (instead of the `raw_destination`).
 ///
 /// ## Any other port
