@@ -45,7 +45,7 @@ impl Credentials {
         common_name: &str,
         key_pair: &InMemorySigningKeyPair,
     ) -> Result<rfc2986::CertificationRequest> {
-        let mut builder = X509CertificateBuilder::new(KeyAlgorithm::Ed25519);
+        let mut builder = X509CertificateBuilder::default();
 
         let _ = builder
             .subject()
@@ -186,7 +186,7 @@ pub mod client {
                 Some(key_pair) => key_pair,
                 None => {
                     let key_algorithm = KeyAlgorithm::Ed25519;
-                    let (_, document) = InMemorySigningKeyPair::generate_random(key_algorithm)?;
+                    let document = InMemorySigningKeyPair::generate_random(key_algorithm)?;
                     let pem_key = pem::Pem::new("PRIVATE KEY", document.as_ref());
                     pem::encode(&pem_key).into()
                 }

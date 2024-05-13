@@ -34,7 +34,7 @@ serde_json.workspace = true
 
 bytes.workspace = true
 thiserror.workspace = true
-trust-dns-resolver.workspace = true
+hickory-resolver.workspace = true
 num-traits.workspace = true
 
 rand = "0.8"
@@ -45,7 +45,7 @@ socket2.workspace = true
 anyhow.workspace = true
 streammap-ext.workspace = true
 urlencoding = "2"
-itertools = "0.10"
+itertools = "0.12"
 os_info = "3"
 bytemuck = "1"
 bimap.workspace = true
@@ -62,7 +62,7 @@ null-terminated = "0.3"
 mirrord-intproxy = { path = "../intproxy" }
 k8s-openapi.workspace = true
 chrono = { version = "0.4", features = ["clock"] }
-base64 = "0.21"
+base64.workspace = true
 http-body = { workspace = true }
 hyper = { workspace = true }
 rstest = "*"
@@ -70,7 +70,7 @@ test-cdylib = "*"
 tower = "0.4"
 tokio = { version = "1", features = ["rt", "net", "macros"] }
 tests = { path = "../../tests" }
-flaky_test = "0.1.0"
+flaky_test = "0.2"
 futures.workspace = true
 actix-codec.workspace = true
 tokio-stream.workspace = true

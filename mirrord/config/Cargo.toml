@@ -28,8 +28,8 @@ bimap.workspace = true
 nom = "7.1"
 ipnet = "2.8"
 bitflags = "2"
-k8s-openapi = { workspace = true, features = ["schemars"] }
+k8s-openapi = { workspace = true, features = ["schemars", "earliest"] }
 tera = "1"
 
 [dev-dependencies]
-rstest = "0.17"
+rstest = "0.19"

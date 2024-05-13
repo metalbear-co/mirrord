@@ -19,7 +19,7 @@ containerd-client = {git = "https://github.com/containerd/rust-extensions", rev=
 tokio = { workspace = true, features = ["rt", "net", "macros", "fs", "process", "signal"] }
 serde.workspace = true
 serde_json.workspace = true
-pnet = "0.33"
+pnet = "0.34"
 nix = { workspace  = true, features = ["mount"] }
 clap = { workspace = true, features = ["env"] }
 mirrord-protocol = { path = "../protocol"}
@@ -29,9 +29,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 tokio-stream.workspace = true
 thiserror.workspace = true
-trust-dns-resolver.workspace = true
+hickory-resolver.workspace = true
 num-traits.workspace = true
-bollard = "0.14"
+bollard = "0.16"
 tokio-util.workspace = true
 rand.workspace = true
 streammap-ext.workspace = true
@@ -50,14 +50,14 @@ fancy-regex = { workspace = true }
 dashmap = { version = "5" }
 oci-spec = "0.6.0"
 async-trait = "0.1"
-tonic = "0.9"
+tonic = "0.11"
 tower = "0.4"
-http = "0.2"
+http = "1"
 k8s-cri = "0.7"
 once_cell.workspace = true
 semver.workspace = true
 drain.workspace = true
-tokio-rustls = "0.25"
+tokio-rustls = "0.26"
 x509-parser = "0.16"
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -66,6 +66,6 @@ rawsocket = {git = "https://github.com/metalbear-co/rawsocket.git"}
 
 
 [dev-dependencies]
-mockall = "0.11.2" # 0.11.3 is broken
+mockall = "0.12" # 0.11.3 is broken
 test_bin = "0.4"
-rcgen = "0.10"
+rcgen = "0.13"

@@ -3,7 +3,7 @@ use std::{fmt, fmt::Formatter, io, net::AddrParseError};
 use bincode::{Decode, Encode};
 use thiserror::Error;
 use tracing::warn;
-use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
+use hickory_resolver::error::{ResolveError, ResolveErrorKind};
 
 use crate::{
     outgoing::SocketAddress,
