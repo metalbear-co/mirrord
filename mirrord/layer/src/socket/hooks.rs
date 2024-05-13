@@ -414,8 +414,8 @@ pub(super) unsafe extern "C" fn recvmsg_detour(
 }
 
 /// Not a faithful reproduction of what [`libc::sendmsg`] is supposed to do, see [`sendmsg`].
-///
-/// TODO(alex): We are ignoring the control message header [`libc::cmsghdr`].
+//
+// TODO(alex): We are ignoring the control message header `libc::cmsghdr`.
 #[hook_guard_fn]
 pub(super) unsafe extern "C" fn sendmsg_detour(
     sockfd: RawFd,
