@@ -23,7 +23,7 @@ mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"
 
 ctor = "0.2"
 libc.workspace = true
-nix.workspace = true
+nix = { workspace = true, features = ["net", "process", "signal"]}
 tracing.workspace = true
 tracing-subscriber.workspace = true
 # can't change to upstream since it brings openssl dependency.

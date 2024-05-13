@@ -1,9 +1,9 @@
 use std::{fmt, fmt::Formatter, io, net::AddrParseError};
 
 use bincode::{Decode, Encode};
+use hickory_resolver::error::{ResolveError, ResolveErrorKind};
 use thiserror::Error;
 use tracing::warn;
-use hickory_resolver::error::{ResolveError, ResolveErrorKind};
 
 use crate::{
     outgoing::SocketAddress,
