@@ -157,7 +157,7 @@ impl FilteringService {
 
                 // We need this to progress the connection forward (hyper thing).
                 tokio::spawn(async move {
-                    if let Err(error) = connection.await {
+                    if let Err(error) = connection.with_upgrades().await {
                         tracing::error!(?error, "Connection with original destination failed");
                     }
                 });
