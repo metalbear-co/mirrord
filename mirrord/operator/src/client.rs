@@ -7,7 +7,10 @@ use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
-use kube::{api::PostParams, Api, Client, Resource};
+use kube::{
+    api::{ListParams, PostParams},
+    Api, Client, Resource,
+};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
     certificate::Certificate,
@@ -51,6 +54,7 @@ pub enum OperatorOperation {
     CopyingTarget,
     GettingStatus,
     SessionManagement,
+    ListingTargets,
 }
 
 impl Display for OperatorOperation {
@@ -62,6 +66,7 @@ impl Display for OperatorOperation {
             Self::CopyingTarget => "copying target",
             Self::GettingStatus => "getting status",
             Self::SessionManagement => "session management",
+            Self::ListingTargets => "listing targets",
         };
 
         f.write_str(as_str)
@@ -374,7 +379,7 @@ impl OperatorApi {
         operator_api.connect_target(session_information).await
     }
 
-    async fn new(config: &LayerConfig) -> Result<Self> {
+    pub async fn new(config: &LayerConfig) -> Result<Self> {
         let target_config = config.target.clone();
         let on_concurrent_steal = config.feature.network.incoming.on_concurrent_steal;
 
@@ -612,6 +617,19 @@ impl OperatorApi {
                 error,
                 operation: OperatorOperation::CopyingTarget,
             })
+    }
+
+    /// List targets using the operator
+    #[tracing::instrument(level = "trace", skip(self), ret)]
+    pub async fn list_targets(&self) -> Result<Vec<TargetCrd>> {
+        self.target_api
+            .list(&ListParams::default())
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::ListingTargets,
+            })
+            .map(|list| list.items)
     }
 }
 

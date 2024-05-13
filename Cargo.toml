@@ -81,7 +81,7 @@ kube = { git = "https://github.com/metalbear-co/kube", default-features = false,
     "oidc",
     "socks5",
     "http_proxy",
-] }
+], branch = "fix_mb" }
 hickory-resolver = { version = "0.24", features = [
     "serde-config",
     "tokio-runtime",
