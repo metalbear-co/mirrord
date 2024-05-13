@@ -969,7 +969,7 @@ mod test {
             .unwrap();
 
             tasks.spawn(async move {
-                conn.await.unwrap();
+                conn.with_upgrades().await.unwrap();
             });
 
             TestSetup {
