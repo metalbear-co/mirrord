@@ -168,7 +168,7 @@ mod main {
                         .or_else(|| fat_slice.arches().iter().find(is_fat_x64_arch));
 
                     #[cfg(target_arch = "x86_64")]
-                    let found_arch = fat_slice.iter().find(is_fat_x64_arch);
+                    let found_arch = fat_slice.arches().iter().find(is_fat_x64_arch);
 
                     found_arch
                         .map(|arch| Self::new(arch.offset() as usize, arch.size() as usize))
@@ -191,7 +191,7 @@ mod main {
                         .or_else(|| fat_slice.arches().iter().find(is_fat_x64_arch));
 
                     #[cfg(target_arch = "x86_64")]
-                    let found_arch = fat_slice.iter().find(is_fat_x64_arch);
+                    let found_arch = fat_slice.arches().iter().find(is_fat_x64_arch);
 
                     found_arch
                         .map(|arch| Self::new(arch.offset() as usize, arch.size() as usize))

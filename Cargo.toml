@@ -71,6 +71,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls-native-roots",
     "json",
     "socks",
+    "http2"
 ] }
 kube = { git = "https://github.com/metalbear-co/kube", default-features = false, features = [
     "runtime",
