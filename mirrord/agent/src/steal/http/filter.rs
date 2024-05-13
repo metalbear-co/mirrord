@@ -74,6 +74,7 @@ impl HttpFilter {
 /// [`HeaderMap`](hyper::http::header::HeaderMap) entries formatted like `k: v` (format expected by
 /// [`HttpFilter::Header`]). Computed and cached in [`Request::extensions`] the first time
 /// [`HttpFilter::matches`] is called on the [`Request`].
+#[derive(Clone)]
 struct NormalizedHeaders(Vec<String>);
 
 impl NormalizedHeaders {

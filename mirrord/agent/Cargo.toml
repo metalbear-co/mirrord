@@ -15,12 +15,12 @@ edition.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-containerd-client = {git = "https://github.com/containerd/rust-extensions", rev="35a97f17d55753bb1ef04c28cd7c3203993932b0"}
+containerd-client = "0.5"
 tokio = { workspace = true, features = ["rt", "net", "macros", "fs", "process", "signal"] }
 serde.workspace = true
 serde_json.workspace = true
 pnet = "0.34"
-nix = { workspace  = true, features = ["mount"] }
+nix = { workspace  = true, features = ["mount", "sched", "user"] }
 clap = { workspace = true, features = ["env"] }
 mirrord-protocol = { path = "../protocol"}
 actix-codec.workspace = true
@@ -53,7 +53,8 @@ async-trait = "0.1"
 tonic = "0.11"
 tower = "0.4"
 http = "1"
-k8s-cri = "0.7"
+# until https://github.com/kflansburg/k8s-cri/pull/10 is released
+k8s-cri = {git = "https://github.com/metalbear-co/k8s-cri", rev = "8a96a85"}
 once_cell.workspace = true
 semver.workspace = true
 drain.workspace = true
