@@ -103,6 +103,9 @@ pub(super) struct ExecArgs {
     #[arg(short = 'l', long)]
     pub agent_log_level: Option<String>,
 
+    #[arg(long)]
+    pub agent_json_log: bool,
+
     /// Agent image
     #[arg(short = 'i', long)]
     pub agent_image: Option<String>,

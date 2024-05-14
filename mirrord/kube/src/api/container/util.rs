@@ -45,6 +45,10 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &&ContainerParams) -> Vec<V
             "MIRRORD_AGENT_NFTABLES".to_string(),
             agent.nftables.to_string(),
         ),
+        (
+            "MIRRORD_AGENT_JSON_LOG".to_string(),
+            agent.json_log.to_string(),
+        ),
     ];
     if let Some(attempts) = agent.dns.attempts {
         env.push((

@@ -694,6 +694,7 @@ mod tests {
             agent: Some(AgentFileConfig {
                 privileged: None,
                 log_level: Some("info".to_owned()),
+                json_log: Some(false),
                 namespace: Some("default".to_owned()),
                 image: Some(AgentImageFileConfig::Simple(Some("".to_owned()))),
                 image_pull_policy: Some("".to_owned()),

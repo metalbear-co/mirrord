@@ -804,15 +804,30 @@ async fn start_iptable_guard(args: Args, watch: drain::Watch) -> Result<()> {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_thread_ids(true)
-                .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-                .compact(),
-        )
-        .with(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    if let Ok(json_log) =
+        std::env::var("MIRRORD_AGENT_JSON_LOG").map(|json_log| json_log.parse().unwrap_or_default())
+        && json_log
+    {
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_thread_ids(true)
+                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+                    .json(),
+            )
+            .with(tracing_subscriber::EnvFilter::from_default_env())
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_thread_ids(true)
+                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+                    .compact(),
+            )
+            .with(tracing_subscriber::EnvFilter::from_default_env())
+            .init();
+    }
 
     debug!(
         "main -> Initializing mirrord-agent, version {}.",

@@ -157,6 +157,8 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
         std::env::set_var("MIRRORD_AGENT_RUST_LOG", log_level.clone());
     }
 
+    std::env::set_var("MIRRORD_AGENT_JSON_LOG", args.agent_json_log.to_string());
+
     if let Some(image) = &args.agent_image {
         std::env::set_var("MIRRORD_AGENT_IMAGE", image.clone());
     }
