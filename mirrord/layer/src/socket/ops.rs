@@ -203,8 +203,9 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
     is_ignored_port(addr) || (not_stolen_with_filter && not_whitelisted)
 }
 
-/// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
-/// update the socket state.
+/// If the socket is not found in [`SOCKETS`], bypass.
+/// Otherwise, if it's not an ignored port, bind (possibly with a fallback to random port) and
+/// update socket state in [`SOCKETS`]. If it's an ignored port, remove the socket from [`SOCKETS`].
 #[mirrord_layer_macro::instrument(level = "trace", ret, skip(raw_address))]
 pub(super) fn bind(
     sockfd: c_int,
@@ -544,6 +545,8 @@ pub(super) fn connect(
         None => {
             // Socket was probably removed from `SOCKETS` in `bind` detour (as not interesting in
             // terms of `incoming` feature).
+            // Here we just recreate `UserSocket` using domain and type fetched from the descriptor
+            // we have.
             let domain = nix::sys::socket::getsockname::<SockaddrStorage>(sockfd)
                 .map_err(io::Error::from)?
                 .family()
