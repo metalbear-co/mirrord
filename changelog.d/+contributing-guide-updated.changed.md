@@ -1,1 +1,0 @@
-Update contributing guide.

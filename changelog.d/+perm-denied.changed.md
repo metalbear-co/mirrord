@@ -1,1 +1,0 @@
-Don't print error on permission denied
