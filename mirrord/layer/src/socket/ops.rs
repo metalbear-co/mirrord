@@ -555,7 +555,7 @@ pub(super) fn connect(
             if domain != libc::AF_INET && domain != libc::AF_UNIX {
                 return Detour::Bypass(Bypass::Domain(domain));
             }
-            let type_ = nix::sys::socket::getsockopt(sockfd, sockopt::SockType)
+            let type_ = nix::sys::socket::getsockopt(&sockfd, sockopt::SockType)
                 .map_err(io::Error::from)? as i32;
             let kind = SocketKind::try_from(type_)?;
 
