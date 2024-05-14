@@ -926,10 +926,10 @@ mod test {
                         accept = original_listener.accept() => {
                             let (stream, _) = accept.unwrap();
                             let conn = hyper::server::conn::http1::Builder::new()
-                                .serve_connection(TokioIo::new(stream), service_fn(Self::handle_request));
+                                .serve_connection(TokioIo::new(stream), service_fn(Self::handle_request)).with_upgrades();
 
                             tasks.spawn(async move {
-                                conn.with_upgrades()
+                                conn
                                     .await
                                     .unwrap();
                             });
