@@ -516,6 +516,7 @@ impl OperatorRole {
                         "list".to_owned(),
                         "get".to_owned(),
                         "delete".to_owned(),
+                        "deletecollection".to_owned(),
                         "patch".to_owned(),
                     ],
                     ..Default::default()
