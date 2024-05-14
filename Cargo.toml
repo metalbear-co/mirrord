@@ -11,6 +11,7 @@ members = [
     "mirrord/layer/tests/apps/issue1776portnot53",
     "mirrord/layer/tests/apps/issue1899",
     "mirrord/layer/tests/apps/issue2001",
+    "mirrord/layer/tests/apps/issue2438",
     "sample/rust",
     "medschool",
     "tests",
