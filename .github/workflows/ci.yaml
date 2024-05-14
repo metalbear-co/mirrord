@@ -244,9 +244,6 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/issue2204
           rustc issue2204.rs --out-dir target
-      - run: |
-          cd mirrord/layer/tests/apps/issue2438
-          rustc issue2204.rs --out-dir target
       # For the `java_temurin_sip` test.
       - uses: sdkman/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
         id: sdkman
@@ -311,6 +308,9 @@ jobs:
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue2001
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue2438
           cargo build
       - run: ./scripts/build_c_apps.sh
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
@@ -410,6 +410,9 @@ jobs:
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue2001
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue2438
           cargo build
       - run: ./scripts/build_c_apps.sh
       # For the `java_temurin_sip` test.
