@@ -23,6 +23,7 @@ use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
+use nix::sys::socket::{sockopt, SockaddrLike, SockaddrStorage};
 use socket2::SockAddr;
 use tracing::{error, trace};
 
@@ -538,10 +539,25 @@ pub(super) fn connect(
 
     trace!("in connect {:#?}", SOCKETS);
 
-    let (_, user_socket_info) = {
-        SOCKETS
-            .remove(&sockfd)
-            .ok_or(Bypass::LocalFdNotFound(sockfd))?
+    let user_socket_info = match SOCKETS.remove(&sockfd) {
+        Some((_, socket)) => socket,
+        None => {
+            // Socket was probably removed from `SOCKETS` in `bind` detour (as not interesting in
+            // terms of `incoming` feature).
+            let domain = nix::sys::socket::getsockname::<SockaddrStorage>(sockfd)
+                .map_err(io::Error::from)?
+                .family()
+                .map(|family| family as i32)
+                .unwrap_or(-1);
+            if domain != libc::AF_INET && domain != libc::AF_UNIX {
+                return Detour::Bypass(Bypass::Domain(domain));
+            }
+            let type_ = nix::sys::socket::getsockopt(sockfd, sockopt::SockType)
+                .map_err(io::Error::from)? as i32;
+            let kind = SocketKind::try_from(type_)?;
+
+            Arc::new(UserSocket::new(domain, type_, 0, Default::default(), kind))
+        }
     };
 
     if let Some(ip_address) = optional_ip_address {
