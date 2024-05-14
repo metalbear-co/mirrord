@@ -8,6 +8,32 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.101.0](https://github.com/metalbear-co/mirrord/tree/3.101.0) - 2024-05-14
+
+
+### Changed
+
+- Use operator to list targets to avoid inconsistencies
+  [#1959](https://github.com/metalbear-co/mirrord/issues/1959)
+- Don't print error on permission denied
+
+
+### Fixed
+
+- Fixed a bug where outgoing connections where not intercepted from bound
+  sockets. [#2438](https://github.com/metalbear-co/mirrord/issues/2438)
+
+
+### Internal
+
+- Fix all check-rust-docs warnings
+  [#1399](https://github.com/metalbear-co/mirrord/issues/1399)
+- Use `with_env_vars` in flaky `fs_config_default` test
+  [#2163](https://github.com/metalbear-co/mirrord/issues/2163)
+- Move LicenseInfoOwned to another module
+- Update contributing guide.
+
+
 ## [3.100.1](https://github.com/metalbear-co/mirrord/tree/3.100.1) - 2024-05-06
 
 
