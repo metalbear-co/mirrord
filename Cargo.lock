@@ -3088,7 +3088,7 @@ dependencies = [
 name = "issue2438"
 version = "0.1.0"
 dependencies = [
- "nix 0.24.3",
+ "nix 0.28.0",
 ]
 
 [[package]]
