@@ -195,9 +195,6 @@ pub(crate) enum Bypass {
     /// is not exposed by a service, so bind locally.
     BindWhenTargetless,
 
-    /// Hooked connect from a bound mirror socket.
-    MirrorConnect,
-
     /// Hooked a `connect` to a target that is disabled in the configuration.
     DisabledOutgoing,
 
