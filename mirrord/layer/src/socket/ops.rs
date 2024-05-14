@@ -4,7 +4,7 @@ use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
     os::{
-        fd::{FromRawFd, IntoRawFd},
+        fd::{BorrowedFd, FromRawFd, IntoRawFd},
         unix::io::RawFd,
     },
     path::PathBuf,
@@ -555,7 +555,9 @@ pub(super) fn connect(
             if domain != libc::AF_INET && domain != libc::AF_UNIX {
                 return Detour::Bypass(Bypass::Domain(domain));
             }
-            let type_ = nix::sys::socket::getsockopt(&sockfd, sockopt::SockType)
+            // I really hate it, but nix seems to really make this API bad :()
+            let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
+            let type_ = nix::sys::socket::getsockopt(&borrowed_fd, sockopt::SockType)
                 .map_err(io::Error::from)? as i32;
             let kind = SocketKind::try_from(type_)?;
 
