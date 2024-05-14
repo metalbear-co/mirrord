@@ -614,7 +614,7 @@ pub(super) fn connect(
         ),
 
         NetProtocol::Stream => match user_socket_info.state {
-            SocketState::Initialized
+            SocketState::Initialized | SocketState::Bound(..)
                 if (optional_ip_address.is_some() && enabled_tcp_outgoing)
                     || (remote_address.is_unix() && !unix_streams.is_empty()) =>
             {
@@ -624,24 +624,6 @@ pub(super) fn connect(
                     user_socket_info,
                     NetProtocol::Stream,
                 )
-            }
-
-            SocketState::Bound(Bound { address, .. }) => {
-                trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
-
-                let address = SockAddr::from(address);
-                let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
-
-                if bind_result != 0 {
-                    error!(
-                        "connect -> Failed to bind socket result {:?}, address: {:?}, sockfd: {:?}!",
-                        bind_result, address, sockfd
-                    );
-
-                    Err(io::Error::last_os_error())?
-                } else {
-                    Detour::Bypass(Bypass::MirrorConnect)
-                }
             }
 
             _ => Detour::Bypass(Bypass::DisabledOutgoing),
