@@ -657,6 +657,7 @@ pub enum Application {
     Realpath,
     NodeIssue2283,
     RustIssue2204,
+    RustIssue2438,
     // For running applications with the executable and arguments determined at runtime.
     DynamicApp(String, Vec<String>),
 }
@@ -781,6 +782,13 @@ impl Application {
                     "../../target/debug/issue1899"
                 )
             }
+            Application::RustIssue2438 => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/issue2438"
+                )
+            }
             Application::RustIssue2001 => {
                 format!(
                     "{}/{}",
@@ -902,7 +910,8 @@ impl Application {
             | Application::OpenFile
             | Application::CIssue2055
             | Application::CIssue2178
-            | Application::RustIssue2204 => vec![],
+            | Application::RustIssue2204
+            | Application::RustIssue2438 => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
@@ -973,6 +982,7 @@ impl Application {
             | Application::CIssue2178
             | Application::NodeIssue2283
             | Application::RustIssue2204
+            | Application::RustIssue2438
             | Application::DynamicApp(..) => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
