@@ -485,7 +485,7 @@ pub struct SqsSessionDetails {
     // TODO: Don't save whole PodSpec, because its schema is so long you can't create the CRD with
     //  `kubectl apply` due to a length limit.
     pub spec: PodSpec,
-    pub queue_names: HashMap<QueueId, QueueNameUpdate>,
+    pub queue_names: BTreeMap<QueueId, QueueNameUpdate>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
