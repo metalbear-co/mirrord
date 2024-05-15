@@ -460,11 +460,11 @@ jobs:
       - name: Run cli E2E tests
         if: ${{ matrix.container-runtime == 'docker' }}
         run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features cli -- --test-threads=6
+          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features cli -- --test-threads=6 cli
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test
         run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features targetless -- --test-threads=6
+          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features targetless -- --test-threads=6 targetless
       - name: Run all E2E tests - docker
         if: ${{ matrix.container-runtime == 'docker' }}
         run: |
