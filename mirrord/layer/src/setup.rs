@@ -7,6 +7,7 @@ use mirrord_config::{
         fs::FsConfig,
         network::{incoming::IncomingConfig, outgoing::OutgoingConfig},
     },
+    target::Target,
     util::VecOrSingle,
     LayerConfig,
 };
@@ -103,7 +104,12 @@ impl LayerSetup {
     }
 
     pub fn targetless(&self) -> bool {
-        self.config.target.path.is_none()
+        self.config
+            .target
+            .path
+            .as_ref()
+            .map(|path| matches!(path, Target::Targetless))
+            .unwrap_or(true)
     }
 
     pub fn sip_binaries(&self) -> Vec<String> {
