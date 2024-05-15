@@ -103,6 +103,7 @@ pub(super) struct ExecArgs {
     #[arg(short = 'l', long)]
     pub agent_log_level: Option<String>,
 
+    /// Controls whether the agent produce logs in readable tracing mode or json.
     #[arg(long)]
     pub agent_json_log: bool,
 

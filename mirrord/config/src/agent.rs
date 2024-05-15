@@ -40,6 +40,7 @@ impl LinuxCapability {
 /// {
 ///   "agent": {
 ///     "log_level": "info",
+///     "json_log": false,
 ///     "namespace": "default",
 ///     "image": "ghcr.io/metalbear-co/mirrord:latest",
 ///     "image_pull_policy": "IfNotPresent",
@@ -76,6 +77,17 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_RUST_LOG", default = "info")]
     pub log_level: String,
 
+    /// ### agent.json_log {#agent-json_log}
+    ///
+    /// Controls whether the agent produces logs in a human-friendly format, or json.
+    ///
+    /// ```json
+    /// {
+    ///   "agent": {
+    ///     "json_log": true
+    ///   }
+    /// }
+    /// ```
     #[config(env = "MIRRORD_AGENT_JSON_LOG", default = false)]
     pub json_log: bool,
 

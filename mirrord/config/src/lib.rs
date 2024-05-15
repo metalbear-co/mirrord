@@ -102,6 +102,7 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///   "connect_tcp": null,
 ///   "agent": {
 ///     "log_level": "info",
+///     "json_log": false,
 ///     "namespace": "default",
 ///     "image": "ghcr.io/metalbear-co/mirrord:latest",
 ///     "image_pull_policy": "IfNotPresent",
