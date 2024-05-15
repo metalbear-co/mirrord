@@ -473,7 +473,7 @@ namespaced
 pub struct MirrordQueueSplitterSpec {
     /// A map of the queues that should be split.
     /// The key is used by users to associate filters to the right queues.
-    pub queues: HashMap<QueueId, SplitQueue>,
+    pub queues: BTreeMap<QueueId, SplitQueue>,
 
     /// The resource (deployment or Argo rollout) that reads from the queues.
     pub consumer: QueueConsumer,
