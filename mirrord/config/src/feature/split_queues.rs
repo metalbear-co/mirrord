@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use schemars::JsonSchema;
@@ -31,7 +31,7 @@ pub type QueueId = String;
 /// }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Default)]
-pub struct SplitQueuesConfig(Option<HashMap<QueueId, QueueFilter>>);
+pub struct SplitQueuesConfig(Option<BTreeMap<QueueId, QueueFilter>>);
 
 impl SplitQueuesConfig {
     pub fn is_set(&self) -> bool {
@@ -39,7 +39,7 @@ impl SplitQueuesConfig {
     }
 
     /// Out of the whole queue splitting config, get only the sqs queues.
-    pub fn get_sqs_filter(&self) -> Option<HashMap<String, HashMap<String, String>>> {
+    pub fn get_sqs_filter(&self) -> Option<HashMap<String, SqsMessageFilter>> {
         self.0.as_ref().map(|queue_id2queue_filter| {
             queue_id2queue_filter
                 .iter()
@@ -71,7 +71,7 @@ impl FromMirrordConfig for SplitQueuesConfig {
 pub type MessageAttributeName = String;
 pub type AttributeValuePattern = String;
 
-pub type SqsMessageFilter = HashMap<MessageAttributeName, AttributeValuePattern>;
+pub type SqsMessageFilter = BTreeMap<MessageAttributeName, AttributeValuePattern>;
 
 /// More queue types might be added in the future.
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]

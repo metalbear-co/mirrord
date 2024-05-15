@@ -3,6 +3,7 @@ use std::{
     fmt::{self, Display},
     io,
 };
+use std::collections::BTreeMap;
 
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
@@ -594,7 +595,7 @@ impl OperatorApi {
         session_metadata: &OperatorSessionMetadata,
         target: Target,
         scale_down: bool,
-        sqs_filter: Option<HashMap<String, HashMap<String, String>>>,
+        sqs_filter: Option<HashMap<String, BTreeMap<String, String>>>,
     ) -> Result<CopyTargetCrd> {
         let name = TargetCrd::target_name(&target);
 
