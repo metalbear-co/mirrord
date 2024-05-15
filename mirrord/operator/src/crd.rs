@@ -430,11 +430,11 @@ pub struct QueueDetails {
 
     /// For each config map name, a mapping from queue id to key name in the map that holds the name
     /// of that queue.
-    pub config_map_updates: HashMap<String, HashMap<QueueId, String>>,
-    //                              ^               ^        ^
-    //                              |               |        ---- name of key that points to Q name
-    //                              |               ---- queue id
-    //                              ---- ConfigMap name
+    pub config_map_updates: BTreeMap<String, HashMap<QueueId, String>>,
+    //                               ^               ^        ^
+    //                               |               |        ---- name of key that points to Q name
+    //                               |               ---- queue id
+    //                               ---- ConfigMap name
 
     // TODO: Don't save whole PodSpec, because its schema is so long you can't create the CRD with
     //  `kubectl apply` due to a length limit.
