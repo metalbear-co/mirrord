@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     fmt::{Display, Formatter},
 };
+use std::collections::BTreeMap;
 
 use k8s_openapi::api::core::v1::{PodSpec, PodTemplateSpec};
 use kube::CustomResource;
@@ -24,11 +25,11 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "Target",
-    root = "TargetCrd",
-    namespaced
+group = "operator.metalbear.co",
+version = "v1",
+kind = "Target",
+root = "TargetCrd",
+namespaced
 )]
 pub struct TargetSpec {
     /// None when targetless.
@@ -92,11 +93,11 @@ pub static OPERATOR_STATUS_NAME: &str = "operator";
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "MirrordOperator",
-    root = "MirrordOperatorCrd",
-    status = "MirrordOperatorStatus"
+group = "operator.metalbear.co",
+version = "v1",
+kind = "MirrordOperator",
+root = "MirrordOperatorCrd",
+status = "MirrordOperatorStatus"
 )]
 pub struct MirrordOperatorSpec {
     pub operator_version: String,
@@ -235,10 +236,10 @@ pub struct Session {
 /// the operator.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "Session",
-    root = "SessionCrd"
+group = "operator.metalbear.co",
+version = "v1",
+kind = "Session",
+root = "SessionCrd"
 )]
 pub struct SessionSpec;
 
@@ -290,11 +291,11 @@ impl From<&OperatorFeatures> for NewOperatorFeature {
 /// (operator's copy pod feature).
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "CopyTarget",
-    root = "CopyTargetCrd",
-    namespaced
+group = "operator.metalbear.co",
+version = "v1",
+kind = "CopyTarget",
+root = "CopyTargetCrd",
+namespaced
 )]
 pub struct CopyTargetSpec {
     /// Original target. Only [`Target::Pod`] and [`Target::Deployment`] are accepted.
@@ -323,11 +324,11 @@ pub enum BlockedFeature {
 /// Custom resource for policies that limit what mirrord features users can use.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-    // The operator group is handled by the operator, we want policies to be handled by k8s.
-    group = "policies.mirrord.metalbear.co",
-    version = "v1alpha",
-    kind = "MirrordPolicy",
-    namespaced
+// The operator group is handled by the operator, we want policies to be handled by k8s.
+group = "policies.mirrord.metalbear.co",
+version = "v1alpha",
+kind = "MirrordPolicy",
+namespaced
 )]
 #[serde(rename_all = "camelCase")] // target_path -> targetPath in yaml.
 pub struct MirrordPolicySpec {
@@ -421,7 +422,7 @@ pub struct QueueNameUpdate {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct QueueDetails {
     /// For each queue_id, the actual queue name as retrieved from the target's pod spec or config map.
-    pub queue_names: HashMap<QueueId, QueueNameUpdate>,
+    pub queue_names: BTreeMap<QueueId, QueueNameUpdate>,
 
     /// Names of env vars that contain the queue name directly in the pod spec, without config
     /// map refs, mapped to their queue id.
