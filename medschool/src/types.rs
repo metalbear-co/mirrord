@@ -64,10 +64,26 @@ impl PartialField {
             _ => None,
         }?;
 
+        let mut docs = docs_from_attributes(field.attrs);
+
+        for doc in docs.iter_mut() {
+            // removes docs that we don't want in `configuration.md`
+            if doc.contains(r"<!--${internal}-->") {
+                return None;
+            }
+
+            // `trim` is too aggressive, we just want to remove 1 whitespace
+            if doc.starts_with(' ') {
+                doc.remove(0);
+            }
+        }
+
+        docs.push("\n".to_string());
+
         Some(Self {
             ident: field.ident?.to_string(),
             ty: type_ident.to_string(),
-            docs: docs_from_attributes(field.attrs),
+            docs,
         })
     }
 
@@ -134,7 +150,7 @@ impl Eq for PartialField {}
 
 impl PartialOrd for PartialField {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.ident.cmp(&other.ident))
+        Some(self.cmp(other))
     }
 }
 
@@ -201,42 +217,5 @@ impl Display for PartialField {
         // Prevents crashing the tool if the field is not properly documented.
         let docs = self.docs.last().cloned().unwrap_or_default();
         f.write_str(&docs)
-    }
-}
-
-pub trait PrettyDocs {
-    /// The docs of the type or field.
-    fn docs(&mut self) -> &mut Vec<String>;
-
-    /// Glues all the `Vec<String>` docs into one big `String`.
-    /// It can also be used to filter out docs with meta comments, such as `${internal}`.
-    fn pretty_docs(&mut self) {
-        let docs = self.docs();
-        for doc in docs.iter_mut() {
-            // removes docs that we don't want in `configuration.md`
-            if doc.contains(r"<!--${internal}-->") {
-                self.docs().clear();
-                return;
-            }
-
-            // `trim` is too aggressive, we just want to remove 1 whitespace
-            if doc.starts_with(' ') {
-                doc.remove(0);
-            }
-        }
-
-        self.docs().push("\n".to_string());
-    }
-}
-
-impl PrettyDocs for PartialField {
-    fn docs(&mut self) -> &mut Vec<String> {
-        &mut self.docs
-    }
-}
-
-impl PrettyDocs for PartialType {
-    fn docs(&mut self) -> &mut Vec<String> {
-        &mut self.docs
     }
 }

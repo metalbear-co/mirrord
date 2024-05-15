@@ -7,6 +7,10 @@ pub(crate) enum DocsError {
     #[error("Glob error {0}")]
     Glob(#[from] glob::GlobError),
 
+    /// No files found in the glob pattern.
+    #[error("No files found in the glob pattern")]
+    NoFiles,
+
     /// Parsing glob pattern.
     #[error("Glob pattern {0}")]
     Pattern(#[from] glob::PatternError),
@@ -18,4 +22,8 @@ pub(crate) enum DocsError {
     /// Error when parsing the source files into `syn::File`.
     #[error("Parsing error {0}")]
     Parse(#[from] syn::Error),
+
+    /// Error when parsing the source files into `syn::File`.
+    #[error("Parsing error {0}")]
+    ParseInt(#[from] std::num::ParseIntError),
 }

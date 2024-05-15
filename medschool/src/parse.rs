@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use syn::{Attribute, Expr, Ident, Meta};
 
 use crate::{
-    types::{PartialField, PartialType, PrettyDocs},
+    types::{PartialField, PartialType},
     DocsError,
 };
 
@@ -58,6 +58,26 @@ fn parse_item_enum(item: syn::ItemEnum) -> Option<PartialType> {
 }
 
 fn parse_item_struct(item: syn::ItemStruct) -> Option<PartialType> {
+    let mut docs = docs_from_attributes(item.attrs);
+
+    if docs.is_empty() {
+        return None;
+    }
+
+    for doc in docs.iter_mut() {
+        // removes docs that we don't want in `configuration.md`
+        if doc.contains(r"<!--${internal}-->") {
+            return None;
+        }
+
+        // `trim` is too aggressive, we just want to remove 1 whitespace
+        if doc.starts_with(' ') {
+            doc.remove(0);
+        }
+    }
+
+    docs.push("\n".to_string());
+
     // we used to remove any duplicate fields such as two fields with the same
     // type by converting them to a HashSet
     // for example, struct {a : B, b: B} would duplicate docs for B
@@ -67,25 +87,13 @@ fn parse_item_struct(item: syn::ItemStruct) -> Option<PartialType> {
     let fields = item
         .fields
         .into_iter()
-        // filter_map -> convert to new PartialField and remove internal fields
         .filter_map(PartialField::new)
-        .filter(|field| !field.docs.contains(&r"<!--${internal}-->".into()))
-        .map(|mut field| {
-            // println!("field: {:?}", field.ident);
-            field.pretty_docs();
-            field
-        })
         .collect::<BTreeSet<_>>();
 
-    let thing_docs_untreated = docs_from_attributes(item.attrs);
-    let is_internal = thing_docs_untreated
-        .iter()
-        .any(|doc| doc.contains(r"<!--${internal}-->"));
-
     // We only care about types that have docs.
-    (!thing_docs_untreated.is_empty() && !fields.is_empty() && !is_internal).then(|| PartialType {
+    (!fields.is_empty()).then(|| PartialType {
         ident: item.ident.to_string(),
-        docs: thing_docs_untreated,
+        docs,
         fields,
     })
 }
@@ -93,23 +101,18 @@ fn parse_item_struct(item: syn::ItemStruct) -> Option<PartialType> {
 /// Converts a [`syn::Item`] into a [`PartialType`], if possible.
 #[tracing::instrument(level = "trace", ret)]
 fn parse_syn_item_into_partial_type(item: syn::Item) -> Option<PartialType> {
-    let parsed_item = match item {
+    match item {
         syn::Item::Mod(item_mod) => parse_item_mod(item_mod),
         syn::Item::Enum(item_enum) => parse_item_enum(item_enum),
         syn::Item::Struct(item_struct) => parse_item_struct(item_struct),
         _ => return None,
-    };
-
-    parsed_item.map(|mut item| {
-        item.pretty_docs();
-        item
-    })
+    }
 }
 
 /// Converts a list of [`syn::File`] into a [`BTreeSet`] of our own [`PartialType`] types, so we can
 /// get a root node (see the [`Ord`] implementation of `PartialType`).
 #[tracing::instrument(level = "trace", ret)]
-pub fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<HashSet<PartialType>, DocsError> {
+pub fn parse_docs_into_set(files: Vec<syn::File>) -> Result<HashSet<PartialType>, DocsError> {
     let type_docs = files
         .into_iter()
         // go through each `File` extracting the types into a hierarchical tree based on which types
@@ -144,12 +147,11 @@ fn dfs_fields(
                 // check if we've already resolved the type
                 let mut new_type_docs = type_.docs.clone();
                 type_.fields.iter().for_each(|field| {
-                    let resolved_type_docs = dfs_fields(field, types, cache, recursion_level);                    
+                    let resolved_type_docs = dfs_fields(field, types, cache, recursion_level);
                     cache.insert(field.ty.clone(), resolved_type_docs.clone());
                     // append the docs of the field to the resolved type docs
-                    new_type_docs.extend(field.docs.clone());
-                    new_type_docs.extend(resolved_type_docs);
-                });                
+                    new_type_docs.extend(field.docs.clone().into_iter().chain(resolved_type_docs));
+                });
                 cache.insert(type_.ident.clone(), new_type_docs.clone());
                 new_type_docs
             })
@@ -207,8 +209,8 @@ pub fn resolve_references(types: HashSet<PartialType>) -> Option<PartialType> {
 
     types
         .clone()
-        .drain()
-        .filter_map(|mut type_| {
+        .into_iter()
+        .flat_map(|mut type_| {
             // Check if the type has already been resolved.
             (!cache.contains_key(&type_.ident)).then(|| {
                 // We need to calculate the recursion level for the type, so we can get the root
@@ -236,3 +238,37 @@ pub fn resolve_references(types: HashSet<PartialType>) -> Option<PartialType> {
         .max_by_key(|(recursion_level, _)| *recursion_level)
         .map(|(_, type_)| type_)
 }
+
+// fn dfs_fields_v1(field: &PartialField, types: &HashSet<PartialType>) -> Vec<String> {
+//     types
+//         .get(&field.ty)
+//         .map(|type_| {
+//             let mut new_type_docs = type_.docs.clone();
+//             type_.fields.iter().for_each(|field| {
+//                 let resolved_type_docs = dfs_fields_v1(field, types);
+//                 new_type_docs.extend(field.docs.clone().into_iter().chain(resolved_type_docs));
+//             });
+//             new_type_docs
+//         })
+//         .unwrap_or_default()
+// }
+
+// pub fn resolve_references_v1(types: HashSet<PartialType>) -> HashSet<PartialType> {
+//     types
+//         .clone()
+//         .into_iter()
+//         .map(|mut type_| {
+//             type_.fields = type_
+//                 .fields
+//                 .into_iter()
+//                 .map(|mut field| {
+//                     let resolved_type_docs = dfs_fields_v1(&field, &types);
+//                     field.docs.extend(resolved_type_docs);
+//                     field
+//                 })
+//                 .collect::<BTreeSet<_>>();
+
+//             type_
+//         })
+//         .collect::<HashSet<_>>()
+// }
