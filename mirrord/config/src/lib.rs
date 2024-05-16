@@ -9,6 +9,7 @@
 //! including if you only made documentation changes.
 pub mod agent;
 pub mod config;
+pub mod experimental;
 pub mod feature;
 pub mod internal_proxy;
 pub mod target;
@@ -17,6 +18,7 @@ pub mod util;
 use std::path::Path;
 
 use config::{ConfigContext, ConfigError, MirrordConfig};
+use experimental::ExperimentalConfig;
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -314,6 +316,10 @@ pub struct LayerConfig {
     /// If the remote pod sets this env, the mirrord process will still use it.
     #[config(env = "MIRRORD_PROXY", default = true)]
     pub use_proxy: bool,
+
+    /// # experimental {#root-experimental}
+    #[config(nested)]
+    pub experimental: ExperimentalConfig,
 }
 
 impl LayerConfig {
@@ -751,6 +757,7 @@ mod tests {
             kube_context: None,
             internal_proxy: None,
             use_proxy: None,
+            experimental: None,
         };
 
         assert_eq!(config, expect);

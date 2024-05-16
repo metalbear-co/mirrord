@@ -31,6 +31,17 @@
         "null"
       ]
     },
+    "experimental": {
+      "title": "experimental {#root-experimental}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ExperimentalFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "feature": {
       "title": "feature {#root-feature}",
       "anyOf": [
@@ -537,7 +548,7 @@
         },
         "unset": {
           "title": "feature.env.unset {#feature-env-unset}",
-          "description": "Allows unsetting environment variables in the executed process.\n\nThis is useful for when some system/user-defined environment like `AWS_PROFILE` make the application behave as if it's running locally, instead of using the remote settings. The unsetting happens from extension (if possible)/CLI and when process initializes. In some cases, such as Go the env might not be able to be modified from the process itself.",
+          "description": "Allows unsetting environment variables in the executed process.\n\nThis is useful for when some system/user-defined environment like `AWS_PROFILE` make the application behave as if it's running locally, instead of using the remote settings. The unsetting happens from extension (if possible)/CLI and when process initializes. In some cases, such as Go the env might not be able to be modified from the process itself. This is case insensitive, meaning if you'd put `AWS_PROFILE` it'd unset both `AWS_PROFILE` and `Aws_Profile` and other variations.",
           "anyOf": [
             {
               "$ref": "#/definitions/VecOrSingle_for_String"
@@ -545,6 +556,21 @@
             {
               "type": "null"
             }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExperimentalFileConfig": {
+      "description": "mirrord Experimental features. This shouldn't be used unless someone from MetalBear/mirrord tells you to.",
+      "type": "object",
+      "properties": {
+        "tcp_ping4_mock": {
+          "title": "experimental {#fexperimental-tcp_ping4_mock}",
+          "description": "<https://github.com/metalbear-co/mirrord/issues/2421#issuecomment-2093200904>",
+          "type": [
+            "boolean",
+            "null"
           ]
         }
       },
@@ -749,7 +775,7 @@
         },
         "ignore_localhost": {
           "title": "ignore_localhost",
-          "description": "Consider removing when adding https://github.com/metalbear-co/mirrord/issues/702",
+          "description": "Consider removing when adding <https://github.com/metalbear-co/mirrord/issues/702>",
           "type": [
             "boolean",
             "null"
@@ -1185,7 +1211,6 @@
             },
             "path": {
               "description": "<!--${internal}--> Path is optional so that it can also be specified via env var instead of via conf file, but it is not optional in a resulting [`TargetConfig`] object - either there is a path, or the target configuration is `None`.",
-              "default": null,
               "anyOf": [
                 {
                   "$ref": "#/definitions/Target"

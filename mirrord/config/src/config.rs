@@ -3,6 +3,8 @@ pub mod from_env;
 pub mod source;
 pub mod unstable;
 
+use std::error::Error;
+
 use thiserror::Error;
 
 /// <!--${internal}-->
@@ -57,8 +59,22 @@ pub enum ConfigError {
     )]
     TargetJobWithoutCopyTarget,
 
-    #[error("Template rendering failed, check your config file `{0}`.")]
-    TemplateRenderingFailed(#[from] tera::Error),
+    #[error("Template rendering failed with: `{0}`! Please check your config file!")]
+    TemplateRenderingFailed(String),
+}
+
+impl From<tera::Error> for ConfigError {
+    fn from(fail: tera::Error) -> Self {
+        let mut fail_message = fail.to_string();
+        let mut source = fail.source();
+
+        while let Some(fail_source) = source {
+            fail_message.push_str(&format!(" -> {fail_source}"));
+            source = fail_source.source();
+        }
+
+        Self::TemplateRenderingFailed(fail_message)
+    }
 }
 
 pub type Result<T, E = ConfigError> = std::result::Result<T, E>;

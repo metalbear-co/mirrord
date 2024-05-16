@@ -270,7 +270,7 @@ impl Target {
     }
 }
 
-trait TargetDisplay {
+pub trait TargetDisplay {
     fn target_type(&self) -> &str;
 
     fn target_name(&self) -> &str;
@@ -321,6 +321,38 @@ impl fmt::Display for Target {
             Target::Deployment(dep) => dep.fmt_display(f),
             Target::Rollout(roll) => roll.fmt_display(f),
             Target::Job(job) => job.fmt_display(f),
+        }
+    }
+}
+
+impl TargetDisplay for Target {
+    fn target_type(&self) -> &str {
+        match self {
+            Target::Targetless => "targetless",
+            Target::Deployment(x) => x.target_type(),
+            Target::Pod(x) => x.target_type(),
+            Target::Rollout(x) => x.target_type(),
+            Target::Job(x) => x.target_type(),
+        }
+    }
+
+    fn target_name(&self) -> &str {
+        match self {
+            Target::Targetless => "targetless",
+            Target::Deployment(x) => x.target_name(),
+            Target::Pod(x) => x.target_name(),
+            Target::Rollout(x) => x.target_name(),
+            Target::Job(x) => x.target_name(),
+        }
+    }
+
+    fn container_name(&self) -> Option<&String> {
+        match self {
+            Target::Targetless => None,
+            Target::Deployment(x) => x.container_name(),
+            Target::Pod(x) => x.container_name(),
+            Target::Rollout(x) => x.container_name(),
+            Target::Job(x) => x.container_name(),
         }
     }
 }

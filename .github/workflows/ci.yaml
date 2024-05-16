@@ -169,7 +169,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       # enables the creation of a workspace index.html page.
-      RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
+      RUSTDOCFLAGS: "--enable-index-page -Zunstable-options -Dwarnings"
     steps:
       - uses: actions/checkout@v3
       - uses: arduino/setup-protoc@v1
@@ -309,6 +309,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/issue2001
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue2438
+          cargo build
       - run: ./scripts/build_c_apps.sh
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
       - name: mirrord protocol UT
@@ -408,6 +411,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/issue2001
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue2438
+          cargo build
       - run: ./scripts/build_c_apps.sh
       # For the `java_temurin_sip` test.
       - uses: sdkman/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
@@ -454,11 +460,11 @@ jobs:
       - name: Run cli E2E tests
         if: ${{ matrix.container-runtime == 'docker' }}
         run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features cli -- --test-threads=6
+          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features cli -- --test-threads=6 cli
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test
         run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features targetless -- --test-threads=6
+          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features targetless -- --test-threads=6 targetless
       - name: Run all E2E tests - docker
         if: ${{ matrix.container-runtime == 'docker' }}
         run: |
@@ -545,6 +551,7 @@ jobs:
         test_agent,
         lint,
         lint_markdown,
+        check-rust-docs,
       ]
     runs-on: ubuntu-latest
     steps:
@@ -562,5 +569,6 @@ jobs:
             (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
             (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped') &&
             (needs.intellij_e2e_on_release_branch.result == 'success' || needs.intellij_e2e_on_release_branch.result == 'skipped') &&
-            (needs.vscode_e2e_on_release_branch.result == 'success' || needs.vscode_e2e_on_release_branch.result == 'skipped') }}
+            (needs.vscode_e2e_on_release_branch.result == 'success' || needs.vscode_e2e_on_release_branch.result == 'skipped') &&
+            (needs.check-rust-docs.result == 'success' || needs.check-rust-docs.result == 'skipped') }}
         run: echo $CI_SUCCESS && if [ "$CI_SUCCESS" == "true" ]; then echo "SUCCESS" && exit 0; else echo "Failure" && exit 1; fi

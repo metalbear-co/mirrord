@@ -44,6 +44,7 @@ impl EnvFilter {
                 WildMatch::new("BUNDLE_GEMFILE"),
                 WildMatch::new("BUNDLE_GEM_PATH"),
                 WildMatch::new("BUNDLE_PATH"),
+                WildMatch::new("BUNDLE_WITHOUT"),
                 WildMatch::new("CLASSPATH"),
                 WildMatch::new("GEM_HOME"),
                 WildMatch::new("GEM_PATH"),
@@ -77,7 +78,7 @@ impl EnvFilter {
     }
 }
 
-/// Translate ToIter<AsRef<str>> of "K=V" to HashMap.
+/// Translate `ToIter<AsRef<str>>` of "K=V" to HashMap.
 pub(crate) fn parse_raw_env<'a, S: AsRef<str> + 'a + ?Sized, T: IntoIterator<Item = &'a S>>(
     raw: T,
 ) -> HashMap<String, String> {

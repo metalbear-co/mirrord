@@ -52,8 +52,8 @@ impl LoggerTask {
 }
 
 /// Console logger that sends log messages to the console app using
-/// [`codec`](mirrord_intproxy::codec). It uses a background [`tokio::task`] to send messages with
-/// an [`AsyncEncoder`].
+/// [`codec`](mirrord_intproxy_protocol::codec). It uses a background [`tokio::task`] to send
+/// messages with an [`AsyncEncoder`].
 pub struct AsyncConsoleLogger {
     tx: Sender<Record>,
 }

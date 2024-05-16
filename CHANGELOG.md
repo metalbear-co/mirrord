@@ -8,6 +8,65 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.101.0](https://github.com/metalbear-co/mirrord/tree/3.101.0) - 2024-05-14
+
+
+### Changed
+
+- Use operator to list targets to avoid inconsistencies
+  [#1959](https://github.com/metalbear-co/mirrord/issues/1959)
+- Don't print error on permission denied
+
+
+### Fixed
+
+- Fixed a bug where outgoing connections where not intercepted from bound
+  sockets. [#2438](https://github.com/metalbear-co/mirrord/issues/2438)
+
+
+### Internal
+
+- Fix all check-rust-docs warnings
+  [#1399](https://github.com/metalbear-co/mirrord/issues/1399)
+- Use `with_env_vars` in flaky `fs_config_default` test
+  [#2163](https://github.com/metalbear-co/mirrord/issues/2163)
+- Move LicenseInfoOwned to another module
+- Update contributing guide.
+
+
+## [3.100.1](https://github.com/metalbear-co/mirrord/tree/3.100.1) - 2024-05-06
+
+
+### Fixed
+
+- mirrord-agent now catches SIGTERM signal and cleans iptables during graceful
+  deletion. [#2427](https://github.com/metalbear-co/mirrord/issues/2427)
+- Fixed ping pong logic for intproxy-agent communication. Intproxy now sends
+  pings on a fixed schedule, regardless of any other messages.
+
+
+## [3.100.0](https://github.com/metalbear-co/mirrord/tree/3.100.0) - 2024-05-05
+
+
+### Added
+
+- Added experimental, temp feature for supporting hazelcast pings
+  [#2421](https://github.com/metalbear-co/mirrord/issues/2421)
+- Provide value hint to Clap for generating shell completions for config_file
+  to
+  only resolve to files, not just first match.
+
+
+### Changed
+
+- Changed default env exclude to have `BUNDLE_WITHOUT`
+  [#2417](https://github.com/metalbear-co/mirrord/issues/2417)
+- Append more permissions to operator clusterrole
+- Improve tera templating config error to dig into source and give out more
+  details.
+- env.unset feature is now case insensitive
+
+
 ## [3.99.2](https://github.com/metalbear-co/mirrord/tree/3.99.2) - 2024-04-30
 
 

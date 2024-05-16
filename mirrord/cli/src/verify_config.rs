@@ -1,6 +1,7 @@
-//! `mirrord verify-config [--ide] {path}` builds a [`VerifyConfig`] enum after checking the
-//! config file passed in `path`. It's used by the IDE plugins to display errors/warnings quickly,
-//! without having to start mirrord-layer.
+//! `mirrord verify-config [--ide] {path}` builds a
+//! [`VerifyConfig`](crate::Commands::VerifyConfig) enum after checking the config file passed in
+//! `path`. It's used by the IDE plugins to display errors/warnings quickly, without having to start
+//! mirrord-layer.
 use error::Result;
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
