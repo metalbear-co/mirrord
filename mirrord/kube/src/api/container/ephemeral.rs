@@ -62,13 +62,14 @@ where
 
     let pod_api = get_k8s_resource_api(client, runtime_data.pod_namespace.as_deref());
     let pod: Pod = pod_api.get(&runtime_data.pod_name).await?;
-    let pod_spec = pod.spec.ok_or(KubeApiError::PodSpecNotFound)?;
-
-    let container_spec = pod_spec
+    let container_spec = pod
+        .spec
+        .as_ref()
+        .ok_or_else(|| KubeApiError::missing_field(&pod, "spec"))?
         .containers
         .iter()
         .find(|c| c.name == runtime_data.container_name)
-        .ok_or_else(|| KubeApiError::ContainerNotFound(runtime_data.container_name.clone()))?;
+        .ok_or_else(|| KubeApiError::invalid_state(&pod, runtime_data.container_name.clone()))?;
 
     if let Some(spec_env) = container_spec.env.as_ref() {
         let mut env = ephemeral_container.env.unwrap_or_default();
@@ -90,7 +91,7 @@ where
     let spec = ephemeral_containers_subresource
         .spec
         .as_mut()
-        .ok_or(KubeApiError::PodSpecNotFound)?;
+        .ok_or_else(|| KubeApiError::missing_field(&pod, "spec"))?;
 
     spec.ephemeral_containers = match spec.ephemeral_containers.clone() {
         Some(mut ephemeral_containers) => {

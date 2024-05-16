@@ -4,7 +4,7 @@ use k8s_openapi::api::{
     core::v1::{Pod, PodTemplateSpec},
 };
 use kube::{
-    api::{ListParams, ObjectMeta, PostParams},
+    api::{ObjectMeta, PostParams},
     runtime::{watcher, WatchStreamExt},
     Api, Client,
 };
@@ -39,12 +39,12 @@ where
     let mut pod_progress = progress.subtask("creating agent pod...");
 
     let agent = variant.agent_config();
-    let agent_pod: Job = variant.as_update();
+    let agent_job: Job = variant.as_update();
 
     let job_api = get_k8s_resource_api(client, agent.namespace.as_deref());
 
     job_api
-        .create(&PostParams::default(), &agent_pod)
+        .create(&PostParams::default(), &agent_job)
         .await
         .map_err(KubeApiError::KubeError)?;
 
@@ -61,27 +61,28 @@ where
     let stream = watcher(pod_api.clone(), watcher_config).applied_objects();
     pin!(stream);
 
+    let mut agent_pod = None;
     while let Some(Ok(pod)) = stream.next().await {
-        if let Some(status) = &pod.status
-            && let Some(phase) = &status.phase
-        {
-            debug!("Pod Phase = {phase:?}");
-            if phase == "Running" {
-                break;
-            }
+        let Some(phase) = pod.status.as_ref().and_then(|status| status.phase.as_ref()) else {
+            continue;
+        };
+
+        debug!(?phase, "Agent pod changed");
+
+        if phase == "Running" {
+            agent_pod.replace(pod);
+            break;
         }
     }
 
-    let pods = pod_api
-        .list(&ListParams::default().labels(&format!("job-name={}", params.name)))
-        .await
-        .map_err(KubeApiError::KubeError)?;
+    let agent_pod = agent_pod.ok_or(KubeApiError::AgentPodNotRunning)?;
 
-    let pod_name = pods
-        .items
-        .first()
-        .and_then(|pod| pod.metadata.name.clone())
-        .ok_or(KubeApiError::JobPodNotFound(params.name.clone()))?;
+    let pod_name = agent_pod
+        .metadata
+        .name
+        .as_ref()
+        .ok_or_else(|| KubeApiError::missing_field(&agent_pod, ".metadata.name"))?
+        .clone();
 
     let version = wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
     match version.as_ref() {

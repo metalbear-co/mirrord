@@ -116,7 +116,7 @@ where
 /// We also check if we're in a mesh based on `MESH_LIST`, returning whether we are or not.
 #[tracing::instrument(level = "trace", ret)]
 pub fn choose_container<'a>(
-    container_name: &Option<String>,
+    container_name: Option<&str>,
     container_statuses: &'a [ContainerStatus],
 ) -> (Option<&'a ContainerStatus>, Option<MeshVendor>) {
     const ISTIO: [&str; 2] = ["istio-proxy", "istio-init"];
@@ -138,7 +138,7 @@ pub fn choose_container<'a>(
     let container = if let Some(name) = container_name {
         container_statuses
             .iter()
-            .find(|&status| &status.name == name)
+            .find(|&status| status.name == name)
     } else {
         // Choose any container that isn't part of the skip list
         container_statuses
