@@ -4,9 +4,11 @@ use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
-use crate::{config::ExtensionExecArgs, error::CliError, execution::MirrordExecution, Result};
+use crate::{
+    config::ExtensionExecArgs, error::CliError, execution::MirrordExecution, print_config, Result,
+};
 
-/// Actualy facilitate execution after all preperatations were complete
+/// Actually facilitate execution after all preparations were complete
 async fn mirrord_exec<P>(
     #[cfg(target_os = "macos")] executable: Option<&str>,
     env: HashMap<String, String>,
@@ -65,6 +67,11 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch)
     for warning in context.get_warnings() {
         progress.warning(warning);
     }
+
+    // Print config details for the user in a single message
+    let mut sub_progress_config = progress.subtask("config summary");
+    print_config(&sub_progress_config, None, None, &config, true);
+    sub_progress_config.success(None);
 
     #[cfg(target_os = "macos")]
     let execution_result = mirrord_exec(

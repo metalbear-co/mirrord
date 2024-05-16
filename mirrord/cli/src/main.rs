@@ -104,32 +104,67 @@ where
     binary_args.insert(0, args.binary.clone());
 
     // Print config details for the user
-    sub_progress.info(
-        &format!(
-            "Running binary \"{}\" with arguments: {:?}.",
-            binary, args.binary_args
-        )[..],
+    let mut sub_progress_config = progress.subtask("config summary");
+    print_config(
+        &sub_progress_config,
+        Some(&binary),
+        Some(&args.binary_args),
+        &config,
+        false,
     );
+    sub_progress_config.success(None);
+
+    sub_progress.success(Some("ready to launch process"));
+    // The execve hook is not yet active and does not hijack this call.
+    let err = execvp(binary.clone(), binary_args.clone());
+    error!("Couldn't execute {:?}", err);
+    analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    if let exec::Error::Errno(errno) = err {
+        if Into::<i32>::into(errno) == 86 {
+            // "Bad CPU type in executable"
+            if _did_sip_patch {
+                return Err(CliError::RosettaMissing(binary));
+            }
+        }
+    }
+    Err(CliError::BinaryExecuteFailed(binary, binary_args))
+}
+
+fn print_config<P>(
+    progress_subtask: &P,
+    binary: Option<&String>,
+    binary_args: Option<&Vec<String>>,
+    config: &LayerConfig,
+    single_msg: bool,
+) where
+    P: Progress + Send + Sync,
+{
+    let mut messages = vec![];
+    if let Some(b) = binary
+        && let Some(a) = binary_args
+    {
+        messages.push(format!("Running binary \"{}\" with arguments: {:?}.", b, a));
+    }
 
     let target_info = if let Some(target) = &config.target.path {
         &format!("mirrord will target: {}", target)[..]
     } else {
-        // TODO: check accuracy of statement
         "mirrord will run without a target"
     };
     let config_info = if let Ok(path) = std::env::var("MIRRORD_CONFIG_FILE") {
-        &format!("a configuration file was loaded from: {}. ", path)[..]
+        &format!("a configuration file was loaded from: {} ", path)[..]
     } else {
         "no configuration file was loaded"
     };
-    sub_progress.info(&format!("{}, {}", target_info, config_info)[..]);
+    messages.push(format!("{}, {}", target_info, config_info));
 
     let operator_info = match config.operator {
         Some(true) => "be used",
         Some(false) => "not be used",
         None => "be used if possible",
     };
-    sub_progress.info(&format!("operator: the operator will {}", operator_info)[..]);
+    messages.push(format!("operator: the operator will {}", operator_info));
 
     let exclude = config.feature.env.exclude.as_ref();
     let include = config.feature.env.include.as_ref();
@@ -149,21 +184,27 @@ where
     } else {
         "all"
     };
-    sub_progress.info(&format!("env: {} environment variables will be fetched", env_info)[..]);
+    messages.push(format!(
+        "env: {} environment variables will be fetched",
+        env_info
+    ));
 
     let fs_info = match config.feature.fs.mode {
         FsModeConfig::Read => "read only from the remote",
         FsModeConfig::Write => "read and write from the remote",
         _ => "read and write locally",
     };
-    sub_progress.info(&format!("fs: file operations will default to {}", fs_info)[..]);
+    messages.push(format!("fs: file operations will default to {}", fs_info));
 
     let incoming_info = match config.feature.network.incoming.mode {
         IncomingMode::Mirror => "mirrored",
         IncomingMode::Steal => "stolen",
         IncomingMode::Off => "ignored",
     };
-    sub_progress.info(&format!("incoming: incoming traffic will be {}", incoming_info)[..]);
+    messages.push(format!(
+        "incoming: incoming traffic will be {}",
+        incoming_info
+    ));
 
     let outgoing_info = match (
         config.feature.network.outgoing.tcp,
@@ -174,29 +215,22 @@ where
         (false, true) => "enabled on UDP",
         (false, false) => "disabled on TCP and UDP",
     };
-    sub_progress.info(&format!("outgoing: forwarding is {}", outgoing_info)[..]);
+    messages.push(format!("outgoing: forwarding is {}", outgoing_info));
 
     let dns_info = match config.feature.network.dns {
         true => "remotely",
         false => "locally",
     };
-    sub_progress.info(&format!("dns: DNS will be resolved {}", dns_info)[..]);
+    messages.push(format!("dns: DNS will be resolved {}", dns_info));
 
-    sub_progress.success(Some("ready to launch process"));
-    // The execve hook is not yet active and does not hijack this call.
-    let err = execvp(binary.clone(), binary_args.clone());
-    error!("Couldn't execute {:?}", err);
-    analytics.set_error(AnalyticsError::BinaryExecuteFailed);
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    if let exec::Error::Errno(errno) = err {
-        if Into::<i32>::into(errno) == 86 {
-            // "Bad CPU type in executable"
-            if _did_sip_patch {
-                return Err(CliError::RosettaMissing(binary));
-            }
+    if single_msg {
+        let long_message = messages.join(". \n");
+        progress_subtask.info(&long_message);
+    } else {
+        for m in messages {
+            progress_subtask.info(&m[..]);
         }
     }
-    Err(CliError::BinaryExecuteFailed(binary, binary_args))
 }
 
 async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
