@@ -384,9 +384,16 @@ fn layer_start(mut config: LayerConfig) {
     }
 
     if let Some(unset) = setup().env_config().unset.as_ref() {
-        unset.as_slice().iter().for_each(|var| {
-            std::env::remove_var(var);
-        })
+        let unset = unset
+            .as_slice()
+            .iter()
+            .map(|s| s.to_lowercase())
+            .collect::<Vec<_>>();
+        std::env::vars().for_each(|(key, _)| {
+            if unset.contains(&key.to_lowercase()) {
+                std::env::remove_var(&key);
+            }
+        });
     }
 }
 
@@ -469,7 +476,7 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
 ///   `FsConfig::is_active`, and [`hooks::enable_file_hooks`](file::hooks::enable_file_hooks);
 ///
 /// - `enabled_remote_dns`: replaces [`libc::getaddrinfo`] and [`libc::freeaddrinfo`] when this is
-///   `true`, see [`NetworkConfig`], and
+///   `true`, see [`NetworkConfig`](mirrord_config::feature::network::NetworkConfig), and
 ///   [`hooks::enable_socket_hooks`](socket::hooks::enable_socket_hooks).
 #[mirrord_layer_macro::instrument(level = "trace")]
 fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries: Vec<String>) {
@@ -575,7 +582,7 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 
 /// Hook for `libc::fork`.
 ///
-/// on macOS, be wary what we do in this path as we might trigger https://github.com/metalbear-co/mirrord/issues/1745
+/// on macOS, be wary what we do in this path as we might trigger <https://github.com/metalbear-co/mirrord/issues/1745>
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     tracing::debug!("Process {} forking!.", std::process::id());
@@ -638,7 +645,7 @@ pub(crate) unsafe extern "C" fn __close_detour(fd: c_int) -> c_int {
 /// ## Hook
 ///
 /// Needed for libuv that calls the syscall directly.
-/// https://github.dev/libuv/libuv/blob/7b84d5b0ecb737b4cc30ce63eade690d994e00a6/src/unix/core.c#L557-L558
+/// <https://github.dev/libuv/libuv/blob/7b84d5b0ecb737b4cc30ce63eade690d994e00a6/src/unix/core.c#L557-L558>
 #[cfg(target_os = "linux")]
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn uv_fs_close_detour(

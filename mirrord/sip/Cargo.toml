@@ -13,6 +13,9 @@ categories.workspace = true
 publish.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 apple-codesign = { version = "0.27", default-features = false}
 memchr = "2"

@@ -182,3 +182,62 @@ async fn outgoing_tcp_from_the_local_app_broken(
 ) {
     outgoing_tcp_logic(with_config, dylib_path, config_dir).await;
 }
+
+/// Tests that outgoing connections are properly handled on sockets that were bound by the user
+/// application.
+#[rstest]
+#[tokio::test]
+#[timeout(Duration::from_secs(10))]
+async fn outgoing_tcp_bound_socket(dylib_path: &PathBuf) {
+    let (mut test_process, mut intproxy) = Application::RustIssue2438
+        .start_process_with_layer(dylib_path, vec![], None)
+        .await;
+
+    let expected_peer_address = "1.1.1.1:4567".parse::<SocketAddr>().unwrap();
+
+    // Test apps runs logic twice for 2 bind addresses.
+    for _ in 0..2 {
+        let msg = intproxy.recv().await;
+        let ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
+            remote_address: SocketAddress::Ip(addr),
+        })) = msg
+        else {
+            panic!("Invalid message received from layer: {msg:?}");
+        };
+        assert_eq!(addr, expected_peer_address);
+
+        intproxy
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
+                DaemonConnect {
+                    connection_id: 0,
+                    remote_address: addr.into(),
+                    local_address: "1.2.3.4:6000".parse::<SocketAddr>().unwrap().into(),
+                },
+            ))))
+            .await;
+
+        let msg = intproxy.recv().await;
+        let ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
+            connection_id: 0,
+            bytes,
+        })) = msg
+        else {
+            panic!("Invalid message received from layer: {msg:?}");
+        };
+
+        intproxy
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
+                DaemonRead {
+                    connection_id: 0,
+                    bytes,
+                },
+            ))))
+            .await;
+
+        intproxy
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(0)))
+            .await;
+    }
+
+    test_process.wait_assert_success().await;
+}

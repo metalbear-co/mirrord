@@ -14,8 +14,8 @@
 #![feature(iterator_try_collect)]
 #![deny(clippy::missing_docs_in_private_items)]
 #![deny(missing_docs)]
-use std::{fs, fs::File, io::Read, path::PathBuf};
 
+use std::{fs, fs::File, io::Read, path::PathBuf};
 use parse::parse_docs_into_set;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
@@ -66,7 +66,7 @@ struct MedschoolArgs {
 
 /// # Attention when using `RUST_LOG`
 ///
-/// Every function here supports our usual [`tracing::instrument`] setup, with default
+/// Every function here supports our usual [`mod@tracing::instrument`] setup, with default
 /// `log_level = "trace`, but if you dare run with `RUST_LOG=trace` you're going to have a bad time!
 ///
 /// The logging is put in place so you can quickly change whatever function you need to

@@ -1,11 +1,13 @@
 use std::{collections::HashSet, net::SocketAddr};
 
 use mirrord_config::{
+    experimental::ExperimentalConfig,
     feature::{
         env::EnvConfig,
         fs::FsConfig,
         network::{incoming::IncomingConfig, outgoing::OutgoingConfig},
     },
+    target::Target,
     util::VecOrSingle,
     LayerConfig,
 };
@@ -93,12 +95,21 @@ impl LayerSetup {
         &self.config.feature.network.outgoing
     }
 
+    pub fn experimental(&self) -> &ExperimentalConfig {
+        &self.config.experimental
+    }
+
     pub fn remote_dns_enabled(&self) -> bool {
         self.config.feature.network.dns
     }
 
     pub fn targetless(&self) -> bool {
-        self.config.target.path.is_none()
+        self.config
+            .target
+            .path
+            .as_ref()
+            .map(|path| matches!(path, Target::Targetless))
+            .unwrap_or(true)
     }
 
     pub fn sip_binaries(&self) -> Vec<String> {

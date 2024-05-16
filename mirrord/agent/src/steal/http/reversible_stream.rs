@@ -14,7 +14,7 @@ use tokio::{
 /// Wraps a [`TcpStream`] to allow a sort of _peek_ functionality, by reading the first bytes, but
 /// then keeping them for later reads.
 ///
-/// Very useful to the HTTP filter component on [`stealer`], where we have to look at the first
+/// Very useful to the HTTP filter component on `stealer`, where we have to look at the first
 /// message on a [`TcpStream`] to try and identify if this connection is _talking_ HTTP.
 ///
 /// Thanks [finomnis](https://stackoverflow.com/users/2902833/finomnis) for the help!
@@ -31,17 +31,17 @@ pub(crate) struct ReversibleStream<const HEADER_SIZE: usize> {
     /// So we need to always know how many bytes we actually have.
     header_len: usize,
 
-    /// How many bytes out of the [`header`] were already read by the reader of this
+    /// How many bytes out of the `header` were already read by the reader of this
     /// [`ReversibleStream`]. If the reader reads bytes into a buffer that is smaller than
-    /// `HEADER_SIZE`, it would not read the whole [`header`] on the first read, so this is the
-    /// amount of bytes that were already read. After all the bytes from the [`header`] were read,
+    /// `HEADER_SIZE`, it would not read the whole `header` on the first read, so this is the
+    /// amount of bytes that were already read. After all the bytes from the `header` were read,
     /// by the user of this struct, further reads are forwarded to the underlying `TcpStream`.
     num_forwarded: usize,
 }
 
 impl<const HEADER_SIZE: usize> ReversibleStream<HEADER_SIZE> {
-    /// Build a Reversible stream from a TcpStream, move on if not done within given timeout.
-    /// Return an Error if there was an error while reading from the TCP Stream.
+    /// Build a [`ReversibleStream`] from a [`TcpStream`], move on if not done within given timeout.
+    /// Return an Error if there was an error while reading from the [`TcpStream`].
     pub(crate) async fn read_header(stream: TcpStream, timeout: Duration) -> io::Result<Self> {
         let mut this = Self {
             stream,

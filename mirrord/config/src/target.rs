@@ -253,7 +253,7 @@ impl Target {
     }
 }
 
-trait TargetDisplay {
+pub trait TargetDisplay {
     fn target_type(&self) -> &str;
 
     fn target_name(&self) -> &str;
@@ -306,6 +306,34 @@ impl fmt::Display for Target {
     }
 }
 
+impl TargetDisplay for Target {
+    fn target_type(&self) -> &str {
+        match self {
+            Target::Deployment(x) => x.target_type(),
+            Target::Pod(x) => x.target_type(),
+            Target::Rollout(x) => x.target_type(),
+            Target::Targetless => "targetless",
+        }
+    }
+
+    fn target_name(&self) -> &str {
+        match self {
+            Target::Deployment(x) => x.target_name(),
+            Target::Pod(x) => x.target_name(),
+            Target::Rollout(x) => x.target_name(),
+            Target::Targetless => "targetless",
+        }
+    }
+
+    fn container_name(&self) -> Option<&String> {
+        match self {
+            Target::Deployment(x) => x.container_name(),
+            Target::Pod(x) => x.container_name(),
+            Target::Rollout(x) => x.container_name(),
+            Target::Targetless => None,
+        }
+    }
+}
 /// <!--${internal}-->
 /// Mirror the pod specified by [`PodTarget::pod`].
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]

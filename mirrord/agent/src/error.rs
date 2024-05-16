@@ -1,3 +1,5 @@
+use std::process::ExitStatus;
+
 use mirrord_protocol::{
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -138,6 +140,10 @@ pub(crate) enum AgentError {
 
     #[error("TLS setup failed: {0}")]
     TlsSetupError(#[from] TlsSetupError),
+
+    /// Child agent process spawned in `main` failed.
+    #[error("Agent child process failed: {0}")]
+    AgentFailed(ExitStatus),
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;

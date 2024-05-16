@@ -154,8 +154,9 @@ pub struct IncomingProxy {
 }
 
 impl IncomingProxy {
-    /// Used when registering new [`RawInterceptor`] and [`HttpInterceptor`] tasks in the
+    /// Used when registering new `RawInterceptor` and `HttpInterceptor` tasks in the
     /// [`BackgroundTasks`] struct.
+    // TODO: Update outdated documentation. RawInterceptor, HttpInterceptor do not exist
     const CHANNEL_SIZE: usize = 512;
 
     /// Tries to register the new subscription in the [`SubscriptionsManager`].
@@ -176,7 +177,7 @@ impl IncomingProxy {
         }
     }
 
-    /// Tries to unregister the subscription from the [`SubscriptionManager`].
+    /// Tries to unregister the subscription from the [`SubscriptionsManager`].
     #[tracing::instrument(level = "trace", skip(self, message_bus))]
     async fn handle_port_unsubscribe(
         &mut self,

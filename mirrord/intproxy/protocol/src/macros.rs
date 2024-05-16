@@ -3,7 +3,7 @@
 /// A helper macro for binding inner-most values from complex enum expressions.
 /// Accepts an identifier and a non-empty sequence of enum paths.
 ///
-/// Used in [`impl_request`] macro for `match` expressions.
+/// Used in [`impl_request`](`macro@crate::impl_request`) macro for `match` expressions.
 ///
 /// # Example
 ///
@@ -34,7 +34,7 @@ macro_rules! bind_nested {
 
 /// A helper macro for implementing [`IsLayerRequest`](super::IsLayerRequest) and
 /// [`IsLayerRequestWithResponse`](super::IsLayerRequestWithResponse) traits. Accepts arguments in
-/// two forms, see invocations in [`crate::protocol`] for
+/// two forms, see invocations in [`protocol`](crate) for
 /// [`OpenFileRequest`](mirrord_protocol::file::OpenFileRequest) and
 /// [`CloseFileRequest`](mirrord_protocol::file::CloseFileRequest) below in this file. Invocation
 /// for [`OpenFileRequest`](mirrord_protocol::file::OpenFileRequest) generates both

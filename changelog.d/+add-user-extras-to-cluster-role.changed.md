@@ -1,1 +1,0 @@
-Append more permissions to operator clusterrole
