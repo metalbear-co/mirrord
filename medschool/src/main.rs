@@ -16,6 +16,7 @@
 #![deny(missing_docs)]
 
 use std::{fs, fs::File, io::Read, path::PathBuf};
+
 use parse::parse_docs_into_set;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
