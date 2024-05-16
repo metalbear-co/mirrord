@@ -276,7 +276,7 @@ impl RuntimeDataFromLabels for DeploymentTarget {
             .spec
             .as_ref()
             .and_then(|spec| spec.selector.match_labels.clone())
-            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.matchExpressions"))
+            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.matchLabels"))
     }
 }
 

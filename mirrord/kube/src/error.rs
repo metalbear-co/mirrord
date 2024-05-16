@@ -19,8 +19,6 @@ pub enum KubeApiError {
     #[error("Failed to load Kube config: {0}")]
     KubeConfigPathError(#[from] kube::config::KubeconfigError),
 
-    // #[error("Failed to extract container runtime from container `{}` (`id {}`)", .name, .id)]
-    // ContainerRuntimeParseError { name: String, id: String },
     #[error("Timeout waiting for agent to be ready")]
     AgentReadyTimeout,
 
@@ -53,22 +51,31 @@ pub enum KubeApiError {
 }
 
 impl KubeApiError {
-    pub fn missing_field<R: Resource<DynamicType = ()>>(resource: &R, field_name: &str) -> Self {
+    /// Use when a resource fetched with [`kube`] is missing some expected field.
+    /// Pass full path to the field, e.g. `.spec.selector.matchLabels`.
+    ///
+    /// Produces [`KubeApiError::MalformedResource`].
+    pub fn missing_field<R: Resource<DynamicType = ()>>(resource: &R, field_path: &str) -> Self {
         let kind = R::kind(&());
         let name = resource.meta().name.as_ref();
         let namespace = resource.meta().namespace.as_deref().unwrap_or("default");
 
         let message = match name {
-            Some(name) => format!("{kind} `{namespace}/{name}` is missing field `{field_name}`"),
-            None => format!("{kind} is missing field `{field_name}`"),
+            Some(name) => format!("{kind} `{namespace}/{name}` is missing field `{field_path}`"),
+            None => format!("{kind} is missing field `{field_path}`"),
         };
 
         Self::MalformedResource(message)
     }
 
+    /// Use when a resource fetched with [`kube`] is has an invalid field (e.g. node IP does not
+    /// parse into [`IpAddr`](std::net::IpAddr)). Pass full path to the field, e.g.
+    /// `.spec.selector.matchLabels`.
+    ///
+    /// Produces [`KubeApiError::MalformedResource`].
     pub fn invalid_value<R: Resource<DynamicType = ()>, T: fmt::Display>(
         resource: &R,
-        field_name: &str,
+        field_path: &str,
         info: T,
     ) -> Self {
         let kind = R::kind(&());
@@ -77,14 +84,18 @@ impl KubeApiError {
 
         let message = match name {
             Some(name) => {
-                format!("field `{field_name}` in {kind} `{namespace}/{name}` is invalid: {info}")
+                format!("field `{field_path}` in {kind} `{namespace}/{name}` is invalid: {info}")
             }
-            None => format!("field `{field_name}` in a {kind} is invalid: {info}"),
+            None => format!("field `{field_path}` in a {kind} is invalid: {info}"),
         };
 
         Self::MalformedResource(message)
     }
 
+    /// Use when a resource fetched with [`kube`] is in invalid state, e.g. node is hosting too many
+    /// pods or pod is not running the selected container.
+    ///
+    /// Produces [`KubeApiError::InvalidResourceState`].
     pub fn invalid_state<R: Resource<DynamicType = ()>, T: fmt::Display>(
         resource: &R,
         info: T,
