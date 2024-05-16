@@ -1,0 +1,1 @@
+Remove warning when detecting mirror mode is used with mesh

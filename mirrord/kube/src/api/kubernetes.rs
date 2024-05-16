@@ -208,20 +208,6 @@ impl KubernetesAPI {
     {
         let (params, runtime_data) = self.create_agent_params(target, tls_cert).await?;
 
-        let incoming_mode = config.map(|config| config.feature.network.incoming.mode);
-        let is_mesh = runtime_data
-            .as_ref()
-            .map(|data| data.mesh.is_some())
-            .unwrap_or_default();
-        if matches!(incoming_mode, Some(IncomingMode::Mirror)) && is_mesh {
-            progress.warning(
-                "mirrord has detected that you might be running on a cluster with a \
-                 service mesh and `network.incoming.mode = \"mirror\"`, which is currently \
-                 unsupported. You can set `network.incoming.mode` to \"steal\" (check out the\
-                 `http_filter` configuration value if you only want to steal some of the traffic).",
-            );
-        }
-
         info!(?params, "Spawning new agent");
 
         let agent_connect_info = match (runtime_data, self.agent.ephemeral) {
