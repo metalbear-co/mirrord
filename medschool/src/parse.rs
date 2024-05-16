@@ -1,6 +1,8 @@
+//! All parsing of `syn::File`` and `syn::Item`` into relevant types and fields related functions.
+
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use syn::{Attribute, Expr, Ident, Meta};
+use syn::{Attribute, Expr, Ident, Meta, Type, TypePath};
 
 use crate::{
     types::{PartialField, PartialType},
@@ -34,6 +36,45 @@ pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
         .collect()
 }
 
+/// Digs into the generics of a field ([`syn::ItemStruct`] only), trying to get the last
+/// [`syn::PathArguments`], which (hopefully) contains the concrete type we care about.
+///
+/// Extracts `Foo` from `foo: Option<Vec<{Foo}>>`.
+///
+/// Doesn't handle generics of generics though, so if your field is `baz: Option<T>` we're going
+/// to be assigning this field type to be the string `"T"` (which is probably not what you
+/// wanted).
+#[tracing::instrument(level = "trace", ret)]
+pub fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> {
+    // welp, this path probably contains generics
+    let segment = type_path.path.segments.last()?;
+
+    let mut current_argument = segment.arguments.clone();
+    let mut inner_type = None;
+
+    // keep digging into the `PathArguments`
+    while let syn::PathArguments::AngleBracketed(generics) = &current_argument {
+        // go directly to the last piece of generics, skipping lifetimes
+        match generics.args.last()? {
+            // finally have something that resembles a type, but might be an `Option`, so
+            // we have to go deeper!
+            syn::GenericArgument::Type(Type::Path(generic_path)) => {
+                // that's it, we've reached the final type
+                inner_type = match generic_path.path.segments.last() {
+                    Some(t) => Some(t.ident.clone()),
+                    None => break,
+                };
+
+                current_argument = generic_path.path.segments.last()?.arguments.clone();
+            }
+            _ => break,
+        }
+    }
+
+    inner_type
+}
+
+/// Converts a [`syn::ItemMod`] into a [`PartialType`].
 fn parse_item_mod(item_mod: syn::ItemMod) -> Option<PartialType> {
     let thing_docs_untreated = docs_from_attributes(item_mod.attrs);
     Some(PartialType {
@@ -43,6 +84,7 @@ fn parse_item_mod(item_mod: syn::ItemMod) -> Option<PartialType> {
     })
 }
 
+/// Converts a [`syn::ItemEnum`] into a [`PartialType`].
 fn parse_item_enum(item: syn::ItemEnum) -> Option<PartialType> {
     let thing_docs_untreated = docs_from_attributes(item.attrs);
     let is_internal = thing_docs_untreated
@@ -57,6 +99,7 @@ fn parse_item_enum(item: syn::ItemEnum) -> Option<PartialType> {
     })
 }
 
+/// Converts a [`syn::ItemStruct`] into a [`PartialType`].
 fn parse_item_struct(item: syn::ItemStruct) -> Option<PartialType> {
     let mut docs = docs_from_attributes(item.attrs);
 
@@ -139,20 +182,24 @@ fn dfs_fields(
     recursion_level: &mut usize,
 ) -> Vec<String> {
     // increment the recursion level as we're going deeper into the tree
-    *recursion_level += 1;
     types // get the type of the field from the types set to recurse into it's fields
         .get(&field.ty)
         .map(|type_| {
             cache.get(&type_.ident).cloned().unwrap_or_else(|| {
                 // check if we've already resolved the type
+                let mut max_recursion_level = 0;
                 let mut new_type_docs = type_.docs.clone();
                 type_.fields.iter().for_each(|field| {
-                    let resolved_type_docs = dfs_fields(field, types, cache, recursion_level);
+                    let mut current_recursion_level = *recursion_level + 1;
+                    let resolved_type_docs =
+                        dfs_fields(field, types, cache, &mut current_recursion_level);
+                    max_recursion_level = max_recursion_level.max(current_recursion_level);
                     cache.insert(field.ty.clone(), resolved_type_docs.clone());
                     // append the docs of the field to the resolved type docs
                     new_type_docs.extend(field.docs.clone().into_iter().chain(resolved_type_docs));
                 });
                 cache.insert(type_.ident.clone(), new_type_docs.clone());
+                *recursion_level = max_recursion_level;
                 new_type_docs
             })
         })
@@ -230,7 +277,6 @@ pub fn resolve_references(types: HashSet<PartialType>) -> Option<PartialType> {
                         field
                     })
                     .collect::<BTreeSet<_>>();
-
                 (recursion_level, type_)
             })
         })
@@ -238,37 +284,3 @@ pub fn resolve_references(types: HashSet<PartialType>) -> Option<PartialType> {
         .max_by_key(|(recursion_level, _)| *recursion_level)
         .map(|(_, type_)| type_)
 }
-
-// fn dfs_fields_v1(field: &PartialField, types: &HashSet<PartialType>) -> Vec<String> {
-//     types
-//         .get(&field.ty)
-//         .map(|type_| {
-//             let mut new_type_docs = type_.docs.clone();
-//             type_.fields.iter().for_each(|field| {
-//                 let resolved_type_docs = dfs_fields_v1(field, types);
-//                 new_type_docs.extend(field.docs.clone().into_iter().chain(resolved_type_docs));
-//             });
-//             new_type_docs
-//         })
-//         .unwrap_or_default()
-// }
-
-// pub fn resolve_references_v1(types: HashSet<PartialType>) -> HashSet<PartialType> {
-//     types
-//         .clone()
-//         .into_iter()
-//         .map(|mut type_| {
-//             type_.fields = type_
-//                 .fields
-//                 .into_iter()
-//                 .map(|mut field| {
-//                     let resolved_type_docs = dfs_fields_v1(&field, &types);
-//                     field.docs.extend(resolved_type_docs);
-//                     field
-//                 })
-//                 .collect::<BTreeSet<_>>();
-
-//             type_
-//         })
-//         .collect::<HashSet<_>>()
-// }

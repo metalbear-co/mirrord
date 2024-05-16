@@ -1,8 +1,10 @@
+//! The interface for the types we're extracting from the source code.
+
 use std::{borrow::Borrow, cmp::Ordering, collections::BTreeSet, fmt::Display, hash::Hash};
 
-use syn::{Ident, Type, TypePath};
+use syn::Type;
 
-use crate::parse::docs_from_attributes;
+use crate::parse::{docs_from_attributes, get_ident_from_field_skipping_generics};
 
 /// We're extracting [`syn::Item`] structs and enums into this type.
 ///
@@ -59,13 +61,14 @@ impl PartialField {
                     .path
                     .get_ident()
                     .cloned()
-                    .or_else(|| Self::get_ident_from_field_skipping_generics(type_path))
+                    .or_else(|| get_ident_from_field_skipping_generics(type_path))
             }
             _ => None,
         }?;
 
         let mut docs = docs_from_attributes(field.attrs);
 
+        // TODO: this part can be encapsulated into a function
         for doc in docs.iter_mut() {
             // removes docs that we don't want in `configuration.md`
             if doc.contains(r"<!--${internal}-->") {
@@ -85,44 +88,6 @@ impl PartialField {
             ty: type_ident.to_string(),
             docs,
         })
-    }
-
-    /// Digs into the generics of a field ([`syn::ItemStruct`] only), trying to get the last
-    /// [`syn::PathArguments`], which (hopefully) contains the concrete type we care about.
-    ///
-    /// Extracts `Foo` from `foo: Option<Vec<{Foo}>>`.
-    ///
-    /// Doesn't handle generics of generics though, so if your field is `baz: Option<T>` we're going
-    /// to be assigning this field type to be the string `"T"` (which is probably not what you
-    /// wanted).
-    #[tracing::instrument(level = "trace", ret)]
-    fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ident> {
-        // welp, this path probably contains generics
-        let segment = type_path.path.segments.last()?;
-
-        let mut current_argument = segment.arguments.clone();
-        let mut inner_type = None;
-
-        // keep digging into the `PathArguments`
-        while let syn::PathArguments::AngleBracketed(generics) = &current_argument {
-            // go directly to the last piece of generics, skipping lifetimes
-            match generics.args.last()? {
-                // finally have something that resembles a type, but might be an `Option`, so
-                // we have to go deeper!
-                syn::GenericArgument::Type(Type::Path(generic_path)) => {
-                    // that's it, we've reached the final type
-                    inner_type = match generic_path.path.segments.last() {
-                        Some(t) => Some(t.ident.clone()),
-                        None => break,
-                    };
-
-                    current_argument = generic_path.path.segments.last()?.arguments.clone();
-                }
-                _ => break,
-            }
-        }
-
-        inner_type
     }
 }
 
@@ -179,12 +144,6 @@ impl PartialEq for PartialType {
 impl Eq for PartialType {}
 
 impl Hash for PartialType {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.ident.hash(state)
-    }
-}
-
-impl Hash for PartialField {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.ident.hash(state)
     }

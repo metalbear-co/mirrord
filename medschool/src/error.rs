@@ -1,3 +1,5 @@
+//! Errors defined for medschool.
+
 use thiserror::Error;
 
 /// We just _eat_ some of these errors (turn them into `None`).
