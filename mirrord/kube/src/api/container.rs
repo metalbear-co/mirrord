@@ -75,7 +75,7 @@ pub trait ContainerVariant {
 
     fn params(&self) -> &ContainerParams;
 
-    fn as_update(&self) -> Result<Self::Update>;
+    fn as_update(&self) -> Self::Update;
 }
 
 impl<T> ContainerVariant for Box<T>
@@ -92,7 +92,7 @@ where
         T::params(self)
     }
 
-    fn as_update(&self) -> Result<Self::Update> {
+    fn as_update(&self) -> Self::Update {
         T::as_update(self)
     }
 }

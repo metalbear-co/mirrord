@@ -1,13 +1,15 @@
 use futures::StreamExt;
-use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
+use k8s_openapi::api::{
+    batch::v1::{Job, JobSpec},
+    core::v1::{Pod, PodTemplateSpec},
+};
 use kube::{
-    api::{ListParams, PostParams},
+    api::{ListParams, ObjectMeta, PostParams},
     runtime::{watcher, WatchStreamExt},
     Api, Client,
 };
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
-use serde_json::json;
 use tokio::pin;
 use tracing::debug;
 
@@ -37,7 +39,7 @@ where
     let mut pod_progress = progress.subtask("creating agent pod...");
 
     let agent = variant.agent_config();
-    let agent_pod: Job = variant.as_update()?;
+    let agent_pod: Job = variant.as_update();
 
     let job_api = get_k8s_resource_api(client, agent.namespace.as_deref());
 
@@ -129,29 +131,44 @@ where
         self.inner.params()
     }
 
-    fn as_update(&self) -> Result<Self::Update> {
+    fn as_update(&self) -> Self::Update {
         let agent = self.agent_config();
         let params = self.params();
 
-        serde_json::from_value(json!({
-            "metadata": {
-                "name": params.name,
-                "labels": {
-                    "kuma.io/sidecar-injection": "disabled",
-                    "app": "mirrord"
-                },
-                "annotations":
-                {
-                    "sidecar.istio.io/inject": "false",
-                    "linkerd.io/inject": "disabled"
-                }
+        let pod = self.inner.as_update();
+
+        Job {
+            metadata: ObjectMeta {
+                name: Some(params.name.clone()),
+                labels: Some(
+                    [
+                        (
+                            "kuma.io/sidecar-injection".to_string(),
+                            "disabled".to_string(),
+                        ),
+                        ("app".to_string(), "mirrord".to_string()),
+                    ]
+                    .into(),
+                ),
+                annotations: Some(
+                    [
+                        ("sidecar.istio.io/inject".to_string(), "false".to_string()),
+                        ("linkerd.io/inject".to_string(), "disabled".to_string()),
+                    ]
+                    .into(),
+                ),
+                ..Default::default()
             },
-            "spec": {
-                "ttlSecondsAfterFinished": agent.ttl,
-                "template": self.inner.as_update()?
-            }
-        }))
-        .map_err(KubeApiError::from)
+            spec: Some(JobSpec {
+                ttl_seconds_after_finished: Some(agent.ttl.into()),
+                template: PodTemplateSpec {
+                    metadata: Some(pod.metadata),
+                    spec: pod.spec,
+                },
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
     }
 }
 
@@ -184,7 +201,7 @@ impl ContainerVariant for JobTargetedVariant<'_> {
         self.inner.params()
     }
 
-    fn as_update(&self) -> Result<Job> {
+    fn as_update(&self) -> Job {
         self.inner.as_update()
     }
 }
@@ -214,9 +231,9 @@ mod test {
             tls_cert: None,
         };
 
-        let update = JobVariant::new(&agent, &params).as_update()?;
+        let update = JobVariant::new(&agent, &params).as_update();
 
-        let expected: Job = serde_json::from_value(json!({
+        let expected: Job = serde_json::from_value(serde_json::json!({
             "metadata": {
                 "name": "foobar",
                 "labels": {
@@ -307,9 +324,9 @@ mod test {
                 container_name: "foo".to_string(),
             },
         )
-        .as_update()?;
+        .as_update();
 
-        let expected: Job = serde_json::from_value(json!({
+        let expected: Job = serde_json::from_value(serde_json::json!({
             "metadata": {
                 "name": "foobar",
                 "labels": {
