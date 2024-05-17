@@ -168,13 +168,8 @@ fn print_config<P>(
 
     let exclude = config.feature.env.exclude.as_ref();
     let include = config.feature.env.include.as_ref();
-    let env_info = if exclude.is_some() {
-        if exclude
-            .unwrap()
-            .clone()
-            .to_vec()
-            .contains(&String::from("*"))
-        {
+    let env_info = if let Some(excluded) = exclude {
+        if excluded.clone().to_vec().contains(&String::from("*")) {
             "no"
         } else {
             "not all"
