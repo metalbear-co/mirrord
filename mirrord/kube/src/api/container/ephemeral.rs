@@ -1,5 +1,7 @@
 use futures::StreamExt;
-use k8s_openapi::api::core::v1::{EphemeralContainer as KubeEphemeralContainer, Pod};
+use k8s_openapi::api::core::v1::{
+    Capabilities, EphemeralContainer as KubeEphemeralContainer, Pod, SecurityContext,
+};
 use kube::{
     api::PostParams,
     runtime::{watcher, WatchStreamExt},
@@ -7,7 +9,6 @@ use kube::{
 };
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
-use serde_json::json;
 use tokio::pin;
 use tracing::debug;
 
@@ -56,18 +57,19 @@ where
     // Ephemeral should never be targetless, so there should be runtime data.
     let mut container_progress = progress.subtask("creating ephemeral container...");
 
-    let mut ephemeral_container: KubeEphemeralContainer = variant.as_update()?;
+    let mut ephemeral_container: KubeEphemeralContainer = variant.as_update();
     debug!("Requesting ephemeral_containers_subresource");
 
     let pod_api = get_k8s_resource_api(client, runtime_data.pod_namespace.as_deref());
     let pod: Pod = pod_api.get(&runtime_data.pod_name).await?;
-    let pod_spec = pod.spec.ok_or(KubeApiError::PodSpecNotFound)?;
-
-    let container_spec = pod_spec
+    let container_spec = pod
+        .spec
+        .as_ref()
+        .ok_or_else(|| KubeApiError::missing_field(&pod, "spec"))?
         .containers
         .iter()
         .find(|c| c.name == runtime_data.container_name)
-        .ok_or_else(|| KubeApiError::ContainerNotFound(runtime_data.container_name.clone()))?;
+        .ok_or_else(|| KubeApiError::invalid_state(&pod, runtime_data.container_name.clone()))?;
 
     if let Some(spec_env) = container_spec.env.as_ref() {
         let mut env = ephemeral_container.env.unwrap_or_default();
@@ -89,7 +91,7 @@ where
     let spec = ephemeral_containers_subresource
         .spec
         .as_mut()
-        .ok_or(KubeApiError::PodSpecNotFound)?;
+        .ok_or_else(|| KubeApiError::missing_field(&pod, "spec"))?;
 
     spec.ephemeral_containers = match spec.ephemeral_containers.clone() {
         Some(mut ephemeral_containers) => {
@@ -104,7 +106,8 @@ where
             "ephemeralcontainers",
             &runtime_data.pod_name,
             &PostParams::default(),
-            serde_json::to_vec(&ephemeral_containers_subresource).map_err(KubeApiError::from)?,
+            serde_json::to_vec(&ephemeral_containers_subresource)
+                .expect("serialization to vector never fails"),
         )
         .await
         .map_err(KubeApiError::KubeError)?;
@@ -193,7 +196,7 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
         self.params
     }
 
-    fn as_update(&self) -> Result<KubeEphemeralContainer> {
+    fn as_update(&self) -> KubeEphemeralContainer {
         let EphemeralTargetedVariant {
             agent,
             params,
@@ -202,23 +205,30 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
         } = self;
         let env = agent_env(agent, params);
 
-        serde_json::from_value(json!({
-            "name": params.name,
-            "image": agent.image(),
-            "securityContext": {
-                "runAsGroup": params.gid,
-                "capabilities": {
-                    "add": get_capabilities(agent),
-                },
-                "privileged": agent.privileged,
-                "runAsNonRoot": agent.privileged.then_some(false),
-                "runAsUser": agent.privileged.then_some(0),
-            },
-            "imagePullPolicy": agent.image_pull_policy,
-            "targetContainerName": runtime_data.container_name,
-            "env": env,
-            "command": command_line,
-        }))
-        .map_err(KubeApiError::from)
+        KubeEphemeralContainer {
+            name: params.name.clone(),
+            image: Some(agent.image().to_string()),
+            security_context: Some(SecurityContext {
+                run_as_group: Some(params.gid.into()),
+                capabilities: Some(Capabilities {
+                    add: Some(
+                        get_capabilities(agent)
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect(),
+                    ),
+                    ..Default::default()
+                }),
+                privileged: Some(agent.privileged),
+                run_as_non_root: agent.privileged.then_some(false),
+                run_as_user: agent.privileged.then_some(0),
+                ..Default::default()
+            }),
+            image_pull_policy: Some(agent.image_pull_policy.clone()),
+            target_container_name: Some(runtime_data.container_name.clone()),
+            env: Some(env),
+            command: Some(command_line.clone()),
+            ..Default::default()
+        }
     }
 }

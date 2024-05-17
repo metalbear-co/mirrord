@@ -305,16 +305,13 @@
         },
         "image_pull_secrets": {
           "title": "agent.image_pull_secrets {#agent-image_pull_secrets}",
-          "description": "List of secrets the agent pod has access to.\n\nTakes an array of hash with the format `{ name: <secret-name> }`.\n\nRead more [here](https://kubernetes.io/docs/concepts/containers/images/).\n\n```json { \"agent\": { \"image_pull_secrets\": [ { \"very-secret\": \"secret-key\" }, { \"very-secret\": \"keep-your-secrets\" } ] } } ```",
+          "description": "List of secrets the agent pod has access to.\n\nTakes an array of entries with the format `{ name: <secret-name> }`.\n\nRead more [here](https://kubernetes.io/docs/concepts/containers/images/#referring-to-an-imagepullsecrets-on-a-pod).\n\n```json { \"agent\": { \"image_pull_secrets\": [ { \"name\": \"secret-key-1\" }, { \"name\": \"secret-key-2\" } ] } } ```",
           "type": [
             "array",
             "null"
           ],
           "items": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
+            "$ref": "#/definitions/AgentPullSecret"
           }
         },
         "log_level": {
@@ -433,6 +430,19 @@
           "additionalProperties": false
         }
       ]
+    },
+    "AgentPullSecret": {
+      "description": "<!--${internal}--> Specifies a secret reference for the agent pod.",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "description": "Name of the secret.",
+          "type": "string"
+        }
+      }
     },
     "ConcurrentSteal": {
       "description": "(Operator Only): Allows overriding port locks\n\nCan be set to either `\"continue\"` or `\"override\"`.\n\n- `\"continue\"`: Continue with normal execution - `\"override\"`: If port lock detected then override it with new lock and force close the original locking connection.",

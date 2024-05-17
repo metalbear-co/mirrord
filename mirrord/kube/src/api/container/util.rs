@@ -1,12 +1,11 @@
 use std::sync::LazyLock;
 
 use futures::{AsyncBufReadExt, TryStreamExt};
-use k8s_openapi::api::core::v1::{Pod, Toleration};
+use k8s_openapi::api::core::v1::{EnvVar, Pod, Toleration};
 use kube::{api::LogParams, Api};
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
 use mirrord_protocol::AGENT_OPERATOR_CERT_ENV;
 use regex::Regex;
-use serde_json::{json, Value};
 use tracing::warn;
 
 use crate::{api::container::ContainerParams, error::Result};
@@ -34,7 +33,7 @@ pub(super) fn get_capabilities(agent: &AgentConfig) -> Vec<LinuxCapability> {
 }
 
 /// Builds mirrord agent environment variables.
-pub(super) fn agent_env(agent: &AgentConfig, params: &&ContainerParams) -> Vec<Value> {
+pub(super) fn agent_env(agent: &AgentConfig, params: &&ContainerParams) -> Vec<EnvVar> {
     let mut env = vec![
         ("RUST_LOG".to_string(), agent.log_level.clone()),
         (
@@ -64,7 +63,11 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &&ContainerParams) -> Vec<V
                 .clone()
                 .map(|cert| (AGENT_OPERATOR_CERT_ENV.to_string(), cert)),
         )
-        .map(|(name, value)| json!({ "name": name, "value": value }))
+        .map(|(name, value)| EnvVar {
+            name,
+            value: Some(value),
+            ..Default::default()
+        })
         .collect::<Vec<_>>()
 }
 
