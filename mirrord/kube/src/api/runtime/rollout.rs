@@ -1,41 +1,27 @@
 use std::collections::BTreeMap;
 
-use kube::{Api, Client};
 use mirrord_config::target::rollout::RolloutTarget;
 
-use super::{RuntimeDataFromLabels, RuntimeTarget};
+use super::RuntimeDataFromLabels;
 use crate::{
-    api::kubernetes::{get_k8s_resource_api, rollout::Rollout},
+    api::kubernetes::rollout::Rollout,
     error::{KubeApiError, Result},
 };
 
-impl RuntimeTarget for RolloutTarget {
-    fn target(&self) -> &str {
+impl RuntimeDataFromLabels for RolloutTarget {
+    type Resource = Rollout;
+
+    fn name(&self) -> &str {
         &self.rollout
     }
 
-    fn container(&self) -> &Option<String> {
-        &self.container
+    fn container(&self) -> Option<&str> {
+        self.container.as_deref()
     }
-}
 
-impl RuntimeDataFromLabels for RolloutTarget {
-    async fn get_labels(
-        &self,
-        client: &Client,
-        namespace: Option<&str>,
-    ) -> Result<BTreeMap<String, String>> {
-        let rollout_api: Api<Rollout> = get_k8s_resource_api(client, namespace);
-        let rollout = rollout_api
-            .get(&self.rollout)
-            .await
-            .map_err(KubeApiError::KubeError)?;
-
-        rollout.match_labels().ok_or_else(|| {
-            KubeApiError::DeploymentNotFound(format!(
-                "Label for rollout: {}, not found!",
-                self.rollout.clone()
-            ))
-        })
+    async fn get_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>> {
+        resource
+            .match_labels()
+            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.matchLabels"))
     }
 }

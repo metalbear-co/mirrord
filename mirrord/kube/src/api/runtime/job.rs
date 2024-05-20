@@ -1,44 +1,32 @@
 use std::collections::BTreeMap;
 
 use k8s_openapi::api::batch::v1::Job;
-use kube::{Api, Client};
 use mirrord_config::target::job::JobTarget;
 
-use super::{RuntimeDataFromLabels, RuntimeTarget};
-use crate::{
-    api::kubernetes::get_k8s_resource_api,
-    error::{KubeApiError, Result},
-};
+use super::RuntimeDataFromLabels;
+use crate::error::{KubeApiError, Result};
 
-impl RuntimeTarget for JobTarget {
-    fn target(&self) -> &str {
+impl RuntimeDataFromLabels for JobTarget {
+    type Resource = Job;
+
+    fn name(&self) -> &str {
         &self.job
     }
 
-    fn container(&self) -> &Option<String> {
-        &self.container
+    fn container(&self) -> Option<&str> {
+        self.container.as_deref()
     }
-}
 
-impl RuntimeDataFromLabels for JobTarget {
-    async fn get_labels(
-        &self,
-        client: &Client,
-        namespace: Option<&str>,
-    ) -> Result<BTreeMap<String, String>> {
-        let job_api: Api<Job> = get_k8s_resource_api(client, namespace);
-        let job = job_api
-            .get(&self.job)
-            .await
-            .map_err(KubeApiError::KubeError)?;
-
-        job.spec
-            .and_then(|spec| spec.selector?.match_labels)
+    async fn get_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>> {
+        resource
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.selector.as_ref()?.match_labels.clone())
             .ok_or_else(|| {
-                KubeApiError::JobNotFound(format!(
-                    "Label for job: {}, not found!",
-                    self.job.clone()
-                ))
+                KubeApiError::missing_field(
+                    resource,
+                    ".spec.selector or .spec.selector.match_labels",
+                )
             })
     }
 }

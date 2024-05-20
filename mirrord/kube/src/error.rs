@@ -1,84 +1,116 @@
-use std::net::AddrParseError;
+use std::fmt;
 
+use kube::Resource;
 use thiserror::Error;
 
 pub type Result<T, E = KubeApiError> = std::result::Result<T, E>;
 
 #[derive(Debug, Error)]
 pub enum KubeApiError {
-    #[error("mirrord-layer: Kube failed with error `{0}`!")]
+    #[error("Kube failed: {0}")]
     KubeError(#[from] kube::Error),
 
-    #[error("mirrord-layer: Connection to agent failed `{0}`!")]
+    #[error("Connection to agent failed: {0}")]
     KubeConnectionError(#[from] std::io::Error),
 
-    #[error("mirrord-layer: Failed to get `KubeConfig`!")]
-    KubeConfigError(#[from] kube::config::InferConfigError),
+    #[error("Failed to infer Kube config: {0}")]
+    InferKubeConfigError(#[from] kube::config::InferConfigError),
 
-    #[error("mirrord-layer: Failed to get the custom path for `KubeConfig`!")]
+    #[error("Failed to load Kube config: {0}")]
     KubeConfigPathError(#[from] kube::config::KubeconfigError),
 
-    #[error("mirrord-layer: JSON convert error")]
-    JSONConvertError(#[from] serde_json::Error),
-
-    #[error("mirrord-layer: Invalid target provided `{0}`!")]
-    InvalidTarget(String),
-
-    #[error("mirrord-layer: Failed to get `Spec` for Pod!")]
-    PodSpecNotFound,
-
-    #[error("mirrord-layer: Deployment: `{0} not found!`")]
-    DeploymentNotFound(String),
-
-    #[error("mirrord-layer: Job: `{0} not found!`")]
-    JobNotFound(String),
-
-    #[error("mirrord-layer: Failed to get Container runtime data for `{0}`!")]
-    ContainerRuntimeParseError(String),
-
-    #[error("mirrord-layer: Container ID not found in response from kube API")]
-    ContainerIdNotFound,
-
-    #[error("mirrord-layer: Failed to get Pod for Job `{0}`!")]
-    JobPodNotFound(String),
-
-    #[error("mirrord-layer: Pod name not found in response from kube API")]
-    PodNameNotFound,
-
-    #[error("mirrord-layer: Node name wasn't found in pod spec")]
-    NodeNotFound,
-
-    #[error("mirrord-layer: Pod status not found in response from kube API")]
-    PodStatusNotFound,
-
-    #[error("mirrord-layer: Container status not found in response from kube API")]
-    ContainerStatusNotFound,
-
-    #[error("mirrord-layer: Container not found: `{0}`")]
-    ContainerNotFound(String),
-
-    #[error("mirrord-layer: Timeout waiting for agent to be ready")]
+    #[error("Timeout waiting for agent to be ready")]
     AgentReadyTimeout,
 
     #[error("Port not found in port forward")]
     PortForwardFailed,
 
-    #[error("Invaild Address Conversion: {0}")]
-    InvalidAddress(#[from] AddrParseError),
-
     /// This error should never happen, but has to exist if we don't want to unwrap.
-    #[error("mirrord-layer: None runtime data for non-targetless agent. This is a bug.")]
+    #[error("None runtime data for non-targetless agent. This is a bug.")]
     MissingRuntimeData,
 
-    #[error("Kube incluster error `{0}`!")]
+    #[error("Failed to load incluster Kube config: {0}")]
     KubeInclusterError(#[from] kube::config::InClusterError),
-
-    #[error("Unable to fetch node limits for {0:?}")]
-    NodeBadAllocatable(String),
-
-    #[error("Node {0:?} is too full with {1} pods")]
-    NodePodLimitExceeded(String, usize),
 
     #[error("Path expansion for kubeconfig failed: {0}")]
     ConfigPathExpansionError(String),
+
+    /// We fetched a malformed resource using [`kube`] (should not happen).
+    /// Construct with [`Self::missing_field`] or [`Self::invalid_value`] for consistent error
+    /// messages.
+    #[error("Kube API returned a malformed resource: {0}")]
+    MalformedResource(String),
+
+    /// Resource fetched using [`kube`] is in invalid state.
+    /// Construct with [`Self::invalid_state`] for consistent error messages.
+    #[error("Resource fetched from Kube API is invalid: {0}")]
+    InvalidResourceState(String),
+
+    #[error("Agent Job was created, but Pod is not running")]
+    AgentPodNotRunning,
+}
+
+impl KubeApiError {
+    /// Use when a resource fetched with [`kube`] is missing some expected field.
+    /// Pass full path to the field, e.g. `.spec.selector.matchLabels`.
+    ///
+    /// Produces [`KubeApiError::MalformedResource`].
+    pub fn missing_field<R: Resource<DynamicType = ()>>(resource: &R, field_path: &str) -> Self {
+        let kind = R::kind(&());
+        let name = resource.meta().name.as_ref();
+        let namespace = resource.meta().namespace.as_deref().unwrap_or("default");
+
+        let message = match name {
+            Some(name) => format!("{kind} `{namespace}/{name}` is missing field `{field_path}`"),
+            None => format!("{kind} is missing field `{field_path}`"),
+        };
+
+        Self::MalformedResource(message)
+    }
+
+    /// Use when a resource fetched with [`kube`] is has an invalid field (e.g. node IP does not
+    /// parse into [`IpAddr`](std::net::IpAddr)). Pass full path to the field, e.g.
+    /// `.spec.selector.matchLabels`.
+    ///
+    /// Produces [`KubeApiError::MalformedResource`].
+    pub fn invalid_value<R: Resource<DynamicType = ()>, T: fmt::Display>(
+        resource: &R,
+        field_path: &str,
+        info: T,
+    ) -> Self {
+        let kind = R::kind(&());
+        let name = resource.meta().name.as_ref();
+        let namespace = resource.meta().namespace.as_deref().unwrap_or("default");
+
+        let message = match name {
+            Some(name) => {
+                format!("field `{field_path}` in {kind} `{namespace}/{name}` is invalid: {info}")
+            }
+            None => format!("field `{field_path}` in a {kind} is invalid: {info}"),
+        };
+
+        Self::MalformedResource(message)
+    }
+
+    /// Use when a resource fetched with [`kube`] is in invalid state, e.g. node is hosting too many
+    /// pods or pod is not running the selected container.
+    ///
+    /// Produces [`KubeApiError::InvalidResourceState`].
+    pub fn invalid_state<R: Resource<DynamicType = ()>, T: fmt::Display>(
+        resource: &R,
+        info: T,
+    ) -> Self {
+        let kind = R::kind(&());
+        let name = resource.meta().name.as_ref();
+        let namespace = resource.meta().namespace.as_deref().unwrap_or("default");
+
+        let message = match name {
+            Some(name) => {
+                format!("{kind} `{namespace}/{name}` is in invalid state: {info}")
+            }
+            None => format!("{kind} is in invalid state: {info}"),
+        };
+
+        Self::MalformedResource(message)
+    }
 }

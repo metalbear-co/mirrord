@@ -10,6 +10,6 @@ impl RuntimeDataProvider for PodTarget {
         let pod_api: Api<Pod> = get_k8s_resource_api(client, namespace);
         let pod = pod_api.get(&self.pod).await?;
 
-        RuntimeData::from_pod(&pod, &self.container)
+        RuntimeData::from_pod(&pod, self.container.as_deref())
     }
 }

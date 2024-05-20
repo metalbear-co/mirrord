@@ -102,6 +102,7 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///   "connect_tcp": null,
 ///   "agent": {
 ///     "log_level": "info",
+///     "json_log": false,
 ///     "namespace": "default",
 ///     "image": "ghcr.io/metalbear-co/mirrord:latest",
 ///     "image_pull_policy": "IfNotPresent",
@@ -508,7 +509,6 @@ impl LayerFileConfig {
 mod tests {
 
     use std::{
-        collections::HashMap,
         fs::{File, OpenOptions},
         io::{Read, Write},
     };
@@ -561,6 +561,7 @@ mod tests {
                         },
                         "agent": {
                             "log_level": "info",
+                            "json_log": false,
                             "namespace": "default",
                             "image": "",
                             "image_pull_policy": "",
@@ -597,6 +598,7 @@ mod tests {
 
                     [agent]
                     log_level = "info"
+                    json_log = false
                     namespace = "default"
                     image = ""
                     image_pull_policy = ""
@@ -630,6 +632,7 @@ mod tests {
 
                     agent:
                         log_level: "info"
+                        json_log: false
                         namespace: "default"
                         image: ""
                         image_pull_policy: ""
@@ -682,7 +685,10 @@ mod tests {
     fn full(
         #[values(ConfigType::Json, ConfigType::Toml, ConfigType::Yaml)] config_type: ConfigType,
     ) {
-        use crate::{agent::AgentImageFileConfig, target::pod::PodTarget};
+        use crate::{
+            agent::{AgentImageFileConfig, AgentPullSecret},
+            target::pod::PodTarget,
+        };
 
         let input = config_type.full();
 
@@ -705,13 +711,13 @@ mod tests {
             agent: Some(AgentFileConfig {
                 privileged: None,
                 log_level: Some("info".to_owned()),
+                json_log: Some(false),
                 namespace: Some("default".to_owned()),
                 image: Some(AgentImageFileConfig::Simple(Some("".to_owned()))),
                 image_pull_policy: Some("".to_owned()),
-                image_pull_secrets: Some(vec![HashMap::from([(
-                    "name".to_owned(),
-                    "testsecret".to_owned(),
-                )])]),
+                image_pull_secrets: Some(vec![AgentPullSecret {
+                    name: "testsecret".to_owned(),
+                }]),
                 ttl: Some(60),
                 ephemeral: Some(false),
                 communication_timeout: None,

@@ -1,45 +1,27 @@
 use std::collections::BTreeMap;
 
 use k8s_openapi::api::apps::v1::Deployment;
-use kube::{Api, Client};
 use mirrord_config::target::deployment::DeploymentTarget;
 
-use super::{RuntimeDataFromLabels, RuntimeTarget};
-use crate::{
-    api::kubernetes::get_k8s_resource_api,
-    error::{KubeApiError, Result},
-};
+use super::RuntimeDataFromLabels;
+use crate::error::{KubeApiError, Result};
 
-impl RuntimeTarget for DeploymentTarget {
-    fn target(&self) -> &str {
+impl RuntimeDataFromLabels for DeploymentTarget {
+    type Resource = Deployment;
+
+    fn name(&self) -> &str {
         &self.deployment
     }
 
-    fn container(&self) -> &Option<String> {
-        &self.container
+    fn container(&self) -> Option<&str> {
+        self.container.as_deref()
     }
-}
 
-impl RuntimeDataFromLabels for DeploymentTarget {
-    async fn get_labels(
-        &self,
-        client: &Client,
-        namespace: Option<&str>,
-    ) -> Result<BTreeMap<String, String>> {
-        let deployment_api: Api<Deployment> = get_k8s_resource_api(client, namespace);
-        let deployment = deployment_api
-            .get(&self.deployment)
-            .await
-            .map_err(KubeApiError::KubeError)?;
-
-        deployment
+    async fn get_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>> {
+        resource
             .spec
-            .and_then(|spec| spec.selector.match_labels)
-            .ok_or_else(|| {
-                KubeApiError::DeploymentNotFound(format!(
-                    "Label for deployment: {}, not found!",
-                    self.deployment.clone()
-                ))
-            })
+            .as_ref()
+            .and_then(|spec| spec.selector.match_labels.clone())
+            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.matchLabels"))
     }
 }

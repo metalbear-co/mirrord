@@ -1,17 +1,20 @@
 use std::{
     collections::BTreeMap,
     convert::Infallible,
-    fmt::{Display, Formatter},
+    fmt::{self, Display, Formatter},
     ops::FromResidual,
+    str::FromStr,
 };
 
 use k8s_openapi::{
     api::core::v1::{Node, Pod},
-    apimachinery::pkg::api::resource::Quantity,
+    NamespaceResourceScope,
 };
-use kube::{api::ListParams, Api, Client};
+use kube::{api::ListParams, Api, Client, Resource};
 use mirrord_config::target::Target;
 use mirrord_protocol::MeshVendor;
+use serde::de::DeserializeOwned;
+use thiserror::Error;
 
 use crate::{
     api::{container::choose_container, kubernetes::get_k8s_resource_api},
@@ -28,6 +31,23 @@ pub enum ContainerRuntime {
     Docker,
     Containerd,
     CriO,
+}
+
+#[derive(Error, Debug)]
+#[error("invalid container runtime name: {0}")]
+pub struct ContainerRuntimeParseError(String);
+
+impl FromStr for ContainerRuntime {
+    type Err = ContainerRuntimeParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "docker" => Ok(Self::Docker),
+            "containerd" => Ok(Self::Containerd),
+            "cri-o" => Ok(Self::CriO),
+            _ => Err(ContainerRuntimeParseError(s.to_string())),
+        }
+    }
 }
 
 impl Display for ContainerRuntime {
@@ -54,61 +74,55 @@ pub struct RuntimeData {
 }
 
 impl RuntimeData {
-    fn from_pod(pod: &Pod, container_name: &Option<String>) -> Result<Self> {
+    pub fn from_pod(pod: &Pod, container_name: Option<&str>) -> Result<Self> {
         let pod_name = pod
             .metadata
             .name
             .as_ref()
-            .ok_or(KubeApiError::PodNameNotFound)?
+            .ok_or_else(|| KubeApiError::missing_field(pod, ".metadata.name"))?
             .to_owned();
         let node_name = pod
             .spec
             .as_ref()
-            .ok_or(KubeApiError::PodSpecNotFound)?
-            .node_name
-            .as_ref()
-            .ok_or(KubeApiError::NodeNotFound)?
+            .and_then(|spec| spec.node_name.as_ref())
+            .ok_or_else(|| KubeApiError::missing_field(pod, ".spec.nodeName"))?
             .to_owned();
         let container_statuses = pod
             .status
             .as_ref()
-            .ok_or(KubeApiError::PodStatusNotFound)?
-            .container_statuses
-            .clone()
-            .ok_or(KubeApiError::ContainerStatusNotFound)?;
+            .and_then(|status| status.container_statuses.as_ref())
+            .ok_or_else(|| KubeApiError::missing_field(pod, ".status.containerStatuses"))?;
         let (chosen_container, mesh) =
             choose_container(container_name, container_statuses.as_ref());
 
-        let chosen_status = chosen_container.ok_or_else(|| {
-            KubeApiError::ContainerNotFound(
-                container_name.clone().unwrap_or_else(|| "None".to_string()),
-            )
+        let chosen_status = chosen_container.ok_or_else(|| match container_name {
+            Some(name) => KubeApiError::invalid_state(
+                pod,
+                format_args!("target container `{name}` not found"),
+            ),
+            None => KubeApiError::invalid_state(pod, "no viable target container found"),
         })?;
 
         let container_name = chosen_status.name.clone();
-        let container_id_full = chosen_status
-            .container_id
-            .as_ref()
-            .ok_or(KubeApiError::ContainerIdNotFound)?
-            .to_owned();
+        let container_id_full = chosen_status.container_id.as_ref().ok_or_else(|| {
+            KubeApiError::missing_field(pod, ".status.containerStatuses.[].containerID")
+        })?;
 
         let mut split = container_id_full.split("://");
 
-        let container_runtime = match split.next() {
-            Some("docker") => ContainerRuntime::Docker,
-            Some("containerd") => ContainerRuntime::Containerd,
-            Some("cri-o") => ContainerRuntime::CriO,
+        let (container_runtime, container_id) = match (
+            split.next().map(ContainerRuntime::from_str),
+            split.next(),
+        ) {
+            (Some(Ok(runtime)), Some(id)) => (runtime, id.to_string()),
             _ => {
-                return Err(KubeApiError::ContainerRuntimeParseError(
-                    container_id_full.to_string(),
-                ))
+                return Err(KubeApiError::invalid_value(
+                    pod,
+                    ".status.containerStatuses.[].containerID",
+                    format_args!("failed to extract container runtime for `{container_name}`: `{container_id_full}`"),
+                ));
             }
         };
-
-        let container_id = split
-            .next()
-            .ok_or_else(|| KubeApiError::ContainerRuntimeParseError(container_id_full.to_string()))?
-            .to_owned();
 
         Ok(RuntimeData {
             pod_name,
@@ -128,15 +142,15 @@ impl RuntimeData {
 
         let node = node_api.get(&self.node_name).await?;
 
-        let allocatable = node
+        let allowed = node
             .status
-            .and_then(|status| status.allocatable)
-            .ok_or_else(|| KubeApiError::NodeBadAllocatable(self.node_name.clone()))?;
-
-        let allowed: usize = allocatable
-            .get("pods")
-            .and_then(|Quantity(quantity)| quantity.parse().ok())
-            .ok_or_else(|| KubeApiError::NodeBadAllocatable(self.node_name.clone()))?;
+            .as_ref()
+            .and_then(|status| status.allocatable.as_ref())
+            .and_then(|allocatable| allocatable.get("pods"))
+            .ok_or_else(|| KubeApiError::missing_field(&node, ".status.allocatable.pods"))?
+            .0
+            .parse::<usize>()
+            .map_err(|e| KubeApiError::invalid_value(&node, ".status.allocatable.pods", e))?;
 
         let mut pod_count = 0;
         let mut list_params = ListParams {
@@ -158,7 +172,7 @@ impl RuntimeData {
         }
 
         if allowed <= pod_count {
-            NodeCheck::Failed(self.node_name.clone(), pod_count)
+            NodeCheck::Failed(node, pod_count)
         } else {
             NodeCheck::Success
         }
@@ -168,7 +182,7 @@ impl RuntimeData {
 #[derive(Debug)]
 pub enum NodeCheck {
     Success,
-    Failed(String, usize),
+    Failed(Node, usize),
     Error(KubeApiError),
 }
 
@@ -179,12 +193,7 @@ where
     fn from_residual(error: Result<Infallible, E>) -> Self {
         match error {
             Ok(_) => unreachable!(),
-            Err(err) => match err.into() {
-                KubeApiError::NodePodLimitExceeded(node_name, pods) => {
-                    NodeCheck::Failed(node_name, pods)
-                }
-                err => NodeCheck::Error(err),
-            },
+            Err(err) => NodeCheck::Error(err.into()),
         }
     }
 }
@@ -194,27 +203,30 @@ pub trait RuntimeDataProvider {
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData>;
 }
 
-pub trait RuntimeTarget {
-    fn target(&self) -> &str;
-
-    fn container(&self) -> &Option<String>;
-}
-
 pub trait RuntimeDataFromLabels {
+    type Resource: Resource<DynamicType = (), Scope = NamespaceResourceScope>
+        + Clone
+        + DeserializeOwned
+        + fmt::Debug;
+
     #[allow(async_fn_in_trait)]
-    async fn get_labels(
-        &self,
-        client: &Client,
-        namespace: Option<&str>,
-    ) -> Result<BTreeMap<String, String>>;
+    async fn get_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>>;
+
+    fn name(&self) -> &str;
+
+    fn container(&self) -> Option<&str>;
 }
 
 impl<T> RuntimeDataProvider for T
 where
-    T: RuntimeTarget + RuntimeDataFromLabels,
+    T: RuntimeDataFromLabels,
 {
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
-        let labels = self.get_labels(client, namespace).await?;
+        let api: Api<<Self as RuntimeDataFromLabels>::Resource> =
+            get_k8s_resource_api(client, namespace);
+        let resource = api.get(self.name()).await?;
+
+        let labels = Self::get_labels(&resource).await?;
 
         // convert to key value pair
         let formatted_deployments_labels = labels
@@ -226,14 +238,10 @@ where
         let pod_api: Api<Pod> = get_k8s_resource_api(client, namespace);
         let pods = pod_api
             .list(&ListParams::default().labels(&formatted_deployments_labels))
-            .await
-            .map_err(KubeApiError::KubeError)?;
+            .await?;
 
         let first_pod = pods.items.first().ok_or_else(|| {
-            KubeApiError::DeploymentNotFound(format!(
-                "Failed to fetch the default(first pod) from ObjectList<Pod> for {}",
-                self.target()
-            ))
+            KubeApiError::invalid_state(&resource, "no pods matching labels found")
         })?;
 
         RuntimeData::from_pod(first_pod, self.container())
@@ -247,9 +255,7 @@ impl RuntimeDataProvider for Target {
             Target::Pod(pod) => pod.runtime_data(client, namespace).await,
             Target::Rollout(rollout) => rollout.runtime_data(client, namespace).await,
             Target::Job(job) => job.runtime_data(client, namespace).await,
-            Target::Targetless => {
-                unreachable!("runtime_data can't be called on Targetless")
-            }
+            Target::Targetless => Err(KubeApiError::MissingRuntimeData),
         }
     }
 }
