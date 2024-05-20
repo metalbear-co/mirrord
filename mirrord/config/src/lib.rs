@@ -498,7 +498,6 @@ impl LayerFileConfig {
 mod tests {
 
     use std::{
-        collections::HashMap,
         fs::{File, OpenOptions},
         io::{Read, Write},
     };
@@ -675,7 +674,7 @@ mod tests {
     fn full(
         #[values(ConfigType::Json, ConfigType::Toml, ConfigType::Yaml)] config_type: ConfigType,
     ) {
-        use crate::agent::AgentImageFileConfig;
+        use crate::agent::{AgentImageFileConfig, AgentPullSecret};
 
         let input = config_type.full();
 
@@ -702,10 +701,9 @@ mod tests {
                 namespace: Some("default".to_owned()),
                 image: Some(AgentImageFileConfig::Simple(Some("".to_owned()))),
                 image_pull_policy: Some("".to_owned()),
-                image_pull_secrets: Some(vec![HashMap::from([(
-                    "name".to_owned(),
-                    "testsecret".to_owned(),
-                )])]),
+                image_pull_secrets: Some(vec![AgentPullSecret {
+                    name: "testsecret".to_owned(),
+                }]),
                 ttl: Some(60),
                 ephemeral: Some(false),
                 communication_timeout: None,

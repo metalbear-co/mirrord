@@ -6,7 +6,7 @@ use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
 use crate::{config::ExtensionExecArgs, error::CliError, execution::MirrordExecution, Result};
 
-/// Actualy facilitate execution after all preperatations were complete
+/// Actually facilitate execution after all preparations were complete
 async fn mirrord_exec<P>(
     #[cfg(target_os = "macos")] executable: Option<&str>,
     env: HashMap<String, String>,

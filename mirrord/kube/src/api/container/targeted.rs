@@ -48,10 +48,13 @@ impl<'c> ContainerApi<JobTargetedVariant<'c>> for Targeted<'c, JobTargetedVarian
                 NodeCheck::Error(err) => {
                     debug!("unable to check if node is allocatable, {err}");
                 }
-                NodeCheck::Failed(node_name, pods) => {
+                NodeCheck::Failed(node, pods) => {
                     progress.failure(Some("node is not allocatable"));
 
-                    return Err(KubeApiError::NodePodLimitExceeded(node_name, pods));
+                    return Err(KubeApiError::invalid_state(
+                        &node,
+                        format_args!("too full with {pods} pods"),
+                    ));
                 }
             }
         }
