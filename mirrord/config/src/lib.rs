@@ -102,6 +102,7 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///   "connect_tcp": null,
 ///   "agent": {
 ///     "log_level": "info",
+///     "json_log": false,
 ///     "namespace": "default",
 ///     "image": "ghcr.io/metalbear-co/mirrord:latest",
 ///     "image_pull_policy": "IfNotPresent",
@@ -549,6 +550,7 @@ mod tests {
                         },
                         "agent": {
                             "log_level": "info",
+                            "json_log": false,
                             "namespace": "default",
                             "image": "",
                             "image_pull_policy": "",
@@ -585,6 +587,7 @@ mod tests {
 
                     [agent]
                     log_level = "info"
+                    json_log = false
                     namespace = "default"
                     image = ""
                     image_pull_policy = ""
@@ -618,6 +621,7 @@ mod tests {
 
                     agent:
                         log_level: "info"
+                        json_log: false
                         namespace: "default"
                         image: ""
                         image_pull_policy: ""
@@ -693,6 +697,7 @@ mod tests {
             agent: Some(AgentFileConfig {
                 privileged: None,
                 log_level: Some("info".to_owned()),
+                json_log: Some(false),
                 namespace: Some("default".to_owned()),
                 image: Some(AgentImageFileConfig::Simple(Some("".to_owned()))),
                 image_pull_policy: Some("".to_owned()),

@@ -274,7 +274,9 @@ mod test {
                                 "env": [
                                     { "name": "RUST_LOG", "value": agent.log_level },
                                     { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() },
-                                    { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() }
+                                    { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() },
+                                    { "name": "MIRRORD_AGENT_JSON_LOG", "value": Some(agent.json_log.to_string()) }
+
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 {
@@ -400,7 +402,8 @@ mod test {
                                 "env": [
                                     { "name": "RUST_LOG", "value": agent.log_level },
                                     { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() },
-                                    { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() }
+                                    { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() },
+                                    { "name": "MIRRORD_AGENT_JSON_LOG", "value": Some(agent.json_log.to_string()) }
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 {
