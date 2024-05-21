@@ -178,7 +178,10 @@ impl MirrordExecution {
             .stderr(std::process::Stdio::piped())
             .stdin(std::process::Stdio::null());
 
-        proxy_command.env(AGENT_CONNECT_INFO_ENV_KEY, serde_json::to_string(&connect_info)?);
+        proxy_command.env(
+            AGENT_CONNECT_INFO_ENV_KEY,
+            serde_json::to_string(&connect_info)?,
+        );
 
         let mut proxy_process = proxy_command
             .spawn()
