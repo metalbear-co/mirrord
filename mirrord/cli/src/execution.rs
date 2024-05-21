@@ -6,6 +6,7 @@ use std::{
 
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::LayerConfig;
+use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel};
 #[cfg(target_os = "macos")]
@@ -47,6 +48,9 @@ pub(crate) struct MirrordExecution {
     pub patched_path: Option<String>,
 
     pub env_to_unset: Vec<String>,
+
+    /// Whether this run uses mirrord operator.
+    pub uses_operator: bool,
 }
 
 /// Struct that when dropped will cancel the token and wait on the join handle
@@ -174,8 +178,10 @@ impl MirrordExecution {
             .stderr(std::process::Stdio::piped())
             .stdin(std::process::Stdio::null());
 
-        let connect_info = serde_json::to_string(&connect_info)?;
-        proxy_command.env(AGENT_CONNECT_INFO_ENV_KEY, connect_info);
+        proxy_command.env(
+            AGENT_CONNECT_INFO_ENV_KEY,
+            serde_json::to_string(&connect_info)?,
+        );
 
         let mut proxy_process = proxy_command
             .spawn()
@@ -245,6 +251,7 @@ impl MirrordExecution {
                 .clone()
                 .map(|unset| unset.to_vec())
                 .unwrap_or_default(),
+            uses_operator: matches!(connect_info, AgentConnectInfo::Operator(..)),
         })
     }
 
