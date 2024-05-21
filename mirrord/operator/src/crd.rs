@@ -445,6 +445,7 @@ pub struct QueueDetails {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // active_filters -> activeFilters
 pub struct QueueSplitterStatus {
+    // TODO: that option is unnecessary, right?
     pub active_filters: Option<QueueDetails>,
 }
 
@@ -455,6 +456,16 @@ impl QueueSplitterStatus {
 
     pub fn is_inactive(&self) -> bool {
         !self.is_active()
+    }
+
+    pub fn output_queue_names(&self) -> Vec<&str> {
+        self.active_filters
+            .as_ref()
+            .map(|QueueDetails { queue_names, .. }| queue_names
+                .values()
+                .map(|QueueNameUpdate { output_name, .. }| output_name.as_str())
+                .collect())
+            .unwrap_or_default()
     }
 }
 
