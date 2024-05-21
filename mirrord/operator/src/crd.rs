@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fmt::{Display, Formatter},
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use k8s_openapi::api::core::v1::{PodSpec, PodTemplateSpec};
 use kube::CustomResource;
@@ -421,7 +421,8 @@ pub struct QueueNameUpdate {
 // is organized differently.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct QueueDetails {
-    /// For each queue_id, the actual queue name as retrieved from the target's pod spec or config map.
+    /// For each queue_id, the actual queue name as retrieved from the target's pod spec or config
+    /// map, together with the name of its temporary output queue.
     pub queue_names: BTreeMap<QueueId, QueueNameUpdate>,
 
     /// Names of env vars that contain the queue name directly in the pod spec, without config
@@ -445,27 +446,18 @@ pub struct QueueDetails {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // active_filters -> activeFilters
 pub struct QueueSplitterStatus {
-    // TODO: that option is unnecessary, right?
-    pub active_filters: Option<QueueDetails>,
+    pub queue_details: QueueDetails,
+
+    /// Resource names of active sessions of this splitter.
+    pub active_sessions: BTreeSet<String>,
 }
 
 impl QueueSplitterStatus {
-    pub fn is_active(&self) -> bool {
-        self.active_filters.is_some()
-    }
-
-    pub fn is_inactive(&self) -> bool {
-        !self.is_active()
-    }
-
     pub fn output_queue_names(&self) -> Vec<&str> {
-        self.active_filters
-            .as_ref()
-            .map(|QueueDetails { queue_names, .. }| queue_names
-                .values()
-                .map(|QueueNameUpdate { output_name, .. }| output_name.as_str())
-                .collect())
-            .unwrap_or_default()
+        self.queue_details.queue_names
+            .values()
+            .map(|QueueNameUpdate { output_name, .. }| output_name.as_str())
+            .collect()
     }
 }
 
