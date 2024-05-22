@@ -12,8 +12,8 @@ use mirrord_protocol::{
 use thiserror::Error;
 
 use crate::{
-    cgroup::CgroupError, client_connection::TlsSetupError, namespace::NamespaceError,
-    sniffer::SnifferCommand, steal::StealerCommand,
+    client_connection::TlsSetupError, namespace::NamespaceError, sniffer::SnifferCommand,
+    steal::StealerCommand,
 };
 
 #[derive(Debug, Error)]
