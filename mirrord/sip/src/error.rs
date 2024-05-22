@@ -1,3 +1,5 @@
+use std::{ffi::OsString, path::PathBuf};
+
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, SipError>;
@@ -7,11 +9,11 @@ pub enum SipError {
     #[error("IO failed with `{0}`")]
     IO(#[from] std::io::Error),
 
-    #[error("Signing failed statuscode: `{0}`, output: `{1}`")]
-    Sign(i32, String),
+    #[error("Signing failed statuscode: `{0}`, output: `{1:?}`")]
+    Sign(i32, OsString),
 
-    #[error("Adding Rpaths failed with statuscode: `{0}`, output: `{1}`")]
-    AddingRpathsFailed(i32, String),
+    #[error("Adding Rpaths failed with statuscode: `{0}`, output: `{1:?}`")]
+    AddingRpathsFailed(i32, OsString),
 
     #[error("Can't patch file format `{0}`")]
     UnsupportedFileFormat(String),
@@ -30,8 +32,8 @@ pub enum SipError {
     #[error("Unlikely error happened `{0}`")]
     UnlikelyError(String),
 
-    #[error("Can't perform SIP check - executable file not found at `{0}`")]
-    FileNotFound(String),
+    #[error("Can't perform SIP check - executable file not found at `{}`", .0.display())]
+    FileNotFound(PathBuf),
 
     #[error("Got invalid string.")]
     NonUtf8Str(#[from] std::str::Utf8Error),
