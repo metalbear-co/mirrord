@@ -494,6 +494,7 @@ pub struct SqsSessionDetails {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename = "SQSSessionStatus", rename_all = "camelCase")]
 pub struct SqsSessionStatus {
+    // TODO: is this option unnecessary?
     pub details: Option<SqsSessionDetails>,
 }
 
