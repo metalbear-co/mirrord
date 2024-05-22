@@ -9,7 +9,7 @@ mod rpath;
 mod main {
     use std::{
         env,
-        ffi::OsStr,
+        ffi::{OsStr, OsString},
         io::{self, ErrorKind::AlreadyExists, Read},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
         path::{Path, PathBuf},
@@ -46,29 +46,29 @@ mod main {
 
     /// Get the `PathBuf` of the `mirrord-bin` dir, and return a `String` prefix to remove, without
     /// a trailing `/`, so that the stripped path starts with a `/`
-    fn get_temp_bin_str_prefix(path: &Path) -> String {
-        // lossy: we assume our temp dir path does not contain non-unicode chars.
-        path.to_string_lossy()
-            .to_string()
-            .trim_end_matches('/')
-            .to_string()
-    }
+    // fn get_temp_bin_str_prefix(path: &Path) -> String {
+    //     // lossy: we assume our temp dir path does not contain non-unicode chars.
+    //     path.to_string_lossy()
+    //         .to_string()
+    //         .trim_end_matches('/')
+    //         .to_string()
+    // }
 
     /// The string path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
     /// scripts, without a trailing `/`.
-    pub static MIRRORD_TEMP_BIN_DIR_STRING: Lazy<String> =
-        Lazy::new(|| get_temp_bin_str_prefix(&MIRRORD_TEMP_BIN_DIR_PATH_BUF));
+    // pub static MIRRORD_TEMP_BIN_DIR_STRING: Lazy<String> =
+    //     Lazy::new(|| get_temp_bin_str_prefix(&MIRRORD_TEMP_BIN_DIR_PATH_BUF));
 
     /// Canonicalized version of `MIRRORD_TEMP_BIN_DIR`.
-    pub static MIRRORD_TEMP_BIN_DIR_CANONIC_STRING: Lazy<String> = Lazy::new(|| {
-        MIRRORD_TEMP_BIN_DIR_PATH_BUF
-            // Resolve symbolic links! (specifically /var -> private/var).
-            .canonicalize()
-            .as_deref()
-            .map(get_temp_bin_str_prefix)
-            // If canonicalization fails, we use the uncanonicalized path string.
-            .unwrap_or(MIRRORD_TEMP_BIN_DIR_STRING.to_string())
-    });
+    // pub static MIRRORD_TEMP_BIN_DIR_CANONIC_STRING: Lazy<String> = Lazy::new(|| {
+    //     MIRRORD_TEMP_BIN_DIR_PATH_BUF
+    //         // Resolve symbolic links! (specifically /var -> private/var).
+    //         .canonicalize()
+    //         .as_deref()
+    //         .map(get_temp_bin_str_prefix)
+    //         // If canonicalization fails, we use the uncanonicalized path string.
+    //         .unwrap_or(MIRRORD_TEMP_BIN_DIR_STRING.to_string())
+    // });
 
     /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
     /// main cpu type is arm64. We only consider the lowest byte in the check.
@@ -197,7 +197,7 @@ mod main {
         }
     }
 
-    /// Get a vector of strings, with a string for each `LC_RPATH` command in `binary`.
+    /// Get a vector of paths, with a path for each `LC_RPATH` command in `binary`.
     /// Returns errors if the binary is not a 64 bit thin binary, or if the load commands could not
     /// be parsed correctly.
     ///
@@ -205,7 +205,7 @@ mod main {
     /// * `binary`: a slice of just the bytes in a thin 64 bit binary. If the file is a thin binary
     ///   in the first place, the slice will be the whole file. If the file is a fat binary, the
     ///   slice will be just the thin binary we're going to use out of the fat binary.
-    fn get_rpath_entries(binary: &[u8]) -> Result<Vec<&str>> {
+    fn get_rpath_entries(binary: &[u8]) -> Result<Vec<&Path>> {
         let mach_header: &MachHeader64<Endianness> = // we don't support 32 bit binaries.
             // offset 0 - `binary` should only be the thin binary (not the containing fat one).
             MachHeader::parse(binary, 0).map_err(|_| {
@@ -218,9 +218,9 @@ mod main {
         while let Some(load_command) = load_commands.next()? {
             if load_command.cmd() == LC_RPATH {
                 if let Ok(Rpath(rpath_command)) = load_command.variant() {
-                    rpath_entries.push(from_utf8(
+                    rpath_entries.push(Path::new(from_utf8(
                         load_command.string(Endianness::default(), rpath_command.path)?,
-                    )?)
+                    )?))
                 }
             }
         }
@@ -238,22 +238,19 @@ mod main {
     /// - `/bin/original/../lib`
     /// So the output binary has all 4 entries.
     fn add_rpath_entries(
-        original_entries: &[&str],
+        original_entries: &[&Path],
         original_path: &Path,
         output_path: &Path,
     ) -> Result<()> {
-        let parent_path_str = original_path
-            .parent()
-            .unwrap_or(original_path)
-            .to_string_lossy()
-            .to_string();
+        let parent_path_str = original_path.parent().unwrap_or(original_path);
         let new_entries = original_entries
             .iter()
-            .filter_map(|path| {
+            .filter_map(|&path| {
                 path.strip_prefix("@executable_path")
-                    .or_else(|| path.strip_prefix("@loader_path"))
+                    .ok()
+                    .or_else(|| path.strip_prefix("@loader_path").ok())
             })
-            .map(|stripped_path| parent_path_str.clone() + stripped_path)
+            .map(|stripped_path| parent_path_str.join(stripped_path).into_os_string()) // TODO: check overwriting caveat
             .collect();
         rpath::add_rpaths(output_path, new_entries)
     }
@@ -338,12 +335,12 @@ mod main {
         let contents = data
             .get(shebang.start_of_rest_of_file..)
             .expect("original shebang size exceeds file size");
-        let mut new_contents = String::from("#!") + new_shebang;
-        new_contents.push_str(
+        let mut new_contents = OsString::from("#!".to_owned() + new_shebang);
+        new_contents.push(
             from_utf8(contents)
                 .map_err(|_utf| UnlikelyError("Can't read script contents as utf8".to_string()))?,
         );
-        std::fs::write(&patched_path, new_contents)?;
+        std::fs::write(&patched_path, new_contents.as_encoded_bytes())?;
 
         // We set the permissions of the patched script to be like those of the original
         // script, but allowing the user to write, so that in the next run, when we are here
@@ -446,7 +443,7 @@ mod main {
     }
 
     /// SIP check for binaries.
-    fn is_binary_sip(path: &Path, patch_binaries: &[String]) -> Result<bool> {
+    fn is_binary_sip(path: &Path, patch_binaries: &[OsString]) -> Result<bool> {
         // Patch binary if it is in the list of binaries to patch.
         // See `ends_with` docs for understanding better when it returns true.
         Ok(patch_binaries.iter().any(|x| path.ends_with(x))
@@ -458,7 +455,7 @@ mod main {
         // If which fails, try using the given path as is.
         let complete_path = which(path).unwrap_or_else(|_| PathBuf::from(&path));
         if !complete_path.exists() {
-            return Err(FileNotFound(complete_path.to_string_lossy().to_string()));
+            return Err(FileNotFound(complete_path));
         }
         Ok(complete_path)
     }
@@ -476,7 +473,7 @@ mod main {
     /// suggest)
     /// If file is a script with shebang, the SipStatus is derived from the the SipStatus of the
     /// file the shebang points to.
-    fn get_sip_status(path: &str, patch_binaries: &[String]) -> Result<SipStatus> {
+    fn get_sip_status(path: &Path, patch_binaries: &[OsString]) -> Result<SipStatus> {
         let complete_path = get_complete_path(path)?;
         // If the binary is in our temp bin dir, it's not SIP protected.
         if is_in_mirrord_tmp_dir(&complete_path)? {
@@ -510,7 +507,7 @@ mod main {
         }
     }
 
-    /// When patching a bundled mac application, it try to load libraries from its frameworks
+    /// When patching a bundled mac application, it tries to load libraries from its frameworks
     /// directory. The patch might cause it to search under the `mirrord-bin` temp dir.
     ///
     /// To make sure it can find the libraries, we set (or add to) the
@@ -565,7 +562,7 @@ mod main {
     /// If it is, create a non-protected version of the file and return `Ok(Some(patched_path)`.
     /// If it is not, `Ok(None)`.
     /// Propagate errors.
-    pub fn sip_patch(binary_path: &str, patch_binaries: &[String]) -> Result<Option<String>> {
+    pub fn sip_patch(binary_path: &Path, patch_binaries: &[OsString]) -> Result<Option<OsString>> {
         match get_sip_status(binary_path, patch_binaries) {
             Ok(SipScript { path, shebang }) => {
                 let patched_interpreter = patch_binary(&shebang.interpreter_path)?;
@@ -574,12 +571,12 @@ mod main {
                     shebang,
                     patched_interpreter.to_string_lossy().as_ref(),
                 )
-                .map(|path| path.to_string_lossy().to_string());
+                .map(|path| path.to_owned().into_os_string());
                 Some(patched_script).transpose()
             }
             Ok(SipBinary(binary)) => {
                 let patched_binary =
-                    patch_binary(&binary).map(|path| path.to_string_lossy().to_string());
+                    patch_binary(&binary).map(|path| path.to_owned().into_os_string());
                 Some(patched_binary).transpose()
             }
             Ok(NoSip) => {
@@ -588,7 +585,7 @@ mod main {
             }
             Err(err) => {
                 trace!(
-                    "Checking the SIP status of {binary_path} (or of the binary in its shebang, if \
+                    "Checking the SIP status of {binary_path:?} (or of the binary in its shebang, if \
                     applicable) failed with {err:?}. Continuing without SIP-sidestepping.\
                     This is not necessarily an error."
                 );
@@ -609,7 +606,7 @@ mod main {
         #[test]
         fn is_sip_true() {
             assert!(matches!(
-                get_sip_status("/bin/ls", &vec![]),
+                get_sip_status(Path::new("/bin/ls"), &vec![]),
                 Ok(SipBinary(_))
             ));
         }
@@ -620,16 +617,16 @@ mod main {
             let data = std::fs::read("/bin/ls").unwrap();
             f.write_all(&data).unwrap();
             f.flush().unwrap();
-            assert!(matches!(
-                get_sip_status(f.path().to_str().unwrap(), &vec![]).unwrap(),
-                NoSip
-            ));
+            assert!(matches!(get_sip_status(f.path(), &vec![]).unwrap(), NoSip));
         }
 
         #[test]
         fn is_sip_notfound() {
-            let err =
-                get_sip_status("/donald/duck/was/a/duck/not/a/quack/a/duck", &vec![]).unwrap_err();
+            let err = get_sip_status(
+                Path::new("/donald/duck/was/a/duck/not/a/quack/a/duck"),
+                &vec![],
+            )
+            .unwrap_err();
             assert!(err.to_string().contains("executable file not found"));
         }
 
@@ -637,10 +634,7 @@ mod main {
         fn patch_binary_fat() {
             let path = "/bin/ls";
             let output = patch_binary(path.as_ref()).unwrap();
-            assert!(matches!(
-                get_sip_status(output.to_str().unwrap(), &vec![]).unwrap(),
-                NoSip
-            ));
+            assert!(matches!(get_sip_status(&output, &vec![]).unwrap(), NoSip));
             // Check DYLD_* features work on it:
             let output = std::process::Command::new(output)
                 .env("DYLD_PRINT_LIBRARIES", "1")
@@ -655,22 +649,21 @@ mod main {
         /// This assumes `/usr/bin/file` is present and contains an arm64 binary.
         #[test]
         fn patch_binary_fat_with_arm64() {
-            let path = "/usr/bin/file";
-            let patched_path_buf = patch_binary(path.as_ref()).unwrap();
-            let patched_path = patched_path_buf.to_str().unwrap();
+            let path = Path::new("/usr/bin/file");
+            let patched_path_buf = patch_binary(path).unwrap();
             assert!(matches!(
-                get_sip_status(patched_path, &vec![]).unwrap(),
+                get_sip_status(path, &vec![]).unwrap(),
                 SipStatus::NoSip
             ));
             // Check DYLD_* features work on it:
-            let output = std::process::Command::new(patched_path)
+            let output = std::process::Command::new(&patched_path_buf)
                 .env("DYLD_PRINT_LIBRARIES", "1")
                 .output()
                 .unwrap();
             assert!(String::from_utf8_lossy(&output.stderr).contains("libsystem_kernel.dylib"));
 
             // Check that the binary was chosen according to the architecture.
-            let data = std::fs::read(patched_path).unwrap();
+            let data = std::fs::read(patched_path_buf).unwrap();
             let file_kind = FileKind::parse(&data[..]).unwrap();
             assert_eq!(file_kind, FileKind::MachO64);
             let header: &MachHeader64<Endianness> = MachHeader::parse(&data[..], 0).unwrap();
@@ -687,7 +680,7 @@ mod main {
             original_file.flush().unwrap();
             let permissions = std::fs::Permissions::from_mode(0o700);
             std::fs::set_permissions(&original_file, permissions).unwrap();
-            let patched_path = sip_patch(original_file.path().to_str().unwrap(), &Vec::new())
+            let patched_path = sip_patch(original_file.path(), &Vec::new())
                 .unwrap()
                 .unwrap();
             // Check DYLD_* features work on it:
@@ -757,9 +750,7 @@ mod main {
             let script_contents = "#!/usr/bin/env bash\nexit\n";
             script.write_all(script_contents.as_ref()).unwrap();
             script.flush().unwrap();
-            let changed_script_path = sip_patch(script.path().to_str().unwrap(), &Vec::new())
-                .unwrap()
-                .unwrap();
+            let changed_script_path = sip_patch(script.path(), &Vec::new()).unwrap().unwrap();
             let new_shebang = read_shebang_from_file(changed_script_path)
                 .unwrap()
                 .unwrap();
@@ -788,9 +779,8 @@ mod main {
             let permissions = std::fs::Permissions::from_mode(0o555); // read and execute, no write.
             std::fs::set_permissions(path, permissions).unwrap();
 
-            let path_str = path.to_str().unwrap();
-            let _ = sip_patch(path_str, &Vec::new()).unwrap().unwrap();
-            let _ = sip_patch(path_str, &Vec::new()).unwrap().unwrap();
+            let _ = sip_patch(path, &Vec::new()).unwrap().unwrap();
+            let _ = sip_patch(path, &Vec::new()).unwrap().unwrap();
         }
 
         /// Run `sip_patch` on a file that has a shebang that points to itself and verify that we
@@ -801,7 +791,7 @@ mod main {
             let contents = "#!".to_string() + script.path().to_str().unwrap();
             script.write_all(contents.as_bytes()).unwrap();
             script.flush().unwrap();
-            let res = sip_patch(script.path().to_str().unwrap(), &Vec::new());
+            let res = sip_patch(script.path(), &Vec::new());
             assert!(matches!(res, Ok(None)));
         }
 
