@@ -151,7 +151,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
     // Create a main connection, that will be held until proxy is closed.
     // This will guarantee agent staying alive and will enable us to
     // make the agent close on last connection close immediately (will help in tests)
-    let mut main_connection = connect_and_ping(&config, agent_connect_info.clone(), &mut analytics)
+    let main_connection = connect_and_ping(&config, agent_connect_info.clone(), &mut analytics)
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
