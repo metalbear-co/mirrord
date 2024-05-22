@@ -30,7 +30,6 @@ use crate::{
     internal_proxy::InternalProxyConfig, target::TargetConfig, util::VecOrSingle,
 };
 
-
 /// mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
 ///

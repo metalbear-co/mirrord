@@ -452,7 +452,7 @@ impl ClientConnectionHandler {
                 return Ok(false);
             }
             ClientMessage::PauseTargetRequest(pause) => {
-                self.respond(DaemonMessage::LogMessage(
+                self.respond(DaemonMessage::Close(
                     "Pause isn't supported anymore.".to_string(),
                 ))
                 .await?;

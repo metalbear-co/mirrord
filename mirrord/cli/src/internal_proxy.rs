@@ -155,7 +155,6 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-
     let (main_connection_cancellation_token, main_connection_task_join) =
         create_ping_loop(main_connection);
 

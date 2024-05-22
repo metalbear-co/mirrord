@@ -881,7 +881,6 @@ pub async fn udp_logger_service(#[future] kube_client: Client) -> KubeService {
     .await
 }
 
-
 /// Service that listens on port 80 and returns `remote: <DATA>` when getting `<DATA>` directly
 /// over TCP, not HTTP.
 #[fixture]
