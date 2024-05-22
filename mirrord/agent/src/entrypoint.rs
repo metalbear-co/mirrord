@@ -89,7 +89,7 @@ impl State {
                 let container =
                     get_container(container_id.clone(), Some(container_runtime)).await?;
 
-                let container_handle = ContainerHandle::new(container, watch).await?;
+                let container_handle = ContainerHandle::new(container).await?;
                 let pid = container_handle.pid().to_string();
 
                 env.extend(container_handle.raw_env().clone());
@@ -97,10 +97,9 @@ impl State {
                 (false, Some(container_handle), pid)
             }
             cli::Mode::Ephemeral { .. } => {
-                let container_handle = ContainerHandle::new(
-                    runtime::Container::Ephemeral(runtime::EphemeralContainer {}),
-                    watch,
-                )
+                let container_handle = ContainerHandle::new(runtime::Container::Ephemeral(
+                    runtime::EphemeralContainer {},
+                ))
                 .await?;
 
                 let pid = container_handle.pid().to_string();

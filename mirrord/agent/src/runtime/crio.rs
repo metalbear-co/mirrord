@@ -32,28 +32,6 @@ impl CriOContainer {
     pub fn from_id(container_id: String) -> Self {
         CriOContainer { container_id }
     }
-
-    async fn api_get(path: &str) -> Result<Response<Incoming>> {
-        let stream = UnixStream::connect(CRIO_DEFAULT_SOCK_PATH).await?;
-        let (mut request_sender, connection) = conn::http1::handshake(TokioIo::new(stream)).await?;
-
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                error!("Error in connection: {}", e);
-            }
-        });
-
-        request_sender
-            .send_request(
-                Request::builder()
-                    .method("GET")
-                    .header("Host", "localhost")
-                    .uri(format!("http://localhost{}", path))
-                    .body(Empty::<Bytes>::new())?,
-            )
-            .await
-            .map_err(AgentError::from)
-    }
 }
 
 impl ContainerRuntime for CriOContainer {

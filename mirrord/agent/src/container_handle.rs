@@ -7,14 +7,10 @@ use crate::{
 
 #[derive(Debug)]
 struct Inner {
-    /// The managed container.
-    container: Container,
     /// Cached process ID of the container.
     pid: u64,
     /// Cached environment of the container.
     raw_env: HashMap<String, String>,
-    /// Watch for using in the drop
-    watch: drain::Watch,
 }
 
 /// Handle to the container targeted by the agent.
@@ -26,15 +22,10 @@ pub(crate) struct ContainerHandle(Arc<Inner>);
 impl ContainerHandle {
     /// Retrieve info about the container and initialize this struct.
     #[tracing::instrument(level = "trace")]
-    pub(crate) async fn new(container: Container, watch: drain::Watch) -> Result<Self> {
+    pub(crate) async fn new(container: Container) -> Result<Self> {
         let ContainerInfo { pid, env: raw_env } = container.get_info().await?;
 
-        let inner = Inner {
-            container,
-            pid,
-            raw_env,
-            watch,
-        };
+        let inner = Inner { pid, raw_env };
 
         Ok(Self(inner.into()))
     }
