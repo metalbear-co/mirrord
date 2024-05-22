@@ -4,7 +4,7 @@ use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
 use containerd_client::{
     services::v1::{
         containers_client::ContainersClient, tasks_client::TasksClient, GetContainerRequest,
-        GetRequest, ResumeTaskRequest,
+        GetRequest,
     },
     tonic::{transport::Channel, Request},
     with_namespace,
@@ -16,7 +16,6 @@ use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
 
 use crate::{
-    cgroup::Cgroup,
     env::parse_raw_env,
     error::{AgentError, Result},
     runtime::crio::CriOContainer,

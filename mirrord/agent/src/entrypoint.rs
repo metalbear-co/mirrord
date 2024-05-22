@@ -12,9 +12,7 @@ use std::{
 use client_connection::AgentTlsConnector;
 use dns::{DnsCommand, DnsWorker};
 use futures::TryFutureExt;
-use mirrord_protocol::{
-    pause::DaemonPauseTarget, ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage,
-};
+use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use tokio::{
     net::{TcpListener, TcpStream},
     process::Command,
@@ -451,7 +449,7 @@ impl ClientConnectionHandler {
             ClientMessage::Close => {
                 return Ok(false);
             }
-            ClientMessage::PauseTargetRequest(pause) => {
+            ClientMessage::PauseTargetRequest(_) => {
                 self.respond(DaemonMessage::Close(
                     "Pause isn't supported anymore.".to_string(),
                 ))
