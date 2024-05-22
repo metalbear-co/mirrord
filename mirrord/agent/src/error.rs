@@ -125,16 +125,7 @@ pub(crate) enum AgentError {
 
     #[error("Returning an error to test the agent's error cleanup. Should only ever be used when testing mirrord.")]
     TestError,
-
-    #[error("Container Runtime Error while trying to pause: {0}")]
-    PauseRuntimeError(String),
-
-    #[error("Requested pause, but there is no target container.")]
-    PauseAbsentTarget,
-
-    #[error("Pause failed with cgroup error: {0} - make sure agent is set to privileged.")]
-    PauseFailedCgroup(#[from] CgroupError),
-
+    
     #[error(transparent)]
     FailedNamespaceEnter(#[from] NamespaceError),
 

@@ -94,37 +94,4 @@ impl ContainerRuntime for CriOContainer {
 
         Ok(ContainerInfo::new(pid, Default::default()))
     }
-
-    async fn pause(&self) -> Result<()> {
-        let path = format!("/pause/{}", self.container_id);
-        let response = Self::api_get(&path).await?;
-
-        if !response.status().is_success() {
-            let status_code = response.status();
-            let err_body = response.into_body().collect().await?;
-
-            return Err(AgentError::PauseRuntimeError(format!(
-                "Request pause failed -> status: {status_code} | path: {path} | err_body: {err_body:?}"
-            )));
-        }
-
-        Ok(())
-    }
-
-    async fn unpause(&self) -> Result<()> {
-        let path = format!("/unpause/{}", self.container_id);
-
-        let response = Self::api_get(&path).await?;
-
-        if !response.status().is_success() {
-            let status_code = response.status();
-            let err_body = response.into_body().collect().await?;
-
-            return Err(AgentError::PauseRuntimeError(format!(
-                "Request unpause failed -> status: {status_code} | path: {path} | err_body: {err_body:?}"
-            )));
-        }
-
-        Ok(())
-    }
 }

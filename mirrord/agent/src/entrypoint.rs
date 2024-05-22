@@ -452,30 +452,10 @@ impl ClientConnectionHandler {
                 return Ok(false);
             }
             ClientMessage::PauseTargetRequest(pause) => {
-                match self
-                    .state
-                    .container
-                    .as_ref()
-                    .ok_or(AgentError::PauseAbsentTarget)?
-                    .set_paused(pause)
-                    .await
-                {
-                    Ok(changed) => {
-                        self.respond(DaemonMessage::PauseTarget(
-                            DaemonPauseTarget::PauseResponse {
-                                changed,
-                                container_paused: pause,
-                            },
-                        ))
-                        .await?;
-                    }
-                    Err(e) => {
-                        self.respond(DaemonMessage::LogMessage(LogMessage::error(format!(
-                            "Failed to pause target container: {e:?}"
-                        ))))
-                        .await?;
-                    }
-                }
+                self.respond(DaemonMessage::LogMessage(
+                    "Pause isn't supported anymore.".to_string(),
+                ))
+                .await?;
             }
             ClientMessage::SwitchProtocolVersion(version) => {
                 if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
