@@ -71,7 +71,7 @@ struct State {
 
 impl State {
     /// Return [`Err`] if container runtime operations failed.
-    pub async fn new(args: &Args, watch: drain::Watch) -> Result<State> {
+    pub async fn new(args: &Args) -> Result<State> {
         let tls_connector = args
             .operator_tls_cert_pem
             .clone()
@@ -473,7 +473,7 @@ impl ClientConnectionHandler {
 
 /// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.
 #[tracing::instrument(level = "trace", ret)]
-async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
+async fn start_agent(args: Args) -> Result<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
 
     let listener = TcpListener::bind(SocketAddrV4::new(
@@ -482,7 +482,7 @@ async fn start_agent(args: Args, watch: drain::Watch) -> Result<()> {
     ))
     .await?;
 
-    let state = State::new(&args, watch).await?;
+    let state = State::new(&args).await?;
 
     let cancellation_token = CancellationToken::new();
 
@@ -723,10 +723,10 @@ async fn run_child_agent() -> Result<()> {
 ///
 /// Captures SIGTERM signals sent by Kubernetes when the pod is gracefully deleted.
 /// When a signal is captured, the child process is killed and the iptables are cleaned.
-async fn start_iptable_guard(args: Args, watch: drain::Watch) -> Result<()> {
+async fn start_iptable_guard(args: Args) -> Result<()> {
     debug!("start_iptable_guard -> Initializing iptable-guard.");
 
-    let state = State::new(&args, watch).await?;
+    let state = State::new(&args).await?;
     let pid = state.container_pid();
 
     std::env::set_var(IPTABLE_PREROUTING_ENV, IPTABLE_PREROUTING.as_str());
@@ -789,24 +789,14 @@ pub async fn main() -> Result<()> {
 
     let args = cli::parse_args();
 
-    let (signal, watch) = drain::channel();
-
     let agent_result = if args.mode.is_targetless()
         || (std::env::var(IPTABLE_PREROUTING_ENV).is_ok()
             && std::env::var(IPTABLE_MESH_ENV).is_ok())
     {
-        start_agent(args, watch).await
+        start_agent(args).await
     } else {
-        start_iptable_guard(args, watch).await
+        start_iptable_guard(args).await
     };
-
-    // wait for background tasks/drop impl
-    tokio::time::timeout(std::time::Duration::from_secs(10), signal.drain())
-        .await
-        .is_err()
-        .then(|| {
-            warn!("main -> mirrord-agent waiting for drain timed out");
-        });
 
     match agent_result {
         Ok(_) => {
