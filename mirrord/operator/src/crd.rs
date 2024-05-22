@@ -448,8 +448,9 @@ pub struct QueueDetails {
 pub struct QueueSplitterStatus {
     pub queue_details: QueueDetails,
 
+    // can't be a set: "uniqueItems cannot be set to true since the runtime complexity becomes quadratic"
     /// Resource names of active sessions of this splitter.
-    pub active_sessions: BTreeSet<String>,
+    pub active_sessions: Vec<String>,
 }
 
 impl QueueSplitterStatus {
