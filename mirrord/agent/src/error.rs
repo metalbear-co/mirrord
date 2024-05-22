@@ -125,7 +125,7 @@ pub(crate) enum AgentError {
 
     #[error("Returning an error to test the agent's error cleanup. Should only ever be used when testing mirrord.")]
     TestError,
-    
+
     #[error(transparent)]
     FailedNamespaceEnter(#[from] NamespaceError),
 

@@ -20,7 +20,6 @@ struct Inner {
     watch: drain::Watch,
 }
 
-
 /// Handle to the container targeted by the agent.
 /// Exposes some cached info about the container and allows pausing it according to clients'
 /// requests.
@@ -37,7 +36,7 @@ impl ContainerHandle {
             container,
             pid,
             raw_env,
-            watch
+            watch,
         };
 
         Ok(Self(inner.into()))
