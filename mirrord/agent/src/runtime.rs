@@ -4,7 +4,7 @@ use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
 use containerd_client::{
     services::v1::{
         containers_client::ContainersClient, tasks_client::TasksClient, GetContainerRequest,
-        GetRequest, PauseTaskRequest, ResumeTaskRequest,
+        GetRequest,
     },
     tonic::{transport::Channel, Request},
     with_namespace,
@@ -16,7 +16,6 @@ use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
 
 use crate::{
-    cgroup::Cgroup,
     env::parse_raw_env,
     error::{AgentError, Result},
     runtime::crio::CriOContainer,
@@ -59,10 +58,6 @@ impl ContainerInfo {
 pub(crate) trait ContainerRuntime {
     /// Get information about the container (pid, env).
     async fn get_info(&self) -> Result<ContainerInfo>;
-    /// Pause the whole container (all processes).
-    async fn pause(&self) -> Result<()>;
-    /// Unpause the whole container (all processes).
-    async fn unpause(&self) -> Result<()>;
 }
 
 #[enum_dispatch(ContainerRuntime)]
@@ -140,20 +135,6 @@ impl ContainerRuntime for DockerContainer {
         let env_vars = parse_raw_env(&raw_env);
 
         Ok(ContainerInfo::new(pid, env_vars))
-    }
-
-    async fn pause(&self) -> Result<()> {
-        self.client
-            .pause_container(&self.container_id)
-            .await
-            .map_err(From::from)
-    }
-
-    async fn unpause(&self) -> Result<()> {
-        self.client
-            .unpause_container(&self.container_id)
-            .await
-            .map_err(From::from)
     }
 }
 
@@ -257,24 +238,6 @@ impl ContainerRuntime for ContainerdContainer {
 
         Ok(ContainerInfo::new(pid as u64, env_vars))
     }
-
-    async fn pause(&self) -> Result<()> {
-        let mut client = self.get_task_client().await?;
-        let container_id = self.container_id.to_string();
-        let request = PauseTaskRequest { container_id };
-        let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
-        client.pause(request).await?;
-        Ok(())
-    }
-
-    async fn unpause(&self) -> Result<()> {
-        let mut client = self.get_task_client().await?;
-        let container_id = self.container_id.to_string();
-        let request = ResumeTaskRequest { container_id };
-        let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
-        client.resume(request).await?;
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -285,16 +248,5 @@ impl ContainerRuntime for EphemeralContainer {
     /// copy it from the k8s spec)
     async fn get_info(&self) -> Result<ContainerInfo> {
         Ok(ContainerInfo::new(1, std::env::vars().collect()))
-    }
-
-    /// Pause requires root privileges, so if it fails on permission we send a message.
-    async fn pause(&self) -> Result<()> {
-        let cgroup = Cgroup::new().await?;
-        cgroup.pause().await.map_err(From::from)
-    }
-
-    async fn unpause(&self) -> Result<()> {
-        let cgroup = Cgroup::new().await?;
-        cgroup.unpause().await.map_err(From::from)
     }
 }

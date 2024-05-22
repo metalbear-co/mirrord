@@ -6,8 +6,6 @@
 #![warn(clippy::indexing_slicing)]
 
 #[cfg(target_os = "linux")]
-mod cgroup;
-#[cfg(target_os = "linux")]
 mod cli;
 #[cfg(target_os = "linux")]
 mod client_connection;
