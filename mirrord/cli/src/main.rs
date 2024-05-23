@@ -103,6 +103,8 @@ where
     // Put original executable in argv[0] even if actually running patched version.
     binary_args.insert(0, args.binary.clone());
 
+    sub_progress.success(Some("ready to launch process"));
+
     // Print config details for the user
     let mut sub_progress_config = progress.subtask("config summary");
     print_config(
@@ -112,9 +114,8 @@ where
         &config,
         false,
     );
-    sub_progress_config.success(None);
+    sub_progress_config.success(Some("config summary"));
 
-    sub_progress.success(Some("ready to launch process"));
     // The execve hook is not yet active and does not hijack this call.
     let err = execvp(binary.clone(), binary_args.clone());
     error!("Couldn't execute {:?}", err);
