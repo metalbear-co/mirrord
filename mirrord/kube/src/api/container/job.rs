@@ -143,7 +143,7 @@ where
         let mut labels = config
             .labels
             .clone()
-            .map(|labels| BTreeMap::from_iter(labels))
+            .map(BTreeMap::from_iter)
             .unwrap_or_default();
 
         labels.extend(BTreeMap::from([
@@ -157,7 +157,7 @@ where
         let mut annotations = config
             .annotations
             .clone()
-            .map(|annotations| BTreeMap::from_iter(annotations))
+            .map(BTreeMap::from_iter)
             .unwrap_or_default();
 
         annotations.extend(BTreeMap::from([
