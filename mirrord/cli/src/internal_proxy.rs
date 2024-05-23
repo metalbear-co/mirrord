@@ -23,14 +23,14 @@ use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
     IntProxy,
 };
-use mirrord_protocol::{pause::DaemonPauseTarget, ClientMessage, DaemonMessage, LogLevel};
+use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel};
 use nix::{
     libc,
     sys::resource::{setrlimit, Resource},
 };
 use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, log::trace, warn};
+use tracing::{error, log::trace, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::{
@@ -70,39 +70,6 @@ fn print_port(listener: &TcpListener) -> Result<()> {
         .port();
     println!("{port}\n");
     Ok(())
-}
-
-/// Request target container pause from the connected agent.
-async fn request_pause(
-    sender: &mpsc::Sender<ClientMessage>,
-    receiver: &mut mpsc::Receiver<DaemonMessage>,
-) -> Result<(), InternalProxySetupError> {
-    info!("Requesting target container pause from the agent");
-    sender
-        .send(ClientMessage::PauseTargetRequest(true))
-        .await
-        .map_err(|_| {
-            InternalProxySetupError::PauseError(
-                "Failed to request target container pause.".to_string(),
-            )
-        })?;
-
-    match receiver.recv().await {
-        Some(DaemonMessage::PauseTarget(DaemonPauseTarget::PauseResponse {
-            changed,
-            container_paused: true,
-        })) => {
-            if changed {
-                info!("Target container is now paused.");
-            } else {
-                info!("Target container was already paused.");
-            }
-            Ok(())
-        }
-        msg => Err(InternalProxySetupError::PauseError(format!(
-            "Failed pausing, got invalid answer: {msg:#?}"
-        ))),
-    }
 }
 
 /// Creates a listening socket using socket2
@@ -184,22 +151,9 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
     // Create a main connection, that will be held until proxy is closed.
     // This will guarantee agent staying alive and will enable us to
     // make the agent close on last connection close immediately (will help in tests)
-    let mut main_connection = connect_and_ping(&config, agent_connect_info.clone(), &mut analytics)
+    let main_connection = connect_and_ping(&config, agent_connect_info.clone(), &mut analytics)
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
-
-    if config.pause {
-        tokio::time::timeout(
-            Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into()),
-            request_pause(&main_connection.0, &mut main_connection.1),
-        )
-        .await
-        .map_err(|_| {
-            InternalProxySetupError::PauseError(
-                "Timeout requesting for target container pause.".to_string(),
-            )
-        })??;
-    }
 
     let (main_connection_cancellation_token, main_connection_task_join) =
         create_ping_loop(main_connection);

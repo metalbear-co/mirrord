@@ -316,10 +316,6 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
         std::env::set_var("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", "true");
     };
 
-    if args.pause {
-        std::env::set_var("MIRRORD_PAUSE", "true");
-    }
-
     if args.no_outgoing || args.no_tcp_outgoing {
         std::env::set_var("MIRRORD_TCP_OUTGOING", "false");
     }
