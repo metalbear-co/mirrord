@@ -26,10 +26,6 @@ pub struct Args {
     #[arg(short = 'i', long)]
     pub network_interface: Option<String>,
 
-    /// Pause the target container while clients are connected.
-    #[arg(short = 'p', long, default_value_t = false)]
-    pub pause: bool,
-
     /// Return an error after accepting the first client connection, in order to test agent error
     /// cleanup.
     ///

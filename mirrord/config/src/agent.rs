@@ -63,7 +63,6 @@ impl fmt::Display for LinuxCapability {
 ///     "communication_timeout": 30,
 ///     "startup_timeout": 360,
 ///     "network_interface": "eth0",
-///     "pause": false,
 ///     "flush_connections": false,
 ///   }
 /// }
