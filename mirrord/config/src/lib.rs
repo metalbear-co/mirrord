@@ -103,6 +103,8 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///   "agent": {
 ///     "log_level": "info",
 ///     "json_log": false,
+///     "labels": { "user": "meow" },
+///     "annotations": { "cats.io/inject": "enabled" },
 ///     "namespace": "default",
 ///     "image": "ghcr.io/metalbear-co/mirrord:latest",
 ///     "image_pull_policy": "IfNotPresent",
