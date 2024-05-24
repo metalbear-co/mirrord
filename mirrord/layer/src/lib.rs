@@ -69,14 +69,14 @@ extern crate core;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
-    ffi::OsString,
     net::SocketAddr,
     os::unix::process::parent_id,
     panic,
-    path::Path,
     sync::OnceLock,
     time::Duration,
 };
+#[cfg(target_os = "macos")]
+use std::{ffi::OsString, path::Path};
 
 use ctor::ctor;
 use error::{LayerError, Result};

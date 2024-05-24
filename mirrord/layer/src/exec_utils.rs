@@ -63,13 +63,13 @@ pub(crate) unsafe fn enable_macos_hooks(
 /// Check if the file that is to be executed has SIP and patch it if it does.
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
-    let patch_binaries = PATCH_BINARIES
+    let patch_binaries: Vec<_> = PATCH_BINARIES
         .get()
         .expect("patch binaries not set")
         .iter()
         .map(|y| y.into())
         .collect();
-    match sip_patch(Path::new(path), &patch_binaries) {
+    match sip_patch(Path::new(path), patch_binaries.as_ref()) {
         Ok(None) => Bypass(NoSipDetected(path.to_string())),
         Ok(Some(new_path)) => Success(new_path.to_string_lossy().to_string()),
         Err(SipError::FileNotFound(non_existing_bin)) => {
@@ -118,10 +118,11 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
         trace!("exec arg: {arg_str}");
         let arg_path = Path::new(arg_str);
 
+        let leading_slash = Path::new("/");
         let stripped: PathBuf = arg_path
-            .strip_prefix(MIRRORD_TEMP_BIN_DIR_PATH_BUF.to_owned())
+            .strip_prefix(MIRRORD_TEMP_BIN_DIR_PATH_BUF.to_owned()).map(|x| leading_slash.join(x))
             // If /var/folders... not a prefix, check /private/var/folers...
-            .or(arg_path.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_PATHBUF.to_owned()))
+            .or(arg_path.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_PATHBUF.to_owned()).map(|x| leading_slash.join(x)))
             .inspect(|original_path| {
                 trace!(
                     "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {:?}.",
@@ -129,7 +130,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
                     original_path
                 );
             })
-            .unwrap_or(arg_path) // No temp-dir prefix found, use arg as is.
+            .unwrap_or(arg_path.to_owned()) // No temp-dir prefix found, use arg as is.
             // As the path we get here is a slice of memory allocated and managed by
             // the user app, we copy the data and create new CStrings out of the copy
             // without consuming the original data.
@@ -187,7 +188,7 @@ pub(crate) unsafe fn patch_sip_for_new_process(
     // path. The file might not even exist in our tmp dir, and the application is expecting it there
     // only because it somehow found out about its own patched location in our tmp dir.
     // If original path is SIP, and actually exists in our dir that patched executable will be used.
-    if let Some(s) = strip_mirrord_path(Path::new(&path_str)) {
+    if let Some(s) = strip_mirrord_path(Path::new(&path_str)).map(|x| Path::new("/").join(x)) {
         path_str = s.to_string_lossy().to_string();
     };
     let path_c_string = patch_if_sip(&path_str)
@@ -248,7 +249,8 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
     let res = FN__NSGET_EXECUTABLE_PATH(path, buflen);
     if res == 0 {
         let path_buf_detour = CheckedInto::<PathBuf>::checked_into(path as *const c_char);
-        if let Bypass(FileOperationInMirrordBinTempDir(later_ptr)) = path_buf_detour {
+        if let Bypass(FileOperationInMirrordBinTempDir(path_buf)) = path_buf_detour {
+            let later_ptr: *const i8 = path_buf.as_os_str().as_encoded_bytes().as_ptr() as _;
             // SAFETY: If we're here, the original function was passed this pointer and was
             //         successful, so this pointer must be valid.
             let old_len = *buflen;
@@ -291,9 +293,9 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
     // we hold the guard manually for tracing/internal code
     let guard = crate::detour::DetourGuard::new();
     let detour: Detour<PathBuf> = raw_path.checked_into();
-    let raw_path = if let Bypass(FileOperationInMirrordBinTempDir(ptr)) = detour {
+    let raw_path = if let Bypass(FileOperationInMirrordBinTempDir(path_buf)) = detour {
         trace!("dlopen called with a path inside our patch dir, switching with fixed pointer.");
-        ptr
+        path_buf.as_os_str().as_encoded_bytes().as_ptr() as _
     } else {
         trace!("dlopen called on path {detour:?}.");
         raw_path

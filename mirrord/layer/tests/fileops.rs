@@ -3,10 +3,10 @@
 
 #[cfg(target_os = "linux")]
 use std::assert_matches::assert_matches;
-#[cfg(target_os = "macos")]
-use std::{env, fs};
 use std::{
+    env,
     env::temp_dir,
+    fs,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -84,10 +84,10 @@ async fn read_from_mirrord_bin(dylib_path: &Path) {
     let executable = sip_patch(Path::new("cat"), &Vec::new()).unwrap().unwrap();
 
     // <TMPDIR>/mirrord-bin/cat <TMPDIR>/mirrord-bin/<TMPDIR>/mirrord-test-read-from-mirrord-bin
-    let application = Application::DynamicApp(
+    let application = dbg!(Application::DynamicApp(
         executable.to_string_lossy().to_string(),
         vec![path_in_mirrord_bin.to_string_lossy().to_string()],
-    );
+    ));
 
     let (mut test_process, _intproxy) = application
         .start_process_with_layer(dylib_path, vec![], None)
