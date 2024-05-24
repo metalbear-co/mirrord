@@ -111,6 +111,6 @@ impl KubeApiError {
             None => format!("{kind} is in invalid state: {info}"),
         };
 
-        Self::MalformedResource(message)
+        Self::InvalidResourceState(message)
     }
 }
