@@ -79,8 +79,7 @@ impl RuntimeData {
     /// Verifies that the [`Pod`] is ready to be a target:
     /// 1. pod is in "Running" phase,
     /// 2. pod is not in deletion,
-    /// 3. all regular containers are ready (ephemeral containers are not inspected),
-    /// 4. viable target container is present.
+    /// 3. target container is ready.
     pub fn from_pod(pod: &Pod, container_name: Option<&str>) -> Result<Self> {
         let pod_name = pod
             .metadata
@@ -115,13 +114,6 @@ impl RuntimeData {
             .and_then(|status| status.container_statuses.as_ref())
             .ok_or_else(|| KubeApiError::missing_field(pod, ".status.containerStatuses"))?;
 
-        if let Some(not_ready_container) = container_statuses.iter().find(|status| !status.ready) {
-            return Err(KubeApiError::invalid_state(
-                pod,
-                format_args!("container `{}` is not ready", not_ready_container.name),
-            ));
-        }
-
         let (chosen_container, mesh) =
             choose_container(container_name, container_statuses.as_ref());
 
@@ -132,6 +124,13 @@ impl RuntimeData {
             ),
             None => KubeApiError::invalid_state(pod, "no viable target container found"),
         })?;
+
+        if !chosen_status.ready {
+            return Err(KubeApiError::invalid_state(
+                pod,
+                format_args!("target container `{}` is not ready", chosen_status.name),
+            ));
+        }
 
         let container_name = chosen_status.name.clone();
         let container_id_full = chosen_status.container_id.as_ref().ok_or_else(|| {
