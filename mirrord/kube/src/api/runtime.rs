@@ -75,6 +75,12 @@ pub struct RuntimeData {
 }
 
 impl RuntimeData {
+    /// Extracts data needed to create the mirrord-agent targeting the given [`Pod`].
+    /// Verifies that the [`Pod`] is ready to be a target:
+    /// 1. pod is in "Running" phase,
+    /// 2. pod is not in deletion,
+    /// 3. all regular containers are ready (ephemeral containers are not inspected),
+    /// 4. viable target container is present.
     pub fn from_pod(pod: &Pod, container_name: Option<&str>) -> Result<Self> {
         let pod_name = pod
             .metadata
@@ -82,17 +88,40 @@ impl RuntimeData {
             .as_ref()
             .ok_or_else(|| KubeApiError::missing_field(pod, ".metadata.name"))?
             .to_owned();
+
+        let phase = pod
+            .status
+            .as_ref()
+            .and_then(|status| status.phase.as_ref())
+            .ok_or_else(|| KubeApiError::missing_field(pod, ".status.phase"))?;
+        if phase != "Running" {
+            return Err(KubeApiError::invalid_state(pod, "not in 'Running' phase"));
+        }
+
+        if pod.metadata.deletion_timestamp.is_some() {
+            return Err(KubeApiError::invalid_state(pod, "in deletion"));
+        }
+
         let node_name = pod
             .spec
             .as_ref()
             .and_then(|spec| spec.node_name.as_ref())
             .ok_or_else(|| KubeApiError::missing_field(pod, ".spec.nodeName"))?
             .to_owned();
+
         let container_statuses = pod
             .status
             .as_ref()
             .and_then(|status| status.container_statuses.as_ref())
             .ok_or_else(|| KubeApiError::missing_field(pod, ".status.containerStatuses"))?;
+
+        if let Some(not_ready_container) = container_statuses.iter().find(|status| !status.ready) {
+            return Err(KubeApiError::invalid_state(
+                pod,
+                format_args!("container `{}` is not ready", not_ready_container.name),
+            ));
+        }
+
         let (chosen_container, mesh) =
             choose_container(container_name, container_statuses.as_ref());
 
@@ -229,23 +258,36 @@ where
 
         let labels = Self::get_labels(&resource).await?;
 
-        // convert to key value pair
-        let formatted_deployments_labels = labels
+        let formatted_labels = labels
             .iter()
             .map(|(key, value)| format!("{key}={value}"))
             .collect::<Vec<String>>()
             .join(",");
+        let list_params = ListParams {
+            label_selector: Some(formatted_labels),
+            ..Default::default()
+        };
 
         let pod_api: Api<Pod> = get_k8s_resource_api(client, namespace);
-        let pods = pod_api
-            .list(&ListParams::default().labels(&formatted_deployments_labels))
-            .await?;
+        let pods = pod_api.list(&list_params).await?;
 
-        let first_pod = pods.items.first().ok_or_else(|| {
-            KubeApiError::invalid_state(&resource, "no pods matching labels found")
-        })?;
+        if pods.items.is_empty() {
+            return Err(KubeApiError::invalid_state(
+                &resource,
+                "no pods matching labels found",
+            ));
+        }
 
-        RuntimeData::from_pod(first_pod, self.container())
+        pods.items
+            .iter()
+            .filter_map(|pod| RuntimeData::from_pod(pod, self.container()).ok())
+            .next()
+            .ok_or_else(|| {
+                KubeApiError::invalid_state(
+                    &resource,
+                    "no pod matching labels is ready to be targeted",
+                )
+            })
     }
 }
 
