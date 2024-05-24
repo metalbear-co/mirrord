@@ -4,7 +4,7 @@ use std::{
     env,
     ffi::{c_void, CString},
     marker::PhantomData,
-    path::PathBuf,
+    path::{Path, PathBuf},
     ptr,
     sync::OnceLock,
 };
@@ -12,7 +12,7 @@ use std::{
 use libc::{c_char, c_int, pid_t};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_sip::{
-    sip_patch, SipError, MIRRORD_TEMP_BIN_DIR_CANONIC_STRING, MIRRORD_TEMP_BIN_DIR_STRING,
+    sip_patch, SipError, MIRRORD_TEMP_BIN_DIR_CANONIC_PATHBUF, MIRRORD_TEMP_BIN_DIR_PATH_BUF,
 };
 use null_terminated::Nul;
 use tracing::{trace, warn};
@@ -66,19 +66,26 @@ pub(crate) unsafe fn enable_execve_hook(
 /// Check if the file that is to be executed has SIP and patch it if it does.
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
-    let patch_binaries = PATCH_BINARIES.get().expect("patch binaries not set");
-    match sip_patch(path, patch_binaries) {
+    let patch_binaries = PATCH_BINARIES
+        .get()
+        .expect("patch binaries not set")
+        .iter()
+        .map(|y| y.into())
+        .collect();
+    match sip_patch(Path::new(path), &patch_binaries) {
         Ok(None) => Bypass(NoSipDetected(path.to_string())),
-        Ok(Some(new_path)) => Success(new_path),
+        Ok(Some(new_path)) => Success(new_path.to_string_lossy().to_string()),
         Err(SipError::FileNotFound(non_existing_bin)) => {
             trace!(
-                "The application wants to execute {}, SIP check got FileNotFound for {}. \
+                "The application wants to execute {}, SIP check got FileNotFound for {:?}. \
                 If the file actually exists and should have been found, make sure it is excluded \
                 from FS ops.",
                 path,
                 non_existing_bin
             );
-            Bypass(ExecOnNonExistingFile(non_existing_bin))
+            Bypass(ExecOnNonExistingFile(
+                non_existing_bin.to_string_lossy().to_string(),
+            ))
         }
         Err(sip_error) => {
             warn!(
@@ -148,25 +155,28 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
         }
         let arg_str: &str = arg.checked_into()?;
         trace!("exec arg: {arg_str}");
+        let arg_path = Path::new(arg_str);
 
-        let stripped = arg_str
-            .strip_prefix(MIRRORD_TEMP_BIN_DIR_STRING.as_str())
+        let stripped: PathBuf = arg_path
+            .strip_prefix(MIRRORD_TEMP_BIN_DIR_PATH_BUF.to_owned())
             // If /var/folders... not a prefix, check /private/var/folers...
-            .or(arg_str.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()))
+            .or(arg_path.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_PATHBUF.to_owned()))
             .inspect(|original_path| {
                 trace!(
-                    "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {}.",
+                    "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {:?}.",
                     arg_str,
                     original_path
                 );
             })
-            .unwrap_or(arg_str) // No temp-dir prefix found, use arg as is.
-            // As the string slice we get here is a slice of memory allocated and managed by
+            .unwrap_or(arg_path) // No temp-dir prefix found, use arg as is.
+            // As the path we get here is a slice of memory allocated and managed by
             // the user app, we copy the data and create new CStrings out of the copy
             // without consuming the original data.
             .to_owned();
 
-        c_string_vec.0.push(CString::new(stripped)?)
+        c_string_vec
+            .0
+            .push(CString::new(stripped.to_string_lossy().to_string())?)
     }
     Success(c_string_vec)
 }
@@ -184,16 +194,18 @@ unsafe fn patch_sip_for_new_process(
         .unwrap_or_default();
     trace!("Executable {} called execve/posix_spawn", calling_exe);
 
-    let path_str = path.checked_into()?;
+    let mut path_str: String = path.checked_into()?;
     // If an application is trying to run an executable from our tmp dir, strip our tmp dir from the
     // path. The file might not even exist in our tmp dir, and the application is expecting it there
     // only because it somehow found out about its own patched location in our tmp dir.
     // If original path is SIP, and actually exists in our dir that patched executable will be used.
-    let path_str = strip_mirrord_path(path_str).unwrap_or(path_str);
-    let path_c_string = patch_if_sip(path_str)
+    if let Some(s) = strip_mirrord_path(Path::new(&path_str)) {
+        path_str = s.to_string_lossy().to_string();
+    };
+    let path_c_string = patch_if_sip(&path_str)
         .and_then(|new_path| Success(CString::new(new_path)?))
         // Continue also on error, use original path, don't bypass yet, try cleaning argv.
-        .unwrap_or(CString::new(path_str.to_string())?);
+        .unwrap_or(CString::new(path_str)?);
 
     let argv_arr = Nul::new_unchecked(argv);
 
