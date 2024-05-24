@@ -1,6 +1,8 @@
 use std::{
     assert_matches::assert_matches,
+    cmp::min,
     collections::HashMap,
+    ffi::OsString,
     fmt::Debug,
     fs::File,
     io,
@@ -1113,14 +1115,19 @@ impl Application {
 
     /// Start the test process with the given env.
     pub async fn get_test_process(&self, env: HashMap<&str, &str>) -> TestProcess {
-        let executable = self.get_executable().await;
+        let executable: OsString = self.get_executable().await.into();
         #[cfg(target_os = "macos")]
-        let executable = sip_patch(&executable, &Vec::new())
+        let executable = sip_patch(&PathBuf::from(executable.clone()), &Vec::new())
             .unwrap()
             .unwrap_or(executable);
-        println!("Using executable: {}", &executable);
+        println!("Using executable: {:?}", &executable);
         println!("Using args: {:?}", self.get_args());
-        TestProcess::start_process(executable, self.get_args(), env).await
+        TestProcess::start_process(
+            executable.to_string_lossy().to_string(),
+            self.get_args(),
+            env,
+        )
+        .await
     }
 
     /// Start the process of this application, with the layer lib loaded.

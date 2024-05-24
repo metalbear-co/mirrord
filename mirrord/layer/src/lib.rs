@@ -69,9 +69,11 @@ extern crate core;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
+    ffi::OsString,
     net::SocketAddr,
     os::unix::process::parent_id,
     panic,
+    path::Path,
     sync::OnceLock,
     time::Duration,
 };
@@ -176,10 +178,10 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     let config = LayerConfig::from_env()?;
 
     #[cfg(target_os = "macos")]
-    let patch_binaries = config
+    let patch_binaries: Vec<OsString> = config
         .sip_binaries
         .clone()
-        .map(|x| x.to_vec())
+        .map(|x| x.to_vec().iter().map(|y| y.into()).collect())
         .unwrap_or_default();
 
     // SIP Patch the process' binary then re-execute it. Needed
@@ -189,7 +191,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         let path = EXECUTABLE_PATH
             .get()
             .expect("EXECUTABLE_PATH needs to be set!");
-        if let Ok(Some(binary)) = mirrord_sip::sip_patch(path, &patch_binaries) {
+        if let Ok(Some(binary)) = mirrord_sip::sip_patch(Path::new(path), &patch_binaries) {
             let err = exec::execvp(
                 binary,
                 EXECUTABLE_ARGS
@@ -206,7 +208,13 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     match given_process.load_type(&config) {
         LoadType::Full => layer_start(config),
         #[cfg(target_os = "macos")]
-        LoadType::SIPOnly => sip_only_layer_start(config, patch_binaries),
+        LoadType::SIPOnly => sip_only_layer_start(
+            config,
+            patch_binaries
+                .iter()
+                .map(|x| x.to_string_lossy().to_string())
+                .collect(),
+        ),
         LoadType::Skip => load_only_layer_start(&config),
     }
 

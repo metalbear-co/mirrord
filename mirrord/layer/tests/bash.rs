@@ -30,8 +30,8 @@ async fn bash_script(dylib_path: &Path, config_dir: &Path) {
     // to ignore those paths.
     config_path.push("bash_script.json");
     let application = Application::EnvBashCat;
-    let executable = application.get_executable().await; // Own it.
-    println!("Using executable: {}", &executable);
+    let executable = PathBuf::from(application.get_executable().await.to_owned()); // Own it.
+    println!("Using executable: {:?}", &executable);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
     println!("Listening for messages from the layer on {addr}");
@@ -43,7 +43,12 @@ async fn bash_script(dylib_path: &Path, config_dir: &Path) {
     );
     #[cfg(target_os = "macos")]
     let executable = sip_patch(&executable, &Vec::new()).unwrap().unwrap();
-    let test_process = TestProcess::start_process(executable, application.get_args(), env).await;
+    let test_process = TestProcess::start_process(
+        executable.to_string_lossy().to_string(),
+        application.get_args(),
+        env,
+    )
+    .await;
 
     let mut intproxy = TestIntProxy::new(listener).await;
 

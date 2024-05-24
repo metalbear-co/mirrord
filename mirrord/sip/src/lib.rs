@@ -50,20 +50,13 @@ mod main {
     pub static MIRRORD_TEMP_BIN_DIR_PATH_BUF: Lazy<PathBuf> =
         Lazy::new(|| env::temp_dir().join(MIRRORD_PATCH_DIR));
 
-    /// Get the `PathBuf` of the `mirrord-bin` dir, and return a `String` prefix to remove, without
-    /// a trailing `/`, so that the stripped path starts with a `/`
-    // fn get_temp_bin_str_prefix(path: &Path) -> String {
-    //     // lossy: we assume our temp dir path does not contain non-unicode chars.
-    //     path.to_string_lossy()
-    //         .to_string()
-    //         .trim_end_matches('/')
-    //         .to_string()
-    // }
-
-    /// The string path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
-    /// scripts, without a trailing `/`.
-    // pub static MIRRORD_TEMP_BIN_DIR_STRING: Lazy<String> =
-    //     Lazy::new(|| get_temp_bin_str_prefix(&MIRRORD_TEMP_BIN_DIR_PATH_BUF));
+    /// Canonicalized version of `MIRRORD_TEMP_BIN_DIR`.
+    pub static MIRRORD_TEMP_BIN_DIR_CANONIC_PATHBUF: Lazy<PathBuf> = Lazy::new(|| {
+        MIRRORD_TEMP_BIN_DIR_PATH_BUF
+            // Resolve symbolic links (specifically /var -> private/var).
+            .canonicalize()
+            .unwrap_or(MIRRORD_TEMP_BIN_DIR_PATH_BUF.to_path_buf())
+    });
 
     /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
     /// main cpu type is arm64. We only consider the lowest byte in the check.
@@ -559,7 +552,10 @@ mod main {
     /// If it is, create a non-protected version of the file and return `Ok(Some(patched_path)`.
     /// If it is not, `Ok(None)`.
     /// Propagate errors.
-    pub fn sip_patch(binary_path: &Path, patch_binaries: &[OsString]) -> Result<Option<OsString>> {
+    pub fn sip_patch(
+        binary_path: &Path,
+        patch_binaries: &Vec<OsString>,
+    ) -> Result<Option<OsString>> {
         match get_sip_status(binary_path, patch_binaries) {
             Ok(SipScript { path, shebang }) => {
                 let patched_interpreter = patch_binary(&shebang.interpreter_path)?;

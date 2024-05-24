@@ -1,9 +1,16 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{ffi::CStr, fmt::Debug, ops::Not, path::PathBuf};
+use std::{
+    ffi::CStr,
+    fmt::Debug,
+    ops::Not,
+    path::{Path, PathBuf},
+};
 
 use libc::c_char;
 use mirrord_intproxy_protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
 use mirrord_protocol::file::OpenOptionsInternal;
+#[cfg(target_os = "macos")]
+use mirrord_sip::{MIRRORD_TEMP_BIN_DIR_CANONIC_PATHBUF, MIRRORD_TEMP_BIN_DIR_PATH_BUF};
 use null_terminated::Nul;
 use tracing::warn;
 
@@ -84,15 +91,15 @@ impl CheckedInto<String> for *const c_char {
 }
 
 #[cfg(target_os = "macos")]
-pub fn strip_mirrord_path(path_str: &str) -> Option<&str> {
-    use mirrord_sip::MIRRORD_PATCH_DIR;
-
-    // SAFETY: We only slice after we find the string in the path
-    // so it must be valid
-    #[allow(clippy::indexing_slicing)]
+pub fn strip_mirrord_path(path_str: &Path) -> Option<&Path> {
     path_str
-        .find(MIRRORD_PATCH_DIR)
-        .map(|index| &path_str[(MIRRORD_PATCH_DIR.len() + index)..])
+        .strip_prefix(MIRRORD_TEMP_BIN_DIR_PATH_BUF.to_owned())
+        .ok()
+        .or_else(|| {
+            path_str
+                .strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_PATHBUF.to_owned())
+                .ok()
+        })
 }
 
 impl CheckedInto<PathBuf> for *const c_char {
@@ -102,14 +109,14 @@ impl CheckedInto<PathBuf> for *const c_char {
         let str_det = CheckedInto::<&str>::checked_into(self);
         #[cfg(target_os = "macos")]
         let str_det = str_det.and_then(|path_str| {
-            let optional_stripped_path = strip_mirrord_path(path_str);
+            let optional_stripped_path = strip_mirrord_path(&Path::new(path_str));
             if let Some(stripped_path) = optional_stripped_path {
                 // actually stripped, so bypass and provide a pointer to after the temp dir.
                 // `stripped_path` is a reference to a later character in the same string as
                 // `path_str`, `stripped_path.as_ptr()` returns a pointer to a later index
                 // in the same string owned by the caller (the hooked program).
                 Detour::Bypass(Bypass::FileOperationInMirrordBinTempDir(
-                    stripped_path.as_ptr() as _,
+                    stripped_path.to_string_lossy().as_ptr() as _,
                 ))
             } else {
                 Detour::Success(path_str) // strip is None, path not in temp dir.
