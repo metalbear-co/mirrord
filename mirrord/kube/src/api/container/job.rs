@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use futures::StreamExt;
 use k8s_openapi::api::{
     batch::v1::{Job, JobSpec},
@@ -6,7 +8,7 @@ use k8s_openapi::api::{
 use kube::{
     api::{ObjectMeta, PostParams},
     runtime::{watcher, WatchStreamExt},
-    Api, Client,
+    Api, Client, ResourceExt,
 };
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
@@ -133,35 +135,48 @@ where
     }
 
     fn as_update(&self) -> Self::Update {
-        let agent = self.agent_config();
+        let config = self.agent_config();
         let params = self.params();
 
-        let pod = self.inner.as_update();
+        let mut pod = self.inner.as_update();
+
+        let mut labels = config
+            .labels
+            .clone()
+            .map(BTreeMap::from_iter)
+            .unwrap_or_default();
+
+        labels.extend(BTreeMap::from([
+            (
+                "kuma.io/sidecar-injection".to_string(),
+                "disabled".to_string(),
+            ),
+            ("app".to_string(), "mirrord".to_string()),
+        ]));
+
+        let mut annotations = config
+            .annotations
+            .clone()
+            .map(BTreeMap::from_iter)
+            .unwrap_or_default();
+
+        annotations.extend(BTreeMap::from([
+            ("sidecar.istio.io/inject".to_string(), "false".to_string()),
+            ("linkerd.io/inject".to_string(), "disabled".to_string()),
+        ]));
+
+        pod.labels_mut().extend(labels.clone());
+        pod.annotations_mut().extend(annotations.clone());
 
         Job {
             metadata: ObjectMeta {
                 name: Some(params.name.clone()),
-                labels: Some(
-                    [
-                        (
-                            "kuma.io/sidecar-injection".to_string(),
-                            "disabled".to_string(),
-                        ),
-                        ("app".to_string(), "mirrord".to_string()),
-                    ]
-                    .into(),
-                ),
-                annotations: Some(
-                    [
-                        ("sidecar.istio.io/inject".to_string(), "false".to_string()),
-                        ("linkerd.io/inject".to_string(), "disabled".to_string()),
-                    ]
-                    .into(),
-                ),
+                labels: Some(labels),
+                annotations: Some(annotations),
                 ..Default::default()
             },
             spec: Some(JobSpec {
-                ttl_seconds_after_finished: Some(agent.ttl.into()),
+                ttl_seconds_after_finished: Some(config.ttl.into()),
                 template: PodTemplateSpec {
                     metadata: Some(pod.metadata),
                     spec: pod.spec,
