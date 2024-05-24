@@ -62,7 +62,9 @@ fn update_ptr_from_bypass(ptr: *const c_char, bypass: Bypass) -> *const c_char {
         // inside mirrord's temp bin dir. The detour has returned us the original path of the file
         // (stripped mirrord's dir path), so now we carry out the operation locally, on the stripped
         // path.
-        Bypass::FileOperationInMirrordBinTempDir(stripped_ptr) => stripped_ptr,
+        Bypass::FileOperationInMirrordBinTempDir(path_buf) => {
+            path_buf.as_os_str().as_encoded_bytes().as_ptr() as _
+        }
         _ => ptr,
     }
 }
