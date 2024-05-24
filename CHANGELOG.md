@@ -8,6 +8,40 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.102.0](https://github.com/metalbear-co/mirrord/tree/3.102.0) - 2024-05-22
+
+
+### Removed
+
+- Remove deprecated unstable pause feature
+  [#2458](https://github.com/metalbear-co/mirrord/issues/2458)
+
+
+### Added
+
+- Added json_log config under agent to control whether the agent produces logs
+  as normal tracing or json.
+  [#2155](https://github.com/metalbear-co/mirrord/issues/2155)
+- Added config info printout at session start.
+  [#2367](https://github.com/metalbear-co/mirrord/issues/2367)
+
+
+### Fixed
+
+- Fixed agent crashing when mirrord target is explicitly set to `targetless`.
+  [#2444](https://github.com/metalbear-co/mirrord/issues/2444)
+- Fixed confusing errors produced when creating an agent.
+
+
+### Internal
+
+- Agent compiles on macOS
+  [#2453](https://github.com/metalbear-co/mirrord/issues/2453)
+- Added `uses_operator` flag to `mirrord ext` output (to be inspected in the
+  plugin/extension).
+- Skip tests from running twice
+
+
 ## [3.101.0](https://github.com/metalbear-co/mirrord/tree/3.101.0) - 2024-05-14
 
 

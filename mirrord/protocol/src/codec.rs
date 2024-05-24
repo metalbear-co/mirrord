@@ -141,6 +141,7 @@ pub enum DaemonMessage {
     /// NOTE: can remove `RemoteResult` when we break protocol compatibility.
     GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
     GetAddrInfoResponse(GetAddrInfoResponse),
+    /// Pause is deprecated but we don't want to break protocol
     PauseTarget(DaemonPauseTarget),
     SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
 }
