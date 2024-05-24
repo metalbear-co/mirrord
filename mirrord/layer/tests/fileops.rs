@@ -4,7 +4,7 @@
 #[cfg(target_os = "linux")]
 use std::assert_matches::assert_matches;
 #[cfg(target_os = "macos")]
-use std::{env, fs};
+use std::{env, fs, path::Path};
 use std::{env::temp_dir, path::PathBuf, time::Duration};
 
 use libc::{pid_t, O_RDWR};

@@ -1,6 +1,7 @@
+#[cfg(target_os = "macos")]
+use std::path::Path;
 use std::{
     collections::{HashMap, HashSet},
-    path::Path,
     sync::Arc,
     time::Duration,
 };
@@ -227,11 +228,12 @@ impl MirrordExecution {
             .and_then(|exe| {
                 sip_patch(
                     Path::new(exe),
-                    &config
+                    config
                         .sip_binaries
                         .clone()
-                        .map(|x| x.to_vec().iter().map(|y| y.into()).collect())
-                        .unwrap_or_default(),
+                        .map(|x| x.to_vec().iter().map(|y| y.into()).collect::<Vec<_>>())
+                        .unwrap_or_default()
+                        .as_ref(),
                 )
                 .transpose() // We transpose twice to propagate a possible error out of this
                              // closure.

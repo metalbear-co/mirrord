@@ -23,14 +23,20 @@ use mirrord_sip::sip_patch;
 async fn tmp_dir_read_locally(dylib_path: &Path) {
     let application = Application::BashShebang;
     let executable = application.get_executable().await;
-    let executable = sip_patch(&executable, &Vec::new()).unwrap().unwrap();
-    println!("Using executable: {}", &executable);
+    let executable = sip_patch(Path::new(&executable), &Vec::new())
+        .unwrap()
+        .unwrap();
+    println!("Using executable: {:?}", &executable);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap().to_string();
     println!("Listening for messages from the layer on {addr}");
     let env = get_env(dylib_path.to_str().unwrap(), &addr, vec![], None);
-    let mut test_process =
-        TestProcess::start_process(executable, application.get_args(), env).await;
+    let mut test_process = TestProcess::start_process(
+        executable.to_string_lossy().to_string(),
+        application.get_args(),
+        env,
+    )
+    .await;
 
     // Accept the connection from the layer and verify initial messages.
     let mut intproxy = TestIntProxy::new(listener).await;

@@ -66,13 +66,13 @@ pub(crate) unsafe fn enable_execve_hook(
 /// Check if the file that is to be executed has SIP and patch it if it does.
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
-    let patch_binaries = PATCH_BINARIES
+    let patch_binaries: Vec<_> = PATCH_BINARIES
         .get()
         .expect("patch binaries not set")
         .iter()
         .map(|y| y.into())
         .collect();
-    match sip_patch(Path::new(path), &patch_binaries) {
+    match sip_patch(Path::new(path), patch_binaries.as_ref()) {
         Ok(None) => Bypass(NoSipDetected(path.to_string())),
         Ok(Some(new_path)) => Success(new_path.to_string_lossy().to_string()),
         Err(SipError::FileNotFound(non_existing_bin)) => {

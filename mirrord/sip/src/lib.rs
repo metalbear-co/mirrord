@@ -544,10 +544,7 @@ mod main {
     /// If it is, create a non-protected version of the file and return `Ok(Some(patched_path)`.
     /// If it is not, `Ok(None)`.
     /// Propagate errors.
-    pub fn sip_patch(
-        binary_path: &Path,
-        patch_binaries: &Vec<OsString>,
-    ) -> Result<Option<OsString>> {
+    pub fn sip_patch(binary_path: &Path, patch_binaries: &[OsString]) -> Result<Option<OsString>> {
         match get_sip_status(binary_path, patch_binaries) {
             Ok(SipScript { path, shebang }) => {
                 let patched_interpreter = patch_binary(&shebang.interpreter_path)?;

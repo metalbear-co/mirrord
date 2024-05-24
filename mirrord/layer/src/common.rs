@@ -1,9 +1,7 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{
-    ffi::CStr,
-    fmt::Debug,
-    path::{Path, PathBuf},
-};
+#[cfg(target_os = "macos")]
+use std::path::Path;
+use std::{ffi::CStr, fmt::Debug, path::PathBuf};
 
 use libc::c_char;
 use mirrord_intproxy_protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
@@ -105,7 +103,7 @@ impl CheckedInto<PathBuf> for *const c_char {
         let str_det = CheckedInto::<&str>::checked_into(self);
         #[cfg(target_os = "macos")]
         let str_det = str_det.and_then(|path_str| {
-            let optional_stripped_path = strip_mirrord_path(&Path::new(path_str));
+            let optional_stripped_path = strip_mirrord_path(Path::new(path_str));
             if let Some(stripped_path) = optional_stripped_path {
                 // actually stripped, so bypass and provide a pointer to after the temp dir.
                 // `stripped_path` is a reference to a later character in the same string as
