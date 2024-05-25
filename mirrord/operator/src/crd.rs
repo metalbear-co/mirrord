@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fmt::{Display, Formatter},
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use k8s_openapi::api::core::v1::{PodSpec, PodTemplateSpec};
 use kube::CustomResource;
@@ -481,6 +481,10 @@ pub struct MirrordQueueSplitterSpec {
 
     /// The resource (deployment or Argo rollout) that reads from the queues.
     pub consumer: QueueConsumer,
+
+    /// These tags will be added to all temporary SQS queues created by mirrord for queues defined
+    /// in this MirrordQueueSplitter.
+    pub tags: Option<HashMap<String, String>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
