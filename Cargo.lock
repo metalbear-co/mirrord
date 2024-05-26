@@ -3305,7 +3305,7 @@ dependencies = [
 [[package]]
 name = "kube"
 version = "0.91.0"
-source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#0b5bbc3b211b5022941f31f9e217c3f7a9993703"
+source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#474eaed9d30adafc47f95c8fb649d9497a5ecab1"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -3317,7 +3317,7 @@ dependencies = [
 [[package]]
 name = "kube-client"
 version = "0.91.0"
-source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#0b5bbc3b211b5022941f31f9e217c3f7a9993703"
+source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#474eaed9d30adafc47f95c8fb649d9497a5ecab1"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -3358,7 +3358,7 @@ dependencies = [
 [[package]]
 name = "kube-core"
 version = "0.91.0"
-source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#0b5bbc3b211b5022941f31f9e217c3f7a9993703"
+source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#474eaed9d30adafc47f95c8fb649d9497a5ecab1"
 dependencies = [
  "chrono",
  "form_urlencoded",
@@ -3374,7 +3374,7 @@ dependencies = [
 [[package]]
 name = "kube-derive"
 version = "0.91.0"
-source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#0b5bbc3b211b5022941f31f9e217c3f7a9993703"
+source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#474eaed9d30adafc47f95c8fb649d9497a5ecab1"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3386,7 +3386,7 @@ dependencies = [
 [[package]]
 name = "kube-runtime"
 version = "0.91.0"
-source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#0b5bbc3b211b5022941f31f9e217c3f7a9993703"
+source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#474eaed9d30adafc47f95c8fb649d9497a5ecab1"
 dependencies = [
  "ahash",
  "async-broadcast",
