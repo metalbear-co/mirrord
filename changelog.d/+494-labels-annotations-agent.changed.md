@@ -1,0 +1,1 @@
+Allows the user to set labels and annotations for the agent job and pod via agent config.

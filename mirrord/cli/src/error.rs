@@ -44,9 +44,6 @@ pub(crate) enum InternalProxySetupError {
     #[error("No connection method, please report a bug")]
     NoConnectionMethod,
 
-    #[error("Failed pausing target container {0:#?}")]
-    PauseError(String),
-
     #[error("No pong received from agent. {0:#?}")]
     NoPong(String),
 }

@@ -103,10 +103,16 @@ impl KubernetesAPI {
 
         let pod = pod_api.get(&pod_name).await?;
 
-        let conn = if let Some(pod_ip) = pod.status.and_then(|status| status.pod_ip) {
+        let pod_ip = pod
+            .status
+            .as_ref()
+            .and_then(|status| status.pod_ip.as_ref());
+        let conn = if let Some(pod_ip) = pod_ip {
             // When pod_ip is available we directly create it as SocketAddr to prevent tokio from
             // performing a DNS lookup.
-            let ip = pod_ip.parse::<IpAddr>()?;
+            let ip = pod_ip
+                .parse::<IpAddr>()
+                .map_err(|e| KubeApiError::invalid_value(&pod, "status.podIp", e))?;
             trace!("connecting to pod {pod_ip}:{agent_port}");
 
             tokio::time::timeout(

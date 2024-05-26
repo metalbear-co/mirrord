@@ -15,7 +15,6 @@ pub(crate) enum NamespaceError {
 #[derive(Debug)]
 pub(crate) enum NamespaceType {
     Net,
-    Cgroup,
 }
 
 impl NamespaceType {
@@ -23,7 +22,6 @@ impl NamespaceType {
     fn path_from_pid(&self, pid: u64) -> String {
         match self {
             NamespaceType::Net => format!("/proc/{}/ns/net", pid),
-            NamespaceType::Cgroup => format!("/proc/{}/ns/cgroup", pid),
         }
     }
 }
@@ -32,7 +30,6 @@ impl From<NamespaceType> for CloneFlags {
     fn from(ns_type: NamespaceType) -> Self {
         match ns_type {
             NamespaceType::Net => CloneFlags::CLONE_NEWNET,
-            NamespaceType::Cgroup => CloneFlags::CLONE_NEWCGROUP,
         }
     }
 }

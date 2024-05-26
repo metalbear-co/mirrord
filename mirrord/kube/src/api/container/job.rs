@@ -1,13 +1,17 @@
+use std::collections::BTreeMap;
+
 use futures::StreamExt;
-use k8s_openapi::api::{batch::v1::Job, core::v1::Pod};
+use k8s_openapi::api::{
+    batch::v1::{Job, JobSpec},
+    core::v1::{Pod, PodTemplateSpec},
+};
 use kube::{
-    api::{ListParams, PostParams},
+    api::{ObjectMeta, PostParams},
     runtime::{watcher, WatchStreamExt},
-    Api, Client,
+    Api, Client, ResourceExt,
 };
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
-use serde_json::json;
 use tokio::pin;
 use tracing::debug;
 
@@ -37,12 +41,12 @@ where
     let mut pod_progress = progress.subtask("creating agent pod...");
 
     let agent = variant.agent_config();
-    let agent_pod: Job = variant.as_update()?;
+    let agent_job: Job = variant.as_update();
 
     let job_api = get_k8s_resource_api(client, agent.namespace.as_deref());
 
     job_api
-        .create(&PostParams::default(), &agent_pod)
+        .create(&PostParams::default(), &agent_job)
         .await
         .map_err(KubeApiError::KubeError)?;
 
@@ -59,27 +63,28 @@ where
     let stream = watcher(pod_api.clone(), watcher_config).applied_objects();
     pin!(stream);
 
+    let mut agent_pod = None;
     while let Some(Ok(pod)) = stream.next().await {
-        if let Some(status) = &pod.status
-            && let Some(phase) = &status.phase
-        {
-            debug!("Pod Phase = {phase:?}");
-            if phase == "Running" {
-                break;
-            }
+        let Some(phase) = pod.status.as_ref().and_then(|status| status.phase.as_ref()) else {
+            continue;
+        };
+
+        debug!(?phase, "Agent pod changed");
+
+        if phase == "Running" {
+            agent_pod.replace(pod);
+            break;
         }
     }
 
-    let pods = pod_api
-        .list(&ListParams::default().labels(&format!("job-name={}", params.name)))
-        .await
-        .map_err(KubeApiError::KubeError)?;
+    let agent_pod = agent_pod.ok_or(KubeApiError::AgentPodNotRunning)?;
 
-    let pod_name = pods
-        .items
-        .first()
-        .and_then(|pod| pod.metadata.name.clone())
-        .ok_or(KubeApiError::JobPodNotFound(params.name.clone()))?;
+    let pod_name = agent_pod
+        .metadata
+        .name
+        .as_ref()
+        .ok_or_else(|| KubeApiError::missing_field(&agent_pod, ".metadata.name"))?
+        .clone();
 
     let version = wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
     match version.as_ref() {
@@ -129,29 +134,57 @@ where
         self.inner.params()
     }
 
-    fn as_update(&self) -> Result<Self::Update> {
-        let agent = self.agent_config();
+    fn as_update(&self) -> Self::Update {
+        let config = self.agent_config();
         let params = self.params();
 
-        serde_json::from_value(json!({
-            "metadata": {
-                "name": params.name,
-                "labels": {
-                    "kuma.io/sidecar-injection": "disabled",
-                    "app": "mirrord"
-                },
-                "annotations":
-                {
-                    "sidecar.istio.io/inject": "false",
-                    "linkerd.io/inject": "disabled"
-                }
+        let mut pod = self.inner.as_update();
+
+        let mut labels = config
+            .labels
+            .clone()
+            .map(BTreeMap::from_iter)
+            .unwrap_or_default();
+
+        labels.extend(BTreeMap::from([
+            (
+                "kuma.io/sidecar-injection".to_string(),
+                "disabled".to_string(),
+            ),
+            ("app".to_string(), "mirrord".to_string()),
+        ]));
+
+        let mut annotations = config
+            .annotations
+            .clone()
+            .map(BTreeMap::from_iter)
+            .unwrap_or_default();
+
+        annotations.extend(BTreeMap::from([
+            ("sidecar.istio.io/inject".to_string(), "false".to_string()),
+            ("linkerd.io/inject".to_string(), "disabled".to_string()),
+        ]));
+
+        pod.labels_mut().extend(labels.clone());
+        pod.annotations_mut().extend(annotations.clone());
+
+        Job {
+            metadata: ObjectMeta {
+                name: Some(params.name.clone()),
+                labels: Some(labels),
+                annotations: Some(annotations),
+                ..Default::default()
             },
-            "spec": {
-                "ttlSecondsAfterFinished": agent.ttl,
-                "template": self.inner.as_update()?
-            }
-        }))
-        .map_err(KubeApiError::from)
+            spec: Some(JobSpec {
+                ttl_seconds_after_finished: Some(config.ttl.into()),
+                template: PodTemplateSpec {
+                    metadata: Some(pod.metadata),
+                    spec: pod.spec,
+                },
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
     }
 }
 
@@ -184,7 +217,7 @@ impl ContainerVariant for JobTargetedVariant<'_> {
         self.inner.params()
     }
 
-    fn as_update(&self) -> Result<Job> {
+    fn as_update(&self) -> Job {
         self.inner.as_update()
     }
 }
@@ -214,9 +247,9 @@ mod test {
             tls_cert: None,
         };
 
-        let update = JobVariant::new(&agent, &params).as_update()?;
+        let update = JobVariant::new(&agent, &params).as_update();
 
-        let expected: Job = serde_json::from_value(json!({
+        let expected: Job = serde_json::from_value(serde_json::json!({
             "metadata": {
                 "name": "foobar",
                 "labels": {
@@ -256,7 +289,9 @@ mod test {
                                 "env": [
                                     { "name": "RUST_LOG", "value": agent.log_level },
                                     { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() },
-                                    { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() }
+                                    { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() },
+                                    { "name": "MIRRORD_AGENT_JSON_LOG", "value": Some(agent.json_log.to_string()) }
+
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 {
@@ -307,9 +342,9 @@ mod test {
                 container_name: "foo".to_string(),
             },
         )
-        .as_update()?;
+        .as_update();
 
-        let expected: Job = serde_json::from_value(json!({
+        let expected: Job = serde_json::from_value(serde_json::json!({
             "metadata": {
                 "name": "foobar",
                 "labels": {
@@ -382,7 +417,8 @@ mod test {
                                 "env": [
                                     { "name": "RUST_LOG", "value": agent.log_level },
                                     { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() },
-                                    { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() }
+                                    { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() },
+                                    { "name": "MIRRORD_AGENT_JSON_LOG", "value": Some(agent.json_log.to_string()) }
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 {

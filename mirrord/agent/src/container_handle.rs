@@ -1,8 +1,5 @@
 use std::{collections::HashMap, sync::Arc};
 
-use tokio::sync::RwLock;
-use tracing::{error, info};
-
 use crate::{
     error::Result,
     runtime::{Container, ContainerInfo, ContainerRuntime},
@@ -10,34 +7,10 @@ use crate::{
 
 #[derive(Debug)]
 struct Inner {
-    /// The managed container.
-    container: Container,
     /// Cached process ID of the container.
     pid: u64,
     /// Cached environment of the container.
     raw_env: HashMap<String, String>,
-    /// Whether the container is paused.
-    paused: RwLock<bool>,
-    /// Watch for using in the drop
-    watch: drain::Watch,
-}
-
-/// This is to make sure we don't leave the target container paused when the agent exits.
-impl Drop for Inner {
-    fn drop(&mut self) {
-        // use try_read to avoid deadlocks
-        if let Ok(true) = self.paused.try_read().as_deref() {
-            let watch = self.watch.clone();
-            let container = self.container.clone();
-            tokio::spawn(async move {
-                info!("Agent exiting with target container paused. Unpausing target container.");
-                if let Err(err) = container.unpause().await {
-                    error!("Could not unpause target container while exiting, got error: {err:?}");
-                }
-                drop(watch);
-            });
-        }
-    }
 }
 
 /// Handle to the container targeted by the agent.
@@ -49,16 +22,10 @@ pub(crate) struct ContainerHandle(Arc<Inner>);
 impl ContainerHandle {
     /// Retrieve info about the container and initialize this struct.
     #[tracing::instrument(level = "trace")]
-    pub(crate) async fn new(container: Container, watch: drain::Watch) -> Result<Self> {
+    pub(crate) async fn new(container: Container) -> Result<Self> {
         let ContainerInfo { pid, env: raw_env } = container.get_info().await?;
 
-        let inner = Inner {
-            container,
-            pid,
-            raw_env,
-            watch,
-            paused: Default::default(),
-        };
+        let inner = Inner { pid, raw_env };
 
         Ok(Self(inner.into()))
     }
@@ -71,22 +38,5 @@ impl ContainerHandle {
     /// Return environment variables from the container.
     pub(crate) fn raw_env(&self) -> &HashMap<String, String> {
         &self.0.raw_env
-    }
-
-    /// Pause or unpause the container.
-    /// If the container changed its state, return true.
-    /// Otherwise, return false.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) async fn set_paused(&self, paused: bool) -> Result<bool> {
-        let mut guard = self.0.paused.write().await;
-
-        match (*guard, paused) {
-            (false, true) => self.0.container.pause().await?,
-            (true, false) => self.0.container.unpause().await?,
-            _ => return Ok(false),
-        }
-        *guard = paused;
-
-        Ok(true)
     }
 }
