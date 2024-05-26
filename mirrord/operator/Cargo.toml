@@ -58,7 +58,7 @@ base64 = { workspace = true, optional = true }
 bincode =  { version = "2.0.0-rc.2", features = ["serde"], optional = true }
 bytes = { workspace = true, optional = true }
 chrono = { version = "0.4", features = ["clock", "serde"] }
-http = { version = "0.2", optional = true }
+http = { version = "1", optional = true }
 k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, features = ["derive", "ws"], optional = true }
 futures = { workspace = true, optional = true }
@@ -71,7 +71,7 @@ serde_yaml = { version = "0.9", optional = true }
 thiserror.workspace = true
 semver.workspace = true
 tokio = { workspace = true, optional = true }
-tokio-tungstenite = { version = "0.20.1", optional = true }
+tokio-tungstenite = { version = "0.21", optional = true }
 tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
