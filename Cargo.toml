@@ -83,7 +83,7 @@ kube = { git = "https://github.com/aviramha/kube-rs", default-features = false, 
     "oidc",
     "socks5",
     "http-proxy",
-], branch = "http_proxy_feature" }
+], branch = "features_are_hard" }
 hickory-resolver = { version = "0.24", features = [
     "serde-config",
     "tokio-runtime",
