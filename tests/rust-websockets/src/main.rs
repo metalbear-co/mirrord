@@ -38,7 +38,10 @@ async fn main() {
 async fn handle_socket(mut socket: WebSocket, shutdown: mpsc::UnboundedSender<()>) {
     loop {
         let msg = match socket.recv().await {
-            Some(Ok(msg)) => msg,
+            Some(Ok(msg)) => {
+                eprintln!("Receieved Message: {msg:?}");
+                msg
+            }
             Some(Err(err)) => {
                 eprintln!("Error while receiving message: {err:?}");
                 break;
