@@ -1010,9 +1010,9 @@ dependencies = [
 
 [[package]]
 name = "brotli-decompressor"
-version = "4.0.0"
+version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6221fe77a248b9117d431ad93761222e1cf8ff282d9d1d5d9f53d6299a1cf76"
+checksum = "9a45bd2e4095a8b518033b128020dd4a55aab1c0a381ba4404a472630f4bc362"
 dependencies = [
  "alloc-no-stdlib",
  "alloc-stdlib",
@@ -1210,9 +1210,9 @@ dependencies = [
 
 [[package]]
 name = "clang-sys"
-version = "1.7.0"
+version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67523a3b4be3ce1989d607a828d036249522dd9c1c8de7f4dd2dae43a37369d1"
+checksum = "a483f3cbf7cec2e153d424d0e92329d816becc6421389bd494375c6065921b9b"
 dependencies = [
  "glob",
  "libc",
@@ -2769,6 +2769,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper-http-proxy"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d06dbdfbacf34d996c6fb540a71a684a7aae9056c71951163af8a8a4c07b9a4"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "headers",
+ "http 1.1.0",
+ "hyper 1.3.1",
+ "hyper-rustls 0.27.1",
+ "hyper-util",
+ "pin-project-lite",
+ "rustls-native-certs 0.7.0",
+ "tokio",
+ "tokio-rustls 0.26.0",
+ "tower-service",
+]
+
+[[package]]
 name = "hyper-named-pipe"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2781,27 +2801,6 @@ dependencies = [
  "tokio",
  "tower-service",
  "winapi",
-]
-
-[[package]]
-name = "hyper-proxy2"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9043b7b23fb0bc4a1c7014c27b50a4fc42cc76206f71d34fc0dfe5b28ddc3faf"
-dependencies = [
- "bytes",
- "futures-util",
- "headers",
- "http 1.1.0",
- "hyper 1.3.1",
- "hyper-rustls 0.26.0",
- "hyper-util",
- "pin-project-lite",
- "rustls-native-certs 0.7.0",
- "tokio",
- "tokio-rustls 0.25.0",
- "tower-service",
- "webpki",
 ]
 
 [[package]]
@@ -2828,9 +2827,7 @@ dependencies = [
  "http 1.1.0",
  "hyper 1.3.1",
  "hyper-util",
- "log",
  "rustls 0.22.4",
- "rustls-native-certs 0.7.0",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.25.0",
@@ -3305,7 +3302,7 @@ dependencies = [
 [[package]]
 name = "kube"
 version = "0.91.0"
-source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#474eaed9d30adafc47f95c8fb649d9497a5ecab1"
+source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#304fab693d08e95d665c178b93b116ece81c7102"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -3317,7 +3314,7 @@ dependencies = [
 [[package]]
 name = "kube-client"
 version = "0.91.0"
-source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#474eaed9d30adafc47f95c8fb649d9497a5ecab1"
+source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#304fab693d08e95d665c178b93b116ece81c7102"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -3330,7 +3327,7 @@ dependencies = [
  "http-body 1.0.0",
  "http-body-util",
  "hyper 1.3.1",
- "hyper-proxy2",
+ "hyper-http-proxy",
  "hyper-rustls 0.27.1",
  "hyper-socks2",
  "hyper-timeout 0.5.1",
@@ -3358,7 +3355,7 @@ dependencies = [
 [[package]]
 name = "kube-core"
 version = "0.91.0"
-source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#474eaed9d30adafc47f95c8fb649d9497a5ecab1"
+source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#304fab693d08e95d665c178b93b116ece81c7102"
 dependencies = [
  "chrono",
  "form_urlencoded",
@@ -3374,7 +3371,7 @@ dependencies = [
 [[package]]
 name = "kube-derive"
 version = "0.91.0"
-source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#474eaed9d30adafc47f95c8fb649d9497a5ecab1"
+source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#304fab693d08e95d665c178b93b116ece81c7102"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3386,7 +3383,7 @@ dependencies = [
 [[package]]
 name = "kube-runtime"
 version = "0.91.0"
-source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#474eaed9d30adafc47f95c8fb649d9497a5ecab1"
+source = "git+https://github.com/aviramha/kube-rs?branch=features_are_hard#304fab693d08e95d665c178b93b116ece81c7102"
 dependencies = [
  "ahash",
  "async-broadcast",
@@ -7185,16 +7182,6 @@ checksum = "77afa9a11836342370f4817622a2f0f418b134426d91a82dfb48f532d2ec13ef"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "webpki"
-version = "0.22.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed63aea5ce73d0ff405984102c42de94fc55a6b75765d621c65262469b3c9b53"
-dependencies = [
- "ring",
- "untrusted",
 ]
 
 [[package]]
