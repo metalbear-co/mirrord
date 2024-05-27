@@ -7,25 +7,24 @@ use std::{
 };
 
 use k8s_openapi::{
-    api::{
-        apps::v1::Deployment,
-        core::v1::{Node, Pod},
-    },
+    api::core::v1::{Node, Pod},
     NamespaceResourceScope,
 };
 use kube::{api::ListParams, Api, Client, Resource};
-use mirrord_config::target::{DeploymentTarget, PodTarget, RolloutTarget, Target};
+use mirrord_config::target::Target;
 use mirrord_protocol::MeshVendor;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 
 use crate::{
-    api::{
-        container::choose_container,
-        kubernetes::{get_k8s_resource_api, rollout::Rollout},
-    },
+    api::{container::choose_container, kubernetes::get_k8s_resource_api},
     error::{KubeApiError, Result},
 };
+
+pub mod deployment;
+pub mod job;
+pub mod pod;
+pub mod rollout;
 
 #[derive(Debug)]
 pub enum ContainerRuntime {
@@ -296,60 +295,15 @@ impl RuntimeDataProvider for Target {
             Target::Deployment(deployment) => deployment.runtime_data(client, namespace).await,
             Target::Pod(pod) => pod.runtime_data(client, namespace).await,
             Target::Rollout(rollout) => rollout.runtime_data(client, namespace).await,
+            Target::Job(job) => job.runtime_data(client, namespace).await,
             Target::Targetless => Err(KubeApiError::MissingRuntimeData),
         }
     }
 }
 
-impl RuntimeDataFromLabels for DeploymentTarget {
-    type Resource = Deployment;
-
-    fn name(&self) -> &str {
-        &self.deployment
-    }
-
-    fn container(&self) -> Option<&str> {
-        self.container.as_deref()
-    }
-
-    async fn get_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>> {
-        resource
-            .spec
-            .as_ref()
-            .and_then(|spec| spec.selector.match_labels.clone())
-            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.matchLabels"))
-    }
-}
-
-impl RuntimeDataFromLabels for RolloutTarget {
-    type Resource = Rollout;
-
-    fn name(&self) -> &str {
-        &self.rollout
-    }
-
-    fn container(&self) -> Option<&str> {
-        self.container.as_deref()
-    }
-
-    async fn get_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>> {
-        resource
-            .match_labels()
-            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.matchLabels"))
-    }
-}
-
-impl RuntimeDataProvider for PodTarget {
-    async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
-        let pod_api: Api<Pod> = get_k8s_resource_api(client, namespace);
-        let pod = pod_api.get(&self.pod).await?;
-
-        RuntimeData::from_pod(&pod, self.container.as_deref())
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use mirrord_config::target::{deployment::DeploymentTarget, job::JobTarget, pod::PodTarget};
     use rstest::rstest;
 
     use super::*;
@@ -360,6 +314,8 @@ mod tests {
     #[case("deployment/nginx-deployment", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_string(), container: None}))]
     #[case("pod/foo/container/baz", Target::Pod(PodTarget { pod: "foo".to_string(), container: Some("baz".to_string()) }))]
     #[case("deployment/nginx-deployment/container/container-name", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_string(), container: Some("container-name".to_string())}))]
+    #[case("job/foo", Target::Job(JobTarget { job: "foo".to_string(), container: None }))]
+    #[case("job/foo/container/baz", Target::Job(JobTarget { job: "foo".to_string(), container: Some("baz".to_string()) }))]
     fn target_parses(#[case] target: &str, #[case] expected: Target) {
         let target = target.parse::<Target>().unwrap();
         assert_eq!(target, expected)

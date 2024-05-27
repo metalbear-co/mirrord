@@ -34,6 +34,7 @@ impl TargetCrd {
             Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
             Target::Pod(target) => ("pod", &target.pod, &target.container),
             Target::Rollout(target) => ("rollout", &target.rollout, &target.container),
+            Target::Job(target) => ("job", &target.job, &target.container),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
         };
         if let Some(container) = container {

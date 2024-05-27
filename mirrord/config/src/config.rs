@@ -51,6 +51,14 @@ pub enum ConfigError {
     )]
     TargetNamespaceWithoutTarget,
 
+    #[error(
+        "A Job target has been specified, but the feature `copy_target` has not been enabled!
+
+        If you want to target a job, please enable `copy_target` feature in the `feature` section.
+        "
+    )]
+    TargetJobWithoutCopyTarget,
+
     #[error("Template rendering failed with: `{0}`! Please check your config file!")]
     TemplateRenderingFailed(String),
 }

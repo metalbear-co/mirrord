@@ -315,6 +315,7 @@ where
     Client::try_from(config).map_err(KubeApiError::from)
 }
 
+#[tracing::instrument(level = "debug", skip(client))]
 pub fn get_k8s_resource_api<K>(client: &Client, namespace: Option<&str>) -> Api<K>
 where
     K: kube::Resource<Scope = NamespaceResourceScope>,

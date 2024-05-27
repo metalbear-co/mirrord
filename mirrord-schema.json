@@ -1004,6 +1004,24 @@
       },
       "additionalProperties": false
     },
+    "JobTarget": {
+      "type": "object",
+      "required": [
+        "job"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "job": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "LinuxCapability": {
       "type": "string",
       "enum": [
@@ -1185,7 +1203,7 @@
       "additionalProperties": false
     },
     "Target": {
-      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`.",
+      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`. - `job/{sample-job}`;",
       "anyOf": [
         {
           "description": "<!--${internal}--> Mirror a deployment.",
@@ -1208,6 +1226,14 @@
           "allOf": [
             {
               "$ref": "#/definitions/RolloutTarget"
+            }
+          ]
+        },
+        {
+          "description": "<!--${internal}--> Mirror a Job.\n\nOnly supported when `copy_target` is enabled.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/JobTarget"
             }
           ]
         },
