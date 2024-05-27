@@ -482,8 +482,10 @@ pub struct MirrordQueueSplitterSpec {
     /// The resource (deployment or Argo rollout) that reads from the queues.
     pub consumer: QueueConsumer,
 
-    /// These tags will be added to all temporary SQS queues created by mirrord for queues defined
-    /// in this MirrordQueueSplitter.
+    /// These tags will be set for all temporary SQS queues created by mirrord for queues defined
+    /// in this MirrordQueueSplitter, alongside with the original tags of the respective original
+    /// queue. In case of a collision, the temporary queue will get the value from the tag passed
+    /// in here.
     pub tags: Option<HashMap<String, String>>,
 }
 
