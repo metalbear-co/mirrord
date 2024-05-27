@@ -1,0 +1,1 @@
+Allows a Job to be used as a target when copy_target is enabled.
