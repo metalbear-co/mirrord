@@ -1,4 +1,4 @@
-use std::{fmt, path::Path};
+use std::{collections::HashMap, fmt, path::Path};
 
 use k8s_openapi::api::core::v1::{ResourceRequirements, Toleration};
 use mirrord_analytics::CollectAnalytics;
@@ -63,7 +63,6 @@ impl fmt::Display for LinuxCapability {
 ///     "communication_timeout": 30,
 ///     "startup_timeout": 360,
 ///     "network_interface": "eth0",
-///     "pause": false,
 ///     "flush_connections": false,
 ///   }
 /// }
@@ -281,6 +280,28 @@ pub struct AgentConfig {
     /// ### agent.dns {#agent-dns}
     #[config(nested)]
     pub dns: AgentDnsConfig,
+
+    /// ### agent.labels {#agent-labels}
+    ///
+    /// Allows setting up custom labels for the agent Job and Pod.
+    ///
+    /// ```json
+    /// {
+    ///   "labels": { "user": "meow", "state": "asleep" }
+    /// }
+    /// ```
+    pub labels: Option<HashMap<String, String>>,
+
+    /// ### agent.annotations {#agent-annotations}
+    ///
+    /// Allows setting up custom annotations for the agent Job and Pod.
+    ///
+    /// ```json
+    /// {
+    ///   "annotations": { "cats.io/inject": "enabled" }
+    /// }
+    /// ```
+    pub annotations: Option<HashMap<String, String>>,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing

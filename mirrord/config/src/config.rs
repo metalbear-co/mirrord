@@ -54,7 +54,7 @@ pub enum ConfigError {
     #[error(
         "A Job target has been specified, but the feature `copy_target` has not been enabled!
 
-        If you want to target a job, please set `copy_target: true`.
+        If you want to target a job, please enable `copy_target` feature in the `feature` section.
         "
     )]
     TargetJobWithoutCopyTarget,
