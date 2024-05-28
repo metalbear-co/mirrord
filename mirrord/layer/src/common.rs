@@ -103,7 +103,8 @@ impl CheckedInto<PathBuf> for *const c_char {
         let str_det = CheckedInto::<&str>::checked_into(self);
         #[cfg(target_os = "macos")]
         let str_det = str_det.and_then(|path_str| {
-            let optional_stripped_path = strip_mirrord_path(Path::new(path_str));
+            let optional_stripped_path =
+                strip_mirrord_path(Path::new(path_str)).map(|x| Path::new("/").join(x));
             if let Some(stripped_path) = optional_stripped_path {
                 // actually stripped, so bypass and provide a pointer to after the temp dir.
                 // `stripped_path` is a reference to a later character in the same string as

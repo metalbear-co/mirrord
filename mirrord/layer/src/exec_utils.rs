@@ -157,10 +157,11 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
         trace!("exec arg: {arg_str}");
         let arg_path = Path::new(arg_str);
 
+        let leading_slash = Path::new("/");
         let stripped: PathBuf = arg_path
-            .strip_prefix(MIRRORD_TEMP_BIN_DIR_PATH_BUF.to_owned())
+            .strip_prefix(MIRRORD_TEMP_BIN_DIR_PATH_BUF.to_owned()).map(|x| leading_slash.join(x))
             // If /var/folders... not a prefix, check /private/var/folers...
-            .or(arg_path.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_PATHBUF.to_owned()))
+            .or(arg_path.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_PATHBUF.to_owned()).map(|x| leading_slash.join(x)))
             .inspect(|original_path| {
                 trace!(
                     "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {:?}.",
@@ -168,7 +169,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
                     original_path
                 );
             })
-            .unwrap_or(arg_path) // No temp-dir prefix found, use arg as is.
+            .unwrap_or(arg_path.to_owned()) // No temp-dir prefix found, use arg as is.
             // As the path we get here is a slice of memory allocated and managed by
             // the user app, we copy the data and create new CStrings out of the copy
             // without consuming the original data.
@@ -199,7 +200,7 @@ unsafe fn patch_sip_for_new_process(
     // path. The file might not even exist in our tmp dir, and the application is expecting it there
     // only because it somehow found out about its own patched location in our tmp dir.
     // If original path is SIP, and actually exists in our dir that patched executable will be used.
-    if let Some(s) = strip_mirrord_path(Path::new(&path_str)) {
+    if let Some(s) = strip_mirrord_path(Path::new(&path_str)).map(|x| Path::new("/").join(x)) {
         path_str = s.to_string_lossy().to_string();
     };
     let path_c_string = patch_if_sip(&path_str)

@@ -40,16 +40,18 @@ mod main {
     pub const FRAMEWORKS_ENV_VAR_NAME: &str = "DYLD_FALLBACK_FRAMEWORK_PATH";
 
     /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
-    /// scripts.
+    /// scripts. Needs a leading slash
     pub static MIRRORD_TEMP_BIN_DIR_PATH_BUF: Lazy<PathBuf> =
-        Lazy::new(|| env::temp_dir().join(MIRRORD_PATCH_DIR));
+        Lazy::new(|| Path::new("/").join(env::temp_dir().join(MIRRORD_PATCH_DIR)));
 
-    /// Canonicalized version of `MIRRORD_TEMP_BIN_DIR`.
+    /// Canonicalized version of `MIRRORD_TEMP_BIN_DIR`. Needs a leading slash
     pub static MIRRORD_TEMP_BIN_DIR_CANONIC_PATHBUF: Lazy<PathBuf> = Lazy::new(|| {
-        MIRRORD_TEMP_BIN_DIR_PATH_BUF
-            // Resolve symbolic links (specifically /var -> private/var).
-            .canonicalize()
-            .unwrap_or(MIRRORD_TEMP_BIN_DIR_PATH_BUF.to_path_buf())
+        Path::new("/").join(
+            MIRRORD_TEMP_BIN_DIR_PATH_BUF
+                // Resolve symbolic links (specifically /var -> private/var).
+                .canonicalize()
+                .unwrap_or(MIRRORD_TEMP_BIN_DIR_PATH_BUF.to_path_buf()),
+        )
     });
 
     /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
@@ -224,6 +226,7 @@ mod main {
         original_path: &Path,
         output_path: &Path,
     ) -> Result<()> {
+        let leading_slash = Path::new("/");
         let parent_path_str = original_path.parent().unwrap_or(original_path);
         let new_entries = original_entries
             .iter()
@@ -232,7 +235,8 @@ mod main {
                     .ok()
                     .or_else(|| path.strip_prefix("@loader_path").ok())
             })
-            .map(|stripped_path| parent_path_str.join(stripped_path).into_os_string()) // TODO: check overwriting caveat
+            .map(|path| leading_slash.join(path)) // .strip_prefix() removes the leading slash, so add it back
+            .map(|stripped_path| parent_path_str.join(stripped_path).into_os_string())
             .collect();
         rpath::add_rpaths(output_path, new_entries)
     }
