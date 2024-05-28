@@ -623,9 +623,19 @@ impl OperatorApi {
     }
 
     /// List targets using the operator
-    #[tracing::instrument(level = "trace", skip(self), ret)]
-    pub async fn list_targets(&self) -> Result<Vec<TargetCrd>> {
-        self.target_api
+    #[tracing::instrument(level = "trace", ret)]
+    pub async fn list_targets(config: &LayerConfig) -> Result<Vec<TargetCrd>> {
+        let client = create_kube_api(
+            config.accept_invalid_certificates,
+            config.kubeconfig.clone(),
+            config.kube_context.clone(),
+        )
+        .await
+        .map_err(OperatorApiError::CreateApiError)?;
+
+        let target_api: Api<TargetCrd> =
+            get_k8s_resource_api(&client, config.target.namespace.as_deref());
+        target_api
             .list(&ListParams::default())
             .await
             .map_err(|error| OperatorApiError::KubeError {
