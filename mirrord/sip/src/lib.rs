@@ -634,7 +634,7 @@ mod main {
             let path = Path::new("/usr/bin/file");
             let patched_path_buf = patch_binary(path).unwrap();
             assert!(matches!(
-                get_sip_status(path, &vec![]).unwrap(),
+                get_sip_status(&&patched_path_buf, &vec![]).unwrap(),
                 SipStatus::NoSip
             ));
             // Check DYLD_* features work on it:
