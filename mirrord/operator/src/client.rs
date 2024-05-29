@@ -514,21 +514,19 @@ impl OperatorApi {
                 .uri(self.connect_url(&session_info))
                 .header("x-session-id", session_info.metadata.session_id.to_string());
 
-            debug!(
-                "session_id {}",
-                session_info.metadata.session_id.to_string()
-            );
+            // we trim name/hostname since we saw users having line breaks and maybe it can have
+            // non ascii stuf???
             if let Some(name) = name {
-                debug!(?name, "name");
-                builder =
-                    builder.header("x-client-name", name.replace(|c: char| !c.is_ascii(), ""));
+                builder = builder.header(
+                    "x-client-name",
+                    name.replace(|c: char| !c.is_ascii(), "").trim(),
+                );
             };
 
             if let Some(hostname) = hostname {
-                debug!(?hostname, "hostname");
                 builder = builder.header(
                     "x-client-hostname",
-                    hostname.replace(|c: char| !c.is_ascii(), ""),
+                    hostname.replace(|c: char| !c.is_ascii(), "").trim(),
                 );
             };
 
