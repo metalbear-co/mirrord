@@ -15,8 +15,7 @@ const hostList = [
   "www.live.com",
   "www.msn.com",
   "www.google.com.br",
-  "www.yahoo.co.jp",
-  "www.qq.com",
+  "www.yahoo.co.jp"
 ];
 
 let requestIndex = 0;
