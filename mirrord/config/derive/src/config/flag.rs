@@ -1,7 +1,7 @@
 use proc_macro2::{Span, TokenStream};
 use proc_macro2_diagnostics::{Diagnostic, SpanDiagnosticExt};
 use quote::{quote, ToTokens};
-use syn::{spanned::Spanned, Attribute, Ident, Lit, Meta, NestedMeta};
+use syn::{Attribute, Expr, ExprLit, Ident, Lit, Meta, MetaNameValue};
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ConfigFlagsType {
@@ -30,87 +30,87 @@ pub struct ConfigFlags {
     pub deprecated: Option<Lit>,
 }
 
+fn lit_or_kaboom(meta: &MetaNameValue) -> Lit {
+    if let MetaNameValue {
+        path: _,
+        eq_token: _,
+        value: Expr::Lit(ExprLit { attrs, lit }),
+    } = meta
+    {
+        lit.clone()
+    } else {
+        panic!("Kaboom `deprecated` meta.lit")
+    }
+}
+
 impl ConfigFlags {
     pub fn new(attrs: &[Attribute], mode: ConfigFlagsType) -> Result<Self, Diagnostic> {
+        /* TODO(alex) [high]: Looks like a stray comma at the end is the issue:
+
+        #[derive(Clone, Debug, Default, serde :: Deserialize,)] <--
+        #[serde(deny_unknown_fields)]
+         */
+        // ADD(alex) [high]: Nope, this doesn't seem to be the issue, I don't see doble
+        // commas anywhere (which would be actually breaking).
         let mut flags = ConfigFlags {
             doc: attrs
                 .iter()
-                .filter(|attr| attr.path.is_ident("doc"))
+                .filter(|attr| attr.path().is_ident("doc"))
                 .cloned()
                 .collect(),
             ..Default::default()
         };
 
-        for meta in attrs
+        for meta_list in attrs
             .iter()
-            .filter(|attr| attr.path.is_ident("config"))
-            .filter_map(|attr| attr.parse_meta().ok())
+            .filter(|attr| attr.path().is_ident("config"))
+            .filter_map(|attr| attr.meta.require_list().ok())
         {
-            if let Meta::List(list) = meta {
-                for meta in list.nested {
-                    match meta {
-                        NestedMeta::Meta(Meta::Path(path))
-                            if mode == ConfigFlagsType::Field && path.is_ident("nested") =>
+            meta_list
+                .parse_nested_meta(|nested| {
+                    if mode == ConfigFlagsType::Field && nested.path.is_ident("nested") {
+                        flags.nested = true
+                    } else if mode == ConfigFlagsType::Field && nested.path.is_ident("toggleable") {
+                        flags.toggleable = true
+                    } else if mode == ConfigFlagsType::Field && nested.path.is_ident("unstable") {
+                        flags.unstable = true
+                    } else if mode == ConfigFlagsType::Field && nested.path.is_ident("default") {
+                        flags.default = Some(DefaultFlag::Flag)
+                    } else if let Ok(name_value) = nested.input.parse::<MetaNameValue>() {
+                        if mode == ConfigFlagsType::Field && nested.path.is_ident("env") {
+                            flags.env = Some(EnvFlag(lit_or_kaboom(&name_value)))
+                        } else if mode == ConfigFlagsType::Field && nested.path.is_ident("default")
                         {
-                            flags.nested = true
-                        }
-                        NestedMeta::Meta(Meta::Path(path))
-                            if mode == ConfigFlagsType::Field && path.is_ident("toggleable") =>
+                            flags.default = Some(DefaultFlag::Value(lit_or_kaboom(&name_value)))
+                        } else if mode == ConfigFlagsType::Field && nested.path.is_ident("rename") {
+                            flags.rename = Some(lit_or_kaboom(&name_value))
+                        } else if mode == ConfigFlagsType::Field
+                            && nested.path.is_ident("deprecated")
                         {
-                            flags.toggleable = true
-                        }
-                        NestedMeta::Meta(Meta::Path(path))
-                            if mode == ConfigFlagsType::Field && path.is_ident("unstable") =>
+                            flags.deprecated = Some(lit_or_kaboom(&name_value))
+                        } else if mode == ConfigFlagsType::Container
+                            && nested.path.is_ident("map_to")
                         {
-                            flags.unstable = true
-                        }
-                        NestedMeta::Meta(Meta::NameValue(meta))
-                            if mode == ConfigFlagsType::Field && meta.path.is_ident("env") =>
-                        {
-                            flags.env = Some(EnvFlag(meta.lit))
-                        }
-                        NestedMeta::Meta(Meta::Path(path))
-                            if mode == ConfigFlagsType::Field && path.is_ident("default") =>
-                        {
-                            flags.default = Some(DefaultFlag::Flag)
-                        }
-                        NestedMeta::Meta(Meta::NameValue(meta))
-                            if mode == ConfigFlagsType::Field && meta.path.is_ident("default") =>
-                        {
-                            flags.default = Some(DefaultFlag::Value(meta.lit))
-                        }
-                        NestedMeta::Meta(Meta::NameValue(meta))
-                            if mode == ConfigFlagsType::Field && meta.path.is_ident("rename") =>
-                        {
-                            flags.rename = Some(meta.lit)
-                        }
-                        NestedMeta::Meta(Meta::NameValue(meta))
-                            if mode == ConfigFlagsType::Field
-                                && meta.path.is_ident("deprecated") =>
-                        {
-                            flags.deprecated = Some(meta.lit)
-                        }
-                        NestedMeta::Meta(Meta::NameValue(meta))
-                            if mode == ConfigFlagsType::Container
-                                && meta.path.is_ident("map_to") =>
-                        {
-                            match meta.lit {
+                            let lit = lit_or_kaboom(&name_value);
+                            match lit {
                                 Lit::Str(val) => {
                                     flags.map_to = Some(Ident::new(&val.value(), Span::call_site()))
                                 }
                                 _ => {
-                                    return Err(meta
-                                        .lit
+                                    let fail = lit
                                         .span()
-                                        .error("map_to should be a string literal as value"))
+                                        .error("map_to should be a string literal as value");
+                                    panic!("{fail:?}");
+                                    // return Err(lit
+                                    //     .span()
+                                    //     .error("map_to should be a string literal as value"));
                                 }
                             }
-                        }
-                        NestedMeta::Meta(Meta::NameValue(meta))
-                            if mode == ConfigFlagsType::Container
-                                && meta.path.is_ident("derive") =>
+                        } else if mode == ConfigFlagsType::Container
+                            && nested.path.is_ident("derive")
                         {
-                            match meta.lit {
+                            let lit = lit_or_kaboom(&name_value);
+                            match lit {
                                 Lit::Str(val) => {
                                     flags.derive.extend(
                                         val.value()
@@ -119,34 +119,40 @@ impl ConfigFlags {
                                     );
                                 }
                                 _ => {
-                                    return Err(meta
-                                        .lit
+                                    let fail = lit
                                         .span()
-                                        .error("derive should be a string literal as value"))
+                                        .error("derive should be a string literal as value");
+                                    panic!("{fail:?}");
+                                    // return Err(lit
+                                    //     .span()
+                                    //     .error("derive should be a string literal as value"))
                                 }
                             }
-                        }
-                        NestedMeta::Meta(Meta::NameValue(meta))
-                            if mode == ConfigFlagsType::Container
-                                && meta.path.is_ident("generator") =>
+                        } else if mode == ConfigFlagsType::Container
+                            && nested.path.is_ident("generator")
                         {
-                            match meta.lit {
+                            let lit = lit_or_kaboom(&name_value);
+                            match lit {
                                 Lit::Str(val) => {
                                     flags.generator =
                                         Some(Ident::new(&val.value(), Span::call_site()))
                                 }
                                 _ => {
-                                    return Err(meta
-                                        .lit
+                                    let fail = lit
                                         .span()
-                                        .error("derive should be a string literal as value"))
+                                        .error("derive should be a string literal as value");
+                                    panic!("{fail:?}");
+                                    // return Err(lit
+                                    //     .span()
+                                    //     .error("derive should be a string literal as value"))
                                 }
                             }
                         }
-                        _ => return Err(meta.span().error("unsupported config attribute flag")),
                     }
-                }
-            }
+
+                    Ok(())
+                })
+                .ok();
         }
 
         Ok(flags)

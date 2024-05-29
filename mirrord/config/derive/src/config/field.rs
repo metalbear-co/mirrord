@@ -188,6 +188,7 @@ impl ConfigField {
 impl TryFrom<Field> for ConfigField {
     type Error = Diagnostic;
 
+    // TOOD(alex) [mid]: working
     fn try_from(field: Field) -> Result<Self, Self::Error> {
         let flags = ConfigFlags::new(&field.attrs, ConfigFlagsType::Field)?;
         let option = Self::is_option(&field);

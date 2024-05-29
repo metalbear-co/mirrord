@@ -21,6 +21,7 @@ pub struct ConfigStruct {
 }
 
 impl ConfigStruct {
+    // TODO(alex) [mid]: working
     pub fn new(input: DeriveInput) -> Result<Self, Diagnostic> {
         let DeriveInput {
             attrs,
