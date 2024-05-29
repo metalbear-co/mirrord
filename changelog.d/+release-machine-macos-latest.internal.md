@@ -1,1 +1,0 @@
-Update release action to use latest macOS

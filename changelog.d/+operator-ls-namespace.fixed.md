@@ -1,1 +1,0 @@
-Fixed listing targets when using operator ignoring namespace - always using default
