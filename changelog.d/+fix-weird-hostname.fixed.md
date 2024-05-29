@@ -1,0 +1,1 @@
+Clean hostname/name sent to operator to fix issue of hostname with linebreaks
