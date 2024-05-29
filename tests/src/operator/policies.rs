@@ -15,13 +15,15 @@ use crate::utils::{
 };
 
 /// Guard that deletes a mirrord policy when dropped.
-struct PolicyGuard(ResourceGuard);
+struct PolicyGuard {
+    _inner: ResourceGuard,
+}
 
 impl PolicyGuard {
     pub async fn new(kube_client: kube::Client, policy: &MirrordPolicy, namespace: &str) -> Self {
         let policy_api: Api<MirrordPolicy> = Api::namespaced(kube_client.clone(), namespace);
-        PolicyGuard(
-            ResourceGuard::create(
+        PolicyGuard {
+            _inner: ResourceGuard::create(
                 policy_api,
                 policy.metadata.name.clone().unwrap(),
                 policy,
@@ -29,7 +31,7 @@ impl PolicyGuard {
             )
             .await
             .expect("Could not create policy in E2E test."),
-        )
+        }
     }
 }
 
