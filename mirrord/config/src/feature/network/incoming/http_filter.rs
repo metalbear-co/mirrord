@@ -38,7 +38,7 @@ use crate::{
 ///
 ///
 /// This can be useful for filtering out Kubernetes liveness, readiness and startup probes.
-/// For example, for avoiding stealing any probe at all, you can set this filter:
+/// For example, for avoiding stealing any probe sent by kubernetes, you can set this filter:
 /// ```json
 /// {
 ///   "header_filter": "^User-Agent: (?!kube-probe)",
