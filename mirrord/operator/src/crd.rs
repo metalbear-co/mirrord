@@ -21,9 +21,6 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 pub struct TargetSpec {
     /// None when targetless.
     pub target: Option<Target>,
-    /// This field is deprecated.
-    /// New operator versions always return [`None`].
-    pub port_locks: Option<Vec<TargetPortLock>>,
 }
 
 impl TargetCrd {
