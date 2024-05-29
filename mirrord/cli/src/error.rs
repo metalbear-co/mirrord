@@ -67,28 +67,6 @@ pub(crate) enum CliError {
     ))]
     OperatorConnectionFailed(String),
 
-    #[error("Failed to connect to the operator. Someone else is stealing traffic from the requested target")]
-    #[diagnostic(help(
-        r#"
-    If you want to run anyway, please set the following:
-    
-    {{
-      "feature": {{
-        "network": {{
-          "incoming": {{
-            ...
-            "on_concurrent_steal": "continue" // or "override"
-          }}
-        }}
-      }}
-    }}
-
-    More info (https://mirrord.dev/docs/reference/configuration/#feature-network-incoming-on_concurrent_steal)
-
-    {GENERAL_HELP}"#
-    ))]
-    OperatorConcurrentSteal,
-
     #[error("Failed to create Kubernetes API. {0:#?}")]
     #[diagnostic(help(
         r#"
@@ -325,7 +303,6 @@ pub(crate) enum CliError {
 impl From<OperatorApiError> for CliError {
     fn from(value: OperatorApiError) -> Self {
         match value {
-            OperatorApiError::ConcurrentStealAbort => Self::OperatorConcurrentSteal,
             OperatorApiError::UnsupportedFeature {
                 feature,
                 operator_version,
