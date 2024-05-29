@@ -90,9 +90,6 @@ pub enum OperatorApiError {
         operation: OperatorOperation,
     },
 
-    #[error("can't start proccess because other locks exist on target")]
-    ConcurrentStealAbort,
-
     #[error("mirrord operator {operator_version} does not support feature {feature}")]
     UnsupportedFeature {
         feature: String,

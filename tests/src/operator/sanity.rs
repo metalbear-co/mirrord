@@ -1,11 +1,10 @@
 #![cfg(test)]
 #![cfg(feature = "operator")]
-use std::time::Duration;
 
 use regex::Regex;
 use rstest::rstest;
 
-use crate::utils::{config_dir, run_ls, run_verify_config, service, KubeService};
+use crate::utils::{run_ls, service, KubeService};
 
 /// Tests for the `mirrord ls` command with operator
 #[rstest]

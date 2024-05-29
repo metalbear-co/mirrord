@@ -20,9 +20,12 @@ pub async fn two_clients_steal_same_target(
     #[future]
     #[notrace]
     service: KubeService,
+    #[future]
+    #[notrace]
+    kube_client: Client,
     #[values(Application::PythonFlaskHTTP)] application: Application,
 ) {
-    let service = service.await;
+    let (service, client) = tokio::join!(service, kube_client);
 
     let flags = vec!["--steal", "--fs-mode=local"];
 
@@ -43,19 +46,27 @@ pub async fn two_clients_steal_same_target(
         .run(&service.target, Some(&service.namespace), Some(flags), None)
         .await;
 
-    client_b
-        .wait_for_line(Duration::from_secs(40), "Someone else is stealing traffic")
-        .await;
-
-    client_a.child.kill().await.unwrap();
-
     let res = client_b.child.wait().await.unwrap();
     assert!(!res.success());
+    assert!(!client_b.get_stderr().await.contains("daemon subscribed"));
+
+    // check if client_a is stealing
+    let url = get_service_url(client, &service).await;
+    let client = reqwest::Client::new();
+    let req_builder = client.delete(&url);
+    let mut headers = HeaderMap::default();
+    headers.insert("x-filter", "yes".parse().unwrap());
+    send_request(req_builder, Some("DELETE"), headers.clone()).await;
+
+    tokio::time::timeout(Duration::from_secs(15), client_a.wait())
+        .await
+        .unwrap();
+
+    client_a
+        .assert_stdout_contains("DELETE: Request completed")
+        .await;
 }
 
-/// with operator installed steal works on pod/*/container/* and deployment/*
-/// ignored, till bug is fixed upstream
-#[ignore]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub async fn two_clients_steal_same_target_pod_deployment(
@@ -67,8 +78,7 @@ pub async fn two_clients_steal_same_target_pod_deployment(
     kube_client: Client,
     #[values(Application::PythonFlaskHTTP)] application: Application,
 ) {
-    let service = service.await;
-    let client = kube_client.await;
+    let (service, client) = tokio::join!(service, kube_client);
 
     let flags = vec!["--steal", "--fs-mode=local"];
 
@@ -98,9 +108,9 @@ pub async fn two_clients_steal_same_target_pod_deployment(
         )
         .await;
 
-    client_b
-        .wait_for_line(Duration::from_secs(40), "Someone else is stealing traffic")
-        .await;
+    let res = client_b.child.wait().await.unwrap();
+    assert!(!res.success());
+    assert!(!client_b.get_stderr().await.contains("daemon subscribed"));
 
     // check if client_a is stealing
     let url = get_service_url(client, &service).await;
@@ -117,9 +127,6 @@ pub async fn two_clients_steal_same_target_pod_deployment(
     client_a
         .assert_stdout_contains("DELETE: Request completed")
         .await;
-
-    let res = client_b.child.wait().await.unwrap();
-    assert!(!res.success());
 }
 
 #[rstest]
