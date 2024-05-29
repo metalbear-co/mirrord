@@ -511,8 +511,7 @@ impl OperatorApi {
                 .uri(self.connect_url(&session_info))
                 .header("x-session-id", session_info.metadata.session_id.to_string());
 
-            // we trim name/hostname since we saw users having line breaks and maybe it can have
-            // non ascii stuf???
+            // Replace non-ascii (not supported in headers) chars and trim headers.
             if let Some(name) = name {
                 builder = builder.header(
                     "x-client-name",
