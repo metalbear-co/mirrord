@@ -498,44 +498,12 @@ impl OperatorApi {
         }
     }
 
-    /// Checks that there are no active port locks on the given target.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn check_no_port_locks(&self, target: &TargetCrd) -> Result<()> {
-        let Ok(lock_target) = self
-            .target_api
-            .get_subresource("port-locks", &target.name())
-            .await
-        else {
-            return Ok(());
-        };
-
-        let no_port_locks = lock_target
-            .spec
-            .port_locks
-            .as_ref()
-            .map(Vec::is_empty)
-            .unwrap_or(true);
-
-        if no_port_locks {
-            Ok(())
-        } else {
-            Err(OperatorApiError::ConcurrentStealAbort)
-        }
-    }
-
     /// Create websocket connection to operator.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn connect_target(
         &self,
         session_info: OperatorSessionInformation,
     ) -> Result<OperatorSessionConnection> {
-        // why are we checking on client side..?
-        if let (ConcurrentSteal::Abort, OperatorSessionTarget::Raw(target)) =
-            (self.on_concurrent_steal, &session_info.target)
-        {
-            self.check_no_port_locks(target).await?;
-        }
-
         let UserIdentity { name, hostname } = UserIdentity::load();
 
         let request = {

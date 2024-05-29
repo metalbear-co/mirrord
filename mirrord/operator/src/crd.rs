@@ -21,6 +21,7 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 pub struct TargetSpec {
     /// None when targetless.
     pub target: Option<Target>,
+    #[deprecated = "port locks are enforced only in the operator, new operator versions always return an empty list"]
     pub port_locks: Option<Vec<TargetPortLock>>,
 }
 
