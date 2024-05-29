@@ -112,6 +112,30 @@ pub struct AgentConfig {
     pub namespace: Option<String>,
 
     /// ### agent.image {#agent-image}
+    ///
+    /// Name of the agent's docker image.
+    ///
+    /// Useful when a custom build of mirrord-agent is required, or when using an internal
+    /// registry.
+    ///
+    /// Defaults to the latest stable image `"ghcr.io/metalbear-co/mirrord:latest"`.
+    ///
+    /// ```json
+    /// {
+    ///   "image": "internal.repo/images/mirrord:latest"
+    /// }
+    /// ```
+    ///
+    /// Complete setup:
+    ///
+    /// ```json
+    /// {
+    ///   "image": {
+    ///     "registry": "internal.repo/images/mirrord",
+    ///     "tag": "latest",
+    ///   }
+    /// }
+    /// ```
     #[config(nested)]
     pub image: AgentImageConfig,
 
@@ -201,9 +225,9 @@ pub struct AgentConfig {
     /// Defaults to `true`.
     // Temporary fix for issue [#1029](https://github.com/metalbear-co/mirrord/issues/1029).
     #[config(
-        env = "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS",
-        default = true,
-        unstable
+    env = "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS",
+    default = true,
+    unstable
     )]
     pub flush_connections: bool,
 
@@ -311,29 +335,6 @@ pub struct AgentConfig {
     pub test_error: bool,
 }
 
-/// Name of the agent's docker image.
-///
-/// Useful when a custom build of mirrord-agent is required, or when using an internal
-/// registry.
-///
-/// Defaults to the latest stable image `"ghcr.io/metalbear-co/mirrord:latest"`.
-///
-/// ```json
-/// {
-///   "image": "internal.repo/images/mirrord:latest"
-/// }
-/// ```
-///
-/// Complete setup:
-///
-/// ```json
-/// {
-///   "image": {
-///     "registry": "internal.repo/images/mirrord",
-///     "tag": "latest",
-///   }
-/// }
-/// ```
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
@@ -439,8 +440,8 @@ impl AgentConfig {
 
 impl AgentFileConfig {
     pub fn from_path<P>(path: P) -> Result<Self, ConfigError>
-    where
-        P: AsRef<Path>,
+        where
+            P: AsRef<Path>,
     {
         let config = std::fs::read_to_string(path.as_ref())?;
 

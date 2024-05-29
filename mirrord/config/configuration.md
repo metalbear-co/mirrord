@@ -416,6 +416,30 @@ Read more [here](https://kubernetes.io/docs/concepts/containers/images/#referrin
 
 ### agent.image {#agent-image}
 
+Name of the agent's docker image.
+
+Useful when a custom build of mirrord-agent is required, or when using an internal
+registry.
+
+Defaults to the latest stable image `"ghcr.io/metalbear-co/mirrord:latest"`.
+
+```json
+{
+  "image": "internal.repo/images/mirrord:latest"
+}
+```
+
+Complete setup:
+
+```json
+{
+  "image": {
+    "registry": "internal.repo/images/mirrord",
+    "tag": "latest",
+  }
+}
+```
+
 ### agent.resources {#agent-resources}
 
 Set pod resource reqirements. (not with ephemeral agents)
