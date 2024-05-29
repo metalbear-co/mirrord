@@ -520,7 +520,7 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
                         .filter_map(|target_crd| {
                             let target = target_crd.spec.target.as_ref()?;
                             if let Some(container) = target.container_name() {
-                                if !SKIP_NAMES.contains(container.as_str()) {
+                                if SKIP_NAMES.contains(container.as_str()) {
                                     return None;
                                 }
                             }
