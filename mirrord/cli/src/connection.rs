@@ -35,8 +35,7 @@ impl OperatorApiErrorExt for OperatorApiError {
             // Fallback to OSS if license is expired
             Self::NoLicense => false,
             // These should either never happen or can happen only if the operator is installed.
-            Self::ConcurrentStealAbort
-            | Self::ConnectRequestBuildError(..)
+            Self::ConnectRequestBuildError(..)
             | Self::CreateApiError(..)
             | Self::InvalidTarget { .. }
             | Self::UnsupportedFeature { .. }

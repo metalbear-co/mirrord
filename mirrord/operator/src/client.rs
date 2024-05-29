@@ -90,9 +90,6 @@ pub enum OperatorApiError {
         operation: OperatorOperation,
     },
 
-    #[error("can't start proccess because other locks exist on target")]
-    ConcurrentStealAbort,
-
     #[error("mirrord operator {operator_version} does not support feature {feature}")]
     UnsupportedFeature {
         feature: String,
@@ -514,12 +511,19 @@ impl OperatorApi {
                 .uri(self.connect_url(&session_info))
                 .header("x-session-id", session_info.metadata.session_id.to_string());
 
+            // Replace non-ascii (not supported in headers) chars and trim headers.
             if let Some(name) = name {
-                builder = builder.header("x-client-name", name);
+                builder = builder.header(
+                    "x-client-name",
+                    name.replace(|c: char| !c.is_ascii(), "").trim(),
+                );
             };
 
             if let Some(hostname) = hostname {
-                builder = builder.header("x-client-hostname", hostname);
+                builder = builder.header(
+                    "x-client-hostname",
+                    hostname.replace(|c: char| !c.is_ascii(), "").trim(),
+                );
             };
 
             match session_info.metadata.client_credentials() {
