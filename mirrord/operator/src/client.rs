@@ -528,7 +528,6 @@ impl OperatorApi {
 
             match session_info.metadata.client_credentials() {
                 Ok(Some(credentials)) => {
-                    debug!(?credentials, "credentials");
                     builder = builder.header("x-client-der", credentials);
                 }
                 Ok(None) => {}
