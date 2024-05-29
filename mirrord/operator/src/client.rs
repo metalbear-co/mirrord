@@ -514,16 +514,27 @@ impl OperatorApi {
                 .uri(self.connect_url(&session_info))
                 .header("x-session-id", session_info.metadata.session_id.to_string());
 
+            debug!(
+                "session_id {}",
+                session_info.metadata.session_id.to_string()
+            );
             if let Some(name) = name {
-                builder = builder.header("x-client-name", name);
+                debug!(?name, "name");
+                builder =
+                    builder.header("x-client-name", name.replace(|c: char| !c.is_ascii(), ""));
             };
 
             if let Some(hostname) = hostname {
-                builder = builder.header("x-client-hostname", hostname);
+                debug!(?hostname, "hostname");
+                builder = builder.header(
+                    "x-client-hostname",
+                    hostname.replace(|c: char| !c.is_ascii(), ""),
+                );
             };
 
             match session_info.metadata.client_credentials() {
                 Ok(Some(credentials)) => {
+                    debug!(?credentials, "credentials");
                     builder = builder.header("x-client-der", credentials);
                 }
                 Ok(None) => {}
