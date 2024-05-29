@@ -1,0 +1,1 @@
+Fixed missing pods/deployments with more than 1 container when using operator ls
