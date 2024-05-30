@@ -112,6 +112,30 @@ pub struct AgentConfig {
     pub namespace: Option<String>,
 
     /// ### agent.image {#agent-image}
+    ///
+    /// Name of the agent's docker image.
+    ///
+    /// Useful when a custom build of mirrord-agent is required, or when using an internal
+    /// registry.
+    ///
+    /// Defaults to the latest stable image `"ghcr.io/metalbear-co/mirrord:latest"`.
+    ///
+    /// ```json
+    /// {
+    ///   "image": "internal.repo/images/mirrord:latest"
+    /// }
+    /// ```
+    ///
+    /// Complete setup:
+    ///
+    /// ```json
+    /// {
+    ///   "image": {
+    ///     "registry": "internal.repo/images/mirrord",
+    ///     "tag": "latest",
+    ///   }
+    /// }
+    /// ```
     #[config(nested)]
     pub image: AgentImageConfig,
 
@@ -311,29 +335,6 @@ pub struct AgentConfig {
     pub test_error: bool,
 }
 
-/// Name of the agent's docker image.
-///
-/// Useful when a custom build of mirrord-agent is required, or when using an internal
-/// registry.
-///
-/// Defaults to the latest stable image `"ghcr.io/metalbear-co/mirrord:latest"`.
-///
-/// ```json
-/// {
-///   "image": "internal.repo/images/mirrord:latest"
-/// }
-/// ```
-///
-/// Complete setup:
-///
-/// ```json
-/// {
-///   "image": {
-///     "registry": "internal.repo/images/mirrord",
-///     "tag": "latest",
-///   }
-/// }
-/// ```
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
