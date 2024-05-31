@@ -445,11 +445,11 @@ pub struct QueueDetails {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // active_filters -> activeFilters
-pub struct QueueSplitterStatus {
+pub struct WorkloadQueueRegistryStatus {
     pub queue_details: QueueDetails,
 }
 
-impl QueueSplitterStatus {
+impl WorkloadQueueRegistryStatus {
     pub fn output_queue_names(&self) -> Vec<&str> {
         self.queue_details.queue_names
             .values()
@@ -463,14 +463,14 @@ impl QueueSplitterStatus {
 /// to the spec and the user's filter.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-group = "splitters.mirrord.metalbear.co",
+group = "queues.mirrord.metalbear.co",
 version = "v1alpha",
-kind = "MirrordQueueSplitter",
+kind = "MirrordWorkloadQueueRegistry",
 shortname = "qs",
-status = "QueueSplitterStatus",
+status = "WorkloadQueueRegistryStatus",
 namespaced
 )]
-pub struct MirrordQueueSplitterSpec {
+pub struct MirrordWorkloadQueueRegistrySpec {
     /// A map of the queues that should be split.
     /// The key is used by users to associate filters to the right queues.
     pub queues: BTreeMap<QueueId, SplitQueue>,
@@ -479,7 +479,7 @@ pub struct MirrordQueueSplitterSpec {
     pub consumer: QueueConsumer,
 
     /// These tags will be set for all temporary SQS queues created by mirrord for queues defined
-    /// in this MirrordQueueSplitter, alongside with the original tags of the respective original
+    /// in this MirrordWorkloadQueueRegistry, alongside with the original tags of the respective original
     /// queue. In case of a collision, the temporary queue will get the value from the tag passed
     /// in here.
     pub tags: Option<HashMap<String, String>>,
@@ -524,7 +524,7 @@ pub fn is_session_ready(session: Option<&MirrordSqsSession>) -> bool {
 //  the operator that defines this CRD and also give the operator permissions to do stuff with it.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-group = "splitters.mirrord.metalbear.co",
+group = "queues.mirrord.metalbear.co",
 version = "v1alpha",
 kind = "MirrordSQSSession",
 root = "MirrordSqsSession", // for Rust naming conventions (Sqs, not SQS)

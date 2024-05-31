@@ -23,7 +23,7 @@ use k8s_openapi::{
 use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
-use crate::crd::{MirrordPolicy, MirrordQueueSplitter, MirrordSqsSession, TargetCrd};
+use crate::crd::{MirrordPolicy, MirrordWorkloadQueueRegistry, MirrordSqsSession, TargetCrd};
 
 static OPERATOR_NAME: &str = "mirrord-operator";
 static OPERATOR_PORT: i32 = 3000;
@@ -178,7 +178,7 @@ impl OperatorSetup for Operator {
         MirrordPolicy::crd().to_writer(&mut writer)?;
 
         writer.write_all(b"---\n")?;
-        MirrordQueueSplitter::crd().to_writer(&mut writer)?;
+        MirrordWorkloadQueueRegistry::crd().to_writer(&mut writer)?;
 
         writer.write_all(b"---\n")?;
         MirrordSqsSession::crd().to_writer(&mut writer)?;
@@ -489,8 +489,8 @@ impl OperatorRole {
                 },
                 // Allow the operator to list mirrord queue splitters.
                 PolicyRule {
-                    api_groups: Some(vec!["splitters.mirrord.metalbear.co".to_owned()]),
-                    resources: Some(vec![MirrordQueueSplitter::plural(&()).to_string()]),
+                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
+                    resources: Some(vec![MirrordWorkloadQueueRegistry::plural(&()).to_string()]),
                     verbs: vec![
                         "list".to_owned(),
                     ],
@@ -498,8 +498,8 @@ impl OperatorRole {
                 },
                 // Allow the SQS controller to update queue splitter status.
                 PolicyRule {
-                    api_groups: Some(vec!["splitters.mirrord.metalbear.co".to_owned()]),
-                    resources: Some(vec!["mirrordqueuesplitters/status".to_string()]),
+                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
+                    resources: Some(vec!["mirrordworkloadqueueregistries/status".to_string()]),
                     verbs: vec![
                         // For setting the status in the SQS controller.
                         "update".to_owned(),
@@ -508,7 +508,7 @@ impl OperatorRole {
                 },
                 // Allow the operator to control mirrord queue filters.
                 PolicyRule {
-                    api_groups: Some(vec!["splitters.mirrord.metalbear.co".to_owned()]),
+                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
                     resources: Some(vec![MirrordSqsSession::plural(&()).to_string()]),
                     verbs: vec![
                         "create".to_owned(),
@@ -523,7 +523,7 @@ impl OperatorRole {
                 },
                 // Allow the SQS controller to update queue splitter status.
                 PolicyRule {
-                    api_groups: Some(vec!["splitters.mirrord.metalbear.co".to_owned()]),
+                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
                     resources: Some(vec!["mirrordsqssessions/status".to_string()]),
                     verbs: vec![
                         // For setting the status in the SQS controller.
