@@ -319,6 +319,7 @@ impl IncomingProxy {
                     message_bus.send(msg).await;
                 }
             }
+            _ => tracing::error!("{:?}", message),
         }
 
         Ok(())

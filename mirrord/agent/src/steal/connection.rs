@@ -1,9 +1,11 @@
 use std::{
     collections::{HashMap, HashSet},
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    task::Poll,
 };
 
 use fancy_regex::Regex;
+use futures::poll;
 use http_body_util::BodyExt;
 use hyper::{
     body::Incoming,
@@ -12,8 +14,10 @@ use hyper::{
 };
 use mirrord_protocol::{
     tcp::{
-        DaemonTcp, HttpRequest, HttpResponseFallback, InternalHttpBody, InternalHttpRequest,
-        StealType, TcpClose, TcpData, HTTP_FILTERED_UPGRADE_VERSION, HTTP_FRAMED_VERSION,
+        ChunkedFrame, ChunkedRequest, ChunkedRequestBody, ChunkedRequestError, DaemonTcp,
+        HttpRequest, HttpResponseFallback, InternalHttpBody, InternalHttpRequest, StealType,
+        TcpClose, TcpData, HTTP_CHUNKED_VERSION, HTTP_FILTERED_UPGRADE_VERSION,
+        HTTP_FRAMED_VERSION,
     },
     ConnectionId, Port,
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
@@ -124,8 +128,8 @@ struct Client {
 
 impl Client {
     /// Attempts to spawn a new [`tokio::task`] to transform the given [`MatchedHttpRequest`] into
-    /// [`DaemonTcp::HttpRequest`] or [`DaemonTcp::HttpRequestFramed`] and send it via cloned
-    /// [`Client::tx`].
+    /// [`DaemonTcp::HttpRequest`], [`DaemonTcp::HttpRequestFramed`] or
+    /// [`DaemonTcp::HttpRequestChunked`] and send it via cloned [`Client::tx`].
     ///
     /// Inspects [`Client::protocol_version`] to pick between [`DaemonTcp`] variants and check for
     /// upgrade requests.
@@ -147,10 +151,157 @@ impl Client {
         }
 
         let framed = HTTP_FRAMED_VERSION.matches(&self.protocol_version);
+        let chunked = HTTP_CHUNKED_VERSION.matches(&self.protocol_version);
         let tx = self.tx.clone();
 
         tokio::spawn(async move {
-            if framed {
+            // Chunked data is preferred over framed data
+            if chunked {
+                // Send headers
+                tracing::error!("starting bg task");
+                let connection_id = request.connection_id;
+                let request_id = request.request_id;
+                let (
+                    Parts {
+                        method,
+                        uri,
+                        version,
+                        headers,
+                        ..
+                    },
+                    mut body,
+                ) = request.request.into_parts();
+                let _ = tx
+                    .send(DaemonTcp::HttpRequestChunked(ChunkedRequest::Start(
+                        HttpRequest {
+                            internal_request: InternalHttpRequest {
+                                method,
+                                uri,
+                                headers,
+                                version,
+                                body: (),
+                            },
+                            connection_id,
+                            request_id,
+                            port: request.port,
+                        },
+                    )))
+                    .await;
+                tracing::error!("sent header");
+
+                // If frames are immediately available, send them
+                let mut ready_frames: Vec<ChunkedFrame> = vec![];
+                let mut frame_fut: http_body_util::combinators::Frame<Incoming> = body.frame();
+                // Poll the future without moving the frame
+                let mut is_last = false;
+                while let Poll::Ready(ready_frame) = poll!(&mut frame_fut) {
+                    tracing::error!("{:?}", ready_frame);
+                    match ready_frame {
+                        Some(Ok(ok_frame)) => {
+                            let frame = if ok_frame.is_data() {
+                                ChunkedFrame::Data(ok_frame.into_data().unwrap().into())
+                            } else if ok_frame.is_trailers() {
+                                ChunkedFrame::Trailer(ok_frame.into_trailers().unwrap())
+                            } else {
+                                // ignore
+                                frame_fut = body.frame();
+                                continue;
+                            };
+                            ready_frames.push(frame);
+                            frame_fut = body.frame();
+                        }
+                        Some(Err(_)) => {
+                            // Error occured while sending request frame
+                            let frame_err = ChunkedRequest::Error(ChunkedRequestError {
+                                connection_id,
+                                request_id,
+                            });
+                            let _ = tx.send(DaemonTcp::HttpRequestChunked(frame_err)).await;
+                            return;
+                        }
+                        None => {
+                            is_last = true;
+                            break;
+                        }
+                    }
+                }
+
+                if !(ready_frames.is_empty()) || is_last {
+                    let chunked = ChunkedRequestBody {
+                        frames: ready_frames,
+                        is_last,
+                        connection_id,
+                        request_id,
+                    };
+                    if tx
+                        .send(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(chunked)))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+
+                if is_last {
+                    return;
+                }
+
+                // Start processing incoming frames
+                while let Some(incoming_frame) = frame_fut.await {
+                    // if !self.subscribed_connections.contains(&request.connection_id) {
+                    //     // if client has unsubscibed, stop sending data
+                    //     break;
+                    // }
+
+                    tracing::error!("{:?}", incoming_frame);
+                    match incoming_frame {
+                        Ok(ok_frame) => {
+                            let frame = if ok_frame.is_data() {
+                                ChunkedFrame::Data(ok_frame.into_data().unwrap().into())
+                            } else if ok_frame.is_trailers() {
+                                ChunkedFrame::Trailer(ok_frame.into_trailers().unwrap())
+                            } else {
+                                // ignore
+                                frame_fut = body.frame();
+                                continue;
+                            };
+                            let chunked = ChunkedRequestBody {
+                                frames: vec![frame],
+                                is_last: false,
+                                connection_id,
+                                request_id,
+                            };
+                            if tx
+                                .send(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(chunked)))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                        }
+                        Err(_) => {
+                            // Error occured while sending request frame
+                            let frame_err = ChunkedRequest::Error(ChunkedRequestError {
+                                connection_id,
+                                request_id,
+                            });
+                            let _ = tx.send(DaemonTcp::HttpRequestChunked(frame_err)).await;
+                            return;
+                        }
+                    }
+
+                    frame_fut = body.frame();
+                }
+                let chunked = ChunkedRequestBody {
+                    frames: vec![],
+                    is_last: true,
+                    connection_id,
+                    request_id,
+                };
+                let _ = tx
+                    .send(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(chunked)))
+                    .await;
+            } else if framed {
                 let Ok(request) = request.into_serializable().await else {
                     return;
                 };

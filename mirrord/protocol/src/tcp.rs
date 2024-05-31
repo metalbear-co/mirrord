@@ -2,7 +2,7 @@ use core::fmt::Display;
 use std::{
     collections::VecDeque,
     convert::Infallible,
-    fmt,
+    fmt::{self},
     net::IpAddr,
     pin::Pin,
     sync::LazyLock,
@@ -73,6 +73,40 @@ pub enum DaemonTcp {
     SubscribeResult(RemoteResult<Port>),
     HttpRequest(HttpRequest<Vec<u8>>),
     HttpRequestFramed(HttpRequest<InternalHttpBody>),
+    HttpRequestChunked(ChunkedRequest),
+}
+
+/// Contents of a chunked message from server.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum ChunkedRequest {
+    Start(HttpRequest<()>),
+    Body(ChunkedRequestBody),
+    Error(ChunkedRequestError),
+}
+
+impl ChunkedRequest {}
+
+/// Contents of a chunked message body frame from server.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ChunkedRequestBody {
+    #[bincode(with_serde)]
+    pub frames: Vec<ChunkedFrame>,
+    pub is_last: bool,
+    pub connection_id: ConnectionId,
+    pub request_id: RequestId,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub enum ChunkedFrame {
+    Data(Vec<u8>),
+    Trailer(#[serde(with = "http_serde::header_map")] HeaderMap),
+}
+
+/// An error occurred while processing chunked data from server.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ChunkedRequestError {
+    pub connection_id: ConnectionId,
+    pub request_id: RequestId,
 }
 
 /// Wraps the string that will become a [`fancy_regex::Regex`], providing a nice API in
@@ -271,6 +305,11 @@ impl HttpRequestFallback {
 /// [`DaemonTcp::HttpRequest`].
 pub static HTTP_FRAMED_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.3.0".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows [`DaemonTcp::HttpRequestChunked`] instead of
+/// [`DaemonTcp::HttpRequest`].
+pub static HTTP_CHUNKED_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.6.0".parse().expect("Bad Identifier")); // TODO: check version number
 
 /// Minimal mirrord-protocol version that allows [`DaemonTcp::Data`] to be sent in the same
 /// connection as [`DaemonTcp::HttpRequestFramed`] and [`DaemonTcp::HttpRequest`].
