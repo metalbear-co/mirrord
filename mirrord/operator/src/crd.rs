@@ -447,10 +447,6 @@ pub struct QueueDetails {
 #[serde(rename_all = "camelCase")] // active_filters -> activeFilters
 pub struct QueueSplitterStatus {
     pub queue_details: QueueDetails,
-
-    // can't be a set: "uniqueItems cannot be set to true since the runtime complexity becomes quadratic"
-    /// Resource names of active sessions of this splitter.
-    pub active_sessions: Vec<String>,
 }
 
 impl QueueSplitterStatus {
