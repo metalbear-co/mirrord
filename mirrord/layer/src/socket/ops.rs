@@ -180,25 +180,50 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
         .get_by_left(&addr.port())
         .copied()
         .unwrap_or_else(|| addr.port());
-    let http_filter_used = config.mode == IncomingMode::Steal
-        && (config.http_filter.header_filter.is_some() || config.http_filter.path_filter.is_some());
+    let http_filter_used = config.mode == IncomingMode::Steal && config.http_filter.is_filter_set();
 
     // this is a bit weird but it makes more sense configured ports are the remote port
     // and not the local, so the check is done on the mapped port
     // see https://github.com/metalbear-co/mirrord/issues/2397
-    let not_stolen_with_filter = !http_filter_used
-        || config
-            .http_filter
-            .ports
-            .as_slice()
-            .iter()
-            .all(|port| *port != mapped_port);
+    let not_a_filtered_port = config
+        .http_filter
+        .ports
+        .as_slice()
+        .iter()
+        .all(|port| *port != mapped_port);
 
+    let not_stolen_with_filter = !http_filter_used || not_a_filtered_port;
+
+    // Unfiltered ports were specified and the requested port is not one of them, or an HTTP filter
+    // is set and no unfiltered ports were specified.
     let not_whitelisted = config
         .ports
         .as_ref()
         .map(|ports| !ports.contains(&mapped_port))
         .unwrap_or(http_filter_used);
+
+    if http_filter_used && not_a_filtered_port && config.ports.is_none() {
+        // User specified a filter that does not include this port, and did not specify any
+        // unfiltered ports.
+        // It's plausible that the user did not know the port has to be in either port list to be
+        // stolen when an HTTP filter is set, so show a warning.
+        let port_text = if mapped_port != addr.port() {
+            format!(
+                "Remote port {mapped_port} (mapped from local port {})",
+                addr.port()
+            )
+        } else {
+            format!("Port {mapped_port}")
+        };
+        warn!(
+            "{port_text} was not included in the filtered ports, and also not in the non-filtered \
+            ports, and will therefore be bound locally. If this is intentional, ignore this \
+            warning. If you want the http filter to apply to this port, add it to \
+            `feature.network.incoming.http_filter.ports`. \
+            If you want to steal all the traffic of this port, add it to \
+            `feature.network.incoming.ports`."
+        );
+    }
 
     is_ignored_port(addr) || (not_stolen_with_filter && not_whitelisted)
 }
