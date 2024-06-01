@@ -776,7 +776,7 @@
         },
         "ports": {
           "title": "feature.network.incoming.http_filter.ports {#feature-network-incoming-http_filter-ports}",
-          "description": "Activate the HTTP traffic filter only for these ports.\n\nOther ports will *not* be stolen, unless listed in [`feature.network.incoming.ports`](#feature-network-incoming-ports).",
+          "description": "Activate the HTTP traffic filter only for these ports.\n\nOther ports will *not* be stolen, unless listed in [`feature.network.incoming.ports`](#feature-network-incoming-ports).\n\nSet to [80, 8080] by default.",
           "anyOf": [
             {
               "$ref": "#/definitions/PortList"
