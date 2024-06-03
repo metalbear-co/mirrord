@@ -362,6 +362,17 @@ impl LayerConfig {
             ))?
         }
 
+        if !self.feature.copy_target.enabled
+            && self
+                .target
+                .path
+                .as_ref()
+                .map(|target| matches!(target, target::Target::Job(_)))
+                .unwrap_or_default()
+        {
+            Err(ConfigError::TargetJobWithoutCopyTarget)?
+        }
+
         if self.target.path.is_none() && !context.ide {
             // In the IDE, a target may be selected after `mirrord verify-config` is run, so we
             // for this case we treat these as warnings. They'll become errors once mirrord proper
@@ -411,6 +422,23 @@ impl LayerConfig {
                         .into(),
                 );
             }
+        }
+
+        if self
+            .feature
+            .network
+            .incoming
+            .port_mapping
+            .iter()
+            .any(|(to, from)| to == from)
+        {
+            context.add_warning(
+                "The feature.network.incoming.port_mapping mirrord configuration field \
+                contains a mapping of a local port to the same remote port. \
+                A mapping is only necessary when the local application is listening on \
+                a different port than the remote one."
+                    .into(),
+            );
         }
 
         Ok(())
@@ -471,7 +499,7 @@ mod tests {
             },
             FeatureFileConfig,
         },
-        target::{PodTarget, Target, TargetFileConfig},
+        target::{Target, TargetFileConfig},
         util::ToggleableConfig,
     };
 
@@ -625,7 +653,10 @@ mod tests {
     fn full(
         #[values(ConfigType::Json, ConfigType::Toml, ConfigType::Yaml)] config_type: ConfigType,
     ) {
-        use crate::agent::{AgentImageFileConfig, AgentPullSecret};
+        use crate::{
+            agent::{AgentImageFileConfig, AgentPullSecret},
+            target::pod::PodTarget,
+        };
 
         let input = config_type.full();
 

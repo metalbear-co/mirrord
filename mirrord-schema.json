@@ -289,6 +289,7 @@
         },
         "image": {
           "title": "agent.image {#agent-image}",
+          "description": "Name of the agent's docker image.\n\nUseful when a custom build of mirrord-agent is required, or when using an internal registry.\n\nDefaults to the latest stable image `\"ghcr.io/metalbear-co/mirrord:latest\"`.\n\n```json { \"image\": \"internal.repo/images/mirrord:latest\" } ```\n\nComplete setup:\n\n```json { \"image\": { \"registry\": \"internal.repo/images/mirrord\", \"tag\": \"latest\", } } ```",
           "anyOf": [
             {
               "$ref": "#/definitions/AgentImageFileConfig"
@@ -754,7 +755,7 @@
       ]
     },
     "HttpFilterFileConfig": {
-      "description": "Filter configuration for the HTTP traffic stealer feature.\n\nAllows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is set as `\"steal\"`, ignored otherwise.\n\nfor example, to filter based on header: ```json { \"header_filter\": \"host: api\\..+\", } ```\n\nfor example, to filter based on path ```json { \"path_filter\": \"host: api\\..+\", } ```",
+      "description": "Filter configuration for the HTTP traffic stealer feature.\n\nAllows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is set as `\"steal\"`, ignored otherwise.\n\nFor example, to filter based on header: ```json { \"header_filter\": \"host: api\\..+\", } ``` Setting that filter will make mirrord only steal requests with the `host` header set to hosts that start with \"api\", followed by a dot, and then at least one more character.\n\nFor example, to filter based on path: ```json { \"path_filter\": \"^/api/\", } ``` Setting this filter will make mirrord only steal requests to URIs starting with \"/api/\".\n\nThis can be useful for filtering out Kubernetes liveness, readiness and startup probes. For example, for avoiding stealing any probe sent by kubernetes, you can set this filter: ```json { \"header_filter\": \"^User-Agent: (?!kube-probe)\", } ``` Setting this filter will make mirrord only steal requests that **do** have a user agent that **does not** begin with \"kube-probe\".\n\nSimilarly, you can exclude certain paths using a negative look-ahead: ```json { \"path_filter\": \"^(?!/health/)\", } ``` Setting this filter will make mirrord only steal requests to URIs that do not start with \"/health/\".",
       "type": "object",
       "properties": {
         "header_filter": {
@@ -767,7 +768,7 @@
         },
         "path_filter": {
           "title": "feature.network.incoming.http_filter.path_filter {#feature-network-incoming-http-path-filter}",
-          "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nCase insensitive.",
+          "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nCase-insensitive.",
           "type": [
             "string",
             "null"
@@ -1004,6 +1005,24 @@
       },
       "additionalProperties": false
     },
+    "JobTarget": {
+      "type": "object",
+      "required": [
+        "job"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "job": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "LinuxCapability": {
       "type": "string",
       "enum": [
@@ -1185,7 +1204,7 @@
       "additionalProperties": false
     },
     "Target": {
-      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`.",
+      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`. - `job/{sample-job}`;",
       "anyOf": [
         {
           "description": "<!--${internal}--> Mirror a deployment.",
@@ -1208,6 +1227,14 @@
           "allOf": [
             {
               "$ref": "#/definitions/RolloutTarget"
+            }
+          ]
+        },
+        {
+          "description": "<!--${internal}--> Mirror a Job.\n\nOnly supported when `copy_target` is enabled.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/JobTarget"
             }
           ]
         },

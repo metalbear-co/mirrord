@@ -8,6 +8,40 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.103.0](https://github.com/metalbear-co/mirrord/tree/3.103.0) - 2024-05-29
+
+
+### Added
+
+- Allows a Job to be used as a target when copy_target is enabled.
+
+
+### Changed
+
+- Allows the user to set labels and annotations for the agent job and pod via
+  agent config.
+
+
+### Fixed
+
+- mirrord now prints an informative error when the targeted pod is not in
+  correct state (e.g. is not `Running` or the target container is not `ready`).
+  When picking a pod from target deployment/rollout, mirrord filters out pods
+  that are not in correct state.
+  [#462](https://github.com/metalbear-co/mirrord/issues/462)
+- Fix config printout error showing repeated messages.
+- Fixed listing targets when using operator ignoring namespace - always using
+  default
+- Fixed missing pods/deployments with more than 1 container when using operator
+  ls
+
+
+### Internal
+
+- Fixed DNS e2e flake
+- Update release action to use latest macOS
+
+
 ## [3.102.0](https://github.com/metalbear-co/mirrord/tree/3.102.0) - 2024-05-22
 
 
