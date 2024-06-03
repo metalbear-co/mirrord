@@ -1,8 +1,8 @@
 #![warn(clippy::indexing_slicing)]
 
 use proc_macro2::Span;
-use quote::quote;
-use syn::{parse::Parser, punctuated::Punctuated, token::Comma, Block, Ident, ItemFn};
+use quote::{quote, ToTokens};
+use syn::{parse::Parser, punctuated::Punctuated, token::Comma, Block, Ident, ItemFn, Type};
 
 /// `#[hook_fn]` annotates the C ffi functions (mirrord's `_detour`s), and is used to generate the
 /// following boilerplate (using `close_detour` as an example):
@@ -49,7 +49,7 @@ pub fn hook_fn(
         let unsafety = signature.unsafety;
         let abi = signature.abi;
 
-        let fn_args = signature
+        let mut fn_args = signature
             .inputs
             .into_iter()
             .map(|fn_arg| match fn_arg {
@@ -57,6 +57,14 @@ pub fn hook_fn(
                 syn::FnArg::Typed(arg) => arg.ty,
             })
             .collect::<Vec<_>>();
+
+        if let Some(varargs) = signature.variadic {
+            let fixed_arg = quote! {
+                mut args: std::ffi::VaListImpl
+            };
+
+            fn_args.push(Box::new(Type::Verbatim(fixed_arg)));
+        }
 
         let return_type = signature.output;
 
@@ -88,6 +96,8 @@ pub fn hook_fn(
             #proper_function
 
         };
+
+        // panic!("output---\n{output}\nbare_fn---\n{bare_fn}");
 
         output
     };
