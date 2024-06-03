@@ -20,8 +20,16 @@ pub enum ConfigFlagsType {
 pub struct ConfigFlags {
     pub doc: Vec<Attribute>,
 
+    /// Derive [`Ident`]s that we want the config type to have.
+    ///
+    /// `#[config(map_to = "Bear", derive = "Metallic")` will produce a type
+    /// `#[derive(Metallic)] struct Bear {}`
     pub derive: Vec<Ident>,
     pub generator: Option<Ident>,
+
+    /// Generates a mapped type that implements config stuff (?).
+    ///
+    /// `#[config(map_to = "Bear")` will produce a type `struct Bear {}`
     pub map_to: Option<Ident>,
 
     pub default: Option<DefaultFlag>,
@@ -53,6 +61,8 @@ fn lit_in_meta_name_value(meta: &MetaNameValue) -> Option<Lit> {
 }
 
 impl ConfigFlags {
+    /// Digs into the [`syn::MetaList`] of the list of [`Attribute`] to fill up our
+    ///[`ConfigFlags`].
     pub fn new(attrs: &[Attribute], mode: ConfigFlagsType) -> Result<Self, Diagnostic> {
         let mut flags = ConfigFlags {
             doc: attrs
@@ -80,6 +90,7 @@ impl ConfigFlags {
             let nested =
                 meta_list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
 
+            // Let's look into the nested `Meta` to possibly set multiple flags.
             for meta in nested {
                 match meta {
                     Meta::Path(path)
