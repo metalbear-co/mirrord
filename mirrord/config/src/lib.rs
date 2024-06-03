@@ -424,6 +424,23 @@ impl LayerConfig {
             }
         }
 
+        if self
+            .feature
+            .network
+            .incoming
+            .port_mapping
+            .iter()
+            .any(|(to, from)| to == from)
+        {
+            context.add_warning(
+                "The feature.network.incoming.port_mapping mirrord configuration field \
+                contains a mapping of a local port to the same remote port. \
+                A mapping is only necessary when the local application is listening on \
+                a different port than the remote one."
+                    .into(),
+            );
+        }
+
         Ok(())
     }
 }
