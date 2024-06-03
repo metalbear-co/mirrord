@@ -11,17 +11,7 @@ pub fn mirrord_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     let input = syn::parse_macro_input!(input as DeriveInput);
 
     match config::ConfigStruct::new(input) {
-        Ok(tokens) => {
-            let res = tokens.into_token_stream().into();
-            // panic!("Failed Ok \n{res}");
-
-            res
-        }
-        Err(diag) => {
-            let res = diag.emit_as_expr_tokens().into();
-            panic!("Failed Err :(");
-
-            res
-        }
+        Ok(tokens) => tokens.into_token_stream().into(),
+        Err(diag) => diag.emit_as_expr_tokens().into(),
     }
 }
