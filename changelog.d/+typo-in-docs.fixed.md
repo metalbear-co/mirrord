@@ -1,0 +1,1 @@
+Fixed typo in auto-generated docs for mirrord config.
