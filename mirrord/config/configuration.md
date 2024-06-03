@@ -919,7 +919,7 @@ Can be set to either `"continue"` or `"override"`.
 - `"override"`: If port lock detected then override it with new lock and force close the
   original locking connection.
 
-#### feature.network.incoming.filter {#feature-network-incoming-http-filter}
+#### feature.network.incoming.http_filter {#feature-network-incoming-http-filter}
 Filter configuration for the HTTP traffic stealer feature.
 
 Allows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic
