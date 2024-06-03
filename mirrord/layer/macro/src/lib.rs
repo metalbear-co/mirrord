@@ -60,7 +60,7 @@ pub fn hook_fn(
 
         if let Some(varargs) = signature.variadic {
             let fixed_arg = quote! {
-                mut args: std::ffi::VaListImpl
+                ...
             };
 
             fn_args.push(Box::new(Type::Verbatim(fixed_arg)));
