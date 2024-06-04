@@ -21,6 +21,7 @@ use crate::{
     error::{KubeApiError, Result},
 };
 
+pub mod cron_job;
 pub mod deployment;
 pub mod job;
 pub mod pod;
@@ -296,6 +297,7 @@ impl RuntimeDataProvider for Target {
             Target::Pod(pod) => pod.runtime_data(client, namespace).await,
             Target::Rollout(rollout) => rollout.runtime_data(client, namespace).await,
             Target::Job(job) => job.runtime_data(client, namespace).await,
+            Target::CronJob(cron_job) => cron_job.runtime_data(client, namespace).await,
             Target::Targetless => Err(KubeApiError::MissingRuntimeData),
         }
     }

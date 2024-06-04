@@ -3,6 +3,7 @@ use std::{
     str::FromStr,
 };
 
+use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
 use schemars::{gen::SchemaGenerator, schema::SchemaObject, JsonSchema};
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,7 @@ use crate::{
     util::string_or_struct_option,
 };
 
+pub mod cron_job;
 pub mod deployment;
 pub mod job;
 pub mod pod;
@@ -229,6 +231,12 @@ pub enum Target {
     Job(job::JobTarget),
 
     /// <!--${internal}-->
+    /// Mirror a CronJob.
+    ///
+    /// Only supported when `copy_target` is enabled.
+    CronJob(cron_job::CronJobTarget),
+
+    /// <!--${internal}-->
     /// Spawn a new pod.
     Targetless,
 }
@@ -263,6 +271,7 @@ impl Target {
             Target::Pod(pod) => pod.pod.clone(),
             Target::Rollout(rollout) => rollout.rollout.clone(),
             Target::Job(job) => job.job.clone(),
+            Target::CronJob(cron_job) => cron_job.cron_job.clone(),
             Target::Targetless => {
                 unreachable!("this shouldn't happen - called from operator on a flow where it's not targetless.")
             }
@@ -312,15 +321,17 @@ impl_target_display!(PodTarget, pod);
 impl_target_display!(DeploymentTarget, deployment);
 impl_target_display!(RolloutTarget, rollout);
 impl_target_display!(JobTarget, job);
+impl_target_display!(CronJobTarget, cron_job);
 
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Target::Targetless => write!(f, "targetless"),
-            Target::Pod(pod) => pod.fmt_display(f),
-            Target::Deployment(dep) => dep.fmt_display(f),
-            Target::Rollout(roll) => roll.fmt_display(f),
-            Target::Job(job) => job.fmt_display(f),
+            Target::Pod(target) => target.fmt_display(f),
+            Target::Deployment(target) => target.fmt_display(f),
+            Target::Rollout(target) => target.fmt_display(f),
+            Target::Job(target) => target.fmt_display(f),
+            Target::CronJob(target) => target.fmt_display(f),
         }
     }
 }
@@ -329,30 +340,33 @@ impl TargetDisplay for Target {
     fn target_type(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
-            Target::Deployment(x) => x.target_type(),
-            Target::Pod(x) => x.target_type(),
-            Target::Rollout(x) => x.target_type(),
-            Target::Job(x) => x.target_type(),
+            Target::Deployment(target) => target.target_type(),
+            Target::Pod(target) => target.target_type(),
+            Target::Rollout(target) => target.target_type(),
+            Target::Job(target) => target.target_type(),
+            Target::CronJob(target) => target.target_type(),
         }
     }
 
     fn target_name(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
-            Target::Deployment(x) => x.target_name(),
-            Target::Pod(x) => x.target_name(),
-            Target::Rollout(x) => x.target_name(),
-            Target::Job(x) => x.target_name(),
+            Target::Deployment(target) => target.target_name(),
+            Target::Pod(target) => target.target_name(),
+            Target::Rollout(target) => target.target_name(),
+            Target::Job(target) => target.target_name(),
+            Target::CronJob(target) => target.target_name(),
         }
     }
 
     fn container_name(&self) -> Option<&String> {
         match self {
             Target::Targetless => None,
-            Target::Deployment(x) => x.container_name(),
-            Target::Pod(x) => x.container_name(),
-            Target::Rollout(x) => x.container_name(),
-            Target::Job(x) => x.container_name(),
+            Target::Deployment(target) => target.container_name(),
+            Target::Pod(target) => target.container_name(),
+            Target::Rollout(target) => target.container_name(),
+            Target::Job(target) => target.container_name(),
+            Target::CronJob(target) => target.container_name(),
         }
     }
 }
@@ -399,6 +413,12 @@ impl CollectAnalytics for &TargetConfig {
                 Target::Job(job) => {
                     flags |= TargetAnalyticFlags::JOB;
                     if job.container.is_some() {
+                        flags |= TargetAnalyticFlags::CONTAINER;
+                    }
+                }
+                Target::CronJob(cron_job) => {
+                    flags |= TargetAnalyticFlags::JOB;
+                    if cron_job.container.is_some() {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }
                 }
