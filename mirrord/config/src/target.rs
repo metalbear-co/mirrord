@@ -276,6 +276,7 @@ impl Target {
             Target::Pod(pod) => pod.target_type(),
             Target::Deployment(dep) => dep.target_type(),
             Target::Rollout(roll) => roll.target_type(),
+            Target::Job(job) => job.target_type(),
         }
     }
 }

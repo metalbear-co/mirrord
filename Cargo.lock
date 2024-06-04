@@ -823,7 +823,7 @@ dependencies = [
  "once_cell",
  "pin-project-lite",
  "pin-utils",
- "rustls 0.21.10",
+ "rustls 0.21.12",
  "tokio",
  "tracing 0.1.40",
 ]
