@@ -3489,7 +3489,7 @@ dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.63",
 ]
 
 [[package]]
@@ -3629,7 +3629,7 @@ version = "3.103.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.63",
 ]
 
 [[package]]
@@ -3639,7 +3639,7 @@ dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
  "semver 1.0.23",
- "syn 1.0.109",
+ "syn 2.0.63",
 ]
 
 [[package]]
