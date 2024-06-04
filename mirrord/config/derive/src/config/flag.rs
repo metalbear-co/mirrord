@@ -20,7 +20,7 @@ pub enum ConfigFlagsType {
 pub struct ConfigFlags {
     pub doc: Vec<Attribute>,
 
-    /// Derive [`Ident`]s that we want the config type to have.
+    /// Derive [`struct@Ident`]s that we want the config type to have.
     ///
     /// `#[config(map_to = "Bear", derive = "Metallic")` will produce a type
     /// `#[derive(Metallic)] struct Bear {}`
@@ -41,9 +41,9 @@ pub struct ConfigFlags {
     pub deprecated: Option<Lit>,
 }
 
-/// Retrieves the [`Lit`] that is inside a [`MetaNameValue`].
+/// Retrieves the [`enum@Lit`] that is inside a [`MetaNameValue`].
 ///
-/// The [`Lit`] can be:
+/// The [`enum@Lit`] can be:
 /// 1. The `CatFile` in `map_to = "CatFile"`;
 /// 2. The `JsonSchema` in `derive = "JsonSchema"`;
 /// 3. The `CatUserConfig` in `generator = "CatUserConfig"`;
