@@ -9,7 +9,10 @@ use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
 use futures::{SinkExt, StreamExt};
 use http::request::Request;
-use kube::{api::PostParams, Api, Client, Resource};
+use kube::{
+    api::{ListParams, PostParams},
+    Api, Client, Resource,
+};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
     certificate::Certificate,
@@ -53,6 +56,7 @@ pub enum OperatorOperation {
     CopyingTarget,
     GettingStatus,
     SessionManagement,
+    ListingTargets,
 }
 
 impl Display for OperatorOperation {
@@ -64,6 +68,7 @@ impl Display for OperatorOperation {
             Self::CopyingTarget => "copying target",
             Self::GettingStatus => "getting status",
             Self::SessionManagement => "session management",
+            Self::ListingTargets => "listing targets",
         };
 
         f.write_str(as_str)
@@ -87,9 +92,6 @@ pub enum OperatorApiError {
         operation: OperatorOperation,
     },
 
-    #[error("can't start proccess because other locks exist on target")]
-    ConcurrentStealAbort,
-
     #[error("mirrord operator {operator_version} does not support feature {feature}")]
     UnsupportedFeature {
         feature: NewOperatorFeature,
@@ -97,8 +99,8 @@ pub enum OperatorApiError {
     },
 
     #[error(
-    "Tried executing {operation}, but operator returned with `{}` and code `{}``!",
-    status.reason, status.code
+        "Tried executing {operation}, but operator returned with `{}` and code `{}``!",
+        status.reason, status.code
     )]
     StatusFailure {
         operation: String,
@@ -244,14 +246,16 @@ impl OperatorApi {
     /// and working, it'll just work without the operator.
     ///
     /// For a fuller documentation, see the docs in `operator/service/src/main.rs::listen`.
+    ///
+    /// - `copy_target`: When this feature is enabled, `target` validation is done in the operator.
     #[tracing::instrument(level = "trace", skip_all)]
     pub async fn create_session<P, R: Reporter>(
         config: &LayerConfig,
         progress: &P,
         analytics: &mut R,
     ) -> Result<OperatorSessionConnection>
-        where
-            P: Progress + Send + Sync,
+    where
+        P: Progress + Send + Sync,
     {
         let operator_api = OperatorApi::new(config).await?;
 
@@ -272,7 +276,7 @@ impl OperatorApi {
                     })
                     .unwrap_or_else(|| "today".to_string());
 
-                let expiring_message = format!("Operator license will expire {expiring_soon}!", );
+                let expiring_message = format!("Operator license will expire {expiring_soon}!",);
 
                 progress.warning(&expiring_message);
                 warn!(expiring_message);
@@ -335,6 +339,7 @@ impl OperatorApi {
             // use copy_target for splitting queues
             || config.feature.split_queues.is_set()
         {
+            // We do not validate the `target` here, it's up to the operator.
             let mut copy_progress = progress.subtask("copying target");
             let copied = operator_api
                 .copy_target(
@@ -376,7 +381,7 @@ impl OperatorApi {
         operator_api.connect_target(session_information).await
     }
 
-    async fn new(config: &LayerConfig) -> Result<Self> {
+    pub async fn new(config: &LayerConfig) -> Result<Self> {
         let target_config = config.target.clone();
         let on_concurrent_steal = config.feature.network.incoming.on_concurrent_steal;
 
@@ -385,8 +390,8 @@ impl OperatorApi {
             config.kubeconfig.clone(),
             config.kube_context.clone(),
         )
-            .await
-            .map_err(OperatorApiError::CreateApiError)?;
+        .await
+        .map_err(OperatorApiError::CreateApiError)?;
 
         let target_namespace = if target_config.path.is_some() {
             target_config.namespace.clone()
@@ -495,44 +500,12 @@ impl OperatorApi {
         }
     }
 
-    /// Checks that there are no active port locks on the given target.
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn check_no_port_locks(&self, target: &TargetCrd) -> Result<()> {
-        let Ok(lock_target) = self
-            .target_api
-            .get_subresource("port-locks", &target.name())
-            .await
-            else {
-                return Ok(());
-            };
-
-        let no_port_locks = lock_target
-            .spec
-            .port_locks
-            .as_ref()
-            .map(Vec::is_empty)
-            .unwrap_or(true);
-
-        if no_port_locks {
-            Ok(())
-        } else {
-            Err(OperatorApiError::ConcurrentStealAbort)
-        }
-    }
-
     /// Create websocket connection to operator.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn connect_target(
         &self,
         session_info: OperatorSessionInformation,
     ) -> Result<OperatorSessionConnection> {
-        // why are we checking on client side..?
-        if let (ConcurrentSteal::Abort, OperatorSessionTarget::Raw(target)) =
-            (self.on_concurrent_steal, &session_info.target)
-        {
-            self.check_no_port_locks(target).await?;
-        }
-
         let UserIdentity { name, hostname } = UserIdentity::load();
 
         let request = {
@@ -540,12 +513,19 @@ impl OperatorApi {
                 .uri(self.connect_url(&session_info))
                 .header("x-session-id", session_info.metadata.session_id.to_string());
 
+            // Replace non-ascii (not supported in headers) chars and trim headers.
             if let Some(name) = name {
-                builder = builder.header("x-client-name", name);
+                builder = builder.header(
+                    "x-client-name",
+                    name.replace(|c: char| !c.is_ascii(), "").trim(),
+                );
             };
 
             if let Some(hostname) = hostname {
-                builder = builder.header("x-client-hostname", hostname);
+                builder = builder.header(
+                    "x-client-hostname",
+                    hostname.replace(|c: char| !c.is_ascii(), "").trim(),
+                );
             };
 
             match session_info.metadata.client_credentials() {
@@ -617,6 +597,29 @@ impl OperatorApi {
                 operation: OperatorOperation::CopyingTarget,
             })
     }
+
+    /// List targets using the operator
+    #[tracing::instrument(level = "trace", ret)]
+    pub async fn list_targets(config: &LayerConfig) -> Result<Vec<TargetCrd>> {
+        let client = create_kube_api(
+            config.accept_invalid_certificates,
+            config.kubeconfig.clone(),
+            config.kube_context.clone(),
+        )
+        .await
+        .map_err(OperatorApiError::CreateApiError)?;
+
+        let target_api: Api<TargetCrd> =
+            get_k8s_resource_api(&client, config.target.namespace.as_deref());
+        target_api
+            .list(&ListParams::default())
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::ListingTargets,
+            })
+            .map(|list| list.items)
+    }
 }
 
 #[derive(Error, Debug)]
@@ -641,12 +644,12 @@ pub struct ConnectionWrapper<T> {
 }
 
 impl<T> ConnectionWrapper<T>
-    where
-            for<'stream> T: StreamExt<Item=Result<Message, TungsteniteError>>
-    + SinkExt<Message, Error=TungsteniteError>
-    + Send
-    + Unpin
-    + 'stream,
+where
+    for<'stream> T: StreamExt<Item = Result<Message, TungsteniteError>>
+        + SinkExt<Message, Error = TungsteniteError>
+        + Send
+        + Unpin
+        + 'stream,
 {
     fn wrap(
         connection: T,

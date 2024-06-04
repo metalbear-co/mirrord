@@ -509,7 +509,10 @@ pub async fn run_exec(
 }
 
 /// Runs `mirrord ls` command and asserts if the json matches the expected format
-pub async fn run_ls(args: Option<Vec<&str>>, namespace: Option<&str>) -> TestProcess {
+pub async fn run_ls<const USE_OPERATOR: bool>(
+    args: Option<Vec<&str>>,
+    namespace: Option<&str>,
+) -> TestProcess {
     let mut mirrord_args = vec!["ls"];
     if let Some(args) = args {
         mirrord_args.extend(args);
@@ -518,7 +521,12 @@ pub async fn run_ls(args: Option<Vec<&str>>, namespace: Option<&str>) -> TestPro
         mirrord_args.extend(vec!["--namespace", namespace]);
     }
 
-    run_mirrord(mirrord_args, Default::default()).await
+    let mut env = HashMap::new();
+    if USE_OPERATOR {
+        env.insert("MIRRORD_OPERATOR_ENABLE", "true");
+    };
+
+    run_mirrord(mirrord_args, env).await
 }
 
 /// Runs `mirrord verify-config [--ide] "/path/config.json"`.
@@ -677,8 +685,9 @@ fn default_env() -> Value {
 
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
-/// This behavior can be changed, see [`FORCE_CLEANUP_ENV_NAME`].
+/// This behavior can be changed, see `FORCE_CLEANUP_ENV_NAME`.
 /// * `randomize_name` - whether a random suffix should be added to the end of the resource names
+// TODO: update outdated comment, FORCE_CLEANUP_ENV_NAME does not exist
 #[fixture]
 pub async fn service(
     #[default("default")] namespace: &str,
@@ -934,39 +943,7 @@ pub async fn udp_logger_service(#[future] kube_client: Client) -> KubeService {
     .await
 }
 
-/// Initiailizes the services needed for pause testing.
-/// Returns the requester service, the logger service
-#[fixture]
-pub async fn pause_services(#[future] kube_client: Client) -> (KubeService, KubeService) {
-    let kube_client = kube_client.await;
-    let kube_client_clone = kube_client.clone();
-    let namespace = random_string().to_string();
-    let requester = service(
-        &namespace,
-        "ClusterIP",
-        "ghcr.io/metalbear-co/mirrord-http-log-requester:latest",
-        "mirrord-http-log-requester",
-        // Have a non-random name, so that there can only be one requester at any point in time
-        // so that another requester does not send requests while this one is paused.
-        false,
-        // have to pass it as future ;_;
-        async { kube_client_clone },
-    )
-    .await;
-
-    let logger = service(
-        &namespace,
-        "ClusterIP",
-        "ghcr.io/metalbear-co/mirrord-http-logger:latest",
-        "mirrord-tests-http-logger",
-        false, // So that requester can reach logger by name.
-        async { kube_client },
-    )
-    .await;
-    (requester, logger)
-}
-
-/// Service that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" directly
+/// Service that listens on port 80 and returns `remote: <DATA>` when getting `<DATA>` directly
 /// over TCP, not HTTP.
 #[fixture]
 pub async fn tcp_echo_service(#[future] kube_client: Client) -> KubeService {
@@ -982,7 +959,7 @@ pub async fn tcp_echo_service(#[future] kube_client: Client) -> KubeService {
 }
 
 /// [Service](https://github.com/metalbear-co/test-images/blob/main/websocket/app.mjs)
-/// that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" over a websocket
+/// that listens on port 80 and returns `remote: <DATA>` when getting `<DATA>` over a websocket
 /// connection, allowing us to test HTTP upgrade requests.
 #[fixture]
 pub async fn websocket_service(#[future] kube_client: Client) -> KubeService {
@@ -1010,7 +987,7 @@ pub async fn http2_service(#[future] kube_client: Client) -> KubeService {
     .await
 }
 
-/// Service that listens on port 80 and returns "remote: <DATA>" when getting "<DATA>" directly
+/// Service that listens on port 80 and returns `remote: <DATA>` when getting `<DATA>` directly
 /// over TCP, not HTTP.
 #[fixture]
 pub async fn hostname_service(#[future] kube_client: Client) -> KubeService {

@@ -23,6 +23,7 @@ use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
+use nix::sys::socket::{sockopt, SockaddrLike, SockaddrStorage};
 use socket2::SockAddr;
 use tracing::{error, trace};
 
@@ -202,8 +203,9 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
     is_ignored_port(addr) || (not_stolen_with_filter && not_whitelisted)
 }
 
-/// Check if the socket is managed by us, if it's managed by us and it's not an ignored port,
-/// update the socket state.
+/// If the socket is not found in [`SOCKETS`], bypass.
+/// Otherwise, if it's not an ignored port, bind (possibly with a fallback to random port) and
+/// update socket state in [`SOCKETS`]. If it's an ignored port, remove the socket from [`SOCKETS`].
 #[mirrord_layer_macro::instrument(level = "trace", ret, skip(raw_address))]
 pub(super) fn bind(
     sockfd: c_int,
@@ -538,10 +540,27 @@ pub(super) fn connect(
 
     trace!("in connect {:#?}", SOCKETS);
 
-    let (_, user_socket_info) = {
-        SOCKETS
-            .remove(&sockfd)
-            .ok_or(Bypass::LocalFdNotFound(sockfd))?
+    let user_socket_info = match SOCKETS.remove(&sockfd) {
+        Some((_, socket)) => socket,
+        None => {
+            // Socket was probably removed from `SOCKETS` in `bind` detour (as not interesting in
+            // terms of `incoming` feature).
+            // Here we just recreate `UserSocket` using domain and type fetched from the descriptor
+            // we have.
+            let domain = nix::sys::socket::getsockname::<SockaddrStorage>(sockfd)
+                .map_err(io::Error::from)?
+                .family()
+                .map(|family| family as i32)
+                .unwrap_or(-1);
+            if domain != libc::AF_INET && domain != libc::AF_UNIX {
+                return Detour::Bypass(Bypass::Domain(domain));
+            }
+            let type_ = nix::sys::socket::getsockopt(sockfd, sockopt::SockType)
+                .map_err(io::Error::from)? as i32;
+            let kind = SocketKind::try_from(type_)?;
+
+            Arc::new(UserSocket::new(domain, type_, 0, Default::default(), kind))
+        }
     };
 
     if let Some(ip_address) = optional_ip_address {
@@ -598,7 +617,7 @@ pub(super) fn connect(
         ),
 
         NetProtocol::Stream => match user_socket_info.state {
-            SocketState::Initialized
+            SocketState::Initialized | SocketState::Bound(..)
                 if (optional_ip_address.is_some() && enabled_tcp_outgoing)
                     || (remote_address.is_unix() && !unix_streams.is_empty()) =>
             {
@@ -608,24 +627,6 @@ pub(super) fn connect(
                     user_socket_info,
                     NetProtocol::Stream,
                 )
-            }
-
-            SocketState::Bound(Bound { address, .. }) => {
-                trace!("connect -> SocketState::Bound {:#?}", user_socket_info);
-
-                let address = SockAddr::from(address);
-                let bind_result = unsafe { FN_BIND(sockfd, address.as_ptr(), address.len()) };
-
-                if bind_result != 0 {
-                    error!(
-                        "connect -> Failed to bind socket result {:?}, address: {:?}, sockfd: {:?}!",
-                        bind_result, address, sockfd
-                    );
-
-                    Err(io::Error::last_os_error())?
-                } else {
-                    Detour::Bypass(Bypass::MirrorConnect)
-                }
             }
 
             _ => Detour::Bypass(Bypass::DisabledOutgoing),
@@ -769,7 +770,7 @@ pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), Hoo
 }
 
 /// Managed part of our [`dup_detour`], that clones the `Arc<T>` thing we have keyed by `fd`
-/// ([`UserSocket`], or [`RemoteFile`]).
+/// ([`UserSocket`], or [`file::ops::RemoteFile`]).
 ///
 /// - `SWITCH_MAP`:
 ///
@@ -1055,10 +1056,10 @@ pub(super) fn gethostname() -> Detour<&'static CString> {
 /// we don't actually [`libc::connect`] `sockfd`, but we change the respective [`UserSocket`] to
 /// [`SocketState::Connected`].
 ///
-/// Here we check for this invariant, so if a user calls [`libc::recv_from`] without previously
-/// either connecting this `sockfd`, or calling [`libc::send_to`], we're going to panic.
+/// Here we check for this invariant, so if a user calls [`libc::recvmsg`] without previously
+/// either connecting this `sockfd`, or calling [`libc::sendto`], we're going to panic.
 ///
-/// It performs the [`fill_address`] requirement of [`libc::recv_from`] with the correct remote
+/// It performs the [`fill_address`] requirement of [`libc::recvmsg`] with the correct remote
 /// address (instead of using our interceptor address).
 ///
 /// ## Any other port
@@ -1150,7 +1151,7 @@ fn send_dns_patch(
 ///
 /// There is a bit of trickery going on here, as this function first triggers a _semantical_
 /// connection to an interceptor socket (we don't [`libc::connect`] this `sockfd`, just change the
-/// [`UserSocket`] state), and only then calls the actual [`libc::send_to`] to send `raw_message` to
+/// [`UserSocket`] state), and only then calls the actual [`libc::sendto`] to send `raw_message` to
 /// the interceptor address (instead of the `raw_destination`).
 ///
 /// ## Any other port

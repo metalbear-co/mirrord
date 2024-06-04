@@ -27,7 +27,7 @@ mod net_protocol_ext;
 /// Errors that can occur when handling the `outgoing` feature.
 #[derive(Error, Debug)]
 pub enum OutgoingProxyError {
-    /// The agent sent an error not bound to any [`ConnectionId`](mirrord_protocol::ConnectionId).
+    /// The agent sent an error not bound to any [`ConnectionId`].
     /// This is assumed to be a general agent error.
     /// Originates only from the [`RemoteResult<DaemonRead>`] message.
     #[error("agent error: {0}")]

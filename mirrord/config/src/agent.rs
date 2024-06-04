@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, fmt, path::Path};
 
 use k8s_openapi::api::core::v1::{ResourceRequirements, Toleration};
 use mirrord_analytics::CollectAnalytics;
@@ -32,6 +32,19 @@ impl LinuxCapability {
     }
 }
 
+impl fmt::Display for LinuxCapability {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let as_str = match self {
+            Self::SysAdmin => "SYS_ADMIN",
+            Self::SysPtrace => "SYS_PTRACE",
+            Self::NetRaw => "NET_RAW",
+            Self::NetAdmin => "NET_ADMIN",
+        };
+
+        f.write_str(as_str)
+    }
+}
+
 /// Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.
 ///
 /// We provide sane defaults for this option, so you don't have to set up anything here.
@@ -40,6 +53,7 @@ impl LinuxCapability {
 /// {
 ///   "agent": {
 ///     "log_level": "info",
+///     "json_log": false,
 ///     "namespace": "default",
 ///     "image": "ghcr.io/metalbear-co/mirrord:latest",
 ///     "image_pull_policy": "IfNotPresent",
@@ -49,7 +63,6 @@ impl LinuxCapability {
 ///     "communication_timeout": 30,
 ///     "startup_timeout": 360,
 ///     "network_interface": "eth0",
-///     "pause": false,
 ///     "flush_connections": false,
 ///   }
 /// }
@@ -76,6 +89,20 @@ pub struct AgentConfig {
     #[config(env = "MIRRORD_AGENT_RUST_LOG", default = "info")]
     pub log_level: String,
 
+    /// ### agent.json_log {#agent-json_log}
+    ///
+    /// Controls whether the agent produces logs in a human-friendly format, or json.
+    ///
+    /// ```json
+    /// {
+    ///   "agent": {
+    ///     "json_log": true
+    ///   }
+    /// }
+    /// ```
+    #[config(env = "MIRRORD_AGENT_JSON_LOG", default = false)]
+    pub json_log: bool,
+
     /// ### agent.namespace {#agent-namespace}
     ///
     /// Namespace where the agent shall live.
@@ -85,6 +112,30 @@ pub struct AgentConfig {
     pub namespace: Option<String>,
 
     /// ### agent.image {#agent-image}
+    ///
+    /// Name of the agent's docker image.
+    ///
+    /// Useful when a custom build of mirrord-agent is required, or when using an internal
+    /// registry.
+    ///
+    /// Defaults to the latest stable image `"ghcr.io/metalbear-co/mirrord:latest"`.
+    ///
+    /// ```json
+    /// {
+    ///   "image": "internal.repo/images/mirrord:latest"
+    /// }
+    /// ```
+    ///
+    /// Complete setup:
+    ///
+    /// ```json
+    /// {
+    ///   "image": {
+    ///     "registry": "internal.repo/images/mirrord",
+    ///     "tag": "latest",
+    ///   }
+    /// }
+    /// ```
     #[config(nested)]
     pub image: AgentImageConfig,
 
@@ -103,21 +154,21 @@ pub struct AgentConfig {
     ///
     /// List of secrets the agent pod has access to.
     ///
-    /// Takes an array of hash with the format `{ name: <secret-name> }`.
+    /// Takes an array of entries with the format `{ name: <secret-name> }`.
     ///
-    /// Read more [here](https://kubernetes.io/docs/concepts/containers/images/).
+    /// Read more [here](https://kubernetes.io/docs/concepts/containers/images/#referring-to-an-imagepullsecrets-on-a-pod).
     ///
     /// ```json
     /// {
     ///   "agent": {
     ///     "image_pull_secrets": [
-    ///       { "very-secret": "secret-key" },
-    ///       { "very-secret": "keep-your-secrets" }
+    ///       { "name": "secret-key-1" },
+    ///       { "name": "secret-key-2" }
     ///     ]
     ///   }
     /// }
     /// ```
-    pub image_pull_secrets: Option<Vec<HashMap<String, String>>>,
+    pub image_pull_secrets: Option<Vec<AgentPullSecret>>,
 
     /// ### agent.ttl {#agent-ttl}
     ///
@@ -254,6 +305,28 @@ pub struct AgentConfig {
     #[config(nested)]
     pub dns: AgentDnsConfig,
 
+    /// ### agent.labels {#agent-labels}
+    ///
+    /// Allows setting up custom labels for the agent Job and Pod.
+    ///
+    /// ```json
+    /// {
+    ///   "labels": { "user": "meow", "state": "asleep" }
+    /// }
+    /// ```
+    pub labels: Option<HashMap<String, String>>,
+
+    /// ### agent.annotations {#agent-annotations}
+    ///
+    /// Allows setting up custom annotations for the agent Job and Pod.
+    ///
+    /// ```json
+    /// {
+    ///   "annotations": { "cats.io/inject": "enabled" }
+    /// }
+    /// ```
+    pub annotations: Option<HashMap<String, String>>,
+
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
@@ -262,29 +335,6 @@ pub struct AgentConfig {
     pub test_error: bool,
 }
 
-/// Name of the agent's docker image.
-///
-/// Useful when a custom build of mirrord-agent is required, or when using an internal
-/// registry.
-///
-/// Defaults to the latest stable image `"ghcr.io/metalbear-co/mirrord:latest"`.
-///
-/// ```json
-/// {
-///   "image": "internal.repo/images/mirrord:latest"
-/// }
-/// ```
-///
-/// Complete setup:
-///
-/// ```json
-/// {
-///   "image": {
-///     "registry": "internal.repo/images/mirrord",
-///     "tag": "latest",
-///   }
-/// }
-/// ```
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
@@ -335,6 +385,14 @@ impl AgentImageFileConfig {
             .source_value(context)
             .transpose()
     }
+}
+
+/// <!--${internal}-->
+/// Specifies a secret reference for the agent pod.
+#[derive(Clone, Debug, PartialEq, Eq, JsonSchema, Deserialize, Serialize)]
+pub struct AgentPullSecret {
+    /// Name of the secret.
+    pub name: String,
 }
 
 impl MirrordConfig for AgentImageFileConfig {

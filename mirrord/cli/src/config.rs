@@ -153,10 +153,6 @@ pub(super) struct ExecArgs {
     #[arg(long = "steal")]
     pub tcp_steal: bool,
 
-    /// Pause target container while running.
-    #[arg(short, long, alias = "paws")]
-    pub pause: bool,
-
     /// Disable tcp/udp outgoing traffic
     #[arg(long)]
     pub no_outgoing: bool,
@@ -169,7 +165,7 @@ pub(super) struct ExecArgs {
     #[arg(long)]
     pub no_udp_outgoing: bool,
 
-    /// Disable telemetry. See https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md
+    /// Disable telemetry. See <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>
     #[arg(long)]
     pub no_telemetry: bool,
 
@@ -199,7 +195,7 @@ pub(super) enum OperatorCommand {
     /// NOTE: You don't need to install the operator to use open source mirrord features.
     #[command(override_usage = "mirrord operator setup [OPTIONS] | kubectl apply -f -")]
     Setup {
-        /// ToS can be read here https://metalbear.co/legal/terms
+        /// ToS can be read here <https://metalbear.co/legal/terms>
         #[arg(long)]
         accept_tos: bool,
 
@@ -310,7 +306,7 @@ pub(super) struct ExtensionExecArgs {
     pub executable: Option<String>,
 }
 
-/// Args for the [`super::verify_config`] mirrord-cli command.
+/// Args for the [`mod@super::verify_config`] mirrord-cli command.
 #[derive(Args, Debug)]
 #[command(group(ArgGroup::new("verify-config")))]
 pub(super) struct VerifyConfigArgs {

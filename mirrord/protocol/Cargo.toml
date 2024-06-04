@@ -1,6 +1,6 @@
 [package]
 name = "mirrord-protocol"
-version = "1.5.4"
+version = "1.5.5"
 authors.workspace = true
 description.workspace = true
 documentation.workspace = true
@@ -12,6 +12,9 @@ keywords.workspace = true
 categories.workspace = true
 publish.workspace = true
 edition.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
 actix-codec.workspace = true

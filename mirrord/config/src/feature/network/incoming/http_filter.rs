@@ -19,19 +19,42 @@ use crate::{
 /// Only does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is
 /// set as `"steal"`, ignored otherwise.
 ///
-/// for example, to filter based on header:
+/// For example, to filter based on header:
 /// ```json
 /// {
 ///   "header_filter": "host: api\..+",
 /// }
 /// ```
+/// Setting that filter will make mirrord only steal requests with the `host` header set to hosts
+/// that start with "api", followed by a dot, and then at least one more character.
 ///
-/// for example, to filter based on path
+/// For example, to filter based on path:
 /// ```json
 /// {
-///   "path_filter": "host: api\..+",
+///   "path_filter": "^/api/",
 /// }
 /// ```
+/// Setting this filter will make mirrord only steal requests to URIs starting with "/api/".
+///
+///
+/// This can be useful for filtering out Kubernetes liveness, readiness and startup probes.
+/// For example, for avoiding stealing any probe sent by kubernetes, you can set this filter:
+/// ```json
+/// {
+///   "header_filter": "^User-Agent: (?!kube-probe)",
+/// }
+/// ```
+/// Setting this filter will make mirrord only steal requests that **do** have a user agent that
+/// **does not** begin with "kube-probe".
+///
+/// Similarly, you can exclude certain paths using a negative look-ahead:
+/// ```json
+/// {
+///   "path_filter": "^(?!/health/)",
+/// }
+/// ```
+/// Setting this filter will make mirrord only steal requests to URIs that do not start with
+/// "/health/".
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
 #[config(map_to = "HttpFilterFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
@@ -53,7 +76,7 @@ pub struct HttpFilterConfig {
     /// Supports regexes validated by the
     /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
     ///
-    /// Case insensitive.
+    /// Case-insensitive.
     #[config(env = "MIRRORD_HTTP_PATH_FILTER")]
     pub path_filter: Option<String>,
 

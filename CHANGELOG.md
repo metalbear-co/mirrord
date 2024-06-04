@@ -8,6 +8,100 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.103.0](https://github.com/metalbear-co/mirrord/tree/3.103.0) - 2024-05-29
+
+
+### Added
+
+- Allows a Job to be used as a target when copy_target is enabled.
+
+
+### Changed
+
+- Allows the user to set labels and annotations for the agent job and pod via
+  agent config.
+
+
+### Fixed
+
+- mirrord now prints an informative error when the targeted pod is not in
+  correct state (e.g. is not `Running` or the target container is not `ready`).
+  When picking a pod from target deployment/rollout, mirrord filters out pods
+  that are not in correct state.
+  [#462](https://github.com/metalbear-co/mirrord/issues/462)
+- Fix config printout error showing repeated messages.
+- Fixed listing targets when using operator ignoring namespace - always using
+  default
+- Fixed missing pods/deployments with more than 1 container when using operator
+  ls
+
+
+### Internal
+
+- Fixed DNS e2e flake
+- Update release action to use latest macOS
+
+
+## [3.102.0](https://github.com/metalbear-co/mirrord/tree/3.102.0) - 2024-05-22
+
+
+### Removed
+
+- Remove deprecated unstable pause feature
+  [#2458](https://github.com/metalbear-co/mirrord/issues/2458)
+
+
+### Added
+
+- Added json_log config under agent to control whether the agent produces logs
+  as normal tracing or json.
+  [#2155](https://github.com/metalbear-co/mirrord/issues/2155)
+- Added config info printout at session start.
+  [#2367](https://github.com/metalbear-co/mirrord/issues/2367)
+
+
+### Fixed
+
+- Fixed agent crashing when mirrord target is explicitly set to `targetless`.
+  [#2444](https://github.com/metalbear-co/mirrord/issues/2444)
+- Fixed confusing errors produced when creating an agent.
+
+
+### Internal
+
+- Agent compiles on macOS
+  [#2453](https://github.com/metalbear-co/mirrord/issues/2453)
+- Added `uses_operator` flag to `mirrord ext` output (to be inspected in the
+  plugin/extension).
+- Skip tests from running twice
+
+
+## [3.101.0](https://github.com/metalbear-co/mirrord/tree/3.101.0) - 2024-05-14
+
+
+### Changed
+
+- Use operator to list targets to avoid inconsistencies
+  [#1959](https://github.com/metalbear-co/mirrord/issues/1959)
+- Don't print error on permission denied
+
+
+### Fixed
+
+- Fixed a bug where outgoing connections where not intercepted from bound
+  sockets. [#2438](https://github.com/metalbear-co/mirrord/issues/2438)
+
+
+### Internal
+
+- Fix all check-rust-docs warnings
+  [#1399](https://github.com/metalbear-co/mirrord/issues/1399)
+- Use `with_env_vars` in flaky `fs_config_default` test
+  [#2163](https://github.com/metalbear-co/mirrord/issues/2163)
+- Move LicenseInfoOwned to another module
+- Update contributing guide.
+
+
 ## [3.100.1](https://github.com/metalbear-co/mirrord/tree/3.100.1) - 2024-05-06
 
 

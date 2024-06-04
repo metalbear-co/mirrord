@@ -1,11 +1,15 @@
-//! `mirrord verify-config [--ide] {path}` builds a [`VerifyConfig`] enum after checking the
-//! config file passed in `path`. It's used by the IDE plugins to display errors/warnings quickly,
-//! without having to start mirrord-layer.
+//! `mirrord verify-config [--ide] {path}` builds a
+//! [`VerifyConfig`](crate::Commands::VerifyConfig) enum after checking the config file passed in
+//! `path`. It's used by the IDE plugins to display errors/warnings quickly, without having to start
+//! mirrord-layer.
 use error::Result;
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     feature::FeatureConfig,
-    target::{DeploymentTarget, PodTarget, RolloutTarget, Target, TargetConfig},
+    target::{
+        deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, rollout::RolloutTarget,
+        Target, TargetConfig,
+    },
 };
 use serde::Serialize;
 
@@ -29,6 +33,9 @@ enum VerifiedTarget {
     Deployment(DeploymentTarget),
     #[serde(untagged)]
     Rollout(RolloutTarget),
+
+    #[serde(untagged)]
+    Job(JobTarget),
 }
 
 impl From<Target> for VerifiedTarget {
@@ -37,6 +44,7 @@ impl From<Target> for VerifiedTarget {
             Target::Deployment(d) => Self::Deployment(d),
             Target::Pod(p) => Self::Pod(p),
             Target::Rollout(r) => Self::Rollout(r),
+            Target::Job(j) => Self::Job(j),
             Target::Targetless => Self::Targetless,
         }
     }
@@ -64,18 +72,27 @@ enum TargetType {
     Targetless,
     Pod,
     Deployment,
+    Job,
     Rollout,
 }
 
 impl TargetType {
     fn all() -> impl Iterator<Item = Self> {
-        [Self::Targetless, Self::Pod, Self::Deployment, Self::Rollout].into_iter()
+        [
+            Self::Targetless,
+            Self::Pod,
+            Self::Deployment,
+            Self::Job,
+            Self::Rollout,
+        ]
+        .into_iter()
     }
 
     fn compatible_with(&self, config: &FeatureConfig) -> bool {
         match self {
             Self::Targetless | Self::Rollout => !config.copy_target.enabled,
             Self::Pod => !(config.copy_target.enabled && config.copy_target.scale_down),
+            Self::Job => config.copy_target.enabled,
             Self::Deployment => true,
         }
     }

@@ -108,7 +108,7 @@ impl TryFrom<SocketAddress> for OsSockAddr {
     }
 }
 
-/// For error messages, e.g. [`RemoteError::ConnectTimeOut`].
+/// For error messages, e.g. `RemoteError::ConnectTimeOut`.
 impl Display for SocketAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let addr = match self {

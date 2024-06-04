@@ -1,34 +1,53 @@
 use std::{
     collections::BTreeMap,
     convert::Infallible,
-    fmt::{Display, Formatter},
+    fmt::{self, Display, Formatter},
     ops::FromResidual,
+    str::FromStr,
 };
 
 use k8s_openapi::{
-    api::{
-        apps::v1::Deployment,
-        core::v1::{Node, Pod},
-    },
-    apimachinery::pkg::api::resource::Quantity,
+    api::core::v1::{Node, Pod},
+    NamespaceResourceScope,
 };
-use kube::{api::ListParams, Api, Client};
-use mirrord_config::target::{DeploymentTarget, PodTarget, RolloutTarget, Target};
+use kube::{api::ListParams, Api, Client, Resource};
+use mirrord_config::target::Target;
 use mirrord_protocol::MeshVendor;
+use serde::de::DeserializeOwned;
+use thiserror::Error;
 
 use crate::{
-    api::{
-        container::choose_container,
-        kubernetes::{get_k8s_resource_api, rollout::Rollout},
-    },
+    api::{container::choose_container, kubernetes::get_k8s_resource_api},
     error::{KubeApiError, Result},
 };
+
+pub mod deployment;
+pub mod job;
+pub mod pod;
+pub mod rollout;
 
 #[derive(Debug)]
 pub enum ContainerRuntime {
     Docker,
     Containerd,
     CriO,
+}
+
+#[derive(Error, Debug)]
+#[error("invalid container runtime name: {0}")]
+pub struct ContainerRuntimeParseError(String);
+
+impl FromStr for ContainerRuntime {
+    type Err = ContainerRuntimeParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "docker" => Ok(Self::Docker),
+            "containerd" => Ok(Self::Containerd),
+            "cri-o" => Ok(Self::CriO),
+            _ => Err(ContainerRuntimeParseError(s.to_string())),
+        }
+    }
 }
 
 impl Display for ContainerRuntime {
@@ -55,61 +74,83 @@ pub struct RuntimeData {
 }
 
 impl RuntimeData {
-    fn from_pod(pod: &Pod, container_name: &Option<String>) -> Result<Self> {
+    /// Extracts data needed to create the mirrord-agent targeting the given [`Pod`].
+    /// Verifies that the [`Pod`] is ready to be a target:
+    /// 1. pod is in "Running" phase,
+    /// 2. pod is not in deletion,
+    /// 3. target container is ready.
+    pub fn from_pod(pod: &Pod, container_name: Option<&str>) -> Result<Self> {
         let pod_name = pod
             .metadata
             .name
             .as_ref()
-            .ok_or(KubeApiError::PodNameNotFound)?
+            .ok_or_else(|| KubeApiError::missing_field(pod, ".metadata.name"))?
             .to_owned();
+
+        let phase = pod
+            .status
+            .as_ref()
+            .and_then(|status| status.phase.as_ref())
+            .ok_or_else(|| KubeApiError::missing_field(pod, ".status.phase"))?;
+        if phase != "Running" {
+            return Err(KubeApiError::invalid_state(pod, "not in 'Running' phase"));
+        }
+
+        if pod.metadata.deletion_timestamp.is_some() {
+            return Err(KubeApiError::invalid_state(pod, "in deletion"));
+        }
+
         let node_name = pod
             .spec
             .as_ref()
-            .ok_or(KubeApiError::PodSpecNotFound)?
-            .node_name
-            .as_ref()
-            .ok_or(KubeApiError::NodeNotFound)?
+            .and_then(|spec| spec.node_name.as_ref())
+            .ok_or_else(|| KubeApiError::missing_field(pod, ".spec.nodeName"))?
             .to_owned();
+
         let container_statuses = pod
             .status
             .as_ref()
-            .ok_or(KubeApiError::PodStatusNotFound)?
-            .container_statuses
-            .clone()
-            .ok_or(KubeApiError::ContainerStatusNotFound)?;
+            .and_then(|status| status.container_statuses.as_ref())
+            .ok_or_else(|| KubeApiError::missing_field(pod, ".status.containerStatuses"))?;
+
         let (chosen_container, mesh) =
             choose_container(container_name, container_statuses.as_ref());
 
-        let chosen_status = chosen_container.ok_or_else(|| {
-            KubeApiError::ContainerNotFound(
-                container_name.clone().unwrap_or_else(|| "None".to_string()),
-            )
+        let chosen_status = chosen_container.ok_or_else(|| match container_name {
+            Some(name) => KubeApiError::invalid_state(
+                pod,
+                format_args!("target container `{name}` not found"),
+            ),
+            None => KubeApiError::invalid_state(pod, "no viable target container found"),
         })?;
 
+        if !chosen_status.ready {
+            return Err(KubeApiError::invalid_state(
+                pod,
+                format_args!("target container `{}` is not ready", chosen_status.name),
+            ));
+        }
+
         let container_name = chosen_status.name.clone();
-        let container_id_full = chosen_status
-            .container_id
-            .as_ref()
-            .ok_or(KubeApiError::ContainerIdNotFound)?
-            .to_owned();
+        let container_id_full = chosen_status.container_id.as_ref().ok_or_else(|| {
+            KubeApiError::missing_field(pod, ".status.containerStatuses.[].containerID")
+        })?;
 
         let mut split = container_id_full.split("://");
 
-        let container_runtime = match split.next() {
-            Some("docker") => ContainerRuntime::Docker,
-            Some("containerd") => ContainerRuntime::Containerd,
-            Some("cri-o") => ContainerRuntime::CriO,
+        let (container_runtime, container_id) = match (
+            split.next().map(ContainerRuntime::from_str),
+            split.next(),
+        ) {
+            (Some(Ok(runtime)), Some(id)) => (runtime, id.to_string()),
             _ => {
-                return Err(KubeApiError::ContainerRuntimeParseError(
-                    container_id_full.to_string(),
-                ))
+                return Err(KubeApiError::invalid_value(
+                    pod,
+                    ".status.containerStatuses.[].containerID",
+                    format_args!("failed to extract container runtime for `{container_name}`: `{container_id_full}`"),
+                ));
             }
         };
-
-        let container_id = split
-            .next()
-            .ok_or_else(|| KubeApiError::ContainerRuntimeParseError(container_id_full.to_string()))?
-            .to_owned();
 
         Ok(RuntimeData {
             pod_name,
@@ -129,15 +170,15 @@ impl RuntimeData {
 
         let node = node_api.get(&self.node_name).await?;
 
-        let allocatable = node
+        let allowed = node
             .status
-            .and_then(|status| status.allocatable)
-            .ok_or_else(|| KubeApiError::NodeBadAllocatable(self.node_name.clone()))?;
-
-        let allowed: usize = allocatable
-            .get("pods")
-            .and_then(|Quantity(quantity)| quantity.parse().ok())
-            .ok_or_else(|| KubeApiError::NodeBadAllocatable(self.node_name.clone()))?;
+            .as_ref()
+            .and_then(|status| status.allocatable.as_ref())
+            .and_then(|allocatable| allocatable.get("pods"))
+            .ok_or_else(|| KubeApiError::missing_field(&node, ".status.allocatable.pods"))?
+            .0
+            .parse::<usize>()
+            .map_err(|e| KubeApiError::invalid_value(&node, ".status.allocatable.pods", e))?;
 
         let mut pod_count = 0;
         let mut list_params = ListParams {
@@ -159,7 +200,7 @@ impl RuntimeData {
         }
 
         if allowed <= pod_count {
-            NodeCheck::Failed(self.node_name.clone(), pod_count)
+            NodeCheck::Failed(node, pod_count)
         } else {
             NodeCheck::Success
         }
@@ -169,7 +210,7 @@ impl RuntimeData {
 #[derive(Debug)]
 pub enum NodeCheck {
     Success,
-    Failed(String, usize),
+    Failed(Node, usize),
     Error(KubeApiError),
 }
 
@@ -180,12 +221,7 @@ where
     fn from_residual(error: Result<Infallible, E>) -> Self {
         match error {
             Ok(_) => unreachable!(),
-            Err(err) => match err.into() {
-                KubeApiError::NodePodLimitExceeded(node_name, pods) => {
-                    NodeCheck::Failed(node_name, pods)
-                }
-                err => NodeCheck::Error(err),
-            },
+            Err(err) => NodeCheck::Error(err.into()),
         }
     }
 }
@@ -195,49 +231,61 @@ pub trait RuntimeDataProvider {
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData>;
 }
 
-pub trait RuntimeTarget {
-    fn target(&self) -> &str;
-
-    fn container(&self) -> &Option<String>;
-}
-
 pub trait RuntimeDataFromLabels {
+    type Resource: Resource<DynamicType = (), Scope = NamespaceResourceScope>
+        + Clone
+        + DeserializeOwned
+        + fmt::Debug;
+
     #[allow(async_fn_in_trait)]
-    async fn get_labels(
-        &self,
-        client: &Client,
-        namespace: Option<&str>,
-    ) -> Result<BTreeMap<String, String>>;
+    async fn get_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>>;
+
+    fn name(&self) -> &str;
+
+    fn container(&self) -> Option<&str>;
 }
 
 impl<T> RuntimeDataProvider for T
 where
-    T: RuntimeTarget + RuntimeDataFromLabels,
+    T: RuntimeDataFromLabels,
 {
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
-        let labels = self.get_labels(client, namespace).await?;
+        let api: Api<<Self as RuntimeDataFromLabels>::Resource> =
+            get_k8s_resource_api(client, namespace);
+        let resource = api.get(self.name()).await?;
 
-        // convert to key value pair
-        let formatted_deployments_labels = labels
+        let labels = Self::get_labels(&resource).await?;
+
+        let formatted_labels = labels
             .iter()
             .map(|(key, value)| format!("{key}={value}"))
             .collect::<Vec<String>>()
             .join(",");
+        let list_params = ListParams {
+            label_selector: Some(formatted_labels),
+            ..Default::default()
+        };
 
         let pod_api: Api<Pod> = get_k8s_resource_api(client, namespace);
-        let pods = pod_api
-            .list(&ListParams::default().labels(&formatted_deployments_labels))
-            .await
-            .map_err(KubeApiError::KubeError)?;
+        let pods = pod_api.list(&list_params).await?;
 
-        let first_pod = pods.items.first().ok_or_else(|| {
-            KubeApiError::DeploymentNotFound(format!(
-                "Failed to fetch the default(first pod) from ObjectList<Pod> for {}",
-                self.target()
-            ))
-        })?;
+        if pods.items.is_empty() {
+            return Err(KubeApiError::invalid_state(
+                &resource,
+                "no pods matching labels found",
+            ));
+        }
 
-        RuntimeData::from_pod(first_pod, self.container())
+        pods.items
+            .iter()
+            .filter_map(|pod| RuntimeData::from_pod(pod, self.container()).ok())
+            .next()
+            .ok_or_else(|| {
+                KubeApiError::invalid_state(
+                    &resource,
+                    "no pod matching labels is ready to be targeted",
+                )
+            })
     }
 }
 
@@ -247,89 +295,15 @@ impl RuntimeDataProvider for Target {
             Target::Deployment(deployment) => deployment.runtime_data(client, namespace).await,
             Target::Pod(pod) => pod.runtime_data(client, namespace).await,
             Target::Rollout(rollout) => rollout.runtime_data(client, namespace).await,
-            Target::Targetless => {
-                unreachable!("runtime_data can't be called on Targetless")
-            }
+            Target::Job(job) => job.runtime_data(client, namespace).await,
+            Target::Targetless => Err(KubeApiError::MissingRuntimeData),
         }
-    }
-}
-
-impl RuntimeTarget for DeploymentTarget {
-    fn target(&self) -> &str {
-        &self.deployment
-    }
-
-    fn container(&self) -> &Option<String> {
-        &self.container
-    }
-}
-
-impl RuntimeDataFromLabels for DeploymentTarget {
-    async fn get_labels(
-        &self,
-        client: &Client,
-        namespace: Option<&str>,
-    ) -> Result<BTreeMap<String, String>> {
-        let deployment_api: Api<Deployment> = get_k8s_resource_api(client, namespace);
-        let deployment = deployment_api
-            .get(&self.deployment)
-            .await
-            .map_err(KubeApiError::KubeError)?;
-
-        deployment
-            .spec
-            .and_then(|spec| spec.selector.match_labels)
-            .ok_or_else(|| {
-                KubeApiError::DeploymentNotFound(format!(
-                    "Label for deployment: {}, not found!",
-                    self.deployment.clone()
-                ))
-            })
-    }
-}
-
-impl RuntimeTarget for RolloutTarget {
-    fn target(&self) -> &str {
-        &self.rollout
-    }
-
-    fn container(&self) -> &Option<String> {
-        &self.container
-    }
-}
-
-impl RuntimeDataFromLabels for RolloutTarget {
-    async fn get_labels(
-        &self,
-        client: &Client,
-        namespace: Option<&str>,
-    ) -> Result<BTreeMap<String, String>> {
-        let rollout_api: Api<Rollout> = get_k8s_resource_api(client, namespace);
-        let rollout = rollout_api
-            .get(&self.rollout)
-            .await
-            .map_err(KubeApiError::KubeError)?;
-
-        rollout.match_labels().ok_or_else(|| {
-            KubeApiError::DeploymentNotFound(format!(
-                "Label for rollout: {}, not found!",
-                self.rollout.clone()
-            ))
-        })
-    }
-}
-
-impl RuntimeDataProvider for PodTarget {
-    async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
-        let pod_api: Api<Pod> = get_k8s_resource_api(client, namespace);
-        let pod = pod_api.get(&self.pod).await?;
-
-        RuntimeData::from_pod(&pod, &self.container)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use mirrord_config::target::{deployment::DeploymentTarget, job::JobTarget, pod::PodTarget};
     use rstest::rstest;
 
     use super::*;
@@ -340,6 +314,8 @@ mod tests {
     #[case("deployment/nginx-deployment", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_string(), container: None}))]
     #[case("pod/foo/container/baz", Target::Pod(PodTarget { pod: "foo".to_string(), container: Some("baz".to_string()) }))]
     #[case("deployment/nginx-deployment/container/container-name", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_string(), container: Some("container-name".to_string())}))]
+    #[case("job/foo", Target::Job(JobTarget { job: "foo".to_string(), container: None }))]
+    #[case("job/foo/container/baz", Target::Job(JobTarget { job: "foo".to_string(), container: Some("baz".to_string()) }))]
     fn target_parses(#[case] target: &str, #[case] expected: Target) {
         let target = target.parse::<Target>().unwrap();
         assert_eq!(target, expected)

@@ -2,7 +2,7 @@
 //!
 //! ## Macros
 //!
-//! - [`replace!`]
+//! - [`replace!`](`macro@crate::replace`)
 //!
 //! Replaces a [`libc`] function with a hook.
 //!
@@ -10,7 +10,7 @@
 //!
 //! Used to hook go symbols.
 //!
-//! - [`graceful_exit!`]
+//! - [`graceful_exit!`](`macro@crate::graceful_exit`)
 //!
 //! Exits the process with a nice message.
 

@@ -30,19 +30,6 @@ use crate::{
     internal_proxy::InternalProxyConfig, target::TargetConfig, util::VecOrSingle,
 };
 
-const PAUSE_WITHOUT_STEAL_WARNING: &str =
-    "--pause specified without --steal: Incoming requests to the application will
-    not be handled. The target container running the deployed application is paused,
-    and responses from the local application are dropped.
-
-    Attention: if network based liveness/readiness probes are defined for the
-    target, they will fail under this configuration.
-
-    To have the local application handle incoming requests you can run again with
-    `--steal`. To have the deployed application handle requests, run again without
-    specifying `--pause`.
-    ";
-
 /// mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
 ///
@@ -94,7 +81,6 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 /// {
 ///   "accept_invalid_certificates": false,
 ///   "skip_processes": "ide-debugger",
-///   "pause": false,
 ///   "target": {
 ///     "path": "pod/bear-pod",
 ///     "namespace": "default"
@@ -102,6 +88,9 @@ const PAUSE_WITHOUT_STEAL_WARNING: &str =
 ///   "connect_tcp": null,
 ///   "agent": {
 ///     "log_level": "info",
+///     "json_log": false,
+///     "labels": { "user": "meow" },
+///     "annotations": { "cats.io/inject": "enabled" },
 ///     "namespace": "default",
 ///     "image": "ghcr.io/metalbear-co/mirrord:latest",
 ///     "image_pull_policy": "IfNotPresent",
@@ -203,22 +192,6 @@ pub struct LayerConfig {
     /// "debugserver"]`
     #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true)]
     pub skip_build_tools: bool,
-
-    /// ## pause {#root-pause}
-    /// Controls target pause feature. Unstable.
-    ///
-    /// With this feature enabled, the remote container is paused while this layer is connected to
-    /// the agent.
-    ///
-    /// Note: It requires agent configuration to be set to privileged when running with the
-    /// ephemeral agent option. Defaults to `false`.
-    /// Note2: Pause + ephemeral might not work on Docker runtimes.
-    #[config(
-        env = "MIRRORD_PAUSE",
-        default = false,
-        deprecated = "pause is deprecated in favor of copy + scaledown teams feature. Read the blogpost here https://metalbear.co/blog/on-pausing-containers-how-we-built-and-why-we-deprecated-our-container-pause-feature/"
-    )]
-    pub pause: bool,
 
     /// ## connect_tcp {#root-connect_tpc}
     ///
@@ -353,15 +326,6 @@ impl LayerConfig {
     /// `mirrord verify-config`. Turns some _target missing_ errors into warnings, as the target can
     /// be selected after `verify-config` is run.
     pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
-        if self.pause {
-            if self.agent.ephemeral && !self.agent.privileged {
-                context.add_warning("The target pause feature with ephemeral requires to enable the privileged flag on the agent.".to_string());
-            }
-            if !self.feature.network.incoming.is_steal() {
-                context.add_warning(PAUSE_WITHOUT_STEAL_WARNING.to_string());
-            }
-        }
-
         if self.agent.ephemeral && self.agent.namespace.is_some() {
             context.add_warning(
                 "Agent namespace is ignored when using an ephemeral container for the agent."
@@ -398,6 +362,17 @@ impl LayerConfig {
             ))?
         }
 
+        if !self.feature.copy_target.enabled
+            && self
+                .target
+                .path
+                .as_ref()
+                .map(|target| matches!(target, target::Target::Job(_)))
+                .unwrap_or_default()
+        {
+            Err(ConfigError::TargetJobWithoutCopyTarget)?
+        }
+
         if self.target.path.is_none() && !context.ide {
             // In the IDE, a target may be selected after `mirrord verify-config` is run, so we
             // for this case we treat these as warnings. They'll become errors once mirrord proper
@@ -415,14 +390,6 @@ impl LayerConfig {
                     "Using an ephemeral container for the agent is not \
                          compatible with a targetless agent, please either disable this option or \
                         specify a target."
-                        .into(),
-                ))?
-            }
-
-            if self.pause {
-                Err(ConfigError::Conflict(
-                    "The target pause feature is not compatible with a \
-                        targetless agent, please either disable this option or specify a target."
                         .into(),
                 ))?
             }
@@ -463,7 +430,6 @@ impl LayerConfig {
 
 impl CollectAnalytics for &LayerConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
-        analytics.add("pause", self.pause);
         analytics.add(
             "accept_invalid_certificates",
             self.accept_invalid_certificates,
@@ -497,7 +463,6 @@ impl LayerFileConfig {
 mod tests {
 
     use std::{
-        collections::HashMap,
         fs::{File, OpenOptions},
         io::{Read, Write},
     };
@@ -517,7 +482,7 @@ mod tests {
             },
             FeatureFileConfig,
         },
-        target::{PodTarget, Target, TargetFileConfig},
+        target::{Target, TargetFileConfig},
         util::ToggleableConfig,
     };
 
@@ -543,13 +508,13 @@ mod tests {
                     r#"
                     {
                         "accept_invalid_certificates": false,
-                        "pause": false,
                         "target": {
                             "path": "pod/test-service-abcdefg-abcd",
                             "namespace": "default"
                         },
                         "agent": {
                             "log_level": "info",
+                            "json_log": false,
                             "namespace": "default",
                             "image": "",
                             "image_pull_policy": "",
@@ -578,7 +543,6 @@ mod tests {
                 ConfigType::Toml => {
                     r#"
                     accept_invalid_certificates = false
-                    pause = false
 
                     [target]
                     path = "pod/test-service-abcdefg-abcd"
@@ -586,6 +550,7 @@ mod tests {
 
                     [agent]
                     log_level = "info"
+                    json_log = false
                     namespace = "default"
                     image = ""
                     image_pull_policy = ""
@@ -612,13 +577,13 @@ mod tests {
                 ConfigType::Yaml => {
                     r#"
                     accept_invalid_certificates: false
-                    pause: false
                     target:
                         path: "pod/test-service-abcdefg-abcd"
                         namespace: "default"
 
                     agent:
                         log_level: "info"
+                        json_log: false
                         namespace: "default"
                         image: ""
                         image_pull_policy: ""
@@ -671,7 +636,10 @@ mod tests {
     fn full(
         #[values(ConfigType::Json, ConfigType::Toml, ConfigType::Yaml)] config_type: ConfigType,
     ) {
-        use crate::agent::AgentImageFileConfig;
+        use crate::{
+            agent::{AgentImageFileConfig, AgentPullSecret},
+            target::pod::PodTarget,
+        };
 
         let input = config_type.full();
 
@@ -679,7 +647,6 @@ mod tests {
 
         let expect = LayerFileConfig {
             accept_invalid_certificates: Some(false),
-            pause: Some(false),
             kubeconfig: None,
             telemetry: None,
             target: Some(TargetFileConfig::Advanced {
@@ -694,13 +661,13 @@ mod tests {
             agent: Some(AgentFileConfig {
                 privileged: None,
                 log_level: Some("info".to_owned()),
+                json_log: Some(false),
                 namespace: Some("default".to_owned()),
                 image: Some(AgentImageFileConfig::Simple(Some("".to_owned()))),
                 image_pull_policy: Some("".to_owned()),
-                image_pull_secrets: Some(vec![HashMap::from([(
-                    "name".to_owned(),
-                    "testsecret".to_owned(),
-                )])]),
+                image_pull_secrets: Some(vec![AgentPullSecret {
+                    name: "testsecret".to_owned(),
+                }]),
                 ttl: Some(60),
                 ephemeral: Some(false),
                 communication_timeout: None,

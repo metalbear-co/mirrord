@@ -41,7 +41,8 @@ enum DocsError {
     #[error("IO error {0}")]
     IO(#[from] std::io::Error),
 
-    /// May happen (probably never) when [`parse_files`] is reading the source file into a `&str`.
+    /// May happen (probably never) when [`files_to_string`] is reading the source file into a
+    /// `&str`.
     #[error("Read past end of source!")]
     ReadOutOfBounds,
 }
@@ -416,7 +417,7 @@ fn parse_docs_into_tree(files: Vec<syn::File>) -> Result<BTreeSet<PartialType>, 
     Ok(type_docs)
 }
 
-/// Digs into the [`PartialTypes`] building new types that inline the types of their
+/// Digs into the [`PartialType`] building new types that inline the types of their
 /// [`PartialField`]s, turning something like:
 ///
 /// ```no_run
@@ -570,7 +571,7 @@ struct ToolArgs {
 
 /// # Attention when using `RUST_LOG`
 ///
-/// Every function here supports our usual [`tracing::instrument`] setup, with default
+/// Every function here supports our usual [`mod@tracing::instrument`] setup, with default
 /// `log_level = "trace`, but if you dare run with `RUST_LOG=trace` you're going to have a bad time!
 ///
 /// The logging is put in place so you can quickly change whatever function you need to
