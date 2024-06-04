@@ -135,7 +135,7 @@ pub fn hook_guard_fn(
         let unsafety = signature.unsafety;
         let abi = signature.abi;
 
-        let fn_args = signature
+        let mut fn_args = signature
             .inputs
             .clone()
             .into_iter()
@@ -144,6 +144,16 @@ pub fn hook_guard_fn(
                 syn::FnArg::Typed(arg) => arg.ty,
             })
             .collect::<Vec<_>>();
+
+        // If we have `VaListImpl` args, then we push it to the end of the `fn_args` as
+        // just `...`.
+        if signature.variadic.is_some() {
+            let fixed_arg = quote! {
+                ...
+            };
+
+            fn_args.push(Box::new(Type::Verbatim(fixed_arg)));
+        }
 
         let fn_arg_names: Punctuated<_, Comma> = signature
             .inputs
