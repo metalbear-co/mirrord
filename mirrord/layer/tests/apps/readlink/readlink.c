@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 int main() {
@@ -16,5 +17,6 @@ int main() {
   out_buffer[amount_read] = '\0';
 
   printf("'%s' -> '%s'", path, out_buffer);
+  assert(strcmp("gatos.link", out_buffer) == 0);
   return 0;
 }
