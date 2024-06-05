@@ -6,8 +6,8 @@ use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 use libc::{c_char, statx, statx_timestamp};
 use libc::{c_int, iovec, unlink, AT_FDCWD};
 use mirrord_protocol::file::{
-    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, SeekFileResponse,
-    WriteFileResponse, XstatFsResponse, XstatResponse,
+    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, ReadLinkFileRequest,
+    ReadLinkFileResponse, SeekFileResponse, WriteFileResponse, XstatFsResponse, XstatResponse,
 };
 use rand::distributions::{Alphanumeric, DistString};
 use tracing::{error, trace};
@@ -272,6 +272,14 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
     };
 
     let response = common::make_proxy_request_with_response(reading_file)??;
+
+    Detour::Success(response)
+}
+
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
+    let requesting_path = ReadLinkFileRequest { path: path? };
+    let response = common::make_proxy_request_with_response(requesting_path)??;
 
     Detour::Success(response)
 }
