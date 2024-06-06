@@ -8,6 +8,39 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.104.0](https://github.com/metalbear-co/mirrord/tree/3.104.0) - 2024-06-06
+
+
+### Added
+
+- Emit a warning when the `port_mapping` field of the configuration contains an
+  unnecessary mapping of a port to itself.
+
+
+### Changed
+
+- Update syn to version 2.
+  [#1235](https://github.com/metalbear-co/mirrord/issues/1235)
+
+
+### Fixed
+
+- Fix HTTP2/1.1 translated messages dropping
+  [#2497](https://github.com/metalbear-co/mirrord/issues/2497)
+- Clean hostname/name sent to operator to fix issue of hostname with linebreaks
+- Fixed a bug where two mirrord sessions could not target the same pod while
+  stealing from different ports.
+- Fixed typo in auto-generated docs for mirrord config.
+
+
+### Internal
+
+- Added healthcheck examples to filter configuration docs. Also some other
+  minor doc fixes.
+- Fixed concurrent steal operator tests, removed obsolete error variants, fixed
+  `cargo` warnings in test code.
+
+
 ## [3.103.0](https://github.com/metalbear-co/mirrord/tree/3.103.0) - 2024-05-29
 
 
