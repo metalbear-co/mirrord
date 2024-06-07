@@ -121,6 +121,7 @@ impl TryFrom<syn::ItemMod> for PartialType {
 }
 
 /// Converts a [`syn::ItemEnum`] into a [`PartialType`].
+/// Currently, we don't handle enum variants as fields, we just use its top-level docs.
 impl TryFrom<syn::ItemEnum> for PartialType {
     type Error = ();
 
@@ -223,7 +224,7 @@ fn dfs_fields<'a>(
 
 /// Resolves the references of the types, so we can inline the docs of the types that are fields of
 /// other types. Following a DFS approach to resolve the references with memoization it
-/// digs into the [`PartialTypes`] building new types that inline the types of their
+/// digs into the [`PartialType`]s building new types that inline the types of their
 /// [`PartialField`]s, turning something like:
 ///
 /// ```no_run

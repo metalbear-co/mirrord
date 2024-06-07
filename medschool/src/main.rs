@@ -102,7 +102,7 @@ fn main() -> Result<(), DocsError> {
             final_docs.insert_str(0, &(header + "\n"));
         }
         let output = output.unwrap_or_else(|| PathBuf::from("./configuration.md"));
-        fs::write(output, final_docs).unwrap();
+        fs::write(output, final_docs)?;
     }
     Ok(())
 }
@@ -203,6 +203,45 @@ mod test {
 "#,
     ];
 
+    const UNORDERED_EXPECTED: &str = "# UnorderedStructC\n\n## UnorderedField -> UnorderedStructA\n\n# UnorderedStructA\n\n## UnorderedField - a\n\n## UnorderedField - b\n\n## UnorderedField -> UnorderedStructB\n\n# UnorderedStructB\n\n## UnorderedField - a\n\n# Example Enum\n\n## UnorderedField -> UnorderedStructA\n\n# UnorderedStructA\n\n## UnorderedField - a\n\n## UnorderedField - b\n\n";
+    const UNORDERED_FILES: [&str; 2] = [
+        r#"
+    /// # UnorderedStructA
+    struct UnorderedStructA {
+        /// ## UnorderedField - b
+        b_field: i32,
+
+        /// ## UnorderedField - a
+        a_field: String,
+    }
+
+    /// # UnorderedStructB
+    struct UnorderedStructB {
+        /// ## UnorderedField -> UnorderedStructA
+        c_field: UnorderedStructA,
+
+        /// ## UnorderedField - a
+        a_field: ExampleEnum,
+    }    
+
+    /// # Example Enum
+    enum ExampleEnum {        
+        A,        
+        B,
+    }
+    "#,
+        r#"
+    /// # UnorderedStructC
+    struct UnorderedStructC {
+        /// ## UnorderedField -> UnorderedStructB
+        b_field: UnorderedStructB,
+
+        /// ## UnorderedField -> UnorderedStructA
+        a_field: UnorderedStructA,
+    }
+    "#,
+    ];
+
     fn parse_string_files(files: Vec<String>) -> Vec<syn::File> {
         files
             .into_iter()
@@ -244,89 +283,15 @@ mod test {
         }
     }
 
-    /// # Root_B_C_Node
-    ///
-    /// Root_B_C_Node - 1l
-    ///
-    /// Root_B_C_Node - 2l
-    struct Root_B_C_Node {
-        /// <!--${internal}-->
-        /// ## Root_B_C_Node - internal
-        internal: i32,
+    /// Test that determines whether we pick the pick the correct root based on the level of
+    /// recursion and all the recursive fields are correctly resolved from the given files.
+    #[test]
+    fn randomly_ordered_fields() {
+        let files = parse_string_files(UNORDERED_FILES.map(ToString::to_string).to_vec());
 
-        /// ## Root_B_C_Node - d_field
-        d_field: Vec<Root_B_C_D_Edge>,
-
-        /// ## Root_B_C_Node - root_b_c_node_field
-        ///
-        /// Root_B_C_Node - edge - root_b_c_node_field
-        root_b_c_node_field: Option<Vec<String>>,
-    }
-
-    /// # Root
-    ///
-    /// Root - 1l
-    ///
-    /// Root - 2l
-    struct Root {
-        /// ## Root - e_field
-        e_field: Root_E_Edge,
-
-        /// ## Root - root_field
-        ///
-        /// Root - edge - root_field
-        root_field: i32,
-
-        /// ## Root - b_field
-        b_field: Option<Vec<Root_B_Node>>,
-    }
-
-    /// # Root_B_Node
-    ///
-    /// Root_B_Node - 1l
-    ///
-    /// Root_B_Node - 2l
-    struct Root_B_Node {
-        /// ## Root_B_Node - c_field
-        c_field: Vec<Root_B_C_Node>,
-
-        /// ## Root_B_Node - root_b_node_field
-        ///
-        /// Root_B_Node - edge - root_b_node_field
-        root_b_node_field: Option<String>,
-    }
-
-    /// # Root_B_C_D_Edge
-    ///
-    /// Root_B_C_D_Edge - 1l
-    ///
-    /// Root_B_C_D_Edge - 2l
-    struct Root_B_C_D_Edge {
-        /// ## Root_B_C_D_Edge - d_field
-        ///
-        /// Root_B_C_D_Edge - edge - d_field
-        d_field: Vec<Option<Vec<PathBuf>>>,
-
-        /// ## Root_B_C_D_Edge - c_field
-        ///
-        /// Root_B_C_D_Edge - edge - c_field
-        c_field: i32,
-    }
-
-    /// # Root_E_Edge
-    ///
-    /// Root_E_Edge - 1l
-    ///
-    /// Root_E_Edge - 2l
-    struct Root_E_Edge {
-        /// ## Root_E_Edge - f_field
-        ///
-        /// Root_E_Edge - edge - f_field
-        f_field: i32,
-
-        /// ## Root_E_Edge - e_field
-        ///
-        /// Root_E_Edge - edge - e_field
-        e_field: String,
+        let type_docs = super::parse_docs_into_set(files).unwrap();
+        let root_type = resolve_references(type_docs.clone()).unwrap();
+        let final_docs = root_type.produce_docs();
+        assert_eq!(final_docs, UNORDERED_EXPECTED);
     }
 }
