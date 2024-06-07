@@ -65,6 +65,7 @@ pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Option<Vec<String>> {
         return None;
     }
 
+    // New line to separate this types' docs from the next types' docs.
     docs.push("\n".to_string());
     Some(docs)
 }
