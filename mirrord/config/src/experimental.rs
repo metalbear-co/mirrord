@@ -17,6 +17,8 @@ pub struct ExperimentalConfig {
     pub tcp_ping4_mock: bool,
 
     /// ## [experimental] readlink {#fexperimental-readlink}
+    ///
+    /// Enables the `readlink` hook.
     #[config(default = false)]
     pub readlink: bool,
 }
