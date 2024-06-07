@@ -279,41 +279,49 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
 
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
-    let path = path?;
+    if crate::setup().experimental().readlink {
+        let path = path?;
 
-    if path.is_relative() {
-        // Calls with non absolute paths are sent to libc::open.
-        Detour::Bypass(Bypass::RelativePath(path.clone()))?
-    };
+        if path.is_relative() {
+            // Calls with non absolute paths are sent to libc::readlink.
+            Detour::Bypass(Bypass::RelativePath(path.clone()))?
+        };
 
-    ensure_not_ignored!(path, false);
+        ensure_not_ignored!(path, false);
 
-    let requesting_path = ReadLinkFileRequest { path };
-    let response = common::make_proxy_request_with_response(requesting_path)??;
+        let requesting_path = ReadLinkFileRequest { path };
+        let response = common::make_proxy_request_with_response(requesting_path)??;
 
-    Detour::Success(response)
+        Detour::Success(response)
+    } else {
+        None?
+    }
 }
 
-// #[mirrord_layer_macro::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(crate) fn read_link_at(local_fd: RawFd, path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
-    let path = path?;
+    if crate::setup().experimental().readlink {
+        let path = path?;
 
-    if path.is_relative() {
-        // Calls with non absolute paths are sent to libc::open.
-        Detour::Bypass(Bypass::RelativePath(path.clone()))?
-    };
+        if path.is_relative() {
+            // Calls with non absolute paths are sent to libc::readlinkat.
+            Detour::Bypass(Bypass::RelativePath(path.clone()))?
+        };
 
-    ensure_not_ignored!(path, false);
+        ensure_not_ignored!(path, false);
 
-    let remote_fd = get_remote_fd(local_fd)?;
+        let remote_fd = get_remote_fd(local_fd)?;
 
-    let requesting_path = ReadLinkAtFileRequest {
-        fd: remote_fd,
-        path,
-    };
-    let response = common::make_proxy_request_with_response(requesting_path)??;
+        let requesting_path = ReadLinkAtFileRequest {
+            fd: remote_fd,
+            path,
+        };
+        let response = common::make_proxy_request_with_response(requesting_path)??;
 
-    Detour::Success(response)
+        Detour::Success(response)
+    } else {
+        None?
+    }
 }
 
 pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<WriteFileResponse> {
