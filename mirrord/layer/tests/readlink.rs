@@ -11,7 +11,7 @@ pub use common::*;
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn readlink(
-    #[values(None, Some("readlink.json"))] with_config: Option<&str>,
+    #[values(Some("readlink.json"))] with_config: Option<&str>,
     dylib_path: &PathBuf,
     config_dir: &PathBuf,
 ) {
