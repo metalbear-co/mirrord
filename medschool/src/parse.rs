@@ -11,8 +11,8 @@ use crate::{
 
 /// Look into the [`syn::Attribute`]s of whatever item we're handling, and extract its doc strings.
 #[tracing::instrument(level = "trace", ret)]
-pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
-    attributes
+pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Option<Vec<String>> {
+    let mut docs: Vec<String> = attributes
         .into_iter()
         // drill into `Meta::NameValue`
         .filter_map(|attribute| match attribute.meta {
@@ -47,7 +47,26 @@ pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
                 format!("{}\n", doc)
             }
         })
-        .collect()
+        .collect();
+
+    for doc in docs.iter_mut() {
+        // removes docs that we don't want in `configuration.md`
+        if doc.contains(r"<!--${internal}-->") {
+            return None;
+        }
+
+        // `trim` is too aggressive, we just want to remove 1 whitespace
+        if doc.starts_with(' ') {
+            doc.remove(0);
+        }
+    }
+
+    if docs.is_empty() {
+        return None;
+    }
+
+    docs.push("\n".to_string());
+    Some(docs)
 }
 
 /// Digs into the generics of a field ([`syn::ItemStruct`] only), trying to get the last
@@ -93,10 +112,9 @@ impl TryFrom<syn::ItemMod> for PartialType {
     type Error = ();
 
     fn try_from(item: syn::ItemMod) -> Result<Self, Self::Error> {
-        let thing_docs_untreated = docs_from_attributes(item.attrs);
         Ok(PartialType {
             ident: item.ident.to_string(),
-            docs: thing_docs_untreated,
+            docs: docs_from_attributes(item.attrs).ok_or(())?,
             fields: Default::default(),
         })
     }
@@ -107,18 +125,9 @@ impl TryFrom<syn::ItemEnum> for PartialType {
     type Error = ();
 
     fn try_from(item: syn::ItemEnum) -> Result<Self, Self::Error> {
-        let thing_docs_untreated = docs_from_attributes(item.attrs);
-        let is_internal = thing_docs_untreated
-            .iter()
-            .any(|doc| doc.contains(r"<!--${internal}-->"));
-
-        if thing_docs_untreated.is_empty() || is_internal {
-            return Err(());
-        }
-
         Ok(PartialType {
             ident: item.ident.to_string(),
-            docs: thing_docs_untreated,
+            docs: docs_from_attributes(item.attrs).ok_or(())?,
             fields: Default::default(),
         })
     }
@@ -130,35 +139,15 @@ impl TryFrom<syn::ItemStruct> for PartialType {
     type Error = ();
 
     fn try_from(item: syn::ItemStruct) -> Result<Self, Self::Error> {
-        let mut docs = docs_from_attributes(item.attrs);
-
-        for doc in docs.iter_mut() {
-            // removes docs that we don't want in `configuration.md`
-            if doc.contains(r"<!--${internal}-->") {
-                return Err(());
-            }
-
-            // `trim` is too aggressive, we just want to remove 1 whitespace
-            if doc.starts_with(' ') {
-                doc.remove(0);
-            }
-        }
-
-        docs.push("\n".to_string());
-
         let fields = item
             .fields
             .into_iter()
             .filter_map(|field| PartialField::try_from(field).ok())
             .collect::<BTreeSet<_>>();
 
-        if docs.is_empty() || fields.is_empty() {
-            return Err(());
-        }
-
         Ok(PartialType {
             ident: item.ident.to_string(),
-            docs,
+            docs: docs_from_attributes(item.attrs).ok_or(())?,
             fields,
         })
     }

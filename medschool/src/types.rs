@@ -69,27 +69,10 @@ impl TryFrom<syn::Field> for PartialField {
         }
         .ok_or(())?;
 
-        let mut docs = docs_from_attributes(field.attrs);
-
-        // TODO: this part can be encapsulated into a function
-        for doc in docs.iter_mut() {
-            // removes docs that we don't want in `configuration.md`
-            if doc.contains(r"<!--${internal}-->") {
-                return Err(());
-            }
-
-            // `trim` is too aggressive, we just want to remove 1 whitespace
-            if doc.starts_with(' ') {
-                doc.remove(0);
-            }
-        }
-
-        docs.push("\n".to_string());
-
         Ok(Self {
             ident: field.ident.ok_or(())?.to_string(),
             ty: type_ident.to_string(),
-            docs,
+            docs: docs_from_attributes(field.attrs).ok_or(())?,
         })
     }
 }
