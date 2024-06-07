@@ -469,3 +469,13 @@ In order to have a more structured approach, here’s the flow you should follow
     6. And so on.
 5. This doc should go later on to our mirrord docs for advanced developers so people can understand how stuff works
 6. After approval of the implementation, you can start writing code, and add relevant e2e tests.
+
+# Rust Analyzer on MacOS
+
+The mirrord agent crate makes use of the `#[cfg(target_os = "linux")]` attribute to allow the whole repo to compile when you run `cargo build`. Unfortunately, this means rust-analyzer will not run on the code in that crate and you won't have full codesense and autocomplete while using MacOS.
+
+To mitigate this, you can switch the compilation target for rust-analyzer to Linux by adding the following line to VSCode's `settings.json` file:
+
+```json
+"rust-analyzer.cargo.target": "x86_64-unknown-linux-gnu"
+```
