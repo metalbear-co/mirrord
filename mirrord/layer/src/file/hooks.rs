@@ -1036,6 +1036,7 @@ pub(crate) unsafe extern "C" fn preadv_detour(
         .unwrap_or_bypass_with(|_| FN_PREADV(fd, iovecs, iovec_count, offset))
 }
 
+/// Hook for [`libc::readlink`].
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn readlink_detour(
     raw_path: *const c_char,
@@ -1057,6 +1058,35 @@ pub(crate) unsafe extern "C" fn readlink_detour(
             #[cfg(target_os = "macos")]
             let raw_path = update_ptr_from_bypass(raw_path, _bypass);
             FN_READLINK(raw_path, out_buffer, buffer_size)
+        })
+}
+
+/// Hook for [`libc::readlinkat`].
+///
+/// The `dirfd` argument is only used if `raw_path` is an empty string, otherwise it is
+// ignored due to mirrord not handling relative paths.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn readlinkat_detour(
+    dirfd: RawFd,
+    raw_path: *const c_char,
+    out_buffer: *mut c_char,
+    buffer_size: size_t,
+) -> ssize_t {
+    read_link_at(dirfd, raw_path.checked_into())
+        .map(|ReadLinkFileResponse { path }| {
+            let path_bytes = path.as_os_str().as_bytes();
+
+            let path_ptr = path_bytes.as_ptr();
+            let out_buffer = out_buffer.cast();
+
+            ptr::copy(path_ptr, out_buffer, buffer_size as usize);
+
+            ssize_t::try_from(path_bytes.len().min(buffer_size)).unwrap()
+        })
+        .unwrap_or_bypass_with(|_bypass| {
+            #[cfg(target_os = "macos")]
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+            FN_READLINKAT(dirfd, raw_path, out_buffer, buffer_size)
         })
 }
 
@@ -1132,6 +1162,13 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         readlink_detour,
         FnReadlink,
         FN_READLINK
+    );
+    replace!(
+        hook_manager,
+        "readlinkt",
+        readlinkat_detour,
+        FnReadlinkat,
+        FN_READLINKAT
     );
 
     replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);

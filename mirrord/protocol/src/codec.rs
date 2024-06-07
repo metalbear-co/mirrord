@@ -17,9 +17,10 @@ use crate::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
         GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest, OpenFileResponse,
         OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
-        ReadFileResponse, ReadLimitedFileRequest, ReadLinkFileRequest, ReadLinkFileResponse,
-        SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
-        WriteLimitedFileRequest, XstatFsRequest, XstatFsResponse, XstatRequest, XstatResponse,
+        ReadFileResponse, ReadLimitedFileRequest, ReadLinkAtFileRequest, ReadLinkFileRequest,
+        ReadLinkFileResponse, SeekFileRequest, SeekFileResponse, WriteFileRequest,
+        WriteFileResponse, WriteLimitedFileRequest, XstatFsRequest, XstatFsResponse, XstatRequest,
+        XstatResponse,
     },
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -82,6 +83,7 @@ pub enum FileRequest {
     CloseDir(CloseDirRequest),
     GetDEnts64(GetDEnts64Request),
     ReadLink(ReadLinkFileRequest),
+    ReadLinkAt(ReadLinkAtFileRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
