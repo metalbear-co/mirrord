@@ -27,10 +27,9 @@ use tracing::{error, trace};
 
 use crate::{error::Result, util::IndexAllocator};
 
-#[allow(unused)]
 #[derive(Debug)]
 pub enum RemoteFile {
-    File(File, PathBuf),
+    File(File),
     Directory(PathBuf),
 }
 
@@ -256,7 +255,7 @@ impl FileManager {
         let remote_file = if metadata.is_dir() {
             RemoteFile::Directory(path)
         } else {
-            RemoteFile::File(file, path)
+            RemoteFile::File(file)
         };
 
         self.open_files.insert(fd, remote_file);
@@ -290,7 +289,7 @@ impl FileManager {
             let remote_file = if metadata.is_dir() {
                 RemoteFile::Directory(path)
             } else {
-                RemoteFile::File(file, path)
+                RemoteFile::File(file)
             };
 
             self.open_files.insert(fd, remote_file);
@@ -307,7 +306,7 @@ impl FileManager {
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
-                if let RemoteFile::File(file, _) = remote_file {
+                if let RemoteFile::File(file) = remote_file {
                     let mut buffer = vec![0; buffer_size as usize];
                     let read_amount = file.read(&mut buffer)?;
 
@@ -344,7 +343,7 @@ impl FileManager {
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
-                if let RemoteFile::File(file, _) = remote_file {
+                if let RemoteFile::File(file) = remote_file {
                     let original_position = file.stream_position()?;
                     // limit bytes read using take
                     let mut reader = BufReader::new(std::io::Read::by_ref(file)).take(buffer_size);
@@ -382,7 +381,7 @@ impl FileManager {
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
-                if let RemoteFile::File(file, _) = remote_file {
+                if let RemoteFile::File(file) = remote_file {
                     let mut buffer = vec![0; buffer_size as usize];
 
                     let read_amount = file.read_at(&mut buffer, start_from)?;
@@ -418,30 +417,6 @@ impl FileManager {
             .map_err(ResponseError::from)
     }
 
-    #[tracing::instrument(level = "trace", skip_all)]
-    pub(crate) fn read_link_at(
-        &mut self,
-        dir_fd: u64,
-        path: PathBuf,
-    ) -> RemoteResult<ReadLinkFileResponse> {
-        if path == Path::new("") {
-            let path = match self
-                .open_files
-                .get(&dir_fd)
-                .ok_or(ResponseError::NotFound(dir_fd))?
-            {
-                RemoteFile::File(_, opened_path) => opened_path,
-                RemoteFile::Directory(path) => path,
-            };
-
-            read_link(path)
-                .map(|path| ReadLinkFileResponse { path })
-                .map_err(ResponseError::from)
-        } else {
-            self.read_link(path)
-        }
-    }
-
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn write_limited(
         &mut self,
@@ -453,7 +428,7 @@ impl FileManager {
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
-                if let RemoteFile::File(file, _) = remote_file {
+                if let RemoteFile::File(file) = remote_file {
                     let written_amount =
                         file.write_at(&buffer, start_from).map(|written_amount| {
                             WriteFileResponse {
@@ -479,7 +454,7 @@ impl FileManager {
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
-                if let RemoteFile::File(file, _) = remote_file {
+                if let RemoteFile::File(file) = remote_file {
                     let seek_result = file
                         .seek(seek_from)
                         .map(|result_offset| SeekFileResponse { result_offset })?;
@@ -506,7 +481,7 @@ impl FileManager {
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
             .and_then(|remote_file| {
-                if let RemoteFile::File(file, _) = remote_file {
+                if let RemoteFile::File(file) = remote_file {
                     let write_result =
                         file.write(&write_bytes)
                             .map(|write_amount| WriteFileResponse {
@@ -592,7 +567,7 @@ impl FileManager {
                     .get(&fd)
                     .ok_or(ResponseError::NotFound(fd))?
                 {
-                    RemoteFile::File(file, _) => {
+                    RemoteFile::File(file) => {
                         return Ok(XstatResponse {
                             metadata: file.metadata()?.into(),
                         })
@@ -630,7 +605,7 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))?;
 
         let statfs = match target {
-            RemoteFile::File(file, _) => nix::sys::statfs::fstatfs(file)
+            RemoteFile::File(file) => nix::sys::statfs::fstatfs(file)
                 .map_err(|err| std::io::Error::from_raw_os_error(err as i32))?,
             RemoteFile::Directory(path) => nix::sys::statfs::statfs(path)
                 .map_err(|err| std::io::Error::from_raw_os_error(err as i32))?,
@@ -718,7 +693,7 @@ impl FileManager {
             Entry::Vacant(e) => {
                 match self.open_files.get(&fd) {
                     None => Err(ResponseError::NotFound(fd)),
-                    Some(RemoteFile::File(_file, _)) => Err(ResponseError::NotDirectory(fd)),
+                    Some(RemoteFile::File(_file)) => Err(ResponseError::NotDirectory(fd)),
                     Some(RemoteFile::Directory(dir)) => {
                         let current_and_parent = Self::get_current_and_parent_entries(dir);
                         let stream = current_and_parent
