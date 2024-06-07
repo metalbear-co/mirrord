@@ -34,10 +34,11 @@ pub(crate) fn parse_files(path: PathBuf) -> Result<Vec<syn::File>, DocsError> {
     let mut paths = glob::glob(&format!("{}/**/*.rs", path.to_string_lossy()))?.peekable();
     paths.peek().ok_or_else(|| DocsError::NoFiles)?;
 
+    let mut contents = String::new();
     paths
         .map(|path| {
             let mut file = File::open(path?)?;
-            let mut contents = String::new();
+            contents.clear();
             file.read_to_string(&mut contents)?;
             syn::parse_file(&contents).map_err(DocsError::Parse)
         })

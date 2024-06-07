@@ -155,6 +155,12 @@ impl Borrow<String> for PartialType {
     }
 }
 
+impl Borrow<str> for PartialType {
+    fn borrow(&self) -> &str {
+        &self.ident
+    }
+}
+
 impl Display for PartialType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Prevents crashing the tool if the type is not properly documented.

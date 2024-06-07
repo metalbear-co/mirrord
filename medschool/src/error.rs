@@ -2,11 +2,10 @@
 
 use thiserror::Error;
 
-/// We just _eat_ some of these errors (turn them into `None`).
 #[derive(Debug, Error)]
-pub(crate) enum DocsError {
+pub enum DocsError {
     /// Error for glob iteration.
-    #[error("Glob error {0}")]
+    #[error(transparent)]
     Glob(#[from] glob::GlobError),
 
     /// No files found in the glob pattern.
@@ -14,7 +13,7 @@ pub(crate) enum DocsError {
     NoFiles,
 
     /// Parsing glob pattern.
-    #[error("Glob pattern {0}")]
+    #[error(transparent)]
     Pattern(#[from] glob::PatternError),
 
     /// IO issues we have when reading the source files or producing the `.md` file.
@@ -22,10 +21,10 @@ pub(crate) enum DocsError {
     IO(#[from] std::io::Error),
 
     /// Error when parsing the source files into `syn::File`.
-    #[error("Parsing error {0}")]
+    #[error(transparent)]
     Parse(#[from] syn::Error),
 
     /// Error when parsing the source files into `syn::File`.
-    #[error("Parsing error {0}")]
+    #[error(transparent)]
     ParseInt(#[from] std::num::ParseIntError),
 }

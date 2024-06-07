@@ -75,80 +75,91 @@ pub fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ide
 }
 
 /// Converts a [`syn::ItemMod`] into a [`PartialType`].
-fn parse_item_mod(item_mod: syn::ItemMod) -> Option<PartialType> {
-    let thing_docs_untreated = docs_from_attributes(item_mod.attrs);
-    Some(PartialType {
-        ident: item_mod.ident.to_string(),
-        docs: thing_docs_untreated,
-        fields: Default::default(),
-    })
+impl TryFrom<syn::ItemMod> for PartialType {
+    type Error = ();
+
+    fn try_from(item: syn::ItemMod) -> Result<Self, Self::Error> {
+        let thing_docs_untreated = docs_from_attributes(item.attrs);
+        Ok(PartialType {
+            ident: item.ident.to_string(),
+            docs: thing_docs_untreated,
+            fields: Default::default(),
+        })
+    }
 }
 
 /// Converts a [`syn::ItemEnum`] into a [`PartialType`].
-fn parse_item_enum(item: syn::ItemEnum) -> Option<PartialType> {
-    let thing_docs_untreated = docs_from_attributes(item.attrs);
-    let is_internal = thing_docs_untreated
-        .iter()
-        .any(|doc| doc.contains(r"<!--${internal}-->"));
+impl TryFrom<syn::ItemEnum> for PartialType {
+    type Error = ();
 
-    // We only care about types that have docs.
-    (!thing_docs_untreated.is_empty() && !is_internal).then(|| PartialType {
-        ident: item.ident.to_string(),
-        docs: thing_docs_untreated,
-        fields: Default::default(),
-    })
+    fn try_from(item: syn::ItemEnum) -> Result<Self, Self::Error> {
+        let thing_docs_untreated = docs_from_attributes(item.attrs);
+        let is_internal = thing_docs_untreated
+            .iter()
+            .any(|doc| doc.contains(r"<!--${internal}-->"));
+
+        if thing_docs_untreated.is_empty() || is_internal {
+            return Err(());
+        }
+
+        Ok(PartialType {
+            ident: item.ident.to_string(),
+            docs: thing_docs_untreated,
+            fields: Default::default(),
+        })
+    }
 }
 
 /// Converts a [`syn::ItemStruct`] into a [`PartialType`].
-fn parse_item_struct(item: syn::ItemStruct) -> Option<PartialType> {
-    let mut docs = docs_from_attributes(item.attrs);
+impl TryFrom<syn::ItemStruct> for PartialType {
+    type Error = ();
 
-    if docs.is_empty() {
-        return None;
-    }
+    fn try_from(item: syn::ItemStruct) -> Result<Self, Self::Error> {
+        let mut docs = docs_from_attributes(item.attrs);
 
-    for doc in docs.iter_mut() {
-        // removes docs that we don't want in `configuration.md`
-        if doc.contains(r"<!--${internal}-->") {
-            return None;
+        for doc in docs.iter_mut() {
+            // removes docs that we don't want in `configuration.md`
+            if doc.contains(r"<!--${internal}-->") {
+                return Err(());
+            }
+
+            // `trim` is too aggressive, we just want to remove 1 whitespace
+            if doc.starts_with(' ') {
+                doc.remove(0);
+            }
         }
 
-        // `trim` is too aggressive, we just want to remove 1 whitespace
-        if doc.starts_with(' ') {
-            doc.remove(0);
+        docs.push("\n".to_string());
+
+        let fields = item
+            .fields
+            .into_iter()
+            .filter_map(PartialField::new)
+            .collect::<BTreeSet<_>>();
+
+        if docs.is_empty() || fields.is_empty() {
+            return Err(());
         }
+
+        Ok(PartialType {
+            ident: item.ident.to_string(),
+            docs,
+            fields,
+        })
     }
-
-    docs.push("\n".to_string());
-
-    // we used to remove any duplicate fields such as two fields with the same
-    // type by converting them to a HashSet
-    // for example, struct {a : B, b: B} would duplicate docs for B
-    // for our use case this is not necessary, and somehow ends up dropping
-    // fields so we're just going to keep the fields as
-    // they are and consider this again later
-    let fields = item
-        .fields
-        .into_iter()
-        .filter_map(PartialField::new)
-        .collect::<BTreeSet<_>>();
-
-    // We only care about types that have docs.
-    (!fields.is_empty()).then(|| PartialType {
-        ident: item.ident.to_string(),
-        docs,
-        fields,
-    })
 }
 
 /// Converts a [`syn::Item`] into a [`PartialType`], if possible.
-#[tracing::instrument(level = "trace", ret)]
-fn parse_syn_item_into_partial_type(item: syn::Item) -> Option<PartialType> {
-    match item {
-        syn::Item::Mod(item_mod) => parse_item_mod(item_mod),
-        syn::Item::Enum(item_enum) => parse_item_enum(item_enum),
-        syn::Item::Struct(item_struct) => parse_item_struct(item_struct),
-        _ => return None,
+impl TryFrom<syn::Item> for PartialType {
+    type Error = ();
+
+    fn try_from(item: syn::Item) -> Result<Self, Self::Error> {
+        match item {
+            syn::Item::Struct(item_struct) => PartialType::try_from(item_struct),
+            syn::Item::Enum(item_enum) => PartialType::try_from(item_enum),
+            syn::Item::Mod(item_mod) => PartialType::try_from(item_mod),
+            _ => Err(()),
+        }
     }
 }
 
@@ -165,7 +176,7 @@ pub fn parse_docs_into_set(files: Vec<syn::File>) -> Result<HashSet<PartialType>
                 .items
                 .into_iter()
                 // convert an `Item` into a `PartialType`
-                .filter_map(parse_syn_item_into_partial_type)
+                .filter_map(|item| PartialType::try_from(item).ok())
         })
         .collect::<HashSet<_>>();
 
@@ -175,17 +186,17 @@ pub fn parse_docs_into_set(files: Vec<syn::File>) -> Result<HashSet<PartialType>
 /// DFS helper function to resolve the references of the types. Returns the docs of the fields of
 /// the field we're currently looking at search till its leaf nodes. The leaf here means a primitive
 /// type for which we don't have a [`PartialType`].
-fn dfs_fields(
+fn dfs_fields<'a>(
     field: &PartialField,
-    types: &HashSet<PartialType>,
-    cache: &mut HashMap<String, Vec<String>>,
+    types: &'a HashSet<PartialType>,
+    cache: &mut HashMap<&'a str, Vec<String>>,
     recursion_level: &mut usize,
 ) -> Vec<String> {
     // increment the recursion level as we're going deeper into the tree
     types // get the type of the field from the types set to recurse into it's fields
         .get(&field.ty)
         .map(|type_| {
-            cache.get(&type_.ident).cloned().unwrap_or_else(|| {
+            cache.get(&type_.ident as &str).cloned().unwrap_or_else(|| {
                 // check if we've already resolved the type
                 let mut max_recursion_level = 0;
                 let mut new_type_docs = type_.docs.clone();
@@ -194,11 +205,11 @@ fn dfs_fields(
                     let resolved_type_docs =
                         dfs_fields(field, types, cache, &mut current_recursion_level);
                     max_recursion_level = max_recursion_level.max(current_recursion_level);
-                    cache.insert(field.ty.clone(), resolved_type_docs.clone());
+                    cache.insert(&field.ty, resolved_type_docs.clone());
                     // append the docs of the field to the resolved type docs
                     new_type_docs.extend(field.docs.clone().into_iter().chain(resolved_type_docs));
                 });
-                cache.insert(type_.ident.clone(), new_type_docs.clone());
+                cache.insert(&type_.ident, new_type_docs.clone());
                 *recursion_level = max_recursion_level;
                 new_type_docs
             })
@@ -259,7 +270,7 @@ pub fn resolve_references(types: HashSet<PartialType>) -> Option<PartialType> {
         .into_iter()
         .flat_map(|mut type_| {
             // Check if the type has already been resolved.
-            (!cache.contains_key(&type_.ident)).then(|| {
+            (!cache.contains_key(&type_.ident as &str)).then(|| {
                 // We need to calculate the recursion level for the type, so we can get the root
                 // type later on.
                 let mut recursion_level = 0;
