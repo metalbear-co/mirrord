@@ -1,11 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    task::Poll,
 };
 
 use fancy_regex::Regex;
-use futures::poll;
 use http_body_util::BodyExt;
 use hyper::{
     body::Incoming,
@@ -14,9 +12,9 @@ use hyper::{
 };
 use mirrord_protocol::{
     tcp::{
-        ChunkedFrame, ChunkedRequest, ChunkedRequestBody, ChunkedRequestError, DaemonTcp,
-        HttpRequest, HttpResponseFallback, InternalHttpBody, InternalHttpRequest, StealType,
-        TcpClose, TcpData, HTTP_CHUNKED_VERSION, HTTP_FILTERED_UPGRADE_VERSION,
+        ChunkedRequest, ChunkedRequestBody, ChunkedRequestError, DaemonTcp, HttpRequest,
+        HttpResponseFallback, InternalHttpBody, InternalHttpBodyFrame, InternalHttpRequest,
+        StealType, TcpClose, TcpData, HTTP_CHUNKED_VERSION, HTTP_FILTERED_UPGRADE_VERSION,
         HTTP_FRAMED_VERSION,
     },
     ConnectionId, Port,
@@ -35,7 +33,7 @@ use crate::{
         connections::{
             ConnectionMessageIn, ConnectionMessageOut, StolenConnection, StolenConnections,
         },
-        http::HttpFilter,
+        http::{Frames, HttpFilter, IncomingExt},
         orig_dst,
         subscriptions::{IpTablesRedirector, PortSubscriptions},
         Command, StealerCommand,
@@ -171,136 +169,67 @@ impl Client {
                     },
                     mut body,
                 ) = request.request.into_parts();
-                let _ = tx
-                    .send(DaemonTcp::HttpRequestChunked(ChunkedRequest::Start(
-                        HttpRequest {
-                            internal_request: InternalHttpRequest {
-                                method,
-                                uri,
-                                headers,
-                                version,
-                                body: (),
-                            },
-                            connection_id,
-                            request_id,
-                            port: request.port,
-                        },
-                    )))
-                    .await;
-                tracing::error!("sent header");
-
-                // If frames are immediately available, send them
-                let mut ready_frames: Vec<ChunkedFrame> = vec![];
-                let mut frame_fut: http_body_util::combinators::Frame<Incoming> = body.frame();
-                // Poll the future without moving the frame
-                let mut is_last = false;
-                while let Poll::Ready(ready_frame) = poll!(&mut frame_fut) {
-                    tracing::error!("{:?}", ready_frame);
-                    match ready_frame {
-                        Some(Ok(ok_frame)) => {
-                            let frame = if ok_frame.is_data() {
-                                ChunkedFrame::Data(ok_frame.into_data().unwrap().into())
-                            } else if ok_frame.is_trailers() {
-                                ChunkedFrame::Trailer(ok_frame.into_trailers().unwrap())
-                            } else {
-                                // ignore
-                                frame_fut = body.frame();
-                                continue;
-                            };
-                            ready_frames.push(frame);
-                            frame_fut = body.frame();
-                        }
-                        Some(Err(_)) => {
-                            // Error occured while sending request frame
-                            let frame_err = ChunkedRequest::Error(ChunkedRequestError {
+                match body.next_frames(true).await {
+                    Err(..) => return,
+                    Ok(Frames { frames, is_last }) => {
+                        let frames = frames
+                            .into_iter()
+                            .map(InternalHttpBodyFrame::try_from)
+                            .filter_map(Result::ok)
+                            .collect();
+                        let message =
+                            DaemonTcp::HttpRequestChunked(ChunkedRequest::Start(HttpRequest {
+                                internal_request: InternalHttpRequest {
+                                    method,
+                                    uri,
+                                    headers,
+                                    version,
+                                    body: frames,
+                                },
                                 connection_id,
                                 request_id,
-                            });
-                            let _ = tx.send(DaemonTcp::HttpRequestChunked(frame_err)).await;
+                                port: request.port,
+                            }));
+                        if tx.send(message).await.is_err() || is_last {
                             return;
                         }
-                        None => {
-                            is_last = true;
-                            break;
-                        }
                     }
                 }
+                tracing::error!("sent header");
 
-                if !(ready_frames.is_empty()) || is_last {
-                    let chunked = ChunkedRequestBody {
-                        frames: ready_frames,
-                        is_last,
-                        connection_id,
-                        request_id,
-                    };
-                    if tx
-                        .send(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(chunked)))
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-
-                if is_last {
-                    return;
-                }
-
-                // Start processing incoming frames
-                while let Some(incoming_frame) = frame_fut.await {
-                    // if !self.subscribed_connections.contains(&request.connection_id) {
-                    //     // if client has unsubscibed, stop sending data
-                    //     break;
-                    // }
-
-                    tracing::error!("{:?}", incoming_frame);
-                    match incoming_frame {
-                        Ok(ok_frame) => {
-                            let frame = if ok_frame.is_data() {
-                                ChunkedFrame::Data(ok_frame.into_data().unwrap().into())
-                            } else if ok_frame.is_trailers() {
-                                ChunkedFrame::Trailer(ok_frame.into_trailers().unwrap())
-                            } else {
-                                // ignore
-                                frame_fut = body.frame();
-                                continue;
-                            };
-                            let chunked = ChunkedRequestBody {
-                                frames: vec![frame],
-                                is_last: false,
-                                connection_id,
-                                request_id,
-                            };
-                            if tx
-                                .send(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(chunked)))
-                                .await
-                                .is_err()
-                            {
+                loop {
+                    match body.next_frames(false).await {
+                        Ok(Frames { frames, is_last }) => {
+                            let frames = frames
+                                .into_iter()
+                                .map(InternalHttpBodyFrame::try_from)
+                                .filter_map(Result::ok)
+                                .collect();
+                            let message = DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
+                                ChunkedRequestBody {
+                                    frames,
+                                    is_last,
+                                    connection_id,
+                                    request_id,
+                                },
+                            ));
+                            if tx.send(message).await.is_err() || is_last {
                                 return;
                             }
                         }
                         Err(_) => {
-                            // Error occured while sending request frame
-                            let frame_err = ChunkedRequest::Error(ChunkedRequestError {
-                                connection_id,
-                                request_id,
-                            });
-                            let _ = tx.send(DaemonTcp::HttpRequestChunked(frame_err)).await;
+                            let _ = tx
+                                .send(DaemonTcp::HttpRequestChunked(ChunkedRequest::Error(
+                                    ChunkedRequestError {
+                                        connection_id,
+                                        request_id,
+                                    },
+                                )))
+                                .await;
                             return;
                         }
                     }
-
-                    frame_fut = body.frame();
                 }
-                let chunked = ChunkedRequestBody {
-                    frames: vec![],
-                    is_last: true,
-                    connection_id,
-                    request_id,
-                };
-                let _ = tx
-                    .send(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(chunked)))
-                    .await;
             } else if framed {
                 let Ok(request) = request.into_serializable().await else {
                     return;

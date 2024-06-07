@@ -31,6 +31,8 @@ fancy-regex = { workspace = true }
 libc.workspace = true
 socket2.workspace = true
 semver = { workspace = true, features = ["serde"] }
+tokio-stream.workspace = true
+tokio.workspace = true
 
 mirrord-macros = { path = "../macros" }
 

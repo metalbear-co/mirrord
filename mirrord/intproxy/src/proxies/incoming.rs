@@ -11,11 +11,14 @@ use mirrord_intproxy_protocol::{
     MessageId, PortSubscribe, PortSubscription, PortUnsubscribe, ProxyToLayerMessage,
 };
 use mirrord_protocol::{
-    tcp::{DaemonTcp, HttpRequestFallback, NewTcpConnection},
+    tcp::{
+        ChunkedRequest, DaemonTcp, HttpRequest, HttpRequestFallback, InternalHttpBodyFrame,
+        InternalHttpRequest, NewTcpConnection, StreamingBody,
+    },
     ConnectionId, ResponseError,
 };
 use thiserror::Error;
-use tokio::net::TcpSocket;
+use tokio::{net::TcpSocket, sync::mpsc};
 
 use self::{
     interceptor::{Interceptor, InterceptorError, MessageOut},
@@ -270,6 +273,39 @@ impl IncomingProxy {
                     interceptor.send(req).await;
                 }
             }
+            DaemonTcp::HttpRequestChunked(req) => {
+                tracing::error!("{:?}", req);
+                match req {
+                    ChunkedRequest::Start(req) => {
+                        let (tx, rx) = mpsc::channel::<InternalHttpBodyFrame>(12);
+                        let http_stream = StreamingBody::new(rx);
+                        let http_req = HttpRequest {
+                            internal_request: InternalHttpRequest {
+                                method: req.internal_request.method,
+                                uri: req.internal_request.uri,
+                                headers: req.internal_request.headers,
+                                version: req.internal_request.version,
+                                body: http_stream,
+                            },
+                            connection_id: req.connection_id,
+                            request_id: req.request_id,
+                            port: req.port,
+                        };
+
+                        for frame in req.internal_request.body.iter().cloned() {
+                            let _ = tx.send(frame).await;
+                        }
+
+                        let http_req = HttpRequestFallback::Streamed(http_req);
+                        let interceptor = self.get_interceptor_for_http_request(&http_req)?;
+                        if let Some(interceptor) = interceptor {
+                            interceptor.send(http_req).await;
+                        }
+                    }
+                    ChunkedRequest::Body(_) => todo!(),
+                    ChunkedRequest::Error(_) => todo!(),
+                };
+            }
             DaemonTcp::NewConnection(NewTcpConnection {
                 connection_id,
                 remote_address,
@@ -319,7 +355,6 @@ impl IncomingProxy {
                     message_bus.send(msg).await;
                 }
             }
-            _ => tracing::error!("{:?}", message),
         }
 
         Ok(())

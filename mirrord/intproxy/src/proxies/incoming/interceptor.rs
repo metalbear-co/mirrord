@@ -197,7 +197,6 @@ impl HttpConnection {
 
                 Err(InterceptorError::ConnectionClosedTooSoon(request))
             }
-
             Err(InterceptorError::Hyper(e)) if e.is_parse() => {
                 tracing::warn!(
                     "Could not parse HTTP response to filtered HTTP request, got error: {e:?}."
@@ -257,6 +256,16 @@ impl HttpConnection {
                         )
                         .await
                         .map(HttpResponseFallback::Fallback)
+                    }
+                    HttpRequestFallback::Streamed(..) => {
+                        HttpResponse::<InternalHttpBody>::from_hyper_response(
+                            res,
+                            self.peer.port(),
+                            request.connection_id(),
+                            request.request_id(),
+                        )
+                        .await
+                        .map(HttpResponseFallback::Framed)
                     }
                 };
 

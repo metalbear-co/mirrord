@@ -4197,6 +4197,8 @@ dependencies = [
  "serde",
  "socket2",
  "thiserror",
+ "tokio",
+ "tokio-stream",
  "tracing",
 ]
 

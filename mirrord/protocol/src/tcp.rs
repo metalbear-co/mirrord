@@ -2,10 +2,10 @@ use core::fmt::Display;
 use std::{
     collections::VecDeque,
     convert::Infallible,
-    fmt::{self},
+    fmt,
     net::IpAddr,
     pin::Pin,
-    sync::LazyLock,
+    sync::{Arc, LazyLock, Mutex},
     task::{Context, Poll},
 };
 
@@ -21,6 +21,7 @@ use hyper::{
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::Receiver;
 use tracing::error;
 
 use crate::{ConnectionId, Port, RemoteResult, RequestId};
@@ -79,7 +80,7 @@ pub enum DaemonTcp {
 /// Contents of a chunked message from server.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ChunkedRequest {
-    Start(HttpRequest<()>),
+    Start(HttpRequest<Vec<InternalHttpBodyFrame>>),
     Body(ChunkedRequestBody),
     Error(ChunkedRequestError),
 }
@@ -90,16 +91,19 @@ impl ChunkedRequest {}
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ChunkedRequestBody {
     #[bincode(with_serde)]
-    pub frames: Vec<ChunkedFrame>,
+    pub frames: Vec<InternalHttpBodyFrame>,
     pub is_last: bool,
     pub connection_id: ConnectionId,
     pub request_id: RequestId,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-pub enum ChunkedFrame {
-    Data(Vec<u8>),
-    Trailer(#[serde(with = "http_serde::header_map")] HeaderMap),
+impl From<InternalHttpBodyFrame> for Frame<Bytes> {
+    fn from(value: InternalHttpBodyFrame) -> Self {
+        match value {
+            InternalHttpBodyFrame::Data(data) => Frame::data(data.into()),
+            InternalHttpBodyFrame::Trailers(map) => Frame::trailers(map),
+        }
+    }
 }
 
 /// An error occurred while processing chunked data from server.
@@ -255,10 +259,85 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
+impl<E> From<InternalHttpRequest<StreamingBody>> for Request<BoxBody<Bytes, E>>
+where
+    E: From<Infallible>,
+{
+    fn from(value: InternalHttpRequest<StreamingBody>) -> Self {
+        let InternalHttpRequest {
+            method,
+            uri,
+            headers,
+            version,
+            body,
+        } = value;
+        let mut request = Request::new(BoxBody::new(body.map_err(|e| e.into())));
+        *request.method_mut() = method;
+        *request.uri_mut() = uri;
+        *request.version_mut() = version;
+        *request.headers_mut() = headers;
+
+        request
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum HttpRequestFallback {
     Framed(HttpRequest<InternalHttpBody>),
     Fallback(HttpRequest<Vec<u8>>),
+    Streamed(HttpRequest<StreamingBody>),
+}
+
+#[derive(Debug)]
+pub struct StreamingBody {
+    origin: Arc<Mutex<(Receiver<InternalHttpBodyFrame>, Vec<InternalHttpBodyFrame>)>>,
+    idx: usize,
+}
+
+impl StreamingBody {
+    pub fn new(rx: Receiver<InternalHttpBodyFrame>) -> Self {
+        Self {
+            origin: Arc::new(Mutex::new((rx, vec![]))),
+            idx: 0,
+        }
+    }
+}
+
+impl Clone for StreamingBody {
+    fn clone(&self) -> Self {
+        Self {
+            origin: self.origin.clone(),
+            idx: 0,
+        }
+    }
+}
+
+impl Body for StreamingBody {
+    type Data = Bytes;
+
+    type Error = Infallible;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let this = self.get_mut();
+        let mut guard = this.origin.lock().unwrap();
+
+        if let Some(frame) = guard.1.get(this.idx) {
+            this.idx += 1;
+            return Poll::Ready(Some(Ok(frame.clone().into())));
+        }
+
+        match std::task::ready!(guard.0.poll_recv(cx)) {
+            None => Poll::Ready(None),
+            Some(frame) => {
+                guard.1.push(frame.clone());
+                this.idx += 1;
+                Poll::Ready(Some(Ok(frame.into())))
+            }
+        }
+    }
 }
 
 impl HttpRequestFallback {
@@ -266,6 +345,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.connection_id,
             HttpRequestFallback::Fallback(req) => req.connection_id,
+            HttpRequestFallback::Streamed(req) => req.connection_id,
         }
     }
 
@@ -273,6 +353,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.port,
             HttpRequestFallback::Fallback(req) => req.port,
+            HttpRequestFallback::Streamed(req) => req.port,
         }
     }
 
@@ -280,6 +361,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.request_id,
             HttpRequestFallback::Fallback(req) => req.request_id,
+            HttpRequestFallback::Streamed(req) => req.request_id,
         }
     }
 
@@ -287,6 +369,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.version(),
             HttpRequestFallback::Fallback(req) => req.version(),
+            HttpRequestFallback::Streamed(req) => req.version(),
         }
     }
 
@@ -297,6 +380,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.internal_request.into(),
             HttpRequestFallback::Fallback(req) => req.internal_request.into(),
+            HttpRequestFallback::Streamed(req) => req.internal_request.into(),
         }
     }
 }
@@ -321,10 +405,7 @@ pub static HTTP_FILTERED_UPGRADE_VERSION: LazyLock<VersionReq> =
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 #[protocol_break(2)]
 #[bincode(bounds = "for<'de> Body: Serialize + Deserialize<'de>")]
-pub struct HttpRequest<Body>
-where
-    for<'de> Body: Serialize + Deserialize<'de>,
-{
+pub struct HttpRequest<Body> {
     #[bincode(with_serde)]
     pub internal_request: InternalHttpRequest<Body>,
     pub connection_id: ConnectionId,
@@ -334,10 +415,7 @@ where
     pub port: Port,
 }
 
-impl<B: Serialize> HttpRequest<B>
-where
-    for<'de> B: Serialize + Deserialize<'de>,
-{
+impl<B> HttpRequest<B> {
     /// Gets this request's HTTP version.
     pub fn version(&self) -> Version {
         self.internal_request.version
@@ -441,15 +519,6 @@ impl From<Frame<Bytes>> for InternalHttpBodyFrame {
     }
 }
 
-impl From<InternalHttpBodyFrame> for Frame<Bytes> {
-    fn from(frame: InternalHttpBodyFrame) -> Self {
-        match frame {
-            InternalHttpBodyFrame::Data(data) => Frame::data(Bytes::from(data)),
-            InternalHttpBodyFrame::Trailers(map) => Frame::trailers(map),
-        }
-    }
-}
-
 impl fmt::Debug for InternalHttpBodyFrame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -503,6 +572,9 @@ impl HttpResponseFallback {
             ),
             HttpRequestFallback::Fallback(request) => HttpResponseFallback::Fallback(
                 HttpResponse::<Vec<u8>>::response_from_request(request, status, message),
+            ),
+            HttpRequestFallback::Streamed(request) => HttpResponseFallback::Framed(
+                HttpResponse::<InternalHttpBody>::response_from_request(request, status, message),
             ),
         }
     }
@@ -561,8 +633,8 @@ impl HttpResponse<InternalHttpBody> {
         })
     }
 
-    pub fn response_from_request(
-        request: HttpRequest<InternalHttpBody>,
+    pub fn response_from_request<B>(
+        request: HttpRequest<B>,
         status: StatusCode,
         message: &str,
     ) -> Self {
