@@ -1042,9 +1042,6 @@ pub(crate) unsafe extern "C" fn readlink_detour(
     out_buffer: *mut c_char,
     buffer_size: size_t,
 ) -> ssize_t {
-    #[cfg(target_os = "macos")]
-    let raw_path = update_ptr_from_bypass(raw_path, _bypass);
-
     read_link(raw_path.checked_into())
         .map(|ReadLinkFileResponse { path }| {
             let path_bytes = path.as_os_str().as_bytes();
