@@ -2,37 +2,50 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use syn::{Attribute, Expr, Ident, Meta, Type, TypePath};
+use syn::{Attribute, Expr, Ident, Type, TypePath};
 
 use crate::{
     types::{PartialField, PartialType},
     DocsError,
 };
 
-/// Extracts the docs from the attributes of a [`syn::Item`].
+/// Look into the [`syn::Attribute`]s of whatever item we're handling, and extract its doc strings.
 #[tracing::instrument(level = "trace", ret)]
 pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
     attributes
         .into_iter()
-        .filter_map(|attribute| {
-            if let Meta::NameValue(meta_doc) = attribute.meta {
-                if let (ident, Expr::Lit(lit)) = (
-                    meta_doc.path.segments.first()?.ident.clone(),
-                    meta_doc.value,
-                ) {
-                    if ident == Ident::new("doc", ident.span()) {
-                        if let syn::Lit::Str(lit_str) = lit.lit {
-                            let doc = lit_str.value();
-                            return Some(if doc.trim().is_empty() {
-                                "\n".to_string()
-                            } else {
-                                format!("{}\n", doc)
-                            });
-                        }
-                    }
-                }
+        // drill into `Meta::NameValue`
+        .filter_map(|attribute| match attribute.meta {
+            syn::Meta::NameValue(meta_doc) => Some(meta_doc),
+            _ => None,
+        })
+        // retrieve only when `PathSegment::Ident` is "doc"
+        .filter_map(|meta_doc| {
+            let ident = meta_doc.path.segments.first()?.ident.clone();
+
+            if ident == Ident::new("doc", ident.span()) {
+                Some(meta_doc.value)
+            } else {
+                None
             }
-            None
+        })
+        // get the doc `Expr::Lit`
+        .filter_map(|docs| match docs {
+            Expr::Lit(doc_expr) => Some(doc_expr.lit),
+            _ => None,
+        })
+        .filter_map(|doc_lit| match doc_lit {
+            syn::Lit::Str(doc_lit) => Some(doc_lit.value()),
+            _ => None,
+        })
+        // convert empty lines (spacer lines) into markdown newline, or add `\n` to end of lines,
+        // making paragraphs
+        .map(|doc| {
+            if doc.trim().is_empty() {
+                "\n".to_string()
+            } else {
+                format!("{}\n", doc)
+            }
         })
         .collect()
 }
@@ -112,6 +125,7 @@ impl TryFrom<syn::ItemEnum> for PartialType {
 }
 
 /// Converts a [`syn::ItemStruct`] into a [`PartialType`].
+/// We remove docs that have `<!--${internal}-->` (they're not converted to [`PartialType`]s).
 impl TryFrom<syn::ItemStruct> for PartialType {
     type Error = ();
 
