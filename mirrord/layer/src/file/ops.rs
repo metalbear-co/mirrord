@@ -6,9 +6,8 @@ use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 use libc::{c_char, statx, statx_timestamp};
 use libc::{c_int, iovec, unlink, AT_FDCWD};
 use mirrord_protocol::file::{
-    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse,
-    ReadLinkAtFileRequest, ReadLinkFileRequest, ReadLinkFileResponse, SeekFileResponse,
-    WriteFileResponse, XstatFsResponse, XstatResponse,
+    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, ReadLinkFileRequest,
+    ReadLinkFileResponse, SeekFileResponse, WriteFileResponse, XstatFsResponse, XstatResponse,
 };
 use rand::distributions::{Alphanumeric, DistString};
 use tracing::{error, trace};
@@ -290,32 +289,6 @@ pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
         ensure_not_ignored!(path, false);
 
         let requesting_path = ReadLinkFileRequest { path };
-        let response = common::make_proxy_request_with_response(requesting_path)??;
-
-        Detour::Success(response)
-    } else {
-        None?
-    }
-}
-
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
-pub(crate) fn read_link_at(local_fd: RawFd, path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
-    if crate::setup().experimental().readlink {
-        let path = path?;
-
-        if path.is_relative() {
-            // Calls with non absolute paths are sent to libc::readlinkat.
-            Detour::Bypass(Bypass::RelativePath(path.clone()))?
-        };
-
-        ensure_not_ignored!(path, false);
-
-        let remote_fd = get_remote_fd(local_fd)?;
-
-        let requesting_path = ReadLinkAtFileRequest {
-            fd: remote_fd,
-            path,
-        };
         let response = common::make_proxy_request_with_response(requesting_path)??;
 
         Detour::Success(response)

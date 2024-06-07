@@ -267,12 +267,6 @@ pub struct ReadLinkFileRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ReadLinkAtFileRequest {
-    pub fd: u64,
-    pub path: PathBuf,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct SeekFileRequest {
     pub fd: u64,
     pub seek_from: SeekFromInternal,

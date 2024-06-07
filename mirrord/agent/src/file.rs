@@ -17,9 +17,9 @@ use mirrord_protocol::{
         FdOpenDirRequest, GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest,
         OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadDirRequest,
         ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
-        ReadLinkAtFileRequest, ReadLinkFileRequest, ReadLinkFileResponse, SeekFileRequest,
-        SeekFileResponse, WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest,
-        XstatFsRequest, XstatFsResponse, XstatRequest, XstatResponse,
+        ReadLinkFileRequest, ReadLinkFileResponse, SeekFileRequest, SeekFileResponse,
+        WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest, XstatFsRequest,
+        XstatFsResponse, XstatRequest, XstatResponse,
     },
     FileRequest, FileResponse, RemoteResult, ResponseError,
 };
@@ -27,6 +27,7 @@ use tracing::{error, trace};
 
 use crate::{error::Result, util::IndexAllocator};
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum RemoteFile {
     File(File, PathBuf),
@@ -162,9 +163,6 @@ impl FileManager {
             ))),
             FileRequest::ReadLink(ReadLinkFileRequest { path }) => {
                 Some(FileResponse::ReadLink(self.read_link(path)))
-            }
-            FileRequest::ReadLinkAt(ReadLinkAtFileRequest { fd, path }) => {
-                Some(FileResponse::ReadLink(self.read_link_at(fd, path)))
             }
             FileRequest::Seek(SeekFileRequest { fd, seek_from }) => {
                 let seek_result = self.seek(fd, seek_from.into());
