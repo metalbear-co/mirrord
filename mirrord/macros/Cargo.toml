@@ -22,5 +22,5 @@ proc-macro = true
 [dependencies]
 proc-macro2 = "1"
 proc-macro2-diagnostics = "0.10"
-syn = { version = "1", features = ["full", "extra-traits"] }
+syn = { version = "2", features = ["full", "extra-traits"] }
 semver.workspace = true

@@ -8,7 +8,7 @@ __pycache__
 *.vsix
 .DS_Store
 **/.DS_Store
-target
+/target
 build/
 .mirrord
 

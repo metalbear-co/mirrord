@@ -8,6 +8,107 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.104.0](https://github.com/metalbear-co/mirrord/tree/3.104.0) - 2024-06-06
+
+
+### Added
+
+- Emit a warning when the `port_mapping` field of the configuration contains an
+  unnecessary mapping of a port to itself.
+
+
+### Changed
+
+- Update syn to version 2.
+  [#1235](https://github.com/metalbear-co/mirrord/issues/1235)
+
+
+### Fixed
+
+- Fix HTTP2/1.1 translated messages dropping
+  [#2497](https://github.com/metalbear-co/mirrord/issues/2497)
+- Clean hostname/name sent to operator to fix issue of hostname with linebreaks
+- Fixed a bug where two mirrord sessions could not target the same pod while
+  stealing from different ports.
+- Fixed typo in auto-generated docs for mirrord config.
+
+
+### Internal
+
+- Added healthcheck examples to filter configuration docs. Also some other
+  minor doc fixes.
+- Fixed concurrent steal operator tests, removed obsolete error variants, fixed
+  `cargo` warnings in test code.
+
+
+## [3.103.0](https://github.com/metalbear-co/mirrord/tree/3.103.0) - 2024-05-29
+
+
+### Added
+
+- Allows a Job to be used as a target when copy_target is enabled.
+
+
+### Changed
+
+- Allows the user to set labels and annotations for the agent job and pod via
+  agent config.
+
+
+### Fixed
+
+- mirrord now prints an informative error when the targeted pod is not in
+  correct state (e.g. is not `Running` or the target container is not `ready`).
+  When picking a pod from target deployment/rollout, mirrord filters out pods
+  that are not in correct state.
+  [#462](https://github.com/metalbear-co/mirrord/issues/462)
+- Fix config printout error showing repeated messages.
+- Fixed listing targets when using operator ignoring namespace - always using
+  default
+- Fixed missing pods/deployments with more than 1 container when using operator
+  ls
+
+
+### Internal
+
+- Fixed DNS e2e flake
+- Update release action to use latest macOS
+
+
+## [3.102.0](https://github.com/metalbear-co/mirrord/tree/3.102.0) - 2024-05-22
+
+
+### Removed
+
+- Remove deprecated unstable pause feature
+  [#2458](https://github.com/metalbear-co/mirrord/issues/2458)
+
+
+### Added
+
+- Added json_log config under agent to control whether the agent produces logs
+  as normal tracing or json.
+  [#2155](https://github.com/metalbear-co/mirrord/issues/2155)
+- Added config info printout at session start.
+  [#2367](https://github.com/metalbear-co/mirrord/issues/2367)
+
+
+### Fixed
+
+- Fixed agent crashing when mirrord target is explicitly set to `targetless`.
+  [#2444](https://github.com/metalbear-co/mirrord/issues/2444)
+- Fixed confusing errors produced when creating an agent.
+
+
+### Internal
+
+- Agent compiles on macOS
+  [#2453](https://github.com/metalbear-co/mirrord/issues/2453)
+- Added `uses_operator` flag to `mirrord ext` output (to be inspected in the
+  plugin/extension).
+- Skip tests from running twice
+
+
 ## [3.101.0](https://github.com/metalbear-co/mirrord/tree/3.101.0) - 2024-05-14
 
 

@@ -22,6 +22,7 @@ use miette::JSONReportHandler;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
+    feature::{fs::FsModeConfig, network::incoming::IncomingMode},
     target::TargetDisplay,
     LayerConfig, LayerFileConfig,
 };
@@ -103,6 +104,18 @@ where
     binary_args.insert(0, args.binary.clone());
 
     sub_progress.success(Some("ready to launch process"));
+
+    // Print config details for the user
+    let mut sub_progress_config = progress.subtask("config summary");
+    print_config(
+        &sub_progress_config,
+        Some(&binary),
+        Some(&args.binary_args),
+        &config,
+        false,
+    );
+    sub_progress_config.success(Some("config summary"));
+
     // The execve hook is not yet active and does not hijack this call.
     let err = execvp(binary.clone(), binary_args.clone());
     error!("Couldn't execute {:?}", err);
@@ -117,6 +130,103 @@ where
         }
     }
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
+}
+
+fn print_config<P>(
+    progress_subtask: &P,
+    binary: Option<&String>,
+    binary_args: Option<&Vec<String>>,
+    config: &LayerConfig,
+    single_msg: bool,
+) where
+    P: Progress + Send + Sync,
+{
+    let mut messages = vec![];
+    if let Some(b) = binary
+        && let Some(a) = binary_args
+    {
+        messages.push(format!("Running binary \"{}\" with arguments: {:?}.", b, a));
+    }
+
+    let target_info = if let Some(target) = &config.target.path {
+        &format!("mirrord will target: {}", target)[..]
+    } else {
+        "mirrord will run without a target"
+    };
+    let config_info = if let Ok(path) = std::env::var("MIRRORD_CONFIG_FILE") {
+        &format!("a configuration file was loaded from: {} ", path)[..]
+    } else {
+        "no configuration file was loaded"
+    };
+    messages.push(format!("{}, {}", target_info, config_info));
+
+    let operator_info = match config.operator {
+        Some(true) => "be used",
+        Some(false) => "not be used",
+        None => "be used if possible",
+    };
+    messages.push(format!("operator: the operator will {}", operator_info));
+
+    let exclude = config.feature.env.exclude.as_ref();
+    let include = config.feature.env.include.as_ref();
+    let env_info = if let Some(excluded) = exclude {
+        if excluded.clone().to_vec().contains(&String::from("*")) {
+            "no"
+        } else {
+            "not all"
+        }
+    } else if include.is_some() {
+        "not all"
+    } else {
+        "all"
+    };
+    messages.push(format!(
+        "env: {} environment variables will be fetched",
+        env_info
+    ));
+
+    let fs_info = match config.feature.fs.mode {
+        FsModeConfig::Read => "read only from the remote",
+        FsModeConfig::Write => "read and write from the remote",
+        _ => "read and write locally",
+    };
+    messages.push(format!("fs: file operations will default to {}", fs_info));
+
+    let incoming_info = match config.feature.network.incoming.mode {
+        IncomingMode::Mirror => "mirrored",
+        IncomingMode::Steal => "stolen",
+        IncomingMode::Off => "ignored",
+    };
+    messages.push(format!(
+        "incoming: incoming traffic will be {}",
+        incoming_info
+    ));
+
+    let outgoing_info = match (
+        config.feature.network.outgoing.tcp,
+        config.feature.network.outgoing.udp,
+    ) {
+        (true, true) => "enabled on TCP and UDP",
+        (true, false) => "enabled on TCP",
+        (false, true) => "enabled on UDP",
+        (false, false) => "disabled on TCP and UDP",
+    };
+    messages.push(format!("outgoing: forwarding is {}", outgoing_info));
+
+    let dns_info = match config.feature.network.dns {
+        true => "remotely",
+        false => "locally",
+    };
+    messages.push(format!("dns: DNS will be resolved {}", dns_info));
+
+    if single_msg {
+        let long_message = messages.join(". \n");
+        progress_subtask.info(&long_message);
+    } else {
+        for m in messages {
+            progress_subtask.info(&m[..]);
+        }
+    }
 }
 
 async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
@@ -205,10 +315,6 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     if args.tcp_steal {
         std::env::set_var("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", "true");
     };
-
-    if args.pause {
-        std::env::set_var("MIRRORD_PAUSE", "true");
-    }
 
     if args.no_outgoing || args.no_tcp_outgoing {
         std::env::set_var("MIRRORD_TCP_OUTGOING", "false");
@@ -405,10 +511,7 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     // Try operator first if relevant
     let mut targets = match &layer_config.operator {
         Some(true) | None => {
-            let operator_targets = try {
-                let operator_api = OperatorApi::new(&layer_config).await?;
-                operator_api.list_targets().await?
-            };
+            let operator_targets = try { OperatorApi::list_targets(&layer_config).await? };
             match operator_targets {
                 Ok(targets) => {
                     // adjust format to match non-operator output
@@ -417,7 +520,7 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
                         .filter_map(|target_crd| {
                             let target = target_crd.spec.target.as_ref()?;
                             if let Some(container) = target.container_name() {
-                                if !SKIP_NAMES.contains(container.as_str()) {
+                                if SKIP_NAMES.contains(container.as_str()) {
                                     return None;
                                 }
                             }

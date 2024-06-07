@@ -49,7 +49,6 @@ configuration file containing all fields.
 {
   "accept_invalid_certificates": false,
   "skip_processes": "ide-debugger",
-  "pause": false,
   "target": {
     "path": "pod/bear-pod",
     "namespace": "default"
@@ -57,6 +56,9 @@ configuration file containing all fields.
   "connect_tcp": null,
   "agent": {
     "log_level": "info",
+    "json_log": false,
+    "labels": { "user": "meow" },
+    "annotations": { "cats.io/inject": "enabled" },
     "namespace": "default",
     "image": "ghcr.io/metalbear-co/mirrord:latest",
     "image_pull_policy": "IfNotPresent",
@@ -130,16 +132,6 @@ Defaults to `false`.
 Whether mirrord should use the operator.
 If not set, mirrord will first attempt to use the operator, but continue without it in case
 of failure.
-
-## pause {#root-pause}
-Controls target pause feature. Unstable.
-
-With this feature enabled, the remote container is paused while this layer is connected to
-the agent.
-
-Note: It requires agent configuration to be set to privileged when running with the
-ephemeral agent option. Defaults to `false`.
-Note2: Pause + ephemeral might not work on Docker runtimes.
 
 ## skip_build_tools {#root-skip_build_tools}
 
@@ -237,6 +229,7 @@ We provide sane defaults for this option, so you don't have to set up anything h
 {
   "agent": {
     "log_level": "info",
+    "json_log": false,
     "namespace": "default",
     "image": "ghcr.io/metalbear-co/mirrord:latest",
     "image_pull_policy": "IfNotPresent",
@@ -246,7 +239,6 @@ We provide sane defaults for this option, so you don't have to set up anything h
     "communication_timeout": 30,
     "startup_timeout": 360,
     "network_interface": "eth0",
-    "pause": false,
     "flush_connections": false,
   }
 }
@@ -297,6 +289,18 @@ aren't stolen (due to being already established)
 
 Defaults to `true`.
 
+### agent.json_log {#agent-json_log}
+
+Controls whether the agent produces logs in a human-friendly format, or json.
+
+```json
+{
+  "agent": {
+    "json_log": true
+  }
+}
+```
+
 ### agent.nftables {#agent-nftables}
 
 Use iptables-nft instead of iptables-legacy.
@@ -311,20 +315,13 @@ Defaults to `false`.
 
 Might be needed in strict environments such as Bottlerocket.
 
-### agent.image {#agent-image}
+### agent.annotations {#agent-annotations}
 
-Name of the agent's docker image.
-
-Useful when a custom build of mirrord-agent is required, or when using an internal
-registry.
-
-Defaults to the latest stable image `"ghcr.io/metalbear-co/mirrord:latest"`.
+Allows setting up custom annotations for the agent Job and Pod.
 
 ```json
 {
-  "agent": {
-    "image": "internal.repo/images/mirrord:latest"
-  }
+  "annotations": { "cats.io/inject": "enabled" }
 }
 ```
 
@@ -337,22 +334,13 @@ Supports `"IfNotPresent"`, `"Always"`, `"Never"`, or any valid kubernetes
 
 Defaults to `"IfNotPresent"`
 
-### agent.image_pull_secrets {#agent-image_pull_secrets}
+### agent.labels {#agent-labels}
 
-List of secrets the agent pod has access to.
-
-Takes an array of hash with the format `{ name: <secret-name> }`.
-
-Read more [here](https://kubernetes.io/docs/concepts/containers/images/).
+Allows setting up custom labels for the agent Job and Pod.
 
 ```json
 {
-  "agent": {
-    "image_pull_secrets": [
-      { "very-secret": "secret-key" },
-      { "very-secret": "keep-your-secrets" }
-    ]
-  }
+  "labels": { "user": "meow", "state": "asleep" }
 }
 ```
 
@@ -399,11 +387,58 @@ Default is
 
 Set to an empty array to have no tolerations at all
 
+### agent.dns {#agent-dns}
+
 ### agent.disabled_capabilities {#agent-disabled_capabilities}
 
 Disables specified Linux capabilities for the agent container.
 If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and
 `SYS_ADMIN`.
+
+### agent.image_pull_secrets {#agent-image_pull_secrets}
+
+List of secrets the agent pod has access to.
+
+Takes an array of entries with the format `{ name: <secret-name> }`.
+
+Read more [here](https://kubernetes.io/docs/concepts/containers/images/#referring-to-an-imagepullsecrets-on-a-pod).
+
+```json
+{
+  "agent": {
+    "image_pull_secrets": [
+      { "name": "secret-key-1" },
+      { "name": "secret-key-2" }
+    ]
+  }
+}
+```
+
+### agent.image {#agent-image}
+
+Name of the agent's docker image.
+
+Useful when a custom build of mirrord-agent is required, or when using an internal
+registry.
+
+Defaults to the latest stable image `"ghcr.io/metalbear-co/mirrord:latest"`.
+
+```json
+{
+  "image": "internal.repo/images/mirrord:latest"
+}
+```
+
+Complete setup:
+
+```json
+{
+  "image": {
+    "registry": "internal.repo/images/mirrord",
+    "tag": "latest",
+  }
+}
+```
 
 ### agent.resources {#agent-resources}
 
@@ -474,6 +509,7 @@ Supports:
 - `deployment/{sample-deployment}`;
 - `container/{sample-container}`;
 - `containername/{sample-container}`.
+- `job/{sample-job}` (only when [`copy_target`](#feature-copy_target) is enabled).
 
 # feature {#root-feature}
 Controls mirrord features.
@@ -523,10 +559,15 @@ have support for a shortened version, that you can see [here](#root-shortened).
       },
       "dns": false
     },
-    "copy_target": false
+    "copy_target": false,
+    "hostname": true
   }
 }
 ```
+
+## feature.hostname {#feature-hostname}
+
+Should mirrord return the hostname of the target pod when calling `gethostname`
 
 ## feature.fs {#feature-fs}
 Allows the user to specify the default behavior for file operations:
@@ -681,6 +722,17 @@ Allows setting or overriding environment variables (locally) with a custom value
 For example, if the remote pod has an environment variable `REGION=1`, but this is an
 undesirable value, it's possible to use `override` to set `REGION=2` (locally) instead.
 
+### feature.env.unset {#feature-env-unset}
+
+Allows unsetting environment variables in the executed process.
+
+This is useful for when some system/user-defined environment like `AWS_PROFILE` make the
+application behave as if it's running locally, instead of using the remote settings.
+The unsetting happens from extension (if possible)/CLI and when process initializes.
+In some cases, such as Go the env might not be able to be modified from the process itself.
+This is case insensitive, meaning if you'd put `AWS_PROFILE` it'd unset both `AWS_PROFILE`
+and `Aws_Profile` and other variations.
+
 ## feature.network {#feature-network}
 Controls mirrord network operations.
 
@@ -806,6 +858,8 @@ Can be especially useful when
 and you want to avoid redirecting traffic from some ports (for example, traffic from
 a health probe, or other heartbeat-like traffic).
 
+Mutually exclusive with [`feature.network.incoming.ports`](#feature-network-ports).
+
 #### feature.network.incoming.listen_ports {#feature-network-incoming-listen_ports}
 
 Mapping for local ports to actually used local ports.
@@ -828,6 +882,13 @@ Mapping for local ports to remote ports.
 This is useful when you want to mirror/steal a port to a different port on the remote
 machine. For example, your local process listens on port `9333` and the container listens
 on port `80`. You'd use `[[9333, 80]]`
+
+#### feature.network.incoming.ports {#feature-network-incoming-ports}
+
+List of ports to mirror/steal traffic from. Other ports will remain local.
+
+Mutually exclusive with
+[`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
 
 #### feature.network.incoming.ignore_localhost {#feature-network-incoming-ignore_localhost}
 
@@ -858,7 +919,7 @@ Can be set to either `"continue"` or `"override"`.
 - `"override"`: If port lock detected then override it with new lock and force close the
   original locking connection.
 
-#### feature.network.incoming.filter {#feature-network-incoming-http-filter}
+#### feature.network.incoming.http_filter {#feature-network-incoming-http-filter}
 Filter configuration for the HTTP traffic stealer feature.
 
 Allows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic
@@ -868,19 +929,42 @@ requests to their original destinations.
 Only does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is
 set as `"steal"`, ignored otherwise.
 
-for example, to filter based on header:
+For example, to filter based on header:
 ```json
 {
   "header_filter": "host: api\..+",
 }
 ```
+Setting that filter will make mirrord only steal requests with the `host` header set to hosts
+that start with "api", followed by a dot, and then at least one more character.
 
-for example, to filter based on path
+For example, to filter based on path:
 ```json
 {
-  "path_filter": "host: api\..+",
+  "path_filter": "^/api/",
 }
 ```
+Setting this filter will make mirrord only steal requests to URIs starting with "/api/".
+
+
+This can be useful for filtering out Kubernetes liveness, readiness and startup probes.
+For example, for avoiding stealing any probe sent by kubernetes, you can set this filter:
+```json
+{
+  "header_filter": "^User-Agent: (?!kube-probe)",
+}
+```
+Setting this filter will make mirrord only steal requests that **do** have a user agent that
+**does not** begin with "kube-probe".
+
+Similarly, you can exclude certain paths using a negative look-ahead:
+```json
+{
+  "path_filter": "^(?!/health/)",
+}
+```
+Setting this filter will make mirrord only steal requests to URIs that do not start with
+"/health/".
 
 ##### feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}
 
@@ -897,14 +981,14 @@ case-insensitive.
 Supports regexes validated by the
 [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
 
-Case insensitive.
+Case-insensitive.
 
 ##### feature.network.incoming.http_filter.ports {#feature-network-incoming-http_filter-ports}
 
 Activate the HTTP traffic filter only for these ports.
 
-Other ports will still be stolen (when `"steal`" is being used), they're just not checked
-for HTTP filtering.
+Other ports will *not* be stolen, unless listed in
+[`feature.network.incoming.ports`](#feature-network-incoming-ports).
 
 ### feature.network.outgoing {#feature-network-outgoing}
 Tunnel outgoing network operations through mirrord.
@@ -1044,6 +1128,14 @@ This option is compatible only with deployment targets.
       "scale_down": true
     }
 ```
+
+# experimental {#root-experimental}
+mirrord Experimental features.
+This shouldn't be used unless someone from MetalBear/mirrord tells you to.
+
+## experimental {#fexperimental-tcp_ping4_mock}
+
+<https://github.com/metalbear-co/mirrord/issues/2421#issuecomment-2093200904>
 
 # internal_proxy {#root-internal_proxy}
 Configuration for the internal proxy mirrord spawns for each local mirrord session

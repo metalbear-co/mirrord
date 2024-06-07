@@ -1,9 +1,4 @@
-use bytes::Bytes;
 use futures::TryFutureExt;
-use http::{Request, Response};
-use http_body_util::{BodyExt, Empty};
-use hyper::{body::Incoming, client::conn};
-use hyper_util::rt::TokioIo;
 use k8s_cri::v1::{runtime_service_client::RuntimeServiceClient, ContainerStatusRequest};
 use serde::Deserialize;
 use tokio::net::UnixStream;
@@ -31,28 +26,6 @@ struct ContainerStatus {
 impl CriOContainer {
     pub fn from_id(container_id: String) -> Self {
         CriOContainer { container_id }
-    }
-
-    async fn api_get(path: &str) -> Result<Response<Incoming>> {
-        let stream = UnixStream::connect(CRIO_DEFAULT_SOCK_PATH).await?;
-        let (mut request_sender, connection) = conn::http1::handshake(TokioIo::new(stream)).await?;
-
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                error!("Error in connection: {}", e);
-            }
-        });
-
-        request_sender
-            .send_request(
-                Request::builder()
-                    .method("GET")
-                    .header("Host", "localhost")
-                    .uri(format!("http://localhost{}", path))
-                    .body(Empty::<Bytes>::new())?,
-            )
-            .await
-            .map_err(AgentError::from)
     }
 }
 
@@ -93,38 +66,5 @@ impl ContainerRuntime for CriOContainer {
         };
 
         Ok(ContainerInfo::new(pid, Default::default()))
-    }
-
-    async fn pause(&self) -> Result<()> {
-        let path = format!("/pause/{}", self.container_id);
-        let response = Self::api_get(&path).await?;
-
-        if !response.status().is_success() {
-            let status_code = response.status();
-            let err_body = response.into_body().collect().await?;
-
-            return Err(AgentError::PauseRuntimeError(format!(
-                "Request pause failed -> status: {status_code} | path: {path} | err_body: {err_body:?}"
-            )));
-        }
-
-        Ok(())
-    }
-
-    async fn unpause(&self) -> Result<()> {
-        let path = format!("/unpause/{}", self.container_id);
-
-        let response = Self::api_get(&path).await?;
-
-        if !response.status().is_success() {
-            let status_code = response.status();
-            let err_body = response.into_body().collect().await?;
-
-            return Err(AgentError::PauseRuntimeError(format!(
-                "Request unpause failed -> status: {status_code} | path: {path} | err_body: {err_body:?}"
-            )));
-        }
-
-        Ok(())
     }
 }
