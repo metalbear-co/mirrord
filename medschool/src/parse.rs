@@ -9,6 +9,7 @@ use crate::{
     DocsError,
 };
 
+/// Extracts the docs from the attributes of a [`syn::Item`].
 #[tracing::instrument(level = "trace", ret)]
 pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Vec<String> {
     attributes
@@ -134,7 +135,7 @@ impl TryFrom<syn::ItemStruct> for PartialType {
         let fields = item
             .fields
             .into_iter()
-            .filter_map(PartialField::new)
+            .filter_map(|field| PartialField::try_from(field).ok())
             .collect::<BTreeSet<_>>();
 
         if docs.is_empty() || fields.is_empty() {

@@ -2,6 +2,7 @@
 
 use thiserror::Error;
 
+/// Errors that can happen when working with the documentation.
 #[derive(Debug, Error)]
 pub enum DocsError {
     /// Error for glob iteration.

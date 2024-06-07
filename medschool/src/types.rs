@@ -48,12 +48,15 @@ pub struct PartialField {
     /// any type that we declared.
     pub docs: Vec<String>,
 }
+    
+    
+/// Converts a [`syn::Field`] into [`PartialField`], using
+/// [`get_ident_from_field_skipping_generics`] to get the field type.
+impl TryFrom<syn::Field> for PartialField {
+    type Error = ();
 
-impl PartialField {
-    /// Converts a [`syn::Field`] into [`PartialField`], using
-    /// [`get_ident_from_field_skipping_generics`] to get the field type.
     #[tracing::instrument(level = "trace", ret)]
-    pub fn new(field: syn::Field) -> Option<Self> {
+    fn try_from(field: syn::Field) -> Result<Self, Self::Error> {
         let type_ident = match field.ty {
             Type::Path(type_path) => {
                 // `get_ident` returns `Some` if the `path` doesn't contain generics.
@@ -64,7 +67,8 @@ impl PartialField {
                     .or_else(|| get_ident_from_field_skipping_generics(type_path))
             }
             _ => None,
-        }?;
+        }
+        .ok_or(())?;
 
         let mut docs = docs_from_attributes(field.attrs);
 
@@ -72,7 +76,7 @@ impl PartialField {
         for doc in docs.iter_mut() {
             // removes docs that we don't want in `configuration.md`
             if doc.contains(r"<!--${internal}-->") {
-                return None;
+                return Err(());
             }
 
             // `trim` is too aggressive, we just want to remove 1 whitespace
@@ -83,8 +87,8 @@ impl PartialField {
 
         docs.push("\n".to_string());
 
-        Some(Self {
-            ident: field.ident?.to_string(),
+        Ok(Self {
+            ident: field.ident.ok_or(())?.to_string(),
             ty: type_ident.to_string(),
             docs,
         })
