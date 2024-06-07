@@ -70,7 +70,6 @@ pub enum FileRequest {
     OpenRelative(OpenRelativeFileRequest),
     Read(ReadFileRequest),
     ReadLimited(ReadLimitedFileRequest),
-    ReadLink(ReadLinkFileRequest),
     Seek(SeekFileRequest),
     Write(WriteFileRequest),
     WriteLimited(WriteLimitedFileRequest),
@@ -82,6 +81,7 @@ pub enum FileRequest {
     ReadDir(ReadDirRequest),
     CloseDir(CloseDirRequest),
     GetDEnts64(GetDEnts64Request),
+    ReadLink(ReadLinkFileRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -114,7 +114,6 @@ pub enum FileResponse {
     Open(RemoteResult<OpenFileResponse>),
     Read(RemoteResult<ReadFileResponse>),
     ReadLimited(RemoteResult<ReadFileResponse>),
-    ReadLink(RemoteResult<ReadLinkFileResponse>),
     Write(RemoteResult<WriteFileResponse>),
     WriteLimited(RemoteResult<WriteFileResponse>),
     Seek(RemoteResult<SeekFileResponse>),
@@ -124,6 +123,7 @@ pub enum FileResponse {
     ReadDir(RemoteResult<ReadDirResponse>),
     OpenDir(RemoteResult<OpenDirResponse>),
     GetDEnts64(RemoteResult<GetDEnts64Response>),
+    ReadLink(RemoteResult<ReadLinkFileResponse>),
 }
 
 /// `-agent` --> `-layer` messages.
