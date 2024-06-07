@@ -249,6 +249,7 @@ impl fmt::Debug for ReadFileResponse {
     }
 }
 
+/// The contents of the symbolic link.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadLinkFileResponse {
     pub path: PathBuf,
@@ -261,6 +262,7 @@ pub struct ReadLimitedFileRequest {
     pub start_from: u64,
 }
 
+/// `path` of the symbolic link we want to resolve.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadLinkFileRequest {
     pub path: PathBuf,

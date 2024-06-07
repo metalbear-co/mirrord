@@ -276,6 +276,9 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
     Detour::Success(response)
 }
 
+/// Resolves the symbolic link `path`.
+///
+/// Bypassed if the `experimental.readlink` config is not set to `true`.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
     if crate::setup().experimental().readlink {
