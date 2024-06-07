@@ -285,6 +285,8 @@ pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
         Detour::Bypass(Bypass::RelativePath(path.clone()))?
     };
 
+    ensure_not_ignored!(path, false);
+
     let requesting_path = ReadLinkFileRequest { path };
     let response = common::make_proxy_request_with_response(requesting_path)??;
 
