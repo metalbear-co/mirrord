@@ -48,8 +48,7 @@ pub struct PartialField {
     /// any type that we declared.
     pub docs: Vec<String>,
 }
-    
-    
+
 /// Converts a [`syn::Field`] into [`PartialField`], using
 /// [`get_ident_from_field_skipping_generics`] to get the field type.
 impl TryFrom<syn::Field> for PartialField {
@@ -166,25 +165,23 @@ impl Borrow<str> for PartialType {
 }
 
 impl Display for PartialType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Prevents crashing the tool if the type is not properly documented.
         let docs = self.docs.last().cloned().unwrap_or_default();
-        f.write_str(&docs)?;
+        formatter.write_str(&docs)?;
 
-        self.fields.iter().fold(f, |accum, s| {
-            accum
-                .write_str(&s.ident.to_string())
-                .expect("writing failed");
-            accum
-        });
+        self.fields.iter().try_for_each(|field| {
+            formatter.write_str(&field.ident.to_string())?;
+            Ok(())
+        })?;
         Ok(())
     }
 }
 
 impl Display for PartialField {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Prevents crashing the tool if the field is not properly documented.
         let docs = self.docs.last().cloned().unwrap_or_default();
-        f.write_str(&docs)
+        formatter.write_str(&docs)
     }
 }
