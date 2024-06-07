@@ -1050,7 +1050,7 @@ pub(crate) unsafe extern "C" fn readlink_detour(
             let path_ptr = path_bytes.as_ptr();
             let out_buffer = out_buffer.cast();
 
-            ptr::copy(path_ptr, out_buffer, buffer_size as usize);
+            ptr::copy(path_ptr, out_buffer, buffer_size);
 
             ssize_t::try_from(path_bytes.len().min(buffer_size)).unwrap()
         })
