@@ -6,6 +6,7 @@ use rstest::rstest;
 mod common;
 pub use common::*;
 
+/// Test for the [`libc::readlink`] function.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
@@ -17,7 +18,6 @@ async fn readlink(dylib_path: &PathBuf) {
 
     println!("waiting for file request.");
     intproxy.expect_read_link("/gatos/tigrado.txt").await;
-    intproxy.expect_file_close(1).await;
 
     assert_eq!(intproxy.try_recv().await, None);
 
