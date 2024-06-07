@@ -278,7 +278,14 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
 
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
-    let requesting_path = ReadLinkFileRequest { path: path? };
+    let path = path?;
+
+    if path.is_relative() {
+        // Calls with non absolute paths are sent to libc::open.
+        Detour::Bypass(Bypass::RelativePath(path.clone()))?
+    };
+
+    let requesting_path = ReadLinkFileRequest { path };
     let response = common::make_proxy_request_with_response(requesting_path)??;
 
     Detour::Success(response)
