@@ -26,6 +26,8 @@ clap = { version = "4", features = ["derive"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 regex.workspace = true
+flame = "0.2.2"
+flamescope = "0.1.2"
 
 [dev-dependencies]
 rand = "0.8"
