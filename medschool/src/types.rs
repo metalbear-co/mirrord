@@ -1,6 +1,12 @@
 //! The interface for the types we're extracting from the source code.
 
-use std::{borrow::Borrow, cmp::Ordering, collections::BTreeSet, fmt::Display, hash::Hash};
+use std::{
+    borrow::{Borrow, Cow},
+    cmp::Ordering,
+    collections::BTreeSet,
+    fmt::Display,
+    hash::Hash,
+};
 
 use syn::Type;
 
@@ -11,16 +17,16 @@ use crate::parse::{docs_from_attributes, get_ident_from_field_skipping_generics}
 /// Implements [`Ord`] by checking if any of its `PartialType::fields` belongs to another type that
 /// we have declared.
 #[derive(Debug, Default, Clone)]
-pub struct PartialType {
+pub struct PartialType<'a> {
     /// Only interested in the type name, e.g. `struct {Foo}`.
-    pub ident: String,
+    pub ident: Cow<'a, str>,
 
     /// The docs of the item, they come in as a bunch of strings from `syn`, and we just hold them
     /// as they come.
     pub docs: Vec<String>,
 
     /// Only useful when [`syn::ItemStruct`], we don't look into variants of enums.
-    pub fields: BTreeSet<PartialField>,
+    pub fields: BTreeSet<PartialField<'a>>,
 }
 
 /// The fields when the item we're looking is [`syn::ItemStruct`].
@@ -28,9 +34,9 @@ pub struct PartialType {
 /// Implements [`Ord`] by `PartialField::ty.len()`, thus making primitive types < custom types
 /// (usually).
 #[derive(Debug, Clone)]
-pub struct PartialField {
+pub struct PartialField<'a> {
     /// The name of the field, e.g. `{foo}: String`.
-    pub ident: String,
+    pub ident: Cow<'a, str>,
 
     /// The type of the field, e.g. `foo: {String}`.
     ///
@@ -39,7 +45,7 @@ pub struct PartialField {
     ///
     /// Keep in mind that the handling for this is very crude, so if you have a field with anything
     /// fancier than just the `foo` example (such as `foo: bar::String`), the assumptions break.
-    pub ty: String,
+    pub ty: Cow<'a, str>,
 
     /// The docs of the field, they come in as a bunch of strings from `syn`, and we just hold them
     /// as they come.
@@ -51,7 +57,7 @@ pub struct PartialField {
 
 /// Converts a [`syn::Field`] into [`PartialField`], using
 /// [`get_ident_from_field_skipping_generics`] to get the field type.
-impl TryFrom<syn::Field> for PartialField {
+impl<'a> TryFrom<syn::Field> for PartialField<'a> {
     type Error = ();
 
     #[tracing::instrument(level = "trace", ret)]
@@ -69,15 +75,16 @@ impl TryFrom<syn::Field> for PartialField {
         }
         .ok_or(())?;
 
+        let ident = field.ident.as_ref().ok_or(())?.to_string();
         Ok(Self {
-            ident: field.ident.ok_or(())?.to_string(),
-            ty: type_ident.to_string(),
+            ident: ident.into(),
+            ty: type_ident.to_string().into(),
             docs: docs_from_attributes(field.attrs).ok_or(())?,
         })
     }
 }
 
-impl PartialType {
+impl PartialType<'_> {
     /// Turns the `root` [`PartialType`] documentation into one big `String`.
     pub fn produce_docs(self) -> String {
         self.docs
@@ -91,28 +98,28 @@ impl PartialType {
     }
 }
 
-impl PartialEq for PartialField {
+impl PartialEq for PartialField<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.ident == other.ident
     }
 }
 
-impl Eq for PartialField {}
+impl Eq for PartialField<'_> {}
 
-impl PartialOrd for PartialField {
+impl PartialOrd for PartialField<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for PartialField {
+impl Ord for PartialField<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.ident.cmp(&other.ident)
     }
 }
 
-impl From<PartialField> for PartialType {
-    fn from(value: PartialField) -> Self {
+impl<'a> From<PartialField<'a>> for PartialType<'a> {
+    fn from(value: PartialField<'a>) -> Self {
         Self {
             ident: value.ident,
             docs: value.docs,
@@ -121,47 +128,41 @@ impl From<PartialField> for PartialType {
     }
 }
 
-impl PartialEq for PartialType {
+impl PartialEq for PartialType<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.ident.eq(&other.ident)
     }
 }
 
-impl Eq for PartialType {}
+impl Eq for PartialType<'_> {}
 
-impl Hash for PartialType {
+impl Hash for PartialType<'_> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.ident.hash(state)
     }
 }
 
-impl Borrow<String> for PartialType {
-    fn borrow(&self) -> &String {
+impl<'a> Borrow<Cow<'a, str>> for PartialType<'a> {
+    fn borrow(&self) -> &Cow<'a, str> {
         &self.ident
     }
 }
 
-impl Borrow<str> for PartialType {
-    fn borrow(&self) -> &str {
-        &self.ident
-    }
-}
-
-impl Display for PartialType {
+impl Display for PartialType<'_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Prevents crashing the tool if the type is not properly documented.
         let docs = self.docs.last().cloned().unwrap_or_default();
         formatter.write_str(&docs)?;
 
         self.fields.iter().try_for_each(|field| {
-            formatter.write_str(&field.ident.to_string())?;
+            formatter.write_str(&field.ident)?;
             Ok(())
         })?;
         Ok(())
     }
 }
 
-impl Display for PartialField {
+impl Display for PartialField<'_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Prevents crashing the tool if the field is not properly documented.
         let docs = self.docs.last().cloned().unwrap_or_default();

@@ -109,12 +109,13 @@ pub fn get_ident_from_field_skipping_generics(type_path: TypePath) -> Option<Ide
 }
 
 /// Converts a [`syn::ItemMod`] into a [`PartialType`].
-impl TryFrom<syn::ItemMod> for PartialType {
+impl TryFrom<syn::ItemMod> for PartialType<'_> {
     type Error = ();
 
     fn try_from(item: syn::ItemMod) -> Result<Self, Self::Error> {
+        let ident = item.ident.to_string();
         Ok(PartialType {
-            ident: item.ident.to_string(),
+            ident: ident.into(),
             docs: docs_from_attributes(item.attrs).ok_or(())?,
             fields: Default::default(),
         })
@@ -123,12 +124,13 @@ impl TryFrom<syn::ItemMod> for PartialType {
 
 /// Converts a [`syn::ItemEnum`] into a [`PartialType`].
 /// Currently, we don't handle enum variants as fields, we just use its top-level docs.
-impl TryFrom<syn::ItemEnum> for PartialType {
+impl TryFrom<syn::ItemEnum> for PartialType<'_> {
     type Error = ();
 
     fn try_from(item: syn::ItemEnum) -> Result<Self, Self::Error> {
+        let ident = item.ident.to_string();
         Ok(PartialType {
-            ident: item.ident.to_string(),
+            ident: ident.into(),
             docs: docs_from_attributes(item.attrs).ok_or(())?,
             fields: Default::default(),
         })
@@ -137,7 +139,7 @@ impl TryFrom<syn::ItemEnum> for PartialType {
 
 /// Converts a [`syn::ItemStruct`] into a [`PartialType`].
 /// We remove docs that have `<!--${internal}-->` (they're not converted to [`PartialType`]s).
-impl TryFrom<syn::ItemStruct> for PartialType {
+impl TryFrom<syn::ItemStruct> for PartialType<'_> {
     type Error = ();
 
     fn try_from(item: syn::ItemStruct) -> Result<Self, Self::Error> {
@@ -147,8 +149,9 @@ impl TryFrom<syn::ItemStruct> for PartialType {
             .filter_map(|field| PartialField::try_from(field).ok())
             .collect::<BTreeSet<_>>();
 
+        let ident = item.ident.to_string();
         Ok(PartialType {
-            ident: item.ident.to_string(),
+            ident: ident.into(),
             docs: docs_from_attributes(item.attrs).ok_or(())?,
             fields,
         })
@@ -156,7 +159,7 @@ impl TryFrom<syn::ItemStruct> for PartialType {
 }
 
 /// Converts a [`syn::Item`] into a [`PartialType`], if possible.
-impl TryFrom<syn::Item> for PartialType {
+impl TryFrom<syn::Item> for PartialType<'_> {
     type Error = ();
 
     fn try_from(item: syn::Item) -> Result<Self, Self::Error> {
@@ -172,7 +175,9 @@ impl TryFrom<syn::Item> for PartialType {
 /// Converts a list of [`syn::File`] into a [`BTreeSet`] of our own [`PartialType`] types, so we can
 /// get a root node (see the [`Ord`] implementation of `PartialType`).
 #[tracing::instrument(level = "trace", ret)]
-pub fn parse_docs_into_set(files: Vec<syn::File>) -> Result<HashSet<PartialType>, DocsError> {
+pub fn parse_docs_into_set<'a>(
+    files: Vec<syn::File>,
+) -> Result<HashSet<PartialType<'a>>, DocsError> {
     let type_docs = files
         .into_iter()
         // go through each `File` extracting the types into a hierarchical tree based on which types
@@ -193,7 +198,7 @@ pub fn parse_docs_into_set(files: Vec<syn::File>) -> Result<HashSet<PartialType>
 /// the field we're currently looking at search till its leaf nodes. The leaf here means a primitive
 /// type for which we don't have a [`PartialType`].
 fn dfs_fields<'a>(
-    field: &PartialField,
+    field: &PartialField<'a>,
     types: &'a HashSet<PartialType>,
     cache: &mut HashMap<&'a str, Vec<String>>,
     recursion_level: &mut usize,
