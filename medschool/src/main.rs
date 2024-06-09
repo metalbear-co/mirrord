@@ -91,12 +91,9 @@ fn main() -> Result<(), DocsError> {
         input,
     } = <MedschoolArgs as clap::Parser>::parse();
 
-    let main_guard = flame::start_guard("main");
     let files = parse_files(input.unwrap_or_else(|| PathBuf::from("./src")))?;
     let type_docs = parse_docs_into_set(files)?;
     let resolved = resolve_references(type_docs.clone());
-    main_guard.end();
-    flamescope::dump(&mut File::create("flamescope.json").unwrap()).unwrap();
 
     if let Some(produced) = resolved {
         let mut final_docs = produced.produce_docs();
