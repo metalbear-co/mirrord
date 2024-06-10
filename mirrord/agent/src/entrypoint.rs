@@ -139,15 +139,12 @@ impl State {
         stream: TcpStream,
         tasks: BackgroundTasks,
         cancellation_token: CancellationToken,
-        protocol_version: semver::Version,
     ) -> u32 {
         let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
 
         let result = ClientConnection::new(stream, client_id, self.tls_connector.clone())
             .map_err(AgentError::from)
-            .and_then(|connection| {
-                ClientConnectionHandler::new(client_id, connection, tasks, protocol_version, self)
-            })
+            .and_then(|connection| ClientConnectionHandler::new(client_id, connection, tasks, self))
             .and_then(|client| client.start(cancellation_token))
             .await;
 
@@ -212,7 +209,6 @@ impl ClientConnectionHandler {
         id: ClientId,
         mut connection: ClientConnection,
         bg_tasks: BackgroundTasks,
-        protocol_version: semver::Version,
         state: State,
     ) -> Result<Self> {
         let pid = state.container_pid();
@@ -221,8 +217,7 @@ impl ClientConnectionHandler {
 
         let tcp_sniffer_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection).await;
         let tcp_stealer_api =
-            Self::create_stealer_api(id, bg_tasks.stealer, protocol_version, &mut connection)
-                .await?;
+            Self::create_stealer_api(id, bg_tasks.stealer, &mut connection).await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
@@ -274,7 +269,6 @@ impl ClientConnectionHandler {
     async fn create_stealer_api(
         id: ClientId,
         task: BackgroundTask<StealerCommand>,
-        protocol_version: semver::Version,
         connection: &mut ClientConnection,
     ) -> Result<Option<TcpStealerApi>> {
         if let BackgroundTask::Running(stealer_status, stealer_sender) = task {
@@ -283,7 +277,7 @@ impl ClientConnectionHandler {
                 stealer_sender,
                 stealer_status,
                 CHANNEL_SIZE,
-                protocol_version,
+                mirrord_protocol::VERSION.clone(),
             )
             .await
             {
@@ -454,15 +448,18 @@ impl ClientConnectionHandler {
                 ))
                 .await?;
             }
-            ClientMessage::SwitchProtocolVersion(version) => {
+            ClientMessage::SwitchProtocolVersion(client_version) => {
+                let settled_version = client_version.min(mirrord_protocol::VERSION.clone());
                 if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
                     tcp_stealer_api
-                        .switch_protocol_version(version.clone())
+                        .switch_protocol_version(settled_version.clone())
                         .await?;
                 }
 
-                self.respond(DaemonMessage::SwitchProtocolVersionResponse(version))
-                    .await?;
+                self.respond(DaemonMessage::SwitchProtocolVersionResponse(
+                    settled_version,
+                ))
+                .await?;
             }
             ClientMessage::ReadyForLogs => {}
         }
@@ -595,7 +592,6 @@ async fn start_agent(args: Args) -> Result<()> {
                 stream,
                 bg_tasks.clone(),
                 cancellation_token.clone(),
-                args.base_protocol_version.clone(),
             ));
         }
 
@@ -623,8 +619,7 @@ async fn start_agent(args: Args) -> Result<()> {
                     .serve_client_connection(
                         stream,
                         bg_tasks.clone(),
-                        cancellation_token.clone(),
-                        args.base_protocol_version.clone(),
+                        cancellation_token.clone()
                     )
                 );
             },
