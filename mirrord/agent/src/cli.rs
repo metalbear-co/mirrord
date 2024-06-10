@@ -35,9 +35,6 @@ pub struct Args {
     #[arg(long, default_value_t = false, hide = true)]
     pub test_error: bool,
 
-    #[arg(long, default_value = "1.2.1")]
-    pub base_protocol_version: semver::Version,
-
     /// PEM-encoded X509 certificate that this agent will use to secure incoming TCP connections
     /// from the clients (proxied by the operator).
     ///
