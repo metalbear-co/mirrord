@@ -15,7 +15,7 @@ pub mod internal_proxy;
 pub mod target;
 pub mod util;
 
-use std::path::Path;
+use std::{collections::HashSet, ops::Not, path::Path};
 
 use config::{ConfigContext, ConfigError, MirrordConfig};
 use experimental::ExperimentalConfig;
@@ -360,6 +360,28 @@ impl LayerConfig {
                 "Cannot use both `incoming.ignore_ports` and `incoming.ports` at the same time"
                     .to_string(),
             ))?
+        }
+
+        if let (Some(unfiltered_ports), Some(filtered_ports)) = (
+            self.feature.network.incoming.ports.as_ref(),
+            self.feature
+                .network
+                .incoming
+                .http_filter
+                .get_filtered_ports(),
+        ) {
+            if unfiltered_ports
+                .is_disjoint(&HashSet::from_iter(filtered_ports.iter().copied()))
+                .not()
+            {
+                Err(ConfigError::Conflict(format!(
+                    "`feature.network.incoming.ports` (set to {unfiltered_ports:?}) and \
+                    `feature.network.incoming.http_filter.ports` (set to {filtered_ports:?}) must \
+                    be disjoint. If you want traffic to a port ot be filtered, include it only in \
+                    the filter port. To steal all the traffic from that port without filtering, \
+                    include it only in `feature.network.incoming.ports`."
+                )))?
+            }
         }
 
         if !self.feature.copy_target.enabled
