@@ -12,7 +12,9 @@ use crate::{
 /// Look into the [`syn::Attribute`]s of whatever item we're handling, and extract its doc strings.
 #[tracing::instrument(level = "trace", ret)]
 pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Option<Vec<String>> {
-    let mut docs: Vec<String> = attributes
+    let mut docs: Vec<String> = Vec::with_capacity(attributes.len());
+
+    let docs_iter = attributes
         .into_iter()
         // drill into `Meta::NameValue`
         .filter_map(|attribute| match attribute.meta {
@@ -46,8 +48,9 @@ pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Option<Vec<String>> {
             } else {
                 format!("{}\n", doc)
             }
-        })
-        .collect();
+        });
+
+    docs.extend(docs_iter);
 
     for doc in docs.iter_mut() {
         // removes docs that we don't want in `configuration.md`
@@ -302,7 +305,8 @@ pub fn resolve_references(types: HashSet<PartialType>) -> Option<PartialType> {
                 (recursion_level, type_)
             })
         })
-        // Get the type with the maximum recursion level, which should be our root type.
-        .max_by_key(|(recursion_level, _)| *recursion_level)
+        // Get the type with the maximum "area", which should be our root type.
+        // Area is recursion_level * number of fields in the type.
+        .max_by_key(|(recursion_level, type_)| *recursion_level * type_.fields.len())
         .map(|(_, type_)| type_)
 }
