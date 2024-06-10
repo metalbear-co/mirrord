@@ -178,6 +178,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: nightly-2024-04-15
+          target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu,aarch64-apple-darwin,x86_64-apple-darwin
       # TODO(alex): `no-deps` here due to an issue in `futures-util`.
       - run: cargo doc --document-private-items --no-deps
 
@@ -284,34 +285,34 @@ jobs:
           ./scripts/build_go_apps.sh 21
       - run: |
           cd mirrord/layer/tests/apps/fileops
-          cargo build
+          cargo build --target x86_64-unknown-linux-gnu
       - run: |
           cd mirrord/layer/tests/apps/outgoing
-          cargo build
+          cargo build --target x86_64-unknown-linux-gnu
       - run: |
           cd mirrord/layer/tests/apps/recv_from
-          cargo build
+          cargo build --target x86_64-unknown-linux-gnu
       - run: |
           cd mirrord/layer/tests/apps/dns_resolve
-          cargo build
+          cargo build --target x86_64-unknown-linux-gnu
       - run: |
           cd mirrord/layer/tests/apps/listen_ports
-          cargo build
+          cargo build --target x86_64-unknown-linux-gnu
       - run: |
           cd mirrord/layer/tests/apps/issue1776
-          cargo build
+          cargo build --target x86_64-unknown-linux-gnu
       - run: |
           cd mirrord/layer/tests/apps/issue1776portnot53
-          cargo build
+          cargo build --target x86_64-unknown-linux-gnu
       - run: |
           cd mirrord/layer/tests/apps/issue1899
-          cargo build
+          cargo build --target x86_64-unknown-linux-gnu
       - run: |
           cd mirrord/layer/tests/apps/issue2001
-          cargo build
+          cargo build --target x86_64-unknown-linux-gnu
       - run: |
           cd mirrord/layer/tests/apps/issue2438
-          cargo build
+          cargo build --target x86_64-unknown-linux-gnu
       - run: ./scripts/build_c_apps.sh
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
       - name: mirrord protocol UT
@@ -389,31 +390,31 @@ jobs:
           ./scripts/build_go_apps.sh 21
       - run: |
           cd mirrord/layer/tests/apps/fileops
-          cargo build
+          cargo build --target x86_64-apple-darwin
       - run: |
           cd mirrord/layer/tests/apps/outgoing
-          cargo build
+          cargo build --target x86_64-apple-darwin
       - run: |
           cd mirrord/layer/tests/apps/recv_from
-          cargo build
+          cargo build --target x86_64-apple-darwin
       - run: |
           cd mirrord/layer/tests/apps/dns_resolve
-          cargo build
+          cargo build --target x86_64-apple-darwin
       - run: |
           cd mirrord/layer/tests/apps/issue1776
-          cargo build
+          cargo build --target x86_64-apple-darwin
       - run: |
           cd mirrord/layer/tests/apps/issue1776portnot53
-          cargo build
+          cargo build --target x86_64-apple-darwin
       - run: |
           cd mirrord/layer/tests/apps/issue1899
-          cargo build
+          cargo build --target x86_64-apple-darwin
       - run: |
           cd mirrord/layer/tests/apps/issue2001
-          cargo build
+          cargo build --target x86_64-apple-darwin
       - run: |
           cd mirrord/layer/tests/apps/issue2438
-          cargo build
+          cargo build --target x86_64-apple-darwin
       - run: ./scripts/build_c_apps.sh
       # For the `java_temurin_sip` test.
       - uses: sdkman/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
