@@ -179,7 +179,7 @@ jobs:
         with:
           toolchain: nightly-2024-04-15
       # TODO(alex): `no-deps` here due to an issue in `futures-util`.
-      - run: cargo doc --target x86_64-unknown-linux-gnu --document-private-items --no-deps
+      - run: cargo doc --document-private-items --no-deps
 
   test_agent:
     runs-on: ubuntu-latest
@@ -284,34 +284,34 @@ jobs:
           ./scripts/build_go_apps.sh 21
       - run: |
           cd mirrord/layer/tests/apps/fileops
-          cargo build --target x86_64-unknown-linux-gnu
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/outgoing
-          cargo build --target x86_64-unknown-linux-gnu
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/recv_from
-          cargo build --target x86_64-unknown-linux-gnu
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/dns_resolve
-          cargo build --target x86_64-unknown-linux-gnu
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/listen_ports
-          cargo build --target x86_64-unknown-linux-gnu
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue1776
-          cargo build --target x86_64-unknown-linux-gnu
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue1776portnot53
-          cargo build --target x86_64-unknown-linux-gnu
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue1899
-          cargo build --target x86_64-unknown-linux-gnu
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue2001
-          cargo build --target x86_64-unknown-linux-gnu
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue2438
-          cargo build --target x86_64-unknown-linux-gnu
+          cargo build
       - run: ./scripts/build_c_apps.sh
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
       - name: mirrord protocol UT
@@ -389,31 +389,31 @@ jobs:
           ./scripts/build_go_apps.sh 21
       - run: |
           cd mirrord/layer/tests/apps/fileops
-          cargo build --target x86_64-apple-darwin
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/outgoing
-          cargo build --target x86_64-apple-darwin
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/recv_from
-          cargo build --target x86_64-apple-darwin
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/dns_resolve
-          cargo build --target x86_64-apple-darwin
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue1776
-          cargo build --target x86_64-apple-darwin
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue1776portnot53
-          cargo build --target x86_64-apple-darwin
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue1899
-          cargo build --target x86_64-apple-darwin
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue2001
-          cargo build --target x86_64-apple-darwin
+          cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue2438
-          cargo build --target x86_64-apple-darwin
+          cargo build
       - run: ./scripts/build_c_apps.sh
       # For the `java_temurin_sip` test.
       - uses: sdkman/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
