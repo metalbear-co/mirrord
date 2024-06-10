@@ -17,9 +17,9 @@ use crate::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
         GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest, OpenFileResponse,
         OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
-        ReadFileResponse, ReadLimitedFileRequest, SeekFileRequest, SeekFileResponse,
-        WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest, XstatFsRequest,
-        XstatFsResponse, XstatRequest, XstatResponse,
+        ReadFileResponse, ReadLimitedFileRequest, ReadLinkFileRequest, ReadLinkFileResponse,
+        SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+        WriteLimitedFileRequest, XstatFsRequest, XstatFsResponse, XstatRequest, XstatResponse,
     },
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -81,6 +81,7 @@ pub enum FileRequest {
     ReadDir(ReadDirRequest),
     CloseDir(CloseDirRequest),
     GetDEnts64(GetDEnts64Request),
+    ReadLink(ReadLinkFileRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -122,6 +123,7 @@ pub enum FileResponse {
     ReadDir(RemoteResult<ReadDirResponse>),
     OpenDir(RemoteResult<OpenDirResponse>),
     GetDEnts64(RemoteResult<GetDEnts64Response>),
+    ReadLink(RemoteResult<ReadLinkFileResponse>),
 }
 
 /// `-agent` --> `-layer` messages.

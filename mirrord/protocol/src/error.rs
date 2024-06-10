@@ -1,4 +1,9 @@
-use std::{fmt, fmt::Formatter, io, net::AddrParseError};
+use std::{
+    fmt::{self, Formatter},
+    io,
+    net::AddrParseError,
+    path::StripPrefixError,
+};
 
 use bincode::{Decode, Encode};
 use thiserror::Error;
@@ -56,6 +61,15 @@ pub enum ResponseError {
         blocked_action: BlockedAction,
         policy_name: Option<String>,
     },
+
+    #[error("Failed stripping path with `{0}`!")]
+    StripPrefix(String),
+}
+
+impl From<StripPrefixError> for ResponseError {
+    fn from(fail: StripPrefixError) -> Self {
+        Self::StripPrefix(fail.to_string())
+    }
 }
 
 /// If some then the name with a trailing space, else empty string.

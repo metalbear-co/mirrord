@@ -5,7 +5,12 @@ use core::ffi::{c_size_t, c_ssize_t};
 ///
 /// NOTICE: If a file operation fails, it might be because it depends on some `libc` function
 /// that is not being hooked (`strace` the program to check).
-use std::{ffi::CString, os::unix::io::RawFd, ptr, slice, time::Duration};
+use std::{
+    ffi::CString,
+    os::unix::{ffi::OsStrExt, io::RawFd},
+    ptr, slice,
+    time::Duration,
+};
 
 use errno::{set_errno, Errno};
 use libc::{
@@ -16,7 +21,7 @@ use libc::{
 use libc::{dirent64, stat64, statx, EBADF, ENOENT, ENOTDIR};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
-    FsMetadataInternal, MetadataInternal, ReadFileResponse, WriteFileResponse,
+    FsMetadataInternal, MetadataInternal, ReadFileResponse, ReadLinkFileResponse, WriteFileResponse,
 };
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
@@ -1031,6 +1036,31 @@ pub(crate) unsafe extern "C" fn preadv_detour(
         .unwrap_or_bypass_with(|_| FN_PREADV(fd, iovecs, iovec_count, offset))
 }
 
+/// Hook for [`libc::readlink`].
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn readlink_detour(
+    raw_path: *const c_char,
+    out_buffer: *mut c_char,
+    buffer_size: size_t,
+) -> ssize_t {
+    read_link(raw_path.checked_into())
+        .map(|ReadLinkFileResponse { path }| {
+            let path_bytes = path.as_os_str().as_bytes();
+
+            let path_ptr = path_bytes.as_ptr();
+            let out_buffer = out_buffer.cast();
+
+            ptr::copy(path_ptr, out_buffer, buffer_size);
+
+            ssize_t::try_from(path_bytes.len().min(buffer_size)).unwrap()
+        })
+        .unwrap_or_bypass_with(|_bypass| {
+            #[cfg(target_os = "macos")]
+            let raw_path = update_ptr_from_bypass(raw_path, _bypass);
+            FN_READLINK(raw_path, out_buffer, buffer_size)
+        })
+}
+
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
@@ -1095,6 +1125,14 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         _pread_nocancel_detour,
         Fn_pread_nocancel,
         FN__PREAD_NOCANCEL
+    );
+
+    replace!(
+        hook_manager,
+        "readlink",
+        readlink_detour,
+        FnReadlink,
+        FN_READLINK
     );
 
     replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);
