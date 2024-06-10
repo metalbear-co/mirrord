@@ -990,6 +990,8 @@ Activate the HTTP traffic filter only for these ports.
 Other ports will *not* be stolen, unless listed in
 [`feature.network.incoming.ports`](#feature-network-incoming-ports).
 
+Set to [80, 8080] by default.
+
 ### feature.network.outgoing {#feature-network-outgoing}
 Tunnel outgoing network operations through mirrord.
 
