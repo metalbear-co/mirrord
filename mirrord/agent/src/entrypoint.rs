@@ -1,5 +1,4 @@
 use std::{
-    borrow::Borrow,
     collections::HashMap,
     mem,
     net::{Ipv4Addr, SocketAddrV4},
@@ -450,7 +449,7 @@ impl ClientConnectionHandler {
                 .await?;
             }
             ClientMessage::SwitchProtocolVersion(client_version) => {
-                let settled_version = client_version.min(*mirrord_protocol::VERSION);
+                let settled_version = client_version.min(&(*mirrord_protocol::VERSION));
                 if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
                     tcp_stealer_api
                         .switch_protocol_version(settled_version.clone())
