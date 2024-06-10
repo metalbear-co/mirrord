@@ -1,0 +1,1 @@
+rust-analyzer will check all targets if (targets) installed
