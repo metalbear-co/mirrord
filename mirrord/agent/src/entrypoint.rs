@@ -139,7 +139,6 @@ impl State {
         stream: TcpStream,
         tasks: BackgroundTasks,
         cancellation_token: CancellationToken,
-        protocol_version: semver::Version,
     ) -> u32 {
         let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
 
@@ -454,15 +453,19 @@ impl ClientConnectionHandler {
                 ))
                 .await?;
             }
-            ClientMessage::SwitchProtocolVersion(version) => {
+            ClientMessage::SwitchProtocolVersion(client_version) => {
+                let our_version = mirrord_protocol::VERSION.get().clone();
+                let settled_version = client_version.min(&our_version);
                 if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
                     tcp_stealer_api
-                        .switch_protocol_version(version.clone())
+                        .switch_protocol_version(settled_version.clone())
                         .await?;
                 }
 
-                self.respond(DaemonMessage::SwitchProtocolVersionResponse(version))
-                    .await?;
+                self.respond(DaemonMessage::SwitchProtocolVersionResponse(
+                    settled_version,
+                ))
+                .await?;
             }
             ClientMessage::ReadyForLogs => {}
         }
@@ -623,8 +626,7 @@ async fn start_agent(args: Args) -> Result<()> {
                     .serve_client_connection(
                         stream,
                         bg_tasks.clone(),
-                        cancellation_token.clone(),
-                        args.base_protocol_version.clone(),
+                        cancellation_token.clone()
                     )
                 );
             },
