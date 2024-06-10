@@ -598,8 +598,16 @@
       "description": "mirrord Experimental features. This shouldn't be used unless someone from MetalBear/mirrord tells you to.",
       "type": "object",
       "properties": {
+        "readlink": {
+          "title": "_experimental_ readlink {#fexperimental-readlink}",
+          "description": "Enables the `readlink` hook.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "tcp_ping4_mock": {
-          "title": "experimental {#fexperimental-tcp_ping4_mock}",
+          "title": "_experimental_ tcp_ping4_mock {#fexperimental-tcp_ping4_mock}",
           "description": "<https://github.com/metalbear-co/mirrord/issues/2421#issuecomment-2093200904>",
           "type": [
             "boolean",
