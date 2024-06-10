@@ -1,4 +1,8 @@
-use std::{collections::HashSet, net::SocketAddr};
+use std::{
+    collections::HashSet,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+};
 
 use mirrord_config::{
     experimental::ExperimentalConfig,
@@ -33,6 +37,7 @@ pub struct LayerSetup {
     proxy_address: SocketAddr,
     incoming_mode: IncomingMode,
     local_hostname: bool,
+    mirrord_lib_path: PathBuf,
 }
 
 impl LayerSetup {
@@ -62,6 +67,9 @@ impl LayerSetup {
             .expect("failed to parse internal proxy address");
 
         let incoming_mode = IncomingMode::new(&config.feature.network.incoming);
+        let mirrord_lib_path = PathBuf::from(
+            std::env::var("MIRRORD_LIBRARY_PATH").expect("MIRRORD_LIBRARY_PATH not set!"),
+        );
 
         Self {
             config,
@@ -72,6 +80,7 @@ impl LayerSetup {
             proxy_address,
             incoming_mode,
             local_hostname,
+            mirrord_lib_path,
         }
     }
 
@@ -142,6 +151,10 @@ impl LayerSetup {
 
     pub fn local_hostname(&self) -> bool {
         self.local_hostname
+    }
+
+    pub fn mirrord_lib_path(&self) -> &Path {
+        &self.mirrord_lib_path
     }
 }
 

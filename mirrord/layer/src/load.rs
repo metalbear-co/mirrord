@@ -175,6 +175,9 @@ mod sip {
         given_process.is_build_tool()
             || SIP_ONLY_PROCESSES.contains(given_process.exec_name.as_str())
             || SIP_ONLY_PROCESSES.contains(given_process.invoked_as.as_str())
+            || std::env::var("MIRRORD_SIP_ONLY")
+                .map(|v| v.to_lowercase() == "true")
+                .unwrap_or(false)
     }
 }
 

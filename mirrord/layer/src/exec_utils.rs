@@ -1,7 +1,7 @@
 #![cfg(target_os = "macos")]
 
 use std::{
-    env,
+    env::{self, Args},
     ffi::{c_void, CString},
     marker::PhantomData,
     path::PathBuf,
@@ -171,6 +171,41 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
     Success(c_string_vec)
 }
 
+/// Verifies that mirrord environment is passed to child process
+fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
+    let mut c_string_vec = Argv::default();
+
+    let mut found_dyld = false;
+    for arg in envp_arr.iter() {
+        let arg_str: &str = arg.checked_into()?;
+        tracing::debug!("env arg: {arg_str}");
+
+        if arg_str.split('=').next() == Some("DYLD_INSERT_LIBRARIES") {
+            found_dyld = true;
+            tracing::debug!("found dyld");
+        }
+
+        c_string_vec.0.push(CString::new(arg_str)?)
+    }
+
+    if !found_dyld {
+        let library_path = crate::setup().mirrord_lib_path().to_string_lossy();
+        let proxy_addr = crate::setup().proxy_address().to_string();
+        c_string_vec.0.push(CString::new(format!(
+            "DYLD_INSERT_LIBRARIES={library_path}"
+        ))?);
+        // kinda funny..
+        c_string_vec.0.push(CString::new(format!(
+            "MIRRORD_LIBRARY_PATH={library_path}"
+        ))?);
+        c_string_vec
+            .0
+            .push(CString::new(format!("MIRRORD_CONNECT_TCP={proxy_addr}"))?);
+        c_string_vec.0.push(CString::new("MIRRORD_SIP_ONLY=true")?);
+    }
+    Success(c_string_vec)
+}
+
 /// Patch the new executable for SIP if necessary. Also: if mirrord's temporary directory appears
 /// in any of the arguments, remove it and leave only the original path of the file. If for example
 /// `argv[1]` is `"/tmp/mirrord-bin/bin/bash"`, create a new `argv` where `argv[1]` is
@@ -178,7 +213,8 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
 unsafe fn patch_sip_for_new_process(
     path: *const c_char,
     argv: *const *const c_char,
-) -> Detour<(CString, Argv)> {
+    envp: *const *const c_char,
+) -> Detour<(CString, Argv, Argv)> {
     let calling_exe = env::current_exe()
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();
@@ -196,14 +232,16 @@ unsafe fn patch_sip_for_new_process(
         .unwrap_or(CString::new(path_str.to_string())?);
 
     let argv_arr = Nul::new_unchecked(argv);
+    let envp_arr = Nul::new_unchecked(envp);
 
     let argv_vec = intercept_tmp_dir(argv_arr)?;
-    Success((path_c_string, argv_vec))
+    let envp_vec = intercept_environment(envp_arr)?;
+    Success((path_c_string, argv_vec, envp_vec))
 }
 
 /// Hook for `libc::execve`.
 ///
-/// We change 2 arguments and then call the original functions:
+/// We change 3 arguments and then call the original functions:
 /// 1. The executable path - we check it for SIP, create a patched binary and use the path to the
 ///    new path instead of the original path. If there is no SIP, we use a new string with the same
 ///    path.
@@ -211,7 +249,10 @@ unsafe fn patch_sip_for_new_process(
 ///    "/var/folders/1337/mirrord-bin/opt/homebrew/bin/npx" Switch it to "/opt/homebrew/bin/npx"
 ///    Also here we create a new array with pointers to new strings, even if there are no changes
 ///    needed (except for the case of an error).
-///
+/// 3. envp - We found out that Turbopack (Vercel) spawns a clean "Node" instance without env,
+///    basically stripping all of the important mirrord env. We restore the env here. https://github.com/metalbear-co/mirrord/issues/2500
+///    EDIT - We don't restore all env, just DYLD as it seems Turbo just strips the env at beginning
+///    and probably doesn't need more than just injecting for SIP.
 /// If there is an error in the detour, we don't exit or anything, we just call the original libc
 /// function with the original passed arguments.
 #[hook_guard_fn]
@@ -220,13 +261,14 @@ pub(crate) unsafe extern "C" fn execve_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    match patch_sip_for_new_process(path, argv) {
-        Success((new_path, new_argv)) => {
+    match patch_sip_for_new_process(path, argv, envp) {
+        Success((new_path, new_argv, new_envp)) => {
             let new_argv = new_argv.null_vec();
+            let new_envp = new_envp.null_vec();
             FN_EXECVE(
                 new_path.as_ptr(),
                 new_argv.as_ptr() as *const *const c_char,
-                envp,
+                new_envp.as_ptr() as *const *const c_char,
             )
         }
         _ => FN_EXECVE(path, argv, envp),
@@ -245,16 +287,18 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    match patch_sip_for_new_process(path, argv) {
-        Success((new_path, new_argv)) => {
+    match patch_sip_for_new_process(path, argv, envp) {
+        Success((new_path, new_argv, new_envp)) => {
             let new_argv = new_argv.null_vec();
+            let new_envp = new_envp.null_vec();
+
             FN_POSIX_SPAWN(
                 pid,
                 new_path.as_ptr(),
                 file_actions,
                 attrp,
                 new_argv.as_ptr() as *const *const c_char,
-                envp,
+                new_envp.as_ptr() as *const *const c_char,
             )
         }
         _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
