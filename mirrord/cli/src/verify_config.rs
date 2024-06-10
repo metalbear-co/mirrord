@@ -77,6 +77,7 @@ enum TargetType {
     Pod,
     Deployment,
     Job,
+    CronJob,
     Rollout,
 }
 
@@ -87,6 +88,7 @@ impl TargetType {
             Self::Pod,
             Self::Deployment,
             Self::Job,
+            Self::CronJob,
             Self::Rollout,
         ]
         .into_iter()
@@ -96,7 +98,7 @@ impl TargetType {
         match self {
             Self::Targetless | Self::Rollout => !config.copy_target.enabled,
             Self::Pod => !(config.copy_target.enabled && config.copy_target.scale_down),
-            Self::Job => config.copy_target.enabled,
+            Self::Job | Self::CronJob => config.copy_target.enabled,
             Self::Deployment => true,
         }
     }
