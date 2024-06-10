@@ -473,8 +473,17 @@ In order to have a more structured approach, here’s the flow you should follow
 # Rust Analyzer on MacOS
 
 The mirrord agent crate makes use of the `#[cfg(target_os = "linux")]` attribute to allow the whole repo to compile when you run `cargo build`.
-rust-analyzer supports building multiple targets and committed `.vscode/settings.json` and `.cargo/config.toml` should take care of it, but user needs to have
-the targets installed for that to work:
+rust-analyzer supports building multiple targets, to enable it edit your local `~/.cargo/config.toml` to have this block:
+```toml
+[build]
+target = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
+```
+Besides that, you need the targets installed for that to work:
 ```sh
 rustup target add x86_64-unknown-linux-gnu
 rustup target add aarch64-apple-darwin
