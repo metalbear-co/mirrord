@@ -472,10 +472,21 @@ In order to have a more structured approach, here’s the flow you should follow
 
 # Rust Analyzer on MacOS
 
-The mirrord agent crate makes use of the `#[cfg(target_os = "linux")]` attribute to allow the whole repo to compile when you run `cargo build`. Unfortunately, this means rust-analyzer will not run on the code in that crate and you won't have full codesense and autocomplete while using MacOS.
-
-To mitigate this, you can switch the compilation target for rust-analyzer to Linux by adding the following line to VSCode's `settings.json` file:
-
-```json
-"rust-analyzer.cargo.target": "x86_64-unknown-linux-gnu"
+The mirrord agent crate makes use of the `#[cfg(target_os = "linux")]` attribute to allow the whole repo to compile when you run `cargo build`.
+rust-analyzer supports building multiple targets, to enable it edit your local `~/.cargo/config.toml` to have this block:
+```toml
+[build]
+target = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
+```
+Besides that, you need the targets installed for that to work:
+```sh
+rustup target add x86_64-unknown-linux-gnu
+rustup target add aarch64-apple-darwin
+rustup target add x86_64-apple-darwin
+rustup target add aarch64-unknown-linux-gnu
 ```
