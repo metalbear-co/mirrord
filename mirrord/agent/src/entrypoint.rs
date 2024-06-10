@@ -144,9 +144,7 @@ impl State {
 
         let result = ClientConnection::new(stream, client_id, self.tls_connector.clone())
             .map_err(AgentError::from)
-            .and_then(|connection| {
-                ClientConnectionHandler::new(client_id, connection, tasks, protocol_version, self)
-            })
+            .and_then(|connection| ClientConnectionHandler::new(client_id, connection, tasks, self))
             .and_then(|client| client.start(cancellation_token))
             .await;
 
@@ -454,7 +452,7 @@ impl ClientConnectionHandler {
                 .await?;
             }
             ClientMessage::SwitchProtocolVersion(client_version) => {
-                let our_version = mirrord_protocol::VERSION.get().clone();
+                let our_version = mirrord_protocol::VERSION.clone();
                 let settled_version = client_version.min(&our_version);
                 if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
                     tcp_stealer_api
@@ -598,7 +596,6 @@ async fn start_agent(args: Args) -> Result<()> {
                 stream,
                 bg_tasks.clone(),
                 cancellation_token.clone(),
-                args.base_protocol_version.clone(),
             ));
         }
 
