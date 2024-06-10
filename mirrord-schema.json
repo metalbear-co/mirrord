@@ -599,7 +599,7 @@
       "type": "object",
       "properties": {
         "readlink": {
-          "title": "[experimental] readlink {#fexperimental-readlink}",
+          "title": "_experimental_ readlink {#fexperimental-readlink}",
           "description": "Enables the `readlink` hook.",
           "type": [
             "boolean",
@@ -607,7 +607,7 @@
           ]
         },
         "tcp_ping4_mock": {
-          "title": "[experimental] tcp_ping4_mock {#fexperimental-tcp_ping4_mock}",
+          "title": "_experimental_ tcp_ping4_mock {#fexperimental-tcp_ping4_mock}",
           "description": "<https://github.com/metalbear-co/mirrord/issues/2421#issuecomment-2093200904>",
           "type": [
             "boolean",
