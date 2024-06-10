@@ -512,6 +512,24 @@
         }
       ]
     },
+    "CronJobTarget": {
+      "type": "object",
+      "required": [
+        "cron_job"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cron_job": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "DeploymentTarget": {
       "description": "<!--${internal}--> Mirror the deployment specified by [`DeploymentTarget::deployment`].",
       "type": "object",
@@ -1212,7 +1230,7 @@
       "additionalProperties": false
     },
     "Target": {
-      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`. - `job/{sample-job}`;",
+      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`. - `job/{sample-job}`; - `cronjob/{sample-job}`;",
       "anyOf": [
         {
           "description": "<!--${internal}--> Mirror a deployment.",
@@ -1243,6 +1261,14 @@
           "allOf": [
             {
               "$ref": "#/definitions/JobTarget"
+            }
+          ]
+        },
+        {
+          "description": "<!--${internal}--> Mirror a CronJob.\n\nOnly supported when `copy_target` is enabled.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/CronJobTarget"
             }
           ]
         },

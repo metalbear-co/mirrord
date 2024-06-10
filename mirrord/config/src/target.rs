@@ -186,6 +186,7 @@ mirrord-layer failed to parse the provided target!
     >> deploy/<deployment-name>[/container/container-name]
     >> pod/<pod-name>[/container/container-name]
     >> job/<job-name>[/container/container-name]
+    >> cronjob/<cronjob-name>[/container/container-name]
 
 - Note:
     >> specifying container name is optional, defaults to the first container in the provided pod/deployment target.
@@ -209,6 +210,7 @@ mirrord-layer failed to parse the provided target!
 /// - `container/{sample-container}`;
 /// - `containername/{sample-container}`.
 /// - `job/{sample-job}`;
+/// - `cronjob/{sample-job}`;
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum Target {
