@@ -215,8 +215,10 @@ fn print_config<P>(
             .get_filtered_ports()
             .and_then(|filtered_ports| match filtered_ports.len() {
                 0 => None,
-                #[allow(clippy::indexing_slicing)]
-                1 => Some(format!("port {} (filtered)", filtered_ports[0])),
+                1 => Some(format!(
+                    "port {} (filtered)",
+                    filtered_ports.get(0).unwrap()
+                )),
                 _ => Some(format!("ports {filtered_ports:?} (filtered)")),
             });
         let unfiltered_ports_str =
