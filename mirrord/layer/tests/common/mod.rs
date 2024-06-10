@@ -391,7 +391,7 @@ impl TestIntProxy {
             .unwrap();
     }
 
-    /// Like the other expect_file_open_... but where we don't compare to predefined open options.
+    /// Makes a [`FileRequest::ReadLink`], and answers it.
     pub async fn expect_read_link(&mut self, file_name: &str) {
         // Expecting `readlink` call with path.
         assert_matches!(
@@ -406,7 +406,8 @@ impl TestIntProxy {
             .send(DaemonMessage::File(
                 mirrord_protocol::FileResponse::ReadLink(Ok(
                     mirrord_protocol::file::ReadLinkFileResponse {
-                        path: PathBuf::from_str("rajado.txt").expect("Valid path `rajado.txt`!"),
+                        path: PathBuf::from_str("/gatos/rajado.txt")
+                            .expect("Valid path `rajado.txt`!"),
                     },
                 )),
             ))
