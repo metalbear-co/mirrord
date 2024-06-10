@@ -8,7 +8,6 @@ const hostList = [
   "www.google.com",
   "www.bing.com",
   "www.yahoo.com",
-  "www.baidu.com",
   "www.twitter.com",
   "www.microsoft.com",
   "www.youtube.com",
