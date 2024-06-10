@@ -1,4 +1,5 @@
 use std::{
+    borrow::Borrow,
     collections::HashMap,
     mem,
     net::{Ipv4Addr, SocketAddrV4},
@@ -7,7 +8,6 @@ use std::{
         atomic::{AtomicU32, Ordering},
         Arc,
     },
-    borrow::Borrow
 };
 
 use client_connection::AgentTlsConnector;
