@@ -217,7 +217,7 @@ fn print_config<P>(
                 0 => None,
                 1 => Some(format!(
                     "port {} (filtered)",
-                    filtered_ports.get(0).unwrap()
+                    filtered_ports.first().unwrap()
                 )),
                 _ => Some(format!("ports {filtered_ports:?} (filtered)")),
             });
