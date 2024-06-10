@@ -93,7 +93,6 @@ fn main() -> Result<(), DocsError> {
 
     let files = parse_files(input.unwrap_or_else(|| PathBuf::from("./src")))?;
     let type_docs = parse_docs_into_set(files)?;
-    println!("parsed len: {len}", len = type_docs.len());
     let resolved = resolve_references(type_docs.clone());
 
     if let Some(produced) = resolved {

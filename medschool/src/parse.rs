@@ -12,8 +12,7 @@ use crate::{
 /// Look into the [`syn::Attribute`]s of whatever item we're handling, and extract its doc strings.
 #[tracing::instrument(level = "trace", ret)]
 pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Option<Vec<String>> {
-    let mut docs: Vec<String> = Vec::with_capacity(attributes.len());
-
+    let mut docs: Vec<String> = Vec::with_capacity(attributes.len() + 1);
     let docs_iter = attributes
         .into_iter()
         // drill into `Meta::NameValue`
@@ -214,6 +213,7 @@ fn dfs_fields<'a>(
                 // check if we've already resolved the type
                 let mut max_recursion_level = 0;
                 let mut new_type_docs = type_.docs.clone();
+                new_type_docs.reserve(type_.fields.len());
                 type_.fields.iter().for_each(|field| {
                     let mut current_recursion_level = *recursion_level + 1;
                     let resolved_type_docs =
