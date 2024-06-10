@@ -209,7 +209,6 @@ impl ClientConnectionHandler {
         id: ClientId,
         mut connection: ClientConnection,
         bg_tasks: BackgroundTasks,
-        protocol_version: semver::Version,
         state: State,
     ) -> Result<Self> {
         let pid = state.container_pid();
@@ -218,8 +217,7 @@ impl ClientConnectionHandler {
 
         let tcp_sniffer_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection).await;
         let tcp_stealer_api =
-            Self::create_stealer_api(id, bg_tasks.stealer, protocol_version, &mut connection)
-                .await?;
+            Self::create_stealer_api(id, bg_tasks.stealer, &mut connection).await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
@@ -271,7 +269,6 @@ impl ClientConnectionHandler {
     async fn create_stealer_api(
         id: ClientId,
         task: BackgroundTask<StealerCommand>,
-        protocol_version: semver::Version,
         connection: &mut ClientConnection,
     ) -> Result<Option<TcpStealerApi>> {
         if let BackgroundTask::Running(stealer_status, stealer_sender) = task {
@@ -280,7 +277,7 @@ impl ClientConnectionHandler {
                 stealer_sender,
                 stealer_status,
                 CHANNEL_SIZE,
-                protocol_version,
+                mirrord_protocol::VERSION.clone(),
             )
             .await
             {
