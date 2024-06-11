@@ -1,7 +1,6 @@
 use std::{
     collections::HashSet,
-    net::SocketAddr,
-    path::{Path, PathBuf},
+    net::SocketAddr
 };
 
 use mirrord_config::{
@@ -37,7 +36,8 @@ pub struct LayerSetup {
     proxy_address: SocketAddr,
     incoming_mode: IncomingMode,
     local_hostname: bool,
-    mirrord_lib_path: PathBuf,
+    // to be used on macOS to restore env on execv
+    env_backup: Vec<(String, String)>,
 }
 
 impl LayerSetup {
@@ -67,9 +67,9 @@ impl LayerSetup {
             .expect("failed to parse internal proxy address");
 
         let incoming_mode = IncomingMode::new(&config.feature.network.incoming);
-        let mirrord_lib_path = PathBuf::from(
-            std::env::var("MIRRORD_LIBRARY_PATH").expect("MIRRORD_LIBRARY_PATH not set!"),
-        );
+        let env_backup = std::env::vars()
+            .filter(|(k, _)| k.starts_with("MIRRORD_") || k == "DYLD_INSERT_LIBRARIES")
+            .collect();
 
         Self {
             config,
@@ -80,7 +80,7 @@ impl LayerSetup {
             proxy_address,
             incoming_mode,
             local_hostname,
-            mirrord_lib_path,
+            env_backup,
         }
     }
 
@@ -153,8 +153,8 @@ impl LayerSetup {
         self.local_hostname
     }
 
-    pub fn mirrord_lib_path(&self) -> &Path {
-        &self.mirrord_lib_path
+    pub fn env_backup(&self) -> &Vec<(String, String)> {
+        &self.env_backup
     }
 }
 

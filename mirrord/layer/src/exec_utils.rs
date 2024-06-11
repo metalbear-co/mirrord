@@ -1,7 +1,7 @@
 #![cfg(target_os = "macos")]
 
 use std::{
-    env::{self, Args},
+    env::{self},
     ffi::{c_void, CString},
     marker::PhantomData,
     path::PathBuf,
@@ -11,9 +11,7 @@ use std::{
 
 use libc::{c_char, c_int, pid_t};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-use mirrord_sip::{
-    sip_patch, SipError, MIRRORD_TEMP_BIN_DIR_CANONIC_STRING, MIRRORD_TEMP_BIN_DIR_STRING,
-};
+use mirrord_sip::{sip_patch, SipError, MIRRORD_PATCH_DIR};
 use null_terminated::Nul;
 use tracing::{trace, warn};
 
@@ -150,9 +148,8 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
         trace!("exec arg: {arg_str}");
 
         let stripped = arg_str
-            .strip_prefix(MIRRORD_TEMP_BIN_DIR_STRING.as_str())
-            // If /var/folders... not a prefix, check /private/var/folers...
-            .or(arg_str.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()))
+            .find(MIRRORD_PATCH_DIR)
+            .map(|index| &arg_str[(MIRRORD_PATCH_DIR.len() + index)..])
             .inspect(|original_path| {
                 trace!(
                     "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {}.",
@@ -189,19 +186,9 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
     }
 
     if !found_dyld {
-        let library_path = crate::setup().mirrord_lib_path().to_string_lossy();
-        let proxy_addr = crate::setup().proxy_address().to_string();
-        c_string_vec.0.push(CString::new(format!(
-            "DYLD_INSERT_LIBRARIES={library_path}"
-        ))?);
-        // kinda funny..
-        c_string_vec.0.push(CString::new(format!(
-            "MIRRORD_LIBRARY_PATH={library_path}"
-        ))?);
-        c_string_vec
-            .0
-            .push(CString::new(format!("MIRRORD_CONNECT_TCP={proxy_addr}"))?);
-        c_string_vec.0.push(CString::new("MIRRORD_SIP_ONLY=true")?);
+        for (key, value) in crate::setup().env_backup() {
+            c_string_vec.0.push(CString::new(format!("{key}={value}"))?);
+        }
     }
     Success(c_string_vec)
 }

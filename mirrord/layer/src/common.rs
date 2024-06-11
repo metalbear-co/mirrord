@@ -4,8 +4,6 @@ use std::{ffi::CStr, fmt::Debug, path::PathBuf};
 use libc::c_char;
 use mirrord_intproxy_protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
 use mirrord_protocol::file::OpenOptionsInternal;
-#[cfg(target_os = "macos")]
-use mirrord_sip::{MIRRORD_TEMP_BIN_DIR_CANONIC_STRING, MIRRORD_TEMP_BIN_DIR_STRING};
 use tracing::warn;
 
 use crate::{
@@ -84,9 +82,11 @@ impl CheckedInto<String> for *const c_char {
 
 #[cfg(target_os = "macos")]
 pub fn strip_mirrord_path(path_str: &str) -> Option<&str> {
+    use mirrord_sip::MIRRORD_PATCH_DIR;
+
     path_str
-        .strip_prefix(MIRRORD_TEMP_BIN_DIR_STRING.as_str())
-        .or_else(|| path_str.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_STRING.as_str()))
+        .find(MIRRORD_PATCH_DIR)
+        .map(|index| &path_str[(MIRRORD_PATCH_DIR.len() + index)..])
 }
 
 impl CheckedInto<PathBuf> for *const c_char {
