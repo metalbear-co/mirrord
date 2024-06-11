@@ -240,9 +240,9 @@ unsafe fn patch_sip_for_new_process(
 ///    Also here we create a new array with pointers to new strings, even if there are no changes
 ///    needed (except for the case of an error).
 /// 3. envp - We found out that Turbopack (Vercel) spawns a clean "Node" instance without env,
-///    basically stripping all of the important mirrord env. We restore the env here. https://github.com/metalbear-co/mirrord/issues/2500
-///    EDIT - We don't restore all env, just DYLD as it seems Turbo just strips the env at beginning
-///    and probably doesn't need more than just injecting for SIP.
+///    basically stripping all of the important mirrord env.
+///    https://github.com/metalbear-co/mirrord/issues/2500
+///    We restore the `DYLD_INSERT_LIBRARIES` environment variable and all env vars starting with `MIRRORD_` if the dyld var can't be found in `envp`.
 /// If there is an error in the detour, we don't exit or anything, we just call the original libc
 /// function with the original passed arguments.
 #[hook_guard_fn]
