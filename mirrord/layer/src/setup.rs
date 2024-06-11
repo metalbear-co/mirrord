@@ -34,6 +34,7 @@ pub struct LayerSetup {
     incoming_mode: IncomingMode,
     local_hostname: bool,
     // to be used on macOS to restore env on execv
+    #[cfg(target_os = "macos")]
     env_backup: Vec<(String, String)>,
 }
 
@@ -64,6 +65,7 @@ impl LayerSetup {
             .expect("failed to parse internal proxy address");
 
         let incoming_mode = IncomingMode::new(&config.feature.network.incoming);
+        #[cfg(target_os = "macos")]
         let env_backup = std::env::vars()
             .filter(|(k, _)| k.starts_with("MIRRORD_") || k == "DYLD_INSERT_LIBRARIES")
             .collect();
@@ -77,6 +79,7 @@ impl LayerSetup {
             proxy_address,
             incoming_mode,
             local_hostname,
+            #[cfg(target_os = "macos")]
             env_backup,
         }
     }
@@ -150,6 +153,7 @@ impl LayerSetup {
         self.local_hostname
     }
 
+    #[cfg(target_os = "macos")]
     pub fn env_backup(&self) -> &Vec<(String, String)> {
         &self.env_backup
     }
