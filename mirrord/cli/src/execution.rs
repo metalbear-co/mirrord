@@ -165,9 +165,6 @@ impl MirrordExecution {
             env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path.clone())
         };
 
-        // for use in execvp (restoring library path)
-        env_vars.insert("MIRRORD_LIBRARY_PATH".to_string(), lib_path);
-
         // stderr is inherited so we can see logs/errors.
         let mut proxy_command =
             Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);

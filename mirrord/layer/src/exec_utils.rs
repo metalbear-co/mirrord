@@ -177,12 +177,13 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
 
     let mut found_dyld = false;
     for arg in envp_arr.iter() {
-        let arg_str: &str = arg.checked_into()?;
-        tracing::debug!("env arg: {arg_str}");
+        let Detour::Success(arg_str): Detour<&str> = arg.checked_into() else {
+            tracing::debug!("Failed to convert envp argument to string. Skipping.");
+            continue;
+        };
 
         if arg_str.split('=').next() == Some("DYLD_INSERT_LIBRARIES") {
             found_dyld = true;
-            tracing::debug!("found dyld");
         }
 
         c_string_vec.0.push(CString::new(arg_str)?)
