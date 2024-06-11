@@ -98,9 +98,6 @@ impl ExecuteArgs {
             return false;
         }
 
-        if sip::is_sip_env_set() {
-            return false;
-        }
         // ignore intellij debugger https://github.com/metalbear-co/mirrord/issues/2408
         // don't put it in build tools since we don't want to SIP load on macOS. (leads to above
         // issue)
@@ -174,17 +171,10 @@ mod sip {
     static SIP_ONLY_PROCESSES: LazyLock<HashSet<&str>> =
         LazyLock::new(|| HashSet::from(["sh", "bash", "env", "go", "dlv"]));
 
-    pub fn is_sip_env_set() -> bool {
-        std::env::var("MIRRORD_SIP_ONLY")
-            .map(|v| v.to_lowercase() == "true")
-            .unwrap_or(false)
-    }
-
     pub fn is_sip_only(given_process: &ExecuteArgs) -> bool {
         given_process.is_build_tool()
             || SIP_ONLY_PROCESSES.contains(given_process.exec_name.as_str())
             || SIP_ONLY_PROCESSES.contains(given_process.invoked_as.as_str())
-            || is_sip_env_set()
     }
 }
 

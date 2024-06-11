@@ -1,7 +1,4 @@
-use std::{
-    collections::HashSet,
-    net::SocketAddr
-};
+use std::{collections::HashSet, net::SocketAddr};
 
 use mirrord_config::{
     experimental::ExperimentalConfig,
