@@ -147,6 +147,9 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
         let arg_str: &str = arg.checked_into()?;
         trace!("exec arg: {arg_str}");
 
+        // SAFETY: We only slice after we find the string in the path
+        // so it must be valid
+        #[allow(clippy::indexing_slicing)]
         let stripped = arg_str
             .find(MIRRORD_PATCH_DIR)
             .map(|index| &arg_str[(MIRRORD_PATCH_DIR.len() + index)..])

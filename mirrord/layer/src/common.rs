@@ -84,6 +84,9 @@ impl CheckedInto<String> for *const c_char {
 pub fn strip_mirrord_path(path_str: &str) -> Option<&str> {
     use mirrord_sip::MIRRORD_PATCH_DIR;
 
+    // SAFETY: We only slice after we find the string in the path
+    // so it must be valid
+    #[allow(clippy::indexing_slicing)]
     path_str
         .find(MIRRORD_PATCH_DIR)
         .map(|index| &path_str[(MIRRORD_PATCH_DIR.len() + index)..])
