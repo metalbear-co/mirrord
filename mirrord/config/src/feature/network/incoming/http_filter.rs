@@ -22,7 +22,7 @@ use crate::{
 /// For example, to filter based on header:
 /// ```json
 /// {
-///   "header_filter": "host: api\..+",
+///   "header_filter": "host: api\\..+"
 /// }
 /// ```
 /// Setting that filter will make mirrord only steal requests with the `host` header set to hosts
@@ -31,7 +31,7 @@ use crate::{
 /// For example, to filter based on path:
 /// ```json
 /// {
-///   "path_filter": "^/api/",
+///   "path_filter": "^/api/"
 /// }
 /// ```
 /// Setting this filter will make mirrord only steal requests to URIs starting with "/api/".
@@ -41,7 +41,7 @@ use crate::{
 /// For example, for avoiding stealing any probe sent by kubernetes, you can set this filter:
 /// ```json
 /// {
-///   "header_filter": "^User-Agent: (?!kube-probe)",
+///   "header_filter": "^User-Agent: (?!kube-probe)"
 /// }
 /// ```
 /// Setting this filter will make mirrord only steal requests that **do** have a user agent that
@@ -50,7 +50,7 @@ use crate::{
 /// Similarly, you can exclude certain paths using a negative look-ahead:
 /// ```json
 /// {
-///   "path_filter": "^(?!/health/)",
+///   "path_filter": "^(?!/health/)"
 /// }
 /// ```
 /// Setting this filter will make mirrord only steal requests to URIs that do not start with

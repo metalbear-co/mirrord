@@ -46,9 +46,9 @@ pub mod mode;
 ///   "feature": {
 ///     "fs": {
 ///       "mode": "write",
-///       "read_write": ".+\.json" ,
-///       "read_only": [ ".+\.yaml", ".+important-file\.txt" ],
-///       "local": [ ".+\.js", ".+\.mjs" ]
+///       "read_write": ".+\\.json" ,
+///       "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ],
+///       "local": [ ".+\\.js", ".+\\.mjs" ]
 ///     }
 ///   }
 /// }
