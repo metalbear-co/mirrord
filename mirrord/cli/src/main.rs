@@ -129,6 +129,10 @@ where
             }
         }
     }
+
+    // Kills the intproxy, freeing the agent.
+    execution_info.stop().await?;
+
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
 }
 

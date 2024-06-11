@@ -127,6 +127,8 @@ where
 }
 
 impl MirrordExecution {
+    /// Starts the internal proxy (`intproxy`), and mirrord-layer, even if a bogus binary
+    /// was passed by the user.
     #[tracing::instrument(level = "trace", skip_all)]
     pub(crate) async fn start<P>(
         config: &LayerConfig,
@@ -360,6 +362,16 @@ impl MirrordExecution {
             .wait()
             .await
             .map_err(CliError::InternalProxyWaitError)?;
+        Ok(())
+    }
+
+    /// Kills the child process, stopping the internal proxy, and completing the agent.
+    ///
+    /// Used when mirrord execution fails inside `execvp`.
+    pub async fn stop(self) -> Result<()> {
+        let Self { mut child, .. } = self;
+
+        child.kill().await.unwrap();
         Ok(())
     }
 }
