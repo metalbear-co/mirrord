@@ -368,10 +368,12 @@ impl MirrordExecution {
     /// Kills the child process, stopping the internal proxy, and completing the agent.
     ///
     /// Used when mirrord execution fails inside `execvp`.
-    pub async fn stop(self) -> Result<()> {
+    pub async fn stop(self) {
         let Self { mut child, .. } = self;
 
-        child.kill().await.unwrap();
-        Ok(())
+        child
+            .kill()
+            .await
+            .expect("Could not kill intproxy child process!");
     }
 }
