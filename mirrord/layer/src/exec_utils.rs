@@ -179,6 +179,7 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
     for arg in envp_arr.iter() {
         let Detour::Success(arg_str): Detour<&str> = arg.checked_into() else {
             tracing::debug!("Failed to convert envp argument to string. Skipping.");
+            c_string_vec.0.push(CStr::from_ptr(arg).to_owned());
             continue;
         };
 
