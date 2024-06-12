@@ -23,7 +23,7 @@ pub mod outgoing;
 ///       "incoming": {
 ///         "mode": "steal",
 ///         "http_filter": {
-///           "header_filter": "host: api\..+"
+///           "header_filter": "host: api\\..+"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
