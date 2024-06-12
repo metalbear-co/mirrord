@@ -5,7 +5,7 @@ use std::{
     sync::LazyLock,
 };
 
-use mirrord_config::{util::VecOrSingle, LayerConfig};
+use mirrord_config::LayerConfig;
 use mirrord_intproxy_protocol::ProcessInfo;
 use tracing::trace;
 
@@ -120,11 +120,7 @@ impl ExecuteArgs {
 
     /// Determine the [`LoadType`] for this process.
     pub fn load_type(&self, config: &LayerConfig) -> LoadType {
-        let skip_processes = config
-            .skip_processes
-            .as_ref()
-            .map(VecOrSingle::as_slice)
-            .unwrap_or(&[]);
+        let skip_processes = config.skip_processes.as_deref().unwrap_or(&[]);
 
         if self.should_load(skip_processes, config.skip_build_tools) {
             trace!("Loading into process: {self}.");

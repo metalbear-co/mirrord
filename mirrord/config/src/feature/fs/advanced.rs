@@ -162,30 +162,27 @@ impl CollectAnalytics for &FsConfig {
         analytics.add("mode", self.mode);
         analytics.add(
             "local_paths",
-            self.local
-                .as_ref()
-                .map(VecOrSingle::len)
-                .unwrap_or_default(),
+            self.local.as_deref().map(<[_]>::len).unwrap_or_default(),
         );
         analytics.add(
             "read_write_paths",
             self.read_write
-                .as_ref()
-                .map(VecOrSingle::len)
+                .as_deref()
+                .map(<[_]>::len)
                 .unwrap_or_default(),
         );
         analytics.add(
             "read_only_paths",
             self.read_only
-                .as_ref()
-                .map(VecOrSingle::len)
+                .as_deref()
+                .map(<[_]>::len)
                 .unwrap_or_default(),
         );
         analytics.add(
             "not_found_paths",
             self.not_found
-                .as_ref()
-                .map(VecOrSingle::len)
+                .as_deref()
+                .map(<[_]>::len)
                 .unwrap_or_default(),
         );
     }

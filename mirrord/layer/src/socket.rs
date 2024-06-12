@@ -232,12 +232,12 @@ impl OutgoingSelector {
                 panic!("outgoing traffic filter cannot be empty");
             }
             Some(OutgoingFilterConfig::Remote(list)) => Self::Remote(Self::build_selector(
-                list.as_slice().iter().map(String::as_str),
+                list.iter().map(String::as_str),
                 config.tcp,
                 config.udp,
             )),
             Some(OutgoingFilterConfig::Local(list)) => Self::Local(Self::build_selector(
-                list.as_slice().iter().map(String::as_str),
+                list.iter().map(String::as_str),
                 config.tcp,
                 config.udp,
             )),

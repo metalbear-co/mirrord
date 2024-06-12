@@ -75,9 +75,6 @@ impl Display for OperatorOperation {
 
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
-    #[error("invalid target: {reason}")]
-    InvalidTarget { reason: String },
-
     #[error("failed to build a websocket connect request: {0}")]
     ConnectRequestBuildError(HttpError),
 
@@ -96,16 +93,13 @@ pub enum OperatorApiError {
         operator_version: String,
     },
 
-    #[error(
-        "Tried executing {operation}, but operator returned with `{}` and code `{}``!", 
-        status.reason, status.code
-    )]
+    #[error("{operation} failed with code {}: {}", status.code, status.reason)]
     StatusFailure {
-        operation: String,
+        operation: OperatorOperation,
         status: Box<kube::core::Status>,
     },
 
-    #[error("Operator has expired license, falling back to OSS usage.")]
+    #[error("mirrord operator license expired")]
     NoLicense,
 }
 
@@ -290,7 +284,7 @@ impl OperatorApi {
                 info!(good_validity_message);
             }
         } else {
-            let no_license_message = "No valid license found for mirrord for Teams, falling back to OSS usage. Visit https://app.metalbear.co to purchase or renew your license.";
+            let no_license_message = "No valid license found for mirrord for Teams. Visit https://app.metalbear.co to purchase or renew your license.";
 
             progress.warning(no_license_message);
             warn!(no_license_message);

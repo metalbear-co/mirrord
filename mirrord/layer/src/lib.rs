@@ -384,11 +384,7 @@ fn layer_start(mut config: LayerConfig) {
     }
 
     if let Some(unset) = setup().env_config().unset.as_ref() {
-        let unset = unset
-            .as_slice()
-            .iter()
-            .map(|s| s.to_lowercase())
-            .collect::<Vec<_>>();
+        let unset = unset.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>();
         std::env::vars().for_each(|(key, _)| {
             if unset.contains(&key.to_lowercase()) {
                 std::env::remove_var(&key);

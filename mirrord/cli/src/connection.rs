@@ -1,10 +1,20 @@
 use std::{collections::HashSet, time::Duration};
 
+use kube::{api::GroupVersionKind, discovery, Resource};
 use mirrord_analytics::Reporter;
-use mirrord_config::{feature::network::outgoing::OutgoingFilterConfig, LayerConfig};
+use mirrord_config::LayerConfig;
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
-use mirrord_kube::api::{kubernetes::KubernetesAPI, wrap_raw_connection};
-use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorOperation};
+use mirrord_kube::{
+    api::{
+        kubernetes::{create_kube_api, KubernetesAPI},
+        wrap_raw_connection,
+    },
+    error::KubeApiError,
+};
+use mirrord_operator::{
+    client::{OperatorApi, OperatorApiError, OperatorOperation},
+    crd::MirrordOperatorCrd,
+};
 use mirrord_progress::{
     messages::MULTIPOD_WARNING, IdeAction, IdeMessage, NotificationLevel, Progress,
 };
@@ -18,29 +28,31 @@ pub(crate) struct AgentConnection {
     pub receiver: mpsc::Receiver<DaemonMessage>,
 }
 
-trait OperatorApiErrorExt {
-    /// Whether this error should abort the execution, even if the user did not specify whether to
-    /// use the operator or not.
-    fn should_abort_cli(&self) -> bool;
-}
+#[tracing::instrument(level = "trace", skip(config), ret, err)]
+async fn check_if_operator_resource_exists(config: &LayerConfig) -> Result<bool> {
+    let client = create_kube_api(
+        config.accept_invalid_certificates,
+        config.kubeconfig.clone(),
+        config.kube_context.clone(),
+    )
+    .await
+    .map_err(CliError::OperatorInstallationCheckError)?;
 
-impl OperatorApiErrorExt for OperatorApiError {
-    fn should_abort_cli(&self) -> bool {
-        match self {
-            // Various kube errors can happen due to RBAC if the operator is not installed.
-            Self::KubeError {
-                operation: OperatorOperation::FindingOperator,
-                ..
-            } => false,
-            // Fallback to OSS if license is expired
-            Self::NoLicense => false,
-            // These should either never happen or can happen only if the operator is installed.
-            Self::ConnectRequestBuildError(..)
-            | Self::CreateApiError(..)
-            | Self::InvalidTarget { .. }
-            | Self::UnsupportedFeature { .. }
-            | Self::StatusFailure { .. }
-            | Self::KubeError { .. } => true,
+    let gvk = GroupVersionKind {
+        group: MirrordOperatorCrd::group(&()).into_owned(),
+        version: MirrordOperatorCrd::version(&()).into_owned(),
+        kind: MirrordOperatorCrd::kind(&()).into_owned(),
+    };
+
+    match discovery::oneshot::pinned_kind(&client, &gvk).await {
+        Ok(..) => Ok(true),
+        Err(kube::Error::Api(response)) if response.code == 404 => Ok(false),
+        Err(error) => {
+            tracing::trace!(
+                ?error,
+                "Failed to check if operator is installed in the cluster"
+            );
+            Err(CliError::OperatorInstallationCheckError(error.into()))
         }
     }
 }
@@ -64,18 +76,6 @@ pub(crate) async fn create_and_connect<P, R: Reporter>(
 where
     P: Progress + Send + Sync,
 {
-    if let Some(outgoing_filter) = &config.feature.network.outgoing.filter {
-        if matches!(outgoing_filter, OutgoingFilterConfig::Remote(_)) && !config.feature.network.dns
-        {
-            progress.warning(
-                    "The mirrord outgoing traffic filter includes host names to be connected remotely,\
-                     but the remote DNS feature is disabled, so the addresses of these hosts will be\
-                     resolved locally!\n\
-                     > Consider enabling the remote DNS resolution feature.",
-            );
-        }
-    }
-
     if config.operator != Some(false) {
         let mut subtask = progress.subtask("checking operator");
 
@@ -91,16 +91,30 @@ where
                     },
                 ));
             }
-            Err(e) if config.operator == Some(true) || e.should_abort_cli() => return Err(e.into()),
-            Err(e) => {
-                tracing::trace!("{}", CliError::from(e));
-                subtask.success(Some("operator not found"));
+
+            Err(OperatorApiError::NoLicense) if config.operator.is_none() => {
+                tracing::trace!("operator license expired");
+                subtask.success(Some("operator license expired"));
             }
+
+            Err(
+                e @ OperatorApiError::KubeError {
+                    operation: OperatorOperation::FindingOperator,
+                    ..
+                },
+            ) if config.operator.is_none() => {
+                // We need to check if the operator is really installed or not.
+                if check_if_operator_resource_exists(config).await? {
+                    return Err(e.into());
+                }
+            }
+
+            Err(e) => return Err(e.into()),
         }
     }
 
     if config.feature.copy_target.enabled {
-        return Err(CliError::FeatureRequiresOperatorError("copy target".into()));
+        return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
     }
 
     if matches!(
@@ -136,18 +150,18 @@ where
 
     let k8s_api = KubernetesAPI::create(config)
         .await
-        .map_err(CliError::KubernetesApiFailed)?;
+        .map_err(CliError::CreateAgentFailed)?;
 
-    let _ = k8s_api.detect_openshift(progress).await.map_err(|err| {
-        tracing::debug!("couldn't determine OpenShift: {err}");
-    });
+    if let Err(error) = k8s_api.detect_openshift(progress).await {
+        tracing::debug!(?error, "Failed to detect OpenShift");
+    };
 
     let agent_connect_info = tokio::time::timeout(
         Duration::from_secs(config.agent.startup_timeout),
         k8s_api.create_agent(progress, &config.target, Some(config), Default::default()),
     )
     .await
-    .map_err(|_| CliError::AgentReadyTimeout)?
+    .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
     .map_err(CliError::CreateAgentFailed)?;
 
     let (sender, receiver) = wrap_raw_connection(

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{path::Path, time::Duration};
 
 use mirrord_analytics::NullReporter;
 use mirrord_config::{
@@ -10,7 +10,8 @@ use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::{sync::mpsc, time::Instant};
 
 use crate::{
-    connection::create_and_connect, util::remove_proxy_env, DiagnoseArgs, DiagnoseCommand, Result,
+    connection::create_and_connect, util::remove_proxy_env, CliError, DiagnoseArgs,
+    DiagnoseCommand, Result,
 };
 
 /// Sends a ping the connection and expects a pong.
@@ -18,23 +19,34 @@ async fn ping(
     sender: &mpsc::Sender<ClientMessage>,
     receiver: &mut mpsc::Receiver<DaemonMessage>,
 ) -> Result<()> {
-    sender
-        .send(ClientMessage::Ping)
-        .await
-        .map_err(|_| crate::CliError::CantSendPing)?;
+    sender.send(ClientMessage::Ping).await.map_err(|_| {
+        CliError::PingPongFailed(
+            "failed to send ping message - agent unexpectedly closed connection".to_string(),
+        )
+    })?;
 
     loop {
-        match receiver.recv().await {
-            Some(DaemonMessage::Pong) => break Ok(()),
-            Some(DaemonMessage::LogMessage(..)) => {}
-            _ => break Err(crate::CliError::InvalidPingResponse),
-        }
+        let result = match receiver.recv().await {
+            Some(DaemonMessage::Pong) => Ok(()),
+            Some(DaemonMessage::LogMessage(..)) => continue,
+            Some(DaemonMessage::Close(message)) => Err(CliError::PingPongFailed(format!(
+                "agent closed connection with message: {message}"
+            ))),
+            Some(message) => Err(CliError::PingPongFailed(format!(
+                "agent sent an unexpected message: {message:?}"
+            ))),
+            None => Err(CliError::PingPongFailed(
+                "agent unexpectedly closed connection".to_string(),
+            )),
+        };
+
+        break result;
     }
 }
 
 /// Create a targetless session and run pings to diagnose network latency.
 #[tracing::instrument(level = "trace", ret)]
-async fn diagnose_latency(config: Option<String>) -> Result<()> {
+async fn diagnose_latency(config: Option<&Path>) -> Result<()> {
     let mut progress = ProgressTracker::from_env("mirrord network diagnosis");
 
     let mut cfg_context = ConfigContext::default();
@@ -70,19 +82,9 @@ async fn diagnose_latency(config: Option<String>) -> Result<()> {
         statistics.push(elapsed);
     }
 
-    let min = statistics
-        .iter()
-        .min()
-        .map(|d| d.as_millis().to_string())
-        .unwrap_or("N/A".to_string());
-    let max = statistics
-        .iter()
-        .max()
-        .map(|d| d.as_millis().to_string())
-        .unwrap_or("N/A".to_string());
-    let avg: String = (statistics.iter().sum::<Duration>() / statistics.len() as u32)
-        .as_millis()
-        .to_string();
+    let min = statistics.iter().min().expect("never empty").as_millis();
+    let max = statistics.iter().max().expect("never empty").as_millis();
+    let avg = (statistics.iter().sum::<Duration>() / statistics.len() as u32).as_millis();
     progress.success(Some(
         format!(
             "Latency statistics: min={}ms, max={}ms, avg={}ms",
@@ -90,12 +92,13 @@ async fn diagnose_latency(config: Option<String>) -> Result<()> {
         )
         .as_str(),
     ));
+
     Ok(())
 }
 
 /// Handle commands related to the operator `mirrord diagnose ...`
 pub(crate) async fn diagnose_command(args: DiagnoseArgs) -> Result<()> {
     match args.command {
-        DiagnoseCommand::Latency { config_file } => diagnose_latency(config_file).await,
+        DiagnoseCommand::Latency { config_file } => diagnose_latency(config_file.as_deref()).await,
     }
 }

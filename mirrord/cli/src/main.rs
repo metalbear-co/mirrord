@@ -26,12 +26,9 @@ use mirrord_config::{
     target::TargetDisplay,
     LayerConfig, LayerFileConfig,
 };
-use mirrord_kube::{
-    api::{
-        container::SKIP_NAMES,
-        kubernetes::{create_kube_api, get_k8s_resource_api, rollout::Rollout},
-    },
-    error::KubeApiError,
+use mirrord_kube::api::{
+    container::SKIP_NAMES,
+    kubernetes::{create_kube_api, get_k8s_resource_api, rollout::Rollout},
 };
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
@@ -389,7 +386,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
         // Set canoncialized path to config file, in case forks/children are in different
         // working directories.
         let full_path = std::fs::canonicalize(config_file)
-            .map_err(|e| CliError::ConfigFilePathError(config_file.to_owned(), e))?;
+            .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.clone(), e))?;
         std::env::set_var("MIRRORD_CONFIG_FILE", full_path);
     }
 
@@ -417,9 +414,10 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
 async fn get_kube_pods(
     namespace: Option<&str>,
     client: &kube::Client,
-) -> Result<HashMap<String, Vec<String>>> {
+) -> HashMap<String, Vec<String>> {
     let pods = get_kube_resources::<Pod>(namespace, client, Some("status.phase=Running"))
         .await
+        .into_iter()
         .filter(|pod| {
             pod.status
                 .as_ref()
@@ -434,30 +432,28 @@ async fn get_kube_pods(
         });
 
     // convert pods to (name, container names) pairs
-    let pod_containers_map: HashMap<String, Vec<String>> = pods
-        .filter_map(|pod| {
-            let name = pod.metadata.name.clone()?;
-            let containers = pod
-                .spec
-                .as_ref()?
-                .containers
-                .iter()
-                .filter(|&container| (!SKIP_NAMES.contains(container.name.as_str())))
-                .map(|container| container.name.clone())
-                .collect();
-            Some((name, containers))
-        })
-        .collect();
-
-    Ok(pod_containers_map)
+    pods.filter_map(|pod| {
+        let name = pod.metadata.name.clone()?;
+        let containers = pod
+            .spec
+            .as_ref()?
+            .containers
+            .iter()
+            .filter(|&container| (!SKIP_NAMES.contains(container.name.as_str())))
+            .map(|container| container.name.clone())
+            .collect();
+        Some((name, containers))
+    })
+    .collect()
 }
 
 async fn get_kube_deployments(
     namespace: Option<&str>,
     client: &kube::Client,
-) -> Result<impl Iterator<Item = String>> {
-    Ok(get_kube_resources::<Deployment>(namespace, client, None)
+) -> impl Iterator<Item = String> {
+    get_kube_resources::<Deployment>(namespace, client, None)
         .await
+        .into_iter()
         .filter(|deployment| {
             deployment
                 .status
@@ -465,23 +461,24 @@ async fn get_kube_deployments(
                 .map(|status| status.available_replicas >= Some(1))
                 .unwrap_or(false)
         })
-        .filter_map(|deployment| deployment.metadata.name))
+        .filter_map(|deployment| deployment.metadata.name)
 }
 
 async fn get_kube_rollouts(
     namespace: Option<&str>,
     client: &kube::Client,
-) -> Result<impl Iterator<Item = String>> {
-    Ok(get_kube_resources::<Rollout>(namespace, client, None)
+) -> impl Iterator<Item = String> {
+    get_kube_resources::<Rollout>(namespace, client, None)
         .await
-        .filter_map(|rollout| rollout.metadata().name.clone()))
+        .into_iter()
+        .filter_map(|rollout| rollout.metadata().name.clone())
 }
 
 async fn get_kube_resources<K>(
     namespace: Option<&str>,
     client: &kube::Client,
     field_selector: Option<&str>,
-) -> impl Iterator<Item = K>
+) -> Vec<K>
 where
     K: kube::Resource<Scope = NamespaceResourceScope>,
     <K as kube::Resource>::DynamicType: Default,
@@ -489,17 +486,17 @@ where
 {
     // Set up filters on the K8s resources returned - in this case, excluding the agent resources
     // and then applying any provided field-based filter conditions.
-    let params = &mut ListParams::default().labels("app!=mirrord");
-    if let Some(fields) = field_selector {
-        params.field_selector = Some(fields.to_string())
-    }
+    let params = ListParams {
+        label_selector: Some("app!=mirrord".to_string()),
+        field_selector: field_selector.map(ToString::to_string),
+        ..Default::default()
+    };
+
     get_k8s_resource_api(client, namespace)
-        .list(params)
+        .list(&params)
         .await
-        .map(|resources| resources.into_iter())
-        .map_err(KubeApiError::from)
-        .map_err(CliError::KubernetesApiFailed)
-        .unwrap_or_else(|_| Vec::new().into_iter())
+        .map(|resources| resources.items)
+        .unwrap_or_default()
 }
 
 async fn list_pods(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<Vec<String>> {
@@ -509,18 +506,18 @@ async fn list_pods(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<
         layer_config.kube_context.clone(),
     )
     .await
-    .map_err(CliError::KubernetesApiFailed)?;
+    .map_err(CliError::CreateKubeApiFailed)?;
 
     let namespace = args
         .namespace
         .as_deref()
         .or(layer_config.target.namespace.as_deref());
 
-    let (pods, deployments, rollouts) = futures::try_join!(
+    let (pods, deployments, rollouts) = futures::join!(
         get_kube_pods(namespace, &client),
         get_kube_deployments(namespace, &client),
         get_kube_rollouts(namespace, &client)
-    )?;
+    );
 
     Ok(pods
         .iter()
@@ -568,7 +565,7 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     // Try operator first if relevant
     let mut targets = match &layer_config.operator {
         Some(true) | None => {
-            let operator_targets = try { OperatorApi::list_targets(&layer_config).await? };
+            let operator_targets = OperatorApi::list_targets(&layer_config).await;
             match operator_targets {
                 Ok(targets) => {
                     // adjust format to match non-operator output
@@ -585,10 +582,14 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
                         })
                         .collect::<Vec<String>>()
                 }
-                Err(e) => {
+
+                Err(error) => {
                     if layer_config.operator.is_some() {
-                        error!(?e, "Operator is enabled but failed to list targets");
-                        return Err(e);
+                        error!(
+                            ?error,
+                            "Operator was explicitly enabled and we failed to list targets"
+                        );
+                        return Err(error.into());
                     }
                     list_pods(&layer_config, args).await?
                 }
@@ -649,6 +650,7 @@ fn main() -> miette::Result<()> {
             Commands::Teams => teams::navigate_to_intro().await,
             Commands::Diagnose(args) => diagnose_command(*args).await?,
         };
+
         Ok(())
     });
 

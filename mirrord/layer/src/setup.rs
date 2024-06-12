@@ -8,7 +8,6 @@ use mirrord_config::{
         network::{incoming::IncomingConfig, outgoing::OutgoingConfig},
     },
     target::Target,
-    util::VecOrSingle,
     LayerConfig,
 };
 use mirrord_intproxy_protocol::PortSubscription;
@@ -47,8 +46,7 @@ impl LayerSetup {
             .network
             .outgoing
             .unix_streams
-            .as_ref()
-            .map(VecOrSingle::as_slice)
+            .as_deref()
             .map(RegexSet::new)
             .transpose()
             .expect("invalid unix stream regex set")
@@ -124,8 +122,8 @@ impl LayerSetup {
     pub fn sip_binaries(&self) -> Vec<String> {
         self.config
             .sip_binaries
-            .clone()
-            .map(VecOrSingle::to_vec)
+            .as_deref()
+            .map(<[_]>::to_vec)
             .unwrap_or_default()
     }
 
@@ -197,14 +195,7 @@ impl IncomingMode {
 
         let http_filter_config = &config.http_filter;
 
-        let ports = {
-            http_filter_config
-                .ports
-                .as_slice()
-                .iter()
-                .copied()
-                .collect()
-        };
+        let ports = { http_filter_config.ports.iter().copied().collect() };
 
         let filter = match (
             &http_filter_config.path_filter,
