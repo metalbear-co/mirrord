@@ -15,7 +15,7 @@ pub mod internal_proxy;
 pub mod target;
 pub mod util;
 
-use std::path::Path;
+use std::{collections::HashSet, ops::Not, path::Path};
 
 use config::{ConfigContext, ConfigError, MirrordConfig};
 use experimental::ExperimentalConfig;
@@ -113,15 +113,15 @@ use crate::{
 ///     },
 ///     "fs": {
 ///       "mode": "write",
-///       "read_write": ".+\.json" ,
-///       "read_only": [ ".+\.yaml", ".+important-file\.txt" ],
-///       "local": [ ".+\.js", ".+\.mjs" ]
+///       "read_write": ".+\\.json" ,
+///       "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ],
+///       "local": [ ".+\\.js", ".+\\.mjs" ]
 ///     },
 ///     "network": {
 ///       "incoming": {
 ///         "mode": "steal",
 ///         "http_filter": {
-///           "header_filter": "host: api\..+"
+///           "header_filter": "host: api\\..+"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
@@ -137,10 +137,10 @@ use crate::{
 ///         "unix_streams": "bear.+"
 ///       },
 ///       "dns": false,
-///       "copy_target": {
-///         "scale_down": false
-///       }
 ///     },
+///     "copy_target": {
+///       "scale_down": false
+///     }
 ///   },
 ///   "operator": true,
 ///   "kubeconfig": "~/.kube/config",
@@ -362,6 +362,28 @@ impl LayerConfig {
             ))?
         }
 
+        if let (Some(unfiltered_ports), Some(filtered_ports)) = (
+            self.feature.network.incoming.ports.as_ref(),
+            self.feature
+                .network
+                .incoming
+                .http_filter
+                .get_filtered_ports(),
+        ) {
+            if unfiltered_ports
+                .is_disjoint(&HashSet::from_iter(filtered_ports.iter().copied()))
+                .not()
+            {
+                Err(ConfigError::Conflict(format!(
+                    "`feature.network.incoming.ports` (set to {unfiltered_ports:?}) and \
+                    `feature.network.incoming.http_filter.ports` (set to {filtered_ports:?}) must \
+                    be disjoint. If you want traffic to a port ot be filtered, include it only in \
+                    the filter port. To steal all the traffic from that port without filtering, \
+                    include it only in `feature.network.incoming.ports`."
+                )))?
+            }
+        }
+
         if !self.feature.copy_target.enabled
             && self
                 .target
@@ -422,6 +444,23 @@ impl LayerConfig {
                         .into(),
                 );
             }
+        }
+
+        if self
+            .feature
+            .network
+            .incoming
+            .port_mapping
+            .iter()
+            .any(|(to, from)| to == from)
+        {
+            context.add_warning(
+                "The feature.network.incoming.port_mapping mirrord configuration field \
+                contains a mapping of a local port to the same remote port. \
+                A mapping is only necessary when the local application is listening on \
+                a different port than the remote one."
+                    .into(),
+            );
         }
 
         Ok(())

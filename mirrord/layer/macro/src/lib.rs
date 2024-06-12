@@ -2,7 +2,7 @@
 
 use proc_macro2::Span;
 use quote::quote;
-use syn::{parse::Parser, punctuated::Punctuated, token::Comma, Block, Ident, ItemFn};
+use syn::{parse::Parser, punctuated::Punctuated, token::Comma, Block, Ident, ItemFn, Type};
 
 /// `#[hook_fn]` annotates the C ffi functions (mirrord's `_detour`s), and is used to generate the
 /// following boilerplate (using `close_detour` as an example):
@@ -49,7 +49,8 @@ pub fn hook_fn(
         let unsafety = signature.unsafety;
         let abi = signature.abi;
 
-        let fn_args = signature
+        // Function arguments without taking into account variadics!
+        let mut fn_args = signature
             .inputs
             .into_iter()
             .map(|fn_arg| match fn_arg {
@@ -57,6 +58,16 @@ pub fn hook_fn(
                 syn::FnArg::Typed(arg) => arg.ty,
             })
             .collect::<Vec<_>>();
+
+        // If we have `VaListImpl` args, then we push it to the end of the `fn_args` as
+        // just `...`.
+        if signature.variadic.is_some() {
+            let fixed_arg = quote! {
+                ...
+            };
+
+            fn_args.push(Box::new(Type::Verbatim(fixed_arg)));
+        }
 
         let return_type = signature.output;
 
@@ -124,7 +135,7 @@ pub fn hook_guard_fn(
         let unsafety = signature.unsafety;
         let abi = signature.abi;
 
-        let fn_args = signature
+        let mut fn_args = signature
             .inputs
             .clone()
             .into_iter()
@@ -133,6 +144,16 @@ pub fn hook_guard_fn(
                 syn::FnArg::Typed(arg) => arg.ty,
             })
             .collect::<Vec<_>>();
+
+        // If we have `VaListImpl` args, then we push it to the end of the `fn_args` as
+        // just `...`.
+        if signature.variadic.is_some() {
+            let fixed_arg = quote! {
+                ...
+            };
+
+            fn_args.push(Box::new(Type::Verbatim(fixed_arg)));
+        }
 
         let fn_arg_names: Punctuated<_, Comma> = signature
             .inputs

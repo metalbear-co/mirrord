@@ -20,8 +20,7 @@ workspace = true
 
 [dependencies]
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "process"] }
-hyper = { git = "https://github.com/meowjesty/hyper", branch = "master", features = ["full"] }
-tracing = { git = "https://github.com/metalbear-co/tracing", package = "tracing", branch = "worker_options_non_blocking_v1" }
+hyper = { version = "1", features = ["full"] }
+tracing = "0.1"
 actix-web = "4"
-log = "0.4"
-env_logger = "0.10"
+env_logger = "0.11"

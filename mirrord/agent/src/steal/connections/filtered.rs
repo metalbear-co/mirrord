@@ -117,7 +117,7 @@ impl FilteringService {
     /// Also, it does not retry the request upon failure.
     async fn send_request(
         to: SocketAddr,
-        request: Request<Incoming>,
+        mut request: Request<Incoming>,
     ) -> Result<Response<Incoming>, Box<dyn std::error::Error>> {
         let tcp_stream = TcpStream::connect(to).await.inspect_err(|error| {
             tracing::error!(?error, address = %to, "Failed connecting to request destination");
@@ -142,6 +142,12 @@ impl FilteringService {
                     }
                 });
 
+                // fixes https://github.com/metalbear-co/mirrord/issues/2497
+                // inspired by https://github.com/linkerd/linkerd2-proxy/blob/c5d9f1c1e7b7dddd9d75c0d1a0dca68188f38f34/linkerd/proxy/http/src/h2.rs#L175
+                if request.uri().authority().is_none() {
+                    *request.version_mut() = hyper::http::Version::HTTP_11;
+                }
+
                 request_sender
                     .send_request(request)
                     .await
@@ -157,7 +163,7 @@ impl FilteringService {
 
                 // We need this to progress the connection forward (hyper thing).
                 tokio::spawn(async move {
-                    if let Err(error) = connection.await {
+                    if let Err(error) = connection.with_upgrades().await {
                         tracing::error!(?error, "Connection with original destination failed");
                     }
                 });
@@ -926,10 +932,10 @@ mod test {
                         accept = original_listener.accept() => {
                             let (stream, _) = accept.unwrap();
                             let conn = hyper::server::conn::http1::Builder::new()
-                                .serve_connection(TokioIo::new(stream), service_fn(Self::handle_request));
+                                .serve_connection(TokioIo::new(stream), service_fn(Self::handle_request)).with_upgrades();
 
                             tasks.spawn(async move {
-                                conn.with_upgrades()
+                                conn
                                     .await
                                     .unwrap();
                             });
@@ -969,7 +975,7 @@ mod test {
             .unwrap();
 
             tasks.spawn(async move {
-                conn.await.unwrap();
+                conn.with_upgrades().await.unwrap();
             });
 
             TestSetup {

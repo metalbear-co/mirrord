@@ -43,7 +43,7 @@ pub async fn handshake(
         _http_v1 => {
             let (sender, connection) = http1::handshake(TokioIo::new(target_stream)).await?;
 
-            tokio::spawn(connection);
+            tokio::spawn(connection.with_upgrades());
 
             Ok(HttpSender::V1(sender))
         }
@@ -66,13 +66,16 @@ impl HttpSender {
                     .map_err(Into::into)
             }
             Self::V2(sender) => {
+                let mut req = req.into_hyper();
+                // fixes https://github.com/metalbear-co/mirrord/issues/2497
+                // inspired by https://github.com/linkerd/linkerd2-proxy/blob/c5d9f1c1e7b7dddd9d75c0d1a0dca68188f38f34/linkerd/proxy/http/src/h2.rs#L175
+                if req.uri().authority().is_none() {
+                    *req.version_mut() = hyper::http::Version::HTTP_11;
+                }
                 // Solves a "connection was not ready" client error.
                 // https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/barbara_tries_unix_socket.html#the-single-magical-line
                 sender.ready().await?;
-                sender
-                    .send_request(req.into_hyper())
-                    .await
-                    .map_err(Into::into)
+                sender.send_request(req).await.map_err(Into::into)
             }
         }
     }

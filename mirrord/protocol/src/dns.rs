@@ -3,7 +3,7 @@ use core::ops::Deref;
 use std::net::IpAddr;
 
 use bincode::{Decode, Encode};
-use trust_dns_resolver::{lookup_ip::LookupIp, proto::rr::resource::RecordParts};
+use hickory_resolver::{lookup_ip::LookupIp, proto::rr::resource::RecordParts};
 
 use crate::RemoteResult;
 
@@ -29,7 +29,7 @@ impl From<LookupIp> for DnsLookup {
                 } = record.into_parts();
 
                 rdata
-                    .and_then(|rdata| rdata.to_ip_addr())
+                    .and_then(|rdata| rdata.ip_addr())
                     .map(|ip| LookupRecord {
                         name: name_labels.to_string(),
                         ip,

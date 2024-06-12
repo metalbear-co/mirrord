@@ -15,9 +15,9 @@ use mirrord_protocol::{
         AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
         GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest, OpenFileResponse,
         OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
-        ReadFileResponse, ReadLimitedFileRequest, SeekFileRequest, SeekFileResponse,
-        WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest, XstatFsRequest,
-        XstatFsResponse, XstatRequest, XstatResponse,
+        ReadFileResponse, ReadLimitedFileRequest, ReadLinkFileRequest, ReadLinkFileResponse,
+        SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
+        WriteLimitedFileRequest, XstatFsRequest, XstatFsResponse, XstatRequest, XstatResponse,
     },
     outgoing::SocketAddress,
     tcp::StealType,
@@ -307,6 +307,13 @@ impl_request!(
     res = RemoteResult<ReadFileResponse>,
     req_path = LayerToProxyMessage::File => FileRequest::ReadLimited,
     res_path = ProxyToLayerMessage::File => FileResponse::ReadLimited,
+);
+
+impl_request!(
+    req = ReadLinkFileRequest,
+    res = RemoteResult<ReadLinkFileResponse>,
+    req_path = LayerToProxyMessage::File => FileRequest::ReadLink,
+    res_path = ProxyToLayerMessage::File => FileResponse::ReadLink,
 );
 
 impl_request!(

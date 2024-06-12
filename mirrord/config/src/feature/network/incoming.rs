@@ -54,7 +54,7 @@ use http_filter::*;
 ///       "incoming": {
 ///         "mode": "steal",
 ///         "http_filter": {
-///           "header_filter": "host: api\..+"
+///           "header_filter": "host: api\\..+"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
@@ -293,7 +293,7 @@ pub struct IncomingAdvancedFileConfig {
 ///       "incoming": {
 ///         "mode": "steal",
 ///         "http_filter": {
-///           "header_filter": "host: api\..+"
+///           "header_filter": "host: api\\..+"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
@@ -333,7 +333,7 @@ pub struct IncomingConfig {
     /// #### feature.network.incoming.mode {#feature-network-incoming-mode}
     pub mode: IncomingMode,
 
-    /// #### feature.network.incoming.filter {#feature-network-incoming-http-filter}
+    /// #### feature.network.incoming.http_filter {#feature-network-incoming-http-filter}
     pub http_filter: HttpFilterConfig,
 
     /// #### feature.network.incoming.listen_ports {#feature-network-incoming-listen_ports}

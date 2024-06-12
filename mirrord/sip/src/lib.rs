@@ -18,8 +18,11 @@ mod main {
 
     use apple_codesign::{CodeSignatureFlags, MachFile};
     use object::{
-        macho::{self, FatHeader, MachHeader64, LC_RPATH},
-        read::macho::{FatArch, LoadCommandVariant::Rpath, MachHeader},
+        macho::{self, MachHeader64, LC_RPATH},
+        read::{
+            self,
+            macho::{FatArch, LoadCommandVariant::Rpath, MachHeader},
+        },
         Architecture, Endianness, FileKind,
     };
     use once_cell::sync::Lazy;
@@ -35,7 +38,10 @@ mod main {
     };
 
     /// Where patched files are stored, relative to the temp dir (`/tmp/mirrord-bin/...`).
-    pub const MIRRORD_PATCH_DIR: &str = "mirrord-bin";
+    /// We added some random characaters to the end so we'll be able to identify dir better
+    /// in situations where $TMPDIR changes between exec's, leading to strip not working
+    /// https://github.com/metalbear-co/mirrord/issues/2500#issuecomment-2160026642
+    pub const MIRRORD_PATCH_DIR: &str = "mirrord-bin-ghu3278mz";
 
     pub const FRAMEWORKS_ENV_VAR_NAME: &str = "DYLD_FALLBACK_FRAMEWORK_PATH";
 
@@ -58,17 +64,6 @@ mod main {
     /// scripts, without a trailing `/`.
     pub static MIRRORD_TEMP_BIN_DIR_STRING: Lazy<String> =
         Lazy::new(|| get_temp_bin_str_prefix(&MIRRORD_TEMP_BIN_DIR_PATH_BUF));
-
-    /// Canonicalized version of `MIRRORD_TEMP_BIN_DIR`.
-    pub static MIRRORD_TEMP_BIN_DIR_CANONIC_STRING: Lazy<String> = Lazy::new(|| {
-        MIRRORD_TEMP_BIN_DIR_PATH_BUF
-            // Resolve symbolic links! (specifically /var -> private/var).
-            .canonicalize()
-            .as_deref()
-            .map(get_temp_bin_str_prefix)
-            // If canonicalization fails, we use the uncanonicalized path string.
-            .unwrap_or(MIRRORD_TEMP_BIN_DIR_STRING.to_string())
-    });
 
     /// Check if a cpu subtype (already parsed with the correct endianness) is arm64e, given its
     /// main cpu type is arm64. We only consider the lowest byte in the check.
@@ -154,17 +149,18 @@ mod main {
                 // This is probably where most fat binaries are handled (see comment above
                 // `MachOFat64`). A 32 bit archive (fat Mach-O) can contain 64 bit binaries.
                 FileKind::MachOFat32 => {
-                    let fat_slice = FatHeader::parse_arch32(bytes).map_err(|_| {
+                    let fat_slice = read::macho::MachOFatFile32::parse(bytes).map_err(|_| {
                         SipError::UnsupportedFileFormat("FatMach-O 32-bit".to_string())
                     })?;
                     #[cfg(target_arch = "aarch64")]
                     let found_arch = fat_slice
+                        .arches()
                         .iter()
                         .find(is_fat_arm64_arch)
-                        .or_else(|| fat_slice.iter().find(is_fat_x64_arch));
+                        .or_else(|| fat_slice.arches().iter().find(is_fat_x64_arch));
 
                     #[cfg(target_arch = "x86_64")]
-                    let found_arch = fat_slice.iter().find(is_fat_x64_arch);
+                    let found_arch = fat_slice.arches().iter().find(is_fat_x64_arch);
 
                     found_arch
                         .map(|arch| Self::new(arch.offset() as usize, arch.size() as usize))
@@ -175,18 +171,19 @@ mod main {
                 // binaries has 2^32 bytes or more (around 4 GB).
                 // See https://github.com/Homebrew/ruby-macho/issues/101#issuecomment-403202114
                 FileKind::MachOFat64 => {
-                    let fat_slice = FatHeader::parse_arch64(bytes).map_err(|_| {
+                    let fat_slice = read::macho::MachOFatFile64::parse(bytes).map_err(|_| {
                         SipError::UnsupportedFileFormat("Mach-O 32-bit".to_string())
                     })?;
 
                     #[cfg(target_arch = "aarch64")]
                     let found_arch = fat_slice
+                        .arches()
                         .iter()
                         .find(is_fat_arm64_arch)
-                        .or_else(|| fat_slice.iter().find(is_fat_x64_arch));
+                        .or_else(|| fat_slice.arches().iter().find(is_fat_x64_arch));
 
                     #[cfg(target_arch = "x86_64")]
-                    let found_arch = fat_slice.iter().find(is_fat_x64_arch);
+                    let found_arch = fat_slice.arches().iter().find(is_fat_x64_arch);
 
                     found_arch
                         .map(|arch| Self::new(arch.offset() as usize, arch.size() as usize))

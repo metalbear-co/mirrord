@@ -469,3 +469,24 @@ In order to have a more structured approach, here’s the flow you should follow
     6. And so on.
 5. This doc should go later on to our mirrord docs for advanced developers so people can understand how stuff works
 6. After approval of the implementation, you can start writing code, and add relevant e2e tests.
+
+# Rust Analyzer on MacOS
+
+The mirrord agent crate makes use of the `#[cfg(target_os = "linux")]` attribute to allow the whole repo to compile when you run `cargo build`.
+rust-analyzer supports building multiple targets, to enable it edit your local `~/.cargo/config.toml` to have this block:
+```toml
+[build]
+target = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
+```
+Besides that, you need the targets installed for that to work:
+```sh
+rustup target add x86_64-unknown-linux-gnu
+rustup target add aarch64-apple-darwin
+rustup target add x86_64-apple-darwin
+rustup target add aarch64-unknown-linux-gnu
+```

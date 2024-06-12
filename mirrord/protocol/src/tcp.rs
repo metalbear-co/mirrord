@@ -81,7 +81,7 @@ pub enum DaemonTcp {
 pub struct Filter(String);
 
 impl Filter {
-    pub fn new(filter_str: String) -> Result<Self, fancy_regex::Error> {
+    pub fn new(filter_str: String) -> Result<Self, Box<fancy_regex::Error>> {
         let _ = fancy_regex::Regex::new(&filter_str).inspect_err(|fail| {
             error!(
                 r"
