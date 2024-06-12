@@ -137,9 +137,9 @@ use crate::{
 ///         "unix_streams": "bear.+"
 ///       },
 ///       "dns": false,
-///       "copy_target": {
-///         "scale_down": false
-///       }
+///     },
+///     "copy_target": {
+///       "scale_down": false
 ///     }
 ///   },
 ///   "operator": true,
