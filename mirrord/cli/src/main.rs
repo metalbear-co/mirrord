@@ -81,7 +81,7 @@ where
     #[cfg(target_os = "macos")]
     let (_did_sip_patch, binary) = match execution_info.patched_path {
         None => (false, args.binary.clone()),
-        Some(sip_result) => (true, sip_result),
+        Some(ref sip_result) => (true, sip_result.to_owned()),
     };
 
     #[cfg(not(target_os = "macos"))]
@@ -120,6 +120,10 @@ where
     let err = execvp(binary.clone(), binary_args.clone());
     error!("Couldn't execute {:?}", err);
     analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+
+    // Kills the intproxy, freeing the agent.
+    execution_info.stop().await;
+
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     if let exec::Error::Errno(errno) = err {
         if Into::<i32>::into(errno) == 86 {
@@ -129,6 +133,7 @@ where
             }
         }
     }
+
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
 }
 
