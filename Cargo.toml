@@ -25,7 +25,7 @@ resolver = "2"
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.104.0"
+version = "3.105.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
