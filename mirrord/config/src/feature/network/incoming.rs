@@ -333,7 +333,7 @@ pub struct IncomingConfig {
     /// #### feature.network.incoming.mode {#feature-network-incoming-mode}
     pub mode: IncomingMode,
 
-    /// #### feature.network.incoming.filter {#feature-network-incoming-http-filter}
+    /// #### feature.network.incoming.http_filter {#feature-network-incoming-http-filter}
     pub http_filter: HttpFilterConfig,
 
     /// #### feature.network.incoming.listen_ports {#feature-network-incoming-listen_ports}

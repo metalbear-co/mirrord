@@ -266,6 +266,7 @@ impl From<HookError> for i64 {
                 // this could be changed by waiting for the Subscribed response from agent.
                 ResponseError::PortAlreadyStolen(_port) => libc::EINVAL,
                 ResponseError::NotImplemented => libc::EINVAL,
+                ResponseError::StripPrefix(_) => libc::EINVAL,
                 err @ ResponseError::Forbidden { .. } => {
                     graceful_exit!(
                         "Stopping mirrord run. Please adjust your mirrord configuration.\n{err}"

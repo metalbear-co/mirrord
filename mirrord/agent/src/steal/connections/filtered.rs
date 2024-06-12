@@ -117,7 +117,7 @@ impl FilteringService {
     /// Also, it does not retry the request upon failure.
     async fn send_request(
         to: SocketAddr,
-        request: Request<Incoming>,
+        mut request: Request<Incoming>,
     ) -> Result<Response<Incoming>, Box<dyn std::error::Error>> {
         let tcp_stream = TcpStream::connect(to).await.inspect_err(|error| {
             tracing::error!(?error, address = %to, "Failed connecting to request destination");
@@ -141,6 +141,12 @@ impl FilteringService {
                         tracing::error!(?error, "Connection with original destination failed");
                     }
                 });
+
+                // fixes https://github.com/metalbear-co/mirrord/issues/2497
+                // inspired by https://github.com/linkerd/linkerd2-proxy/blob/c5d9f1c1e7b7dddd9d75c0d1a0dca68188f38f34/linkerd/proxy/http/src/h2.rs#L175
+                if request.uri().authority().is_none() {
+                    *request.version_mut() = hyper::http::Version::HTTP_11;
+                }
 
                 request_sender
                     .send_request(request)

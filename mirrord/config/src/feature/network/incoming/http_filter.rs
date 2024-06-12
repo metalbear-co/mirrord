@@ -86,8 +86,20 @@ pub struct HttpFilterConfig {
     ///
     /// Other ports will *not* be stolen, unless listed in
     /// [`feature.network.incoming.ports`](#feature-network-incoming-ports).
+    ///
+    /// Set to [80, 8080] by default.
     #[config(env = "MIRRORD_HTTP_FILTER_PORTS", default)]
     pub ports: PortList,
+}
+
+impl HttpFilterConfig {
+    pub fn is_filter_set(&self) -> bool {
+        self.header_filter.is_some() || self.path_filter.is_some()
+    }
+
+    pub fn get_filtered_ports(&self) -> Option<&[u16]> {
+        self.is_filter_set().then(|| self.ports.as_slice())
+    }
 }
 
 /// <!--${internal}-->

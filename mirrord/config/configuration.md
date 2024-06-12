@@ -919,7 +919,7 @@ Can be set to either `"continue"` or `"override"`.
 - `"override"`: If port lock detected then override it with new lock and force close the
   original locking connection.
 
-#### feature.network.incoming.filter {#feature-network-incoming-http-filter}
+#### feature.network.incoming.http_filter {#feature-network-incoming-http-filter}
 Filter configuration for the HTTP traffic stealer feature.
 
 Allows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic
@@ -989,6 +989,8 @@ Activate the HTTP traffic filter only for these ports.
 
 Other ports will *not* be stolen, unless listed in
 [`feature.network.incoming.ports`](#feature-network-incoming-ports).
+
+Set to [80, 8080] by default.
 
 ### feature.network.outgoing {#feature-network-outgoing}
 Tunnel outgoing network operations through mirrord.

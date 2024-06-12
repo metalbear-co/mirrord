@@ -1,6 +1,6 @@
 use std::{
     assert_matches::assert_matches, cmp::min, collections::HashMap, fmt::Debug, path::PathBuf,
-    process::Stdio, time::Duration,
+    process::Stdio, str::FromStr, time::Duration,
 };
 
 use actix_codec::Framed;
@@ -391,6 +391,30 @@ impl TestIntProxy {
             .unwrap();
     }
 
+    /// Makes a [`FileRequest::ReadLink`], and answers it.
+    pub async fn expect_read_link(&mut self, file_name: &str) {
+        // Expecting `readlink` call with path.
+        assert_matches!(
+            self.recv().await,
+            ClientMessage::FileRequest(FileRequest::ReadLink(
+                mirrord_protocol::file::ReadLinkFileRequest { path }
+            )) if path.to_str().unwrap() == file_name
+        );
+
+        // Answer `readlink`.
+        self.codec
+            .send(DaemonMessage::File(
+                mirrord_protocol::FileResponse::ReadLink(Ok(
+                    mirrord_protocol::file::ReadLinkFileResponse {
+                        path: PathBuf::from_str("/gatos/rajado.txt")
+                            .expect("Valid path `rajado.txt`!"),
+                    },
+                )),
+            ))
+            .await
+            .unwrap();
+    }
+
     /// Verify that the passed message (not the next message from self.codec!) is a file read.
     /// Return buffer size.
     pub async fn expect_message_file_read(message: ClientMessage, expected_fd: u64) -> u64 {
@@ -650,6 +674,7 @@ pub enum Application {
     RustRecvFrom,
     RustListenPorts,
     Fork,
+    ReadLink,
     OpenFile,
     CIssue2055,
     CIssue2178,
@@ -691,6 +716,7 @@ impl Application {
             | Application::PythonListen => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP => String::from("uvicorn"),
             Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
+            Application::ReadLink => String::from("tests/apps/readlink/out.c_test_app"),
             Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
             Application::NodeHTTP | Application::NodeIssue2283 => String::from("node"),
             Application::JavaTemurinSip => format!(
@@ -888,6 +914,7 @@ impl Application {
             | Application::Go19FAccessAt
             | Application::Go21FAccessAt
             | Application::Fork
+            | Application::ReadLink
             | Application::Realpath
             | Application::RustFileOps
             | Application::RustIssue1123
@@ -946,6 +973,7 @@ impl Application {
             | Application::NodeSpawn
             | Application::BashShebang
             | Application::Fork
+            | Application::ReadLink
             | Application::Realpath
             | Application::Go20Issue834
             | Application::Go19Issue834
