@@ -8,6 +8,39 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.105.0](https://github.com/metalbear-co/mirrord/tree/3.105.0) - 2024-06-12
+
+
+### Added
+
+- Add readlink hook (under experimental config).
+  [#2488](https://github.com/metalbear-co/mirrord/issues/2488)
+- Display filtered and unfiltered stolen ports when filter is set.
+- When an http filter is set and a port is bound that is not included in the
+  filtered ports, and there are no unfiltered ports specified, emit a warning.
+
+
+### Changed
+
+- Now not accepting configs with the same port in
+  `feature.network.incoming.ports` and in
+  `feature.network.incoming.http_filter.ports`.
+
+
+### Fixed
+
+- Fixed SIP issue with Turbo
+  [#2500](https://github.com/metalbear-co/mirrord/issues/2500)
+- Fixed mirrord-agent/cli protocol negotation
+
+
+### Internal
+
+- Remove baidu.com from E2E tests.
+- Update CONTRIBUTING.md
+- rust-analyzer will check all targets if (targets) installed
+
+
 ## [3.104.0](https://github.com/metalbear-co/mirrord/tree/3.104.0) - 2024-06-06
 
 
