@@ -3304,8 +3304,9 @@ dependencies = [
 
 [[package]]
 name = "kube"
-version = "0.91.0"
-source = "git+https://github.com/kube-rs/kube?branch=main#0ac1d07d073cc261af767c7f2b9bbf0629fca323"
+version = "0.92.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12dc4487eda98835dcaa7ac92a14165446db29dbd67a743c79fe9f41bf38ee72"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -3316,8 +3317,9 @@ dependencies = [
 
 [[package]]
 name = "kube-client"
-version = "0.91.0"
-source = "git+https://github.com/kube-rs/kube?branch=main#0ac1d07d073cc261af767c7f2b9bbf0629fca323"
+version = "0.92.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "408f35eab36927d3b883e4ad54c3080ea8c49f899ac84a7856e7182e4ee3b392"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -3357,8 +3359,9 @@ dependencies = [
 
 [[package]]
 name = "kube-core"
-version = "0.91.0"
-source = "git+https://github.com/kube-rs/kube?branch=main#0ac1d07d073cc261af767c7f2b9bbf0629fca323"
+version = "0.92.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f776624097c1e09e72eb1e9e0c2bb5d17d97c27a6a87734390a9fba246a8f67f"
 dependencies = [
  "chrono",
  "form_urlencoded",
@@ -3373,8 +3376,9 @@ dependencies = [
 
 [[package]]
 name = "kube-derive"
-version = "0.91.0"
-source = "git+https://github.com/kube-rs/kube?branch=main#0ac1d07d073cc261af767c7f2b9bbf0629fca323"
+version = "0.92.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ae07adfd7d21b7fa582789206391243f98e155b46c806eb494839569853bcfd"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3385,8 +3389,9 @@ dependencies = [
 
 [[package]]
 name = "kube-runtime"
-version = "0.91.0"
-source = "git+https://github.com/kube-rs/kube?branch=main#0ac1d07d073cc261af767c7f2b9bbf0629fca323"
+version = "0.92.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12e5933f2d429f3a05d4cb67f935b25c94a133b0baeb558ab3917c270a11f6ef"
 dependencies = [
  "ahash",
  "async-broadcast",
