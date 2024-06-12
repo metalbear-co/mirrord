@@ -13,7 +13,7 @@ use crate::config::source::MirrordConfigSource;
 /// {
 ///   "internal_proxy": {
 ///     "start_idle_timeout": 30,
-///     "idle_timeout": 5,
+///     "idle_timeout": 5
 ///   }
 /// }
 /// ```

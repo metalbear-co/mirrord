@@ -163,7 +163,7 @@ impl FilteringService {
 
                 // We need this to progress the connection forward (hyper thing).
                 tokio::spawn(async move {
-                    if let Err(error) = connection.await {
+                    if let Err(error) = connection.with_upgrades().await {
                         tracing::error!(?error, "Connection with original destination failed");
                     }
                 });
@@ -932,10 +932,10 @@ mod test {
                         accept = original_listener.accept() => {
                             let (stream, _) = accept.unwrap();
                             let conn = hyper::server::conn::http1::Builder::new()
-                                .serve_connection(TokioIo::new(stream), service_fn(Self::handle_request));
+                                .serve_connection(TokioIo::new(stream), service_fn(Self::handle_request)).with_upgrades();
 
                             tasks.spawn(async move {
-                                conn.with_upgrades()
+                                conn
                                     .await
                                     .unwrap();
                             });
@@ -975,7 +975,7 @@ mod test {
             .unwrap();
 
             tasks.spawn(async move {
-                conn.await.unwrap();
+                conn.with_upgrades().await.unwrap();
             });
 
             TestSetup {

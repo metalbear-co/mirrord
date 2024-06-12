@@ -40,8 +40,8 @@ tracing.workspace = true
 tokio-retry = "0.3"
 
 [dev-dependencies]
-base64 = "0.21"
-http-body = "0.4"
-hyper = "0.14"
+base64.workspace = true
+http-body.workspace = true
+hyper = "1"
 rstest = "*"
 tower = "0.4"

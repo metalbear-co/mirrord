@@ -155,7 +155,7 @@ pub(crate) enum LayerError {
     NoProcessFound,
 
     #[error("mirrord-layer: Regex creation failed with `{0}`.")]
-    Regex(#[from] fancy_regex::Error),
+    Regex(#[from] Box<fancy_regex::Error>),
 
     // `From` implemented below, not with `#[from]` so that when new variants of
     // `SerializationError` are added, they are mapped into different variants of

@@ -65,10 +65,10 @@ use crate::{
 ///   "feature": {
 ///     "fs": {
 ///       "mode": "write",
-///       "read_write": ".+\.json" ,
-///       "read_only": [ ".+\.yaml", ".+important-file\.txt" ],
-///       "local": [ ".+\.js", ".+\.mjs" ],
-///       "not_found": [ "\.config/gcloud" ]
+///       "read_write": ".+\\.json" ,
+///       "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ],
+///       "local": [ ".+\\.js", ".+\\.mjs" ],
+///       "not_found": [ "\\.config/gcloud" ]
 ///     }
 ///   }
 /// }
