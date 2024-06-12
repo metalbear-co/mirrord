@@ -12,6 +12,7 @@ use crate::{
 /// Look into the [`syn::Attribute`]s of whatever item we're handling, and extract its doc strings.
 #[tracing::instrument(level = "trace", ret)]
 pub fn docs_from_attributes(attributes: Vec<Attribute>) -> Option<Vec<String>> {
+    // + 1 when a field appends in `resolve_references`
     let mut docs: Vec<String> = Vec::with_capacity(attributes.len() + 1);
     let docs_iter = attributes
         .into_iter()
@@ -199,12 +200,15 @@ pub fn parse_docs_into_set<'a>(
 /// DFS helper function to resolve the references of the types. Returns the docs of the fields of
 /// the field we're currently looking at search till its leaf nodes. The leaf here means a primitive
 /// type for which we don't have a [`PartialType`].
-fn dfs_fields<'a>(
+fn dfs_fields<'a, const MAX_RECURSION_LEVEL: usize>(
     field: &PartialField<'a>,
     types: &'a HashSet<PartialType>,
     cache: &mut HashMap<&'a str, Vec<String>>,
     recursion_level: &mut usize,
 ) -> Vec<String> {
+    if *recursion_level >= MAX_RECURSION_LEVEL {
+        return vec![];
+    }
     // increment the recursion level as we're going deeper into the tree
     types // get the type of the field from the types set to recurse into it's fields
         .get(&field.ty)
@@ -216,8 +220,12 @@ fn dfs_fields<'a>(
                 new_type_docs.reserve(type_.fields.len());
                 type_.fields.iter().for_each(|field| {
                     let mut current_recursion_level = *recursion_level + 1;
-                    let resolved_type_docs =
-                        dfs_fields(field, types, cache, &mut current_recursion_level);
+                    let resolved_type_docs = dfs_fields::<MAX_RECURSION_LEVEL>(
+                        field,
+                        types,
+                        cache,
+                        &mut current_recursion_level,
+                    );
                     max_recursion_level = max_recursion_level.max(current_recursion_level);
                     cache.insert(&field.ty, resolved_type_docs.clone());
                     // append the docs of the field to the resolved type docs
@@ -272,6 +280,8 @@ fn dfs_fields<'a>(
 /// decide what the root should be.
 #[tracing::instrument(level = "trace", ret)]
 pub fn resolve_references(types: HashSet<PartialType>) -> Option<PartialType> {
+    /// Maximum recursion level for safety.
+    const MAX_RECURSION_LEVEL: usize = 10;
     // Cache to perform memoization between recursive calls so we don't have to resolve the same
     // type multiple times. Mapping between `ident` -> `resolved_docs`.
     // For example, if we have a types [`A`, `B`, `C`] and A has a field of type `B` and `B` has a
@@ -295,8 +305,12 @@ pub fn resolve_references(types: HashSet<PartialType>) -> Option<PartialType> {
                     .map(|mut field| {
                         // Depth first search to resolve the references of the fields with the types
                         // as our lookup table.
-                        let resolved_type_docs =
-                            dfs_fields(&field, &types, &mut cache, &mut recursion_level);
+                        let resolved_type_docs = dfs_fields::<MAX_RECURSION_LEVEL>(
+                            &field,
+                            &types,
+                            &mut cache,
+                            &mut recursion_level,
+                        );
                         // append the docs of the field to the resolved type docs
                         field.docs.extend(resolved_type_docs);
                         field
