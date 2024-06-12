@@ -225,19 +225,19 @@ mod test {
     #[tokio::test]
     async fn agent_tls_connector_valid_cert() {
         let cert = rcgen::generate_simple_self_signed(vec!["operator".to_string()]).unwrap();
-        let cert_bytes = cert.serialize_der().unwrap();
-        let key_bytes = cert.get_key_pair().serialize_der();
+        let cert_bytes = cert.cert.der();
+        let key_bytes = cert.key_pair.serialize_der();
         let acceptor = ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(
-                vec![cert_bytes.into()],
+                vec![cert_bytes.clone()],
                 PrivateKeyDer::Pkcs8(key_bytes.into()),
             )
             .map(Arc::new)
             .map(TlsAcceptor::from)
             .unwrap();
 
-        let connector = AgentTlsConnector::new(cert.serialize_pem().unwrap()).unwrap();
+        let connector = AgentTlsConnector::new(cert.cert.pem()).unwrap();
 
         let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -270,12 +270,12 @@ mod test {
     #[tokio::test]
     async fn agent_tls_connector_invalid_cert() {
         let server_cert = rcgen::generate_simple_self_signed(vec!["operator".to_string()]).unwrap();
-        let server_cert_bytes = server_cert.serialize_der().unwrap();
-        let key_bytes = server_cert.get_key_pair().serialize_der();
+        let cert_bytes = server_cert.cert.der();
+        let key_bytes = server_cert.key_pair.serialize_der();
         let acceptor = ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(
-                vec![server_cert_bytes.into()],
+                vec![cert_bytes.clone()],
                 PrivateKeyDer::Pkcs8(key_bytes.into()),
             )
             .map(Arc::new)
@@ -290,8 +290,8 @@ mod test {
                 let connector = AgentTlsConnector::new(
                     rcgen::generate_simple_self_signed(vec!["operator".to_string()])
                         .unwrap()
-                        .serialize_pem()
-                        .unwrap(),
+                        .cert
+                        .pem(),
                 )
                 .unwrap();
 

@@ -7,7 +7,7 @@
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
-    os::fd::FromRawFd,
+    os::fd::{AsRawFd, FromRawFd},
 };
 
 use nix::sys::socket::{self, AddressFamily, SockFlag, SockType, SockaddrStorage};
@@ -25,15 +25,15 @@ fn main() {
             None,
         )
         .unwrap();
-        println!("SOCKET CREATED: {sockfd}");
+        println!("SOCKET CREATED: {sockfd:?}");
 
-        socket::bind(sockfd, &SockaddrStorage::from(bind_address)).unwrap();
+        socket::bind(sockfd.as_raw_fd(), &SockaddrStorage::from(bind_address)).unwrap();
         println!("SOCKET BOUND TO {bind_address}");
 
-        socket::connect(sockfd, &SockaddrStorage::from(peer_address)).unwrap();
+        socket::connect(sockfd.as_raw_fd(), &SockaddrStorage::from(peer_address)).unwrap();
         println!("SOCKET CONNECTED TO {peer_address}");
 
-        let mut stream = unsafe { TcpStream::from_raw_fd(sockfd) };
+        let mut stream = unsafe { TcpStream::from_raw_fd(sockfd.as_raw_fd()) };
         assert_eq!(stream.peer_addr().unwrap(), peer_address);
         println!("`TcpStream::peer_addr()` RESULT AS EXPECTED");
 

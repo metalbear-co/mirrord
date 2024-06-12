@@ -1278,6 +1278,7 @@
             },
             "path": {
               "description": "<!--${internal}--> Path is optional so that it can also be specified via env var instead of via conf file, but it is not optional in a resulting [`TargetConfig`] object - either there is a path, or the target configuration is `None`.",
+              "default": null,
               "anyOf": [
                 {
                   "$ref": "#/definitions/Target"

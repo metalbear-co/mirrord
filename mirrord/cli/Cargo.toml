@@ -47,11 +47,11 @@ const-random = "0.1.15"
 tokio = { workspace = true, features = ["rt", "net", "macros", "process"]}
 kube.workspace = true
 k8s-openapi.workspace = true
-miette = { version = "5", features = ["fancy"] }
+miette = { version = "7", features = ["fancy"] }
 thiserror.workspace = true
 prettytable-rs = "0.10"
 humantime = "2"
-nix.workspace = true
+nix = {workspace = true, features = ["process", "resource"]}
 tokio-util.workspace = true
 socket2.workspace = true
 drain.workspace = true
