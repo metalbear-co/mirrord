@@ -136,7 +136,7 @@ use crate::{
 ///         "ignore_localhost": false,
 ///         "unix_streams": "bear.+"
 ///       },
-///       "dns": false,
+///       "dns": false
 ///     },
 ///     "copy_target": {
 ///       "scale_down": false
