@@ -371,9 +371,6 @@ impl MirrordExecution {
     pub async fn stop(self) {
         let Self { mut child, .. } = self;
 
-        child
-            .kill()
-            .await
-            .expect("Could not kill intproxy child process!");
+        let _ = child.start_kill();
     }
 }
