@@ -1,6 +1,7 @@
 use std::{future, path::PathBuf, time::Duration};
 
 use futures::{stream::FuturesOrdered, StreamExt};
+use hickory_resolver::{system_conf::parse_resolv_conf, AsyncResolver, Hosts};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse},
     DnsLookupError, RemoteResult, ResolveErrorKindInternal, ResponseError,
@@ -13,7 +14,6 @@ use tokio::{
     },
 };
 use tokio_util::sync::CancellationToken;
-use trust_dns_resolver::{system_conf::parse_resolv_conf, AsyncResolver, Hosts};
 
 use crate::{
     error::{AgentError, Result},
@@ -90,12 +90,12 @@ impl DnsWorker {
 
         let (config, mut options) = parse_resolv_conf(resolv_conf)?;
         options.server_ordering_strategy =
-            trust_dns_resolver::config::ServerOrderingStrategy::UserProvidedOrder;
+            hickory_resolver::config::ServerOrderingStrategy::UserProvidedOrder;
         options.timeout = timeout;
         options.attempts = attempts;
-        options.ip_strategy = trust_dns_resolver::config::LookupIpStrategy::Ipv4Only;
+        options.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4Only;
 
-        let mut resolver = AsyncResolver::tokio(config, options)?;
+        let mut resolver = AsyncResolver::tokio(config, options);
 
         let hosts = Hosts::default().read_hosts_conf(hosts_conf.as_slice())?;
         resolver.set_hosts(Some(hosts));

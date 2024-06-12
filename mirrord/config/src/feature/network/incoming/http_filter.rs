@@ -22,7 +22,7 @@ use crate::{
 /// For example, to filter based on header:
 /// ```json
 /// {
-///   "header_filter": "host: api\..+",
+///   "header_filter": "host: api\\..+"
 /// }
 /// ```
 /// Setting that filter will make mirrord only steal requests with the `host` header set to hosts
@@ -31,7 +31,7 @@ use crate::{
 /// For example, to filter based on path:
 /// ```json
 /// {
-///   "path_filter": "^/api/",
+///   "path_filter": "^/api/"
 /// }
 /// ```
 /// Setting this filter will make mirrord only steal requests to URIs starting with "/api/".
@@ -41,7 +41,7 @@ use crate::{
 /// For example, for avoiding stealing any probe sent by kubernetes, you can set this filter:
 /// ```json
 /// {
-///   "header_filter": "^User-Agent: (?!kube-probe)",
+///   "header_filter": "^User-Agent: (?!kube-probe)"
 /// }
 /// ```
 /// Setting this filter will make mirrord only steal requests that **do** have a user agent that
@@ -50,7 +50,7 @@ use crate::{
 /// Similarly, you can exclude certain paths using a negative look-ahead:
 /// ```json
 /// {
-///   "path_filter": "^(?!/health/)",
+///   "path_filter": "^(?!/health/)"
 /// }
 /// ```
 /// Setting this filter will make mirrord only steal requests to URIs that do not start with
@@ -86,8 +86,20 @@ pub struct HttpFilterConfig {
     ///
     /// Other ports will *not* be stolen, unless listed in
     /// [`feature.network.incoming.ports`](#feature-network-incoming-ports).
+    ///
+    /// Set to [80, 8080] by default.
     #[config(env = "MIRRORD_HTTP_FILTER_PORTS", default)]
     pub ports: PortList,
+}
+
+impl HttpFilterConfig {
+    pub fn is_filter_set(&self) -> bool {
+        self.header_filter.is_some() || self.path_filter.is_some()
+    }
+
+    pub fn get_filtered_ports(&self) -> Option<&[u16]> {
+        self.is_filter_set().then(|| self.ports.as_slice())
+    }
 }
 
 /// <!--${internal}-->

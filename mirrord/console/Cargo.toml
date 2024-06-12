@@ -30,7 +30,7 @@ mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"
 
 bincode.workspace = true
 log = { version = "0.4", features = ["std"] }
-miette = "5"
+miette = "7"
 thiserror.workspace = true
 
 tokio = { workspace = true, optional = true }

@@ -3,15 +3,13 @@
 #include <sys/uio.h>
 #include <unistd.h>
 #include <string.h>
-#include <signal.h>
-
 
 /// Opens a test file, then tries to read (part) of it with `readv`.
 int main(int argc, char *argv[]) {
   printf("test issue 2178: START");
 
   char first[4], second[8];
-  
+
   struct iovec iov[2];
 
   int fd = open("/app/test.txt", O_RDONLY);
@@ -34,7 +32,6 @@ int main(int argc, char *argv[]) {
     perror("readv");
     return 1;
   }
-
 
   if (memcmp(first, "abcd", 4) != 0) {
     printf("test issue 2178: FAILED");

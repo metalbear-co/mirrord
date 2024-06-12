@@ -4,7 +4,7 @@ use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 use x509_certificate::{
-    asn1time::Time, rfc2986, rfc5280, InMemorySigningKeyPair, KeyAlgorithm, X509CertificateBuilder,
+    asn1time::Time, rfc2986, rfc5280, InMemorySigningKeyPair, X509CertificateBuilder,
 };
 
 use crate::{
@@ -45,7 +45,7 @@ impl Credentials {
         common_name: &str,
         key_pair: &InMemorySigningKeyPair,
     ) -> Result<rfc2986::CertificationRequest> {
-        let mut builder = X509CertificateBuilder::new(KeyAlgorithm::Ed25519);
+        let mut builder = X509CertificateBuilder::default();
 
         let _ = builder
             .subject()
@@ -166,6 +166,7 @@ impl DateValidityExt for rfc5280::Validity {
 #[cfg(feature = "client")]
 pub mod client {
     use kube::{api::PostParams, Api, Client, Resource};
+    use ring::rand::SystemRandom;
 
     use super::*;
 
@@ -185,8 +186,9 @@ pub mod client {
             let key_pair = match key_pair {
                 Some(key_pair) => key_pair,
                 None => {
-                    let key_algorithm = KeyAlgorithm::Ed25519;
-                    let (_, document) = InMemorySigningKeyPair::generate_random(key_algorithm)?;
+                    let rng = SystemRandom::new();
+                    let document = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng)
+                        .map_err(|_| AuthenticationError::KeyGenerationError)?;
                     let pem_key = pem::Pem::new("PRIVATE KEY", document.as_ref());
                     pem::encode(&pem_key).into()
                 }

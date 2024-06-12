@@ -1,9 +1,14 @@
-use std::{fmt, fmt::Formatter, io, net::AddrParseError};
+use std::{
+    fmt::{self, Formatter},
+    io,
+    net::AddrParseError,
+    path::StripPrefixError,
+};
 
 use bincode::{Decode, Encode};
+use hickory_resolver::error::{ResolveError, ResolveErrorKind};
 use thiserror::Error;
 use tracing::warn;
-use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
 
 use crate::{
     outgoing::SocketAddress,
@@ -56,6 +61,15 @@ pub enum ResponseError {
         blocked_action: BlockedAction,
         policy_name: Option<String>,
     },
+
+    #[error("Failed stripping path with `{0}`!")]
+    StripPrefix(String),
+}
+
+impl From<StripPrefixError> for ResponseError {
+    fn from(fail: StripPrefixError) -> Self {
+        Self::StripPrefix(fail.to_string())
+    }
 }
 
 /// If some then the name with a trailing space, else empty string.

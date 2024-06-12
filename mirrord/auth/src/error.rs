@@ -23,6 +23,10 @@ pub enum AuthenticationError {
     #[cfg(feature = "client")]
     #[error(transparent)]
     Kube(#[from] kube::Error),
+
+    /// Failed to generate key pair
+    #[error("Failed to generate key pair")]
+    KeyGenerationError,
 }
 
 /// Error from CredentialStore operations

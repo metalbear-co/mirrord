@@ -43,7 +43,7 @@ pub async fn handshake(
         _http_v1 => {
             let (sender, connection) = http1::handshake(TokioIo::new(target_stream)).await?;
 
-            tokio::spawn(connection);
+            tokio::spawn(connection.with_upgrades());
 
             Ok(HttpSender::V1(sender))
         }

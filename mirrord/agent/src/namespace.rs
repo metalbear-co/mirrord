@@ -1,4 +1,4 @@
-use std::{fs::File, os::fd::AsRawFd};
+use std::fs::File;
 
 use nix::sched::{setns, CloneFlags};
 use thiserror::Error;
@@ -42,6 +42,6 @@ pub(crate) fn set_namespace(pid: u64, namespace_type: NamespaceType) -> Result<(
     let fd = File::open(namespace_type.path_from_pid(pid))?;
 
     // use as_raw_fd to get reference so it will drop after setns
-    setns(fd.as_raw_fd(), namespace_type.into())?;
+    setns(fd, namespace_type.into())?;
     Ok(())
 }

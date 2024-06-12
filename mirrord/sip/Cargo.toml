@@ -19,7 +19,7 @@ workspace = true
 [dependencies]
 apple-codesign = { version = "0.27", default-features = false}
 memchr = "2"
-object = "0.32"
+object = "0.36"
 tempfile = "3"
 
 once_cell.workspace = true

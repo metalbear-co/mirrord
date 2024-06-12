@@ -1,9 +1,8 @@
 use std::{
     self,
     collections::{hash_map::Entry, HashMap},
-    fs::{DirEntry, File, OpenOptions, ReadDir},
-    io,
-    io::{prelude::*, BufReader, SeekFrom},
+    fs::{read_link, DirEntry, File, OpenOptions, ReadDir},
+    io::{self, prelude::*, BufReader, SeekFrom},
     iter::{Enumerate, Map, Peekable},
     os::unix::{fs::MetadataExt, prelude::FileExt},
     path::{Path, PathBuf},
@@ -18,8 +17,9 @@ use mirrord_protocol::{
         FdOpenDirRequest, GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest,
         OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadDirRequest,
         ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
-        SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
-        WriteLimitedFileRequest, XstatFsRequest, XstatFsResponse, XstatRequest, XstatResponse,
+        ReadLinkFileRequest, ReadLinkFileResponse, SeekFileRequest, SeekFileResponse,
+        WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest, XstatFsRequest,
+        XstatFsResponse, XstatRequest, XstatResponse,
     },
     FileRequest, FileResponse, RemoteResult, ResponseError,
 };
@@ -160,6 +160,9 @@ impl FileManager {
                 buffer_size,
                 start_from,
             ))),
+            FileRequest::ReadLink(ReadLinkFileRequest { path }) => {
+                Some(FileResponse::ReadLink(self.read_link(path)))
+            }
             FileRequest::Seek(SeekFileRequest { fd, seek_from }) => {
                 let seek_result = self.seek(fd, seek_from.into());
                 Some(FileResponse::Seek(seek_result))
@@ -399,6 +402,20 @@ impl FileManager {
                     Err(ResponseError::NotFile(fd))
                 }
             })
+    }
+
+    /// Handles our `readlink_detour` with [`std::fs::read_link`].
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub(crate) fn read_link(&mut self, path: PathBuf) -> RemoteResult<ReadLinkFileResponse> {
+        let path = path
+            .strip_prefix("/")
+            .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
+
+        let full_path = self.root_path.join(path);
+
+        read_link(full_path)
+            .map(|path| ReadLinkFileResponse { path })
+            .map_err(ResponseError::from)
     }
 
     #[tracing::instrument(level = "trace", skip(self))]

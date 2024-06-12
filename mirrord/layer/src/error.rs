@@ -155,7 +155,7 @@ pub(crate) enum LayerError {
     NoProcessFound,
 
     #[error("mirrord-layer: Regex creation failed with `{0}`.")]
-    Regex(#[from] fancy_regex::Error),
+    Regex(#[from] Box<fancy_regex::Error>),
 
     // `From` implemented below, not with `#[from]` so that when new variants of
     // `SerializationError` are added, they are mapped into different variants of
@@ -266,6 +266,7 @@ impl From<HookError> for i64 {
                 // this could be changed by waiting for the Subscribed response from agent.
                 ResponseError::PortAlreadyStolen(_port) => libc::EINVAL,
                 ResponseError::NotImplemented => libc::EINVAL,
+                ResponseError::StripPrefix(_) => libc::EINVAL,
                 err @ ResponseError::Forbidden { .. } => {
                     graceful_exit!(
                         "Stopping mirrord run. Please adjust your mirrord configuration.\n{err}"

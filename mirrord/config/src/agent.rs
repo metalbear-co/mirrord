@@ -63,7 +63,7 @@ impl fmt::Display for LinuxCapability {
 ///     "communication_timeout": 30,
 ///     "startup_timeout": 360,
 ///     "network_interface": "eth0",
-///     "flush_connections": false,
+///     "flush_connections": false
 ///   }
 /// }
 /// ```
@@ -132,7 +132,7 @@ pub struct AgentConfig {
     /// {
     ///   "image": {
     ///     "registry": "internal.repo/images/mirrord",
-    ///     "tag": "latest",
+    ///     "tag": "latest"
     ///   }
     /// }
     /// ```

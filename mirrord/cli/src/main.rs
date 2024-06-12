@@ -81,7 +81,7 @@ where
     #[cfg(target_os = "macos")]
     let (_did_sip_patch, binary) = match execution_info.patched_path {
         None => (false, args.binary.clone()),
-        Some(sip_result) => (true, sip_result),
+        Some(ref sip_result) => (true, sip_result.to_owned()),
     };
 
     #[cfg(not(target_os = "macos"))]
@@ -120,6 +120,10 @@ where
     let err = execvp(binary.clone(), binary_args.clone());
     error!("Couldn't execute {:?}", err);
     analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+
+    // Kills the intproxy, freeing the agent.
+    execution_info.stop().await;
+
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     if let exec::Error::Errno(errno) = err {
         if Into::<i32>::into(errno) == 86 {
@@ -129,6 +133,7 @@ where
             }
         }
     }
+
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
 }
 
@@ -201,6 +206,58 @@ fn print_config<P>(
         "incoming: incoming traffic will be {}",
         incoming_info
     ));
+
+    // When the http filter is set, the rules of what ports get stolen are different, so make it
+    // clear to users in that case which ports are stolen.
+    if config.feature.network.incoming.is_steal()
+        && config.feature.network.incoming.http_filter.is_filter_set()
+    {
+        let filtered_ports_str = config
+            .feature
+            .network
+            .incoming
+            .http_filter
+            .get_filtered_ports()
+            .and_then(|filtered_ports| match filtered_ports.len() {
+                0 => None,
+                1 => Some(format!(
+                    "port {} (filtered)",
+                    filtered_ports.first().unwrap()
+                )),
+                _ => Some(format!("ports {filtered_ports:?} (filtered)")),
+            });
+        let unfiltered_ports_str =
+            config
+                .feature
+                .network
+                .incoming
+                .ports
+                .as_ref()
+                .and_then(|ports| match ports.len() {
+                    0 => None,
+                    1 => Some(format!(
+                        "port {} (unfiltered)",
+                        ports.iter().next().unwrap()
+                    )),
+                    _ => Some(format!(
+                        "ports [{}] (unfiltered)",
+                        ports
+                            .iter()
+                            .copied()
+                            .map(|n| n.to_string())
+                            .collect::<Vec<String>>()
+                            .join(", ")
+                    )),
+                });
+        let and = if filtered_ports_str.is_some() && unfiltered_ports_str.is_some() {
+            " and "
+        } else {
+            ""
+        };
+        let filtered_port_str = filtered_ports_str.unwrap_or_default();
+        let unfiltered_ports_str = unfiltered_ports_str.unwrap_or_default();
+        messages.push(format!("incoming: traffic will only be stolen from {filtered_port_str}{and}{unfiltered_ports_str}"));
+    }
 
     let outgoing_info = match (
         config.feature.network.outgoing.tcp,
