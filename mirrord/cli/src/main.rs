@@ -79,9 +79,9 @@ where
     let execution_info = MirrordExecution::start(&config, &mut sub_progress, analytics).await?;
 
     #[cfg(target_os = "macos")]
-    let (_did_sip_patch, binary) = match execution_info.patched_path {
+    let (_did_sip_patch, binary) = match &execution_info.patched_path {
         None => (false, args.binary.clone()),
-        Some(sip_result) => (true, sip_result),
+        Some(sip_result) => (true, sip_result.to_owned()),
     };
 
     #[cfg(not(target_os = "macos"))]
