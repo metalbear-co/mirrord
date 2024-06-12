@@ -1,6 +1,3 @@
-use core::fmt;
-use std::fmt::Display;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -12,20 +9,6 @@ use crate::config::{self, ConfigError};
 pub struct JobTarget {
     pub job: String,
     pub container: Option<String>,
-}
-
-impl Display for JobTarget {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}{}",
-            self.container
-                .as_ref()
-                .map(|c| format!("{c}/"))
-                .unwrap_or_default(),
-            self.job.clone()
-        )
-    }
 }
 
 impl FromSplit for JobTarget {

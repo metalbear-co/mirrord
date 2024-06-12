@@ -384,6 +384,7 @@ bitflags::bitflags! {
         const CONTAINER = 8;
         const ROLLOUT = 16;
         const JOB = 32;
+        const CRON_JOB = 64;
     }
 }
 
@@ -420,7 +421,7 @@ impl CollectAnalytics for &TargetConfig {
                     }
                 }
                 Target::CronJob(cron_job) => {
-                    flags |= TargetAnalyticFlags::JOB;
+                    flags |= TargetAnalyticFlags::CRON_JOB;
                     if cron_job.container.is_some() {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }
