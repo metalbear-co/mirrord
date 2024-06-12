@@ -35,4 +35,4 @@ k8s-openapi = { workspace = true, features = ["schemars", "earliest"] }
 tera = "1"
 
 [dev-dependencies]
-rstest = "0.19"
+rstest = "0.21"
