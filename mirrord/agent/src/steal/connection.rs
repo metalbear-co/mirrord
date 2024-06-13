@@ -156,7 +156,6 @@ impl Client {
             // Chunked data is preferred over framed data
             if chunked {
                 // Send headers
-                tracing::error!("starting bg task");
                 let connection_id = request.connection_id;
                 let request_id = request.request_id;
                 let (
@@ -195,7 +194,6 @@ impl Client {
                         }
                     }
                 }
-                tracing::error!("sent header");
 
                 loop {
                     match body.next_frames(false).await {

@@ -258,6 +258,8 @@ impl HttpConnection {
                         .map(HttpResponseFallback::Fallback)
                     }
                     HttpRequestFallback::Streamed(..) => {
+                        // Returning `HttpResponseFallback::Framed` variant is safe - streaming
+                        // requests require a strictly higher mirrord-protocol version
                         HttpResponse::<InternalHttpBody>::from_hyper_response(
                             res,
                             self.peer.port(),

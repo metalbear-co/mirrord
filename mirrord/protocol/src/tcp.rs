@@ -290,7 +290,12 @@ pub enum HttpRequestFallback {
 
 #[derive(Debug)]
 pub struct StreamingBody {
+    /// Shared with instances acquired via [`Clone`].
+    /// Allows the clones to receive a copy of the data.
     origin: Arc<Mutex<(Receiver<InternalHttpBodyFrame>, Vec<InternalHttpBodyFrame>)>>,
+    /// Index of the next frame to return from the buffer.
+    /// If outside of the buffer, we need to poll the stream to get the next frame.
+    /// Local state of this instance, zeroed when cloning.
     idx: usize,
 }
 
