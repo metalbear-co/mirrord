@@ -7,6 +7,7 @@ use mirrord_console::error::ConsoleError;
 use mirrord_intproxy::error::IntProxyError;
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::{HttpError, OperatorApiError, OperatorOperation};
+use reqwest::StatusCode;
 use thiserror::Error;
 
 pub(crate) type Result<T, E = CliError> = core::result::Result<T, E>;
@@ -208,6 +209,10 @@ pub(crate) enum CliError {
     Please remember that some features are supported only when using mirrord operator (https://mirrord.dev/docs/overview/teams/#supported-features).{GENERAL_HELP}"))]
     OperatorApiFailed(OperatorOperation, kube::Error),
 
+    #[error("mirrord operator rejected {0}: {1}")]
+    #[diagnostic(help("If the problem refers to mirrord operator license, visit https://app.metalbear.co to manage or renew your license.{GENERAL_HELP}"))]
+    OperatorApiForbidden(OperatorOperation, String),
+
     #[error(
         "mirrord operator license expired. Visit https://app.metalbear.co to renew your license"
     )]
@@ -247,8 +252,17 @@ impl From<OperatorApiError> for CliError {
             },
             OperatorApiError::CreateApiError(e) => Self::CreateKubeApiFailed(e),
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
+            OperatorApiError::KubeError {
+                error: kube::Error::Api(ErrorResponse { reason, code, .. }),
+                operation,
+            } if code == StatusCode::FORBIDDEN => Self::OperatorApiForbidden(operation, reason),
             OperatorApiError::KubeError { error, operation } => {
                 Self::OperatorApiFailed(operation, error)
+            }
+            OperatorApiError::StatusFailure { operation, status }
+                if status.code == StatusCode::FORBIDDEN =>
+            {
+                Self::OperatorApiForbidden(operation, status.reason)
             }
             OperatorApiError::StatusFailure { operation, status } => {
                 let error = kube::Error::Api(ErrorResponse {
