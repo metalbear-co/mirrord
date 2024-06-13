@@ -104,10 +104,10 @@ configuration file containing all fields.
         "ignore_localhost": false,
         "unix_streams": "bear.+"
       },
-      "dns": false,
-      "copy_target": {
-        "scale_down": false
-      }
+      "dns": false
+    },
+    "copy_target": {
+      "scale_down": false
     }
   },
   "operator": true,

@@ -1,0 +1,1 @@
+Update configuration docs
