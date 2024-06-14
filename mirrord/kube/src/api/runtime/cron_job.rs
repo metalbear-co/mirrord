@@ -33,7 +33,7 @@ impl RuntimeDataFromLabels for CronJobTarget {
             .ok_or_else(|| {
                 KubeApiError::missing_field(
                     resource,
-                    ".spec.selector or .spec.selector.match_labels",
+                    ".spec.selector or .spec.selector.matchLabels",
                 )
             })
     }

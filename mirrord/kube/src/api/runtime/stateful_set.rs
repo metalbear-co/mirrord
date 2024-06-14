@@ -22,6 +22,6 @@ impl RuntimeDataFromLabels for StatefulSetTarget {
             .spec
             .as_ref()
             .and_then(|spec| spec.selector.match_labels.clone())
-            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.match_labels"))
+            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.matchLabels"))
     }
 }
