@@ -545,7 +545,7 @@ pub async fn run_verify_config(args: Option<Vec<&str>>) -> TestProcess {
     run_mirrord(mirrord_args, Default::default()).await
 }
 
-const CRYPTO_PROVIDER_INSTALLED: Once = Once::new();
+static CRYPTO_PROVIDER_INSTALLED: Once = Once::new();
 
 #[fixture]
 pub async fn kube_client() -> Client {
