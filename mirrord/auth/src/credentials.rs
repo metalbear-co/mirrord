@@ -4,7 +4,7 @@ use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 use x509_certificate::{
-    asn1time::Time, rfc2986, rfc5280, InMemorySigningKeyPair, X509CertificateBuilder,
+    asn1time::Time, rfc2986, rfc5280, InMemorySigningKeyPair, KeyAlgorithm, X509CertificateBuilder,
 };
 
 use crate::{
@@ -45,7 +45,7 @@ impl Credentials {
         common_name: &str,
         key_pair: &InMemorySigningKeyPair,
     ) -> Result<rfc2986::CertificationRequest> {
-        let mut builder = X509CertificateBuilder::default();
+        let mut builder = X509CertificateBuilder::new(KeyAlgorithm::Ed25519);
 
         let _ = builder
             .subject()
