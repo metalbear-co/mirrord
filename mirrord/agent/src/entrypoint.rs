@@ -752,6 +752,9 @@ async fn start_iptable_guard(args: Args) -> Result<()> {
 }
 
 pub async fn main() -> Result<()> {
+    rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
+        .expect("Failed to install crypto provider");
+
     if let Ok(json_log) =
         std::env::var("MIRRORD_AGENT_JSON_LOG").map(|json_log| json_log.parse().unwrap_or_default())
         && json_log
