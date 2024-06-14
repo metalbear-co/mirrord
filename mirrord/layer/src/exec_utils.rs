@@ -249,16 +249,14 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
     let res = FN__NSGET_EXECUTABLE_PATH(path, buflen);
     if res == 0 {
         let path_buf_detour = CheckedInto::<PathBuf>::checked_into(path as *const c_char);
-        if let Bypass(FileOperationInMirrordBinTempDir(path_buf)) = path_buf_detour {
-            let later_ptr: *const i8 = path_buf.as_os_str().as_encoded_bytes().as_ptr() as _;
+        if let Bypass(FileOperationInMirrordBinTempDir((prefix_len, path_buf))) = path_buf_detour {
             // SAFETY: If we're here, the original function was passed this pointer and was
             //         successful, so this pointer must be valid.
-            let old_len = *buflen;
 
             // SAFETY:  `later_ptr` is a pointer to a later char in the same buffer.
-            let prefix_len = later_ptr.offset_from(path);
+            let later_ptr = path.wrapping_add(prefix_len);
 
-            let stripped_len = old_len - prefix_len as u32;
+            let stripped_len = path_buf.to_string_lossy().len() as u32;
 
             // SAFETY:
             // - can read `stripped_len` bytes from `path_cstring` because it's its length.
@@ -293,9 +291,9 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
     // we hold the guard manually for tracing/internal code
     let guard = crate::detour::DetourGuard::new();
     let detour: Detour<PathBuf> = raw_path.checked_into();
-    let raw_path = if let Bypass(FileOperationInMirrordBinTempDir(path_buf)) = detour {
+    let raw_path = if let Bypass(FileOperationInMirrordBinTempDir((prefix_len, _))) = detour {
         trace!("dlopen called with a path inside our patch dir, switching with fixed pointer.");
-        path_buf.as_os_str().as_encoded_bytes().as_ptr() as _
+        raw_path.wrapping_add(prefix_len)
     } else {
         trace!("dlopen called on path {detour:?}.");
         raw_path

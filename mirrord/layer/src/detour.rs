@@ -144,9 +144,11 @@ pub(crate) enum Bypass {
     CStrConversion,
 
     /// We hooked a file operation on a path in mirrord's bin directory. So do the operation
-    /// locally, but on the original path, not the one in mirrord's dir.
+    /// locally, but on the original path, not the one in mirrord's dir. The offset from the full
+    /// path to the original path is needed for pointer arithmetic, as a pointer to the String is
+    /// no longer possible.
     #[cfg(target_os = "macos")]
-    FileOperationInMirrordBinTempDir(PathBuf),
+    FileOperationInMirrordBinTempDir((usize, PathBuf)),
 
     /// File [`PathBuf`] should be ignored (used for tests).
     IgnoredFile(CString),
