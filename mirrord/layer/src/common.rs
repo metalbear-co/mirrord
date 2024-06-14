@@ -6,11 +6,8 @@ use std::{ffi::CStr, fmt::Debug, path::PathBuf};
 use libc::c_char;
 use mirrord_intproxy_protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
 use mirrord_protocol::file::OpenOptionsInternal;
-<<<<<<< HEAD
-=======
 #[cfg(target_os = "macos")]
 use mirrord_sip::{MIRRORD_TEMP_BIN_DIR_CANONIC_PATHBUF, MIRRORD_TEMP_BIN_DIR_PATH_BUF};
->>>>>>> b6d57201 (Fix type errors in non-SIP crates)
 use tracing::warn;
 
 use crate::{
@@ -113,7 +110,11 @@ impl CheckedInto<PathBuf> for *const c_char {
                 // `stripped_path` is a reference to a later character in the same string as
                 // `path_str`, `stripped_path.as_ptr()` returns a pointer to a later index
                 // in the same string owned by the caller (the hooked program).
-                Detour::Bypass(Bypass::FileOperationInMirrordBinTempDir(stripped_path))
+                let prefix_len = path_str.len() - stripped_path.to_string_lossy().len();
+                Detour::Bypass(Bypass::FileOperationInMirrordBinTempDir((
+                    prefix_len,
+                    stripped_path,
+                )))
             } else {
                 Detour::Success(path_str) // strip is None, path not in temp dir.
             }

@@ -2,7 +2,6 @@
 use std::path::Path;
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
     time::Duration,
 };
 
