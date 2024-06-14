@@ -99,11 +99,11 @@ struct TCPSession {
 
 type TCPSessionMap = HashMap<TcpSessionIdentifier, TCPSession>;
 
-const fn is_new_connection(flags: u16) -> bool {
+const fn is_new_connection(flags: u8) -> bool {
     0 != (flags & TcpFlags::SYN) && 0 == (flags & (TcpFlags::ACK | TcpFlags::RST | TcpFlags::FIN))
 }
 
-fn is_closed_connection(flags: u16) -> bool {
+fn is_closed_connection(flags: u8) -> bool {
     0 != (flags & (TcpFlags::FIN | TcpFlags::RST))
 }
 
@@ -172,7 +172,7 @@ async fn prepare_sniffer(
 #[derive(Debug)]
 struct TcpPacketData {
     bytes: Vec<u8>,
-    flags: u16,
+    flags: u8,
 }
 
 #[tracing::instrument(skip(eth_packet), level = "trace", fields(bytes = %eth_packet.len()))]
@@ -514,7 +514,7 @@ impl TcpConnectionSniffer {
     ///
     /// tl;dr: checks packet flags, or if it's an HTTP packet, then begins a new sniffing session.
     #[tracing::instrument(level = "trace", ret, skip(bytes))]
-    fn treat_as_new_session(tcp_flags: u16, bytes: &[u8]) -> bool {
+    fn treat_as_new_session(tcp_flags: u8, bytes: &[u8]) -> bool {
         is_new_connection(tcp_flags)
             || matches!(
                 HttpVersion::new(bytes),

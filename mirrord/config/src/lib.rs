@@ -113,15 +113,15 @@ use crate::{
 ///     },
 ///     "fs": {
 ///       "mode": "write",
-///       "read_write": ".+\.json" ,
-///       "read_only": [ ".+\.yaml", ".+important-file\.txt" ],
-///       "local": [ ".+\.js", ".+\.mjs" ]
+///       "read_write": ".+\\.json" ,
+///       "read_only": [ ".+\\.yaml", ".+important-file\\.txt" ],
+///       "local": [ ".+\\.js", ".+\\.mjs" ]
 ///     },
 ///     "network": {
 ///       "incoming": {
 ///         "mode": "steal",
 ///         "http_filter": {
-///           "header_filter": "host: api\..+"
+///           "header_filter": "host: api\\..+"
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
@@ -136,11 +136,11 @@ use crate::{
 ///         "ignore_localhost": false,
 ///         "unix_streams": "bear.+"
 ///       },
-///       "dns": false,
-///       "copy_target": {
-///         "scale_down": false
-///       }
+///       "dns": false
 ///     },
+///     "copy_target": {
+///       "scale_down": false
+///     }
 ///   },
 ///   "operator": true,
 ///   "kubeconfig": "~/.kube/config",

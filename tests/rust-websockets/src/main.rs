@@ -1,9 +1,6 @@
 //! Test app that opens an HTTP server at port `80`. It accepts WebSockets connections on the root
 //! path and echoes all [`Message::Text`] and [`Message::Binary`] messages. The app exists
 //! successfully after any WebSockets connection closes.
-
-use std::net::SocketAddr;
-
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -12,12 +9,10 @@ use axum::{
     routing::get,
     Router,
 };
-use tokio::sync::mpsc;
+use tokio::{net::TcpListener, sync::mpsc};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let addr: SocketAddr = "0.0.0.0:80".parse().unwrap();
-
     let (shutdown_tx, mut shutdown_rx) = mpsc::unbounded_channel::<()>();
 
     let app = Router::new()
@@ -31,8 +26,8 @@ async fn main() {
         )
         .with_state(shutdown_tx);
 
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
+    let listener = TcpListener::bind("0.0.0.0:80").await.unwrap();
+    axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             shutdown_rx.recv().await;
         })
@@ -43,7 +38,10 @@ async fn main() {
 async fn handle_socket(mut socket: WebSocket, shutdown: mpsc::UnboundedSender<()>) {
     loop {
         let msg = match socket.recv().await {
-            Some(Ok(msg)) => msg,
+            Some(Ok(msg)) => {
+                eprintln!("Receieved Message: {msg:?}");
+                msg
+            }
             Some(Err(err)) => {
                 eprintln!("Error while receiving message: {err:?}");
                 break;
