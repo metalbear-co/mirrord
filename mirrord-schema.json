@@ -512,6 +512,24 @@
         }
       ]
     },
+    "CronJobTarget": {
+      "type": "object",
+      "required": [
+        "cron_job"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cron_job": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "DeploymentTarget": {
       "description": "<!--${internal}--> Mirror the deployment specified by [`DeploymentTarget::deployment`].",
       "type": "object",
@@ -1211,8 +1229,26 @@
       },
       "additionalProperties": false
     },
+    "StatefulSetTarget": {
+      "type": "object",
+      "required": [
+        "stateful_set"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stateful_set": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "Target": {
-      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`. - `job/{sample-job}`;",
+      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`. - `job/{sample-job}`; - `cronjob/{sample-cronjob}`; - `statefulset/{sample-statefulset}`;",
       "anyOf": [
         {
           "description": "<!--${internal}--> Mirror a deployment.",
@@ -1243,6 +1279,22 @@
           "allOf": [
             {
               "$ref": "#/definitions/JobTarget"
+            }
+          ]
+        },
+        {
+          "description": "<!--${internal}--> Targets a [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/).\n\nOnly supported when `copy_target` is enabled.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/CronJobTarget"
+            }
+          ]
+        },
+        {
+          "description": "<!--${internal}--> Targets a [StatefulSet](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/).\n\nOnly supported when `copy_target` is enabled.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/StatefulSetTarget"
             }
           ]
         },

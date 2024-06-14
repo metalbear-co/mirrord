@@ -52,9 +52,9 @@ pub enum ConfigError {
     TargetNamespaceWithoutTarget,
 
     #[error(
-        "A Job target has been specified, but the feature `copy_target` has not been enabled!
+        "A Job or CronJob target has been specified, but the feature `copy_target` has not been enabled!
 
-        If you want to target a job, please enable `copy_target` feature in the `feature` section.
+        If you want to target a job or cronjob, please enable `copy_target` feature in the `feature` section.
         "
     )]
     TargetJobWithoutCopyTarget,
