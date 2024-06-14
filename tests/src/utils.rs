@@ -7,7 +7,7 @@ use std::{
     net::Ipv4Addr,
     path::PathBuf,
     process::{ExitStatus, Stdio},
-    sync::Arc,
+    sync::{Arc, Once},
     time::Duration,
 };
 
@@ -545,8 +545,16 @@ pub async fn run_verify_config(args: Option<Vec<&str>>) -> TestProcess {
     run_mirrord(mirrord_args, Default::default()).await
 }
 
+const CRYPTO_PROVIDER_INSTALLED: Once = Once::new();
+
 #[fixture]
 pub async fn kube_client() -> Client {
+    CRYPTO_PROVIDER_INSTALLED.call_once(|| {
+        rustls::crypto::aws_lc_rs::default_provider()
+            .install_default()
+            .expect("Failed to install crypto provider");
+    });
+
     let mut config = Config::infer().await.unwrap();
     config.accept_invalid_certs = true;
     Client::try_from(config).unwrap()
