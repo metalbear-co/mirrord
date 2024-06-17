@@ -253,16 +253,16 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::CreateApiError(e) => Self::CreateKubeApiFailed(e),
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
             OperatorApiError::KubeError {
-                error: kube::Error::Api(ErrorResponse { reason, code, .. }),
+                error: kube::Error::Api(ErrorResponse { message, code, .. }),
                 operation,
-            } if code == StatusCode::FORBIDDEN => Self::OperatorApiForbidden(operation, reason),
+            } if code == StatusCode::FORBIDDEN => Self::OperatorApiForbidden(operation, message),
             OperatorApiError::KubeError { error, operation } => {
                 Self::OperatorApiFailed(operation, error)
             }
             OperatorApiError::StatusFailure { operation, status }
                 if status.code == StatusCode::FORBIDDEN =>
             {
-                Self::OperatorApiForbidden(operation, status.reason)
+                Self::OperatorApiForbidden(operation, status.message)
             }
             OperatorApiError::StatusFailure { operation, status } => {
                 let error = kube::Error::Api(ErrorResponse {
