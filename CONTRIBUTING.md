@@ -14,6 +14,7 @@ Make sure to take a look at the project's [style guide](STYLE.md).
   - [Getting Started](#getting-started)
   - [Debugging mirrord](#debugging-mirrord)
   - [New Hook Guidelines](#new-hook-guidelines)
+  - [Compiling on MacOs](#compliling-on-macos)
 
 # Getting Started
 
@@ -448,9 +449,6 @@ kubectl logs <YOUR_POD_NAME> | less -R
 
 where you would replace `<YOUR_POD_NAME>` with the name of the pod.
 
-
-
-
 # New Hook Guidelines
 
 Adding a feature to mirrord that introduces a new hook (file system, network) can be tricky and there are a lot of edge cases we might need to cover. 
@@ -470,10 +468,19 @@ In order to have a more structured approach, here’s the flow you should follow
 5. This doc should go later on to our mirrord docs for advanced developers so people can understand how stuff works
 6. After approval of the implementation, you can start writing code, and add relevant e2e tests.
 
-# Rust Analyzer on MacOS
+# Compliling on MacOS
 
-The mirrord agent crate makes use of the `#[cfg(target_os = "linux")]` attribute to allow the whole repo to compile when you run `cargo build`.
-rust-analyzer supports building multiple targets, to enable it edit your local `~/.cargo/config.toml` to have this block:
+The `mirrord-agent` crate makes use of the `#[cfg(target_os = "linux")]` attribute to allow the whole repo to compile on MacOS when you run `cargo build`.
+
+To enable `mirrord-agent` code analysis with rust-analyzer:
+1. Install additional targets
+```sh
+rustup target add x86_64-unknown-linux-gnu
+rustup target add aarch64-apple-darwin
+rustup target add x86_64-apple-darwin
+rustup target add aarch64-unknown-linux-gnu
+```
+2. Add additional targets to your local `.cargo/config.toml` block:
 ```toml
 [build]
 target = [
@@ -483,10 +490,15 @@ target = [
     "aarch64-unknown-linux-gnu",
 ]
 ```
-Besides that, you need the targets installed for that to work:
-```sh
-rustup target add x86_64-unknown-linux-gnu
-rustup target add aarch64-apple-darwin
-rustup target add x86_64-apple-darwin
-rustup target add aarch64-unknown-linux-gnu
+
+If you're using rust-analyzer VSCode extension, put this block in `.vscode/settings.json` as well:
+```json
+{
+    "rust-analyzer.check.targets": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu"
+    ]
+}
 ```
