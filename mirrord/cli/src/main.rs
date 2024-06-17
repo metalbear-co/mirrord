@@ -608,6 +608,9 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> miette::Result<()> {
+    rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
+        .expect("Failed to install crypto provider");
+
     let cli = Cli::parse();
 
     let rt = tokio::runtime::Builder::new_current_thread()

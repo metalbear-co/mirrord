@@ -21,10 +21,12 @@ use crate::{
     error::{KubeApiError, Result},
 };
 
+pub mod cron_job;
 pub mod deployment;
 pub mod job;
 pub mod pod;
 pub mod rollout;
+pub mod stateful_set;
 
 #[derive(Debug)]
 pub enum ContainerRuntime {
@@ -293,9 +295,11 @@ impl RuntimeDataProvider for Target {
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
         match self {
             Target::Deployment(deployment) => deployment.runtime_data(client, namespace).await,
-            Target::Pod(pod) => pod.runtime_data(client, namespace).await,
-            Target::Rollout(rollout) => rollout.runtime_data(client, namespace).await,
-            Target::Job(job) => job.runtime_data(client, namespace).await,
+            Target::Pod(target) => target.runtime_data(client, namespace).await,
+            Target::Rollout(target) => target.runtime_data(client, namespace).await,
+            Target::Job(target) => target.runtime_data(client, namespace).await,
+            Target::CronJob(target) => target.runtime_data(client, namespace).await,
+            Target::StatefulSet(target) => target.runtime_data(client, namespace).await,
             Target::Targetless => Err(KubeApiError::MissingRuntimeData),
         }
     }
