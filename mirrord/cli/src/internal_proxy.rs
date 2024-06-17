@@ -20,7 +20,7 @@ use std::{
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
-use mirrord_intproxy::IntProxy;
+use mirrord_intproxy::{agent_conn::AgentConnection, error::IntProxyError, IntProxy};
 use nix::{
     libc,
     sys::resource::{setrlimit, Resource},
@@ -93,25 +93,25 @@ fn create_listen_socket() -> io::Result<TcpListener> {
 pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError> {
     let config = LayerConfig::from_env()?;
 
-    if let Some(log_destination) = config.internal_proxy.log_destination.as_ref() {
-        let output_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_destination)
-            .map_err(|e| InternalProxyError::OpenLogFile(log_destination.clone(), e))?;
+    // if let Some(log_destination) = config.internal_proxy.log_destination.as_ref() {
+    let output_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("./intproxy.log")
+        .map_err(|e| InternalProxyError::OpenLogFile("./intproxy.log".to_string(), e))?;
 
-        let tracing_registry = tracing_subscriber::fmt()
-            .with_writer(output_file)
-            .with_ansi(false);
+    let tracing_registry = tracing_subscriber::fmt()
+        .with_writer(output_file)
+        .with_ansi(false);
 
-        if let Some(log_level) = config.internal_proxy.log_level.as_ref() {
-            tracing_registry
-                .with_env_filter(EnvFilter::builder().parse_lossy(log_level))
-                .init();
-        } else {
-            tracing_registry.init();
-        }
-    }
+    // if let Some(log_level) = config.internal_proxy.log_level.as_ref() {
+    tracing_registry
+        .with_env_filter(EnvFilter::builder().parse_lossy("mirrord=trace"))
+        .init();
+    // } else {
+    //     tracing_registry.init();
+    // }
+    // }
 
     // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
     // so we assume Linux can be higher and set to that.
@@ -127,9 +127,16 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
         }
         Err(..) => None,
     };
-
     let mut analytics = AnalyticsReporter::new(config.telemetry, watch);
     (&config).collect_analytics(analytics.get_mut());
+
+    // The agent is spawned and our parent process already established a connection.
+    // However, the parent process (`exec` or `ext` command) is free to exec/exit as soon as it
+    // reads the TPC listener port from our stdout. We open our own connection with the agent
+    // **before** this happens to ensure that the agent does not prematurely exit.
+    let agent_conn = AgentConnection::new(&config, agent_connect_info, &mut analytics)
+        .await
+        .map_err(IntProxyError::from)?;
 
     // Let it assign port for us then print it for the user.
     let listener = create_listen_socket().map_err(InternalProxyError::ListenerSetup)?;
@@ -142,10 +149,8 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
     let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);
     let consecutive_connection_timeout = Duration::from_secs(config.internal_proxy.idle_timeout);
 
-    IntProxy::new(&config, agent_connect_info, listener)
-        .await?
+    IntProxy::new_with_connection(agent_conn, listener)
         .run(first_connection_timeout, consecutive_connection_timeout)
-        .await?;
-
-    Ok(())
+        .await
+        .map_err(InternalProxyError::from)
 }

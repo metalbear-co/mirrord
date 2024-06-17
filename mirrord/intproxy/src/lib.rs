@@ -6,8 +6,6 @@ use background_tasks::{BackgroundTasks, TaskSender, TaskUpdate};
 use layer_conn::LayerConnection;
 use layer_initializer::LayerInitializer;
 use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
-use mirrord_analytics::NullReporter;
-use mirrord_config::LayerConfig;
 use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, LocalMessage};
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS};
 use ping_pong::{AgentSentPong, PingPong};
@@ -19,9 +17,7 @@ use proxies::{
 use tokio::{net::TcpListener, time};
 
 use crate::{
-    agent_conn::{AgentConnectInfo, AgentConnection},
-    background_tasks::TaskError,
-    error::IntProxyError,
+    agent_conn::AgentConnection, background_tasks::TaskError, error::IntProxyError,
     main_tasks::LayerClosed,
 };
 
@@ -63,19 +59,6 @@ impl IntProxy {
     const CHANNEL_SIZE: usize = 512;
     /// How long can the agent connection remain silent.
     const PING_INTERVAL: Duration = Duration::from_secs(30);
-
-    /// Initiates a new agent connection and creates a new [`IntProxy`].
-    /// The returned instance will accept connections from the layers using the given
-    /// [`TcpListener`].
-    pub async fn new(
-        config: &LayerConfig,
-        agent_connect_info: Option<AgentConnectInfo>,
-        listener: TcpListener,
-    ) -> Result<Self, IntProxyError> {
-        let mut reporter = NullReporter::default();
-        let agent_conn = AgentConnection::new(config, agent_connect_info, &mut reporter).await?;
-        Ok(Self::new_with_connection(agent_conn, listener))
-    }
 
     /// Creates a new [`IntProxy`] using existing [`AgentConnection`].
     /// The returned instance will accept connections from the layers using the given
