@@ -23,6 +23,7 @@ build/
 
 ### VSCode ###
 vscode-ext/bin
+.vscode/settings.json
 
 ### Intellij ###
 intellij-ext/.gradle
