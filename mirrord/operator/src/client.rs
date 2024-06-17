@@ -729,14 +729,17 @@ where
     }
 }
 
-/// Code copied from [`kube::client`] and adjusted.
-///
-/// Just like original [`Client::connect`] function, [`connect_ws`] creates a WebSockets connection.
-/// However, original function swallows [`ErrorResponse`] sent by the
-/// operator and returns flat [`UpgradeConnectionError`]. [`connect_ws`] attempts to recover the
-/// [`ErrorResponse`] - if operator response code is not [`StatusCode::SWITCHING_PROTOCOLS`], it
-/// tries to read response body and deserialize it.
 mod upgrade {
+    //! Code copied from [`kube::client`] and adjusted.
+    //!
+    //! Just like original [`Client::connect`] function, [`connect_ws`] creates a
+    //! WebSockets connection. However, original function swallows
+    //! [`ErrorResponse`] sent by the operator and returns flat
+    //! [`UpgradeConnectionError`]. [`connect_ws`] attempts to
+    //! recover the [`ErrorResponse`] - if operator response code is not
+    //! [`StatusCode::SWITCHING_PROTOCOLS`], it tries to read
+    //! response body and deserialize it.
+
     use base64::Engine;
     use http::{HeaderValue, Request, Response, StatusCode};
     use http_body_util::BodyExt;
@@ -748,7 +751,7 @@ mod upgrade {
     };
     use tokio_tungstenite::{tungstenite::protocol::Role, WebSocketStream};
 
-    const WS_PROTOCOL: &'static str = "v4.channel.k8s.io";
+    const WS_PROTOCOL: &str = "v4.channel.k8s.io";
 
     // Verify upgrade response according to RFC6455.
     // Based on `tungstenite` and added subprotocol verification.
