@@ -93,25 +93,25 @@ fn create_listen_socket() -> io::Result<TcpListener> {
 pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError> {
     let config = LayerConfig::from_env()?;
 
-    // if let Some(log_destination) = config.internal_proxy.log_destination.as_ref() {
-    let output_file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("./intproxy.log")
-        .map_err(|e| InternalProxyError::OpenLogFile("./intproxy.log".to_string(), e))?;
+    if let Some(log_destination) = config.internal_proxy.log_destination.as_ref() {
+        let output_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_destination)
+            .map_err(|e| InternalProxyError::OpenLogFile(log_destination.clone(), e))?;
 
-    let tracing_registry = tracing_subscriber::fmt()
-        .with_writer(output_file)
-        .with_ansi(false);
+        let tracing_registry = tracing_subscriber::fmt()
+            .with_writer(output_file)
+            .with_ansi(false);
 
-    // if let Some(log_level) = config.internal_proxy.log_level.as_ref() {
-    tracing_registry
-        .with_env_filter(EnvFilter::builder().parse_lossy("mirrord=trace"))
-        .init();
-    // } else {
-    //     tracing_registry.init();
-    // }
-    // }
+        if let Some(log_level) = config.internal_proxy.log_level.as_ref() {
+            tracing_registry
+                .with_env_filter(EnvFilter::builder().parse_lossy(log_level))
+                .init();
+        } else {
+            tracing_registry.init();
+        }
+    }
 
     // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
     // so we assume Linux can be higher and set to that.
