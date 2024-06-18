@@ -389,14 +389,7 @@ impl LayerConfig {
                 .target
                 .path
                 .as_ref()
-                .map(|target| {
-                    matches!(
-                        target,
-                        target::Target::Job(_)
-                            | target::Target::CronJob(_)
-                            | target::Target::StatefulSet(_)
-                    )
-                })
+                .map(|target| matches!(target, target::Target::Job(_) | target::Target::CronJob(_)))
                 .unwrap_or_default()
         {
             Err(ConfigError::TargetJobWithoutCopyTarget)?

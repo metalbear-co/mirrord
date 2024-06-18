@@ -23,7 +23,7 @@ use crate::{config::VerifyConfigArgs, error, LayerFileConfig};
 /// Changing the way [`Target::Targetless`] serializes would be cumbersome for two reasons:
 /// 1. It's used in a lot of places, e.g. CRDs
 /// 2. `schemars` crate does not support nested `[serde(untagged)]` tags
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 enum VerifiedTarget {
     #[serde(rename = "targetless")]
     Targetless,
@@ -58,7 +58,7 @@ impl From<Target> for VerifiedTarget {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct VerifiedTargetConfig {
     path: Option<VerifiedTarget>,
     namespace: Option<String>,
@@ -104,8 +104,8 @@ impl TargetType {
         match self {
             Self::Targetless | Self::Rollout => !config.copy_target.enabled,
             Self::Pod => !(config.copy_target.enabled && config.copy_target.scale_down),
-            Self::Job | Self::CronJob | Self::StatefulSet => config.copy_target.enabled,
-            Self::Deployment => true,
+            Self::Job | Self::CronJob => config.copy_target.enabled,
+            Self::Deployment | Self::StatefulSet => true,
         }
     }
 }
@@ -181,13 +181,36 @@ pub(super) async fn verify_config(VerifyConfigArgs { ide, path }: VerifyConfigAr
         });
 
     let verified = match layer_config {
-        Ok(config) => VerifiedConfig::Success {
-            config: config.target.into(),
-            warnings: config_context.get_warnings().to_owned(),
-            compatible_target_types: TargetType::all()
-                .filter(|tt| tt.compatible_with(&config.feature))
-                .collect(),
-        },
+        Ok(config) => {
+            let verified_target_config = VerifiedTargetConfig::from(config.target);
+
+            // Check if we're dealing with an operator-only target, and `config.operator`
+            // was set to `false` (operator purposefully disabled).
+            if let Some((verified_target, false)) = verified_target_config
+                .path
+                .clone()
+                .map(VerifiedTarget::from)
+                .zip(config.operator)
+                && matches!(verified_target, VerifiedTarget::StatefulSet(_))
+            {
+                VerifiedConfig::Fail {
+                    errors: vec![
+                        "StatefulSet target requires the mirrord-operator, but the config \
+                        was set to `operator: false`! Consider setting `operator: true` for \
+                        this target type."
+                            .to_string(),
+                    ],
+                }
+            } else {
+                VerifiedConfig::Success {
+                    config: verified_target_config,
+                    warnings: config_context.get_warnings().to_owned(),
+                    compatible_target_types: TargetType::all()
+                        .filter(|tt| tt.compatible_with(&config.feature))
+                        .collect(),
+                }
+            }
+        }
         Err(fail) => VerifiedConfig::Fail {
             errors: vec![fail.to_string()],
         },
