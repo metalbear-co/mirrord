@@ -74,14 +74,17 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         // Any path under the standard temp directory.
         &format!("^{}", env::temp_dir().to_string_lossy()),
         "^/$", // root
-        ].iter().map(|s| s.to_string()).collect();
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
 
-        if let Ok(cwd) = env::current_dir() {
-            patterns.push(format!("^.*{}.*$", cwd.to_string_lossy()));
-        }
-        if let Ok(executable) = env::current_exe() {
-            patterns.push(format!("^.*{}.*$", executable.to_string_lossy()));
-        }
+    if let Ok(cwd) = env::current_dir() {
+        patterns.push(format!("^.*{}.*$", cwd.to_string_lossy()));
+    }
+    if let Ok(executable) = env::current_exe() {
+        patterns.push(format!("^.*{}.*$", executable.to_string_lossy()));
+    }
 
     RegexSetBuilder::new(patterns)
 }
