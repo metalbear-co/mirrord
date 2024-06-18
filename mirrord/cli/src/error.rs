@@ -60,6 +60,10 @@ pub(crate) enum InternalProxyError {
     #[error("Failed to deserialize connect info `{0}`: {1}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     DeseralizeConnectInfo(String, serde_json::Error),
+
+    #[error("Initial ping pong with the agent failed: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    InitialPingPongFailed(String),
 }
 
 /// Errors that can occur when executing the `mirrord operator setup` command.

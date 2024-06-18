@@ -20,7 +20,12 @@ use std::{
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
-use mirrord_intproxy::{agent_conn::AgentConnection, error::IntProxyError, IntProxy};
+use mirrord_intproxy::{
+    agent_conn::{AgentConnectInfo, AgentConnection},
+    error::IntProxyError,
+    IntProxy,
+};
+use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use nix::{
     libc,
     sys::resource::{setrlimit, Resource},
@@ -134,9 +139,9 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
     // However, the parent process (`exec` or `ext` command) is free to exec/exit as soon as it
     // reads the TPC listener port from our stdout. We open our own connection with the agent
     // **before** this happens to ensure that the agent does not prematurely exit.
-    let agent_conn = AgentConnection::new(&config, agent_connect_info, &mut analytics)
-        .await
-        .map_err(IntProxyError::from)?;
+    // We also perform initial ping pong round to ensure that k8s runtime actually made connection
+    // with the agent (it's a must, because port forwarding may be done lazily).
+    let agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
 
     // Let it assign port for us then print it for the user.
     let listener = create_listen_socket().map_err(InternalProxyError::ListenerSetup)?;
@@ -153,4 +158,58 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
         .run(first_connection_timeout, consecutive_connection_timeout)
         .await
         .map_err(InternalProxyError::from)
+}
+
+/// Creates a connection with the agent and handles one round of ping pong.
+async fn connect_and_ping(
+    config: &LayerConfig,
+    connect_info: Option<AgentConnectInfo>,
+    analytics: &mut AnalyticsReporter,
+) -> Result<AgentConnection, InternalProxyError> {
+    let mut agent_conn = AgentConnection::new(config, connect_info, analytics)
+        .await
+        .map_err(IntProxyError::from)?;
+
+    agent_conn
+        .agent_tx
+        .send(ClientMessage::Ping)
+        .await
+        .map_err(|_| {
+            InternalProxyError::InitialPingPongFailed(
+                "agent closed connection before ping".to_string(),
+            )
+        })?;
+
+    loop {
+        match agent_conn.agent_rx.recv().await {
+            Some(DaemonMessage::Pong) => break Ok(agent_conn),
+            Some(DaemonMessage::LogMessage(LogMessage {
+                level: LogLevel::Error,
+                message,
+            })) => {
+                tracing::error!("agent log: {message}");
+            }
+            Some(DaemonMessage::LogMessage(LogMessage {
+                level: LogLevel::Warn,
+                message,
+            })) => {
+                tracing::warn!("agent log: {message}");
+            }
+            Some(DaemonMessage::Close(reason)) => {
+                break Err(InternalProxyError::InitialPingPongFailed(format!(
+                    "agent closed connection with message: {reason}"
+                )));
+            }
+            Some(message) => {
+                break Err(InternalProxyError::InitialPingPongFailed(format!(
+                    "agent sent an unexpected message: {message:?}"
+                )));
+            }
+            None => {
+                break Err(InternalProxyError::InitialPingPongFailed(
+                    "agent unexpectedly closed connection".to_string(),
+                ));
+            }
+        }
+    }
 }
