@@ -405,9 +405,12 @@ impl OperatorRole {
                         "pods/ephemeralcontainers".to_owned(),
                         "deployments".to_owned(),
                         "deployments/scale".to_owned(),
-                        "jobs".to_owned(),
                         "rollouts".to_owned(),
                         "rollouts/scale".to_owned(),
+                        "jobs".to_owned(),
+                        "cronjobs".to_owned(),
+                        "statefulsets".to_owned(),
+                        "statefulsets/scale".to_owned(),
                     ]),
                     verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
                     ..Default::default()
@@ -417,6 +420,7 @@ impl OperatorRole {
                     resources: Some(vec![
                         "deployments/scale".to_owned(),
                         "rollouts/scale".to_owned(),
+                        "statefulsets/scale".to_owned(),
                     ]),
                     verbs: vec!["patch".to_owned()],
                     ..Default::default()

@@ -258,38 +258,40 @@ impl OperatorApi {
         let operator = operator_api.fetch_operator().await?;
 
         // Warns the user if their license is close to expiring or fallback to OSS if expired
-        if let Some(days_until_expiration) =
+        let Some(days_until_expiration) =
             DateTime::from_naive_date(operator.spec.license.expire_at).days_until_expiration()
-        {
-            if days_until_expiration <= <DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS
-            {
-                let expiring_soon = (days_until_expiration > 0)
-                    .then(|| {
-                        format!(
-                            "soon, in {days_until_expiration} day{}",
-                            if days_until_expiration > 1 { "s" } else { "" }
-                        )
-                    })
-                    .unwrap_or_else(|| "today".to_string());
-
-                let expiring_message = format!("Operator license will expire {expiring_soon}!",);
-
-                progress.warning(&expiring_message);
-                warn!(expiring_message);
-            } else if operator.spec.license.name.contains("(Trial)") {
-                let good_validity_message =
-                    format!("Operator license is valid for {days_until_expiration} more days.");
-
-                progress.info(&good_validity_message);
-                info!(good_validity_message);
-            }
-        } else {
-            let no_license_message = "No valid license found for mirrord for Teams. Visit https://app.metalbear.co to purchase or renew your license.";
-
+        else {
+            let no_license_message = "No valid license found for mirrord for Teams, falling back to OSS usage. Visit https://app.metalbear.co to purchase or renew your license.";
             progress.warning(no_license_message);
             warn!(no_license_message);
 
             return Err(OperatorApiError::NoLicense);
+        };
+
+        let expires_soon =
+            days_until_expiration <= <DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS;
+        let is_trial = operator.spec.license.name.contains("(Trial)");
+
+        if is_trial && expires_soon {
+            let expiring_soon = (days_until_expiration > 0)
+                .then(|| {
+                    format!(
+                        "soon, in {days_until_expiration} day{}",
+                        if days_until_expiration > 1 { "s" } else { "" }
+                    )
+                })
+                .unwrap_or_else(|| "today".to_string());
+
+            let expiring_message = format!("Operator license will expire {expiring_soon}!",);
+
+            progress.warning(&expiring_message);
+            warn!(expiring_message);
+        } else if is_trial {
+            let good_validity_message =
+                format!("Operator license is valid for {days_until_expiration} more days.");
+
+            progress.info(&good_validity_message);
+            info!(good_validity_message);
         }
 
         Self::check_config(config, &operator)?;
