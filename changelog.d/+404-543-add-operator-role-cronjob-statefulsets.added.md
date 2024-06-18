@@ -1,0 +1,1 @@
+Add cronjobs and statefulsets(/scale) to operator role setup.
