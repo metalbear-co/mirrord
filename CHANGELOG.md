@@ -8,6 +8,50 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.106.0](https://github.com/metalbear-co/mirrord/tree/3.106.0) - 2024-06-18
+
+
+### Added
+
+- Add cronjobs and statefulsets(/scale) to operator role setup.
+- Allows a CronJob and StatefulSet to be used as a target when copy_target is
+  enabled.
+
+
+### Changed
+
+- Put the copy_target config example in the proper place on the main complete
+  config sample. [#2508](https://github.com/metalbear-co/mirrord/issues/2508)
+- Dependencies update
+
+
+### Fixed
+
+- A few changes to medschool - refactored the code, changed the algorithm
+  taking into consideration we don't ever drop fields.
+  [#1580](https://github.com/metalbear-co/mirrord/issues/1580)
+- Kill the intproxy child process when mirrord-cli execvp fails.
+  [#2386](https://github.com/metalbear-co/mirrord/issues/2386)
+- mirrord CLI no longer incorrectly warns the user about soon license
+  expiration (renewing licenses).
+  [#2526](https://github.com/metalbear-co/mirrord/issues/2526)
+- Downgrade certificate dependency to avoid loss of support for older
+  certificates
+- Fix json snippets in configuration docs by escaping backslashes and removing
+  trailing commas.
+- Fixed crash on missing cwd/exe
+- Fixed rustls initialization.
+
+
+### Internal
+
+- Fix race in CI e2e waiting for wrong job - test_agent instead of
+  test_agent_image
+- Removed VSCode settings from repo.
+- Update configuration docs
+- Use upstream kubers
+
+
 ## [3.105.0](https://github.com/metalbear-co/mirrord/tree/3.105.0) - 2024-06-12
 
 
