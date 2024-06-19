@@ -13,7 +13,9 @@ mod cli {
     use regex::Regex;
     use rstest::rstest;
 
-    use crate::utils::{config_dir, run_ls, run_verify_config, service_for_mirrord_ls, KubeService};
+    use crate::utils::{
+        config_dir, run_ls, run_verify_config, service_for_mirrord_ls, KubeService,
+    };
 
     /// Tests `verify-config` with `path` and `--ide` args, which should be:
     ///
