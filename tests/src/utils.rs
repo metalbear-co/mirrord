@@ -655,6 +655,8 @@ impl Drop for KubeService {
             self.namespace_guard
                 .as_mut()
                 .and_then(ResourceGuard::take_deleter),
+            self.stateful_set_guard.take_deleter(),
+            self.job_guard.take_deleter(),
         ]
         .into_iter()
         .flatten()
@@ -830,7 +832,7 @@ fn service_from_json(name: &str, service_type: &str) -> Service {
     .expect("Failed creating `service` from json spec!")
 }
 
-fn job_from_json(name: &str, image: &str) -> Service {
+fn job_from_json(name: &str, image: &str) -> Job {
     serde_json::from_value(json!({
         "apiVersion": "batch/v1",
         "kind": "Job",
@@ -986,7 +988,7 @@ pub async fn service(
 
     // `Job`
     let job = job_from_json(&name, &image);
-    let pod_guard =
+    let job_guard =
         ResourceGuard::create(job_api.clone(), name.to_string(), &job, delete_after_fail)
             .await
             .unwrap();
@@ -1014,7 +1016,7 @@ pub async fn service(
         pod_guard,
         service_guard,
         namespace_guard,
-        statetful_set_guard,
+        stateful_set_guard,
         job_guard,
     }
 }
