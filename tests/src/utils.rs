@@ -951,7 +951,7 @@ pub async fn service(
     }
 
     // `StatefulSet`
-    let stateful_set = stateful_set_from_json(&name, &image);
+    let stateful_set = stateful_set_from_json(&name, image);
     let stateful_set_guard = ResourceGuard::create(
         stateful_set_api.clone(),
         name.to_string(),
@@ -963,7 +963,7 @@ pub async fn service(
     watch_resource_exists(&stateful_set_api, &name).await;
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, &image);
+    let deployment = deployment_from_json(&name, image);
     let pod_guard = ResourceGuard::create(
         deployment_api.clone(),
         name.to_string(),
@@ -975,7 +975,7 @@ pub async fn service(
     watch_resource_exists(&deployment_api, &name).await;
 
     // `Service`
-    let service = service_from_json(&name, &service_type);
+    let service = service_from_json(&name, service_type);
     let service_guard = ResourceGuard::create(
         service_api.clone(),
         name.clone(),
@@ -987,7 +987,7 @@ pub async fn service(
     watch_resource_exists(&service_api, "default").await;
 
     // `Job`
-    let job = job_from_json(&name, &image);
+    let job = job_from_json(&name, image);
     let job_guard =
         ResourceGuard::create(job_api.clone(), name.to_string(), &job, delete_after_fail)
             .await
