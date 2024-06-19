@@ -847,9 +847,9 @@ fn job_from_json(name: &str, image: &str) -> Job {
         "spec": {
             "template": {
                 "spec": {
+                    "restartPolicy": "Never",
                     "containers": [
                         {
-                            "restartPolicy": "Never",
                             "name": &CONTAINER_NAME,
                             "image": image,
                             "ports": [
@@ -876,7 +876,6 @@ fn job_from_json(name: &str, image: &str) -> Job {
                 }
 
             },
-            "containers": []
         }
     }))
     .expect("Failed creating `service` from json spec!")
