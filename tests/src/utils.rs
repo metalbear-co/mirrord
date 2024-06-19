@@ -17,7 +17,8 @@ use fancy_regex::Regex;
 use futures::FutureExt;
 use futures_util::{future::BoxFuture, stream::TryStreamExt};
 use k8s_openapi::api::{
-    apps::v1::Deployment,
+    apps::v1::{Deployment, StatefulSet},
+    batch::v1::Job,
     core::v1::{Namespace, Pod, Service},
 };
 use kube::{
@@ -642,6 +643,8 @@ pub struct KubeService {
     pod_guard: ResourceGuard,
     service_guard: ResourceGuard,
     namespace_guard: Option<ResourceGuard>,
+    stateful_set_guard: ResourceGuard,
+    job_guard: ResourceGuard,
 }
 
 impl Drop for KubeService {
@@ -672,6 +675,210 @@ impl Drop for KubeService {
     }
 }
 
+fn stateful_set_from_json(name: &str, image: &str) -> StatefulSet {
+    serde_json::from_value(json!({
+        "apiVersion": "apps/v1",
+        "kind": "StatefulSet",
+        "metadata": {
+            "name": name,
+            "labels": {
+                "app": name,
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                "test-label-for-statefulsets": format!("statefulset-{name}")
+            }
+        },
+        "spec": {
+            "replicas": 1,
+            "selector": {
+                "matchLabels": {
+                    "app": &name
+                }
+            },
+            "template": {
+                "metadata": {
+                    "labels": {
+                        "app": &name,
+                        "test-label-for-pods": format!("pod-{name}"),
+                        format!("test-label-for-pods-{name}"): &name
+                    }
+                },
+                "spec": {
+                    "containers": [
+                        {
+                            "name": &CONTAINER_NAME,
+                            "image": image,
+                            "ports": [
+                                {
+                                    "containerPort": 80
+                                }
+                            ],
+                            "env": [
+                                {
+                                  "name": "MIRRORD_FAKE_VAR_FIRST",
+                                  "value": "mirrord.is.running"
+                                },
+                                {
+                                  "name": "MIRRORD_FAKE_VAR_SECOND",
+                                  "value": "7777"
+                                },
+                                {
+                                    "name": "MIRRORD_FAKE_VAR_THIRD",
+                                    "value": "foo=bar"
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        }
+    }))
+    .expect("Failed creating `statefulset` from json spec!")
+}
+
+fn deployment_from_json(name: &str, image: &str) -> Deployment {
+    serde_json::from_value(json!({
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+            "name": name,
+            "labels": {
+                "app": name,
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                "test-label-for-deployments": format!("deployment-{name}")
+            }
+        },
+        "spec": {
+            "replicas": 1,
+            "selector": {
+                "matchLabels": {
+                    "app": &name
+                }
+            },
+            "template": {
+                "metadata": {
+                    "labels": {
+                        "app": &name,
+                        "test-label-for-pods": format!("pod-{name}"),
+                        format!("test-label-for-pods-{name}"): &name
+                    }
+                },
+                "spec": {
+                    "containers": [
+                        {
+                            "name": &CONTAINER_NAME,
+                            "image": image,
+                            "ports": [
+                                {
+                                    "containerPort": 80
+                                }
+                            ],
+                            "env": [
+                                {
+                                  "name": "MIRRORD_FAKE_VAR_FIRST",
+                                  "value": "mirrord.is.running"
+                                },
+                                {
+                                  "name": "MIRRORD_FAKE_VAR_SECOND",
+                                  "value": "7777"
+                                },
+                                {
+                                    "name": "MIRRORD_FAKE_VAR_THIRD",
+                                    "value": "foo=bar"
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        }
+    }))
+    .expect("Failed creating `deployment` from json spec!")
+}
+
+fn service_from_json(name: &str, service_type: &str) -> Service {
+    serde_json::from_value(json!({
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+            "name": name,
+            "labels": {
+                "app": name,
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+            }
+        },
+        "spec": {
+            "type": service_type,
+            "selector": {
+                "app": name
+            },
+            "sessionAffinity": "None",
+            "ports": [
+                {
+                    "name": "udp",
+                    "protocol": "UDP",
+                    "port": 31415,
+                },
+                {
+                    "name": "http",
+                    "protocol": "TCP",
+                    "port": 80,
+                    "targetPort": 80,
+                },
+            ]
+        }
+    }))
+    .expect("Failed creating `service` from json spec!")
+}
+
+fn job_from_json(name: &str, image: &str) -> Service {
+    serde_json::from_value(json!({
+        "apiVersion": "batch/v1",
+        "kind": "Job",
+        "metadata": {
+            "name": name,
+            "labels": {
+                "app": name,
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                "test-label-for-jobs": format!("job-{name}")
+            }
+        },
+        "spec": {
+            "template": {
+                "spec": {
+                    "containers": [
+                        {
+                            "name": &CONTAINER_NAME,
+                            "image": image,
+                            "ports": [
+                                {
+                                    "containerPort": 80
+                                }
+                            ],
+                            "env": [
+                                {
+                                  "name": "MIRRORD_FAKE_VAR_FIRST",
+                                  "value": "mirrord.is.running"
+                                },
+                                {
+                                  "name": "MIRRORD_FAKE_VAR_SECOND",
+                                  "value": "7777"
+                                },
+                                {
+                                    "name": "MIRRORD_FAKE_VAR_THIRD",
+                                    "value": "foo=bar"
+                                }
+                            ],
+                        }
+                    ]
+                }
+
+            },
+            "containers": []
+        }
+    }))
+    .expect("Failed creating `service` from json spec!")
+}
+
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
 /// This behavior can be changed, see `FORCE_CLEANUP_ENV_NAME`.
@@ -690,8 +897,10 @@ pub async fn service(
 
     let kube_client = kube_client.await;
     let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
+    let stateful_set_api: Api<StatefulSet> = Api::namespaced(kube_client.clone(), namespace);
     let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
     let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
+    let job_api: Api<Job> = Api::namespaced(kube_client.clone(), namespace);
 
     let name = if randomize_name {
         format!("{}-{}", service_name, random_string())
@@ -739,63 +948,20 @@ pub async fn service(
         watch_resource_exists(&namespace_api, namespace).await;
     }
 
-    let deployment: Deployment = serde_json::from_value(json!({
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {
-            "name": &name,
-            "labels": {
-                "app": &name,
-                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-                "test-label-for-deployments": format!("deployment-{name}")
-            }
-        },
-        "spec": {
-            "replicas": 1,
-            "selector": {
-                "matchLabels": {
-                    "app": &name
-                }
-            },
-            "template": {
-                "metadata": {
-                    "labels": {
-                        "app": &name,
-                        "test-label-for-pods": format!("pod-{name}"),
-                        format!("test-label-for-pods-{name}"): &name
-                    }
-                },
-                "spec": {
-                    "containers": [
-                        {
-                            "name": &CONTAINER_NAME,
-                            "image": &image,
-                            "ports": [
-                                {
-                                    "containerPort": 80
-                                }
-                            ],
-                            "env": [
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_FIRST",
-                                  "value": "mirrord.is.running"
-                                },
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_SECOND",
-                                  "value": "7777"
-                                },
-                                {
-                                    "name": "MIRRORD_FAKE_VAR_THIRD",
-                                    "value": "foo=bar"
-                                }
-                            ],
-                        }
-                    ]
-                }
-            }
-        }
-    }))
+    // `StatefulSet`
+    let stateful_set = stateful_set_from_json(&name, &image);
+    let stateful_set_guard = ResourceGuard::create(
+        stateful_set_api.clone(),
+        name.to_string(),
+        &stateful_set,
+        delete_after_fail,
+    )
+    .await
     .unwrap();
+    watch_resource_exists(&stateful_set_api, &name).await;
+
+    // `Deployment`
+    let deployment = deployment_from_json(&name, &image);
     let pod_guard = ResourceGuard::create(
         deployment_api.clone(),
         name.to_string(),
@@ -806,38 +972,8 @@ pub async fn service(
     .unwrap();
     watch_resource_exists(&deployment_api, &name).await;
 
-    let service: Service = serde_json::from_value(json!({
-        "apiVersion": "v1",
-        "kind": "Service",
-        "metadata": {
-            "name": &name,
-            "labels": {
-                "app": &name,
-                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-            }
-        },
-        "spec": {
-            "type": &service_type,
-            "selector": {
-                "app": &name
-            },
-            "sessionAffinity": "None",
-            "ports": [
-                {
-                    "name": "udp",
-                    "protocol": "UDP",
-                    "port": 31415,
-                },
-                {
-                    "name": "http",
-                    "protocol": "TCP",
-                    "port": 80,
-                    "targetPort": 80,
-                },
-            ]
-        }
-    }))
-    .unwrap();
+    // `Service`
+    let service = service_from_json(&name, &service_type);
     let service_guard = ResourceGuard::create(
         service_api.clone(),
         name.clone(),
@@ -847,6 +983,14 @@ pub async fn service(
     .await
     .unwrap();
     watch_resource_exists(&service_api, "default").await;
+
+    // `Job`
+    let job = job_from_json(&name, &image);
+    let pod_guard =
+        ResourceGuard::create(job_api.clone(), name.to_string(), &job, delete_after_fail)
+            .await
+            .unwrap();
+    watch_resource_exists(&job_api, &name).await;
 
     let target = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
         .await
@@ -870,6 +1014,8 @@ pub async fn service(
         pod_guard,
         service_guard,
         namespace_guard,
+        statetful_set_guard,
+        job_guard,
     }
 }
 
