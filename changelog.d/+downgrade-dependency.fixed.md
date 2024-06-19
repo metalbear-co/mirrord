@@ -1,1 +1,0 @@
-Downgrade certificate dependency to avoid loss of support for older certificates

@@ -7,7 +7,7 @@ use regex::RegexSetBuilder;
 /// pattern in the `feature.fs.read_only` or `feature.fs.read_write` configuration field,
 /// respectively.
 pub fn regex_set_builder() -> RegexSetBuilder {
-    RegexSetBuilder::new([
+    let mut patterns: Vec<String> = [
         r"^.+\.so$",
         r"^.+\.d$",
         r"^.+\.pyc$",
@@ -73,10 +73,18 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r"^/Network",
         // Any path under the standard temp directory.
         &format!("^{}", env::temp_dir().to_string_lossy()),
-        // Any path with the current dir's whole path as a substring of its path.
-        &format!("^.*{}.*$", env::current_dir().unwrap().to_string_lossy()),
-        // Any path with the current exe's whole path as a substring of its path.
-        &format!("^.*{}.*$", env::current_exe().unwrap().to_string_lossy()),
         "^/$", // root
-    ])
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+
+    if let Ok(cwd) = env::current_dir() {
+        patterns.push(format!("^.*{}.*$", cwd.to_string_lossy()));
+    }
+    if let Ok(executable) = env::current_exe() {
+        patterns.push(format!("^.*{}.*$", executable.to_string_lossy()));
+    }
+
+    RegexSetBuilder::new(patterns)
 }
