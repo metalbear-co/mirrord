@@ -219,8 +219,8 @@ pub(super) enum OperatorCommand {
     /// Print operator status
     Status {
         /// Specify config file to use
-        #[arg(short = 'f')]
-        config_file: Option<String>,
+        #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
+        config_file: Option<PathBuf>,
     },
     /// Operator session management commands.
     ///
@@ -289,15 +289,15 @@ pub(super) struct ListTargetArgs {
     pub namespace: Option<String>,
 
     /// Specify config file to use
-    #[arg(short = 'f')]
-    pub config_file: Option<String>,
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
+    pub config_file: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
 pub(super) struct ExtensionExecArgs {
     /// Specify config file to use
-    #[arg(short = 'f')]
-    pub config_file: Option<String>,
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
+    pub config_file: Option<PathBuf>,
     /// Specify target
     #[arg(short = 't')]
     pub target: Option<String>,
@@ -335,7 +335,7 @@ pub(super) enum DiagnoseCommand {
     /// Check network connectivity and provide RTT (latency) statistics.
     Latency {
         /// Specify config file to use
-        #[arg(short = 'f')]
-        config_file: Option<String>,
+        #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
+        config_file: Option<PathBuf>,
     },
 }

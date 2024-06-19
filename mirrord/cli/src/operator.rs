@@ -1,10 +1,14 @@
-use std::{fs::File, path::PathBuf, time::Duration};
+use std::{
+    fs::File,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use futures::TryFutureExt;
 use kube::Api;
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
-    LayerFileConfig,
+    LayerConfig, LayerFileConfig,
 };
 use mirrord_kube::api::kubernetes::create_kube_api;
 use mirrord_operator::{
@@ -22,7 +26,7 @@ use tracing::warn;
 use self::session::SessionCommandHandler;
 use crate::{
     config::{OperatorArgs, OperatorCommand},
-    error::CliError,
+    error::{CliError, OperatorSetupError},
     util::remove_proxy_env,
     Result,
 };
@@ -54,7 +58,7 @@ async fn operator_setup(
     namespace: OperatorNamespace,
     license_key: Option<String>,
     license_path: Option<PathBuf>,
-) -> Result<()> {
+) -> Result<(), OperatorSetupError> {
     if !accept_tos {
         eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
 
@@ -81,9 +85,7 @@ async fn operator_setup(
     let image = match std::env::var("MIRRORD_OPERATOR_IMAGE") {
         Ok(image) => image,
         Err(_) => {
-            let version = get_last_version()
-                .await
-                .map_err(CliError::OperatorVersionCheckError)?;
+            let version = get_last_version().await?;
             format!("ghcr.io/metalbear-co/operator:{version}")
         }
     };
@@ -102,7 +104,9 @@ async fn operator_setup(
 
         match file {
             Some(path) => {
-                operator.to_writer(File::create(path).map_err(CliError::ManifestFileError)?)?
+                let writer =
+                    File::create(&path).map_err(|e| OperatorSetupError::OutputFileOpen(path, e))?;
+                operator.to_writer(writer)?;
             }
             None => operator.to_writer(std::io::stdout()).unwrap(), /* unwrap because failing to write to std out.. well.. */
         }
@@ -114,29 +118,31 @@ async fn operator_setup(
 }
 
 #[tracing::instrument(level = "trace", ret)]
-async fn get_status_api(config: Option<String>) -> Result<Api<MirrordOperatorCrd>> {
-    let kube_api = if let Some(config_path) = config {
+async fn get_status_api(config: Option<&Path>) -> Result<Api<MirrordOperatorCrd>> {
+    let layer_config = if let Some(config) = config {
         let mut cfg_context = ConfigContext::default();
-        let config = LayerFileConfig::from_path(config_path)?.generate_config(&mut cfg_context)?;
-        if !config.use_proxy {
-            remove_proxy_env();
-        }
-        create_kube_api(
-            config.accept_invalid_certificates,
-            config.kubeconfig,
-            config.kube_context,
-        )
+        LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?
     } else {
-        create_kube_api(false, None, None)
+        LayerConfig::from_env()?
+    };
+
+    if !layer_config.use_proxy {
+        remove_proxy_env();
     }
+
+    let kube_api = create_kube_api(
+        layer_config.accept_invalid_certificates,
+        layer_config.kubeconfig,
+        layer_config.kube_context,
+    )
     .await
-    .map_err(CliError::KubernetesApiFailed)?;
+    .map_err(CliError::CreateKubeApiFailed)?;
 
     Ok(Api::all(kube_api))
 }
 
 #[tracing::instrument(level = "trace", ret)]
-async fn operator_status(config: Option<String>) -> Result<()> {
+async fn operator_status(config: Option<&Path>) -> Result<()> {
     let mut progress = ProgressTracker::from_env("Operator Status");
 
     let status_api = get_status_api(config).await?;
@@ -287,8 +293,10 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             namespace,
             license_key,
             license_path,
-        } => operator_setup(accept_tos, file, namespace, license_key, license_path).await,
-        OperatorCommand::Status { config_file } => operator_status(config_file).await,
+        } => operator_setup(accept_tos, file, namespace, license_key, license_path)
+            .await
+            .map_err(CliError::from),
+        OperatorCommand::Status { config_file } => operator_status(config_file.as_deref()).await,
         OperatorCommand::Session(session_command) => {
             SessionCommandHandler::new(session_command)
                 .and_then(SessionCommandHandler::handle)

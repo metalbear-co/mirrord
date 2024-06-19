@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt, hash::Hash, marker::PhantomData, slice::Join, str::FromStr};
+use std::{collections::HashSet, fmt, hash::Hash, marker::PhantomData, ops::Deref, str::FromStr};
 
 use schemars::JsonSchema;
 use serde::{
@@ -58,42 +58,13 @@ pub enum VecOrSingle<T> {
     Multiple(Vec<T>),
 }
 
-impl<T> VecOrSingle<T> {
-    pub fn as_slice(&self) -> &[T] {
+impl<T> Deref for VecOrSingle<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
         match self {
             Self::Single(v) => std::slice::from_ref(v),
             Self::Multiple(v) => v.as_slice(),
-        }
-    }
-
-    pub fn join<Separator>(self, sep: Separator) -> <[T] as Join<Separator>>::Output
-    where
-        [T]: Join<Separator>,
-    {
-        match self {
-            VecOrSingle::Single(val) => [val].join(sep),
-            VecOrSingle::Multiple(vals) => vals.join(sep),
-        }
-    }
-
-    pub fn to_vec(self) -> Vec<T> {
-        match self {
-            VecOrSingle::Single(val) => vec![val],
-            VecOrSingle::Multiple(vals) => vals,
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        match self {
-            VecOrSingle::Single(_) => 1,
-            VecOrSingle::Multiple(vals) => vals.len(),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        match self {
-            VecOrSingle::Single(_) => false,
-            VecOrSingle::Multiple(vals) => vals.is_empty(),
         }
     }
 }

@@ -98,7 +98,7 @@ impl HttpFilterConfig {
     }
 
     pub fn get_filtered_ports(&self) -> Option<&[u16]> {
-        self.is_filter_set().then(|| self.ports.as_slice())
+        self.is_filter_set().then(|| &*self.ports.0)
     }
 }
 

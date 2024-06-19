@@ -116,19 +116,19 @@ impl SessionCommandHandler {
         .map(|status| {
             if status.is_failure() {
                 sub_progress.failure(Some(&format!(
-                    "`{command}` failed due to `{}` with code `{}`!",
-                    status.message, status.code
+                    "`{command}` failed with code {}: {}",
+                    status.code, status.message
                 )));
                 progress.failure(Some("Session operation failed!"));
 
                 Err(OperatorApiError::StatusFailure {
-                    operation: command.to_string(),
+                    operation: OperatorOperation::SessionManagement,
                     status: Box::new(status),
                 })
             } else {
                 sub_progress.success(Some(&format!(
-                    "`{command}` finished successfully with `{}` with code `{}`.",
-                    status.message, status.code
+                    "`{command}` finished successfully with code {}: {}",
+                    status.code, status.message
                 )));
                 progress.success(Some("Session operation is completed."));
 
