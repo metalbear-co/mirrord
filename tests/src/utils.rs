@@ -18,7 +18,6 @@ use futures::FutureExt;
 use futures_util::{future::BoxFuture, stream::TryStreamExt};
 use k8s_openapi::api::{
     apps::v1::{Deployment, StatefulSet},
-    batch::v1::Job,
     core::v1::{Namespace, Pod, Service},
 };
 use kube::{
@@ -644,7 +643,6 @@ pub struct KubeService {
     service_guard: ResourceGuard,
     namespace_guard: Option<ResourceGuard>,
     stateful_set_guard: Option<ResourceGuard>,
-    job_guard: Option<ResourceGuard>,
 }
 
 impl Drop for KubeService {
@@ -656,9 +654,6 @@ impl Drop for KubeService {
                 .as_mut()
                 .and_then(ResourceGuard::take_deleter),
             self.stateful_set_guard
-                .as_mut()
-                .and_then(ResourceGuard::take_deleter),
-            self.job_guard
                 .as_mut()
                 .and_then(ResourceGuard::take_deleter),
         ]
@@ -836,54 +831,6 @@ fn service_from_json(name: &str, service_type: &str) -> Service {
     .expect("Failed creating `service` from json spec!")
 }
 
-fn job_from_json(name: &str, image: &str) -> Job {
-    serde_json::from_value(json!({
-        "apiVersion": "batch/v1",
-        "kind": "Job",
-        "metadata": {
-            "name": name,
-            "labels": {
-                "app": name,
-                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-                "test-label-for-jobs": format!("job-{name}")
-            }
-        },
-        "spec": {
-            "template": {
-                "spec": {
-                    "restartPolicy": "Never",
-                    "containers": [
-                        {
-                            "name": &CONTAINER_NAME,
-                            "image": image,
-                            "ports": [
-                                {
-                                    "containerPort": 80
-                                }
-                            ],
-                            "env": [
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_FIRST",
-                                  "value": "mirrord.is.running"
-                                },
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_SECOND",
-                                  "value": "7777"
-                                },
-                                {
-                                    "name": "MIRRORD_FAKE_VAR_THIRD",
-                                    "value": "foo=bar"
-                                }
-                            ],
-                        }
-                    ]
-                }
-
-            },
-        }
-    }))
-    .expect("Failed creating `service` from json spec!")
-}
 
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
@@ -999,7 +946,6 @@ pub async fn service(
         service_guard,
         namespace_guard,
         stateful_set_guard: None,
-        job_guard: None,
     }
 }
 
@@ -1019,7 +965,6 @@ pub async fn service_for_mirrord_ls(
     let stateful_set_api: Api<StatefulSet> = Api::namespaced(kube_client.clone(), namespace);
     let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
     let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
-    let job_api: Api<Job> = Api::namespaced(kube_client.clone(), namespace);
 
     let name = if randomize_name {
         format!("{}-{}", service_name, random_string())
@@ -1103,14 +1048,6 @@ pub async fn service_for_mirrord_ls(
     .unwrap();
     watch_resource_exists(&service_api, "default").await;
 
-    // `Job`
-    let job = job_from_json(&name, image);
-    let job_guard =
-        ResourceGuard::create(job_api.clone(), name.to_string(), &job, delete_after_fail)
-            .await
-            .unwrap();
-    watch_resource_exists(&job_api, &name).await;
-
     let target = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
         .await
         .unwrap();
@@ -1134,7 +1071,6 @@ pub async fn service_for_mirrord_ls(
         service_guard,
         namespace_guard,
         stateful_set_guard: Some(stateful_set_guard),
-        job_guard: Some(job_guard),
     }
 }
 /// Service that should only be reachable from inside the cluster, as a communication partner
