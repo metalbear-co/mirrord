@@ -655,8 +655,10 @@ impl Drop for KubeService {
             self.namespace_guard
                 .as_mut()
                 .and_then(ResourceGuard::take_deleter),
-            self.stateful_set_guard.as_mut().take_deleter(),
-            self.job_guard.as_mut().take_deleter(),
+            self.stateful_set_guard.as_mut()
+                .and_then(ResourceGuard::take_deleter),
+            self.job_guard.as_mut()
+                .and_then(ResourceGuard::take_deleter),
         ]
         .into_iter()
         .flatten()
