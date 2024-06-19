@@ -40,7 +40,7 @@ async fn ping(
             )),
         };
 
-        break result;
+        return result;
     }
 }
 

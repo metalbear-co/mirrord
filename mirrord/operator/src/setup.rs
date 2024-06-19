@@ -64,7 +64,7 @@ pub enum SetupWriteError {
     #[error(transparent)]
     YamlSerialization(#[from] serde_yaml::Error),
     #[error(transparent)]
-    WriteError(#[from] std::io::Error),
+    Io(#[from] std::io::Error),
 }
 
 type Result<T, E = SetupWriteError> = std::result::Result<T, E>;

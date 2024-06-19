@@ -363,7 +363,7 @@ impl MirrordExecution {
                 )),
             };
 
-            break result;
+            return result;
         }
     }
 
