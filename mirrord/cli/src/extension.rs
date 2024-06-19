@@ -46,7 +46,7 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch)
         // Set canoncialized path to config file, in case forks/children are in different
         // working directories.
         let full_path = std::fs::canonicalize(config_file)
-            .map_err(|e| CliError::ConfigFilePathError(config_file.into(), e))?;
+            .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.into(), e))?;
         std::env::set_var("MIRRORD_CONFIG_FILE", full_path.clone());
         env.insert(
             "MIRRORD_CONFIG_FILE".into(),

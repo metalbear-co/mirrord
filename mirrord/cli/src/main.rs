@@ -379,7 +379,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
         // Set canoncialized path to config file, in case forks/children are in different
         // working directories.
         let full_path = std::fs::canonicalize(config_file)
-            .map_err(|e| CliError::ConfigFilePathError(config_file.to_owned(), e))?;
+            .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.clone(), e))?;
         std::env::set_var("MIRRORD_CONFIG_FILE", full_path);
     }
 
@@ -409,7 +409,7 @@ async fn list_pods(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<
         layer_config.kube_context.clone(),
     )
     .await
-    .map_err(CliError::KubernetesApiFailed)?;
+    .map_err(CliError::CreateKubeApiFailed)?;
 
     let namespace = args
         .namespace
@@ -421,7 +421,7 @@ async fn list_pods(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<
         namespace,
     }
     .all_open_source()
-    .await?;
+    .await;
 
     Ok(pods
         .iter()
@@ -473,7 +473,7 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
 
     let mut targets = match &layer_config.operator {
         Some(true) | None => {
-            let operator_targets = try { OperatorApi::list_targets(&layer_config).await? };
+            let operator_targets = OperatorApi::list_targets(&layer_config).await;
             match operator_targets {
                 Ok(targets) => {
                     // adjust format to match non-operator output
@@ -490,10 +490,14 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
                         })
                         .collect::<Vec<String>>()
                 }
-                Err(e) => {
+
+                Err(error) => {
                     if layer_config.operator.is_some() {
-                        error!(?e, "Operator is enabled but failed to list targets");
-                        return Err(e);
+                        error!(
+                            ?error,
+                            "Operator was explicitly enabled and we failed to list targets"
+                        );
+                        return Err(error.into());
                     }
                     list_pods(&layer_config, args).await?
                 }
@@ -557,6 +561,7 @@ fn main() -> miette::Result<()> {
             Commands::Teams => teams::navigate_to_intro().await,
             Commands::Diagnose(args) => diagnose_command(*args).await?,
         };
+
         Ok(())
     });
 
