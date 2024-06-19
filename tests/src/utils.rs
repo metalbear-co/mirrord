@@ -1001,6 +1001,7 @@ pub async fn service(
     }
 }
 
+#[fixture]
 pub async fn service_for_mirrord_ls(
     #[default("default")] namespace: &str,
     #[default("NodePort")] service_type: &str,
