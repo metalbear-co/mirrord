@@ -849,6 +849,7 @@ fn job_from_json(name: &str, image: &str) -> Job {
                 "spec": {
                     "containers": [
                         {
+                            "restartPolicy": "Never",
                             "name": &CONTAINER_NAME,
                             "image": image,
                             "ports": [
