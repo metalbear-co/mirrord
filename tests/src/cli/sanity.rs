@@ -97,8 +97,8 @@ mod cli {
     /// Tests for the `mirrord ls` command
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn mirrord_ls(#[future] service: KubeService) {
-        let service = service.await;
+    pub async fn mirrord_ls(#[future] service_for_mirrord_ls: KubeService) {
+        let service = service_for_mirrord_ls.await;
         let mut process = run_ls::<false>(None, None).await;
         let res = process.wait().await;
         assert!(res.success());
