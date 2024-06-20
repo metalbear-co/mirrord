@@ -1,5 +1,6 @@
 #![feature(slice_concat_trait)]
 #![feature(lazy_cell)]
+#![feature(let_chains)]
 #![warn(clippy::indexing_slicing)]
 //! <!--${internal}-->
 //! To generate the `mirrord-schema.json` file see
@@ -327,6 +328,14 @@ impl LayerConfig {
     /// `mirrord verify-config`. Turns some _target missing_ errors into warnings, as the target can
     /// be selected after `verify-config` is run.
     pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
+        if let Some(ref target) = self.target.path
+            && matches!(target, target::Target::Unknown)
+        {
+            Err(ConfigError::InvalidTarget(
+                "Trying to use an `unknown` target is not supported!".to_string(),
+            ))?
+        }
+
         if self.agent.ephemeral && self.agent.namespace.is_some() {
             context.add_warning(
                 "Agent namespace is ignored when using an ephemeral container for the agent."
