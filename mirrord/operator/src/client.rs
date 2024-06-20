@@ -589,7 +589,7 @@ impl OperatorApi {
     }
 
     /// List targets using the operator
-    #[tracing::instrument(level = "info", ret)]
+    #[tracing::instrument(level = "trace", ret)]
     pub async fn list_targets(config: &LayerConfig) -> Result<Vec<TargetCrd>> {
         let client = create_kube_api(
             config.accept_invalid_certificates,
