@@ -256,6 +256,10 @@ pub enum Target {
     Targetless,
 
     /// <!--${internal}-->
+    /// Target that we do not know about in this version of mirrord.
+    ///
+    /// It's here to help with forwards compatibility of operator targets, for the case
+    /// where we need to add a new target there, we won't be breaking older mirrord-clis.
     #[serde(deserialize_with = "deserialize_ignore_any")]
     Unknown,
 }
