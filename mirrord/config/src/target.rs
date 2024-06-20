@@ -303,6 +303,8 @@ impl Target {
             Target::Deployment(dep) => dep.target_type(),
             Target::Rollout(roll) => roll.target_type(),
             Target::Job(job) => job.target_type(),
+            Target::CronJob(cron_job) => cron_job.target_type(),
+            Target::StatefulSet(stateful_set) => stateful_set.target_type(),
         }
     }
 }
