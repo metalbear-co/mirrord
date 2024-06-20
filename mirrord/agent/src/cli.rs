@@ -23,7 +23,7 @@ pub struct Args {
     pub communication_timeout: u16,
 
     /// Interface to use
-    #[arg(short = 'i', long)]
+    #[arg(short = 'i', long, env = AGENT_NETWORK_INTERFACE_ENV)]
     pub network_interface: Option<String>,
 
     /// Return an error after accepting the first client connection, in order to test agent error

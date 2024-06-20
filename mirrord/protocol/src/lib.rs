@@ -100,3 +100,5 @@ impl FromStr for MeshVendor {
 /// This may not be the best place to put this name, but this is the only crate shared by
 /// `mirrord-kube` and `mirrord-agent`.
 pub const AGENT_OPERATOR_CERT_ENV: &str = "MIRRORD_AGENT_OPERATOR_CERT";
+
+pub const AGENT_NETWORK_INTERFACE_ENV: &str = "MIRRORD_AGENT_INTERFACE";
