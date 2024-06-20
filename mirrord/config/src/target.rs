@@ -7,6 +7,7 @@ use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
 use schemars::{gen::SchemaGenerator, schema::SchemaObject, JsonSchema};
 use serde::{Deserialize, Serialize};
+use serde_with::rust::deserialize_ignore_any;
 use stateful_set::StatefulSetTarget;
 
 use self::{deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, rollout::RolloutTarget};
@@ -253,6 +254,10 @@ pub enum Target {
     /// <!--${internal}-->
     /// Spawn a new pod.
     Targetless,
+
+    /// <!--${internal}-->
+    #[serde(deserialize_with = "deserialize_ignore_any")]
+    Unknown,
 }
 
 impl FromStr for Target {
@@ -275,23 +280,6 @@ impl FromStr for Target {
             _ => Err(ConfigError::InvalidTarget(format!(
                 "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
-        }
-    }
-}
-
-impl Target {
-    /// Get the target name - pod name, deployment name, rollout name..
-    pub fn get_target_name(&self) -> String {
-        match self {
-            Target::Deployment(target) => target.deployment.clone(),
-            Target::Pod(target) => target.pod.clone(),
-            Target::Rollout(target) => target.rollout.clone(),
-            Target::Job(target) => target.job.clone(),
-            Target::CronJob(target) => target.cron_job.clone(),
-            Target::StatefulSet(target) => target.stateful_set.clone(),
-            Target::Targetless => {
-                unreachable!("this shouldn't happen - called from operator on a flow where it's not targetless.")
-            }
         }
     }
 }
@@ -351,6 +339,7 @@ impl fmt::Display for Target {
             Target::Job(target) => target.fmt_display(f),
             Target::CronJob(target) => target.fmt_display(f),
             Target::StatefulSet(target) => target.fmt_display(f),
+            Target::Unknown => write!(f, "unknown"),
         }
     }
 }
@@ -365,6 +354,7 @@ impl TargetDisplay for Target {
             Target::Job(target) => target.target_type(),
             Target::CronJob(target) => target.target_type(),
             Target::StatefulSet(target) => target.target_type(),
+            Target::Unknown => "unknown",
         }
     }
 
@@ -377,6 +367,7 @@ impl TargetDisplay for Target {
             Target::Job(target) => target.target_name(),
             Target::CronJob(target) => target.target_name(),
             Target::StatefulSet(target) => target.target_name(),
+            Target::Unknown => "unknown",
         }
     }
 
@@ -389,6 +380,7 @@ impl TargetDisplay for Target {
             Target::Job(target) => target.container_name(),
             Target::CronJob(target) => target.container_name(),
             Target::StatefulSet(target) => target.container_name(),
+            Target::Unknown => None,
         }
     }
 }
@@ -405,6 +397,7 @@ bitflags::bitflags! {
         const JOB = 32;
         const CRON_JOB = 64;
         const STATEFUL_SET = 128;
+        const UNKNOWN = 256;
     }
 }
 
@@ -454,6 +447,9 @@ impl CollectAnalytics for &TargetConfig {
                 }
                 Target::Targetless => {
                     // Targetless is essentially 0, so no need to set any flags.
+                }
+                Target::Unknown => {
+                    flags |= TargetAnalyticFlags::UNKNOWN;
                 }
             }
         }
