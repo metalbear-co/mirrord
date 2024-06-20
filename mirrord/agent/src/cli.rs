@@ -1,7 +1,7 @@
 #![deny(missing_docs)]
 
 use clap::{Parser, Subcommand};
-use mirrord_protocol::{MeshVendor, AGENT_OPERATOR_CERT_ENV};
+use mirrord_protocol::{MeshVendor, AGENT_NETWORK_INTERFACE_ENV, AGENT_OPERATOR_CERT_ENV};
 
 const DEFAULT_RUNTIME: &str = "containerd";
 
