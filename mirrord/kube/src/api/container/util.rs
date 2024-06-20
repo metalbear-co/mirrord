@@ -56,11 +56,8 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &&ContainerParams) -> Vec<E
         ));
     }
 
-    if let Some(interface) = agent.network_interface {
-        env.push((
-            AGENT_NETWORK_INTERFACE_ENV.to_string(),
-            interface.to_string(),
-        ));
+    if let Some(interface) = agent.network_interface.as_ref() {
+        env.push((AGENT_NETWORK_INTERFACE_ENV.to_string(), interface.into()));
     }
     if let Some(timeout) = agent.dns.timeout {
         env.push(("MIRRORD_AGENT_DNS_TIMEOUT".to_string(), timeout.to_string()));
