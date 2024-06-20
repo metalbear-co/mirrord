@@ -47,6 +47,8 @@ impl TargetCrd {
             Target::Pod(target) => ("pod", &target.pod, &target.container),
             Target::Rollout(target) => ("rollout", &target.rollout, &target.container),
             Target::Job(target) => ("job", &target.job, &target.container),
+            Target::CronJob(target) => ("cronjob", &target.cron_job, &target.container),
+            Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
         };
         if let Some(container) = container {

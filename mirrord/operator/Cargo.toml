@@ -24,6 +24,9 @@ client = [
   "dep:base64",
   "dep:bincode",
   "dep:http",
+  "dep:http-body-util",
+  "dep:hyper",
+  "dep:hyper-util",
   "dep:futures",
   "dep:mirrord-analytics",
   "dep:mirrord-auth",
@@ -59,6 +62,9 @@ bincode = { version = "2.0.0-rc.2", features = ["serde"], optional = true }
 bytes = { workspace = true, optional = true }
 chrono = { version = "0.4", features = ["clock", "serde"] }
 http = { version = "1", optional = true }
+http-body-util = { workspace = true, optional = true }
+hyper = { workspace = true, optional = true }
+hyper-util = { workspace = true, optional = true }
 k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, features = ["derive", "ws"], optional = true }
 futures = { workspace = true, optional = true }

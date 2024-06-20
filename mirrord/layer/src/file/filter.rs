@@ -79,7 +79,7 @@ pub struct FileFilter {
 
 impl FileFilter {
     fn make_regex_set(patterns: Option<VecOrSingle<String>>) -> Result<RegexSet, regex::Error> {
-        RegexSetBuilder::new(patterns.map(VecOrSingle::to_vec).unwrap_or_default())
+        RegexSetBuilder::new(patterns.as_deref().map(<[_]>::to_vec).unwrap_or_default())
             .case_insensitive(true)
             .build()
     }

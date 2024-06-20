@@ -19,6 +19,7 @@ use std::{collections::HashSet, ops::Not, path::Path};
 
 use config::{ConfigContext, ConfigError, MirrordConfig};
 use experimental::ExperimentalConfig;
+use feature::network::outgoing::OutgoingFilterConfig;
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -136,7 +137,7 @@ use crate::{
 ///         "ignore_localhost": false,
 ///         "unix_streams": "bear.+"
 ///       },
-///       "dns": false,
+///       "dns": false
 ///     },
 ///     "copy_target": {
 ///       "scale_down": false
@@ -333,6 +334,18 @@ impl LayerConfig {
             );
         }
 
+        if matches!(
+            self.feature.network.outgoing.filter,
+            Some(OutgoingFilterConfig::Remote(_))
+        ) && !self.feature.network.dns
+        {
+            context.add_warning(
+                "The mirrord outgoing traffic filter includes host names to be connected remotely, \
+                but the remote DNS feature is disabled, so the addresses of these hosts will be \
+                resolved locally. Consider enabling the remote DNS resolution feature.".to_string(),
+            );
+        }
+
         if self
             .feature
             .network
@@ -389,7 +402,14 @@ impl LayerConfig {
                 .target
                 .path
                 .as_ref()
-                .map(|target| matches!(target, target::Target::Job(_)))
+                .map(|target| {
+                    matches!(
+                        target,
+                        target::Target::Job(_)
+                            | target::Target::CronJob(_)
+                            | target::Target::StatefulSet(_)
+                    )
+                })
                 .unwrap_or_default()
         {
             Err(ConfigError::TargetJobWithoutCopyTarget)?
@@ -461,6 +481,13 @@ impl LayerConfig {
                 a different port than the remote one."
                     .into(),
             );
+        }
+
+        if self.feature.env.exclude.is_some() && self.feature.env.include.is_some() {
+            return Err(ConfigError::Conflict(
+                "cannot use both `include` and `exclude` filters for environment variables"
+                    .to_string(),
+            ));
         }
 
         Ok(())

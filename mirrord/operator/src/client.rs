@@ -77,9 +77,6 @@ impl Display for OperatorOperation {
 
 #[derive(Debug, Error)]
 pub enum OperatorApiError {
-    #[error("invalid target: {reason}")]
-    InvalidTarget { reason: String },
-
     #[error("failed to build a websocket connect request: {0}")]
     ConnectRequestBuildError(HttpError),
 
@@ -98,16 +95,13 @@ pub enum OperatorApiError {
         operator_version: String,
     },
 
-    #[error(
-        "Tried executing {operation}, but operator returned with `{}` and code `{}``!",
-        status.reason, status.code
-    )]
+    #[error("{operation} failed with code {}: {}", status.code, status.reason)]
     StatusFailure {
-        operation: String,
+        operation: OperatorOperation,
         status: Box<kube::core::Status>,
     },
 
-    #[error("Operator has expired license, falling back to OSS usage.")]
+    #[error("mirrord operator license expired")]
     NoLicense,
 }
 
@@ -262,38 +256,40 @@ impl OperatorApi {
         let operator = operator_api.fetch_operator().await?;
 
         // Warns the user if their license is close to expiring or fallback to OSS if expired
-        if let Some(days_until_expiration) =
+        let Some(days_until_expiration) =
             DateTime::from_naive_date(operator.spec.license.expire_at).days_until_expiration()
-        {
-            if days_until_expiration <= <DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS
-            {
-                let expiring_soon = (days_until_expiration > 0)
-                    .then(|| {
-                        format!(
-                            "soon, in {days_until_expiration} day{}",
-                            if days_until_expiration > 1 { "s" } else { "" }
-                        )
-                    })
-                    .unwrap_or_else(|| "today".to_string());
-
-                let expiring_message = format!("Operator license will expire {expiring_soon}!",);
-
-                progress.warning(&expiring_message);
-                warn!(expiring_message);
-            } else if operator.spec.license.name.contains("(Trial)") {
-                let good_validity_message =
-                    format!("Operator license is valid for {days_until_expiration} more days.");
-
-                progress.info(&good_validity_message);
-                info!(good_validity_message);
-            }
-        } else {
+        else {
             let no_license_message = "No valid license found for mirrord for Teams, falling back to OSS usage. Visit https://app.metalbear.co to purchase or renew your license.";
-
             progress.warning(no_license_message);
             warn!(no_license_message);
 
             return Err(OperatorApiError::NoLicense);
+        };
+
+        let expires_soon =
+            days_until_expiration <= <DateTime<Utc> as LicenseValidity>::CLOSE_TO_EXPIRATION_DAYS;
+        let is_trial = operator.spec.license.name.contains("(Trial)");
+
+        if is_trial && expires_soon {
+            let expiring_soon = (days_until_expiration > 0)
+                .then(|| {
+                    format!(
+                        "soon, in {days_until_expiration} day{}",
+                        if days_until_expiration > 1 { "s" } else { "" }
+                    )
+                })
+                .unwrap_or_else(|| "today".to_string());
+
+            let expiring_message = format!("Operator license will expire {expiring_soon}!",);
+
+            progress.warning(&expiring_message);
+            warn!(expiring_message);
+        } else if is_trial {
+            let good_validity_message =
+                format!("Operator license is valid for {days_until_expiration} more days.");
+
+            progress.info(&good_validity_message);
+            info!(good_validity_message);
         }
 
         Self::check_config(config, &operator)?;
@@ -543,14 +539,12 @@ impl OperatorApi {
                 .map_err(OperatorApiError::ConnectRequestBuildError)?
         };
 
-        let connection =
-            self.client
-                .connect(request)
-                .await
-                .map_err(|error| OperatorApiError::KubeError {
-                    error,
-                    operation: OperatorOperation::WebsocketConnection,
-                })?;
+        let connection = upgrade::connect_ws(&self.client, request)
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::WebsocketConnection,
+            })?;
 
         let (tx, rx) =
             ConnectionWrapper::wrap(connection, session_info.metadata.protocol_version.clone());
@@ -738,5 +732,163 @@ where
         let _ = self.connection.send(Message::Close(None)).await;
 
         Ok(())
+    }
+}
+
+mod upgrade {
+    //! Code copied from [`kube::client`] and adjusted.
+    //!
+    //! Just like original [`Client::connect`] function, [`connect_ws`] creates a
+    //! WebSockets connection. However, original function swallows
+    //! [`ErrorResponse`] sent by the operator and returns flat
+    //! [`UpgradeConnectionError`]. [`connect_ws`] attempts to
+    //! recover the [`ErrorResponse`] - if operator response code is not
+    //! [`StatusCode::SWITCHING_PROTOCOLS`], it tries to read
+    //! response body and deserialize it.
+
+    use base64::Engine;
+    use http::{HeaderValue, Request, Response, StatusCode};
+    use http_body_util::BodyExt;
+    use hyper_util::rt::TokioIo;
+    use kube::{
+        client::{Body, UpgradeConnectionError},
+        core::ErrorResponse,
+        Client, Error, Result,
+    };
+    use tokio_tungstenite::{tungstenite::protocol::Role, WebSocketStream};
+
+    const WS_PROTOCOL: &str = "v4.channel.k8s.io";
+
+    // Verify upgrade response according to RFC6455.
+    // Based on `tungstenite` and added subprotocol verification.
+    async fn verify_response(res: Response<Body>, key: &HeaderValue) -> Result<Response<Body>> {
+        let status = res.status();
+
+        if status != StatusCode::SWITCHING_PROTOCOLS {
+            if status.is_client_error() || status.is_server_error() {
+                let error_response = res
+                    .into_body()
+                    .collect()
+                    .await
+                    .ok()
+                    .map(|body| body.to_bytes())
+                    .and_then(|body_bytes| {
+                        serde_json::from_slice::<ErrorResponse>(&body_bytes).ok()
+                    });
+
+                if let Some(error_response) = error_response {
+                    return Err(Error::Api(error_response));
+                }
+            }
+
+            return Err(Error::UpgradeConnection(
+                UpgradeConnectionError::ProtocolSwitch(status),
+            ));
+        }
+
+        let headers = res.headers();
+        if !headers
+            .get(http::header::UPGRADE)
+            .and_then(|h| h.to_str().ok())
+            .map(|h| h.eq_ignore_ascii_case("websocket"))
+            .unwrap_or(false)
+        {
+            return Err(Error::UpgradeConnection(
+                UpgradeConnectionError::MissingUpgradeWebSocketHeader,
+            ));
+        }
+
+        if !headers
+            .get(http::header::CONNECTION)
+            .and_then(|h| h.to_str().ok())
+            .map(|h| h.eq_ignore_ascii_case("Upgrade"))
+            .unwrap_or(false)
+        {
+            return Err(Error::UpgradeConnection(
+                UpgradeConnectionError::MissingConnectionUpgradeHeader,
+            ));
+        }
+
+        let accept_key = tokio_tungstenite::tungstenite::handshake::derive_accept_key(key.as_ref());
+        if !headers
+            .get(http::header::SEC_WEBSOCKET_ACCEPT)
+            .map(|h| h == &accept_key)
+            .unwrap_or(false)
+        {
+            return Err(Error::UpgradeConnection(
+                UpgradeConnectionError::SecWebSocketAcceptKeyMismatch,
+            ));
+        }
+
+        // Make sure that the server returned the correct subprotocol.
+        if !headers
+            .get(http::header::SEC_WEBSOCKET_PROTOCOL)
+            .map(|h| h == WS_PROTOCOL)
+            .unwrap_or(false)
+        {
+            return Err(Error::UpgradeConnection(
+                UpgradeConnectionError::SecWebSocketProtocolMismatch,
+            ));
+        }
+
+        Ok(res)
+    }
+
+    /// Generate a random key for the `Sec-WebSocket-Key` header.
+    /// This must be nonce consisting of a randomly selected 16-byte value in base64.
+    fn sec_websocket_key() -> HeaderValue {
+        let random: [u8; 16] = rand::random();
+        base64::engine::general_purpose::STANDARD
+            .encode(random)
+            .parse()
+            .expect("should be valid")
+    }
+
+    pub async fn connect_ws(
+        client: &Client,
+        request: Request<Vec<u8>>,
+    ) -> kube::Result<WebSocketStream<TokioIo<hyper::upgrade::Upgraded>>> {
+        let (mut parts, body) = request.into_parts();
+        parts.headers.insert(
+            http::header::CONNECTION,
+            HeaderValue::from_static("Upgrade"),
+        );
+        parts
+            .headers
+            .insert(http::header::UPGRADE, HeaderValue::from_static("websocket"));
+        parts.headers.insert(
+            http::header::SEC_WEBSOCKET_VERSION,
+            HeaderValue::from_static("13"),
+        );
+        let key = sec_websocket_key();
+        parts
+            .headers
+            .insert(http::header::SEC_WEBSOCKET_KEY, key.clone());
+        // Use the binary subprotocol v4, to get JSON `Status` object in `error` channel (3).
+        // There's no official documentation about this protocol, but it's described in
+        // [`k8s.io/apiserver/pkg/util/wsstream/conn.go`](https://git.io/JLQED).
+        // There's a comment about v4 and `Status` object in
+        // [`kublet/cri/streaming/remotecommand/httpstream.go`](https://git.io/JLQEh).
+        parts.headers.insert(
+            http::header::SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static(WS_PROTOCOL),
+        );
+
+        let res = client
+            .send(Request::from_parts(parts, Body::from(body)))
+            .await?;
+        let res = verify_response(res, &key).await?;
+        match hyper::upgrade::on(res).await {
+            Ok(upgraded) => {
+                Ok(
+                    WebSocketStream::from_raw_socket(TokioIo::new(upgraded), Role::Client, None)
+                        .await,
+                )
+            }
+
+            Err(e) => Err(Error::UpgradeConnection(
+                UpgradeConnectionError::GetPendingUpgrade(e),
+            )),
+        }
     }
 }

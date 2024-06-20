@@ -58,7 +58,7 @@ where
     };
     if !file_path.exists() {
         let mut file = File::create(&file_path)
-            .map_err(|e| CliError::LayerExtractFailed(file_path.clone(), e))?;
+            .map_err(|e| CliError::LayerExtractError(file_path.clone(), e))?;
         let bytes = include_bytes!(env!("MIRRORD_LAYER_FILE"));
         file.write_all(bytes).unwrap();
         debug!("Extracted library file to {:?}", &file_path);

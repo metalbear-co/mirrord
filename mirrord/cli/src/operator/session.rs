@@ -91,47 +91,47 @@ impl SessionCommandHandler {
                 .await
                 .map(|either| either.right()),
         }
-            .map_err(|kube_fail| match kube_fail {
-                // The random `reason` we get when the operator returns from a "missing route".
-                kube::Error::Api(ErrorResponse { code, reason, .. })
+        .map_err(|kube_fail| match kube_fail {
+            // The random `reason` we get when the operator returns from a "missing route".
+            kube::Error::Api(ErrorResponse { code, reason, .. })
                 if code == 404 && reason.contains("parse") =>
-                    {
-                        OperatorApiError::UnsupportedFeature {
-                            feature: NewOperatorFeature::SessionManagement,
-                            operator_version,
-                        }
-                    }
-                // Something actually went wrong.
-                other => OperatorApiError::KubeError {
-                    error: other,
-                    operation: OperatorOperation::SessionManagement,
-                },
-            })
-            // Finish the progress report here if we have an error response.
-            .inspect_err(|fail| {
-                sub_progress.failure(Some(&fail.to_string()));
-                progress.failure(Some("Session management operation failed!"));
-            })?
-            // The kube api interaction was successful, but we might still fail the operation
-            // itself, so let's check the `Status` and report.
-            .map(|status| {
-                if status.is_failure() {
-                    sub_progress.failure(Some(&format!(
-                        "`{command}` failed due to `{}` with code `{}`!",
-                        status.message, status.code
-                    )));
-                    progress.failure(Some("Session operation failed!"));
+            {
+                OperatorApiError::UnsupportedFeature {
+                    feature: NewOperatorFeature::SessionManagement,
+                    operator_version,
+                }
+            }
+            // Something actually went wrong.
+            other => OperatorApiError::KubeError {
+                error: other,
+                operation: OperatorOperation::SessionManagement,
+            },
+        })
+        // Finish the progress report here if we have an error response. 
+        .inspect_err(|fail| {
+            sub_progress.failure(Some(&fail.to_string()));
+            progress.failure(Some("Session management operation failed!"));
+        })?
+        // The kube api interaction was successful, but we might still fail the operation
+        // itself, so let's check the `Status` and report.
+        .map(|status| {
+            if status.is_failure() {
+                sub_progress.failure(Some(&format!(
+                    "`{command}` failed with code {}: {}",
+                    status.code, status.message
+                )));
+                progress.failure(Some("Session operation failed!"));
 
-                    Err(OperatorApiError::StatusFailure {
-                        operation: command.to_string(),
-                        status: Box::new(status),
-                    })
-                } else {
-                    sub_progress.success(Some(&format!(
-                        "`{command}` finished successfully with `{}` with code `{}`.",
-                        status.message, status.code
-                    )));
-                    progress.success(Some("Session operation is completed."));
+                Err(OperatorApiError::StatusFailure {
+                    operation: OperatorOperation::SessionManagement,
+                    status: Box::new(status),
+                })
+            } else {
+                sub_progress.success(Some(&format!(
+                    "`{command}` finished successfully with code {}: {}",
+                    status.code, status.message
+                )));
+                progress.success(Some("Session operation is completed."));
 
                     Ok(())
                 }

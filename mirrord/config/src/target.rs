@@ -3,9 +3,11 @@ use std::{
     str::FromStr,
 };
 
+use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
 use schemars::{gen::SchemaGenerator, schema::SchemaObject, JsonSchema};
 use serde::{Deserialize, Serialize};
+use stateful_set::StatefulSetTarget;
 
 use self::{deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, rollout::RolloutTarget};
 use crate::{
@@ -17,10 +19,12 @@ use crate::{
     util::string_or_struct_option,
 };
 
+pub mod cron_job;
 pub mod deployment;
 pub mod job;
 pub mod pod;
 pub mod rollout;
+pub mod stateful_set;
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
@@ -184,6 +188,8 @@ mirrord-layer failed to parse the provided target!
     >> deploy/<deployment-name>[/container/container-name]
     >> pod/<pod-name>[/container/container-name]
     >> job/<job-name>[/container/container-name]
+    >> cronjob/<cronjob-name>[/container/container-name]
+    >> statefulset/<statefulset-name>[/container/container-name]
 
 - Note:
     >> specifying container name is optional, defaults to the first container in the provided pod/deployment target.
@@ -207,6 +213,8 @@ mirrord-layer failed to parse the provided target!
 /// - `container/{sample-container}`;
 /// - `containername/{sample-container}`.
 /// - `job/{sample-job}`;
+/// - `cronjob/{sample-cronjob}`;
+/// - `statefulset/{sample-statefulset}`;
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum Target {
@@ -229,6 +237,20 @@ pub enum Target {
     Job(job::JobTarget),
 
     /// <!--${internal}-->
+    /// Targets a
+    /// [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/).
+    ///
+    /// Only supported when `copy_target` is enabled.
+    CronJob(cron_job::CronJobTarget),
+
+    /// <!--${internal}-->
+    /// Targets a
+    /// [StatefulSet](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/).
+    ///
+    /// Only supported when `copy_target` is enabled.
+    StatefulSet(stateful_set::StatefulSetTarget),
+
+    /// <!--${internal}-->
     /// Spawn a new pod.
     Targetless,
 }
@@ -248,6 +270,8 @@ impl FromStr for Target {
             Some("rollout") => rollout::RolloutTarget::from_split(&mut split).map(Target::Rollout),
             Some("pod") => pod::PodTarget::from_split(&mut split).map(Target::Pod),
             Some("job") => job::JobTarget::from_split(&mut split).map(Target::Job),
+            Some("cronjob") => cron_job::CronJobTarget::from_split(&mut split).map(Target::CronJob),
+            Some("statefulset") => stateful_set::StatefulSetTarget::from_split(&mut split).map(Target::StatefulSet),
             _ => Err(ConfigError::InvalidTarget(format!(
                 "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
@@ -259,10 +283,12 @@ impl Target {
     /// Get the target name - pod name, deployment name, rollout name..
     pub fn get_target_name(&self) -> String {
         match self {
-            Target::Deployment(deployment) => deployment.deployment.clone(),
-            Target::Pod(pod) => pod.pod.clone(),
-            Target::Rollout(rollout) => rollout.rollout.clone(),
-            Target::Job(job) => job.job.clone(),
+            Target::Deployment(target) => target.deployment.clone(),
+            Target::Pod(target) => target.pod.clone(),
+            Target::Rollout(target) => target.rollout.clone(),
+            Target::Job(target) => target.job.clone(),
+            Target::CronJob(target) => target.cron_job.clone(),
+            Target::StatefulSet(target) => target.stateful_set.clone(),
             Target::Targetless => {
                 unreachable!("this shouldn't happen - called from operator on a flow where it's not targetless.")
             }
@@ -323,15 +349,19 @@ impl_target_display!(PodTarget, pod);
 impl_target_display!(DeploymentTarget, deployment);
 impl_target_display!(RolloutTarget, rollout);
 impl_target_display!(JobTarget, job);
+impl_target_display!(CronJobTarget, cron_job);
+impl_target_display!(StatefulSetTarget, stateful_set);
 
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Target::Targetless => write!(f, "targetless"),
-            Target::Pod(pod) => pod.fmt_display(f),
-            Target::Deployment(dep) => dep.fmt_display(f),
-            Target::Rollout(roll) => roll.fmt_display(f),
-            Target::Job(job) => job.fmt_display(f),
+            Target::Pod(target) => target.fmt_display(f),
+            Target::Deployment(target) => target.fmt_display(f),
+            Target::Rollout(target) => target.fmt_display(f),
+            Target::Job(target) => target.fmt_display(f),
+            Target::CronJob(target) => target.fmt_display(f),
+            Target::StatefulSet(target) => target.fmt_display(f),
         }
     }
 }
@@ -340,30 +370,36 @@ impl TargetDisplay for Target {
     fn target_type(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
-            Target::Deployment(x) => x.target_type(),
-            Target::Pod(x) => x.target_type(),
-            Target::Rollout(x) => x.target_type(),
-            Target::Job(x) => x.target_type(),
+            Target::Deployment(target) => target.target_type(),
+            Target::Pod(target) => target.target_type(),
+            Target::Rollout(target) => target.target_type(),
+            Target::Job(target) => target.target_type(),
+            Target::CronJob(target) => target.target_type(),
+            Target::StatefulSet(target) => target.target_type(),
         }
     }
 
     fn target_name(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
-            Target::Deployment(x) => x.target_name(),
-            Target::Pod(x) => x.target_name(),
-            Target::Rollout(x) => x.target_name(),
-            Target::Job(x) => x.target_name(),
+            Target::Deployment(target) => target.target_name(),
+            Target::Pod(target) => target.target_name(),
+            Target::Rollout(target) => target.target_name(),
+            Target::Job(target) => target.target_name(),
+            Target::CronJob(target) => target.target_name(),
+            Target::StatefulSet(target) => target.target_name(),
         }
     }
 
     fn container_name(&self) -> Option<&String> {
         match self {
             Target::Targetless => None,
-            Target::Deployment(x) => x.container_name(),
-            Target::Pod(x) => x.container_name(),
-            Target::Rollout(x) => x.container_name(),
-            Target::Job(x) => x.container_name(),
+            Target::Deployment(target) => target.container_name(),
+            Target::Pod(target) => target.container_name(),
+            Target::Rollout(target) => target.container_name(),
+            Target::Job(target) => target.container_name(),
+            Target::CronJob(target) => target.container_name(),
+            Target::StatefulSet(target) => target.container_name(),
         }
     }
 }
@@ -378,6 +414,8 @@ bitflags::bitflags! {
         const CONTAINER = 8;
         const ROLLOUT = 16;
         const JOB = 32;
+        const CRON_JOB = 64;
+        const STATEFUL_SET = 128;
     }
 }
 
@@ -389,27 +427,39 @@ impl CollectAnalytics for &TargetConfig {
         }
         if let Some(path) = &self.path {
             match path {
-                Target::Pod(pod) => {
+                Target::Pod(target) => {
                     flags |= TargetAnalyticFlags::POD;
-                    if pod.container.is_some() {
+                    if target.container.is_some() {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }
                 }
-                Target::Deployment(deployment) => {
+                Target::Deployment(target) => {
                     flags |= TargetAnalyticFlags::DEPLOYMENT;
-                    if deployment.container.is_some() {
+                    if target.container.is_some() {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }
                 }
-                Target::Rollout(rollout) => {
+                Target::Rollout(target) => {
                     flags |= TargetAnalyticFlags::ROLLOUT;
-                    if rollout.container.is_some() {
+                    if target.container.is_some() {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }
                 }
-                Target::Job(job) => {
+                Target::Job(target) => {
                     flags |= TargetAnalyticFlags::JOB;
-                    if job.container.is_some() {
+                    if target.container.is_some() {
+                        flags |= TargetAnalyticFlags::CONTAINER;
+                    }
+                }
+                Target::CronJob(target) => {
+                    flags |= TargetAnalyticFlags::CRON_JOB;
+                    if target.container.is_some() {
+                        flags |= TargetAnalyticFlags::CONTAINER;
+                    }
+                }
+                Target::StatefulSet(target) => {
+                    flags |= TargetAnalyticFlags::STATEFUL_SET;
+                    if target.container.is_some() {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }
                 }

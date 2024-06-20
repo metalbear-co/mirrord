@@ -1,11 +1,10 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
     time::Duration,
 };
 
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
-use mirrord_config::LayerConfig;
+use mirrord_config::{config::ConfigError, LayerConfig};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel};
@@ -16,7 +15,7 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{Child, ChildStderr, Command},
     select,
-    sync::RwLock,
+    sync::mpsc::{self, UnboundedReceiver},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, trace, warn};
@@ -61,8 +60,7 @@ where
 {
     progress: &'a P,
     cancellation_token: CancellationToken,
-    // option so we can `.take()` it in Drop
-    messages: Arc<RwLock<Vec<String>>>,
+    stderr_rx: UnboundedReceiver<String>,
 }
 
 impl<'a, P> Drop for DropProgress<'a, P>
@@ -71,12 +69,10 @@ where
 {
     fn drop(&mut self) {
         self.cancellation_token.cancel();
-        match self.messages.try_read() {
-            Ok(messages) => messages.iter().for_each(|msg| {
-                self.progress
-                    .warning(&format!("internal proxy stderr: {}", &msg));
-            }),
-            Err(e) => error!("internal proxy lock stderr: {e}"),
+
+        while let Ok(line) = self.stderr_rx.try_recv() {
+            self.progress
+                .warning(format!("internal proxy stderr: {line}").as_str());
         }
     }
 }
@@ -87,41 +83,46 @@ async fn watch_stderr<P>(stderr: ChildStderr, progress: &P) -> DropProgress<P>
 where
     P: Progress + Send + Sync,
 {
-    let our_token = CancellationToken::new();
-    let caller_token = our_token.clone();
-    let messages = Arc::new(RwLock::new(Vec::new()));
-    let caller_messages = messages.clone();
+    let cancellation_token = CancellationToken::new();
+    let stderr_reader_token = cancellation_token.clone();
+
+    let (stderr_tx, stderr_rx) = mpsc::unbounded_channel();
 
     tokio::spawn(async move {
         let mut stderr = BufReader::new(stderr).lines();
+
         loop {
             select! {
-                    _ = our_token.cancelled() => {
-                        trace!("watch_stderr cancelled");
-                        break;
-                    }
-                    line = stderr.next_line() => {
-                        match line {
-                            Ok(Some(line)) => {
-                                debug!("watch_stderr got line: {line}",);
-                                messages.write().await.push(line.to_string());
-                            },
-                            Ok(None) => {
-                                trace!("watch_stderr finished");
+                _ = stderr_reader_token.cancelled() => {
+                    trace!("watch_stderr cancelled");
+                    break;
+                }
+
+                line = stderr.next_line() => {
+                    match line {
+                        Ok(Some(line)) => {
+                            debug!("watch_stderr got line {line:?}",);
+                            if stderr_tx.send(line).is_err() {
                                 break;
                             }
-                            Err(e) => {
-                                trace!("watch_stderr error: {e}");
-                                break;
-                            }
+                        },
+                        Ok(None) => {
+                            trace!("watch_stderr finished");
+                            break;
+                        }
+                        Err(error) => {
+                            trace!("watch_stderr error: {error}");
+                            break;
                         }
                     }
+                }
             }
         }
     });
+
     DropProgress {
-        cancellation_token: caller_token,
-        messages: caller_messages,
+        cancellation_token,
+        stderr_rx,
         progress,
     }
 }
@@ -185,29 +186,33 @@ impl MirrordExecution {
             serde_json::to_string(&connect_info)?,
         );
 
-        let mut proxy_process = proxy_command
-            .spawn()
-            .map_err(CliError::InternalProxyExecutionFailed)?;
+        let mut proxy_process = proxy_command.spawn().map_err(|e| {
+            CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
+        })?;
 
-        let stderr = proxy_process
-            .stderr
-            .take()
-            .ok_or(CliError::InternalProxyStderrError)?;
+        let stderr = proxy_process.stderr.take().expect("stderr was piped");
         let _stderr_guard = watch_stderr(stderr, progress).await;
 
-        let stdout = proxy_process
-            .stdout
-            .take()
-            .ok_or(CliError::InternalProxyStdoutError)?;
+        let stdout = proxy_process.stdout.take().expect("stdout was piped");
 
         let port: u16 = BufReader::new(stdout)
             .lines()
             .next_line()
             .await
-            .map_err(CliError::InternalProxyReadError)?
-            .ok_or(CliError::InternalProxyPortReadError)?
+            .map_err(|e| {
+                CliError::InternalProxySpawnError(format!("failed to read proxy stdout: {e}"))
+            })?
+            .ok_or_else(|| {
+                CliError::InternalProxySpawnError(
+                    "proxy did not print port number to stdout".to_string(),
+                )
+            })?
             .parse()
-            .map_err(CliError::InternalProxyPortParseError)?;
+            .map_err(|e| {
+                CliError::InternalProxySpawnError(format!(
+                    "failed to parse port number printed by proxy: {e}"
+                ))
+            })?;
 
         // Provide details for layer to connect to agent via internal proxy
         env_vars.insert(
@@ -279,8 +284,11 @@ impl MirrordExecution {
                 .clone()
                 .map(|include| include.join(";")),
         ) {
-            (Some(exclude), Some(include)) => {
-                return Err(CliError::InvalidEnvConfig(include, exclude))
+            (Some(..), Some(..)) => {
+                return Err(CliError::ConfigError(ConfigError::Conflict(
+                    "cannot use both `include` and `exclude` filters for environment variables"
+                        .to_string(),
+                )));
             }
             (Some(exclude), None) => (HashSet::from(EnvVars(exclude)), HashSet::new()),
             (None, Some(include)) => (HashSet::new(), HashSet::from(EnvVars(include))),
@@ -296,11 +304,7 @@ impl MirrordExecution {
                 Self::get_remote_env(connection, env_vars_exclude, env_vars_include),
             )
             .await
-            .map_err(|_| {
-                CliError::InitialCommFailed(
-                    "Timeout waiting for remote environment variables.".to_string(),
-                )
-            })??;
+            .map_err(|_| CliError::RemoteEnvFetchFailed("timeout".to_string()))??;
             env_vars.extend(remote_env);
             if let Some(overrides) = &config.feature.env.r#override {
                 env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
@@ -311,6 +315,7 @@ impl MirrordExecution {
     }
 
     /// Retrieve remote environment from the connected agent.
+    #[tracing::instrument(level = "trace", skip_all)]
     async fn get_remote_env(
         connection: &mut AgentConnection,
         env_vars_filter: HashSet<String>,
@@ -324,32 +329,42 @@ impl MirrordExecution {
             }))
             .await
             .map_err(|_| {
-                CliError::InitialCommFailed(
-                    "Failed to request remote environment variables.".to_string(),
-                )
+                CliError::RemoteEnvFetchFailed("agent unexpectedly closed connection".to_string())
             })?;
 
-        let remote_env = loop {
-            match connection.receiver.recv().await {
+        loop {
+            let result = match connection.receiver.recv().await {
                 Some(DaemonMessage::GetEnvVarsResponse(Ok(remote_env))) => {
-                    trace!("DaemonMessage::GetEnvVarsResponse {:#?}!", remote_env.len());
-                    break remote_env;
+                    tracing::trace!(?remote_env, "Agent responded with the remote env");
+                    Ok(remote_env)
                 }
-                Some(DaemonMessage::LogMessage(msg)) => match msg.level {
-                    LogLevel::Error => error!("Agent log: {}", msg.message),
-                    LogLevel::Warn => warn!("Agent log: {}", msg.message),
-                },
-                Some(DaemonMessage::Close(msg)) => Err(CliError::InitialCommFailed(format!(
-                    "Connection closed with message: `{msg}`"
-                )))?,
-                Some(msg) => Err(CliError::InvalidMessage(format!("{msg:#?}")))?,
-                None => Err(CliError::InitialCommFailed(
-                    "Agent connection unexpectedly closed".to_string(),
-                ))?,
-            }
-        };
+                Some(DaemonMessage::GetEnvVarsResponse(Err(error))) => {
+                    tracing::error!(?error, "Agent responded with an error");
+                    Err(CliError::RemoteEnvFetchFailed(format!(
+                        "agent responded with an error: {error}"
+                    )))
+                }
+                Some(DaemonMessage::LogMessage(msg)) => {
+                    match msg.level {
+                        LogLevel::Error => error!("Agent log: {}", msg.message),
+                        LogLevel::Warn => warn!("Agent log: {}", msg.message),
+                    }
 
-        Ok(remote_env)
+                    continue;
+                }
+                Some(DaemonMessage::Close(msg)) => Err(CliError::RemoteEnvFetchFailed(format!(
+                    "agent closed connection with message: {msg}"
+                ))),
+                Some(msg) => Err(CliError::RemoteEnvFetchFailed(format!(
+                    "agent responded with an unexpected message: {msg:?}"
+                ))),
+                None => Err(CliError::RemoteEnvFetchFailed(
+                    "agent unexpectedly closed connection".to_string(),
+                )),
+            };
+
+            return result;
+        }
     }
 
     /// Wait for the internal proxy to exit.
@@ -362,6 +377,7 @@ impl MirrordExecution {
             .wait()
             .await
             .map_err(CliError::InternalProxyWaitError)?;
+
         Ok(())
     }
 

@@ -12,30 +12,31 @@
 
 use std::{
     env,
-    io::Write,
+    fs::OpenOptions,
+    io::{self, Write},
     net::{Ipv4Addr, SocketAddrV4},
     time::Duration,
 };
 
-use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
+use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
+    error::IntProxyError,
     IntProxy,
 };
-use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel};
+use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use nix::{
     libc,
     sys::resource::{setrlimit, Resource},
 };
-use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle};
-use tokio_util::sync::CancellationToken;
-use tracing::{error, log::trace, warn};
+use tokio::net::TcpListener;
+use tracing::warn;
 use tracing_subscriber::EnvFilter;
 
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
-    error::{CliError, InternalProxySetupError, Result},
+    error::{InternalProxyError, Result},
 };
 
 unsafe fn redirect_fd_to_dev_null(fd: libc::c_int) {
@@ -44,11 +45,11 @@ unsafe fn redirect_fd_to_dev_null(fd: libc::c_int) {
     libc::close(devnull_fd);
 }
 
-unsafe fn detach_io() -> Result<()> {
+unsafe fn detach_io() -> Result<(), InternalProxyError> {
     // Create a new session for the proxy process, detaching from the original terminal.
     // This makes the process not to receive signals from the "mirrord" process or it's parent
     // terminal fixes some side effects such as https://github.com/metalbear-co/mirrord/issues/1232
-    nix::unistd::setsid().map_err(InternalProxySetupError::SetSidError)?;
+    nix::unistd::setsid().map_err(InternalProxyError::SetSid)?;
 
     // flush before redirection
     {
@@ -63,11 +64,8 @@ unsafe fn detach_io() -> Result<()> {
 
 /// Print the port for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.
-fn print_port(listener: &TcpListener) -> Result<()> {
-    let port = listener
-        .local_addr()
-        .map_err(InternalProxySetupError::LocalPortError)?
-        .port();
+fn print_port(listener: &TcpListener) -> io::Result<()> {
+    let port = listener.local_addr()?.port();
     println!("{port}\n");
     Ok(())
 }
@@ -77,55 +75,41 @@ fn print_port(listener: &TcpListener) -> Result<()> {
 /// the proxy is under heavy load.
 /// <https://github.com/metalbear-co/mirrord/issues/1716#issuecomment-1663736500>
 /// in macOS backlog is documented to be hardcoded limited to 128.
-fn create_listen_socket() -> Result<TcpListener, InternalProxySetupError> {
+fn create_listen_socket() -> io::Result<TcpListener> {
     let socket = socket2::Socket::new(
         socket2::Domain::IPV4,
         socket2::Type::STREAM,
         Some(socket2::Protocol::TCP),
-    )
-    .map_err(InternalProxySetupError::ListenError)?;
+    )?;
 
-    socket
-        .bind(&socket2::SockAddr::from(SocketAddrV4::new(
-            Ipv4Addr::LOCALHOST,
-            0,
-        )))
-        .map_err(InternalProxySetupError::ListenError)?;
-    socket
-        .listen(1024)
-        .map_err(InternalProxySetupError::ListenError)?;
-
-    socket
-        .set_nonblocking(true)
-        .map_err(InternalProxySetupError::ListenError)?;
+    socket.bind(&socket2::SockAddr::from(SocketAddrV4::new(
+        Ipv4Addr::LOCALHOST,
+        0,
+    )))?;
+    socket.listen(1024)?;
+    socket.set_nonblocking(true)?;
 
     // socket2 -> std -> tokio
-    TcpListener::from_std(socket.into()).map_err(InternalProxySetupError::ListenError)
-}
-
-fn get_agent_connect_info() -> Result<Option<AgentConnectInfo>> {
-    let Ok(var) = env::var(AGENT_CONNECT_INFO_ENV_KEY) else {
-        return Ok(None);
-    };
-
-    serde_json::from_str(&var).map_err(|e| CliError::ConnectInfoLoadFailed(var, e))
+    TcpListener::from_std(socket.into())
 }
 
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
-pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
+pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError> {
     let config = LayerConfig::from_env()?;
 
-    if let Some(ref log_destination) = config.internal_proxy.log_destination {
-        let output_file = std::fs::OpenOptions::new()
+    if let Some(log_destination) = config.internal_proxy.log_destination.as_ref() {
+        let output_file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(log_destination)
-            .map_err(CliError::OpenIntProxyLogFile)?;
+            .map_err(|e| InternalProxyError::OpenLogFile(log_destination.clone(), e))?;
+
         let tracing_registry = tracing_subscriber::fmt()
             .with_writer(output_file)
             .with_ansi(false);
-        if let Some(ref log_level) = config.internal_proxy.log_level {
+
+        if let Some(log_level) = config.internal_proxy.log_level.as_ref() {
             tracing_registry
                 .with_env_filter(EnvFilter::builder().parse_lossy(log_level))
                 .init();
@@ -136,29 +120,32 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
 
     // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
     // so we assume Linux can be higher and set to that.
-    if let Err(err) = setrlimit(Resource::RLIMIT_NOFILE, 12288, 12288) {
-        warn!(?err, "Failed to set the file descriptor limit");
+    if let Err(error) = setrlimit(Resource::RLIMIT_NOFILE, 12288, 12288) {
+        warn!(?error, "Failed to set the file descriptor limit");
     }
 
-    let agent_connect_info = get_agent_connect_info()?;
-
+    let agent_connect_info = match env::var(AGENT_CONNECT_INFO_ENV_KEY) {
+        Ok(var) => {
+            let deserialized = serde_json::from_str(&var)
+                .map_err(|e| InternalProxyError::DeseralizeConnectInfo(var, e))?;
+            Some(deserialized)
+        }
+        Err(..) => None,
+    };
     let mut analytics = AnalyticsReporter::new(config.telemetry, watch);
     (&config).collect_analytics(analytics.get_mut());
 
+    // The agent is spawned and our parent process already established a connection.
+    // However, the parent process (`exec` or `ext` command) is free to exec/exit as soon as it
+    // reads the TPC listener port from our stdout. We open our own connection with the agent
+    // **before** this happens to ensure that the agent does not prematurely exit.
+    // We also perform initial ping pong round to ensure that k8s runtime actually made connection
+    // with the agent (it's a must, because port forwarding may be done lazily).
+    let agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
+
     // Let it assign port for us then print it for the user.
-    let listener = create_listen_socket()?;
-
-    // Create a main connection, that will be held until proxy is closed.
-    // This will guarantee agent staying alive and will enable us to
-    // make the agent close on last connection close immediately (will help in tests)
-    let main_connection = connect_and_ping(&config, agent_connect_info.clone(), &mut analytics)
-        .await
-        .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
-
-    let (main_connection_cancellation_token, main_connection_task_join) =
-        create_ping_loop(main_connection);
-
-    print_port(&listener)?;
+    let listener = create_listen_socket().map_err(InternalProxyError::ListenerSetup)?;
+    print_port(&listener).map_err(InternalProxyError::ListenerSetup)?;
 
     unsafe {
         detach_io()?;
@@ -167,101 +154,62 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<()> {
     let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);
     let consecutive_connection_timeout = Duration::from_secs(config.internal_proxy.idle_timeout);
 
-    IntProxy::new(&config, agent_connect_info, listener)
-        .await?
+    IntProxy::new_with_connection(agent_conn, listener)
         .run(first_connection_timeout, consecutive_connection_timeout)
-        .await?;
-
-    main_connection_cancellation_token.cancel();
-
-    trace!("intproxy joining main connection task");
-    match main_connection_task_join.await {
-        Ok(Err(err)) => Err(err.into()),
-        Err(err) => {
-            error!("internal_proxy connection panicked {err}");
-
-            Err(InternalProxySetupError::AgentClosedConnection.into())
-        }
-        _ => Ok(()),
-    }
+        .await
+        .map_err(InternalProxyError::from)
 }
 
-/// Connect and send ping - this is useful when working using k8s
-/// port forward since it only creates the connection after
-/// sending the first message
+/// Creates a connection with the agent and handles one round of ping pong.
 async fn connect_and_ping(
     config: &LayerConfig,
-    agent_connect_info: Option<AgentConnectInfo>,
+    connect_info: Option<AgentConnectInfo>,
     analytics: &mut AnalyticsReporter,
-) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>)> {
-    let AgentConnection {
-        agent_tx,
-        mut agent_rx,
-    } = AgentConnection::new(config, agent_connect_info, analytics).await?;
-    ping(&agent_tx, &mut agent_rx).await?;
-    Ok((agent_tx, agent_rx))
-}
+) -> Result<AgentConnection, InternalProxyError> {
+    let mut agent_conn = AgentConnection::new(config, connect_info, analytics)
+        .await
+        .map_err(IntProxyError::from)?;
 
-/// Sends a ping the connection and expects a pong.
-async fn ping(
-    sender: &mpsc::Sender<ClientMessage>,
-    receiver: &mut mpsc::Receiver<DaemonMessage>,
-) -> Result<(), InternalProxySetupError> {
-    sender.send(ClientMessage::Ping).await?;
+    agent_conn
+        .agent_tx
+        .send(ClientMessage::Ping)
+        .await
+        .map_err(|_| {
+            InternalProxyError::InitialPingPongFailed(
+                "agent closed connection before ping".to_string(),
+            )
+        })?;
 
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            match receiver.recv().await {
-                Some(DaemonMessage::Pong) => break,
-                Some(DaemonMessage::LogMessage(msg)) => match msg.level {
-                    LogLevel::Error => error!("Agent log: {}", msg.message),
-                    LogLevel::Warn => warn!("Agent log: {}", msg.message),
-                },
-                other => {
-                    error!(?other, "Invalid ping response");
-                    return Err(InternalProxySetupError::NoPong(format!("{other:?}")));
-                }
+    loop {
+        match agent_conn.agent_rx.recv().await {
+            Some(DaemonMessage::Pong) => break Ok(agent_conn),
+            Some(DaemonMessage::LogMessage(LogMessage {
+                level: LogLevel::Error,
+                message,
+            })) => {
+                tracing::error!("agent log: {message}");
+            }
+            Some(DaemonMessage::LogMessage(LogMessage {
+                level: LogLevel::Warn,
+                message,
+            })) => {
+                tracing::warn!("agent log: {message}");
+            }
+            Some(DaemonMessage::Close(reason)) => {
+                break Err(InternalProxyError::InitialPingPongFailed(format!(
+                    "agent closed connection with message: {reason}"
+                )));
+            }
+            Some(message) => {
+                break Err(InternalProxyError::InitialPingPongFailed(format!(
+                    "agent sent an unexpected message: {message:?}"
+                )));
+            }
+            None => {
+                break Err(InternalProxyError::InitialPingPongFailed(
+                    "agent unexpectedly closed connection".to_string(),
+                ));
             }
         }
-        Ok(())
-    })
-    .await
-    .map_err(|_| InternalProxySetupError::NoPong("Timeout in pong".to_string()))?
-}
-
-fn create_ping_loop(
-    mut connection: (mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>),
-) -> (
-    CancellationToken,
-    JoinHandle<Result<(), InternalProxySetupError>>,
-) {
-    let cancellation_token = CancellationToken::new();
-
-    let join_handle = tokio::spawn({
-        let cancellation_token = cancellation_token.clone();
-
-        async move {
-            let mut main_keep_interval = tokio::time::interval(Duration::from_secs(30));
-            main_keep_interval.tick().await;
-
-            loop {
-                tokio::select! {
-                    _ = main_keep_interval.tick() => {
-                        if let Err(err) = ping(&connection.0, &mut connection.1).await {
-                            cancellation_token.cancel();
-
-                            return Err(err);
-                        }
-                    }
-                    _ = cancellation_token.cancelled() => {
-                        break;
-                    }
-                }
-            }
-
-            Ok(())
-        }
-    });
-
-    (cancellation_token, join_handle)
+    }
 }

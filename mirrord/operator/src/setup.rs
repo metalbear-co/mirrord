@@ -49,7 +49,7 @@ macro_rules! writer_impl {
     ($ident:ident) => {
         impl OperatorSetup for $ident {
             fn to_writer<W: Write>(&self, writer: W) -> Result<()> {
-                serde_yaml::to_writer(writer, &self.0).map_err(SetupError::from)
+                serde_yaml::to_writer(writer, &self.0).map_err(SetupWriteError::from)
             }
         }
     };
@@ -60,14 +60,14 @@ macro_rules! writer_impl {
 
 /// General Operator Error
 #[derive(Debug, Error)]
-pub enum SetupError {
-    #[error(transparent)]
-    Reader(#[from] std::io::Error),
+pub enum SetupWriteError {
     #[error(transparent)]
     YamlSerialization(#[from] serde_yaml::Error),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 }
 
-type Result<T, E = SetupError> = std::result::Result<T, E>;
+type Result<T, E = SetupWriteError> = std::result::Result<T, E>;
 
 pub trait OperatorSetup {
     fn to_writer<W: Write>(&self, writer: W) -> Result<()>;
@@ -411,9 +411,12 @@ impl OperatorRole {
                         "pods/ephemeralcontainers".to_owned(),
                         "deployments".to_owned(),
                         "deployments/scale".to_owned(),
-                        "jobs".to_owned(),
                         "rollouts".to_owned(),
                         "rollouts/scale".to_owned(),
+                        "jobs".to_owned(),
+                        "cronjobs".to_owned(),
+                        "statefulsets".to_owned(),
+                        "statefulsets/scale".to_owned(),
                     ]),
                     verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
                     ..Default::default()
@@ -445,6 +448,7 @@ impl OperatorRole {
                     resources: Some(vec![
                         "deployments/scale".to_owned(),
                         "rollouts/scale".to_owned(),
+                        "statefulsets/scale".to_owned(),
                     ]),
                     verbs: vec!["patch".to_owned()],
                     ..Default::default()
@@ -723,7 +727,7 @@ impl Default for OperatorClusterUserRole {
 
 impl OperatorSetup for CustomResourceDefinition {
     fn to_writer<W: Write>(&self, writer: W) -> Result<()> {
-        serde_yaml::to_writer(writer, &self).map_err(SetupError::from)
+        serde_yaml::to_writer(writer, &self).map_err(SetupWriteError::from)
     }
 }
 

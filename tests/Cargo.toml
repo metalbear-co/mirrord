@@ -36,6 +36,7 @@ hyper.workspace = true
 hyper-util.workspace = true
 http-body-util.workspace = true
 const_format = "0.2"
+rustls.workspace = true
 
 [features]
 default = ["ephemeral", "job", "cli", "targetless"]
