@@ -566,13 +566,17 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     let mut targets = match &layer_config.operator {
         Some(true) | None => {
             let operator_targets = OperatorApi::list_targets(&layer_config).await;
+            println!("op targets {operator_targets:?}");
+
             match operator_targets {
                 Ok(targets) => {
+                    println!("and targets {targets:?}");
+
                     // adjust format to match non-operator output
                     targets
                         .iter()
                         .filter_map(|target_crd| {
-                            let target = target_crd.spec.target.as_ref()?;
+                            let target = target_crd.spec.target.target_ref()?;
                             if let Some(container) = target.container_name() {
                                 if SKIP_NAMES.contains(container.as_str()) {
                                     return None;

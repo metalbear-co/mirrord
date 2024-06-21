@@ -52,7 +52,7 @@ impl From<Target> for VerifiedTarget {
             Target::Rollout(target) => Self::Rollout(target),
             Target::Job(target) => Self::Job(target),
             Target::CronJob(target) => Self::CronJob(target),
-            Target::StatefulSet(target) => Self::StatefulSet(target),
+            // Target::StatefulSet(target) => Self::StatefulSet(target),
             Target::Targetless => Self::Targetless,
         }
     }

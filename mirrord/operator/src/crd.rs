@@ -20,8 +20,59 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 )]
 pub struct TargetSpec {
     /// None when targetless.
-    pub target: Option<Target>,
+    pub target: CompatTarget,
 }
+
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum CompatTarget {
+    Known(Option<Target>),
+    #[serde(skip_serializing)]
+    Unknown(String),
+}
+
+impl CompatTarget {
+    pub(crate) fn name(&self) -> Option<String> {
+        match self {
+            CompatTarget::Known(known) => known.as_ref().map(TargetCrd::target_name),
+            CompatTarget::Unknown(_) => None,
+        }
+    }
+
+    pub(crate) fn known(self) -> Option<Target> {
+        match self {
+            CompatTarget::Known(known) => known,
+            CompatTarget::Unknown(_) => None,
+        }
+    }
+
+    pub fn target_ref(&self) -> Option<&Target> {
+        match self {
+            CompatTarget::Known(known) => known.as_ref(),
+            CompatTarget::Unknown(_) => None,
+        }
+    }
+}
+
+// impl<'de> serde::Deserialize<'de> for CompatTarget {
+//     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+//     where
+//         D: serde::Deserializer<'de>,
+//     {
+//         let de = String::deserialize(deserializer)?;
+//         let target = Target::deserialize(de);
+
+//         match Target::deserialize(deserializer) {
+//             Ok(target) => Ok(CompatTarget::Known(Some(target))),
+//             Err(fail) => {
+//                 eprintln!("Failed de with {fail:?}");
+//                 String::deserialize(deserializer)
+//                     .map(CompatTarget::Unknown)
+//                     .map_err(|_fail| serde::de::Error::custom("Kaboom"))
+//             }
+//         }
+//     }
+// }
 
 impl TargetCrd {
     /// Creates target name in format of target_type.target_name.[container.container_name]
@@ -35,7 +86,8 @@ impl TargetCrd {
             Target::Rollout(target) => ("rollout", &target.rollout, &target.container),
             Target::Job(target) => ("job", &target.job, &target.container),
             Target::CronJob(target) => ("cronjob", &target.cron_job, &target.container),
-            Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
+            // Target::StatefulSet(target) => ("statefulset", &target.stateful_set,
+            // &target.container),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
         };
         if let Some(container) = container {
@@ -57,8 +109,7 @@ impl TargetCrd {
     pub fn name(&self) -> String {
         self.spec
             .target
-            .as_ref()
-            .map(Self::target_name)
+            .name()
             .unwrap_or(TARGETLESS_TARGET_NAME.to_string())
     }
 }
@@ -66,7 +117,7 @@ impl TargetCrd {
 impl From<TargetCrd> for TargetConfig {
     fn from(crd: TargetCrd) -> Self {
         TargetConfig {
-            path: crd.spec.target,
+            path: crd.spec.target.known(),
             namespace: crd.metadata.namespace,
         }
     }

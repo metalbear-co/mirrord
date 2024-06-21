@@ -162,6 +162,7 @@ impl MirrordConfig for TargetFileConfig {
     /// Generate the final config object, out of the configuration parsed from a configuration file,
     /// factoring in environment variables (which are also set by the front end - CLI/IDE-plugin).
     fn generate_config(self, context: &mut ConfigContext) -> Result<Self::Generated> {
+        println!("config self: {self:?}");
         let (path_from_conf_file, namespace_from_conf_file) = match self {
             TargetFileConfig::Simple(path) => (path, None),
             TargetFileConfig::Advanced { path, namespace } => (path, namespace),
@@ -248,7 +249,7 @@ pub enum Target {
     /// [StatefulSet](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/).
     ///
     /// Only supported when `copy_target` is enabled.
-    StatefulSet(stateful_set::StatefulSetTarget),
+    // StatefulSet(stateful_set::StatefulSetTarget),
 
     /// <!--${internal}-->
     /// Spawn a new pod.
@@ -271,7 +272,7 @@ impl FromStr for Target {
             Some("pod") => pod::PodTarget::from_split(&mut split).map(Target::Pod),
             Some("job") => job::JobTarget::from_split(&mut split).map(Target::Job),
             Some("cronjob") => cron_job::CronJobTarget::from_split(&mut split).map(Target::CronJob),
-            Some("statefulset") => stateful_set::StatefulSetTarget::from_split(&mut split).map(Target::StatefulSet),
+            // Some("statefulset") => stateful_set::StatefulSetTarget::from_split(&mut split).map(Target::StatefulSet),
             _ => Err(ConfigError::InvalidTarget(format!(
                 "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
@@ -288,7 +289,7 @@ impl Target {
             Target::Rollout(target) => target.rollout.clone(),
             Target::Job(target) => target.job.clone(),
             Target::CronJob(target) => target.cron_job.clone(),
-            Target::StatefulSet(target) => target.stateful_set.clone(),
+            // Target::StatefulSet(target) => target.stateful_set.clone(),
             Target::Targetless => {
                 unreachable!("this shouldn't happen - called from operator on a flow where it's not targetless.")
             }
@@ -350,7 +351,7 @@ impl fmt::Display for Target {
             Target::Rollout(target) => target.fmt_display(f),
             Target::Job(target) => target.fmt_display(f),
             Target::CronJob(target) => target.fmt_display(f),
-            Target::StatefulSet(target) => target.fmt_display(f),
+            // Target::StatefulSet(target) => target.fmt_display(f),
         }
     }
 }
@@ -364,7 +365,7 @@ impl TargetDisplay for Target {
             Target::Rollout(target) => target.target_type(),
             Target::Job(target) => target.target_type(),
             Target::CronJob(target) => target.target_type(),
-            Target::StatefulSet(target) => target.target_type(),
+            // Target::StatefulSet(target) => target.target_type(),
         }
     }
 
@@ -376,7 +377,7 @@ impl TargetDisplay for Target {
             Target::Rollout(target) => target.target_name(),
             Target::Job(target) => target.target_name(),
             Target::CronJob(target) => target.target_name(),
-            Target::StatefulSet(target) => target.target_name(),
+            // Target::StatefulSet(target) => target.target_name(),
         }
     }
 
@@ -388,7 +389,7 @@ impl TargetDisplay for Target {
             Target::Rollout(target) => target.container_name(),
             Target::Job(target) => target.container_name(),
             Target::CronJob(target) => target.container_name(),
-            Target::StatefulSet(target) => target.container_name(),
+            // Target::StatefulSet(target) => target.container_name(),
         }
     }
 }
@@ -446,12 +447,12 @@ impl CollectAnalytics for &TargetConfig {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }
                 }
-                Target::StatefulSet(target) => {
-                    flags |= TargetAnalyticFlags::STATEFUL_SET;
-                    if target.container.is_some() {
-                        flags |= TargetAnalyticFlags::CONTAINER;
-                    }
-                }
+                // Target::StatefulSet(target) => {
+                //     flags |= TargetAnalyticFlags::STATEFUL_SET;
+                //     if target.container.is_some() {
+                //         flags |= TargetAnalyticFlags::CONTAINER;
+                //     }
+                // }
                 Target::Targetless => {
                     // Targetless is essentially 0, so no need to set any flags.
                 }

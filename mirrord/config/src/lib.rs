@@ -407,7 +407,7 @@ impl LayerConfig {
                         target,
                         target::Target::Job(_)
                             | target::Target::CronJob(_)
-                            | target::Target::StatefulSet(_)
+                            // | target::Target::StatefulSet(_)
                     )
                 })
                 .unwrap_or_default()
