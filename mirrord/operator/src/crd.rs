@@ -23,12 +23,28 @@ pub struct TargetSpec {
     pub target: CompatTarget,
 }
 
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
+#[derive(Serialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum CompatTarget {
     Known(Option<Target>),
     #[serde(skip_serializing)]
     Unknown(String),
+}
+
+impl<'de> Deserialize<'de> for CompatTarget {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let de = Target::deserialize(deserializer);
+        match de {
+            Ok(t) => Ok(CompatTarget::Known(Some(t))),
+            Err(fail) => {
+                println!("failed with {fail:?}");
+                Ok(CompatTarget::Unknown(fail.to_string()))
+            }
+        }
+    }
 }
 
 impl CompatTarget {
