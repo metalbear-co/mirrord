@@ -85,8 +85,6 @@ pub enum ChunkedRequest {
     Error(ChunkedRequestError),
 }
 
-impl ChunkedRequest {}
-
 /// Contents of a chunked message body frame from server.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ChunkedRequestBody {
@@ -398,7 +396,7 @@ pub static HTTP_FRAMED_VERSION: LazyLock<VersionReq> =
 /// Minimal mirrord-protocol version that allows [`DaemonTcp::HttpRequestChunked`] instead of
 /// [`DaemonTcp::HttpRequest`].
 pub static HTTP_CHUNKED_VERSION: LazyLock<VersionReq> =
-    LazyLock::new(|| ">=1.6.0".parse().expect("Bad Identifier")); // TODO: check version number
+    LazyLock::new(|| ">=1.6.1".parse().expect("Bad Identifier"));
 
 /// Minimal mirrord-protocol version that allows [`DaemonTcp::Data`] to be sent in the same
 /// connection as [`DaemonTcp::HttpRequestFramed`] and [`DaemonTcp::HttpRequest`].
