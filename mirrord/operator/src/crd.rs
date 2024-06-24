@@ -1,8 +1,7 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fmt::{Display, Formatter},
 };
-use std::collections::BTreeMap;
 
 use k8s_openapi::api::core::v1::{PodSpec, PodTemplateSpec};
 use kube::CustomResource;
@@ -13,10 +12,10 @@ use mirrord_config::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "client")]
-use crate::client::OperatorApiError;
 
 use self::label_selector::LabelSelector;
+#[cfg(feature = "client")]
+use crate::client::OperatorApiError;
 use crate::types::LicenseInfoOwned;
 
 pub mod label_selector;
@@ -25,11 +24,11 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-group = "operator.metalbear.co",
-version = "v1",
-kind = "Target",
-root = "TargetCrd",
-namespaced
+    group = "operator.metalbear.co",
+    version = "v1",
+    kind = "Target",
+    root = "TargetCrd",
+    namespaced
 )]
 pub struct TargetSpec {
     /// None when targetless.
@@ -95,11 +94,11 @@ pub static OPERATOR_STATUS_NAME: &str = "operator";
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-group = "operator.metalbear.co",
-version = "v1",
-kind = "MirrordOperator",
-root = "MirrordOperatorCrd",
-status = "MirrordOperatorStatus"
+    group = "operator.metalbear.co",
+    version = "v1",
+    kind = "MirrordOperator",
+    root = "MirrordOperatorCrd",
+    status = "MirrordOperatorStatus"
 )]
 pub struct MirrordOperatorSpec {
     pub operator_version: String,
@@ -238,10 +237,10 @@ pub struct Session {
 /// the operator.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-group = "operator.metalbear.co",
-version = "v1",
-kind = "Session",
-root = "SessionCrd"
+    group = "operator.metalbear.co",
+    version = "v1",
+    kind = "Session",
+    root = "SessionCrd"
 )]
 pub struct SessionSpec;
 
@@ -293,11 +292,11 @@ impl From<&OperatorFeatures> for NewOperatorFeature {
 /// (operator's copy pod feature).
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-group = "operator.metalbear.co",
-version = "v1",
-kind = "CopyTarget",
-root = "CopyTargetCrd",
-namespaced
+    group = "operator.metalbear.co",
+    version = "v1",
+    kind = "CopyTarget",
+    root = "CopyTargetCrd",
+    namespaced
 )]
 pub struct CopyTargetSpec {
     /// Original target. Only [`Target::Pod`] and [`Target::Deployment`] are accepted.
@@ -374,7 +373,8 @@ pub type OutputQueueName = String;
 /// The details of a queue that should be split.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "queueType")]
-// So that controllers that only handle 1 type of queue don't have to adapt when we add more queue types.
+// So that controllers that only handle 1 type of queue don't have to adapt when we add more queue
+// types.
 #[non_exhaustive]
 pub enum SplitQueue {
     /// Amazon SQS
@@ -397,7 +397,7 @@ impl QueueConsumer {
     pub fn get_type_and_name(&self) -> (&str, &str) {
         match self {
             QueueConsumer::Deployment(dep) => ("deployment", dep),
-            QueueConsumer::Rollout(roll) => ("rollout", roll)
+            QueueConsumer::Rollout(roll) => ("rollout", roll),
         }
     }
 }
@@ -412,7 +412,6 @@ pub struct QueueNameUpdate {
     pub original_name: String,
     pub output_name: String,
 }
-
 
 /// Details retrieved from K8s resources once the splitter is active, used on filter session
 /// creation to create the altered config maps and pod specs that make the application use the
@@ -431,8 +430,8 @@ pub struct QueueDetails {
     /// map refs, mapped to their queue id.
     pub direct_env_vars: HashMap<String, QueueId>,
 
-    /// For each config map name, a mapping from queue id to key name in the map that holds the name
-    /// of that queue.
+    /// For each config map name, a mapping from queue id to key name in the map that holds the
+    /// name of that queue.
     pub config_map_updates: BTreeMap<String, HashMap<QueueId, String>>,
     //                               ^               ^        ^
     //                               |               |        ---- name of key that points to Q name
@@ -453,7 +452,8 @@ pub struct WorkloadQueueRegistryStatus {
 
 impl WorkloadQueueRegistryStatus {
     pub fn output_queue_names(&self) -> Vec<&str> {
-        self.queue_details.queue_names
+        self.queue_details
+            .queue_names
             .values()
             .map(|QueueNameUpdate { output_name, .. }| output_name.as_str())
             .collect()
@@ -465,12 +465,12 @@ impl WorkloadQueueRegistryStatus {
 /// to the spec and the user's filter.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-group = "queues.mirrord.metalbear.co",
-version = "v1alpha",
-kind = "MirrordWorkloadQueueRegistry",
-shortname = "qs",
-status = "WorkloadQueueRegistryStatus",
-namespaced
+    group = "queues.mirrord.metalbear.co",
+    version = "v1alpha",
+    kind = "MirrordWorkloadQueueRegistry",
+    shortname = "qs",
+    status = "WorkloadQueueRegistryStatus",
+    namespaced
 )]
 pub struct MirrordWorkloadQueueRegistrySpec {
     /// A map of the queues that should be split.
@@ -481,41 +481,27 @@ pub struct MirrordWorkloadQueueRegistrySpec {
     pub consumer: QueueConsumer,
 
     /// These tags will be set for all temporary SQS queues created by mirrord for queues defined
-    /// in this MirrordWorkloadQueueRegistry, alongside with the original tags of the respective original
-    /// queue. In case of a collision, the temporary queue will get the value from the tag passed
-    /// in here.
+    /// in this MirrordWorkloadQueueRegistry, alongside with the original tags of the respective
+    /// original queue. In case of a collision, the temporary queue will get the value from the
+    /// tag passed in here.
     pub tags: Option<HashMap<String, String>>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(rename = "SQSSessionDetails", rename_all = "camelCase")]
-pub struct SqsSessionDetails {
-    // TODO: Don't save whole PodSpec, because its schema is so long you can't create the CRD with
-    //  `kubectl apply` due to a length limit.
-    pub spec: PodSpec,
-    pub queue_names: BTreeMap<QueueId, QueueNameUpdate>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename = "SQSSessionStatus", rename_all = "camelCase")]
 pub struct SqsSessionStatus {
-    // TODO: is this option unnecessary?
-    pub details: Option<SqsSessionDetails>,
+    pub queue_names: BTreeMap<QueueId, QueueNameUpdate>,
+    // A bit redundant, because the registry resource status has the mapping from env var name
+    // to queue id, and `queue_names` has the mapping from queue id to name update, but, saving
+    // it here in the form that is useful to reader, for simplicity and readability.
+    pub env_updates: BTreeMap<String, QueueNameUpdate>,
 }
-
-impl SqsSessionStatus {
-    pub fn is_ready(&self) -> bool {
-        self.details.is_some()
-    }
-}
-
 
 /// The [`kube::runtime::wait::Condition`] trait is auto-implemented for this function.
 /// To be used in [`kube::runtime::wait::await_condition`].
 pub fn is_session_ready(session: Option<&MirrordSqsSession>) -> bool {
     session
-        .and_then(|session| session.status.as_ref())
-        .map(|status| status.is_ready())
+        .map(|session| session.status.is_some())
         .unwrap_or_default()
 }
 
