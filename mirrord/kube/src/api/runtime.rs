@@ -299,7 +299,7 @@ impl RuntimeDataProvider for Target {
             Target::Rollout(target) => target.runtime_data(client, namespace).await,
             Target::Job(target) => target.runtime_data(client, namespace).await,
             Target::CronJob(target) => target.runtime_data(client, namespace).await,
-            // Target::StatefulSet(target) => target.runtime_data(client, namespace).await,
+            Target::StatefulSet(target) => target.runtime_data(client, namespace).await,
             Target::Targetless => Err(KubeApiError::MissingRuntimeData),
         }
     }
