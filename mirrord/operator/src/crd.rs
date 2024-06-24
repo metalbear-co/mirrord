@@ -2,7 +2,6 @@ use kube::CustomResource;
 use mirrord_config::target::{Target, TargetConfig, TargetDisplay};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tracing::trace;
 
 use self::label_selector::LabelSelector;
 use crate::types::LicenseInfoOwned;
@@ -45,12 +44,9 @@ impl<'de> Deserialize<'de> for CompatTarget {
         let target = serde_json::from_value(deserialized);
         match target {
             Ok(target) => Ok(CompatTarget(target)),
-            Err(fail) => {
-                trace!(%fail, "Could not deserialize `Target`, defaulting to `Unknown`");
-                Ok(CompatTarget(Target::Unknown(
-                    target_name.unwrap_or_default(),
-                )))
-            }
+            Err(_) => Ok(CompatTarget(Target::Unknown(
+                target_name.unwrap_or_default(),
+            ))),
         }
     }
 }
