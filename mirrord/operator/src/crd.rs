@@ -33,6 +33,12 @@ impl core::fmt::Display for CompatTarget {
     }
 }
 
+impl From<Target> for CompatTarget {
+    fn from(value: Target) -> Self {
+        Self(value)
+    }
+}
+
 impl<'de> Deserialize<'de> for CompatTarget {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
