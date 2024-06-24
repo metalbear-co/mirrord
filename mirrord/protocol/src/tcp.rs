@@ -5,7 +5,7 @@ use std::{
     fmt,
     net::IpAddr,
     pin::Pin,
-    sync::LazyLock,
+    sync::{Arc, LazyLock, Mutex},
     task::{Context, Poll},
 };
 
@@ -21,6 +21,7 @@ use hyper::{
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::Receiver;
 use tracing::error;
 
 use crate::{ConnectionId, Port, RemoteResult, RequestId};
@@ -73,6 +74,41 @@ pub enum DaemonTcp {
     SubscribeResult(RemoteResult<Port>),
     HttpRequest(HttpRequest<Vec<u8>>),
     HttpRequestFramed(HttpRequest<InternalHttpBody>),
+    HttpRequestChunked(ChunkedRequest),
+}
+
+/// Contents of a chunked message from server.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum ChunkedRequest {
+    Start(HttpRequest<Vec<InternalHttpBodyFrame>>),
+    Body(ChunkedRequestBody),
+    Error(ChunkedRequestError),
+}
+
+/// Contents of a chunked message body frame from server.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ChunkedRequestBody {
+    #[bincode(with_serde)]
+    pub frames: Vec<InternalHttpBodyFrame>,
+    pub is_last: bool,
+    pub connection_id: ConnectionId,
+    pub request_id: RequestId,
+}
+
+impl From<InternalHttpBodyFrame> for Frame<Bytes> {
+    fn from(value: InternalHttpBodyFrame) -> Self {
+        match value {
+            InternalHttpBodyFrame::Data(data) => Frame::data(data.into()),
+            InternalHttpBodyFrame::Trailers(map) => Frame::trailers(map),
+        }
+    }
+}
+
+/// An error occurred while processing chunked data from server.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ChunkedRequestError {
+    pub connection_id: ConnectionId,
+    pub request_id: RequestId,
 }
 
 /// Wraps the string that will become a [`fancy_regex::Regex`], providing a nice API in
@@ -221,10 +257,90 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
+impl<E> From<InternalHttpRequest<StreamingBody>> for Request<BoxBody<Bytes, E>>
+where
+    E: From<Infallible>,
+{
+    fn from(value: InternalHttpRequest<StreamingBody>) -> Self {
+        let InternalHttpRequest {
+            method,
+            uri,
+            headers,
+            version,
+            body,
+        } = value;
+        let mut request = Request::new(BoxBody::new(body.map_err(|e| e.into())));
+        *request.method_mut() = method;
+        *request.uri_mut() = uri;
+        *request.version_mut() = version;
+        *request.headers_mut() = headers;
+
+        request
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum HttpRequestFallback {
     Framed(HttpRequest<InternalHttpBody>),
     Fallback(HttpRequest<Vec<u8>>),
+    Streamed(HttpRequest<StreamingBody>),
+}
+
+#[derive(Debug)]
+pub struct StreamingBody {
+    /// Shared with instances acquired via [`Clone`].
+    /// Allows the clones to receive a copy of the data.
+    origin: Arc<Mutex<(Receiver<InternalHttpBodyFrame>, Vec<InternalHttpBodyFrame>)>>,
+    /// Index of the next frame to return from the buffer.
+    /// If outside of the buffer, we need to poll the stream to get the next frame.
+    /// Local state of this instance, zeroed when cloning.
+    idx: usize,
+}
+
+impl StreamingBody {
+    pub fn new(rx: Receiver<InternalHttpBodyFrame>) -> Self {
+        Self {
+            origin: Arc::new(Mutex::new((rx, vec![]))),
+            idx: 0,
+        }
+    }
+}
+
+impl Clone for StreamingBody {
+    fn clone(&self) -> Self {
+        Self {
+            origin: self.origin.clone(),
+            idx: 0,
+        }
+    }
+}
+
+impl Body for StreamingBody {
+    type Data = Bytes;
+
+    type Error = Infallible;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let this = self.get_mut();
+        let mut guard = this.origin.lock().unwrap();
+
+        if let Some(frame) = guard.1.get(this.idx) {
+            this.idx += 1;
+            return Poll::Ready(Some(Ok(frame.clone().into())));
+        }
+
+        match std::task::ready!(guard.0.poll_recv(cx)) {
+            None => Poll::Ready(None),
+            Some(frame) => {
+                guard.1.push(frame.clone());
+                this.idx += 1;
+                Poll::Ready(Some(Ok(frame.into())))
+            }
+        }
+    }
 }
 
 impl HttpRequestFallback {
@@ -232,6 +348,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.connection_id,
             HttpRequestFallback::Fallback(req) => req.connection_id,
+            HttpRequestFallback::Streamed(req) => req.connection_id,
         }
     }
 
@@ -239,6 +356,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.port,
             HttpRequestFallback::Fallback(req) => req.port,
+            HttpRequestFallback::Streamed(req) => req.port,
         }
     }
 
@@ -246,6 +364,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.request_id,
             HttpRequestFallback::Fallback(req) => req.request_id,
+            HttpRequestFallback::Streamed(req) => req.request_id,
         }
     }
 
@@ -253,6 +372,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.version(),
             HttpRequestFallback::Fallback(req) => req.version(),
+            HttpRequestFallback::Streamed(req) => req.version(),
         }
     }
 
@@ -263,6 +383,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.internal_request.into(),
             HttpRequestFallback::Fallback(req) => req.internal_request.into(),
+            HttpRequestFallback::Streamed(req) => req.internal_request.into(),
         }
     }
 }
@@ -271,6 +392,11 @@ impl HttpRequestFallback {
 /// [`DaemonTcp::HttpRequest`].
 pub static HTTP_FRAMED_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.3.0".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows [`DaemonTcp::HttpRequestChunked`] instead of
+/// [`DaemonTcp::HttpRequest`].
+pub static HTTP_CHUNKED_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.7.0".parse().expect("Bad Identifier"));
 
 /// Minimal mirrord-protocol version that allows [`DaemonTcp::Data`] to be sent in the same
 /// connection as [`DaemonTcp::HttpRequestFramed`] and [`DaemonTcp::HttpRequest`].
@@ -282,10 +408,7 @@ pub static HTTP_FILTERED_UPGRADE_VERSION: LazyLock<VersionReq> =
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 #[protocol_break(2)]
 #[bincode(bounds = "for<'de> Body: Serialize + Deserialize<'de>")]
-pub struct HttpRequest<Body>
-where
-    for<'de> Body: Serialize + Deserialize<'de>,
-{
+pub struct HttpRequest<Body> {
     #[bincode(with_serde)]
     pub internal_request: InternalHttpRequest<Body>,
     pub connection_id: ConnectionId,
@@ -295,10 +418,7 @@ where
     pub port: Port,
 }
 
-impl<B: Serialize> HttpRequest<B>
-where
-    for<'de> B: Serialize + Deserialize<'de>,
-{
+impl<B> HttpRequest<B> {
     /// Gets this request's HTTP version.
     pub fn version(&self) -> Version {
         self.internal_request.version
@@ -402,15 +522,6 @@ impl From<Frame<Bytes>> for InternalHttpBodyFrame {
     }
 }
 
-impl From<InternalHttpBodyFrame> for Frame<Bytes> {
-    fn from(frame: InternalHttpBodyFrame) -> Self {
-        match frame {
-            InternalHttpBodyFrame::Data(data) => Frame::data(Bytes::from(data)),
-            InternalHttpBodyFrame::Trailers(map) => Frame::trailers(map),
-        }
-    }
-}
-
 impl fmt::Debug for InternalHttpBodyFrame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -464,6 +575,9 @@ impl HttpResponseFallback {
             ),
             HttpRequestFallback::Fallback(request) => HttpResponseFallback::Fallback(
                 HttpResponse::<Vec<u8>>::response_from_request(request, status, message),
+            ),
+            HttpRequestFallback::Streamed(request) => HttpResponseFallback::Framed(
+                HttpResponse::<InternalHttpBody>::response_from_request(request, status, message),
             ),
         }
     }
@@ -522,8 +636,8 @@ impl HttpResponse<InternalHttpBody> {
         })
     }
 
-    pub fn response_from_request(
-        request: HttpRequest<InternalHttpBody>,
+    pub fn response_from_request<B>(
+        request: HttpRequest<B>,
         status: StatusCode,
         message: &str,
     ) -> Self {
