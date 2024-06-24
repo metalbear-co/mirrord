@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use self::label_selector::LabelSelector;
-use crate::types::LicenseInfoOwned;
+use crate::{client::OperatorApiError, types::LicenseInfoOwned};
 
 pub mod label_selector;
 
@@ -48,14 +48,14 @@ impl<'de> Deserialize<'de> for CompatTarget {
 }
 
 impl CompatTarget {
-    pub(crate) fn name(&self) -> Option<String> {
+    pub fn name(&self) -> Option<String> {
         match self {
             CompatTarget::Known(known) => known.as_ref().map(TargetCrd::target_name),
             CompatTarget::Unknown(_) => None,
         }
     }
 
-    pub(crate) fn known(self) -> Option<Target> {
+    pub fn known(self) -> Option<Target> {
         match self {
             CompatTarget::Known(known) => known,
             CompatTarget::Unknown(_) => None,
