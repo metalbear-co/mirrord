@@ -301,6 +301,10 @@ impl RuntimeDataProvider for Target {
             Target::CronJob(target) => target.runtime_data(client, namespace).await,
             Target::StatefulSet(target) => target.runtime_data(client, namespace).await,
             Target::Targetless => Err(KubeApiError::MissingRuntimeData),
+            Target::Unknown(target) => {
+                tracing::error!("Cannot target `unknown` {target}");
+                Err(KubeApiError::MissingRuntimeData)
+            }
         }
     }
 }

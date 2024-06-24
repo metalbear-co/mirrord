@@ -162,7 +162,6 @@ impl MirrordConfig for TargetFileConfig {
     /// Generate the final config object, out of the configuration parsed from a configuration file,
     /// factoring in environment variables (which are also set by the front end - CLI/IDE-plugin).
     fn generate_config(self, context: &mut ConfigContext) -> Result<Self::Generated> {
-        println!("config self: {self:?}");
         let (path_from_conf_file, namespace_from_conf_file) = match self {
             TargetFileConfig::Simple(path) => (path, None),
             TargetFileConfig::Advanced { path, namespace } => (path, namespace),
@@ -216,7 +215,8 @@ mirrord-layer failed to parse the provided target!
 /// - `job/{sample-job}`;
 /// - `cronjob/{sample-cronjob}`;
 /// - `statefulset/{sample-statefulset}`;
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
+#[warn(clippy::wildcard_enum_match_arm)]
+#[derive(Default, Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum Target {
     /// <!--${internal}-->
@@ -253,7 +253,10 @@ pub enum Target {
 
     /// <!--${internal}-->
     /// Spawn a new pod.
+    #[default]
     Targetless,
+
+    Unknown(String),
 }
 
 impl FromStr for Target {
@@ -272,7 +275,7 @@ impl FromStr for Target {
             Some("pod") => pod::PodTarget::from_split(&mut split).map(Target::Pod),
             Some("job") => job::JobTarget::from_split(&mut split).map(Target::Job),
             Some("cronjob") => cron_job::CronJobTarget::from_split(&mut split).map(Target::CronJob),
-            Some("statefulset") => stateful_set::StatefulSetTarget::from_split(&mut split).map(Target::StatefulSet),
+            // Some("statefulset") => stateful_set::StatefulSetTarget::from_split(&mut split).map(Target::StatefulSet),
             _ => Err(ConfigError::InvalidTarget(format!(
                 "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
@@ -290,7 +293,7 @@ impl Target {
             Target::Job(target) => target.job.clone(),
             Target::CronJob(target) => target.cron_job.clone(),
             Target::StatefulSet(target) => target.stateful_set.clone(),
-            Target::Targetless => {
+            Target::Targetless | Target::Unknown(_) => {
                 unreachable!("this shouldn't happen - called from operator on a flow where it's not targetless.")
             }
         }
@@ -346,6 +349,7 @@ impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Target::Targetless => write!(f, "targetless"),
+            Target::Unknown(unknown) => f.write_fmt(format_args!("unknown/{unknown}")),
             Target::Pod(target) => target.fmt_display(f),
             Target::Deployment(target) => target.fmt_display(f),
             Target::Rollout(target) => target.fmt_display(f),
@@ -360,6 +364,7 @@ impl TargetDisplay for Target {
     fn target_type(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
+            Target::Unknown(_) => "unknown",
             Target::Deployment(target) => target.target_type(),
             Target::Pod(target) => target.target_type(),
             Target::Rollout(target) => target.target_type(),
@@ -372,6 +377,7 @@ impl TargetDisplay for Target {
     fn target_name(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
+            Target::Unknown(target) => target.as_str(),
             Target::Deployment(target) => target.target_name(),
             Target::Pod(target) => target.target_name(),
             Target::Rollout(target) => target.target_name(),
@@ -384,6 +390,7 @@ impl TargetDisplay for Target {
     fn container_name(&self) -> Option<&String> {
         match self {
             Target::Targetless => None,
+            Target::Unknown(_) => None,
             Target::Deployment(target) => target.container_name(),
             Target::Pod(target) => target.container_name(),
             Target::Rollout(target) => target.container_name(),
@@ -406,6 +413,7 @@ bitflags::bitflags! {
         const JOB = 32;
         const CRON_JOB = 64;
         const STATEFUL_SET = 128;
+        const UNKNOWN = 256;
     }
 }
 
@@ -455,6 +463,9 @@ impl CollectAnalytics for &TargetConfig {
                 }
                 Target::Targetless => {
                     // Targetless is essentially 0, so no need to set any flags.
+                }
+                Target::Unknown(_) => {
+                    flags |= TargetAnalyticFlags::UNKNOWN;
                 }
             }
         }

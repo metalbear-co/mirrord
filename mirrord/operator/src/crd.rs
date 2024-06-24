@@ -1,10 +1,11 @@
 use kube::CustomResource;
-use mirrord_config::target::{Target, TargetConfig};
+use mirrord_config::target::{Target, TargetConfig, TargetDisplay};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tracing::trace;
 
 use self::label_selector::LabelSelector;
-use crate::{client::OperatorApiError, types::LicenseInfoOwned};
+use crate::types::LicenseInfoOwned;
 
 pub mod label_selector;
 
@@ -24,11 +25,13 @@ pub struct TargetSpec {
 }
 
 #[derive(Serialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
-#[serde(untagged, deny_unknown_fields)]
-pub enum CompatTarget {
-    Known(Option<Target>),
-    #[serde(skip_serializing)]
-    Unknown(String),
+#[serde(transparent, deny_unknown_fields)]
+pub struct CompatTarget(pub Target);
+
+impl core::fmt::Display for CompatTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
 }
 
 impl<'de> Deserialize<'de> for CompatTarget {
@@ -36,59 +39,21 @@ impl<'de> Deserialize<'de> for CompatTarget {
     where
         D: serde::Deserializer<'de>,
     {
-        let de = Target::deserialize(deserializer);
-        match de {
-            Ok(t) => Ok(CompatTarget::Known(Some(t))),
+        let deserialized = serde_json::Value::deserialize(deserializer)?;
+        let target_name = deserialized.get("name").map(ToString::to_string);
+
+        let target = serde_json::from_value(deserialized);
+        match target {
+            Ok(target) => Ok(CompatTarget(target)),
             Err(fail) => {
-                println!("failed with {fail:?}");
-                Ok(CompatTarget::Unknown(fail.to_string()))
+                trace!(%fail, "Could not deserialize `Target`, defaulting to `Unknown`");
+                Ok(CompatTarget(Target::Unknown(
+                    target_name.unwrap_or_default(),
+                )))
             }
         }
     }
 }
-
-impl CompatTarget {
-    pub fn name(&self) -> Option<String> {
-        match self {
-            CompatTarget::Known(known) => known.as_ref().map(TargetCrd::target_name),
-            CompatTarget::Unknown(_) => None,
-        }
-    }
-
-    pub fn known(self) -> Option<Target> {
-        match self {
-            CompatTarget::Known(known) => known,
-            CompatTarget::Unknown(_) => None,
-        }
-    }
-
-    pub fn target_ref(&self) -> Option<&Target> {
-        match self {
-            CompatTarget::Known(known) => known.as_ref(),
-            CompatTarget::Unknown(_) => None,
-        }
-    }
-}
-
-// impl<'de> serde::Deserialize<'de> for CompatTarget {
-//     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-//     where
-//         D: serde::Deserializer<'de>,
-//     {
-//         let de = String::deserialize(deserializer)?;
-//         let target = Target::deserialize(de);
-
-//         match Target::deserialize(deserializer) {
-//             Ok(target) => Ok(CompatTarget::Known(Some(target))),
-//             Err(fail) => {
-//                 eprintln!("Failed de with {fail:?}");
-//                 String::deserialize(deserializer)
-//                     .map(CompatTarget::Unknown)
-//                     .map_err(|_fail| serde::de::Error::custom("Kaboom"))
-//             }
-//         }
-//     }
-// }
 
 impl TargetCrd {
     /// Creates target name in format of target_type.target_name.[container.container_name]
@@ -104,6 +69,9 @@ impl TargetCrd {
             Target::CronJob(target) => ("cronjob", &target.cron_job, &target.container),
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
+            Target::Unknown(target) => {
+                return target.clone();
+            }
         };
         if let Some(container) = container {
             format!("{}.{}.container.{}", type_name, target, container)
@@ -121,18 +89,15 @@ impl TargetCrd {
             .map_or_else(|| TARGETLESS_TARGET_NAME.to_string(), Self::target_name)
     }
 
-    pub fn name(&self) -> String {
-        self.spec
-            .target
-            .name()
-            .unwrap_or(TARGETLESS_TARGET_NAME.to_string())
+    pub fn name(&self) -> &str {
+        self.spec.target.0.target_name()
     }
 }
 
 impl From<TargetCrd> for TargetConfig {
     fn from(crd: TargetCrd) -> Self {
         TargetConfig {
-            path: crd.spec.target.known(),
+            path: Some(crd.spec.target.0),
             namespace: crd.metadata.namespace,
         }
     }
