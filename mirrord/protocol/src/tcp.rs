@@ -396,7 +396,7 @@ pub static HTTP_FRAMED_VERSION: LazyLock<VersionReq> =
 /// Minimal mirrord-protocol version that allows [`DaemonTcp::HttpRequestChunked`] instead of
 /// [`DaemonTcp::HttpRequest`].
 pub static HTTP_CHUNKED_VERSION: LazyLock<VersionReq> =
-    LazyLock::new(|| ">=1.6.1".parse().expect("Bad Identifier"));
+    LazyLock::new(|| ">=1.7.0".parse().expect("Bad Identifier"));
 
 /// Minimal mirrord-protocol version that allows [`DaemonTcp::Data`] to be sent in the same
 /// connection as [`DaemonTcp::HttpRequestFramed`] and [`DaemonTcp::HttpRequest`].
