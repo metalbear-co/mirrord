@@ -3,7 +3,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use k8s_openapi::api::core::v1::{PodSpec, PodTemplateSpec};
+use k8s_openapi::api::core::v1::{Container, PodTemplateSpec};
 use kube::CustomResource;
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
@@ -441,7 +441,7 @@ pub struct QueueDetails {
     // TODO: Don't save whole PodSpec, because its schema is so long you can't create the CRD with
     //  `kubectl apply` due to a length limit.
     /// The original PodSpec of the queue consumer.
-    pub original_spec: PodSpec,
+    pub containers: Vec<Container>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -495,6 +495,7 @@ pub struct SqsSessionStatus {
     // to queue id, and `queue_names` has the mapping from queue id to name update, but, saving
     // it here in the form that is useful to reader, for simplicity and readability.
     pub env_updates: BTreeMap<String, QueueNameUpdate>,
+    // TODO: add updates to config map references.
 }
 
 /// The [`kube::runtime::wait::Condition`] trait is auto-implemented for this function.
@@ -506,10 +507,6 @@ pub fn is_session_ready(session: Option<&MirrordSqsSession>) -> bool {
 }
 
 // TODO: docs
-// TODO: Clients actually never use this resource in any way directly, so maybe we could define it
-//  in the operator on startup? The operator would probably need permissions to create CRDs and to
-//  give itself permissions for those CRDs? Is that possible? Right now it's the user that installs
-//  the operator that defines this CRD and also give the operator permissions to do stuff with it.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
 group = "queues.mirrord.metalbear.co",
