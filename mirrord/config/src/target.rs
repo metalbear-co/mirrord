@@ -361,6 +361,7 @@ impl fmt::Display for Target {
 }
 
 impl TargetDisplay for Target {
+    #[tracing::instrument(level = "debug", ret)]
     fn target_type(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
@@ -374,6 +375,7 @@ impl TargetDisplay for Target {
         }
     }
 
+    #[tracing::instrument(level = "debug", ret)]
     fn target_name(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
@@ -387,6 +389,7 @@ impl TargetDisplay for Target {
         }
     }
 
+    #[tracing::instrument(level = "debug", ret)]
     fn container_name(&self) -> Option<&String> {
         match self {
             Target::Targetless => None,

@@ -23,7 +23,7 @@ pub struct TargetSpec {
     pub target: CompatTarget,
 }
 
-#[derive(Serialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(transparent, deny_unknown_fields)]
 pub struct CompatTarget(pub Target);
 
@@ -39,15 +39,26 @@ impl From<Target> for CompatTarget {
     }
 }
 
+impl Serialize for CompatTarget {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
 impl<'de> Deserialize<'de> for CompatTarget {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let deserialized = serde_json::Value::deserialize(deserializer)?;
+        println!("deserialized \n\n{deserialized:?}");
         let target_name = deserialized.get("name").map(ToString::to_string);
 
         let target = serde_json::from_value(deserialized);
+        println!("as target \n\n{target:?}");
         match target {
             Ok(target) => Ok(CompatTarget(target)),
             Err(_) => Ok(CompatTarget(Target::Unknown(
@@ -62,6 +73,7 @@ impl TargetCrd {
     /// for example:
     /// deploy.nginx
     /// deploy.nginx.container.nginx
+    #[tracing::instrument(level = "debug", ret)]
     pub fn target_name(target: &Target) -> String {
         let (type_name, target, container) = match target {
             Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
@@ -75,6 +87,9 @@ impl TargetCrd {
                 return target.clone();
             }
         };
+
+        tracing::info!("type {type_name} target {target} container {container:?}");
+
         if let Some(container) = container {
             format!("{}.{}.container.{}", type_name, target, container)
         } else {
@@ -84,6 +99,7 @@ impl TargetCrd {
 
     /// "targetless" ([`TARGETLESS_TARGET_NAME`]) if `None`,
     /// else <resource_type>.<resource_name>...
+    #[tracing::instrument(level = "debug", ret)]
     pub fn target_name_by_config(target_config: &TargetConfig) -> String {
         target_config
             .path
@@ -91,6 +107,7 @@ impl TargetCrd {
             .map_or_else(|| TARGETLESS_TARGET_NAME.to_string(), Self::target_name)
     }
 
+    #[tracing::instrument(level = "debug", ret)]
     pub fn name(&self) -> &str {
         self.spec.target.0.target_name()
     }
