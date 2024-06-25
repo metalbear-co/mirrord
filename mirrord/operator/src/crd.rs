@@ -81,7 +81,6 @@ impl TargetCrd {
     /// for example:
     /// deploy.nginx
     /// deploy.nginx.container.nginx
-    #[tracing::instrument(level = "info", ret)]
     pub fn target_name(target: &Target) -> String {
         let (type_name, target, container) = match target {
             Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
@@ -97,7 +96,7 @@ impl TargetCrd {
             }
         };
 
-        tracing::info!("type {type_name} target {target} container {container:?}");
+        println!("\ntype {type_name} target {target} container {container:?}");
 
         if let Some(container) = container {
             format!("{}.{}.container.{}", type_name, target, container)
@@ -108,7 +107,6 @@ impl TargetCrd {
 
     /// "targetless" ([`TARGETLESS_TARGET_NAME`]) if `None`,
     /// else <resource_type>.<resource_name>...
-    #[tracing::instrument(level = "debug", ret)]
     pub fn target_name_by_config(target_config: &TargetConfig) -> String {
         target_config
             .path
@@ -116,7 +114,6 @@ impl TargetCrd {
             .map_or_else(|| TARGETLESS_TARGET_NAME.to_string(), Self::target_name)
     }
 
-    #[tracing::instrument(level = "info", ret)]
     pub fn type_dot_name(&self) -> String {
         println!("\nthe spec is {}", self.spec.target);
         match &self.spec.target.0 {
