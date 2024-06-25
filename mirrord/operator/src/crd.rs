@@ -33,6 +33,14 @@ impl core::fmt::Display for CompatTarget {
     }
 }
 
+impl core::ops::Deref for CompatTarget {
+    type Target = Target;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl From<Target> for CompatTarget {
     fn from(value: Target) -> Self {
         Self(value)
@@ -73,7 +81,6 @@ impl TargetCrd {
     /// for example:
     /// deploy.nginx
     /// deploy.nginx.container.nginx
-    #[tracing::instrument(level = "debug", ret)]
     pub fn target_name(target: &Target) -> String {
         let (type_name, target, container) = match target {
             Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
@@ -88,8 +95,6 @@ impl TargetCrd {
             }
         };
 
-        tracing::info!("type {type_name} target {target} container {container:?}");
-
         if let Some(container) = container {
             format!("{}.{}.container.{}", type_name, target, container)
         } else {
@@ -99,7 +104,6 @@ impl TargetCrd {
 
     /// "targetless" ([`TARGETLESS_TARGET_NAME`]) if `None`,
     /// else <resource_type>.<resource_name>...
-    #[tracing::instrument(level = "debug", ret)]
     pub fn target_name_by_config(target_config: &TargetConfig) -> String {
         target_config
             .path
@@ -107,9 +111,8 @@ impl TargetCrd {
             .map_or_else(|| TARGETLESS_TARGET_NAME.to_string(), Self::target_name)
     }
 
-    #[tracing::instrument(level = "debug", ret)]
     pub fn name(&self) -> &str {
-        self.spec.target.0.target_name()
+        self.spec.target.target_name()
     }
 }
 
