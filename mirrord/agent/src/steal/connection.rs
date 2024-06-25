@@ -781,7 +781,7 @@ mod test {
         };
         assert_eq!(
             x.internal_request.body,
-            vec![InternalHttpBodyFrame::Data(b"string".to_vec().into())]
+            vec![InternalHttpBodyFrame::Data(b"string".to_vec())]
         );
         let x = client_rx.recv().now_or_never();
         assert!(x.is_none());
@@ -797,9 +797,7 @@ mod test {
         };
         assert_eq!(
             x.frames,
-            vec![InternalHttpBodyFrame::Data(
-                b"another_string".to_vec().into()
-            )]
+            vec![InternalHttpBodyFrame::Data(b"another_string".to_vec(),)]
         );
         let x = client_rx.recv().now_or_never();
         assert!(x.is_none());

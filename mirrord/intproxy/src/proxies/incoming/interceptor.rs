@@ -439,7 +439,6 @@ impl RawConnection {
 mod test {
     use std::{
         convert::Infallible,
-        pin::Pin,
         sync::{Arc, Mutex},
     };
 
@@ -455,11 +454,7 @@ mod test {
         Method, Request, Response,
     };
     use hyper_util::rt::TokioIo;
-    use mirrord_intproxy_protocol::{IncomingRequest, LayerId, PortSubscribe, PortSubscription};
-    use mirrord_protocol::{
-        tcp::{Filter, HttpRequest, InternalHttpRequest, LayerTcpSteal, StealType, StreamingBody},
-        ClientMessage,
-    };
+    use mirrord_protocol::tcp::{HttpRequest, InternalHttpRequest, StreamingBody};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
@@ -468,12 +463,7 @@ mod test {
     };
 
     use super::*;
-    use crate::{
-        background_tasks::{BackgroundTasks, TaskUpdate},
-        main_tasks::ProxyMessage,
-        proxies::incoming::{IncomingProxy, IncomingProxyError, IncomingProxyMessage},
-        IntProxy,
-    };
+    use crate::background_tasks::{BackgroundTasks, TaskUpdate};
 
     /// Binary protocol over TCP.
     /// Server first sends bytes [`INITIAL_MESSAGE`], then echoes back all received data.
@@ -497,7 +487,8 @@ mod test {
                     break;
                 }
 
-                upgraded.write_all(&buf[..bytes_read]).await?;
+                let echo_back = buf.get(0..bytes_read).unwrap();
+                upgraded.write_all(echo_back).await?;
             }
 
             Ok(())

@@ -1,7 +1,7 @@
 #[cfg(test)]
 /// Test the targetless execution mode, where an independent agent is spawned - not targeting any
 /// existing pod/container/deployment.
-mod targetless {
+mod targetless_tests {
     use std::time::Duration;
 
     use rstest::rstest;

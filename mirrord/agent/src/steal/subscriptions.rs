@@ -356,11 +356,7 @@ mod test {
     macro_rules! check_redirector {
         ( $redirector: expr $(, $x:expr )* ) => {
             {
-                let mut temp_vec = Vec::<Port>::new();
-                $(
-                    temp_vec.push($x);
-                )*
-
+                let mut temp_vec: Vec<u16> = vec![$($x,)*];
                 temp_vec.sort();
 
                 let mut redirections = $redirector.redirections.iter().copied().collect::<Vec<_>>();
