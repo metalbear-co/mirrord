@@ -3,7 +3,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use k8s_openapi::api::core::v1::{Container, PodTemplateSpec};
+use k8s_openapi::api::core::v1::PodTemplateSpec;
 use kube::CustomResource;
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
@@ -437,11 +437,7 @@ pub struct QueueDetails {
     //                               |               |        ---- name of key that points to Q name
     //                               |               ---- queue id
     //                               ---- ConfigMap name
-
-    // TODO: Don't save whole PodSpec, because its schema is so long you can't create the CRD with
-    //  `kubectl apply` due to a length limit.
-    /// The original PodSpec of the queue consumer.
-    pub containers: Vec<Container>,
+    pub env_updates: BTreeMap<String, QueueNameUpdate>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
