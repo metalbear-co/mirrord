@@ -110,7 +110,7 @@ where
                     // prompt a warning and fallback to OSS
                     Err(error) => {
                         let message = "failed to check if operator is installed";
-                        tracing::trace!(%error, message);
+                        tracing::debug!(%error, message);
                         subtask.warning(message);
                         subtask.success(Some("operator not found"));
                     }
