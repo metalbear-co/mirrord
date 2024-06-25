@@ -29,7 +29,21 @@ pub struct CompatTarget(pub Target);
 
 impl core::fmt::Display for CompatTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt_display(f)
+        self.0.fmt(f)
+    }
+}
+
+impl TargetDisplay for CompatTarget {
+    fn type_(&self) -> &str {
+        self.0.type_()
+    }
+
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+
+    fn container(&self) -> Option<&String> {
+        self.0.container()
     }
 }
 
@@ -38,6 +52,12 @@ impl core::ops::Deref for CompatTarget {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl core::borrow::Borrow<Target> for CompatTarget {
+    fn borrow(&self) -> &Target {
+        self.0.borrow()
     }
 }
 
@@ -62,11 +82,9 @@ impl<'de> Deserialize<'de> for CompatTarget {
         D: serde::Deserializer<'de>,
     {
         let deserialized = serde_json::Value::deserialize(deserializer)?;
-        println!("deserialized \n\n{deserialized:?}");
         let target_name = deserialized.get("name").map(ToString::to_string);
 
         let target = serde_json::from_value(deserialized);
-        println!("as target \n\n{target:?}");
         match target {
             Ok(target) => Ok(CompatTarget(target)),
             Err(_) => Ok(CompatTarget(Target::Unknown(
@@ -81,7 +99,7 @@ impl TargetCrd {
     /// for example:
     /// deploy.nginx
     /// deploy.nginx.container.nginx
-    pub fn target_name(target: &Target) -> String {
+    pub fn urlfied_name(target: &Target) -> String {
         let (type_name, target, container) = match target {
             Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
             Target::Pod(target) => ("pod", &target.pod, &target.container),
@@ -91,12 +109,9 @@ impl TargetCrd {
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
             Target::Unknown(target) => {
-                panic!("UNKNOWN");
                 return target.clone();
             }
         };
-
-        println!("\ntype {type_name} target {target} container {container:?}");
 
         if let Some(container) = container {
             format!("{}.{}.container.{}", type_name, target, container)
@@ -111,21 +126,7 @@ impl TargetCrd {
         target_config
             .path
             .as_ref()
-            .map_or_else(|| TARGETLESS_TARGET_NAME.to_string(), Self::target_name)
-    }
-
-    pub fn type_dot_name(&self) -> String {
-        println!("\nthe spec is {}", self.spec.target);
-        match &self.spec.target.0 {
-            Target::Deployment(target) => format!("deploy.{target}"),
-            Target::Pod(target) => format!("pod.{target}"),
-            Target::Rollout(target) => format!("rollout.{target}"),
-            Target::Job(target) => format!("job.{target}"),
-            Target::CronJob(target) => format!("cronjob.{target}"),
-            Target::StatefulSet(target) => format!("statefulset.{target}"),
-            Target::Targetless => "targetless".to_string(),
-            Target::Unknown(target) => format!("unknown.{target}"),
-        }
+            .map_or_else(|| TARGETLESS_TARGET_NAME.to_string(), Self::urlfied_name)
     }
 }
 

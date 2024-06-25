@@ -32,17 +32,3 @@ impl FromSplit for CronJobTarget {
         }
     }
 }
-
-impl core::fmt::Display for CronJobTarget {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}{}",
-            self.container
-                .as_ref()
-                .map(|c| format!("{c}/"))
-                .unwrap_or_default(),
-            self.cron_job.clone()
-        )
-    }
-}

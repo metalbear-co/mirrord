@@ -306,18 +306,6 @@ pub trait TargetDisplay {
     fn name(&self) -> &str;
 
     fn container(&self) -> Option<&String>;
-
-    fn fmt_display(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}/{}{}",
-            self.type_(),
-            self.name(),
-            self.container()
-                .map(|name| format!("/container/{name}"))
-                .unwrap_or_default()
-        )
-    }
 }
 
 macro_rules! impl_target_display {
@@ -335,26 +323,25 @@ macro_rules! impl_target_display {
                 self.container.as_ref()
             }
         }
+
+        impl core::fmt::Display for $struct_name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(
+                    f,
+                    "{}/{}{}",
+                    self.type_(),
+                    self.name(),
+                    self.container()
+                        .map(|name| format!("/container/{name}"))
+                        .unwrap_or_default()
+                )
+            }
+        }
     };
 }
 
-impl TargetDisplay for DeploymentTarget {
-    fn type_(&self) -> &str {
-        "deployment"
-    }
-
-    #[tracing::instrument(level = "info", ret)]
-    fn name(&self) -> &str {
-        self.deployment.as_str()
-    }
-
-    fn container(&self) -> Option<&String> {
-        self.container.as_ref()
-    }
-}
-
 impl_target_display!(PodTarget, pod);
-// impl_target_display!(DeploymentTarget, deployment);
+impl_target_display!(DeploymentTarget, deployment);
 impl_target_display!(RolloutTarget, rollout);
 impl_target_display!(JobTarget, job);
 impl_target_display!(CronJobTarget, cron_job);
@@ -365,12 +352,12 @@ impl fmt::Display for Target {
         match self {
             Target::Targetless => write!(f, "targetless"),
             Target::Unknown(unknown) => f.write_fmt(format_args!("unknown/{unknown}")),
-            Target::Pod(target) => target.fmt_display(f),
-            Target::Deployment(target) => target.fmt_display(f),
-            Target::Rollout(target) => target.fmt_display(f),
-            Target::Job(target) => target.fmt_display(f),
-            Target::CronJob(target) => target.fmt_display(f),
-            Target::StatefulSet(target) => target.fmt_display(f),
+            Target::Pod(target) => target.fmt(f),
+            Target::Deployment(target) => target.fmt(f),
+            Target::Rollout(target) => target.fmt(f),
+            Target::Job(target) => target.fmt(f),
+            Target::CronJob(target) => target.fmt(f),
+            Target::StatefulSet(target) => target.fmt(f),
         }
     }
 }

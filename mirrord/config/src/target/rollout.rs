@@ -35,17 +35,3 @@ impl FromSplit for RolloutTarget {
         }
     }
 }
-
-impl core::fmt::Display for RolloutTarget {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}{}",
-            self.container
-                .as_ref()
-                .map(|c| format!("{c}/"))
-                .unwrap_or_default(),
-            self.rollout.clone()
-        )
-    }
-}
