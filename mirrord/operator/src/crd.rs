@@ -29,7 +29,7 @@ pub struct CompatTarget(pub Target);
 
 impl core::fmt::Display for CompatTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        self.0.fmt_display(f)
     }
 }
 
@@ -81,6 +81,7 @@ impl TargetCrd {
     /// for example:
     /// deploy.nginx
     /// deploy.nginx.container.nginx
+    #[tracing::instrument(level = "info", ret)]
     pub fn target_name(target: &Target) -> String {
         let (type_name, target, container) = match target {
             Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
@@ -91,9 +92,12 @@ impl TargetCrd {
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
             Target::Unknown(target) => {
+                panic!("UNKNOWN");
                 return target.clone();
             }
         };
+
+        tracing::info!("type {type_name} target {target} container {container:?}");
 
         if let Some(container) = container {
             format!("{}.{}.container.{}", type_name, target, container)
@@ -104,6 +108,7 @@ impl TargetCrd {
 
     /// "targetless" ([`TARGETLESS_TARGET_NAME`]) if `None`,
     /// else <resource_type>.<resource_name>...
+    #[tracing::instrument(level = "debug", ret)]
     pub fn target_name_by_config(target_config: &TargetConfig) -> String {
         target_config
             .path
@@ -111,8 +116,19 @@ impl TargetCrd {
             .map_or_else(|| TARGETLESS_TARGET_NAME.to_string(), Self::target_name)
     }
 
-    pub fn name(&self) -> &str {
-        self.spec.target.target_name()
+    #[tracing::instrument(level = "info", ret)]
+    pub fn type_dot_name(&self) -> String {
+        println!("\nthe spec is {}", self.spec.target);
+        match &self.spec.target.0 {
+            Target::Deployment(target) => format!("deploy.{target}"),
+            Target::Pod(target) => format!("pod.{target}"),
+            Target::Rollout(target) => format!("rollout.{target}"),
+            Target::Job(target) => format!("job.{target}"),
+            Target::CronJob(target) => format!("cronjob.{target}"),
+            Target::StatefulSet(target) => format!("statefulset.{target}"),
+            Target::Targetless => "targetless".to_string(),
+            Target::Unknown(target) => format!("unknown.{target}"),
+        }
     }
 }
 

@@ -573,7 +573,7 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
                         .iter()
                         .filter_map(|target_crd| {
                             let target = &target_crd.spec.target;
-                            if let Some(container) = target.0.container_name() {
+                            if let Some(container) = target.container() {
                                 if SKIP_NAMES.contains(container.as_str()) {
                                     return None;
                                 }

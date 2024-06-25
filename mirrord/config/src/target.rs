@@ -301,19 +301,19 @@ impl Target {
 }
 
 pub trait TargetDisplay {
-    fn target_type(&self) -> &str;
+    fn type_(&self) -> &str;
 
-    fn target_name(&self) -> &str;
+    fn name(&self) -> &str;
 
-    fn container_name(&self) -> Option<&String>;
+    fn container(&self) -> Option<&String>;
 
     fn fmt_display(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{}/{}{}",
-            self.target_type(),
-            self.target_name(),
-            self.container_name()
+            self.type_(),
+            self.name(),
+            self.container()
                 .map(|name| format!("/container/{name}"))
                 .unwrap_or_default()
         )
@@ -323,23 +323,38 @@ pub trait TargetDisplay {
 macro_rules! impl_target_display {
     ($struct_name:ident, $target_type:ident) => {
         impl TargetDisplay for $struct_name {
-            fn target_type(&self) -> &str {
+            fn type_(&self) -> &str {
                 stringify!($target_type)
             }
 
-            fn target_name(&self) -> &str {
+            fn name(&self) -> &str {
                 self.$target_type.as_str()
             }
 
-            fn container_name(&self) -> Option<&String> {
+            fn container(&self) -> Option<&String> {
                 self.container.as_ref()
             }
         }
     };
 }
 
+impl TargetDisplay for DeploymentTarget {
+    fn type_(&self) -> &str {
+        "deployment"
+    }
+
+    #[tracing::instrument(level = "info", ret)]
+    fn name(&self) -> &str {
+        self.deployment.as_str()
+    }
+
+    fn container(&self) -> Option<&String> {
+        self.container.as_ref()
+    }
+}
+
 impl_target_display!(PodTarget, pod);
-impl_target_display!(DeploymentTarget, deployment);
+// impl_target_display!(DeploymentTarget, deployment);
 impl_target_display!(RolloutTarget, rollout);
 impl_target_display!(JobTarget, job);
 impl_target_display!(CronJobTarget, cron_job);
@@ -362,44 +377,44 @@ impl fmt::Display for Target {
 
 impl TargetDisplay for Target {
     #[tracing::instrument(level = "debug", ret)]
-    fn target_type(&self) -> &str {
+    fn type_(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
             Target::Unknown(_) => "unknown",
-            Target::Deployment(target) => target.target_type(),
-            Target::Pod(target) => target.target_type(),
-            Target::Rollout(target) => target.target_type(),
-            Target::Job(target) => target.target_type(),
-            Target::CronJob(target) => target.target_type(),
-            Target::StatefulSet(target) => target.target_type(),
+            Target::Deployment(target) => target.type_(),
+            Target::Pod(target) => target.type_(),
+            Target::Rollout(target) => target.type_(),
+            Target::Job(target) => target.type_(),
+            Target::CronJob(target) => target.type_(),
+            Target::StatefulSet(target) => target.type_(),
         }
     }
 
     #[tracing::instrument(level = "debug", ret)]
-    fn target_name(&self) -> &str {
+    fn name(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
             Target::Unknown(target) => target.as_str(),
-            Target::Deployment(target) => target.target_name(),
-            Target::Pod(target) => target.target_name(),
-            Target::Rollout(target) => target.target_name(),
-            Target::Job(target) => target.target_name(),
-            Target::CronJob(target) => target.target_name(),
-            Target::StatefulSet(target) => target.target_name(),
+            Target::Deployment(target) => target.name(),
+            Target::Pod(target) => target.name(),
+            Target::Rollout(target) => target.name(),
+            Target::Job(target) => target.name(),
+            Target::CronJob(target) => target.name(),
+            Target::StatefulSet(target) => target.name(),
         }
     }
 
     #[tracing::instrument(level = "debug", ret)]
-    fn container_name(&self) -> Option<&String> {
+    fn container(&self) -> Option<&String> {
         match self {
             Target::Targetless => None,
             Target::Unknown(_) => None,
-            Target::Deployment(target) => target.container_name(),
-            Target::Pod(target) => target.container_name(),
-            Target::Rollout(target) => target.container_name(),
-            Target::Job(target) => target.container_name(),
-            Target::CronJob(target) => target.container_name(),
-            Target::StatefulSet(target) => target.container_name(),
+            Target::Deployment(target) => target.container(),
+            Target::Pod(target) => target.container(),
+            Target::Rollout(target) => target.container(),
+            Target::Job(target) => target.container(),
+            Target::CronJob(target) => target.container(),
+            Target::StatefulSet(target) => target.container(),
         }
     }
 }

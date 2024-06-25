@@ -32,3 +32,17 @@ impl FromSplit for JobTarget {
         }
     }
 }
+
+impl core::fmt::Display for JobTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}{}",
+            self.container
+                .as_ref()
+                .map(|c| format!("{c}/"))
+                .unwrap_or_default(),
+            self.job.clone()
+        )
+    }
+}

@@ -442,7 +442,7 @@ impl OperatorApi {
 
     /// Returns a connection url for the given [`OperatorSessionInformation`].
     /// This can be used to create a websocket connection with the operator.
-    #[tracing::instrument(level = "debug", skip(self), ret)]
+    #[tracing::instrument(level = "info", skip(self), ret)]
     fn connect_url(&self, session: &OperatorSessionInformation) -> String {
         match (session.metadata.proxy_feature_enabled(), &session.target) {
             (true, OperatorSessionTarget::Raw(target)) => {
@@ -451,9 +451,15 @@ impl OperatorApi {
                 let api_version = TargetCrd::api_version(dt);
                 let plural = TargetCrd::plural(dt);
 
+                println!(
+                    "\ntarget-pls {:?} name {:?}",
+                    target,
+                    target.type_dot_name()
+                );
+
                 format!(
                     "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{}?on_concurrent_steal={}&connect=true",
-                    target.name(),
+                    target.type_dot_name(),
                     self.on_concurrent_steal,
                 )
             }
@@ -461,7 +467,7 @@ impl OperatorApi {
                 format!(
                     "{}/{}?on_concurrent_steal={}&connect=true",
                     self.target_api.resource_url(),
-                    target.name(),
+                    target.type_dot_name(),
                     self.on_concurrent_steal,
                 )
             }
