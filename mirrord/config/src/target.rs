@@ -25,6 +25,7 @@ pub mod job;
 pub mod pod;
 pub mod rollout;
 pub mod stateful_set;
+pub mod target_handle;
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
@@ -300,6 +301,10 @@ impl Target {
     }
 }
 
+/// Trait used to convert different aspects of a [`Target`] into a string.
+///
+/// It's mainly implemented using the [`impl_target_display`] macro, except for [`Target`]
+/// and `TargetHandle`, which manually implement this.
 pub trait TargetDisplay {
     fn type_(&self) -> &str;
 

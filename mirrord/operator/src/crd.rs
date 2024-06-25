@@ -1,5 +1,5 @@
 use kube::CustomResource;
-use mirrord_config::target::{Target, TargetConfig, TargetDisplay};
+use mirrord_config::target::{target_handle::TargetHandle, Target, TargetConfig};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -20,85 +20,18 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 )]
 pub struct TargetSpec {
     /// None when targetless.
-    pub target: CompatTarget,
-}
-
-#[derive(Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
-#[serde(transparent, deny_unknown_fields)]
-pub struct CompatTarget(pub Target);
-
-impl core::fmt::Display for CompatTarget {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl TargetDisplay for CompatTarget {
-    fn type_(&self) -> &str {
-        self.0.type_()
-    }
-
-    fn name(&self) -> &str {
-        self.0.name()
-    }
-
-    fn container(&self) -> Option<&String> {
-        self.0.container()
-    }
-}
-
-impl core::ops::Deref for CompatTarget {
-    type Target = Target;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::borrow::Borrow<Target> for CompatTarget {
-    fn borrow(&self) -> &Target {
-        self.0.borrow()
-    }
-}
-
-impl From<Target> for CompatTarget {
-    fn from(value: Target) -> Self {
-        Self(value)
-    }
-}
-
-impl Serialize for CompatTarget {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for CompatTarget {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let deserialized = serde_json::Value::deserialize(deserializer)?;
-        let target_name = deserialized.get("name").map(ToString::to_string);
-
-        let target = serde_json::from_value(deserialized);
-        match target {
-            Ok(target) => Ok(CompatTarget(target)),
-            Err(_) => Ok(CompatTarget(Target::Unknown(
-                target_name.unwrap_or_default(),
-            ))),
-        }
-    }
+    pub target: TargetHandle,
 }
 
 impl TargetCrd {
-    /// Creates target name in format of target_type.target_name.[container.container_name]
+    /// Creates a target name in format of `target_type.target_name.[container.container_name]`
     /// for example:
-    /// deploy.nginx
-    /// deploy.nginx.container.nginx
+    ///
+    /// - `DeploymentTarget { deployment: "nginx", container: None }` -> `deploy.nginx`;
+    /// - `DeploymentTarget { deployment: "nginx", container: Some("pyrex") }` ->
+    ///   `deploy.nginx.container.pyrex`;
+    ///
+    /// It's used to connect to a resource through the operator.
     pub fn urlfied_name(target: &Target) -> String {
         let (type_name, target, container) = match target {
             Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
@@ -109,7 +42,7 @@ impl TargetCrd {
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
             Target::Unknown(target) => {
-                return target.clone();
+                return format!("unknown/{}", target.clone());
             }
         };
 
