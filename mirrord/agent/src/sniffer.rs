@@ -145,8 +145,8 @@ async fn prepare_sniffer(
     // mesh, otherwise we try to get the appropriate interface.
     let interface = match network_interface.or_else(|| {
         mesh.and_then(|mesh_vendor| match mesh_vendor {
-            MeshVendor::Linkerd | MeshVendor::Kuma => None,
-            MeshVendor::Istio => Some("lo".to_string()),
+            MeshVendor::Linkerd | MeshVendor::Istio => Some("lo".to_string()),
+            MeshVendor::Kuma => None,
         })
     }) {
         Some(interface) => interface,
