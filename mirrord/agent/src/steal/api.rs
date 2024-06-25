@@ -165,6 +165,7 @@ impl TcpStealerApi {
                 self.http_response(HttpResponseFallback::Framed(response))
                     .await
             }
+            LayerTcpSteal::HttpResponseChunked(_) => todo!(),
         }
     }
 }

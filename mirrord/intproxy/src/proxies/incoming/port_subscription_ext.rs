@@ -93,6 +93,7 @@ impl PortSubscriptionExt for PortSubscription {
                 MessageOut::Http(HttpResponseFallback::Framed(res)) => Some(
                     ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(res)),
                 ),
+                MessageOut::Http(HttpResponseFallback::Streamed(_)) => todo!(),
             },
         }
     }

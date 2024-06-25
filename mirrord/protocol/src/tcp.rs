@@ -11,7 +11,7 @@ use std::{
 
 use bincode::{Decode, Encode};
 use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
+use http_body_util::{combinators::BoxBody, BodyExt, Full, StreamBody};
 use hyper::{
     body::{Body, Frame, Incoming},
     http,
@@ -22,9 +22,10 @@ use mirrord_macros::protocol_break;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Receiver;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
 
-use crate::{ConnectionId, Port, RemoteResult, RequestId};
+use crate::{body_chunks::IncomingExt, ConnectionId, Port, RemoteResult, RequestId};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnection {
@@ -81,13 +82,13 @@ pub enum DaemonTcp {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ChunkedRequest {
     Start(HttpRequest<Vec<InternalHttpBodyFrame>>),
-    Body(ChunkedRequestBody),
-    Error(ChunkedRequestError),
+    Body(ChunkedHttpBody),
+    Error(ChunkedHttpError),
 }
 
 /// Contents of a chunked message body frame from server.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ChunkedRequestBody {
+pub struct ChunkedHttpBody {
     #[bincode(with_serde)]
     pub frames: Vec<InternalHttpBodyFrame>,
     pub is_last: bool,
@@ -106,7 +107,7 @@ impl From<InternalHttpBodyFrame> for Frame<Bytes> {
 
 /// An error occurred while processing chunked data from server.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ChunkedRequestError {
+pub struct ChunkedHttpError {
     pub connection_id: ConnectionId,
     pub request_id: RequestId,
 }
@@ -191,6 +192,14 @@ pub enum LayerTcpSteal {
     Data(TcpData),
     HttpResponse(HttpResponse<Vec<u8>>),
     HttpResponseFramed(HttpResponse<InternalHttpBody>),
+    HttpResponseChunked(ChunkedResponse),
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum ChunkedResponse {
+    Start(HttpResponse<Vec<InternalHttpBodyFrame>>),
+    Body(ChunkedHttpBody),
+    Error(ChunkedHttpError),
 }
 
 /// (De-)Serializable HTTP request.
@@ -536,10 +545,13 @@ impl fmt::Debug for InternalHttpBodyFrame {
     }
 }
 
+pub type HttpResponseStreamed = StreamBody<ReceiverStream<hyper::Result<Frame<Bytes>>>>;
+
 #[derive(Debug)]
 pub enum HttpResponseFallback {
     Framed(HttpResponse<InternalHttpBody>),
     Fallback(HttpResponse<Vec<u8>>),
+    Streamed(HttpResponse<HttpResponseStreamed>),
 }
 
 impl HttpResponseFallback {
@@ -547,6 +559,7 @@ impl HttpResponseFallback {
         match self {
             HttpResponseFallback::Framed(req) => req.connection_id,
             HttpResponseFallback::Fallback(req) => req.connection_id,
+            HttpResponseFallback::Streamed(req) => req.connection_id,
         }
     }
 
@@ -554,6 +567,7 @@ impl HttpResponseFallback {
         match self {
             HttpResponseFallback::Framed(req) => req.request_id,
             HttpResponseFallback::Fallback(req) => req.request_id,
+            HttpResponseFallback::Streamed(req) => req.request_id,
         }
     }
 
@@ -561,6 +575,7 @@ impl HttpResponseFallback {
         match self {
             HttpResponseFallback::Framed(req) => req.internal_response.try_into(),
             HttpResponseFallback::Fallback(req) => req.internal_response.try_into(),
+            HttpResponseFallback::Streamed(req) => req.internal_response.try_into(),
         }
     }
 
@@ -576,8 +591,10 @@ impl HttpResponseFallback {
             HttpRequestFallback::Fallback(request) => HttpResponseFallback::Fallback(
                 HttpResponse::<Vec<u8>>::response_from_request(request, status, message),
             ),
-            HttpRequestFallback::Streamed(request) => HttpResponseFallback::Framed(
-                HttpResponse::<InternalHttpBody>::response_from_request(request, status, message),
+            HttpRequestFallback::Streamed(request) => HttpResponseFallback::Streamed(
+                HttpResponse::<HttpResponseStreamed>::response_from_request(
+                    request, status, message,
+                ),
             ),
         }
     }
@@ -585,10 +602,7 @@ impl HttpResponseFallback {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 #[bincode(bounds = "for<'de> Body: Serialize + Deserialize<'de>")]
-pub struct HttpResponse<Body>
-where
-    for<'de> Body: Serialize + Deserialize<'de>,
-{
+pub struct HttpResponse<Body> {
     /// This is used to make sure the response is sent in its turn, after responses to all earlier
     /// requests were already sent.
     pub port: Port,
@@ -789,6 +803,87 @@ impl HttpResponse<Vec<u8>> {
     }
 }
 
+impl HttpResponse<HttpResponseStreamed> {
+    pub async fn from_hyper_response(
+        response: Response<Incoming>,
+        port: Port,
+        connection_id: ConnectionId,
+        request_id: RequestId,
+    ) -> Result<HttpResponse<HttpResponseStreamed>, hyper::Error> {
+        let (
+            Parts {
+                status,
+                version,
+                headers,
+                ..
+            },
+            mut body,
+        ) = response.into_parts();
+
+        let frames = body.next_frames(true).await?;
+        let (tx, rx) = tokio::sync::mpsc::channel(frames.frames.len().max(12));
+        for frame in frames.frames {
+            tx.try_send(Ok(frame))
+                .expect("Channel is open, capacity sufficient")
+        }
+        if !frames.is_last {
+            tokio::spawn(async move {
+                while let Some(frame) = body.frame().await {
+                    if tx.send(frame).await.is_err() {
+                        return;
+                    }
+                }
+            });
+        };
+
+        let body = StreamBody::new(ReceiverStream::from(rx));
+
+        let internal_response = InternalHttpResponse {
+            status,
+            headers,
+            version,
+            body,
+        };
+
+        Ok(HttpResponse {
+            request_id,
+            port,
+            connection_id,
+            internal_response,
+        })
+    }
+
+    pub fn response_from_request(
+        request: HttpRequest<StreamingBody>,
+        status: StatusCode,
+        message: &str,
+    ) -> Self {
+        let HttpRequest {
+            internal_request: InternalHttpRequest { version, .. },
+            connection_id,
+            request_id,
+            port,
+        } = request;
+
+        let (tx, rx) = tokio::sync::mpsc::channel(12);
+        let frame = Frame::data(Bytes::copy_from_slice(message.as_bytes()));
+        let _ = tx.blocking_send(Ok(frame));
+        let body = StreamBody::new(ReceiverStream::new(rx));
+
+        Self {
+            port,
+            connection_id,
+            request_id,
+            internal_response: InternalHttpResponse {
+                status,
+                version,
+                headers: Default::default(),
+                body,
+            },
+        }
+    }
+}
+
 impl<E> TryFrom<InternalHttpResponse<InternalHttpBody>> for Response<BoxBody<Bytes, E>> {
     type Error = http::Error;
 
@@ -828,5 +923,25 @@ impl<E> TryFrom<InternalHttpResponse<Vec<u8>>> for Response<BoxBody<Bytes, E>> {
         builder.body(BoxBody::new(
             Full::new(Bytes::from(body)).map_err(|_| unreachable!()),
         ))
+    }
+}
+
+impl<E> TryFrom<InternalHttpResponse<HttpResponseStreamed>> for Response<BoxBody<Bytes, E>> {
+    type Error = http::Error;
+
+    fn try_from(value: InternalHttpResponse<HttpResponseStreamed>) -> Result<Self, Self::Error> {
+        let InternalHttpResponse {
+            status,
+            version,
+            headers,
+            body,
+        } = value;
+
+        let mut builder = Response::builder().status(status).version(version);
+        if let Some(h) = builder.headers_mut() {
+            *h = headers;
+        }
+
+        builder.body(BoxBody::new(body.map_err(|_| unreachable!())))
     }
 }

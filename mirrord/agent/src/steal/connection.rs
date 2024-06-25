@@ -11,8 +11,9 @@ use hyper::{
     http::{header::UPGRADE, request::Parts},
 };
 use mirrord_protocol::{
+    body_chunks::{Frames, IncomingExt},
     tcp::{
-        ChunkedRequest, ChunkedRequestBody, ChunkedRequestError, DaemonTcp, HttpRequest,
+        ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, DaemonTcp, HttpRequest,
         HttpResponseFallback, InternalHttpBody, InternalHttpBodyFrame, InternalHttpRequest,
         StealType, TcpClose, TcpData, HTTP_CHUNKED_VERSION, HTTP_FILTERED_UPGRADE_VERSION,
         HTTP_FRAMED_VERSION,
@@ -33,7 +34,7 @@ use crate::{
         connections::{
             ConnectionMessageIn, ConnectionMessageOut, StolenConnection, StolenConnections,
         },
-        http::{Frames, HttpFilter, IncomingExt},
+        http::HttpFilter,
         orig_dst,
         subscriptions::{IpTablesRedirector, PortSubscriptions},
         Command, StealerCommand,
@@ -204,7 +205,7 @@ impl Client {
                                 .filter_map(Result::ok)
                                 .collect();
                             let message = DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
-                                ChunkedRequestBody {
+                                ChunkedHttpBody {
                                     frames,
                                     is_last,
                                     connection_id,
@@ -218,7 +219,7 @@ impl Client {
                         Err(_) => {
                             let _ = tx
                                 .send(DaemonTcp::HttpRequestChunked(ChunkedRequest::Error(
-                                    ChunkedRequestError {
+                                    ChunkedHttpError {
                                         connection_id,
                                         request_id,
                                     },
