@@ -1,7 +1,5 @@
-use std::{
-    fmt::{self},
-    str::FromStr,
-};
+use core::fmt;
+use std::str::FromStr;
 
 use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
@@ -321,6 +319,7 @@ pub trait TargetDisplay {
     fn container(&self) -> Option<&String>;
 }
 
+/// Implements the [`TargetDisplay`] and [`fmt::Display`] traits for a target type.
 macro_rules! impl_target_display {
     ($struct_name:ident, $target_type:ident) => {
         impl TargetDisplay for $struct_name {
@@ -337,7 +336,7 @@ macro_rules! impl_target_display {
             }
         }
 
-        impl core::fmt::Display for $struct_name {
+        impl fmt::Display for $struct_name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(
                     f,
