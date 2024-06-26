@@ -442,7 +442,7 @@ impl OperatorApi {
 
     /// Returns a connection url for the given [`OperatorSessionInformation`].
     /// This can be used to create a websocket connection with the operator.
-    #[tracing::instrument(level = "info", skip(self), ret)]
+    #[tracing::instrument(level = "trace", skip(self), ret)]
     fn connect_url(&self, session: &OperatorSessionInformation) -> String {
         match (session.metadata.proxy_feature_enabled(), &session.target) {
             (true, OperatorSessionTarget::Raw(crd)) => {

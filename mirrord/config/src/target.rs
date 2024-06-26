@@ -312,10 +312,13 @@ impl Target {
 /// It's mainly implemented using the [`impl_target_display`] macro, except for [`Target`]
 /// and `TargetHandle`, which manually implement this.
 pub trait TargetDisplay {
+    /// The string version of a [`Target`]'s type, e.g. `Pod` -> `"Pod"`.
     fn type_(&self) -> &str;
 
+    /// The `name` of a [`Target`], e.g. `"pod-of-beans"`.
     fn name(&self) -> &str;
 
+    /// The optional name of a [`Target`]'s container, e.g. `"can-of-beans"`.
     fn container(&self) -> Option<&String>;
 }
 
@@ -375,7 +378,7 @@ impl fmt::Display for Target {
 }
 
 impl TargetDisplay for Target {
-    #[tracing::instrument(level = "debug", ret)]
+    #[tracing::instrument(level = "trace", ret)]
     fn type_(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
@@ -389,7 +392,7 @@ impl TargetDisplay for Target {
         }
     }
 
-    #[tracing::instrument(level = "debug", ret)]
+    #[tracing::instrument(level = "trace", ret)]
     fn name(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
@@ -403,7 +406,7 @@ impl TargetDisplay for Target {
         }
     }
 
-    #[tracing::instrument(level = "debug", ret)]
+    #[tracing::instrument(level = "trace", ret)]
     fn container(&self) -> Option<&String> {
         match self {
             Target::Targetless => None,
