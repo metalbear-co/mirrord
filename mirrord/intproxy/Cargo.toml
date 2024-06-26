@@ -24,7 +24,7 @@ mirrord-kube = { path = "../kube" }
 mirrord-operator = { path = "../operator", features = ["client"] }
 mirrord-protocol = { path = "../protocol" }
 mirrord-intproxy-protocol = { path = "./protocol", features = ["codec-async"] }
-mirrord-analytics = { path = "../analytics"}
+mirrord-analytics = { path = "../analytics" }
 
 serde.workspace = true
 thiserror.workspace = true
@@ -37,3 +37,6 @@ http-body-util.workspace = true
 bytes.workspace = true
 
 rand = "0.8"
+
+[dev-dependencies]
+futures.workspace = true

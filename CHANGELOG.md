@@ -8,6 +8,24 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.107.0](https://github.com/metalbear-co/mirrord/tree/3.107.0) - 2024-06-25
+
+
+### Added
+
+- Added support for intercepting streaming HTTP requests with an HTTP filter.
+  [#2478](https://github.com/metalbear-co/mirrord/issues/2478)
+- mirrord now queries kube discovery API to confirm that mirrord operator is
+  not installed (when an attempt to use operator API fails).
+  [#2487](https://github.com/metalbear-co/mirrord/issues/2487)
+
+
+### Fixed
+
+- Fix network interface configuration not propagating to agent
+  [#2539](https://github.com/metalbear-co/mirrord/issues/2539)
+
+
 ## [3.106.0](https://github.com/metalbear-co/mirrord/tree/3.106.0) - 2024-06-18
 
 
