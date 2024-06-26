@@ -309,7 +309,7 @@ impl Target {
 
 /// Trait used to convert different aspects of a [`Target`] into a string.
 ///
-/// It's mainly implemented using the [`impl_target_display`] macro, except for [`Target`]
+/// It's mainly implemented using the `impl_target_display` macro, except for [`Target`]
 /// and `TargetHandle`, which manually implement this.
 pub trait TargetDisplay {
     /// The string version of a [`Target`]'s type, e.g. `Pod` -> `"Pod"`.
