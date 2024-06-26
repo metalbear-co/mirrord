@@ -58,15 +58,20 @@ impl HttpFilter {
                 headers.has_match(filter)
             }
 
-            Self::Path(filter) => {
-                let path = request.uri().path();
-                filter
-                    .is_match(path)
-                    .inspect_err(|error| {
-                        tracing::error!(path, ?error, "Error while matching path");
-                    })
-                    .unwrap_or(false)
-            }
+            Self::Path(filter) => request
+                .uri()
+                .into_parts()
+                .path_and_query
+                .map(|path_and_query| {
+                    let path = path_and_query.as_str();
+                    filter
+                        .is_match(path)
+                        .inspect_err(|error| {
+                            tracing::error!(path, ?error, "Error while matching path");
+                        })
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false),
         }
     }
 }
