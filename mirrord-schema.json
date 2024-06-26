@@ -794,7 +794,7 @@
         },
         "path_filter": {
           "title": "feature.network.incoming.http_filter.path_filter {#feature-network-incoming-http-path-filter}",
-          "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nCase-insensitive.",
+          "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nCase-insensitive. Tries to find match in the path (without query) and path+query. If any of the two matches, the request is stolen.",
           "type": [
             "string",
             "null"
