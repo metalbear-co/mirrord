@@ -451,7 +451,11 @@ impl OperatorApi {
 
     /// Returns a CRD for the target specified in the given [`LayerConfig`].
     /// If `copy_target` feature is enabled, this required creating [`CopyTargetCrd`] first.
-    #[tracing::instrument(level = "trace", skip(self, progress))]
+    #[tracing::instrument(
+        level = "trace",
+        fields(target_config = ?config.target, copy_target_config = ?config.feature.copy_target)
+        skip_all,
+    )]
     pub async fn get_target<P>(
         &self,
         config: &LayerConfig,
@@ -608,7 +612,11 @@ impl OperatorApi {
     ///
     /// `copy_target` feature is not available for all target types.
     /// Target type compatibility is checked by the operator.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(
+        level = "trace",
+        fields(target_config = ?config.target, copy_target_config = ?config.feature.copy_target)
+        skip_all,
+    )]
     async fn copy_target(&self, config: &LayerConfig) -> Result<CopyTargetCrd> {
         let target = config.target.path.clone().unwrap_or(Target::Targetless);
         let name = TargetCrd::target_name(&target);
