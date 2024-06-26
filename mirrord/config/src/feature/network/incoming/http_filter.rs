@@ -76,7 +76,8 @@ pub struct HttpFilterConfig {
     /// Supports regexes validated by the
     /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
     ///
-    /// Case-insensitive.
+    /// Case-insensitive. Tries to find match in the path (without query) and path+query.
+    /// If any of the two matches, the request is stolen.
     #[config(env = "MIRRORD_HTTP_PATH_FILTER")]
     pub path_filter: Option<String>,
 
