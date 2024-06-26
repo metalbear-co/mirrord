@@ -255,6 +255,7 @@ pub enum Target {
     #[default]
     Targetless,
 
+    #[serde(skip_serializing)]
     Unknown(String),
 }
 
