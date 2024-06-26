@@ -62,12 +62,25 @@ impl HttpFilter {
                 .uri()
                 .into_parts()
                 .path_and_query
+                .as_ref()
                 .map(|path_and_query| {
+                    // For backward compatability, we first match path then we match path and query
+                    // together and return true if any of them matches
+                    if filter
+                        .is_match(path_and_query.path())
+                        .inspect_err(|error| {
+                            tracing::error!(path, ?error, "Error while matching path");
+                        })
+                        .unwrap_or(false)
+                    {
+                        return true;
+                    }
+
                     let path = path_and_query.as_str();
                     filter
                         .is_match(path)
                         .inspect_err(|error| {
-                            tracing::error!(path, ?error, "Error while matching path");
+                            tracing::error!(path, ?error, "Error while matching path+query");
                         })
                         .unwrap_or(false)
                 })
