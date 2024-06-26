@@ -5,12 +5,12 @@ use std::{
 };
 
 use futures::TryFutureExt;
-use kube::Api;
+use kube::{api::GroupVersionKind, discovery, Api, Client, Resource};
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     LayerConfig, LayerFileConfig,
 };
-use mirrord_kube::api::kubernetes::create_kube_api;
+use mirrord_kube::api::kubernetes::create_kube_config;
 use mirrord_operator::{
     client::{OperatorApiError, OperatorOperation},
     crd::{MirrordOperatorCrd, MirrordOperatorSpec, OPERATOR_STATUS_NAME},
@@ -130,15 +130,16 @@ async fn get_status_api(config: Option<&Path>) -> Result<Api<MirrordOperatorCrd>
         remove_proxy_env();
     }
 
-    let kube_api = create_kube_api(
+    let client = create_kube_config(
         layer_config.accept_invalid_certificates,
         layer_config.kubeconfig,
         layer_config.kube_context,
     )
     .await
+    .and_then(|config| Client::try_from(config).map_err(From::from))
     .map_err(CliError::CreateKubeApiFailed)?;
 
-    Ok(Api::all(kube_api))
+    Ok(Api::all(client))
 }
 
 #[tracing::instrument(level = "trace", ret)]
@@ -301,6 +302,36 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             SessionCommandHandler::new(session_command)
                 .and_then(SessionCommandHandler::handle)
                 .await
+        }
+    }
+}
+
+#[tracing::instrument(level = "trace", skip(config), ret, err)]
+pub async fn check_if_operator_resource_exists(config: &LayerConfig) -> Result<bool> {
+    let client = create_kube_config(
+        config.accept_invalid_certificates,
+        config.kubeconfig.clone(),
+        config.kube_context.clone(),
+    )
+    .await
+    .and_then(|config| Client::try_from(config).map_err(From::from))
+    .map_err(CliError::OperatorInstallationCheckError)?;
+
+    let gvk = GroupVersionKind {
+        group: MirrordOperatorCrd::group(&()).into_owned(),
+        version: MirrordOperatorCrd::version(&()).into_owned(),
+        kind: MirrordOperatorCrd::kind(&()).into_owned(),
+    };
+
+    match discovery::oneshot::pinned_kind(&client, &gvk).await {
+        Ok(..) => Ok(true),
+        Err(kube::Error::Api(response)) if response.code == 404 => Ok(false),
+        Err(error) => {
+            tracing::trace!(
+                ?error,
+                "Failed to check if operator is installed in the cluster"
+            );
+            Err(CliError::OperatorInstallationCheckError(error.into()))
         }
     }
 }

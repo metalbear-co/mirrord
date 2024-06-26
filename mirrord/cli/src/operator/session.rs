@@ -1,11 +1,9 @@
-use kube::{core::ErrorResponse, Api};
-use mirrord_operator::{
-    client::{session_api, OperatorApiError, OperatorOperation},
-    crd::{MirrordOperatorCrd, SessionCrd, OPERATOR_STATUS_NAME},
-};
+use kube::core::ErrorResponse;
+use mirrord_analytics::NullReporter;
+use mirrord_config::LayerConfig;
+use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorOperation};
 use mirrord_progress::{Progress, ProgressTracker};
 
-use super::get_status_api;
 use crate::{Result, SessionCommand};
 
 /// Handles the [`SessionCommand`]s that deal with session management in the operator.
@@ -17,11 +15,8 @@ pub(super) struct SessionCommandHandler {
     /// operation is going.
     sub_progress: ProgressTracker,
 
-    /// Kube API to talk with session routes in the operator.
-    operator_api: Api<MirrordOperatorCrd>,
-
-    /// Kube API to talk with session routes in the operator.
-    session_api: Api<SessionCrd>,
+    /// Api to talk with session routes in the operator.
+    operator_api: OperatorApi,
 
     /// The command the user is trying to execute from the cli.
     command: SessionCommand,
@@ -33,13 +28,15 @@ impl SessionCommandHandler {
     pub(super) async fn new(command: SessionCommand) -> Result<Self> {
         let mut progress = ProgressTracker::from_env("Operator session action");
 
-        let operator_api = get_status_api(None).await.inspect_err(|fail| {
-            progress.failure(Some(&format!("Failed to create operator API with {fail}!")))
+        let config = LayerConfig::from_env().inspect_err(|error| {
+            progress.failure(Some(&format!("Failed to read config from env: {error}")));
         })?;
 
-        let session_api = session_api(None).await.inspect_err(|fail| {
-            progress.failure(Some(&format!("Failed to create session API with {fail}!")))
-        })?;
+        let operator_api = OperatorApi::new(&config, &progress, &mut NullReporter::default())
+            .await
+            .inspect_err(|error| {
+                progress.failure(Some(&format!("Failed to create operator API: {error}")))
+            })?;
 
         let sub_progress = progress.subtask("preparing...");
 
@@ -47,7 +44,6 @@ impl SessionCommandHandler {
             progress,
             sub_progress,
             operator_api,
-            session_api,
             command,
         })
     }
@@ -60,20 +56,12 @@ impl SessionCommandHandler {
             mut progress,
             mut sub_progress,
             operator_api,
-            session_api,
             command,
         } = self;
 
-        let operator_version = operator_api
-            .get(OPERATOR_STATUS_NAME)
-            .await
-            .map_err(|error| OperatorApiError::KubeError {
-                error,
-                operation: OperatorOperation::GettingStatus,
-            })
-            .map(|crd| crd.spec.operator_version)?;
-
         sub_progress.print(&format!("executing `{command}`"));
+
+        let session_api = operator_api.session_api();
 
         // We're interested in the `Status`es, so we map the results into those.
         match command {
@@ -97,7 +85,7 @@ impl SessionCommandHandler {
             {
                 OperatorApiError::UnsupportedFeature {
                     feature: "session management".to_string(),
-                    operator_version,
+                    operator_version: operator_api.session_metadata().operator_spec().operator_version.clone(),
                 }
             }
             // Something actually went wrong.

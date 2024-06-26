@@ -74,7 +74,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "socks",
     "http2",
 ] }
-kube = { version = "0.92", default-features = false, features = [
+kube = { git = "https://github.com/kube-rs/kube", rev = "f9902f1439b3c0baafc2ece1680644c2bfade742", default-features = false, features = [
     "runtime",
     "derive",
     "client",
@@ -83,7 +83,7 @@ kube = { version = "0.92", default-features = false, features = [
     "oidc",
     "socks5",
     "http-proxy",
-]}
+] }
 hickory-resolver = { version = "0.24", features = [
     "serde-config",
     "tokio-runtime",

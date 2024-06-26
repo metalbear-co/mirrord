@@ -17,9 +17,11 @@ use k8s_openapi::{
     api::{apps::v1::Deployment, core::v1::Pod},
     Metadata, NamespaceResourceScope,
 };
-use kube::api::ListParams;
+use kube::{api::ListParams, Client};
 use miette::JSONReportHandler;
-use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
+use mirrord_analytics::{
+    AnalyticsError, AnalyticsReporter, CollectAnalytics, NullReporter, Reporter,
+};
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     feature::{fs::FsModeConfig, network::incoming::IncomingMode},
@@ -28,10 +30,10 @@ use mirrord_config::{
 };
 use mirrord_kube::api::{
     container::SKIP_NAMES,
-    kubernetes::{create_kube_api, get_k8s_resource_api, rollout::Rollout},
+    kubernetes::{create_kube_config, get_k8s_resource_api, rollout::Rollout},
 };
-use mirrord_operator::client::OperatorApi;
-use mirrord_progress::{Progress, ProgressTracker};
+use mirrord_operator::client::{OperatorApi, OperatorApiError};
+use mirrord_progress::{NullProgress, Progress, ProgressTracker};
 use operator::operator_command;
 use semver::Version;
 use serde::de::DeserializeOwned;
@@ -500,12 +502,13 @@ where
 }
 
 async fn list_pods(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<Vec<String>> {
-    let client = create_kube_api(
+    let client = create_kube_config(
         layer_config.accept_invalid_certificates,
         layer_config.kubeconfig.clone(),
         layer_config.kube_context.clone(),
     )
     .await
+    .and_then(|config| Client::try_from(config).map_err(From::from))
     .map_err(CliError::CreateKubeApiFailed)?;
 
     let namespace = args
@@ -565,7 +568,14 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     // Try operator first if relevant
     let mut targets = match &layer_config.operator {
         Some(true) | None => {
-            let operator_targets = OperatorApi::list_targets(&layer_config).await;
+            let operator_targets: Result<_, OperatorApiError> = try {
+                let api =
+                    OperatorApi::new(&layer_config, &NullProgress, &mut NullReporter::default())
+                        .await?;
+                let namespace = layer_config.target.namespace.as_deref();
+                api.list_targets(namespace).await?
+            };
+
             match operator_targets {
                 Ok(targets) => {
                     // adjust format to match non-operator output
@@ -583,14 +593,29 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
                         .collect::<Vec<String>>()
                 }
 
+                Err(error) if layer_config.operator.is_some() => {
+                    error!(
+                        ?error,
+                        "Operator was explicitly enabled and we failed to list targets"
+                    );
+                    return Err(error.into());
+                }
+
                 Err(error) => {
-                    if layer_config.operator.is_some() {
-                        error!(
-                            ?error,
-                            "Operator was explicitly enabled and we failed to list targets"
-                        );
-                        return Err(error.into());
+                    match operator::check_if_operator_resource_exists(&layer_config).await {
+                        Ok(false) => {}
+                        Ok(true) => {
+                            tracing::error!(
+                                ?error,
+                                "Operator is installed and we failed to list targets"
+                            );
+                            return Err(error.into());
+                        }
+                        Err(error) => {
+                            tracing::debug!(?error, "Failed to check if operator is installed");
+                        }
                     }
+
                     list_pods(&layer_config, args).await?
                 }
             }

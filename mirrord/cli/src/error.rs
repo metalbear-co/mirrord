@@ -242,6 +242,10 @@ pub(crate) enum CliError {
     Please remember that some features are supported only when using mirrord operator (https://mirrord.dev/docs/overview/teams/#supported-features).{GENERAL_HELP}"
     ))]
     OperatorInstallationCheckError(KubeApiError),
+
+    #[error("Failed to prepare mirrord operator user certificate: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    OperatorUserCertError(String),
 }
 
 impl From<OperatorApiError> for CliError {
@@ -254,7 +258,7 @@ impl From<OperatorApiError> for CliError {
                 feature,
                 operator_version,
             },
-            OperatorApiError::CreateApiError(e) => Self::CreateKubeApiFailed(e),
+            OperatorApiError::CreateKubeClient(e) => Self::CreateKubeApiFailed(e),
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
             OperatorApiError::KubeError {
                 error: kube::Error::Api(ErrorResponse { message, code, .. }),
@@ -279,6 +283,7 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorApiFailed(operation, error)
             }
             OperatorApiError::NoLicense => Self::OperatorLicenseExpired,
+            OperatorApiError::UserCertError(error) => Self::OperatorUserCertError(error),
         }
     }
 }

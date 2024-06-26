@@ -1,19 +1,14 @@
 use std::{collections::HashSet, time::Duration};
 
-use kube::{api::GroupVersionKind, discovery, Resource};
 use mirrord_analytics::Reporter;
 use mirrord_config::LayerConfig;
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
-    api::{
-        kubernetes::{create_kube_api, KubernetesAPI},
-        wrap_raw_connection,
-    },
+    api::{kubernetes::KubernetesAPI, wrap_raw_connection},
     error::KubeApiError,
 };
-use mirrord_operator::{
-    client::{OperatorApi, OperatorApiError, OperatorOperation},
-    crd::MirrordOperatorCrd,
+use mirrord_operator::client::{
+    OperatorApi, OperatorApiError, OperatorOperation, OperatorSessionInformation,
 };
 use mirrord_progress::{
     messages::MULTIPOD_WARNING, IdeAction, IdeMessage, NotificationLevel, Progress,
@@ -21,40 +16,11 @@ use mirrord_progress::{
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
 
-use crate::{CliError, Result};
+use crate::{operator, CliError, Result};
 
 pub(crate) struct AgentConnection {
     pub sender: mpsc::Sender<ClientMessage>,
     pub receiver: mpsc::Receiver<DaemonMessage>,
-}
-
-#[tracing::instrument(level = "trace", skip(config), ret, err)]
-async fn check_if_operator_resource_exists(config: &LayerConfig) -> Result<bool> {
-    let client = create_kube_api(
-        config.accept_invalid_certificates,
-        config.kubeconfig.clone(),
-        config.kube_context.clone(),
-    )
-    .await
-    .map_err(CliError::OperatorInstallationCheckError)?;
-
-    let gvk = GroupVersionKind {
-        group: MirrordOperatorCrd::group(&()).into_owned(),
-        version: MirrordOperatorCrd::version(&()).into_owned(),
-        kind: MirrordOperatorCrd::kind(&()).into_owned(),
-    };
-
-    match discovery::oneshot::pinned_kind(&client, &gvk).await {
-        Ok(..) => Ok(true),
-        Err(kube::Error::Api(response)) if response.code == 404 => Ok(false),
-        Err(error) => {
-            tracing::trace!(
-                ?error,
-                "Failed to check if operator is installed in the cluster"
-            );
-            Err(CliError::OperatorInstallationCheckError(error.into()))
-        }
-    }
 }
 
 /// Creates an agent if needed then connects to it.
@@ -79,15 +45,28 @@ where
     if config.operator != Some(false) {
         let mut subtask = progress.subtask("checking operator");
 
-        match OperatorApi::create_session(config, &subtask, analytics).await {
-            Ok(session) => {
+        let result = try {
+            let api = OperatorApi::new(config, &subtask, analytics).await?;
+            let target = api.get_target(config, &subtask).await?;
+            let connection = api
+                .connect_target(&target, config.feature.network.incoming.on_concurrent_steal)
+                .await?;
+            let session_info = OperatorSessionInformation {
+                target,
+                metadata: api.session_metadata().clone(),
+            };
+            (connection, session_info)
+        };
+
+        match result {
+            Ok((connection, session)) => {
                 subtask.success(Some("connected to the operator"));
 
                 return Ok((
-                    AgentConnectInfo::Operator(session.info),
+                    AgentConnectInfo::Operator(session),
                     AgentConnection {
-                        sender: session.tx,
-                        receiver: session.rx,
+                        sender: connection.tx,
+                        receiver: connection.rx,
                     },
                 ));
             }
@@ -104,7 +83,7 @@ where
                 },
             ) if config.operator.is_none() => {
                 // We need to check if the operator is really installed or not.
-                if check_if_operator_resource_exists(config).await? {
+                if operator::check_if_operator_resource_exists(config).await? {
                     return Err(e.into());
                 }
             }

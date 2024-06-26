@@ -74,12 +74,17 @@ impl AgentConnection {
         analytics: &mut R,
     ) -> Result<Self, AgentConnectionError> {
         let (agent_tx, agent_rx) = match connect_info {
-            Some(AgentConnectInfo::Operator(operator_session_information)) => {
-                let session = OperatorApi::connect(config, operator_session_information, analytics)
-                    .await
-                    .map_err(AgentConnectionError::Operator)?;
-
-                (session.tx, session.rx)
+            Some(AgentConnectInfo::Operator(session)) => {
+                let operator_api =
+                    OperatorApi::with_exisiting_session(config, session.metadata, analytics)
+                        .await?;
+                let connection = operator_api
+                    .connect_target(
+                        &session.target,
+                        config.feature.network.incoming.on_concurrent_steal,
+                    )
+                    .await?;
+                (connection.tx, connection.rx)
             }
 
             Some(AgentConnectInfo::DirectKubernetes(connect_info)) => {

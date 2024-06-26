@@ -1,30 +1,22 @@
-use std::{
-    fmt::{self, Display},
-    io,
-};
+use std::fmt::{self, Display};
 
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
 use futures::{SinkExt, StreamExt};
-use http::request::Request;
+use http::{request::Request, HeaderName, HeaderValue};
 use kube::{
     api::{ListParams, PostParams},
-    Api, Client, Resource,
+    Api, Client, Config, Resource,
 };
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
     certificate::Certificate,
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::LicenseValidity,
-    error::AuthenticationError,
 };
-use mirrord_config::{
-    feature::network::incoming::ConcurrentSteal,
-    target::{Target, TargetConfig},
-    LayerConfig,
-};
+use mirrord_config::{feature::network::incoming::ConcurrentSteal, target::Target, LayerConfig};
 use mirrord_kube::{
-    api::kubernetes::{create_kube_api, get_k8s_resource_api},
+    api::kubernetes::{create_kube_config, get_k8s_resource_api},
     error::KubeApiError,
 };
 use mirrord_progress::Progress;
@@ -34,11 +26,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn, Level};
 
-use crate::crd::{
-    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, SessionCrd, TargetCrd,
-    OPERATOR_STATUS_NAME,
+use crate::{
+    crd::{
+        CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, MirrordOperatorSpec, OperatorFeatures,
+        SessionCrd, TargetCrd, OPERATOR_STATUS_NAME,
+    },
+    types::{CLIENT_CERT_HEADER_NAME, MIRRORD_CLI_VERSION_HEADER_NAME},
 };
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
@@ -78,8 +73,8 @@ pub enum OperatorApiError {
     #[error("failed to build a websocket connect request: {0}")]
     ConnectRequestBuildError(HttpError),
 
-    #[error("failed to create mirrord operator API: {0}")]
-    CreateApiError(KubeApiError),
+    #[error("failed to create Kubernetes client: {0}")]
+    CreateKubeClient(KubeApiError),
 
     #[error("{operation} failed: {error}")]
     KubeError {
@@ -101,86 +96,106 @@ pub enum OperatorApiError {
 
     #[error("mirrord operator license expired")]
     NoLicense,
+
+    #[error("failed to prepare user certificate: {0}")]
+    UserCertError(String),
 }
 
 type Result<T, E = OperatorApiError> = std::result::Result<T, E>;
 
+/// Metadata of an operator session.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct OperatorSessionMetadata {
-    client_certificate: Option<Certificate>,
+    /// Generated in the operator or restored from local
+    /// [`CredentialStore`](mirrord_auth::credential_store::CredentialStore).
+    client_certificate: Certificate,
+    /// Random identifier of this session. Generated locally.
     session_id: u64,
-    fingerprint: Option<String>,
-    operator_features: Vec<OperatorFeatures>,
-    protocol_version: Option<semver::Version>,
-    copy_pod_enabled: Option<bool>,
+    /// Operator specification fetched from the cluster.
+    operator_spec: MirrordOperatorSpec,
 }
 
 impl OperatorSessionMetadata {
-    fn new(
-        client_certificate: Option<Certificate>,
-        fingerprint: Option<String>,
-        operator_features: Vec<OperatorFeatures>,
-        protocol_version: Option<semver::Version>,
-        copy_pod_enabled: Option<bool>,
-    ) -> Self {
+    fn new(client_certificate: Certificate, operator_spec: MirrordOperatorSpec) -> Self {
         Self {
             client_certificate,
             session_id: rand::random(),
-            fingerprint,
-            operator_features,
-            protocol_version,
-            copy_pod_enabled,
+            operator_spec,
         }
     }
 
-    fn client_credentials(&self) -> io::Result<Option<String>> {
-        self.client_certificate
-            .as_ref()
-            .map(|cert| {
-                cert.encode_der()
-                    .map(|bytes| general_purpose::STANDARD.encode(bytes))
-            })
-            .transpose()
+    pub fn operator_spec(&self) -> &MirrordOperatorSpec {
+        &self.operator_spec
+    }
+
+    #[tracing::instrument(level = Level::TRACE, skip(base_config), err)]
+    fn get_certified_client(&self, mut base_config: Config) -> Result<Client> {
+        let as_der = self.client_certificate.encode_der().map_err(|error| {
+            OperatorApiError::UserCertError(format!("failed to encode user certificate: {error}"))
+        })?;
+        let as_base64 = general_purpose::STANDARD.encode(as_der);
+        let as_header = HeaderValue::try_from(as_base64)
+            .map_err(|error| OperatorApiError::UserCertError(error.to_string()))?;
+
+        base_config
+            .headers
+            .push((HeaderName::from_static(CLIENT_CERT_HEADER_NAME), as_header));
+
+        Client::try_from(base_config)
+            .map_err(KubeApiError::from)
+            .map_err(OperatorApiError::CreateKubeClient)
     }
 
     fn set_operator_properties<R: Reporter>(&self, analytics: &mut R) {
-        let client_hash = self
-            .client_certificate
-            .as_ref()
-            .map(|cert| cert.public_key_data())
-            .as_deref()
-            .map(AnalyticsHash::from_bytes);
+        let public_key_data = self.client_certificate.public_key_data();
+        let client_hash = AnalyticsHash::from_bytes(&public_key_data);
 
         analytics.set_operator_properties(AnalyticsOperatorProperties {
-            client_hash,
-            license_hash: self.fingerprint.as_deref().map(AnalyticsHash::from_base64),
+            client_hash: Some(client_hash),
+            license_hash: self
+                .operator_spec
+                .license
+                .fingerprint
+                .as_deref()
+                .map(AnalyticsHash::from_base64),
         });
     }
 
     fn proxy_feature_enabled(&self) -> bool {
-        self.operator_features.contains(&OperatorFeatures::ProxyApi)
+        let Some(features) = self.operator_spec.features.as_ref() else {
+            return false;
+        };
+
+        features.contains(&OperatorFeatures::ProxyApi)
     }
 }
 
+/// Prepared target of an operator session.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum OperatorSessionTarget {
+    /// CRD of an immediate target validated and fetched by the operator.
     Raw(TargetCrd),
+    /// CRD of a copied target created by the operator.
     Copied(CopyTargetCrd),
 }
 
+/// Information about created operator session and its prepared target.
+/// Can be used to restore [`OperatorApi`] with [`OperatorApi::with_exisiting_session`]
+/// and connect to the target with [`OperatorApi::connect_target`].
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct OperatorSessionInformation {
-    target: OperatorSessionTarget,
-    metadata: OperatorSessionMetadata,
+    pub target: OperatorSessionTarget,
+    pub metadata: OperatorSessionMetadata,
 }
 
+/// Wrapper over mirrord operator API.
 pub struct OperatorApi {
+    /// For making requests to kubernetes API server.
+    /// This client will send [`MIRRORD_CLI_VERSION_HEADER_NAME`] and [`CLIENT_CERT_HEADER_NAME`]
+    /// headers with each request.
     client: Client,
-    target_api: Api<TargetCrd>,
-    copy_target_api: Api<CopyTargetCrd>,
-    target_namespace: Option<String>,
-    target_config: TargetConfig,
-    on_concurrent_steal: ConcurrentSteal,
+    /// Metadata of the operator session used by this API.
+    session_metadata: OperatorSessionMetadata,
 }
 
 /// Connection to existing operator session.
@@ -189,73 +204,92 @@ pub struct OperatorSessionConnection {
     pub tx: Sender<ClientMessage>,
     /// For receiving messages from the operator.
     pub rx: Receiver<DaemonMessage>,
-    /// Additional data about the session.
-    pub info: OperatorSessionInformation,
-}
-
-/// Allows us to access the operator's [`SessionCrd`] [`Api`].
-pub async fn session_api(config: Option<String>) -> Result<Api<SessionCrd>> {
-    let kube_api: Client = create_kube_api(false, config, None)
-        .await
-        .map_err(OperatorApiError::CreateApiError)?;
-
-    Ok(Api::all(kube_api))
 }
 
 impl OperatorApi {
     /// We allow copied pods to live only for 30 seconds before the internal proxy connects.
     const COPIED_POD_IDLE_TTL: u32 = 30;
 
-    /// Checks used config against operator specification.
-    fn check_config(config: &LayerConfig, operator: &MirrordOperatorCrd) -> Result<()> {
-        if config.feature.copy_target.enabled && !operator.spec.copy_target_enabled.unwrap_or(false)
-        {
+    /// Checks the given [`LayerConfig`] against operator specification fetched from the cluster.
+    fn check_config(layer_config: &LayerConfig, operator: &MirrordOperatorSpec) -> Result<()> {
+        let client_wants_copy = layer_config.feature.copy_target.enabled;
+        let operator_supports_copy = operator.copy_target_enabled.unwrap_or(false);
+        if client_wants_copy && !operator_supports_copy {
             return Err(OperatorApiError::UnsupportedFeature {
                 feature: "copy target".into(),
-                operator_version: operator.spec.operator_version.clone(),
+                operator_version: operator.operator_version.clone(),
             });
         }
 
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(api))]
-    pub async fn get_client_certificate(
-        api: &OperatorApi,
+    /// Allows us to access the operator's [`SessionCrd`] [`Api`].
+    pub fn session_api(&self) -> Api<SessionCrd> {
+        Api::all(self.client.clone())
+    }
+
+    /// Retrieves client [`Certificate`] from local credential store or creates one using the given
+    /// [`Client`] through the operator API.
+    #[tracing::instrument(level = "trace", skip(client))]
+    async fn get_client_certificate(
+        client: &Client,
         operator: &MirrordOperatorCrd,
-    ) -> Result<Option<Certificate>, AuthenticationError> {
+    ) -> Result<Certificate, OperatorApiError> {
         let Some(fingerprint) = operator.spec.license.fingerprint.clone() else {
-            return Ok(None);
+            return Err(OperatorApiError::UserCertError(
+                "license fingerprint is missing from the mirrord operator resource".to_string(),
+            ));
         };
 
         let subscription_id = operator.spec.license.subscription_id.clone();
 
-        let mut credential_store = CredentialStoreSync::open().await?;
+        let mut credential_store = CredentialStoreSync::open().await.map_err(|error| {
+            OperatorApiError::UserCertError(format!(
+                "failed to access local credential store: {error}"
+            ))
+        })?;
+
         credential_store
-            .get_client_certificate::<MirrordOperatorCrd>(&api.client, fingerprint, subscription_id)
+            .get_client_certificate::<MirrordOperatorCrd>(client, fingerprint, subscription_id)
             .await
-            .map(Some)
+            .map_err(|error| {
+                OperatorApiError::UserCertError(format!(
+                    "failed to get client cerfificate: {error}"
+                ))
+            })
     }
 
-    /// Creates new [`OperatorSessionConnection`] based on the given [`LayerConfig`].
-    /// Keep in mind that some failures here won't stop mirrord from hooking into the process
-    /// and working, it'll just work without the operator.
-    ///
-    /// For a fuller documentation, see the docs in `operator/service/src/main.rs::listen`.
-    ///
-    /// - `copy_target`: When this feature is enabled, `target` validation is done in the operator.
-    #[tracing::instrument(level = "trace", skip_all)]
-    pub async fn create_session<P, R: Reporter>(
-        config: &LayerConfig,
+    /// Creates a new instance of this API.
+    /// Performs some operator version/license checks and prepares user certificate.
+    pub async fn new<P, R>(
+        layer_config: &LayerConfig,
         progress: &P,
         analytics: &mut R,
-    ) -> Result<OperatorSessionConnection>
+    ) -> Result<Self>
     where
         P: Progress + Send + Sync,
+        R: Reporter,
     {
-        let operator_api = OperatorApi::new(config).await?;
+        let mut client_config = create_kube_config(
+            layer_config.accept_invalid_certificates,
+            layer_config.kubeconfig.clone(),
+            layer_config.kube_context.clone(),
+        )
+        .await
+        .map_err(KubeApiError::from)
+        .map_err(OperatorApiError::CreateKubeClient)?;
 
-        let operator = operator_api.fetch_operator().await?;
+        client_config.headers.push((
+            HeaderName::from_static(MIRRORD_CLI_VERSION_HEADER_NAME),
+            HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+        ));
+
+        let uncertified_client = Client::try_from(client_config.clone())
+            .map_err(KubeApiError::from)
+            .map_err(OperatorApiError::CreateKubeClient)?;
+
+        let operator = Self::fetch_operator(uncertified_client.clone()).await?;
 
         // Warns the user if their license is close to expiring or fallback to OSS if expired
         let Some(days_until_expiration) =
@@ -294,125 +328,86 @@ impl OperatorApi {
             info!(good_validity_message);
         }
 
-        Self::check_config(config, &operator)?;
+        let client_certificate =
+            Self::get_client_certificate(&uncertified_client, &operator).await?;
 
-        let client_certificate = Self::get_client_certificate(&operator_api, &operator)
-            .await
-            .ok()
-            .flatten();
-        let metadata = OperatorSessionMetadata::new(
-            client_certificate,
-            operator.spec.license.fingerprint,
-            operator.spec.features.unwrap_or_default(),
-            operator
-                .spec
-                .protocol_version
-                .and_then(|str_version| str_version.parse().ok()),
-            operator.spec.copy_target_enabled,
-        );
-
-        metadata.set_operator_properties(analytics);
+        let session_metadata = OperatorSessionMetadata::new(client_certificate, operator.spec);
+        let client = session_metadata.get_certified_client(client_config)?;
 
         let mut version_progress = progress.subtask("comparing versions");
-        let operator_version = Version::parse(&operator.spec.operator_version)
-            .expect("failed to parse operator version from operator crd"); // TODO: Remove expect
-
-        let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
-        if operator_version > mirrord_version {
-            // we make two sub tasks since it looks best this way
-            version_progress.warning(
-                    &format!(
+        match Version::parse(&session_metadata.operator_spec.operator_version) {
+            Ok(operator_version) => {
+                let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+                if operator_version > mirrord_version {
+                    // we make two sub tasks since it looks best this way
+                    version_progress.warning(&format!(
                         "Your mirrord plugin/CLI version {} does not match the operator version {}. This can lead to unforeseen issues.",
                         mirrord_version,
-                        operator_version));
-            version_progress.success(None);
-            version_progress = progress.subtask("comparing versions");
-            version_progress.warning(
-                "Consider updating your mirrord plugin/CLI to match the operator version.",
-            );
+                        operator_version
+                    ));
+                    version_progress.success(None);
+                    version_progress = progress.subtask("comparing versions");
+                    version_progress.warning(
+                        "Consider updating your mirrord plugin/CLI to match the operator version.",
+                    );
+                }
+                version_progress.success(None);
+            }
+            Err(error) => {
+                tracing::debug!(%error, "failed to parse operator version");
+                version_progress.failure(Some("failed to parse operator version"));
+            }
         }
-        version_progress.success(None);
 
-        let target_to_connect = if config.feature.copy_target.enabled {
-            // We do not validate the `target` here, it's up to the operator.
-            let mut copy_progress = progress.subtask("copying target");
-            let copied = operator_api
-                .copy_target(
-                    &metadata,
-                    config.target.path.clone().unwrap_or(Target::Targetless),
-                    config.feature.copy_target.scale_down,
-                )
-                .await?;
-            copy_progress.success(None);
+        session_metadata.set_operator_properties(analytics);
 
-            OperatorSessionTarget::Copied(copied)
-        } else {
-            let raw_target = operator_api.fetch_target().await?;
-            OperatorSessionTarget::Raw(raw_target)
-        };
-
-        let session_info = OperatorSessionInformation {
-            target: target_to_connect,
-            metadata,
-        };
-        let connection = operator_api.connect_target(session_info).await?;
-
-        Ok(connection)
-    }
-
-    /// Connects to exisiting operator session based on the given [`LayerConfig`] and
-    /// [`OperatorSessionInformation`].
-    pub async fn connect<R: Reporter>(
-        config: &LayerConfig,
-        session_information: OperatorSessionInformation,
-        analytics: &mut R,
-    ) -> Result<OperatorSessionConnection> {
-        session_information
-            .metadata
-            .set_operator_properties(analytics);
-
-        let operator_api = OperatorApi::new(config).await?;
-        operator_api.connect_target(session_information).await
-    }
-
-    pub async fn new(config: &LayerConfig) -> Result<Self> {
-        let target_config = config.target.clone();
-        let on_concurrent_steal = config.feature.network.incoming.on_concurrent_steal;
-
-        let client = create_kube_api(
-            config.accept_invalid_certificates,
-            config.kubeconfig.clone(),
-            config.kube_context.clone(),
-        )
-        .await
-        .map_err(OperatorApiError::CreateApiError)?;
-
-        let target_namespace = if target_config.path.is_some() {
-            target_config.namespace.clone()
-        } else {
-            // When targetless, pass agent namespace to operator so that it knows where to create
-            // the agent (the operator does not get the agent config).
-            config.agent.namespace.clone()
-        };
-
-        let target_api: Api<TargetCrd> = get_k8s_resource_api(&client, target_namespace.as_deref());
-        let copy_target_api: Api<CopyTargetCrd> =
-            get_k8s_resource_api(&client, target_namespace.as_deref());
-
-        Ok(OperatorApi {
+        Ok(Self {
             client,
-            target_api,
-            copy_target_api,
-            target_namespace,
-            target_config,
-            on_concurrent_steal,
+            session_metadata,
         })
     }
 
-    #[tracing::instrument(level = "trace", skip(self), ret)]
-    async fn fetch_operator(&self) -> Result<MirrordOperatorCrd> {
-        let api: Api<MirrordOperatorCrd> = Api::all(self.client.clone());
-        api.get(OPERATOR_STATUS_NAME)
+    /// Creates a new instance of this API.
+    /// The instance will use the given operator session.
+    /// This function skipts initial operator checks and user certificate preparation, as this steps
+    /// must have already been done in [`OperatorApi::new`].
+    pub async fn with_exisiting_session<R>(
+        layer_config: &LayerConfig,
+        session_metadata: OperatorSessionMetadata,
+        analytics: &mut R,
+    ) -> Result<Self>
+    where
+        R: Reporter,
+    {
+        let mut client_config = create_kube_config(
+            layer_config.accept_invalid_certificates,
+            layer_config.kubeconfig.clone(),
+            layer_config.kube_context.clone(),
+        )
+        .await
+        .map_err(KubeApiError::from)
+        .map_err(OperatorApiError::CreateKubeClient)?;
+
+        client_config.headers.push((
+            HeaderName::from_static(MIRRORD_CLI_VERSION_HEADER_NAME),
+            HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+        ));
+
+        let client = session_metadata.get_certified_client(client_config)?;
+
+        session_metadata.set_operator_properties(analytics);
+
+        Ok(Self {
+            client,
+            session_metadata,
+        })
+    }
+
+    /// Fetches operator resource from the cluster.
+    #[tracing::instrument(level = "trace", skip_all, ret)]
+    async fn fetch_operator(client: Client) -> Result<MirrordOperatorCrd> {
+        Api::all(client)
+            .get(OPERATOR_STATUS_NAME)
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
@@ -420,92 +415,137 @@ impl OperatorApi {
             })
     }
 
-    /// See `operator/controller/src/target.rs::TargetProvider::get_resource`.
-    #[tracing::instrument(level = "trace", fields(self.target_config), skip(self))]
-    async fn fetch_target(&self) -> Result<TargetCrd> {
-        let target_name = TargetCrd::target_name_by_config(&self.target_config);
-        self.target_api
-            .get(&target_name)
-            .await
-            .map_err(|error| OperatorApiError::KubeError {
-                error,
-                operation: OperatorOperation::FindingTarget,
-            })
+    /// Returns a CRD for the target specified in the given [`LayerConfig`].
+    /// If `copy_target` feature is enabled, this required creating [`CopyTargetCrd`] first.
+    #[tracing::instrument(level = "trace", skip(self, progress))]
+    pub async fn get_target<P>(
+        &self,
+        config: &LayerConfig,
+        progress: &P,
+    ) -> Result<OperatorSessionTarget>
+    where
+        P: Progress,
+    {
+        Self::check_config(config, &self.session_metadata.operator_spec)?;
+
+        if config.feature.copy_target.enabled {
+            // We do not validate the `target` here, it's up to the operator.
+            let mut copy_progress = progress.subtask("copying target");
+            let copied = self.copy_target(config).await?;
+            copy_progress.success(None);
+
+            Ok(OperatorSessionTarget::Copied(copied))
+        } else {
+            let target_name =
+                TargetCrd::target_name(config.target.path.as_ref().unwrap_or(&Target::Targetless));
+
+            let raw_target = Api::namespaced(self.client.clone(), self.namespace(config))
+                .get(&target_name)
+                .await
+                .map_err(|error| OperatorApiError::KubeError {
+                    error,
+                    operation: OperatorOperation::FindingTarget,
+                })?;
+
+            Ok(OperatorSessionTarget::Raw(raw_target))
+        }
     }
 
-    /// Returns a namespace of the target.
-    fn namespace(&self) -> &str {
-        self.target_namespace
-            .as_deref()
-            .unwrap_or_else(|| self.client.default_namespace())
+    /// Returns a namespace of the target based on the given [`LayerConfig`].
+    fn namespace<'a>(&'a self, config: &'a LayerConfig) -> &'a str {
+        let namespace_opt = if config.target.path.is_some() {
+            // Not a targetless run, we use target's namespace.
+            config.target.namespace.as_deref()
+        } else {
+            // A targetless run, we use the namespace where the agent should live.
+            config.agent.namespace.as_deref()
+        };
+
+        namespace_opt.unwrap_or(self.client.default_namespace())
     }
 
-    /// Returns a connection url for the given [`OperatorSessionInformation`].
+    /// Returns a connection url for the given [`OperatorSessionTarget`].
     /// This can be used to create a websocket connection with the operator.
     #[tracing::instrument(level = "debug", skip(self), ret)]
-    fn connect_url(&self, session: &OperatorSessionInformation) -> String {
-        match (session.metadata.proxy_feature_enabled(), &session.target) {
+    fn connect_url(
+        &self,
+        target: &OperatorSessionTarget,
+        concurrent_steal: ConcurrentSteal,
+    ) -> String {
+        match (self.session_metadata.proxy_feature_enabled(), target) {
             (true, OperatorSessionTarget::Raw(target)) => {
-                let dt = &();
-                let namespace = self.namespace();
-                let api_version = TargetCrd::api_version(dt);
-                let plural = TargetCrd::plural(dt);
+                let name = target.name();
+                let namespace = target
+                    .meta()
+                    .namespace
+                    .as_deref()
+                    .expect("missing 'TargetCrd' namespace");
+                let api_version = TargetCrd::api_version(&());
+                let plural = TargetCrd::plural(&());
 
-                format!(
-                    "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{}?on_concurrent_steal={}&connect=true",
-                    target.name(),
-                    self.on_concurrent_steal,
-                )
+                format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?on_concurrent_steal={concurrent_steal}&connect=true")
             }
+
             (false, OperatorSessionTarget::Raw(target)) => {
-                format!(
-                    "{}/{}?on_concurrent_steal={}&connect=true",
-                    self.target_api.resource_url(),
-                    target.name(),
-                    self.on_concurrent_steal,
-                )
+                let name = target.name();
+                let namespace = target
+                    .meta()
+                    .namespace
+                    .as_deref()
+                    .expect("missing 'TargetCrd' namespace");
+                let url_path = TargetCrd::url_path(&(), Some(namespace));
+
+                format!("{url_path}/{name}?on_concurrent_steal={concurrent_steal}&connect=true")
             }
             (true, OperatorSessionTarget::Copied(target)) => {
-                let dt = &();
-                let namespace = self.namespace();
-                let api_version = CopyTargetCrd::api_version(dt);
-                let plural = CopyTargetCrd::plural(dt);
+                let name = target
+                    .meta()
+                    .name
+                    .as_deref()
+                    .expect("missing 'CopyTargetCrd' name");
+                let namespace = target
+                    .meta()
+                    .namespace
+                    .as_deref()
+                    .expect("missing 'CopyTargetCrd' namespace");
+                let api_version = CopyTargetCrd::api_version(&());
+                let plural = CopyTargetCrd::plural(&());
 
                 format!(
-                    "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{}?connect=true",
-                    target
-                        .meta()
-                        .name
-                        .as_ref()
-                        .expect("missing 'copytarget' name"),
+                    "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?connect=true"
                 )
             }
             (false, OperatorSessionTarget::Copied(target)) => {
-                format!(
-                    "{}/{}?connect=true",
-                    self.copy_target_api.resource_url(),
-                    target
-                        .meta()
-                        .name
-                        .as_ref()
-                        .expect("missing 'copytarget' name"),
-                )
+                let name = target
+                    .meta()
+                    .name
+                    .as_deref()
+                    .expect("missing 'CopyTargetCrd' name");
+                let namespace = target
+                    .meta()
+                    .namespace
+                    .as_deref()
+                    .expect("missing 'CopyTargetCrd' namespace");
+                let url_path = CopyTargetCrd::url_path(&(), Some(&namespace));
+
+                format!("{url_path}/{name}?connect=true")
             }
         }
     }
 
-    /// Create websocket connection to operator.
+    /// Creates websocket connection to operator.
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn connect_target(
+    pub async fn connect_target(
         &self,
-        session_info: OperatorSessionInformation,
+        target: &OperatorSessionTarget,
+        concurrent_steal: ConcurrentSteal,
     ) -> Result<OperatorSessionConnection> {
         let UserIdentity { name, hostname } = UserIdentity::load();
 
         let request = {
             let mut builder = Request::builder()
-                .uri(self.connect_url(&session_info))
-                .header("x-session-id", session_info.metadata.session_id.to_string());
+                .uri(self.connect_url(&target, concurrent_steal))
+                .header("x-session-id", self.session_metadata.session_id.to_string());
 
             // Replace non-ascii (not supported in headers) chars and trim headers.
             if let Some(name) = name {
@@ -522,16 +562,6 @@ impl OperatorApi {
                 );
             };
 
-            match session_info.metadata.client_credentials() {
-                Ok(Some(credentials)) => {
-                    builder = builder.header("x-client-der", credentials);
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    debug!("CredentialStore error: {err}");
-                }
-            }
-
             builder
                 .body(vec![])
                 .map_err(OperatorApiError::ConnectRequestBuildError)?
@@ -544,14 +574,15 @@ impl OperatorApi {
                 operation: OperatorOperation::WebsocketConnection,
             })?;
 
-        let (tx, rx) =
-            ConnectionWrapper::wrap(connection, session_info.metadata.protocol_version.clone());
+        let protocol_version = self
+            .session_metadata
+            .operator_spec
+            .protocol_version
+            .as_ref()
+            .and_then(|version| version.parse().ok());
+        let (tx, rx) = ConnectionWrapper::wrap(connection, protocol_version);
 
-        Ok(OperatorSessionConnection {
-            tx,
-            rx,
-            info: session_info,
-        })
+        Ok(OperatorSessionConnection { tx, rx })
     }
 
     /// Creates a new [`CopyTargetCrd`] resource using the operator.
@@ -562,13 +593,10 @@ impl OperatorApi {
     /// `copy_target` feature is not available for all target types.
     /// Target type compatibility is checked by the operator.
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn copy_target(
-        &self,
-        session_metadata: &OperatorSessionMetadata,
-        target: Target,
-        scale_down: bool,
-    ) -> Result<CopyTargetCrd> {
+    async fn copy_target(&self, config: &LayerConfig) -> Result<CopyTargetCrd> {
+        let target = config.target.path.clone().unwrap_or(Target::Targetless);
         let name = TargetCrd::target_name(&target);
+        let scale_down = config.feature.copy_target.scale_down;
 
         let requested = CopyTargetCrd::new(
             &name,
@@ -579,7 +607,7 @@ impl OperatorApi {
             },
         );
 
-        self.copy_target_api
+        Api::namespaced(self.client.clone(), self.namespace(config))
             .create(&PostParams::default(), &requested)
             .await
             .map_err(|error| OperatorApiError::KubeError {
@@ -588,20 +616,10 @@ impl OperatorApi {
             })
     }
 
-    /// List targets using the operator
-    #[tracing::instrument(level = "trace", ret)]
-    pub async fn list_targets(config: &LayerConfig) -> Result<Vec<TargetCrd>> {
-        let client = create_kube_api(
-            config.accept_invalid_certificates,
-            config.kubeconfig.clone(),
-            config.kube_context.clone(),
-        )
-        .await
-        .map_err(OperatorApiError::CreateApiError)?;
-
-        let target_api: Api<TargetCrd> =
-            get_k8s_resource_api(&client, config.target.namespace.as_deref());
-        target_api
+    /// List targets in the given namespcae using the operator.
+    #[tracing::instrument(level = "trace", skip(self), ret)]
+    pub async fn list_targets(&self, namespace: Option<&str>) -> Result<Vec<TargetCrd>> {
+        get_k8s_resource_api(&self.client, namespace)
             .list(&ListParams::default())
             .await
             .map_err(|error| OperatorApiError::KubeError {
@@ -609,6 +627,11 @@ impl OperatorApi {
                 operation: OperatorOperation::ListingTargets,
             })
             .map(|list| list.items)
+    }
+
+    /// Return metadata of this API's operator session.
+    pub fn session_metadata(&self) -> &OperatorSessionMetadata {
+        &self.session_metadata
     }
 }
 
