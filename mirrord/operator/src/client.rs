@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
 use futures::{SinkExt, StreamExt};
-use http::{request::Request, HeaderName, HeaderValue};
+use http::{request::Request, HeaderValue};
 use kube::{
     api::{ListParams, PostParams},
     Api, Client, Config, Resource,
@@ -33,7 +33,10 @@ use crate::{
         CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, MirrordOperatorSpec, OperatorFeatures,
         SessionCrd, TargetCrd, OPERATOR_STATUS_NAME,
     },
-    types::{CLIENT_CERT_HEADER_NAME, MIRRORD_CLI_VERSION_HEADER_NAME},
+    types::{
+        CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CLI_VERSION_HEADER,
+        SESSION_ID_HEADER,
+    },
 };
 
 static CONNECTION_CHANNEL_SIZE: usize = 1000;
@@ -110,6 +113,7 @@ pub struct OperatorSessionMetadata {
     /// [`CredentialStore`](mirrord_auth::credential_store::CredentialStore).
     client_certificate: Certificate,
     /// Random identifier of this session. Generated locally.
+    /// This id is only sent in [`OperatorApi::connect_target`] request.
     session_id: u64,
     /// Operator specification fetched from the cluster.
     operator_spec: MirrordOperatorSpec,
@@ -139,7 +143,7 @@ impl OperatorSessionMetadata {
 
         base_config
             .headers
-            .push((HeaderName::from_static(CLIENT_CERT_HEADER_NAME), as_header));
+            .push((CLIENT_CERT_HEADER.clone(), as_header));
 
         Client::try_from(base_config)
             .map_err(KubeApiError::from)
@@ -191,8 +195,8 @@ pub struct OperatorSessionInformation {
 /// Wrapper over mirrord operator API.
 pub struct OperatorApi {
     /// For making requests to kubernetes API server.
-    /// This client will send [`MIRRORD_CLI_VERSION_HEADER_NAME`] and [`CLIENT_CERT_HEADER_NAME`]
-    /// headers with each request.
+    /// This client will send [`MIRRORD_CLI_VERSION_HEADER`], [`CLIENT_CERT_HEADER`],
+    /// [`CLIENT_NAME_HEADER`] and [`CLIENT_HOSTNAME_HEADER`] headers with each request.
     client: Client,
     /// Metadata of the operator session used by this API.
     session_metadata: OperatorSessionMetadata,
@@ -209,6 +213,62 @@ pub struct OperatorSessionConnection {
 impl OperatorApi {
     /// We allow copied pods to live only for 30 seconds before the internal proxy connects.
     const COPIED_POD_IDLE_TTL: u32 = 30;
+
+    /// Creates a base [`Config`] for creating kube [`Client`].
+    /// Adds extra headers that we send to the operator with each request:
+    /// 1. [`MIRRORD_CLI_VERSION_HEADER`]
+    /// 2. [`CLIENT_NAME_HEADER`]
+    /// 3. [`CLIENT_HOSTNAME_HEADER`]
+    async fn base_client_config(layer_config: &LayerConfig) -> Result<Config> {
+        let mut client_config = create_kube_config(
+            layer_config.accept_invalid_certificates,
+            layer_config.kubeconfig.clone(),
+            layer_config.kube_context.clone(),
+        )
+        .await
+        .map_err(KubeApiError::from)
+        .map_err(OperatorApiError::CreateKubeClient)?;
+
+        client_config.headers.push((
+            MIRRORD_CLI_VERSION_HEADER.clone(),
+            HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+        ));
+
+        let UserIdentity { name, hostname } = UserIdentity::load();
+
+        // Replace non-ascii (not supported in headers) chars and trim headers.
+        if let Some(name) = name {
+            let clean = name.replace(|c: char| !c.is_ascii(), "").trim().to_string();
+            let value = HeaderValue::from_str(&clean);
+            match value {
+                Ok(value) => client_config
+                    .headers
+                    .push((CLIENT_NAME_HEADER.clone(), value)),
+                Err(error) => {
+                    tracing::debug!(%error, raw = name, clean, "User name is not a valid header value");
+                }
+            }
+        };
+
+        // Replace non-ascii (not supported in headers) chars and trim headers.
+        if let Some(hostname) = hostname {
+            let clean = hostname
+                .replace(|c: char| !c.is_ascii(), "")
+                .trim()
+                .to_string();
+            let value = HeaderValue::from_str(&clean);
+            match value {
+                Ok(value) => client_config
+                    .headers
+                    .push((CLIENT_HOSTNAME_HEADER.clone(), value)),
+                Err(error) => {
+                    tracing::debug!(%error, raw = hostname, clean, "User hostname is not a valid header value");
+                }
+            }
+        };
+
+        Ok(client_config)
+    }
 
     /// Checks the given [`LayerConfig`] against operator specification fetched from the cluster.
     fn check_config(layer_config: &LayerConfig, operator: &MirrordOperatorSpec) -> Result<()> {
@@ -271,20 +331,7 @@ impl OperatorApi {
         P: Progress + Send + Sync,
         R: Reporter,
     {
-        let mut client_config = create_kube_config(
-            layer_config.accept_invalid_certificates,
-            layer_config.kubeconfig.clone(),
-            layer_config.kube_context.clone(),
-        )
-        .await
-        .map_err(KubeApiError::from)
-        .map_err(OperatorApiError::CreateKubeClient)?;
-
-        client_config.headers.push((
-            HeaderName::from_static(MIRRORD_CLI_VERSION_HEADER_NAME),
-            HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
-        ));
-
+        let client_config = Self::base_client_config(layer_config).await?;
         let uncertified_client = Client::try_from(client_config.clone())
             .map_err(KubeApiError::from)
             .map_err(OperatorApiError::CreateKubeClient)?;
@@ -379,20 +426,7 @@ impl OperatorApi {
     where
         R: Reporter,
     {
-        let mut client_config = create_kube_config(
-            layer_config.accept_invalid_certificates,
-            layer_config.kubeconfig.clone(),
-            layer_config.kube_context.clone(),
-        )
-        .await
-        .map_err(KubeApiError::from)
-        .map_err(OperatorApiError::CreateKubeClient)?;
-
-        client_config.headers.push((
-            HeaderName::from_static(MIRRORD_CLI_VERSION_HEADER_NAME),
-            HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
-        ));
-
+        let client_config = Self::base_client_config(layer_config).await?;
         let client = session_metadata.get_certified_client(client_config)?;
 
         session_metadata.set_operator_properties(analytics);
@@ -526,7 +560,7 @@ impl OperatorApi {
                     .namespace
                     .as_deref()
                     .expect("missing 'CopyTargetCrd' namespace");
-                let url_path = CopyTargetCrd::url_path(&(), Some(&namespace));
+                let url_path = CopyTargetCrd::url_path(&(), Some(namespace));
 
                 format!("{url_path}/{name}?connect=true")
             }
@@ -540,32 +574,14 @@ impl OperatorApi {
         target: &OperatorSessionTarget,
         concurrent_steal: ConcurrentSteal,
     ) -> Result<OperatorSessionConnection> {
-        let UserIdentity { name, hostname } = UserIdentity::load();
-
-        let request = {
-            let mut builder = Request::builder()
-                .uri(self.connect_url(&target, concurrent_steal))
-                .header("x-session-id", self.session_metadata.session_id.to_string());
-
-            // Replace non-ascii (not supported in headers) chars and trim headers.
-            if let Some(name) = name {
-                builder = builder.header(
-                    "x-client-name",
-                    name.replace(|c: char| !c.is_ascii(), "").trim(),
-                );
-            };
-
-            if let Some(hostname) = hostname {
-                builder = builder.header(
-                    "x-client-hostname",
-                    hostname.replace(|c: char| !c.is_ascii(), "").trim(),
-                );
-            };
-
-            builder
-                .body(vec![])
-                .map_err(OperatorApiError::ConnectRequestBuildError)?
-        };
+        let request = Request::builder()
+            .uri(self.connect_url(target, concurrent_steal))
+            .header(
+                SESSION_ID_HEADER.clone(),
+                self.session_metadata.session_id.to_string(),
+            )
+            .body(vec![])
+            .map_err(OperatorApiError::ConnectRequestBuildError)?;
 
         let connection = upgrade::connect_ws(&self.client, request)
             .await
