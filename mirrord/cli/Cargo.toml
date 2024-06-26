@@ -31,6 +31,9 @@ mirrord-intproxy = { path = "../intproxy" }
 
 actix-codec.workspace = true
 clap.workspace = true
+dns-parser = "0.8"
+rustdns = "0.4"
+hickory-proto = "0.24.1"
 tracing.workspace = true
 rand.workspace = true
 serde_json.workspace = true

@@ -52,6 +52,7 @@ mod operator;
 mod teams;
 mod util;
 mod verify_config;
+mod vpn;
 
 pub(crate) use error::{CliError, Result};
 use verify_config::verify_config;
@@ -652,6 +653,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::Teams => teams::navigate_to_intro().await,
             Commands::Diagnose(args) => diagnose_command(*args).await?,
+            Commands::Vpn(args) => vpn::vpn_command(*args).await?,
         };
 
         Ok(())

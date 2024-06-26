@@ -56,6 +56,9 @@ pub(super) enum Commands {
 
     /// Diagnostic commands
     Diagnose(Box<DiagnoseArgs>),
+
+    /// Run mirrord vpn
+    Vpn(Box<VpnArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -338,4 +341,16 @@ pub(super) enum DiagnoseCommand {
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
         config_file: Option<PathBuf>,
     },
+}
+
+#[derive(Args, Debug)]
+pub(super) struct VpnArgs {
+    /// Specify the namespace to vpn into.
+    #[arg(short = 'n', long = "namespace")]
+    pub namespace: Option<String>,
+
+    #[cfg(target_os = "macos")]
+    /// Path to resolver (macOS)
+    #[arg(long, default_value = "/etc/resolver")]
+    pub resolver_path: PathBuf,
 }
