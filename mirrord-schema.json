@@ -1301,6 +1301,9 @@
         {
           "description": "<!--${internal}--> Spawn a new pod.",
           "type": "null"
+        },
+        {
+          "type": "string"
         }
       ]
     },
