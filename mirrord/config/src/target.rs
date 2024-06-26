@@ -356,7 +356,7 @@ impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Target::Targetless => write!(f, "targetless"),
-            Target::Unknown(unknown) => f.write_fmt(format_args!("unknown/{unknown}")),
+            Target::Unknown(_) => write!(f, ""),
             Target::Pod(target) => target.fmt(f),
             Target::Deployment(target) => target.fmt(f),
             Target::Rollout(target) => target.fmt(f),
@@ -372,7 +372,7 @@ impl TargetDisplay for Target {
     fn type_(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
-            Target::Unknown(_) => "unknown",
+            Target::Unknown(_) => "",
             Target::Deployment(target) => target.type_(),
             Target::Pod(target) => target.type_(),
             Target::Rollout(target) => target.type_(),
@@ -386,7 +386,7 @@ impl TargetDisplay for Target {
     fn name(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
-            Target::Unknown(target) => target.as_str(),
+            Target::Unknown(_) => "",
             Target::Deployment(target) => target.name(),
             Target::Pod(target) => target.name(),
             Target::Rollout(target) => target.name(),

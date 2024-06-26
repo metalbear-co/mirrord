@@ -81,14 +81,12 @@ impl<'de> Deserialize<'de> for TargetHandle {
         D: serde::Deserializer<'de>,
     {
         let deserialized = serde_json::Value::deserialize(deserializer)?;
-        let target_name = deserialized.get("name").map(ToString::to_string);
+        let maybe_unknown = deserialized.to_string();
 
         let target = serde_json::from_value(deserialized);
         match target {
             Ok(target) => Ok(TargetHandle(target)),
-            Err(_) => Ok(TargetHandle(Target::Unknown(
-                target_name.unwrap_or_default(),
-            ))),
+            Err(_) => Ok(TargetHandle(Target::Unknown(maybe_unknown))),
         }
     }
 }
