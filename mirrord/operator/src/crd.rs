@@ -41,9 +41,7 @@ impl TargetCrd {
             Target::CronJob(target) => ("cronjob", &target.cron_job, &target.container),
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
-            Target::Unknown(target) => {
-                return format!("unknown/{}", target.clone());
-            }
+            Target::Unknown(_) => return "".to_string(),
         };
 
         if let Some(container) = container {
