@@ -386,6 +386,7 @@ pub enum SplitQueue {
     Sqs(QueueNameSource),
 }
 
+/// A workload that is a consumer of a queue that is being split.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // Deployment -> deployment in yaml.
 pub enum QueueConsumer {
@@ -403,23 +404,17 @@ impl QueueConsumer {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct Filtering {
-    pub original_spec: PodTemplateSpec,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct QueueNameUpdate {
     pub original_name: String,
     pub output_name: String,
 }
 
 /// Details retrieved from K8s resources once the splitter is active, used on filter session
-/// creation to create the altered config maps and pod specs that make the application use the
+/// creation to determine the required config changes that make the application use the
 /// output queues instead of the original.
 // This status struct is not optimal in that it contains redundant information. This makes the
 // controller's code a bit simpler.
-// The information on config map updates and on env vars is present in the resource itself, but it
-// is organized differently.
+// Some information is present in the spec, but it is organized differently.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct QueueDetails {
     /// For each queue_id, the actual queue name as retrieved from the target's pod spec or config
@@ -486,10 +481,13 @@ pub struct MirrordWorkloadQueueRegistrySpec {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename = "SQSSessionStatus", rename_all = "camelCase")]
 pub struct SqsSessionStatus {
+    /// Queue ID -> old and new queue names.
     pub queue_names: BTreeMap<QueueId, QueueNameUpdate>,
+
     // A bit redundant, because the registry resource status has the mapping from env var name
     // to queue id, and `queue_names` has the mapping from queue id to name update, but, saving
     // it here in the form that is useful to reader, for simplicity and readability.
+    /// Env var name -> old and new queue names.
     pub env_updates: BTreeMap<String, QueueNameUpdate>,
     // TODO: add updates to config map references.
 }
@@ -502,7 +500,8 @@ pub fn is_session_ready(session: Option<&MirrordSqsSession>) -> bool {
         .unwrap_or_default()
 }
 
-// TODO: docs
+/// The operator creates this object when a user runs mirrord against a target that is a queue
+/// consumer.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
 group = "queues.mirrord.metalbear.co",
@@ -514,8 +513,15 @@ namespaced
 )]
 #[serde(rename_all = "camelCase")] // queue_filters -> queueFilters
 pub struct MirrordSqsSessionSpec {
+    /// For each queue_id, a mapping from attribute name, to attribute value regex.
+    /// The queue_id for a queue is determined at the queue registry. It is not (necessarily)
+    /// The name of the queue on AWS.
     pub queue_filters: HashMap<QueueId, SqsMessageFilter>,
+
+    /// The target of this session.
     pub queue_consumer: QueueConsumer,
+
+    /// The id of the mirrord exec session, from the operator.
     // The Kubernetes API can't deal with 64 bit numbers (with most significant bit set)
     // so we save that field as a string even though its source is a u64
     pub session_id: String,
