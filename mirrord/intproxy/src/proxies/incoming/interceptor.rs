@@ -197,7 +197,6 @@ impl HttpConnection {
 
                 Err(InterceptorError::ConnectionClosedTooSoon(request))
             }
-
             Err(InterceptorError::Hyper(e)) if e.is_parse() => {
                 tracing::warn!(
                     "Could not parse HTTP response to filtered HTTP request, got error: {e:?}."
@@ -257,6 +256,18 @@ impl HttpConnection {
                         )
                         .await
                         .map(HttpResponseFallback::Fallback)
+                    }
+                    HttpRequestFallback::Streamed(..) => {
+                        // Returning `HttpResponseFallback::Framed` variant is safe - streaming
+                        // requests require a strictly higher mirrord-protocol version
+                        HttpResponse::<InternalHttpBody>::from_hyper_response(
+                            res,
+                            self.peer.port(),
+                            request.connection_id(),
+                            request.request_id(),
+                        )
+                        .await
+                        .map(HttpResponseFallback::Framed)
                     }
                 };
 
@@ -426,10 +437,14 @@ impl RawConnection {
 
 #[cfg(test)]
 mod test {
-    use std::convert::Infallible;
+    use std::{
+        convert::Infallible,
+        sync::{Arc, Mutex},
+    };
 
     use bytes::Bytes;
-    use http_body_util::Empty;
+    use futures::future::FutureExt;
+    use http_body_util::{BodyExt, Empty};
     use hyper::{
         body::Incoming,
         header::{HeaderValue, CONNECTION, UPGRADE},
@@ -439,11 +454,11 @@ mod test {
         Method, Request, Response,
     };
     use hyper_util::rt::TokioIo;
-    use mirrord_protocol::tcp::{HttpRequest, InternalHttpRequest};
+    use mirrord_protocol::tcp::{HttpRequest, InternalHttpRequest, StreamingBody};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
-        sync::watch,
+        sync::{watch, Notify},
         task,
     };
 
@@ -617,5 +632,98 @@ mod test {
 
         let _ = shutdown_tx.send(true);
         server_task.await.expect("dummy echo server panicked");
+    }
+
+    /// Ensure that [`HttpRequestFallback::Streamed`] are received frame by frame
+    #[tokio::test]
+    async fn receive_request_as_frames() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_destination = listener.local_addr().unwrap();
+
+        let mut tasks: BackgroundTasks<(), MessageOut, InterceptorError> = Default::default();
+        let socket = TcpSocket::new_v4().unwrap();
+        socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let interceptor = Interceptor::new(socket, local_destination);
+        let sender = tasks.register(interceptor, (), 8);
+
+        let (tx, rx) = tokio::sync::mpsc::channel(12);
+        sender
+            .send(MessageIn::Http(HttpRequestFallback::Streamed(
+                HttpRequest {
+                    internal_request: InternalHttpRequest {
+                        method: Method::POST,
+                        uri: "/".parse().unwrap(),
+                        headers: Default::default(),
+                        version: Version::HTTP_11,
+                        body: StreamingBody::new(rx),
+                    },
+                    connection_id: 1,
+                    request_id: 2,
+                    port: 3,
+                },
+            )))
+            .await;
+        let (connection, _peer_addr) = listener.accept().await.unwrap();
+
+        let tx = Mutex::new(Some(tx));
+        let notifier = Arc::new(Notify::default());
+        let finished = notifier.notified();
+
+        let service = service_fn(|mut req: Request<Incoming>| {
+            let tx = tx.lock().unwrap().take().unwrap();
+            let notifier = notifier.clone();
+            async move {
+                let x = req.body_mut().frame().now_or_never();
+                assert!(x.is_none());
+                tx.send(mirrord_protocol::tcp::InternalHttpBodyFrame::Data(
+                    b"string".to_vec(),
+                ))
+                .await
+                .unwrap();
+                let x = req
+                    .body_mut()
+                    .frame()
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .into_data()
+                    .unwrap();
+                assert_eq!(x, b"string".to_vec());
+                let x = req.body_mut().frame().now_or_never();
+                assert!(x.is_none());
+
+                tx.send(mirrord_protocol::tcp::InternalHttpBodyFrame::Data(
+                    b"another_string".to_vec(),
+                ))
+                .await
+                .unwrap();
+                let x = req
+                    .body_mut()
+                    .frame()
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .into_data()
+                    .unwrap();
+                assert_eq!(x, b"another_string".to_vec());
+
+                drop(tx);
+                let x = req.body_mut().frame().await;
+                assert!(x.is_none());
+
+                notifier.notify_waiters();
+                Ok::<_, hyper::Error>(Response::new(Empty::<Bytes>::new()))
+            }
+        });
+        let conn = http1::Builder::new().serve_connection(TokioIo::new(connection), service);
+
+        tokio::select! {
+            result = conn => {
+                result.unwrap()
+            }
+            _ = finished => {
+
+            }
+        }
     }
 }

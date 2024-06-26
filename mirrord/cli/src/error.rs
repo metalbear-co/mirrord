@@ -232,16 +232,6 @@ pub(crate) enum CliError {
         "This usually means that connectivity was lost while pinging.{GENERAL_HELP}"
     ))]
     PingPongFailed(String),
-
-    #[error("Failed to check whether mirrord operator is installed in the cluster: {0}")]
-    #[diagnostic(help(
-    "Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.
-
-    If you want to run without the operator, please set `\"operator\": false` in the mirrord configuration file.
-
-    Please remember that some features are supported only when using mirrord operator (https://mirrord.dev/docs/overview/teams/#supported-features).{GENERAL_HELP}"
-    ))]
-    OperatorInstallationCheckError(KubeApiError),
 }
 
 impl From<OperatorApiError> for CliError {

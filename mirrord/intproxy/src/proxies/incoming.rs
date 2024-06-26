@@ -11,11 +11,17 @@ use mirrord_intproxy_protocol::{
     MessageId, PortSubscribe, PortSubscription, PortUnsubscribe, ProxyToLayerMessage,
 };
 use mirrord_protocol::{
-    tcp::{DaemonTcp, HttpRequestFallback, NewTcpConnection},
-    ConnectionId, ResponseError,
+    tcp::{
+        ChunkedRequest, DaemonTcp, HttpRequest, HttpRequestFallback, InternalHttpBodyFrame,
+        InternalHttpRequest, NewTcpConnection, StreamingBody,
+    },
+    ConnectionId, RequestId, ResponseError,
 };
 use thiserror::Error;
-use tokio::net::TcpSocket;
+use tokio::{
+    net::TcpSocket,
+    sync::mpsc::{self, Sender},
+};
 
 use self::{
     interceptor::{Interceptor, InterceptorError, MessageOut},
@@ -140,7 +146,7 @@ impl MetadataStore {
 /// data.
 ///
 /// Incoming connections are created by the agent either explicitly ([`NewTcpConnection`] message)
-/// or implicitly ([`HttpRequest`](mirrord_protocol::tcp::HttpRequest)).
+/// or implicitly ([`HttpRequest`]).
 #[derive(Default)]
 pub struct IncomingProxy {
     /// Active port subscriptions for all layers.
@@ -151,6 +157,8 @@ pub struct IncomingProxy {
     background_tasks: BackgroundTasks<InterceptorId, MessageOut, InterceptorError>,
     /// For managing intercepted connections metadata.
     metadata_store: MetadataStore,
+    /// For managing streamed [`DaemonTcp::HttpRequestChunked`] request channels.
+    request_body_txs: HashMap<(ConnectionId, RequestId), Sender<InternalHttpBodyFrame>>,
 }
 
 impl IncomingProxy {
@@ -244,6 +252,8 @@ impl IncomingProxy {
             DaemonTcp::Close(close) => {
                 self.interceptors
                     .remove(&InterceptorId(close.connection_id));
+                self.request_body_txs
+                    .retain(|(connection_id, _), _| *connection_id != close.connection_id)
             }
             DaemonTcp::Data(data) => {
                 if let Some(interceptor) = self.interceptors.get(&InterceptorId(data.connection_id))
@@ -269,6 +279,62 @@ impl IncomingProxy {
                 if let Some(interceptor) = interceptor {
                     interceptor.send(req).await;
                 }
+            }
+            DaemonTcp::HttpRequestChunked(req) => {
+                match req {
+                    ChunkedRequest::Start(req) => {
+                        let (tx, rx) = mpsc::channel::<InternalHttpBodyFrame>(12);
+                        let http_stream = StreamingBody::new(rx);
+                        let http_req = HttpRequest {
+                            internal_request: InternalHttpRequest {
+                                method: req.internal_request.method,
+                                uri: req.internal_request.uri,
+                                headers: req.internal_request.headers,
+                                version: req.internal_request.version,
+                                body: http_stream,
+                            },
+                            connection_id: req.connection_id,
+                            request_id: req.request_id,
+                            port: req.port,
+                        };
+                        let key = (http_req.connection_id, http_req.request_id);
+
+                        self.request_body_txs.insert(key, tx.clone());
+
+                        let http_req = HttpRequestFallback::Streamed(http_req);
+                        let interceptor = self.get_interceptor_for_http_request(&http_req)?;
+                        if let Some(interceptor) = interceptor {
+                            interceptor.send(http_req).await;
+                        }
+
+                        for frame in req.internal_request.body {
+                            if let Err(err) = tx.send(frame).await {
+                                self.request_body_txs.remove(&key);
+                                tracing::trace!(?err, "error while sending");
+                            }
+                        }
+                    }
+                    ChunkedRequest::Body(body) => {
+                        let key = &(body.connection_id, body.request_id);
+                        let mut send_err = false;
+                        if let Some(tx) = self.request_body_txs.get(key) {
+                            for frame in body.frames {
+                                if let Err(err) = tx.send(frame).await {
+                                    send_err = true;
+                                    tracing::trace!(?err, "error while sending");
+                                }
+                            }
+                        }
+                        if send_err || body.is_last {
+                            self.request_body_txs.remove(key);
+                        }
+                    }
+                    ChunkedRequest::Error(err) => {
+                        self.request_body_txs
+                            .remove(&(err.connection_id, err.request_id));
+                        tracing::trace!(?err, "ChunkedRequest error received");
+                    }
+                };
             }
             DaemonTcp::NewConnection(NewTcpConnection {
                 connection_id,
@@ -385,6 +451,8 @@ impl BackgroundTask for IncomingProxy {
                         if let Some(msg) = msg {
                             message_bus.send(msg).await;
                         }
+
+                        self.request_body_txs.retain(|(connection_id, _), _| *connection_id != id.0);
                     },
 
                     (id, TaskUpdate::Message(msg)) => {

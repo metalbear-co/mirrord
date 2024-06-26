@@ -802,6 +802,7 @@ where
 
 #[cfg(test)]
 mod test {
+
     use bytes::BytesMut;
     use http::{
         header::{CONNECTION, UPGRADE},

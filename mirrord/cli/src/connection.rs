@@ -29,14 +29,13 @@ pub(crate) struct AgentConnection {
 }
 
 #[tracing::instrument(level = "trace", skip(config), ret, err)]
-async fn check_if_operator_resource_exists(config: &LayerConfig) -> Result<bool> {
+async fn check_if_operator_resource_exists(config: &LayerConfig) -> Result<bool, KubeApiError> {
     let client = create_kube_api(
         config.accept_invalid_certificates,
         config.kubeconfig.clone(),
         config.kube_context.clone(),
     )
-    .await
-    .map_err(CliError::OperatorInstallationCheckError)?;
+    .await?;
 
     let gvk = GroupVersionKind {
         group: MirrordOperatorCrd::group(&()).into_owned(),
@@ -47,13 +46,7 @@ async fn check_if_operator_resource_exists(config: &LayerConfig) -> Result<bool>
     match discovery::oneshot::pinned_kind(&client, &gvk).await {
         Ok(..) => Ok(true),
         Err(kube::Error::Api(response)) if response.code == 404 => Ok(false),
-        Err(error) => {
-            tracing::trace!(
-                ?error,
-                "Failed to check if operator is installed in the cluster"
-            );
-            Err(CliError::OperatorInstallationCheckError(error.into()))
-        }
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -104,8 +97,23 @@ where
                 },
             ) if config.operator.is_none() => {
                 // We need to check if the operator is really installed or not.
-                if check_if_operator_resource_exists(config).await? {
-                    return Err(e.into());
+                match check_if_operator_resource_exists(config).await {
+                    // Operator is installed yet we failed to use it, abort
+                    Ok(true) => {
+                        return Err(e.into());
+                    }
+                    // Operator is not installed, fallback to OSS
+                    Ok(false) => {
+                        subtask.success(Some("operator not found"));
+                    }
+                    // We don't know if operator is installed or not,
+                    // prompt a warning and fallback to OSS
+                    Err(error) => {
+                        let message = "failed to check if operator is installed";
+                        tracing::debug!(%error, message);
+                        subtask.warning(message);
+                        subtask.success(Some("operator not found"));
+                    }
                 }
             }
 
