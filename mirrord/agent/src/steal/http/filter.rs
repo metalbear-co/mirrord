@@ -60,6 +60,7 @@ impl HttpFilter {
 
             Self::Path(filter) => request
                 .uri()
+                .clone()
                 .into_parts()
                 .path_and_query
                 .as_ref()
