@@ -28,9 +28,6 @@ enum VerifiedTarget {
     #[serde(rename = "targetless")]
     Targetless,
 
-    #[serde(rename = "lower_case")]
-    Unknown,
-
     #[serde(untagged)]
     Pod(PodTarget),
     #[serde(untagged)]
@@ -58,7 +55,9 @@ impl From<Target> for VerifiedTarget {
             Target::CronJob(target) => Self::CronJob(target),
             Target::StatefulSet(target) => Self::StatefulSet(target),
             Target::Targetless => Self::Targetless,
-            Target::Unknown(_) => Self::Unknown,
+            Target::Unknown(_) => unreachable!(
+                "`unknown` is not a valid target, and will error out before we get here!"
+            ),
         }
     }
 }
