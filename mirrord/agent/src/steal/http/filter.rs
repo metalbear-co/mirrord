@@ -66,8 +66,9 @@ impl HttpFilter {
                 .map(|path_and_query| {
                     // For backward compatability, we first match path then we match path and query
                     // together and return true if any of them matches
+                    let path = path_and_query.path();
                     if filter
-                        .is_match(path_and_query.path())
+                        .is_match(path)
                         .inspect_err(|error| {
                             tracing::error!(path, ?error, "Error while matching path");
                         })
