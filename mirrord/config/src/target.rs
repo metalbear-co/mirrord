@@ -276,7 +276,7 @@ impl FromStr for Target {
             Some("pod") => pod::PodTarget::from_split(&mut split).map(Target::Pod),
             Some("job") => job::JobTarget::from_split(&mut split).map(Target::Job),
             Some("cronjob") => cron_job::CronJobTarget::from_split(&mut split).map(Target::CronJob),
-            // Some("statefulset") => stateful_set::StatefulSetTarget::from_split(&mut split).map(Target::StatefulSet),
+            Some("statefulset") => stateful_set::StatefulSetTarget::from_split(&mut split).map(Target::StatefulSet),
             _ => Err(ConfigError::InvalidTarget(format!(
                 "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
@@ -298,6 +298,14 @@ impl Target {
                 unreachable!("this shouldn't happen - called from operator on a flow where it's not targetless.")
             }
         }
+    }
+
+    /// `true` if this [`Target`] is only supported when the copy target feature is enabled.
+    pub(super) fn requires_copy(&self) -> bool {
+        matches!(
+            self,
+            Target::Job(_) | Target::CronJob(_) | Target::StatefulSet(_)
+        )
     }
 }
 
@@ -423,7 +431,6 @@ bitflags::bitflags! {
         const JOB = 32;
         const CRON_JOB = 64;
         const STATEFUL_SET = 128;
-        const UNKNOWN = 256;
     }
 }
 
@@ -475,7 +482,7 @@ impl CollectAnalytics for &TargetConfig {
                     // Targetless is essentially 0, so no need to set any flags.
                 }
                 Target::Unknown(_) => {
-                    flags |= TargetAnalyticFlags::UNKNOWN;
+                    unreachable!("Unknown is not a valid target!")
                 }
             }
         }
