@@ -1,9 +1,8 @@
 use kube::{core::ErrorResponse, Api};
 use mirrord_operator::{
     client::{session_api, OperatorApiError, OperatorOperation},
-    crd::{MirrordOperatorCrd, SessionCrd, OPERATOR_STATUS_NAME},
+    crd::{MirrordOperatorCrd, NewOperatorFeature, SessionCrd, OPERATOR_STATUS_NAME},
 };
-use mirrord_operator::crd::NewOperatorFeature;
 use mirrord_progress::{Progress, ProgressTracker};
 
 use super::get_status_api;

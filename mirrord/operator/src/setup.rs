@@ -23,7 +23,7 @@ use k8s_openapi::{
 use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
-use crate::crd::{MirrordPolicy, MirrordWorkloadQueueRegistry, MirrordSqsSession, TargetCrd};
+use crate::crd::{MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd};
 
 static OPERATOR_NAME: &str = "mirrord-operator";
 static OPERATOR_PORT: i32 = 3000;
@@ -423,23 +423,15 @@ impl OperatorRole {
                 },
                 // For SQS controller to temporarily change deployments to use changed queues.
                 PolicyRule {
-                    api_groups: Some(vec![
-                        "apps".to_owned(),
-                    ]),
-                    resources: Some(vec![
-                        "deployments".to_owned(),
-                    ]),
+                    api_groups: Some(vec!["apps".to_owned()]),
+                    resources: Some(vec!["deployments".to_owned()]),
                     verbs: vec!["patch".to_owned()],
                     ..Default::default()
                 },
                 // For SQS controller to temporarily change Argo Rollouts to use changed queues.
                 PolicyRule {
-                    api_groups: Some(vec![
-                        "argoproj.io".to_owned(),
-                    ]),
-                    resources: Some(vec![
-                        "rollouts".to_owned(),
-                    ]),
+                    api_groups: Some(vec!["argoproj.io".to_owned()]),
+                    resources: Some(vec!["rollouts".to_owned()]),
                     verbs: vec!["patch".to_owned()],
                     ..Default::default()
                 },
@@ -495,9 +487,7 @@ impl OperatorRole {
                 PolicyRule {
                     api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
                     resources: Some(vec![MirrordWorkloadQueueRegistry::plural(&()).to_string()]),
-                    verbs: vec![
-                        "list".to_owned(),
-                    ],
+                    verbs: vec!["list".to_owned()],
                     ..Default::default()
                 },
                 // Allow the SQS controller to update queue splitter status.
