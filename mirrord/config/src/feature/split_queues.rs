@@ -20,10 +20,9 @@ pub type QueueId = String;
 ///         }
 ///       },
 ///       "second-queue": {
-///         "queue_type": "SomeFutureQueueType",
+///         "queue_type": "SQS",
 ///         "message_filter": {
-///           "wows": "so wows",
-///           "coolz": "^very .*"
+///           "who": "*you$"
 ///         }
 ///       },
 ///     }
@@ -47,6 +46,8 @@ impl SplitQueuesConfig {
                     QueueFilter::Sqs(filter_mapping) => {
                         Some((queue_id.clone(), filter_mapping.clone()))
                     }
+                    #[allow(unreachable_patterns)] // will become reachable when we add variants
+                    _ => None,
                 })
                 .collect()
         })
@@ -76,6 +77,7 @@ pub type SqsMessageFilter = BTreeMap<MessageAttributeName, AttributeValuePattern
 /// More queue types might be added in the future.
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
 #[serde(tag = "queue_type", content = "message_filter")]
+#[non_exhaustive]
 pub enum QueueFilter {
     #[serde(rename = "SQS")]
     Sqs(SqsMessageFilter),

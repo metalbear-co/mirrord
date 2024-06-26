@@ -3,8 +3,7 @@ use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
 use self::{copy_target::CopyTargetConfig, env::EnvConfig, fs::FsConfig, network::NetworkConfig};
-use crate::config::source::MirrordConfigSource;
-use crate::feature::split_queues::SplitQueuesConfig;
+use crate::{config::source::MirrordConfigSource, feature::split_queues::SplitQueuesConfig};
 
 pub mod copy_target;
 pub mod env;
@@ -102,6 +101,9 @@ pub struct FeatureConfig {
     ///
     /// Define filters to split queues by, and make your local application consume only messages
     /// that match those filters.
+    /// If you don't specify any filter for a queue that is however declared in the
+    /// `MirrordWorkloadQueueRegistry` of the target you're using, a match-nothing filter
+    /// will be used, and your local application will not receive any messages from that queue.
     #[config(nested)]
     pub split_queues: SplitQueuesConfig,
 }

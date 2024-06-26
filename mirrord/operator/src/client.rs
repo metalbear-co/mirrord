@@ -1,9 +1,8 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fmt::{self, Display},
     io,
 };
-use std::collections::BTreeMap;
 
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
@@ -212,6 +211,9 @@ impl OperatorApi {
             operator
                 .spec
                 .require_feature(NewOperatorFeature::CopyTarget)?;
+        }
+        if config.feature.split_queues.is_set() {
+            operator.spec.require_feature(NewOperatorFeature::Sqs)?;
         }
 
         Ok(())

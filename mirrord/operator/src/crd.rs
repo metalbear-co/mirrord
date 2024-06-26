@@ -3,7 +3,6 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use k8s_openapi::api::core::v1::PodTemplateSpec;
 use kube::CustomResource;
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
