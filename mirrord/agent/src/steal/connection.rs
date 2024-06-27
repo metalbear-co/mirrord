@@ -11,7 +11,7 @@ use hyper::{
     http::{header::UPGRADE, request::Parts},
 };
 use mirrord_protocol::{
-    body_chunks::{Frames, IncomingExt},
+    body_chunks::{BodyExt as _, Frames},
     tcp::{
         ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, DaemonTcp, HttpRequest,
         HttpResponseFallback, InternalHttpBody, InternalHttpBodyFrame, InternalHttpRequest,

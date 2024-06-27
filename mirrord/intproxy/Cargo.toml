@@ -35,8 +35,6 @@ hyper = { workspace = true, features = ["client", "http1", "http2"] }
 hyper-util.workspace = true
 http-body-util.workspace = true
 bytes.workspace = true
+futures.workspace = true
 
 rand = "0.8"
-
-[dev-dependencies]
-futures.workspace = true

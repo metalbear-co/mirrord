@@ -25,7 +25,7 @@ use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
 
-use crate::{body_chunks::IncomingExt, ConnectionId, Port, RemoteResult, RequestId};
+use crate::{body_chunks::BodyExt as _, ConnectionId, Port, RemoteResult, RequestId};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnection {
@@ -438,15 +438,15 @@ impl<B> HttpRequest<B> {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct InternalHttpResponse<Body> {
     #[serde(with = "http_serde::status_code")]
-    status: StatusCode,
+    pub status: StatusCode,
 
     #[serde(with = "http_serde::version")]
-    version: Version,
+    pub version: Version,
 
     #[serde(with = "http_serde::header_map")]
-    headers: HeaderMap,
+    pub headers: HeaderMap,
 
-    body: Body,
+    pub body: Body,
 }
 
 impl<B> InternalHttpResponse<B> {
@@ -545,13 +545,13 @@ impl fmt::Debug for InternalHttpBodyFrame {
     }
 }
 
-pub type HttpResponseStreamed = StreamBody<ReceiverStream<hyper::Result<Frame<Bytes>>>>;
+pub type ReceiverStreamBody = StreamBody<ReceiverStream<hyper::Result<Frame<Bytes>>>>;
 
 #[derive(Debug)]
 pub enum HttpResponseFallback {
     Framed(HttpResponse<InternalHttpBody>),
     Fallback(HttpResponse<Vec<u8>>),
-    Streamed(HttpResponse<HttpResponseStreamed>),
+    Streamed(HttpResponse<ReceiverStreamBody>),
 }
 
 impl HttpResponseFallback {
@@ -571,7 +571,10 @@ impl HttpResponseFallback {
         }
     }
 
-    pub fn into_hyper<E>(self) -> Result<Response<BoxBody<Bytes, E>>, http::Error> {
+    pub fn into_hyper<E>(self) -> Result<Response<BoxBody<Bytes, E>>, http::Error>
+    where
+        E: From<hyper::Error>,
+    {
         match self {
             HttpResponseFallback::Framed(req) => req.internal_response.try_into(),
             HttpResponseFallback::Fallback(req) => req.internal_response.try_into(),
@@ -592,9 +595,7 @@ impl HttpResponseFallback {
                 HttpResponse::<Vec<u8>>::response_from_request(request, status, message),
             ),
             HttpRequestFallback::Streamed(request) => HttpResponseFallback::Streamed(
-                HttpResponse::<HttpResponseStreamed>::response_from_request(
-                    request, status, message,
-                ),
+                HttpResponse::<ReceiverStreamBody>::response_from_request(request, status, message),
             ),
         }
     }
@@ -803,13 +804,13 @@ impl HttpResponse<Vec<u8>> {
     }
 }
 
-impl HttpResponse<HttpResponseStreamed> {
+impl HttpResponse<ReceiverStreamBody> {
     pub async fn from_hyper_response(
         response: Response<Incoming>,
         port: Port,
         connection_id: ConnectionId,
         request_id: RequestId,
-    ) -> Result<HttpResponse<HttpResponseStreamed>, hyper::Error> {
+    ) -> Result<HttpResponse<ReceiverStreamBody>, hyper::Error> {
         let (
             Parts {
                 status,
@@ -865,9 +866,10 @@ impl HttpResponse<HttpResponseStreamed> {
             port,
         } = request;
 
-        let (tx, rx) = tokio::sync::mpsc::channel(12);
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
         let frame = Frame::data(Bytes::copy_from_slice(message.as_bytes()));
-        let _ = tx.blocking_send(Ok(frame));
+        tx.try_send(Ok(frame))
+            .expect("channel is open, capacity is sufficient");
         let body = StreamBody::new(ReceiverStream::new(rx));
 
         Self {
@@ -926,10 +928,13 @@ impl<E> TryFrom<InternalHttpResponse<Vec<u8>>> for Response<BoxBody<Bytes, E>> {
     }
 }
 
-impl<E> TryFrom<InternalHttpResponse<HttpResponseStreamed>> for Response<BoxBody<Bytes, E>> {
+impl<E> TryFrom<InternalHttpResponse<ReceiverStreamBody>> for Response<BoxBody<Bytes, E>>
+where
+    E: From<hyper::Error>,
+{
     type Error = http::Error;
 
-    fn try_from(value: InternalHttpResponse<HttpResponseStreamed>) -> Result<Self, Self::Error> {
+    fn try_from(value: InternalHttpResponse<ReceiverStreamBody>) -> Result<Self, Self::Error> {
         let InternalHttpResponse {
             status,
             version,
@@ -942,6 +947,6 @@ impl<E> TryFrom<InternalHttpResponse<HttpResponseStreamed>> for Response<BoxBody
             *h = headers;
         }
 
-        builder.body(BoxBody::new(body.map_err(|_| unreachable!())))
+        builder.body(BoxBody::new(body.map_err(|e| e.into())))
     }
 }
