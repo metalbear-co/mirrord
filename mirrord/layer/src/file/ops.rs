@@ -173,9 +173,12 @@ fn close_remote_file_on_failure(fd: u64) -> Result<()> {
 /// [`OPEN_FILES`].
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
-    let path = remap_path!(path?);
+    let path = path?;
 
     check_relative_paths!(path);
+
+    let path = remap_path!(path);
+
     ensure_not_ignored!(path, open_options.is_write());
 
     let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)?;
@@ -222,11 +225,12 @@ pub(crate) fn openat(
     path: Detour<PathBuf>,
     open_options: OpenOptionsInternal,
 ) -> Detour<RawFd> {
-    let path = remap_path!(path?);
+    let path = path?;
 
     // `openat` behaves the same as `open` when the path is absolute. When called with AT_FDCWD, the
     // call is propagated to `open`.
     if path.is_absolute() || fd == AT_FDCWD {
+        let path = remap_path!(path);
         open(Detour::Success(path), open_options)
     } else {
         // Relative path requires special handling, we must identify the relative part (relative to
@@ -366,9 +370,11 @@ pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isi
 
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
-    let path = remap_path!(path?);
+    let path = path?;
 
     check_relative_paths!(path);
+
+    let path = remap_path!(path);
 
     ensure_not_ignored!(path, false);
 
@@ -405,12 +411,12 @@ pub(crate) fn xstat(
     let (path, fd) = match (rawish_path, fd) {
         // fstatat
         (Some(path), Some(fd)) => {
-            let path = remap_path!(path?);
+            let path = path?;
             let fd = {
                 if fd == AT_FDCWD {
                     check_relative_paths!(path);
 
-                    ensure_not_ignored!(path, false);
+                    ensure_not_ignored!(remap_path!(path.clone()), false);
                     None
                 } else {
                     Some(get_remote_fd(fd)?)
@@ -420,8 +426,11 @@ pub(crate) fn xstat(
         }
         // lstat/stat
         (Some(path), None) => {
-            let path = remap_path!(path?);
+            let path = path?;
+
             check_relative_paths!(path);
+
+            let path = remap_path!(path);
 
             ensure_not_ignored!(path, false);
             (Some(path), None)
@@ -614,9 +623,11 @@ fn absolute_path(path: PathBuf) -> PathBuf {
 
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
-    let path = remap_path!(path?);
+    let path = path?;
 
     check_relative_paths!(path);
+
+    let path = remap_path!(path);
 
     let realpath = absolute_path(path);
 
