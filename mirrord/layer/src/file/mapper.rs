@@ -64,7 +64,6 @@ mod tests {
     #[case("/app/test", "/app/test")]
     #[case("/foo/test", "/bar/test")]
     #[case("/baz/test", "/tmp/mirrord-baz/test")]
-    #[case("/baz/test", "/tmp/mirrord-baz/test")]
     #[case("/Users/john-doe/Library/Caches/JetBrains/IntelliJIdea2023.3/tomcat/6902e44a-a069-433d-ab49-5b46477acb97/static/manifest.xml", "/opt/tomcat/static/manifest.xml")]
     #[case("/Users/john-doe/Library/Caches/JetBrains/IntelliJIdea2023.3/tomcat/6902e44a-a069-433d-ab49-5b46477acb97/static/index.html", "/Users/john-doe/Library/Caches/JetBrains/IntelliJIdea2023.3/tomcat/6902e44a-a069-433d-ab49-5b46477acb97/static/index.html")]
     fn simple_mapping(#[case] input: PathBuf, #[case] expect: PathBuf) {
