@@ -44,3 +44,23 @@ impl FileRemapper {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    fn test_mapping() -> HashMap<String, String> {
+        [("/foo".to_string(), "/bar".to_string())].into()
+    }
+
+    #[rstest]
+    #[case("/app/test", "/app/test")]
+    #[case("/foo/test", "/bar/test")]
+    fn simple_mapping(#[case] input: PathBuf, #[case] expect: PathBuf) {
+        let remapper = FileRemapper::new(test_mapping());
+
+        assert_eq!(remapper.change_path(input), expect);
+    }
+}

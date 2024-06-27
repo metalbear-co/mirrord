@@ -38,12 +38,7 @@ macro_rules! ensure_not_ignored {
         crate::setup().file_filter().continue_or_bypass_with(
             $path.to_str().unwrap_or_default(),
             $write,
-            || {
-                Bypass::IgnoredFile(
-                    CString::new($path.to_str().unwrap_or_default())
-                        .expect("Path should be CStringable"),
-                )
-            },
+            || Bypass::ignored_file($path.to_str().unwrap_or_default()),
         )?;
     };
 }
@@ -51,10 +46,7 @@ macro_rules! ensure_not_ignored {
 macro_rules! check_relative_paths {
     ($path:expr) => {
         if $path.is_relative() {
-            Detour::Bypass(Bypass::RelativePath(
-                CString::new($path.to_str().unwrap_or_default())
-                    .expect("Path should be CStringable"),
-            ))?
+            Detour::Bypass(Bypass::relative_path($path.to_str().unwrap_or_default()))?
         };
     };
 }
@@ -491,7 +483,9 @@ pub(crate) fn statx_logic(
         ensure_not_ignored!(path_name, false);
         (None, Some(path_name))
     } else if !path_name.as_os_str().is_empty() && dir_fd == libc::AT_FDCWD {
-        return Detour::Bypass(Bypass::RelativePath(path_name));
+        return Detour::Bypass(Bypass::relative_path(
+            path_name.to_str().unwrap_or_default(),
+        ));
     } else if !path_name.as_os_str().is_empty() {
         (Some(get_remote_fd(dir_fd)?), Some(path_name))
     } else if (flags & libc::AT_EMPTY_PATH) != 0 {
