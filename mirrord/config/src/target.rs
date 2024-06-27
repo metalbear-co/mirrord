@@ -294,6 +294,19 @@ impl Target {
             }
         }
     }
+
+    /// Get the target type - "pod", "deployment", "rollout" or "targetless"
+    pub fn get_target_type(&self) -> &str {
+        match self {
+            Target::Targetless => "targetless",
+            Target::Pod(pod) => pod.target_type(),
+            Target::Deployment(dep) => dep.target_type(),
+            Target::Rollout(roll) => roll.target_type(),
+            Target::Job(job) => job.target_type(),
+            Target::CronJob(cron_job) => cron_job.target_type(),
+            Target::StatefulSet(stateful_set) => stateful_set.target_type(),
+        }
+    }
 }
 
 pub trait TargetDisplay {

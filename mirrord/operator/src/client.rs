@@ -1,4 +1,5 @@
 use std::{
+    collections::{BTreeMap, HashMap},
     fmt::{self, Display},
     io,
 };
@@ -37,7 +38,7 @@ use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use tracing::{debug, error, info, warn};
 
 use crate::crd::{
-    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, SessionCrd, TargetCrd,
+    CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, NewOperatorFeature, SessionCrd, TargetCrd,
     OPERATOR_STATUS_NAME,
 };
 
@@ -89,7 +90,7 @@ pub enum OperatorApiError {
 
     #[error("mirrord operator {operator_version} does not support feature {feature}")]
     UnsupportedFeature {
-        feature: String,
+        feature: NewOperatorFeature,
         operator_version: String,
     },
 
@@ -110,18 +111,16 @@ pub struct OperatorSessionMetadata {
     client_certificate: Option<Certificate>,
     session_id: u64,
     fingerprint: Option<String>,
-    operator_features: Vec<OperatorFeatures>,
+    operator_features: Vec<NewOperatorFeature>,
     protocol_version: Option<semver::Version>,
-    copy_pod_enabled: Option<bool>,
 }
 
 impl OperatorSessionMetadata {
     fn new(
         client_certificate: Option<Certificate>,
         fingerprint: Option<String>,
-        operator_features: Vec<OperatorFeatures>,
+        operator_features: Vec<NewOperatorFeature>,
         protocol_version: Option<semver::Version>,
-        copy_pod_enabled: Option<bool>,
     ) -> Self {
         Self {
             client_certificate,
@@ -129,7 +128,6 @@ impl OperatorSessionMetadata {
             fingerprint,
             operator_features,
             protocol_version,
-            copy_pod_enabled,
         }
     }
 
@@ -158,7 +156,8 @@ impl OperatorSessionMetadata {
     }
 
     fn proxy_feature_enabled(&self) -> bool {
-        self.operator_features.contains(&OperatorFeatures::ProxyApi)
+        self.operator_features
+            .contains(&NewOperatorFeature::ProxyApi)
     }
 }
 
@@ -208,12 +207,13 @@ impl OperatorApi {
 
     /// Checks used config against operator specification.
     fn check_config(config: &LayerConfig, operator: &MirrordOperatorCrd) -> Result<()> {
-        if config.feature.copy_target.enabled && !operator.spec.copy_target_enabled.unwrap_or(false)
-        {
-            return Err(OperatorApiError::UnsupportedFeature {
-                feature: "copy target".into(),
-                operator_version: operator.spec.operator_version.clone(),
-            });
+        if config.feature.copy_target.enabled {
+            operator
+                .spec
+                .require_feature(NewOperatorFeature::CopyTarget)?;
+        }
+        if config.feature.split_queues.is_set() {
+            operator.spec.require_feature(NewOperatorFeature::Sqs)?;
         }
 
         Ok(())
@@ -300,15 +300,15 @@ impl OperatorApi {
             .await
             .ok()
             .flatten();
+        let features = operator.spec.supported_features();
         let metadata = OperatorSessionMetadata::new(
             client_certificate,
             operator.spec.license.fingerprint,
-            operator.spec.features.unwrap_or_default(),
+            features,
             operator
                 .spec
                 .protocol_version
                 .and_then(|str_version| str_version.parse().ok()),
-            operator.spec.copy_target_enabled,
         );
 
         metadata.set_operator_properties(analytics);
@@ -321,10 +321,10 @@ impl OperatorApi {
         if operator_version > mirrord_version {
             // we make two sub tasks since it looks best this way
             version_progress.warning(
-                    &format!(
-                        "Your mirrord plugin/CLI version {} does not match the operator version {}. This can lead to unforeseen issues.",
-                        mirrord_version,
-                        operator_version));
+                &format!(
+                    "Your mirrord plugin/CLI version {} does not match the operator version {}. This can lead to unforeseen issues.",
+                    mirrord_version,
+                    operator_version));
             version_progress.success(None);
             version_progress = progress.subtask("comparing versions");
             version_progress.warning(
@@ -333,7 +333,10 @@ impl OperatorApi {
         }
         version_progress.success(None);
 
-        let target_to_connect = if config.feature.copy_target.enabled {
+        let target_to_connect = if config.feature.copy_target.enabled
+            // use copy_target for splitting queues
+            || config.feature.split_queues.is_set()
+        {
             // We do not validate the `target` here, it's up to the operator.
             let mut copy_progress = progress.subtask("copying target");
             let copied = operator_api
@@ -341,6 +344,7 @@ impl OperatorApi {
                     &metadata,
                     config.target.path.clone().unwrap_or(Target::Targetless),
                     config.feature.copy_target.scale_down,
+                    config.feature.split_queues.get_sqs_filter(),
                 )
                 .await?;
             copy_progress.success(None);
@@ -567,6 +571,7 @@ impl OperatorApi {
         session_metadata: &OperatorSessionMetadata,
         target: Target,
         scale_down: bool,
+        sqs_filter: Option<HashMap<String, BTreeMap<String, String>>>,
     ) -> Result<CopyTargetCrd> {
         let name = TargetCrd::target_name(&target);
 
@@ -576,6 +581,7 @@ impl OperatorApi {
                 target,
                 idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
                 scale_down,
+                sqs_filter,
             },
         );
 

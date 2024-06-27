@@ -1,7 +1,7 @@
 use kube::{core::ErrorResponse, Api};
 use mirrord_operator::{
     client::{session_api, OperatorApiError, OperatorOperation},
-    crd::{MirrordOperatorCrd, SessionCrd, OPERATOR_STATUS_NAME},
+    crd::{MirrordOperatorCrd, NewOperatorFeature, SessionCrd, OPERATOR_STATUS_NAME},
 };
 use mirrord_progress::{Progress, ProgressTracker};
 
@@ -96,7 +96,7 @@ impl SessionCommandHandler {
                 if code == 404 && reason.contains("parse") =>
             {
                 OperatorApiError::UnsupportedFeature {
-                    feature: "session management".to_string(),
+                    feature: NewOperatorFeature::SessionManagement,
                     operator_version,
                 }
             }
@@ -132,16 +132,16 @@ impl SessionCommandHandler {
                 )));
                 progress.success(Some("Session operation is completed."));
 
-                Ok(())
-            }
-        })
-        .transpose()?
-        // We might've gotten a `SessionCrd` instead of a `Status` (we have a `Left(T)`),
-        // meaning that the operation has started, but it might not be finished yet.
-        .unwrap_or_else(|| {
-            sub_progress.success(Some(&format!("No issues found when executing `{command}`, but the operation status could not be determined at this time.")));
-            progress.success(Some(&format!("`{command}` is done, but the operation might be pending.")));
-        });
+                    Ok(())
+                }
+            })
+            .transpose()?
+            // We might've gotten a `SessionCrd` instead of a `Status` (we have a `Left(T)`),
+            // meaning that the operation has started, but it might not be finished yet.
+            .unwrap_or_else(|| {
+                sub_progress.success(Some(&format!("No issues found when executing `{command}`, but the operation status could not be determined at this time.")));
+                progress.success(Some(&format!("`{command}` is done, but the operation might be pending.")));
+            });
 
         Ok(())
     }
