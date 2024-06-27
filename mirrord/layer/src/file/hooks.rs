@@ -59,6 +59,7 @@ fn update_ptr_from_bypass(ptr: *const c_char, bypass: &Bypass) -> *const c_char 
         // inside mirrord's temp bin dir. The detour has returned us the original path of the file
         // (stripped mirrord's dir path), so now we carry out the operation locally, on the stripped
         // path.
+        #[cfg(target_os = "macos")]
         Bypass::FileOperationInMirrordBinTempDir(stripped_ptr) => *stripped_ptr,
         Bypass::RelativePath(path) | Bypass::IgnoredFile(path) => path.as_ptr(),
         _ => ptr,
@@ -800,8 +801,10 @@ unsafe extern "C" fn statx_detour(
     mask: c_int,
     statx_buf: *mut statx,
 ) -> c_int {
-    statx_logic(dir_fd, path_name, flags, mask, statx_buf)
-        .unwrap_or_bypass_with(|bypass| FN_STATX(dir_fd, path_name, flags, mask, statx_buf))
+    statx_logic(dir_fd, path_name, flags, mask, statx_buf).unwrap_or_bypass_with(|bypass| {
+        let path_name = update_ptr_from_bypass(path_name, &bypass);
+        FN_STATX(dir_fd, path_name, flags, mask, statx_buf)
+    })
 }
 
 /// Hook for libc's stat syscall wrapper.

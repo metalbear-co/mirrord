@@ -52,12 +52,17 @@ mod tests {
     use super::*;
 
     fn test_mapping() -> HashMap<String, String> {
-        [("/foo".to_string(), "/bar".to_string())].into()
+        [
+            ("/foo".to_string(), "/bar".to_string()),
+            ("/(baz)".to_string(), "/tmp/mirrord-$1".to_string()),
+        ]
+        .into()
     }
 
     #[rstest]
     #[case("/app/test", "/app/test")]
     #[case("/foo/test", "/bar/test")]
+    #[case("/baz/test", "/tmp/mirrord-baz/test")]
     fn simple_mapping(#[case] input: PathBuf, #[case] expect: PathBuf) {
         let remapper = FileRemapper::new(test_mapping());
 
