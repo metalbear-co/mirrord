@@ -9,7 +9,9 @@ use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::OnceLock};
+use std::{
+    cell::RefCell, ffi::CString, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::OnceLock,
+};
 
 #[cfg(target_os = "macos")]
 use libc::c_char;
@@ -150,10 +152,10 @@ pub(crate) enum Bypass {
     FileOperationInMirrordBinTempDir(*const c_char),
 
     /// File [`PathBuf`] should be ignored (used for tests).
-    IgnoredFile(PathBuf),
+    IgnoredFile(CString),
 
     /// Some operations only handle absolute [`PathBuf`]s.
-    RelativePath(PathBuf),
+    RelativePath(CString),
 
     /// Started mirrord with [`FsModeConfig`](mirrord_config::feature::fs::mode::FsModeConfig) set
     /// to [`FsModeConfig::Read`](mirrord_config::feature::fs::FsModeConfig::Read), but

@@ -38,8 +38,30 @@ macro_rules! ensure_not_ignored {
         crate::setup().file_filter().continue_or_bypass_with(
             $path.to_str().unwrap_or_default(),
             $write,
-            || Bypass::IgnoredFile($path.clone()),
+            || {
+                Bypass::IgnoredFile(
+                    CString::new($path.to_str().unwrap_or_default())
+                        .expect("Path should be CStringable"),
+                )
+            },
         )?;
+    };
+}
+
+macro_rules! check_relative_paths {
+    ($path:expr) => {
+        if $path.is_relative() {
+            Detour::Bypass(Bypass::RelativePath(
+                CString::new($path.to_str().unwrap_or_default())
+                    .expect("Path should be CStringable"),
+            ))?
+        };
+    };
+}
+
+macro_rules! remap_path {
+    ($path:expr) => {
+        crate::setup().file_remapper().change_path($path)
     };
 }
 
@@ -159,13 +181,9 @@ fn close_remote_file_on_failure(fd: u64) -> Result<()> {
 /// [`OPEN_FILES`].
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
-    let path = path?;
+    let path = remap_path!(path?);
 
-    if path.is_relative() {
-        // Calls with non absolute paths are sent to libc::open.
-        Detour::Bypass(Bypass::RelativePath(path.clone()))?
-    };
-
+    check_relative_paths!(path);
     ensure_not_ignored!(path, open_options.is_write());
 
     let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)?;
@@ -212,7 +230,7 @@ pub(crate) fn openat(
     path: Detour<PathBuf>,
     open_options: OpenOptionsInternal,
 ) -> Detour<RawFd> {
-    let path = path?;
+    let path = remap_path!(path?);
 
     // `openat` behaves the same as `open` when the path is absolute. When called with AT_FDCWD, the
     // call is propagated to `open`.
@@ -282,12 +300,9 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
     if crate::setup().experimental().readlink {
-        let path = path?;
+        let path = remap_path!(path?);
 
-        if path.is_relative() {
-            // Calls with non absolute paths are sent to libc::readlink.
-            Detour::Bypass(Bypass::RelativePath(path.clone()))?
-        };
+        check_relative_paths!(path);
 
         ensure_not_ignored!(path, false);
 
@@ -359,12 +374,9 @@ pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isi
 
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
-    let path = path?;
+    let path = remap_path!(path?);
 
-    if path.is_relative() {
-        // Calls with non absolute paths are sent to libc::open.
-        Detour::Bypass(Bypass::RelativePath(path.clone()))?
-    };
+    check_relative_paths!(path);
 
     ensure_not_ignored!(path, false);
 
@@ -401,16 +413,13 @@ pub(crate) fn xstat(
     let (path, fd) = match (rawish_path, fd) {
         // fstatat
         (Some(path), Some(fd)) => {
-            let path = path?;
+            let path = remap_path!(path?);
             let fd = {
                 if fd == AT_FDCWD {
-                    if path.is_relative() {
-                        // Calls with non absolute paths are sent to libc::fstatat.
-                        return Detour::Bypass(Bypass::RelativePath(path));
-                    } else {
-                        ensure_not_ignored!(path, false);
-                        None
-                    }
+                    check_relative_paths!(path);
+
+                    ensure_not_ignored!(path, false);
+                    None
                 } else {
                     Some(get_remote_fd(fd)?)
                 }
@@ -419,11 +428,9 @@ pub(crate) fn xstat(
         }
         // lstat/stat
         (Some(path), None) => {
-            let path = path?;
-            if path.is_relative() {
-                // Calls with non absolute paths are sent to libc::open.
-                return Detour::Bypass(Bypass::RelativePath(path));
-            }
+            let path = remap_path!(path?);
+            check_relative_paths!(path);
+
             ensure_not_ignored!(path, false);
             (Some(path), None)
         }
@@ -613,12 +620,9 @@ fn absolute_path(path: PathBuf) -> PathBuf {
 
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
-    let path = path?;
+    let path = remap_path!(path?);
 
-    if path.is_relative() {
-        // Calls with non absolute paths are sent to libc::open.
-        Detour::Bypass(Bypass::RelativePath(path.clone()))?
-    };
+    check_relative_paths!(path);
 
     let realpath = absolute_path(path);
 

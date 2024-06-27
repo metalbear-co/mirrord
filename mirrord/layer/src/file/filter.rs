@@ -98,6 +98,7 @@ impl FileFilter {
             local,
             mode,
             not_found,
+            ..
         } = fs_config;
 
         let read_write =
@@ -399,6 +400,7 @@ mod tests {
             local,
             not_found,
             mode,
+            mapping: None,
         };
 
         let file_filter = FileFilter::new(fs_config);
