@@ -577,8 +577,7 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
             };
 
             match api {
-                Some(api) => {
-                    api
+                Some(api) => api
                     .list_targets(layer_config.target.namespace.as_deref())
                     .await?
                     .iter()
@@ -591,8 +590,7 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
                         }
                         Some(format!("{target}"))
                     })
-                    .collect()
-                },
+                    .collect(),
                 None => list_pods(&layer_config, args).await?,
             }
         }
