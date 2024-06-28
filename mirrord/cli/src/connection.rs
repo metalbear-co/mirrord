@@ -61,14 +61,14 @@ where
     let mut version_cmp_subtask = operator_subtask.subtask("checking version compatibility");
     let compatible = api.check_operator_version(&version_cmp_subtask);
     if compatible {
-        version_cmp_subtask.success(None);
+        version_cmp_subtask.success(Some("operator version compatible"));
     } else {
-        version_cmp_subtask.failure(None);
+        version_cmp_subtask.failure(Some("operator version may not be compatible"));
     }
 
     let mut license_subtask = operator_subtask.subtask("checking license");
     match api.check_license_validity(&license_subtask) {
-        Ok(()) => license_subtask.success(None),
+        Ok(()) => license_subtask.success(Some("operator license valid")),
         Err(error) => {
             license_subtask.failure(Some("operator license expired"));
 
@@ -83,11 +83,13 @@ where
 
     let mut user_cert_subtask = operator_subtask.subtask("preparing user credentials");
     api.prepare_client_cert(analytics).await?;
-    user_cert_subtask.success(None);
+    user_cert_subtask.success(Some("user credentials prepared"));
 
     let mut session_subtask = operator_subtask.subtask("starting session");
     let connection = api.connect_in_new_session(config, &session_subtask).await?;
-    session_subtask.success(None);
+    session_subtask.success(Some("session started"));
+
+    operator_subtask.success(Some("using operator"));
 
     Ok(Some(connection))
 }

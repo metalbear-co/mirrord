@@ -393,7 +393,7 @@ impl OperatorApi {
             let namespace = self.target_namespace(config);
             let copied = self.copy_target(target, scale_down, namespace).await?;
 
-            copy_subtask.success(None);
+            copy_subtask.success(Some("target copied"));
 
             OperatorSessionTarget::Copied(copied)
         } else {
@@ -409,7 +409,7 @@ impl OperatorApi {
                     operation: OperatorOperation::FindingTarget,
                 })?;
 
-            fetch_subtask.success(None);
+            fetch_subtask.success(Some("target fetched"));
 
             OperatorSessionTarget::Raw(raw_target)
         };
@@ -438,9 +438,9 @@ impl OperatorApi {
                 .and_then(|version| version.parse().ok()),
         };
 
-        let mut connection_subtask = progress.subtask("connecting with the target");
+        let mut connection_subtask = progress.subtask("connecting to the target");
         let (tx, rx) = Self::connect_target(&self.client, &session).await?;
-        connection_subtask.success(None);
+        connection_subtask.success(Some("connected to the target"));
 
         Ok(OperatorSessionConnection { session, tx, rx })
     }

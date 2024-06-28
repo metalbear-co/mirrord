@@ -705,9 +705,9 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                         let command = if is_homebrew { "brew upgrade metalbear-co/mirrord/mirrord" } else { "curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash" };
                         progress.print(&format!("New mirrord version available: {}. To update, run: `{:?}`.", latest_version, command));
                         progress.print("To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.");
-                        progress.success(Some(&format!("Update to {latest_version} available")));
+                        progress.success(Some(&format!("update to {latest_version} available")));
                     } else {
-                        progress.success(Some(&format!("Running on latest ({CURRENT_VERSION})!")));
+                        progress.success(Some(&format!("running on latest ({CURRENT_VERSION})!")));
                     }
                 }
             }
