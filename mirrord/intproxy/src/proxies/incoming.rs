@@ -437,13 +437,7 @@ impl BackgroundTask for IncomingProxy {
             tokio::select! {
                 Some(((connection_id, request_id), stream_item)) = self.response_body_rxs.next() => match stream_item {
                     Some(Ok(frame)) => {
-                        let int_frame = if frame.is_data() {
-                            InternalHttpBodyFrame::Data(frame.into_data().unwrap().to_vec())
-                        } else if frame.is_trailers() {
-                            InternalHttpBodyFrame::Trailers(frame.into_trailers().unwrap())
-                        } else {
-                            unreachable!();
-                        };
+                        let int_frame = InternalHttpBodyFrame::from(frame);
                         let res = ChunkedResponse::Body(ChunkedHttpBody {
                             frames: vec![int_frame],
                             is_last: false,
@@ -456,8 +450,8 @@ impl BackgroundTask for IncomingProxy {
                             )))
                             .await;
                     },
-                    Some(Err(e)) => {
-                        debug!("Error while sending streamed response: {e:?}");
+                    Some(Err(error)) => {
+                        debug!(%error, "Error while reading streamed response body");
                         let res = ChunkedResponse::Error(ChunkedHttpError {connection_id, request_id});
                         message_bus
                             .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
@@ -538,13 +532,20 @@ impl BackgroundTask for IncomingProxy {
                             },
                             MessageOut::Http(HttpResponseFallback::Streamed(mut res)) => {
                                 let mut body = vec![];
+                                let key = (res.connection_id, res.request_id);
+
                                 match res.internal_response.body.next_frames(false).await {
                                         Ok(frames) => {
-                                            let _ = frames.frames.into_iter().map(|frame| body.push(frame.into()));
+                                            frames.frames.into_iter().map(From::from).for_each(|frame| body.push(frame));
                                         },
-                                        _ => continue,
+                                        Err(error) => {
+                                            debug!(%error, "Error while receving streamed response frames");
+                                            let res = ChunkedResponse::Error(ChunkedHttpError { connection_id: key.0, request_id: key.1 });
+                                            message_bus.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(res))).await;
+                                            continue;
+                                        },
                                 }
-                                let key = (res.connection_id, res.request_id);
+
                                 self.response_body_rxs.insert(key, StreamNotifyClose::new(res.internal_response.body));
 
                                 let internal_response = InternalHttpResponse {

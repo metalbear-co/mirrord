@@ -435,10 +435,7 @@ impl RawConnection {
 
 #[cfg(test)]
 mod test {
-    use std::{
-        convert::Infallible,
-        sync::{Arc, Mutex},
-    };
+    use std::sync::{Arc, Mutex};
 
     use bytes::Bytes;
     use futures::future::FutureExt;
