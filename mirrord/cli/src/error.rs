@@ -233,9 +233,9 @@ pub(crate) enum CliError {
     ))]
     PingPongFailed(String),
 
-    #[error("Failed to prepare mirrord operator user certificate: {0}")]
+    #[error("Failed to prepare mirrord operator client certificate: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
-    OperatorUserCertError(String),
+    OperatorClientCertError(String),
 }
 
 impl From<OperatorApiError> for CliError {
@@ -273,7 +273,7 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorApiFailed(operation, error)
             }
             OperatorApiError::NoLicense => Self::OperatorLicenseExpired,
-            OperatorApiError::ClientCertError(error) => Self::OperatorUserCertError(error),
+            OperatorApiError::ClientCertError(error) => Self::OperatorClientCertError(error),
         }
     }
 }
