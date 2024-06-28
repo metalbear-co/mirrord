@@ -1,7 +1,13 @@
-use kube::core::ErrorResponse;
+use kube::{core::ErrorResponse, Api};
 use mirrord_analytics::NullReporter;
 use mirrord_config::LayerConfig;
-use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorOperation};
+use mirrord_operator::{
+    client::{
+        error::{OperatorApiError, OperatorOperation},
+        OperatorApi,
+    },
+    crd::SessionCrd,
+};
 use mirrord_progress::{Progress, ProgressTracker};
 
 use crate::{Result, SessionCommand};
@@ -29,14 +35,22 @@ impl SessionCommandHandler {
         let mut progress = ProgressTracker::from_env("Operator session action");
 
         let config = LayerConfig::from_env().inspect_err(|error| {
-            progress.failure(Some(&format!("Failed to read config from env: {error}")));
+            progress.failure(Some(&format!("failed to read config from env: {error}")));
         })?;
 
-        let operator_api = OperatorApi::new(&config, &progress, &mut NullReporter::default())
+        let mut operator_api = OperatorApi::new(&config, &mut NullReporter::default())
+            .await
+            .inspect_err(|_| {
+                progress.failure(Some("failed to create operator API"));
+            })?;
+
+        operator_api
+            .prepare_client_cert(&mut NullReporter::default())
             .await
             .inspect_err(|error| {
-                progress.failure(Some(&format!("Failed to create operator API: {error}")))
-            })?;
+                progress.warning(&format!("Failed to prepare user certificate: {error}"));
+            })
+            .ok();
 
         let sub_progress = progress.subtask("preparing...");
 
@@ -61,7 +75,7 @@ impl SessionCommandHandler {
 
         sub_progress.print(&format!("executing `{command}`"));
 
-        let session_api = operator_api.session_api();
+        let session_api: Api<SessionCrd> = Api::all(operator_api.client().clone());
 
         // We're interested in the `Status`es, so we map the results into those.
         match command {
@@ -85,7 +99,7 @@ impl SessionCommandHandler {
             {
                 OperatorApiError::UnsupportedFeature {
                     feature: "session management".to_string(),
-                    operator_version: operator_api.session_metadata().operator_spec().operator_version.clone(),
+                    operator_version: operator_api.operator().spec.operator_version.clone(),
                 }
             }
             // Something actually went wrong.

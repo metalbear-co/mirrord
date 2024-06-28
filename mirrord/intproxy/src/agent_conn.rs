@@ -12,7 +12,7 @@ use mirrord_kube::{
     },
     error::KubeApiError,
 };
-use mirrord_operator::client::{OperatorApi, OperatorApiError, OperatorSessionInformation};
+use mirrord_operator::client::{error::OperatorApiError, OperatorApi, OperatorSession};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -47,7 +47,7 @@ pub enum AgentConnectionError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentConnectInfo {
     /// Connect to the agent through the operator.
-    Operator(OperatorSessionInformation),
+    Operator(OperatorSession),
     /// Connect directly to the agent by name and port using k8s port forward.
     DirectKubernetes(AgentKubernetesConnectInfo),
 }
@@ -75,15 +75,8 @@ impl AgentConnection {
     ) -> Result<Self, AgentConnectionError> {
         let (agent_tx, agent_rx) = match connect_info {
             Some(AgentConnectInfo::Operator(session)) => {
-                let operator_api =
-                    OperatorApi::with_exisiting_session(config, session.metadata, analytics)
-                        .await?;
-                let connection = operator_api
-                    .connect_target(
-                        &session.target,
-                        config.feature.network.incoming.on_concurrent_steal,
-                    )
-                    .await?;
+                let connection =
+                    OperatorApi::connect_in_existing_session(config, session, analytics).await?;
                 (connection.tx, connection.rx)
             }
 

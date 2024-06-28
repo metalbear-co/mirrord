@@ -5,15 +5,16 @@ use std::{
 };
 
 use futures::TryFutureExt;
-use kube::{api::GroupVersionKind, discovery, Api, Client, Resource};
+use kube::{Api, Client};
+use mirrord_analytics::NullReporter;
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     LayerConfig, LayerFileConfig,
 };
 use mirrord_kube::api::kubernetes::create_kube_config;
 use mirrord_operator::{
-    client::{OperatorApiError, OperatorOperation},
-    crd::{MirrordOperatorCrd, MirrordOperatorSpec, OPERATOR_STATUS_NAME},
+    client::OperatorApi,
+    crd::{MirrordOperatorCrd, MirrordOperatorSpec},
     setup::{LicenseType, Operator, OperatorNamespace, OperatorSetup, SetupOptions},
     types::LicenseInfoOwned,
 };
@@ -146,27 +147,23 @@ async fn get_status_api(config: Option<&Path>) -> Result<Api<MirrordOperatorCrd>
 async fn operator_status(config: Option<&Path>) -> Result<()> {
     let mut progress = ProgressTracker::from_env("Operator Status");
 
-    let status_api = get_status_api(config).await?;
-
-    let mut status_progress = progress.subtask("fetching status");
-
-    let mirrord_status = match status_api
-        .get(OPERATOR_STATUS_NAME)
-        .await
-        .map_err(|error| OperatorApiError::KubeError {
-            error,
-            operation: OperatorOperation::GettingStatus,
-        })
-        .map_err(CliError::from)
-    {
-        Ok(status) => status,
-        Err(err) => {
-            status_progress.failure(Some("unable to get status"));
-
-            return Err(err);
-        }
+    let layer_config = if let Some(config) = config {
+        let mut cfg_context = ConfigContext::default();
+        LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?
+    } else {
+        LayerConfig::from_env()?
     };
 
+    if !layer_config.use_proxy {
+        remove_proxy_env();
+    }
+
+    let mut status_progress = progress.subtask("fetching status");
+    let api = OperatorApi::new(&layer_config, &mut NullReporter::default())
+        .await
+        .inspect_err(|_| {
+            status_progress.failure(Some("unable to get status"));
+        })?;
     status_progress.success(Some("fetched status"));
 
     progress.success(None);
@@ -182,7 +179,7 @@ async fn operator_status(config: Option<&Path>) -> Result<()> {
                 ..
             },
         ..
-    } = mirrord_status.spec;
+    } = &api.operator().spec;
 
     let expire_at = expire_at.format("%e-%b-%Y");
 
@@ -197,11 +194,11 @@ Operator License
 "#
     );
 
-    let Some(status) = mirrord_status.status else {
+    let Some(status) = &api.operator().status else {
         return Ok(());
     };
 
-    if let Some(copy_targets) = status.copy_targets {
+    if let Some(copy_targets) = status.copy_targets.as_ref() {
         if copy_targets.is_empty() {
             println!("No active copy targets.");
         } else {
@@ -218,7 +215,11 @@ Operator License
             for (pod_name, copy_target_resource) in copy_targets {
                 copy_targets_table.add_row(row![
                     copy_target_resource.spec.target.to_string(),
-                    copy_target_resource.metadata.namespace.unwrap_or_default(),
+                    copy_target_resource
+                        .metadata
+                        .namespace
+                        .as_deref()
+                        .unwrap_or_default(),
                     pod_name,
                     if copy_target_resource.spec.scale_down {
                         "*"
@@ -233,7 +234,7 @@ Operator License
         println!();
     }
 
-    if let Some(statistics) = status.statistics {
+    if let Some(statistics) = status.statistics.as_ref() {
         println!("Operator Daily Users: {}", statistics.dau);
         println!("Operator Monthly Users: {}", statistics.mau);
     }
@@ -302,36 +303,6 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             SessionCommandHandler::new(session_command)
                 .and_then(SessionCommandHandler::handle)
                 .await
-        }
-    }
-}
-
-#[tracing::instrument(level = "trace", skip(config), ret, err)]
-pub async fn check_if_operator_resource_exists(config: &LayerConfig) -> Result<bool> {
-    let client = create_kube_config(
-        config.accept_invalid_certificates,
-        config.kubeconfig.clone(),
-        config.kube_context.clone(),
-    )
-    .await
-    .and_then(|config| Client::try_from(config).map_err(From::from))
-    .map_err(CliError::OperatorInstallationCheckError)?;
-
-    let gvk = GroupVersionKind {
-        group: MirrordOperatorCrd::group(&()).into_owned(),
-        version: MirrordOperatorCrd::version(&()).into_owned(),
-        kind: MirrordOperatorCrd::kind(&()).into_owned(),
-    };
-
-    match discovery::oneshot::pinned_kind(&client, &gvk).await {
-        Ok(..) => Ok(true),
-        Err(kube::Error::Api(response)) if response.code == 404 => Ok(false),
-        Err(error) => {
-            tracing::trace!(
-                ?error,
-                "Failed to check if operator is installed in the cluster"
-            );
-            Err(CliError::OperatorInstallationCheckError(error.into()))
         }
     }
 }

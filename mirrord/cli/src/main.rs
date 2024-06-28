@@ -32,8 +32,8 @@ use mirrord_kube::api::{
     container::SKIP_NAMES,
     kubernetes::{create_kube_config, get_k8s_resource_api, rollout::Rollout},
 };
-use mirrord_operator::client::{OperatorApi, OperatorApiError};
-use mirrord_progress::{NullProgress, Progress, ProgressTracker};
+use mirrord_operator::client::OperatorApi;
+use mirrord_progress::{Progress, ProgressTracker};
 use operator::operator_command;
 use semver::Version;
 use serde::de::DeserializeOwned;
@@ -568,58 +568,35 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     // Try operator first if relevant
     let mut targets = match &layer_config.operator {
         Some(true) | None => {
-            let operator_targets: Result<_, OperatorApiError> = try {
-                let api =
-                    OperatorApi::new(&layer_config, &NullProgress, &mut NullReporter::default())
-                        .await?;
-                let namespace = layer_config.target.namespace.as_deref();
-                api.list_targets(namespace).await?
+            let api = if layer_config.operator.is_some() {
+                OperatorApi::new(&layer_config, &mut NullReporter::default())
+                    .await?
+                    .into()
+            } else {
+                OperatorApi::try_new(&layer_config, &mut NullReporter::default()).await?
             };
 
-            match operator_targets {
-                Ok(targets) => {
-                    // adjust format to match non-operator output
-                    targets
-                        .iter()
-                        .filter_map(|target_crd| {
-                            let target = target_crd.spec.target.as_ref()?;
-                            if let Some(container) = target.container_name() {
-                                if SKIP_NAMES.contains(container.as_str()) {
-                                    return None;
-                                }
+            match api {
+                Some(api) => {
+                    api
+                    .list_targets(layer_config.target.namespace.as_deref())
+                    .await?
+                    .iter()
+                    .filter_map(|target_crd| {
+                        let target = target_crd.spec.target.as_ref()?;
+                        if let Some(container) = target.container_name() {
+                            if SKIP_NAMES.contains(container.as_str()) {
+                                return None;
                             }
-                            Some(format!("{target}"))
-                        })
-                        .collect::<Vec<String>>()
-                }
-
-                Err(error) if layer_config.operator.is_some() => {
-                    error!(
-                        ?error,
-                        "Operator was explicitly enabled and we failed to list targets"
-                    );
-                    return Err(error.into());
-                }
-
-                Err(error) => {
-                    match operator::check_if_operator_resource_exists(&layer_config).await {
-                        Ok(false) => {}
-                        Ok(true) => {
-                            tracing::error!(
-                                ?error,
-                                "Operator is installed and we failed to list targets"
-                            );
-                            return Err(error.into());
                         }
-                        Err(error) => {
-                            tracing::debug!(?error, "Failed to check if operator is installed");
-                        }
-                    }
-
-                    list_pods(&layer_config, args).await?
-                }
+                        Some(format!("{target}"))
+                    })
+                    .collect()
+                },
+                None => list_pods(&layer_config, args).await?,
             }
         }
+
         Some(false) => list_pods(&layer_config, args).await?,
     };
 

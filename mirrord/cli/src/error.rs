@@ -6,7 +6,7 @@ use mirrord_config::config::ConfigError;
 use mirrord_console::error::ConsoleError;
 use mirrord_intproxy::error::IntProxyError;
 use mirrord_kube::error::KubeApiError;
-use mirrord_operator::client::{HttpError, OperatorApiError, OperatorOperation};
+use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
 use reqwest::StatusCode;
 use thiserror::Error;
 
@@ -233,16 +233,6 @@ pub(crate) enum CliError {
     ))]
     PingPongFailed(String),
 
-    #[error("Failed to check whether mirrord operator is installed in the cluster: {0}")]
-    #[diagnostic(help(
-    "Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.
-
-    If you want to run without the operator, please set `\"operator\": false` in the mirrord configuration file.
-
-    Please remember that some features are supported only when using mirrord operator (https://mirrord.dev/docs/overview/teams/#supported-features).{GENERAL_HELP}"
-    ))]
-    OperatorInstallationCheckError(KubeApiError),
-
     #[error("Failed to prepare mirrord operator user certificate: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     OperatorUserCertError(String),
@@ -283,7 +273,7 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorApiFailed(operation, error)
             }
             OperatorApiError::NoLicense => Self::OperatorLicenseExpired,
-            OperatorApiError::UserCertError(error) => Self::OperatorUserCertError(error),
+            OperatorApiError::ClientCertError(error) => Self::OperatorUserCertError(error),
         }
     }
 }

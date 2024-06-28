@@ -20,9 +20,10 @@ pub static MIRRORD_CLI_VERSION_HEADER: HeaderName =
     HeaderName::from_static("x-mirrord-cli-version");
 
 /// HTTP header containing client certificate.
-/// Sent with each request to the mirrord operator except:
+/// Sent with each request to the mirrord operator (if available) except:
 /// 1. Initial GET on the operator resource
 /// 2. User certificate request
+/// Required for making the target connection request.
 pub static CLIENT_CERT_HEADER: HeaderName = HeaderName::from_static("x-client-der");
 
 /// HTTP header containing client hostname.
