@@ -320,6 +320,8 @@ jobs:
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-config
       - name: mirrord kube UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
+      - name: mirrord intproxy UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-intproxy
 
   macos_tests:
     runs-on: macos-13

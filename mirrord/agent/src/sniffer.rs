@@ -141,14 +141,9 @@ async fn prepare_sniffer(
     network_interface: Option<String>,
     mesh: Option<MeshVendor>,
 ) -> Result<RawCapture, AgentError> {
-    // Priority is whatever the user set as an option to mirrord, then we check if we're in an istio
-    // mesh, otherwise we try to get the appropriate interface.
-    let interface = match network_interface.or_else(|| {
-        mesh.and_then(|mesh_vendor| match mesh_vendor {
-            MeshVendor::Linkerd | MeshVendor::Kuma => None,
-            MeshVendor::Istio => Some("lo".to_string()),
-        })
-    }) {
+    // Priority is whatever the user set as an option to mirrord, then we check if we're in a mesh
+    // to use `lo` interface, otherwise we try to get the appropriate interface.
+    let interface = match network_interface.or_else(|| mesh.map(|_| "lo".to_string())) {
         Some(interface) => interface,
         None => resolve_interface()
             .await?
