@@ -47,8 +47,8 @@ impl FileRemapper {
         let path_str = path.to_str().unwrap_or_default();
 
         match self.change_path_str(path_str) {
-            Cow::Owned(path_str) => PathBuf::from(path_str),
-            Cow::Borrowed(_) => path,
+            Cow::Borrowed(borrowed_path) if borrowed_path == path_str => path,
+            updated_path => PathBuf::from(updated_path.as_ref()),
         }
     }
 }
