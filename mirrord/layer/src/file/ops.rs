@@ -35,7 +35,7 @@ const MAX_READ_SIZE: u64 = 1024 * 1024;
 /// * `write` - [`bool`], stating whether the file is accessed for writing
 macro_rules! ensure_not_ignored {
     ($path:expr, $write:expr) => {
-        crate::setup().file_filter().continue_or_bypass_with(
+        $crate::setup().file_filter().continue_or_bypass_with(
             $path.to_str().unwrap_or_default(),
             $write,
             || Bypass::ignored_file($path.to_str().unwrap_or_default()),
@@ -53,7 +53,7 @@ macro_rules! check_relative_paths {
 
 macro_rules! remap_path {
     ($path:expr) => {
-        crate::setup().file_remapper().change_path($path)
+        $crate::setup().file_remapper().change_path($path)
     };
 }
 

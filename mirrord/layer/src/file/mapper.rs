@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{borrow::Cow, collections::HashMap, path::PathBuf};
 
 use regex::{Regex, RegexSet, RegexSetBuilder};
 
@@ -28,8 +28,7 @@ impl FileRemapper {
     }
 
     #[tracing::instrument(level = "trace", skip(self), ret)]
-    pub fn change_path(&self, path: PathBuf) -> PathBuf {
-        let path_str = path.to_str().unwrap_or_default();
+    pub fn change_path_str<'p>(&self, path_str: &'p str) -> Cow<'p, str> {
         let matches = self.filter.matches(path_str);
 
         if let Some(index) = matches.iter().next() {
@@ -38,9 +37,18 @@ impl FileRemapper {
                 .get(index)
                 .expect("RegexSet matches returned an imposible index");
 
-            PathBuf::from(pattern.replace(path_str, value).as_ref())
+            pattern.replace(path_str, value)
         } else {
-            path
+            Cow::Borrowed(path_str)
+        }
+    }
+
+    pub fn change_path(&self, path: PathBuf) -> PathBuf {
+        let path_str = path.to_str().unwrap_or_default();
+
+        match self.change_path_str(path_str) {
+            Cow::Owned(path_str) => PathBuf::from(path_str),
+            Cow::Borrowed(_) => path,
         }
     }
 }
