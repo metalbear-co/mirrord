@@ -218,9 +218,7 @@ unsafe fn patch_sip_for_new_process(
     // only because it somehow found out about its own patched location in our tmp dir.
     // If original path is SIP, and actually exists in our dir that patched executable will be used.
     let path_str = strip_mirrord_path(path_str).unwrap_or(path_str);
-    let path_str = crate::setup().file_remapper().change_path_str(path_str);
-
-    let path_c_string = patch_if_sip(path_str.as_ref())
+    let path_c_string = patch_if_sip(path_str)
         .and_then(|new_path| Success(CString::new(new_path)?))
         // Continue also on error, use original path, don't bypass yet, try cleaning argv.
         .unwrap_or(CString::new(path_str.to_string())?);
