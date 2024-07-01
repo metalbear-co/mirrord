@@ -4,25 +4,39 @@ use tokio::sync::{broadcast, mpsc::Sender, oneshot};
 use super::TcpSessionIdentifier;
 use crate::util::ClientId;
 
+/// Commmand for [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
 #[derive(Debug)]
-pub enum SnifferCommandInner {
-    NewClient(Sender<SniffedConnection>),
+pub(crate) enum SnifferCommandInner {
+    /// New client wants to use the sniffer.
+    NewClient(
+        /// For notyfing the client about new incoming connections.
+        Sender<SniffedConnection>,
+    ),
+    /// Client wants to start receiving connections incoming to a specific port.
     Subscribe(
         // Number of port to subscribe.
         Port,
         // Channel to notify with `()` when the subscription is done.
         oneshot::Sender<()>,
     ),
+    /// Client no longer wats to receive connections incoming to a specific port.
     UnsubscribePort(Port),
 }
 
+/// Client's command for [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
 #[derive(Debug)]
-pub struct SnifferCommand {
+pub(crate) struct SnifferCommand {
+    /// Id of the client.
     pub client_id: ClientId,
+    /// Actual command.
     pub command: SnifferCommandInner,
 }
 
-pub struct SniffedConnection {
+/// New TCP connection picked up by [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
+pub(crate) struct SniffedConnection {
+    /// Parameters of this connection's TCP session.
+    /// Can be used to create [`NewTcpConnection`](mirrord_protocol::tcp::NewTcpConnection).
     pub session_id: TcpSessionIdentifier,
+    /// For receiving data from this connection.
     pub data: broadcast::Receiver<Vec<u8>>,
 }
