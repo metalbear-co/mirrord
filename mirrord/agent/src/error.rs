@@ -12,7 +12,7 @@ use mirrord_protocol::{
 use thiserror::Error;
 
 use crate::{
-    client_connection::TlsSetupError, namespace::NamespaceError, sniffer::SnifferCommand,
+    client_connection::TlsSetupError, namespace::NamespaceError, sniffer::messages::SnifferCommand,
     steal::StealerCommand,
 };
 
@@ -135,6 +135,9 @@ pub(crate) enum AgentError {
     /// Child agent process spawned in `main` failed.
     #[error("Agent child process failed: {0}")]
     AgentFailed(ExitStatus),
+
+    #[error("Exhausted possible identifiers for incoming connections.")]
+    ExhaustedConnectionId,
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;
