@@ -27,6 +27,7 @@ use crate::{
     },
     pause::DaemonPauseTarget,
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
+    vpn::{ClientVpn, ServerVpn},
     ResponseError,
 };
 
@@ -104,6 +105,7 @@ pub enum ClientMessage {
     PauseTargetRequest(bool),
     SwitchProtocolVersion(#[bincode(with_serde)] semver::Version),
     ReadyForLogs,
+    Vpn(ClientVpn),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -146,6 +148,7 @@ pub enum DaemonMessage {
     /// Pause is deprecated but we don't want to break protocol
     PauseTarget(DaemonPauseTarget),
     SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
+    Vpn(ServerVpn),
 }
 
 pub struct ProtocolCodec<I, O> {

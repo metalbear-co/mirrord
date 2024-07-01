@@ -31,8 +31,7 @@ mirrord-intproxy = { path = "../intproxy" }
 
 actix-codec.workspace = true
 clap.workspace = true
-dns-parser = "0.8"
-rustdns = "0.4"
+tun = { version = "0.6", features = ["async"] }
 hickory-proto = "0.24.1"
 tracing.workspace = true
 rand.workspace = true
@@ -61,6 +60,7 @@ drain.workspace = true
 clap_complete = "4.4.1"
 tracing-appender = "0.2"
 rustls.workspace = true
+ipnet = "2.9"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

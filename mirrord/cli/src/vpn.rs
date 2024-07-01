@@ -1,22 +1,21 @@
 use std::net::IpAddr;
 
-use hickory_proto::rr::{rdata, Name, RData, Record};
+use futures::{SinkExt, StreamExt};
+use ipnet::IpNet;
 use mirrord_analytics::{AnalyticsError, NullReporter, Reporter};
-use mirrord_config::LayerConfig;
+use mirrord_config::{agent::AgentImageConfig, LayerConfig};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{
-    dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse},
+    vpn::{ClientVpn, ServerVpn},
     ClientMessage, DaemonMessage,
 };
-use tokio::net;
+use tokio::{process::Command, signal};
 
 use crate::{
     config::VpnArgs,
     connection::{create_and_connect, AgentConnection},
     error::Result,
 };
-
-mod dns;
 
 #[cfg(target_os = "macos")]
 mod macos {
@@ -29,16 +28,6 @@ mod macos {
         pub nameservers: Vec<String>,
         pub search: Vec<String>,
         pub options: Vec<String>,
-    }
-
-    impl ResolveFile {
-        pub fn is_empty(&self) -> bool {
-            !(self.port > 0
-                || !self.domain.is_empty()
-                || !self.nameservers.is_empty()
-                || !self.search.is_empty()
-                || !self.options.is_empty())
-        }
     }
 
     impl fmt::Display for ResolveFile {
@@ -88,9 +77,9 @@ async fn agent_request<T>(
     mapper(connection.receiver.recv().await?)
 }
 
-fn get_addr_info_response(message: DaemonMessage) -> Option<GetAddrInfoResponse> {
+fn get_server_vpn(message: DaemonMessage) -> Option<ServerVpn> {
     match message {
-        DaemonMessage::GetAddrInfoResponse(response) => Some(response),
+        DaemonMessage::Vpn(response) => Some(response),
         _ => None,
     }
 }
@@ -102,7 +91,10 @@ pub async fn vpn_command(_args: VpnArgs) -> Result<()> {
     let mut analytics = NullReporter::default();
 
     let mut config = LayerConfig::from_env()?;
+    config.agent.image = AgentImageConfig("test".into());
+    config.agent.log_level = "warn,mirrord=trace".to_string();
     config.agent.privileged = true;
+    config.agent.ttl = 30;
 
     let (_, mut connection) = create_and_connect(&config, &mut sub_progress, &mut analytics)
         .await
@@ -111,12 +103,57 @@ pub async fn vpn_command(_args: VpnArgs) -> Result<()> {
     sub_progress.success(None);
     progress.success(None);
 
-    let Ok(socket) = net::UdpSocket::bind("0.0.0.0:52783").await else {
+    let Some(ServerVpn::NetworkConfiguration(network)) = agent_request(
+        &mut connection,
+        ClientMessage::Vpn(ClientVpn::GetNetworkConfiguration),
+        get_server_vpn,
+    )
+    .await
+    else {
         return Ok(());
     };
 
-    let dns_server = dns::DnsServer::new(socket);
-    let port = dns_server.port().expect("Should be bound");
+    println!("{network:?}");
+
+    let (IpAddr::V4(net_mask), IpAddr::V4(gateway)) = (network.net_mask, network.gateway) else {
+        return Ok(());
+    };
+
+    let subnet = IpNet::with_netmask(IpAddr::V4(gateway & net_mask), IpAddr::V4(net_mask)).unwrap();
+
+    let mut config = tun::Configuration::default();
+    config
+        .address(network.ip)
+        .netmask(network.net_mask)
+        .destination(network.gateway)
+        .up();
+
+    #[cfg(target_os = "linux")]
+    config.platform(|config| {
+        config.packet_information(true);
+    });
+
+    let dev = tun::create_as_async(&config).unwrap();
+    let (mut write_stream, read_stream) = dev.into_framed().split();
+    let read_stream = read_stream.fuse();
+
+    tokio::pin!(read_stream);
+
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("route")
+            .args([
+                "-n",
+                "add",
+                "-net",
+                &subnet.to_string(),
+                &gateway.to_string(),
+            ])
+            .output()
+            .await;
+
+        println!("{output:#?}");
+    }
 
     // #[cfg(target_os = "macos")]
     // {
@@ -134,47 +171,52 @@ pub async fn vpn_command(_args: VpnArgs) -> Result<()> {
     //     }
     // }
 
-    let mut dns_api = dns_server.start();
+    'main: loop {
+        tokio::select! {
+            packet = read_stream.next() => {
+                let packet = packet.unwrap().unwrap();
+                println!("in: {packet:#?}");
 
-    println!("Listening on port {port}");
-
-    while let Some(((mut message, addr), reply)) = dns_api.recv().await {
-        let mut answers = Vec::new();
-
-        'q: for query in message.queries() {
-            if !query.query_type().is_ip_addr() {
-                continue 'q;
+                connection
+                    .sender
+                    .send(mirrord_protocol::ClientMessage::Vpn(ClientVpn::Packet(
+                        packet.get_bytes().into(),
+                    )))
+                    .await
+                    .unwrap();
             }
-
-            let Some(GetAddrInfoResponse(response)) = agent_request(
-                &mut connection,
-                ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
-                    node: query.name().to_string(),
-                }),
-                get_addr_info_response,
-            )
-            .await
-            else {
-                continue 'q;
-            };
-
-            if let Ok(DnsLookup(records)) = &response {
-                answers.extend(records.iter().map(|record| {
-                    Record::from_rdata(
-                        Name::from_utf8(&record.name).unwrap_or_default(),
-                        300,
-                        match record.ip {
-                            IpAddr::V4(v4) => RData::A(rdata::A(v4)),
-                            IpAddr::V6(v6) => RData::AAAA(rdata::AAAA(v6)),
-                        },
-                    )
-                }));
+            message = connection.receiver.recv() => {
+                if let Some(message) = message {
+                    match message {
+                        DaemonMessage::Vpn(ServerVpn::Packet(packet)) => {
+                            let packet = tun::TunPacket::new(packet);
+                            println!("out: {packet:#?}");
+                            write_stream.send(packet).await.unwrap();
+                        }
+                        _ => unimplemented!("Unexpected response from agent"),
+                    }
+                }
+            }
+            _ = signal::ctrl_c() => {
+                break 'main;
             }
         }
+    }
 
-        message.insert_answers(answers);
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("route")
+            .args([
+                "-n",
+                "delete",
+                "-net",
+                &subnet.to_string(),
+                &gateway.to_string(),
+            ])
+            .output()
+            .await;
 
-        let _ = reply.send((message, addr));
+        println!("{output:#?}");
     }
 
     Ok(())
