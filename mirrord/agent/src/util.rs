@@ -1,6 +1,6 @@
 use std::{
     clone::Clone,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     future::Future,
     hash::Hash,
     thread::JoinHandle,
@@ -31,27 +31,41 @@ where
     C: Eq + Hash + Clone + Copy,
 {
     /// Add a new subscription to a topic for a given client.
-    pub fn subscribe(&mut self, client: C, topic: T) {
-        self._inner.entry(topic).or_default().insert(client);
-    }
-
-    /// Remove a subscription of given client from the topic.
-    /// topic is removed if no subscribers left.
-    pub fn unsubscribe(&mut self, client: C, topic: T) {
-        if let Some(set) = self._inner.get_mut(&topic) {
-            set.remove(&client);
-            if set.is_empty() {
-                self._inner.remove(&topic);
+    /// Returns whether this resulted in adding a new topic to this mapping.
+    pub fn subscribe(&mut self, client: C, topic: T) -> bool {
+        match self._inner.entry(topic) {
+            Entry::Occupied(mut e) => {
+                e.get_mut().insert(client);
+                false
+            }
+            Entry::Vacant(e) => {
+                e.insert([client].into_iter().collect());
+                true
             }
         }
     }
 
-    /// Get a vector of clients subscribed to a specific topic
-    pub fn get_topic_subscribers(&self, topic: T) -> Vec<C> {
-        match self._inner.get(&topic) {
-            Some(clients_set) => clients_set.iter().cloned().collect(),
-            None => Vec::new(),
+    /// Remove a subscription of given client from the topic.
+    /// Topic is removed if no subscribers left.
+    /// Return whether the topic was removed.
+    pub fn unsubscribe(&mut self, client: C, topic: T) -> bool {
+        match self._inner.entry(topic) {
+            Entry::Occupied(mut e) => {
+                e.get_mut().remove(&client);
+                if e.get().is_empty() {
+                    e.remove();
+                    true
+                } else {
+                    false
+                }
+            }
+            Entry::Vacant(..) => false,
         }
+    }
+
+    /// Get a vector of clients subscribed to a specific topic
+    pub fn get_topic_subscribers(&self, topic: T) -> Option<&HashSet<C>> {
+        self._inner.get(&topic)
     }
 
     /// Get subscribed topics
@@ -59,23 +73,18 @@ where
         self._inner.keys().cloned().collect()
     }
 
-    /// Get topics subscribed by a client
-    pub fn get_client_topics(&self, client: C) -> Vec<T> {
-        let mut result = Vec::new();
-        for (topic, client_set) in self._inner.iter() {
-            if client_set.contains(&client) {
-                result.push(*topic)
-            }
-        }
-        result
-    }
+    /// Remove all subscriptions of a client.
+    /// Topics are removed if no subscribers left.
+    /// Returns whether any topic was removed.
+    pub fn remove_client(&mut self, client: C) -> bool {
+        let prev_length = self._inner.len();
 
-    /// Remove all subscriptions of a client
-    pub fn remove_client(&mut self, client: C) {
-        let topics = self.get_client_topics(client);
-        for topic in topics {
-            self.unsubscribe(client, topic)
-        }
+        self._inner.retain(|_, client_set| {
+            client_set.remove(&client);
+            !client_set.is_empty()
+        });
+
+        self._inner.len() != prev_length
     }
 
     /// Removes a topic and all of it's clients
@@ -205,9 +214,28 @@ pub(crate) fn enter_namespace(pid: Option<u64>, namespace: &str) -> Result<(), A
 
 #[cfg(test)]
 mod subscription_tests {
+    use std::hash::Hash;
+
     use mirrord_protocol::Port;
 
     use super::Subscriptions;
+
+    impl<C, T> Subscriptions<T, C>
+    where
+        C: Hash + Eq,
+        T: Copy,
+    {
+        /// Get topics subscribed by a client
+        fn get_client_topics(&self, client: C) -> Vec<T> {
+            let mut result = Vec::new();
+            for (topic, client_set) in self._inner.iter() {
+                if client_set.contains(&client) {
+                    result.push(*topic)
+                }
+            }
+            result
+        }
+    }
 
     #[test]
     fn sanity() {
@@ -219,12 +247,25 @@ mod subscription_tests {
         subscriptions.subscribe(2, 1);
         subscriptions.subscribe(2, 1);
         subscriptions.subscribe(3, 1);
-        let mut subscribers = subscriptions.get_topic_subscribers(1);
+        let mut subscribers = subscriptions
+            .get_topic_subscribers(1)
+            .into_iter()
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>();
         subscribers.sort();
         assert_eq!(subscribers, vec![2, 3]);
 
-        assert_eq!(subscriptions.get_topic_subscribers(4), vec![1]);
-        assert_eq!(subscriptions.get_topic_subscribers(10), Vec::<u32>::new());
+        assert_eq!(
+            subscriptions
+                .get_topic_subscribers(4)
+                .into_iter()
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert!(subscriptions.get_topic_subscribers(10).is_none());
         let mut topics = subscriptions.get_subscribed_topics();
         topics.sort();
         assert_eq!(topics, vec![1, 2, 3, 4]);
@@ -232,9 +273,17 @@ mod subscription_tests {
         topics.sort();
         assert_eq!(topics, vec![1, 2, 3]);
         subscriptions.unsubscribe(3, 1);
-        assert_eq!(subscriptions.get_topic_subscribers(1), vec![2]);
+        assert_eq!(
+            subscriptions
+                .get_topic_subscribers(1)
+                .into_iter()
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![2]
+        );
         subscriptions.unsubscribe(1, 4);
-        assert_eq!(subscriptions.get_topic_subscribers(4), Vec::<u32>::new());
+        assert!(subscriptions.get_topic_subscribers(4).is_none());
         subscriptions.remove_client(3);
         assert_eq!(subscriptions.get_client_topics(3), Vec::<u16>::new());
         subscriptions.remove_topic(1);
