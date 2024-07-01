@@ -248,7 +248,7 @@ fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionIdentifier, TcpPacke
 /// between the clients, raw socket's recv buffer will overflow and we'll lose packets.
 ///
 /// Having this in mind, this struct distributes incoming data using [`broadcast`] channels. If the
-/// clients are not fast enough to pick up TCP packets, they will loose them
+/// clients are not fast enough to pick up TCP packets, they will lose them
 /// ([`broadcast::error::RecvError::Lagged`]).
 ///
 /// At the same time, notifying clients about new connections (and distributing
