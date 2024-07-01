@@ -35,6 +35,9 @@ pub(crate) struct TcpSnifferApi {
 }
 
 impl TcpSnifferApi {
+    /// Capacity for channel that will be used by
+    /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer) to notify this struct about new
+    /// connections.
     const CONNECTION_CHANNEL_SIZE: usize = 128;
 
     /// Create a new instance of this struct and connect it to a
@@ -84,7 +87,8 @@ impl TcpSnifferApi {
         }
     }
 
-    /// Return the next message from the connected [`TcpConnectionSniffer`].
+    /// Return the next message from the connected
+    /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
     pub async fn recv(&mut self) -> Result<(DaemonTcp, Option<LogMessage>), AgentError> {
         tokio::select! {
             conn = self.receiver.recv() => match conn {
