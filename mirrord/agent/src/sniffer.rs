@@ -234,6 +234,28 @@ fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionIdentifier, TcpPacke
     ))
 }
 
+/// Main struct implementing incoming traffic mirroring feature.
+/// Utilizes [`RawCapture`] socket for sniffing on incoming Ethernet packets. Transforms them into
+/// incoming TCP data streams and sends copy of the traffic to all subscribed clients.
+///
+/// Can be easily used via [`api::TcpSnifferApi`].
+///
+/// # Notes on behavior under high load
+///
+/// Because this struct does not talk directly with the remote peers, we can't apply any back
+/// pressure on the incoming connections. There is no reliable mechanism to ensure that all
+/// subscribed clients receive all of the traffic. If we wait too long when distributing data
+/// between the clients, raw socket's recv buffer will overflow and we'll loose packets.
+///
+/// Having this in mind, this struct distributes incoming data using [`broadcast`] channels. If the
+/// clients are not fast enough to pick up TCP packets, they will loose them
+/// ([`broadcast::error::RecvError::Lagged`]).
+///
+/// At the same time, notifying clients about new connections (and distributing
+/// [`broadcast::Receiver`]s) is done with [`tokio::sync::mpsc`] channels (one per client).
+/// To prevent global packet loss, this struct does not use the blocking [`Sender::send`] method. It
+/// uses the non-blocking [`Sender::try_send`] method, so if the client is not fast enough to pick
+/// up the [`broadcast::Receiver`], they will miss the whole connection.
 pub(crate) struct TcpConnectionSniffer {
     command_rx: Receiver<SnifferCommand>,
     raw_capture: RawCapture,
