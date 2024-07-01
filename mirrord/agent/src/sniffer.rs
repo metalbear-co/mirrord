@@ -245,7 +245,7 @@ fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionIdentifier, TcpPacke
 /// Because this struct does not talk directly with the remote peers, we can't apply any back
 /// pressure on the incoming connections. There is no reliable mechanism to ensure that all
 /// subscribed clients receive all of the traffic. If we wait too long when distributing data
-/// between the clients, raw socket's recv buffer will overflow and we'll loose packets.
+/// between the clients, raw socket's recv buffer will overflow and we'll lose packets.
 ///
 /// Having this in mind, this struct distributes incoming data using [`broadcast`] channels. If the
 /// clients are not fast enough to pick up TCP packets, they will loose them
