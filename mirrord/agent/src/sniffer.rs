@@ -499,12 +499,10 @@ impl TcpConnectionSniffer {
 
         tracing::trace!("Resolved data broadcast channel");
 
-        if !tcp_packet.bytes.is_empty() {
-            if data_tx.get().send(tcp_packet.bytes).is_err() {
-                tracing::trace!("All data receivers are dead, dropping data broadcast sender");
-                data_tx.remove();
-                return Ok(());
-            }
+        if !tcp_packet.bytes.is_empty() && data_tx.get().send(tcp_packet.bytes).is_err() {
+            tracing::trace!("All data receivers are dead, dropping data broadcast sender");
+            data_tx.remove();
+            return Ok(());
         }
 
         if is_closed_connection(tcp_packet.flags) {
