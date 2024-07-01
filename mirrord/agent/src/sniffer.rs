@@ -38,8 +38,8 @@ use crate::{
     util::{ClientId, Subscriptions},
 };
 
-pub mod api;
-pub mod messages;
+pub(crate) mod api;
+pub(crate) mod messages;
 
 /// [`Future`] that resolves to [`ClientId`] when the [`TcpConnectionSniffer`] client drops their
 /// [`TcpSnifferApi`](api::TcpSnifferApi).
