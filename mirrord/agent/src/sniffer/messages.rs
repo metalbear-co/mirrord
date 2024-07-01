@@ -19,7 +19,7 @@ pub(crate) enum SnifferCommandInner {
         // Channel to notify with `()` when the subscription is done.
         oneshot::Sender<()>,
     ),
-    /// Client no longer wats to receive connections incoming to a specific port.
+    /// Client no longer wants to receive connections incoming to a specific port.
     UnsubscribePort(Port),
 }
 
