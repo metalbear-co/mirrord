@@ -65,14 +65,14 @@ impl Future for ClientClosed {
 }
 
 #[derive(Debug, Eq, Copy, Clone)]
-pub struct TcpSessionIdentifier {
+pub(crate) struct TcpSessionIdentifier {
     /// The remote address that is sending a packet to the impersonated pod.
     ///
     /// ## Details
     ///
     /// If you were to `curl {impersonated_pod_ip}:{port}`, this would be the address of whoever
     /// is making the request.
-    pub source_addr: Ipv4Addr,
+    pub(crate) source_addr: Ipv4Addr,
 
     /// Local address of the impersonated pod.
     ///
@@ -85,9 +85,9 @@ pub struct TcpSessionIdentifier {
     /// NAME        READY   STATUS    IP
     /// happy-pod   1/1     Running   1.2.3.4   
     /// ```
-    pub dest_addr: Ipv4Addr,
-    pub source_port: u16,
-    pub dest_port: u16,
+    pub(crate) dest_addr: Ipv4Addr,
+    pub(crate) source_port: u16,
+    pub(crate) dest_port: u16,
 }
 
 impl PartialEq for TcpSessionIdentifier {
