@@ -11,7 +11,7 @@ use bytes::BytesMut;
 use hyper::{upgrade::OnUpgrade, StatusCode, Version};
 use hyper_util::rt::TokioIo;
 use mirrord_protocol::tcp::{
-    HttpRequestFallback, HttpResponse, HttpResponseFallback, InternalHttpBody,
+    HttpRequestFallback, HttpResponse, HttpResponseFallback, InternalHttpBody, ReceiverStreamBody,
 };
 use thiserror::Error;
 use tokio::{
@@ -258,16 +258,14 @@ impl HttpConnection {
                         .map(HttpResponseFallback::Fallback)
                     }
                     HttpRequestFallback::Streamed(..) => {
-                        // Returning `HttpResponseFallback::Framed` variant is safe - streaming
-                        // requests require a strictly higher mirrord-protocol version
-                        HttpResponse::<InternalHttpBody>::from_hyper_response(
+                        HttpResponse::<ReceiverStreamBody>::from_hyper_response(
                             res,
                             self.peer.port(),
                             request.connection_id(),
                             request.request_id(),
                         )
                         .await
-                        .map(HttpResponseFallback::Framed)
+                        .map(HttpResponseFallback::Streamed)
                     }
                 };
 
@@ -437,10 +435,7 @@ impl RawConnection {
 
 #[cfg(test)]
 mod test {
-    use std::{
-        convert::Infallible,
-        sync::{Arc, Mutex},
-    };
+    use std::sync::{Arc, Mutex};
 
     use bytes::Bytes;
     use futures::future::FutureExt;
@@ -594,7 +589,7 @@ mod test {
         match update {
             TaskUpdate::Message(MessageOut::Http(res)) => {
                 let res = res
-                    .into_hyper::<Infallible>()
+                    .into_hyper::<hyper::Error>()
                     .expect("failed to convert into hyper response");
                 assert_eq!(res.status(), StatusCode::SWITCHING_PROTOCOLS);
                 println!("{:?}", res.headers());
