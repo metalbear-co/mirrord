@@ -24,6 +24,7 @@ use mirrord_protocol::file::{GetDEnts64Request, GetDEnts64Response};
 
 pub(crate) mod filter;
 pub(crate) mod hooks;
+pub(crate) mod mapper;
 pub(crate) mod open_dirs;
 pub(crate) mod ops;
 

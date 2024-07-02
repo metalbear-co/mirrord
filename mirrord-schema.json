@@ -166,6 +166,17 @@
             }
           ]
         },
+        "mapping": {
+          "title": "feature.fs.mapping {#feature-fs-mapping}",
+          "description": "Specify map of patterns that if matched will replace the path according to specification",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
         "mode": {
           "title": "feature.fs.mode {#feature-fs-mode}",
           "anyOf": [

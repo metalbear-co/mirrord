@@ -35,11 +35,25 @@ const MAX_READ_SIZE: u64 = 1024 * 1024;
 /// * `write` - [`bool`], stating whether the file is accessed for writing
 macro_rules! ensure_not_ignored {
     ($path:expr, $write:expr) => {
-        crate::setup().file_filter().continue_or_bypass_with(
+        $crate::setup().file_filter().continue_or_bypass_with(
             $path.to_str().unwrap_or_default(),
             $write,
-            || Bypass::IgnoredFile($path.clone()),
+            || Bypass::ignored_file($path.to_str().unwrap_or_default()),
         )?;
+    };
+}
+
+macro_rules! check_relative_paths {
+    ($path:expr) => {
+        if $path.is_relative() {
+            Detour::Bypass(Bypass::relative_path($path.to_str().unwrap_or_default()))?
+        };
+    };
+}
+
+macro_rules! remap_path {
+    ($path:expr) => {
+        $crate::setup().file_remapper().change_path($path)
     };
 }
 
@@ -161,10 +175,9 @@ fn close_remote_file_on_failure(fd: u64) -> Result<()> {
 pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
     let path = path?;
 
-    if path.is_relative() {
-        // Calls with non absolute paths are sent to libc::open.
-        Detour::Bypass(Bypass::RelativePath(path.clone()))?
-    };
+    check_relative_paths!(path);
+
+    let path = remap_path!(path);
 
     ensure_not_ignored!(path, open_options.is_write());
 
@@ -217,6 +230,7 @@ pub(crate) fn openat(
     // `openat` behaves the same as `open` when the path is absolute. When called with AT_FDCWD, the
     // call is propagated to `open`.
     if path.is_absolute() || fd == AT_FDCWD {
+        let path = remap_path!(path);
         open(Detour::Success(path), open_options)
     } else {
         // Relative path requires special handling, we must identify the relative part (relative to
@@ -282,12 +296,9 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
     if crate::setup().experimental().readlink {
-        let path = path?;
+        let path = remap_path!(path?);
 
-        if path.is_relative() {
-            // Calls with non absolute paths are sent to libc::readlink.
-            Detour::Bypass(Bypass::RelativePath(path.clone()))?
-        };
+        check_relative_paths!(path);
 
         ensure_not_ignored!(path, false);
 
@@ -361,10 +372,9 @@ pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isi
 pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
     let path = path?;
 
-    if path.is_relative() {
-        // Calls with non absolute paths are sent to libc::open.
-        Detour::Bypass(Bypass::RelativePath(path.clone()))?
-    };
+    check_relative_paths!(path);
+
+    let path = remap_path!(path);
 
     ensure_not_ignored!(path, false);
 
@@ -404,13 +414,10 @@ pub(crate) fn xstat(
             let path = path?;
             let fd = {
                 if fd == AT_FDCWD {
-                    if path.is_relative() {
-                        // Calls with non absolute paths are sent to libc::fstatat.
-                        return Detour::Bypass(Bypass::RelativePath(path));
-                    } else {
-                        ensure_not_ignored!(path, false);
-                        None
-                    }
+                    check_relative_paths!(path);
+
+                    ensure_not_ignored!(remap_path!(path.clone()), false);
+                    None
                 } else {
                     Some(get_remote_fd(fd)?)
                 }
@@ -420,10 +427,11 @@ pub(crate) fn xstat(
         // lstat/stat
         (Some(path), None) => {
             let path = path?;
-            if path.is_relative() {
-                // Calls with non absolute paths are sent to libc::open.
-                return Detour::Bypass(Bypass::RelativePath(path));
-            }
+
+            check_relative_paths!(path);
+
+            let path = remap_path!(path);
+
             ensure_not_ignored!(path, false);
             (Some(path), None)
         }
@@ -484,7 +492,9 @@ pub(crate) fn statx_logic(
         ensure_not_ignored!(path_name, false);
         (None, Some(path_name))
     } else if !path_name.as_os_str().is_empty() && dir_fd == libc::AT_FDCWD {
-        return Detour::Bypass(Bypass::RelativePath(path_name));
+        return Detour::Bypass(Bypass::relative_path(
+            path_name.to_str().unwrap_or_default(),
+        ));
     } else if !path_name.as_os_str().is_empty() {
         (Some(get_remote_fd(dir_fd)?), Some(path_name))
     } else if (flags & libc::AT_EMPTY_PATH) != 0 {
@@ -615,10 +625,9 @@ fn absolute_path(path: PathBuf) -> PathBuf {
 pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
     let path = path?;
 
-    if path.is_relative() {
-        // Calls with non absolute paths are sent to libc::open.
-        Detour::Bypass(Bypass::RelativePath(path.clone()))?
-    };
+    check_relative_paths!(path);
+
+    let path = remap_path!(path);
 
     let realpath = absolute_path(path);
 

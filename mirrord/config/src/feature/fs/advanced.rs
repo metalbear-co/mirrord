@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use mirrord_analytics::{AnalyticValue, CollectAnalytics};
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -106,6 +108,11 @@ pub struct FsConfig {
     ///
     /// Specify file path patterns that if matched will be treated as non-existent.
     pub not_found: Option<VecOrSingle<String>>,
+
+    /// ### feature.fs.mapping {#feature-fs-mapping}
+    ///
+    /// Specify map of patterns that if matched will replace the path according to specification
+    pub mapping: Option<HashMap<String, String>>,
 }
 
 impl MirrordToggleableConfig for AdvancedFsUserConfig {
@@ -127,6 +134,7 @@ impl MirrordToggleableConfig for AdvancedFsUserConfig {
             read_only,
             local,
             not_found: None,
+            mapping: None,
         })
     }
 }
