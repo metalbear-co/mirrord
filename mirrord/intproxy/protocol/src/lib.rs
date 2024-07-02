@@ -6,7 +6,9 @@ use std::{
     collections::HashMap,
     fmt,
     net::{IpAddr, SocketAddr},
+    num::ParseIntError,
     os::fd::RawFd,
+    str::FromStr,
 };
 
 use bincode::{Decode, Encode};
@@ -61,7 +63,6 @@ pub enum LayerToProxyMessage {
     Incoming(IncomingRequest),
     /// Fetch environment variables from the target.
     GetEnv(GetEnvVarsRequest),
-    NewSocket(NewSocketRequest),
 }
 
 /// Layer process information
@@ -82,6 +83,20 @@ pub struct ProcessInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Encode, Decode)]
 pub struct LayerId(pub u64);
 
+impl core::fmt::Display for LayerId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for LayerId {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(u64::from_str(s)?))
+    }
+}
+
 /// A layer's request to start a new session with the internal proxy.
 /// Contains info about layer's state.
 /// This should be the first message sent by the layer after opening a new connection to the
@@ -96,16 +111,24 @@ pub struct LayerId(pub u64);
 pub enum NewSessionRequest {
     /// Layer initialized from its constructor, has a fresh state.
     // TODO(alex) [mid]: Do we need it here?
-    New {
-        info: ProcessInfo,
-        sockets: HashMap<RawFd, UserSocket>,
-    },
+    New(ProcessInfo),
     /// Layer re-initialized from a [`fork`](https://man7.org/linux/man-pages/man2/fork.2.html) detour.
     /// It inherits state from its parent.
-    Forked {
-        layer: LayerId,
-        sockets: HashMap<RawFd, UserSocket>,
-    },
+    Forked(LayerId),
+    Execve(ExecveRequest),
+}
+
+#[derive(Encode, Decode, Debug)]
+pub struct ExecveRequest {
+    pub parent: LayerId,
+    pub shared_sockets: HashMap<RawFd, UserSocket>,
+}
+
+/// Layer process information
+#[derive(Encode, Decode, Debug)]
+pub struct Execve {
+    pub parent: LayerId,
+    pub shared_sockets: HashMap<RawFd, UserSocket>,
 }
 
 /// Supported network protocols when intercepting outgoing connections.
@@ -154,7 +177,6 @@ pub enum IncomingRequest {
     /// A request made by the layer when it accepts a connection on the socket that is listening
     /// for mirrored connections.
     ConnMetadata(ConnMetadataRequest),
-    NewSocket(NewSocketRequest),
 }
 
 /// A request for additional metadata for accepted connection.
@@ -293,16 +315,11 @@ pub trait IsLayerRequestWithResponse: IsLayerRequest {
     ) -> Result<Self::Response, ProxyToLayerMessage>;
 }
 
-#[derive(Encode, Decode, Debug, Clone)]
-pub struct NewSocketRequest {
-    pub fd: RawFd,
-    pub user: UserSocket,
-}
-
-// impl_request!(
-//     req = NewSocketRequest,
-//     req_path = LayerToProxyMessage::NewSocket => IncomingRequest::NewSocket,
-// );
+// TODO(alex) [high]: What am I doing wrong here?
+impl_request!(
+    req = ExecveRequest,
+    req_path = LayerToProxyMessage::NewSession => NewSessionRequest::Execve,
+);
 
 impl_request!(
     req = OpenFileRequest,

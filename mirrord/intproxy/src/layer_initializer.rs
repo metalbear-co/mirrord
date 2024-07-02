@@ -2,7 +2,8 @@ use std::io;
 
 use mirrord_intproxy_protocol::{
     codec::{AsyncDecoder, AsyncEncoder, CodecError},
-    LayerId, LayerToProxyMessage, LocalMessage, NewSessionRequest, ProxyToLayerMessage,
+    ExecveRequest, LayerId, LayerToProxyMessage, LocalMessage, NewSessionRequest,
+    ProxyToLayerMessage,
 };
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
@@ -59,20 +60,22 @@ impl LayerInitializer {
         self.next_layer_id.0 += 1;
 
         // TODO(alex) [high]: Deal with the sockets we received from the layer!
+        tracing::info!("new stream message: {:?}", msg.inner);
         let (parent_id, sockets) = match msg.inner {
-            LayerToProxyMessage::NewSession(NewSessionRequest::New {
-                info: process_info,
-                sockets,
-            }) => {
+            LayerToProxyMessage::NewSession(NewSessionRequest::New(process_info)) => {
                 // TODO(alex) [high]: Looks like the socket is created in another process,
                 // and we end up here, not in the forked match!
                 info!(?process_info, "new session");
-                (None, sockets)
+                (None, Default::default())
             }
-            LayerToProxyMessage::NewSession(NewSessionRequest::Forked {
-                layer: parent,
-                sockets,
-            }) => (Some(parent), sockets),
+            LayerToProxyMessage::NewSession(NewSessionRequest::Forked(parent)) => {
+                (Some(parent), Default::default())
+            }
+            LayerToProxyMessage::NewSession(NewSessionRequest::Execve(ExecveRequest {
+                parent,
+                shared_sockets,
+            })) => (Some(parent), shared_sockets),
+
             other => return Err(LayerInitializerError::UnexpectedMessage(other)),
         };
 

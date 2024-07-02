@@ -17,8 +17,8 @@ use libc::{c_int, c_void, hostent, sockaddr, socklen_t, AF_UNIX};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
     net::{Bound, Connected},
-    ConnMetadataRequest, ConnMetadataResponse, NetProtocol, NewSocketRequest,
-    OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe,
+    ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
+    OutgoingConnectResponse, PortSubscribe,
 };
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
@@ -138,11 +138,6 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
     }?;
 
     let new_socket = UserSocket::new(domain, type_, protocol, Default::default(), socket_kind);
-
-    // common::make_proxy_request_no_response(NewSocketRequest {
-    //     fd: socket_fd,
-    //     user: new_socket.clone(),
-    // });
 
     SOCKETS.insert(socket_fd, Arc::new(new_socket));
 

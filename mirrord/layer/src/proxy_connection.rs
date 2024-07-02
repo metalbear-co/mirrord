@@ -10,7 +10,6 @@ use std::{
     time::Duration,
 };
 
-use dashmap::DashMap;
 use mirrord_intproxy_protocol::{
     codec::{self, CodecError, SyncDecoder, SyncEncoder},
     IsLayerRequest, IsLayerRequestWithResponse, LayerId, LayerToProxyMessage, LocalMessage,
@@ -77,8 +76,10 @@ impl ProxyConnection {
             return Err(ProxyError::UnexpectedResponse(response));
         };
 
-        for (fd, socket) in sockets {
-            SOCKETS.insert(*fd, Arc::new(socket.clone()));
+        if !sockets.is_empty() {
+            for (fd, socket) in sockets {
+                SOCKETS.insert(*fd, Arc::new(socket.clone()));
+            }
         }
 
         Ok(Self {
