@@ -16,8 +16,9 @@ use errno::set_errno;
 use libc::{c_int, c_void, hostent, sockaddr, socklen_t, AF_UNIX};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
-    ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
-    OutgoingConnectResponse, PortSubscribe,
+    net::{Bound, Connected},
+    ConnMetadataRequest, ConnMetadataResponse, NetProtocol, NewSocketRequest,
+    OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe,
 };
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
@@ -114,9 +115,9 @@ impl From<ConnectResult> for i32 {
 }
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "info", ret)]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
-    let socket_kind = type_.try_into()?;
+    let socket_kind = SocketKind::from_raw(type_)?;
 
     if !((domain == libc::AF_INET) || (domain == libc::AF_INET6) || (domain == libc::AF_UNIX)) {
         Err(Bypass::Domain(domain))
@@ -138,7 +139,14 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
 
     let new_socket = UserSocket::new(domain, type_, protocol, Default::default(), socket_kind);
 
+    // common::make_proxy_request_no_response(NewSocketRequest {
+    //     fd: socket_fd,
+    //     user: new_socket.clone(),
+    // });
+
     SOCKETS.insert(socket_fd, Arc::new(new_socket));
+
+    tracing::info!("inserted {SOCKETS:?}");
 
     Detour::Success(socket_fd)
 }
@@ -226,7 +234,7 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
 /// If the socket is not found in [`SOCKETS`], bypass.
 /// Otherwise, if it's not an ignored port, bind (possibly with a fallback to random port) and
 /// update socket state in [`SOCKETS`]. If it's an ignored port, remove the socket from [`SOCKETS`].
-#[mirrord_layer_macro::instrument(level = "trace", ret, skip(raw_address))]
+#[mirrord_layer_macro::instrument(level = "info", ret, skip(raw_address))]
 pub(super) fn bind(
     sockfd: c_int,
     raw_address: *const sockaddr,
@@ -235,6 +243,8 @@ pub(super) fn bind(
     let requested_address = SocketAddr::try_from_raw(raw_address, address_length)?;
     let requested_port = requested_address.port();
     let incoming_config = crate::setup().incoming_config();
+
+    tracing::info!("binding {SOCKETS:?}");
 
     let mut socket = {
         SOCKETS
@@ -329,6 +339,8 @@ pub(super) fn bind(
 
     SOCKETS.insert(sockfd, socket);
 
+    tracing::info!("bound {SOCKETS:?}");
+
     // node reads errno to check if bind was successful and doesn't care about the return value
     // (???)
     errno::set_errno(errno::Errno(0));
@@ -337,7 +349,7 @@ pub(super) fn bind(
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = "info", ret)]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     let mut socket = {
         SOCKETS
@@ -345,6 +357,8 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
             .map(|(_, socket)| socket)
             .bypass(Bypass::LocalFdNotFound(sockfd))?
     };
+
+    tracing::info!("listening {SOCKETS:?}");
 
     let setup = crate::setup();
 
@@ -579,7 +593,7 @@ pub(super) fn connect(
             let borrowed_fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
             let type_ = nix::sys::socket::getsockopt(&borrowed_fd, sockopt::SockType)
                 .map_err(io::Error::from)? as i32;
-            let kind = SocketKind::try_from(type_)?;
+            let kind = SocketKind::from_raw(type_)?;
 
             Arc::new(UserSocket::new(domain, type_, 0, Default::default(), kind))
         }
@@ -774,7 +788,7 @@ pub(super) fn accept(
         layer_address: None,
     });
 
-    let new_socket = UserSocket::new(domain, type_, protocol, state, type_.try_into()?);
+    let new_socket = UserSocket::new(domain, type_, protocol, state, SocketKind::from_raw(type_)?);
 
     fill_address(address, address_len, remote_source.into())?;
 

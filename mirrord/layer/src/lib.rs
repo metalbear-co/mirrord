@@ -78,7 +78,7 @@ use ctor::ctor;
 use error::{LayerError, Result};
 use file::OPEN_FILES;
 use hooks::HookManager;
-use libc::{c_int, pid_t};
+use libc::{c_int, pid_t, FD_CLOEXEC};
 use load::ExecuteArgs;
 #[cfg(target_os = "macos")]
 use mirrord_config::feature::fs::FsConfig;
@@ -86,12 +86,12 @@ use mirrord_config::{
     feature::{fs::FsModeConfig, network::incoming::IncomingMode},
     LayerConfig,
 };
-use mirrord_intproxy_protocol::NewSessionRequest;
+use mirrord_intproxy_protocol::{net::UserSocket, NewSessionRequest};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use proxy_connection::ProxyConnection;
 use setup::LayerSetup;
-use socket::SOCKETS;
+use socket::{hooks::FN_FCNTL, UserSocketImpl, SOCKETS};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -226,14 +226,27 @@ fn load_only_layer_start(config: &LayerConfig) {
         .parse()
         .expect("failed to parse internal proxy address");
 
+    tracing::info!("another sockets {SOCKETS:?}");
     let new_connection = ProxyConnection::new(
         address,
-        NewSessionRequest::New(
-            EXECUTABLE_ARGS
+        NewSessionRequest::New {
+            info: EXECUTABLE_ARGS
                 .get()
                 .expect("EXECUTABLE_ARGS MUST BE SET")
                 .to_process_info(config),
-        ),
+            sockets: {
+                SOCKETS
+                    .iter()
+                    .filter_map(|inner| {
+                        // if FD_CLOEXEC & unsafe { FN_FCNTL(*inner.key(), 0) } > 0 {
+                        // None
+                        // } else {
+                        Some((*inner.key(), UserSocket::clone(inner.value())))
+                        // }
+                    })
+                    .collect()
+            },
+        },
         PROXY_CONNECTION_TIMEOUT,
     )
     .expect("failed to initialize proxy connection");
@@ -358,9 +371,27 @@ fn layer_start(mut config: LayerConfig) {
 
     unsafe {
         let address = setup().proxy_address();
+
+        // TODO(alex) [high]: Pass the sockets here?
+
+        tracing::info!("sockets in layer init {SOCKETS:?}");
         let new_connection = ProxyConnection::new(
             address,
-            NewSessionRequest::New(process_info),
+            NewSessionRequest::New {
+                info: process_info,
+                sockets: {
+                    SOCKETS
+                        .iter()
+                        .filter_map(|inner| {
+                            // if FD_CLOEXEC & FN_FCNTL(*inner.key(), 0) > 0 {
+                            // None
+                            // } else {
+                            Some((*inner.key(), UserSocket::clone(inner.value())))
+                            // }
+                        })
+                        .collect()
+                },
+            },
             PROXY_CONNECTION_TIMEOUT,
         )
         .expect("failed to initialize proxy connection");
@@ -581,7 +612,7 @@ pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
 /// on macOS, be wary what we do in this path as we might trigger <https://github.com/metalbear-co/mirrord/issues/1745>
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
-    tracing::debug!("Process {} forking!.", std::process::id());
+    tracing::info!("Process {} forking!.", std::process::id());
 
     let res = FN_FORK();
 
@@ -596,9 +627,22 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
                 }
             };
 
+            tracing::info!("the final sockets {SOCKETS:?}");
             let new_connection = ProxyConnection::new(
                 parent_connection.proxy_addr(),
-                NewSessionRequest::Forked(parent_connection.layer_id()),
+                NewSessionRequest::Forked {
+                    layer: parent_connection.layer_id(),
+                    sockets: SOCKETS
+                        .iter()
+                        .filter_map(|inner| {
+                            // if FD_CLOEXEC & FN_FCNTL(*inner.key(), 0) > 0 {
+                            // None
+                            // } else {
+                            Some((*inner.key(), UserSocket::clone(inner.value())))
+                            // }
+                        })
+                        .collect(),
+                },
                 PROXY_CONNECTION_TIMEOUT,
             )
             .expect("failed to establish proxy connection for child");

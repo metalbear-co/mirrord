@@ -5,17 +5,20 @@ use std::{
     net::{SocketAddr, TcpStream},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Mutex, PoisonError,
+        Arc, Mutex, PoisonError,
     },
     time::Duration,
 };
 
+use dashmap::DashMap;
 use mirrord_intproxy_protocol::{
     codec::{self, CodecError, SyncDecoder, SyncEncoder},
     IsLayerRequest, IsLayerRequestWithResponse, LayerId, LayerToProxyMessage, LocalMessage,
     MessageId, NewSessionRequest, ProxyToLayerMessage,
 };
 use thiserror::Error;
+
+use crate::socket::SOCKETS;
 
 #[derive(Debug, Error)]
 pub enum ProxyError {
@@ -70,9 +73,13 @@ impl ProxyConnection {
 
         let mut responses = ResponseManager::new(receiver);
         let response = responses.receive(0)?;
-        let ProxyToLayerMessage::NewSession(layer_id) = &response else {
+        let ProxyToLayerMessage::NewSession(layer_id, sockets) = &response else {
             return Err(ProxyError::UnexpectedResponse(response));
         };
+
+        for (fd, socket) in sockets {
+            SOCKETS.insert(*fd, Arc::new(socket.clone()));
+        }
 
         Ok(Self {
             sender: Mutex::new(sender),

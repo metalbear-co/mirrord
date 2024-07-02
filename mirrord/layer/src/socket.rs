@@ -13,7 +13,10 @@ use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::feature::network::outgoing::{
     AddressFilter, OutgoingConfig, OutgoingFilter, OutgoingFilterConfig, ProtocolFilter,
 };
-use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
+use mirrord_intproxy_protocol::{
+    net::{SocketKind, SocketState, UserSocket},
+    NetProtocol, PortUnsubscribe,
+};
 use mirrord_protocol::{
     outgoing::SocketAddress, DnsLookupError, ResolveErrorKindInternal, ResponseError,
 };
@@ -32,94 +35,15 @@ pub(crate) mod ops;
 
 pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(DashMap::new);
 
-/// Contains the addresses of a mirrord connected socket.
-///
-/// - `layer_address` is only used for the outgoing feature.
-#[derive(Debug)]
-pub struct Connected {
-    /// The address requested by the user that we're "connected" to.
-    ///
-    /// Whenever the user calls [`libc::getpeername`], this is the address we return to them.
-    ///
-    /// For the _outgoing_ feature, we actually connect to the `layer_address` interceptor socket,
-    /// but use this address in the [`libc::recvfrom`] handling of [`fill_address`].
-    remote_address: SocketAddress,
+trait SocketKindExt {
+    type Error;
 
-    /// Local address (pod-wise)
-    ///
-    /// ## Example
-    ///
-    /// ```sh
-    /// $ kubectl get pod -o wide
-    ///
-    /// NAME             READY   STATUS    IP
-    /// impersonated-pod 0/1     Running   1.2.3.4
-    /// ```
-    ///
-    /// We would set this ip as `1.2.3.4:{port}` in `bind`, where `{port}` is the user requested
-    /// port.
-    local_address: SocketAddress,
-
-    /// The address of the interceptor socket, this is what we're really connected to in the
-    /// outgoing feature.
-    layer_address: Option<SocketAddress>,
+    fn from_raw(type_: c_int) -> Result<SocketKind, Self::Error>;
 }
-
-/// Represents a [`SocketState`] where the user made a [`libc::bind`] call, and we intercepted it.
-///
-/// ## Details
-///
-/// Our [`ops::bind`] hook doesn't bind the address that the user passed to us, instead we call
-/// [`hooks::FN_BIND`] with `localhost:0` (or `unspecified:0` for ipv6), and use
-/// [`hooks::FN_GETSOCKNAME`] to retrieve this bound address which we assign to `Bound::address`.
-///
-/// The original user requested address is assigned to `Bound::requested_address`, and used as an
-/// illusion for when the user calls [`libc::getsockname`], as if this address was the actual local
-/// bound address.
-#[derive(Debug, Clone, Copy)]
-pub struct Bound {
-    /// Address originally requested by the user for `bind`.
-    requested_address: SocketAddr,
-
-    /// Actual bound address that we use to communicate between the user's listener socket and our
-    /// interceptor socket.
-    address: SocketAddr,
-}
-
-#[derive(Debug, Default)]
-pub enum SocketState {
-    #[default]
-    Initialized,
-    Bound(Bound),
-    Listening(Bound),
-    Connected(Connected),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SocketKind {
-    Tcp(c_int),
-    Udp(c_int),
-}
-
-impl SocketKind {
-    pub(crate) const fn is_udp(self) -> bool {
-        matches!(self, Self::Udp(..))
-    }
-}
-
-impl From<SocketKind> for NetProtocol {
-    fn from(kind: SocketKind) -> Self {
-        match kind {
-            SocketKind::Tcp(..) => Self::Stream,
-            SocketKind::Udp(..) => Self::Datagrams,
-        }
-    }
-}
-
-impl TryFrom<c_int> for SocketKind {
+impl SocketKindExt for SocketKind {
     type Error = Bypass;
 
-    fn try_from(type_: c_int) -> Result<Self, Self::Error> {
+    fn from_raw(type_: c_int) -> Result<SocketKind, Self::Error> {
         if (type_ & libc::SOCK_STREAM) > 0 {
             Ok(SocketKind::Tcp(type_))
         } else if (type_ & libc::SOCK_DGRAM) > 0 {
@@ -130,40 +54,13 @@ impl TryFrom<c_int> for SocketKind {
     }
 }
 
-// TODO(alex): We could treat `sockfd` as being the same as `&self` for socket ops, we currently
-// can't do that due to how `dup` interacts directly with our `Arc<UserSocket>`, because we just
-// `clone` the arc, we end up with exact duplicates, but `dup` generates a new fd that we have no
-// way of putting inside the duplicated `UserSocket`.
-#[derive(Debug)]
-#[allow(dead_code)]
-pub(crate) struct UserSocket {
-    domain: c_int,
-    type_: c_int,
-    protocol: c_int,
-    pub state: SocketState,
-    pub(crate) kind: SocketKind,
+pub(crate) trait UserSocketImpl {
+    fn close(&self);
 }
-
-impl UserSocket {
-    pub(crate) fn new(
-        domain: c_int,
-        type_: c_int,
-        protocol: c_int,
-        state: SocketState,
-        kind: SocketKind,
-    ) -> Self {
-        Self {
-            domain,
-            type_,
-            protocol,
-            state,
-            kind,
-        }
-    }
-
+impl UserSocketImpl for UserSocket {
     /// Inform internal proxy about closing a listening port.
     #[mirrord_layer_macro::instrument(level = "trace", ret)]
-    pub(crate) fn close(&self) {
+    fn close(&self) {
         if let Self {
             state: SocketState::Listening(bound),
             kind: SocketKind::Tcp(..),
