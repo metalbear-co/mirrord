@@ -1,5 +1,6 @@
 #![feature(let_chains)]
 #![feature(lazy_cell)]
+#![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
 
 #[cfg(feature = "client")]
