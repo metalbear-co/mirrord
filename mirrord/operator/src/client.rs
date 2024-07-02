@@ -250,20 +250,33 @@ impl OperatorApi {
         })
     }
 
-    /// Tries to fetch [`MirrordOperatorCrd`] from the cluster and create a new instance of this
-    /// API.
+    /// If [`LayerConfig::operator`] is explicitly disabled, returns early with [`None`].
     ///
-    /// If fetching the resource fails, an extra discovery step is made to determine whether the
-    /// operator is installed. If this extra step proves that the operator is installed, an
-    /// error is returned. Otherwise, [`None`] is returned.
+    /// If [`LayerConfig::operator`] is explicitly enabled, this functions is equivalent to
+    /// [`OperatorApi::new`] and never returns [`None`].
+    ///
+    /// If [`LayerConfig::operator`] is missing, tries to fetch [`MirrordOperatorCrd`] from the
+    /// cluster and create a new instance of this API. If fetching the resource fails, an extra
+    /// discovery step is made to determine whether the operator is installed. If this extra
+    /// step proves that the operator is installed, an error is returned. Otherwise, [`None`] is
+    /// returned.
     #[tracing::instrument(level = Level::TRACE, skip_all, err)]
-    pub async fn try_new<R>(
+    pub async fn try_new<R, P>(
         config: &LayerConfig,
         reporter: &mut R,
+        progress: &P,
     ) -> OperatorApiResult<Option<Self>>
     where
         R: Reporter,
+        P: Progress,
     {
+        let mut subtask = progress.subtask("detecting operator");
+
+        if config.operator == Some(false) {
+            subtask.success(Some("operator disabled"));
+            return Ok(None);
+        }
+
         let base_config = Self::base_client_config(config).await?;
         let client = Client::try_from(base_config.clone())
             .map_err(KubeApiError::from)
@@ -284,6 +297,8 @@ impl OperatorApi {
                         .map(AnalyticsHash::from_base64),
                 });
 
+                subtask.success(Some("operator found"));
+
                 return Ok(Some(Self {
                     client,
                     client_cert: None,
@@ -292,9 +307,10 @@ impl OperatorApi {
                 }));
             }
 
-            Err(error @ kube::Error::Api(..)) => {
+            Err(error @ kube::Error::Api(..)) if config.operator.is_none() => {
                 match discovery::operator_installed(&client).await {
                     Ok(false) | Err(..) => {
+                        subtask.success(Some("operator not found"));
                         return Ok(None);
                     }
                     Ok(true) => error,

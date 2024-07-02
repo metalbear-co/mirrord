@@ -35,28 +35,12 @@ where
     P: Progress,
     R: Reporter,
 {
-    let operator_required = match config.operator {
-        Some(true) => true,
-        Some(false) => return Ok(None),
-        None => false,
-    };
-
     let mut operator_subtask = progress.subtask("checking operator");
 
-    let mut find_operator_subtask = operator_subtask.subtask("detecting operator");
-
-    let api = if operator_required {
-        OperatorApi::new(config, analytics).await?.into()
-    } else {
-        OperatorApi::try_new(config, analytics).await?
-    };
-    let Some(mut api) = api else {
-        find_operator_subtask.success(Some("operator not found"));
+    let Some(mut api) = OperatorApi::try_new(config, analytics, &operator_subtask).await? else {
         operator_subtask.success(Some("proceeding without operator"));
         return Ok(None);
     };
-
-    find_operator_subtask.success(Some("operator found"));
 
     let mut version_cmp_subtask = operator_subtask.subtask("checking version compatibility");
     let compatible = api.check_operator_version(&version_cmp_subtask);
@@ -72,7 +56,7 @@ where
         Err(error) => {
             license_subtask.failure(Some("operator license expired"));
 
-            if operator_required {
+            if config.operator == Some(true) {
                 return Err(error.into());
             } else {
                 operator_subtask.failure(Some("proceeding without operator"));
