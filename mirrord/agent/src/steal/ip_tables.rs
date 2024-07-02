@@ -99,6 +99,7 @@ pub static IPTABLE_INPUT: LazyLock<String> = LazyLock::new(|| {
 
 const IPTABLES_TABLE_NAME: &str = "nat";
 
+#[cfg_attr(test, allow(clippy::indexing_slicing))] // `mockall::automock` violates our clippy rules
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait IPTables {
     fn with_table(&self, table_name: &'static str) -> Self

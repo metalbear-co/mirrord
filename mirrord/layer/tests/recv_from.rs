@@ -1,7 +1,7 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::{net::SocketAddr, path::Path, time::Duration};
 
 use mirrord_protocol::{
     outgoing::{
@@ -21,7 +21,7 @@ pub use common::*;
 #[timeout(Duration::from_secs(60))]
 async fn recv_from(
     #[values(Application::RustRecvFrom)] application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![], None)

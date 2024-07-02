@@ -1,5 +1,5 @@
 #![feature(assert_matches)]
-use std::{path::PathBuf, time::Duration};
+use std::{path::Path, time::Duration};
 
 use rstest::rstest;
 
@@ -11,7 +11,7 @@ pub use common::*;
 #[timeout(Duration::from_secs(60))]
 async fn test_issue2178(
     #[values(Application::CIssue2178)] application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, Default::default(), None)

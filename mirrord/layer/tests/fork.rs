@@ -1,5 +1,5 @@
 #![feature(assert_matches)]
-use std::{path::PathBuf, time::Duration};
+use std::{path::Path, time::Duration};
 
 use rstest::rstest;
 
@@ -10,7 +10,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn fork(dylib_path: &PathBuf) {
+async fn fork(dylib_path: &Path) {
     let application = Application::Fork;
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, Default::default(), None)

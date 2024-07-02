@@ -2,7 +2,7 @@
 #![warn(clippy::indexing_slicing)]
 #![allow(non_snake_case)]
 
-use std::{path::PathBuf, time::Duration};
+use std::{path::Path, time::Duration};
 
 use rstest::rstest;
 
@@ -26,8 +26,8 @@ async fn mirroring_with_http(
         Application::Go20HTTP
     )]
     application: Application,
-    dylib_path: &PathBuf,
-    config_dir: &PathBuf,
+    dylib_path: &Path,
+    config_dir: &Path,
 ) {
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer_and_port(

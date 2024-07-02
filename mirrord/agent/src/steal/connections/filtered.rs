@@ -1120,7 +1120,9 @@ mod test {
                     client_id,
                     connection_id: TestSetup::CONNECTION_ID,
                 } => {
-                    clients_closed[usize::try_from(client_id).unwrap()] = true;
+                    *clients_closed
+                        .get_mut(usize::try_from(client_id).unwrap())
+                        .expect("unexpected client id") = true;
                 }
                 other => unreachable!("unexpected message: {other:?}"),
             };

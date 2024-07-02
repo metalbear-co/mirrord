@@ -1,0 +1,1 @@
+Added `clippy` check on test code to the CI.

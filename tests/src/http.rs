@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod http {
+mod http_tests {
 
     use std::time::Duration;
 

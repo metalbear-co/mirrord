@@ -1,6 +1,6 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::{net::SocketAddr, path::Path, time::Duration};
 
 use mirrord_protocol::{
     outgoing::{
@@ -21,7 +21,7 @@ pub use common::*;
 #[timeout(Duration::from_secs(60))]
 async fn test_issue1458(
     #[values(Application::RustIssue1458)] application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
@@ -95,7 +95,7 @@ async fn test_issue1458(
 #[timeout(Duration::from_secs(60))]
 async fn test_issue1458_port_not_53(
     #[values(Application::RustIssue1458PortNot53)] application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(

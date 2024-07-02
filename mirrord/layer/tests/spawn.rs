@@ -1,7 +1,7 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{collections::HashSet, path::PathBuf, time::Duration};
+use std::{collections::HashSet, path::Path, time::Duration};
 
 #[cfg(not(target_os = "macos"))]
 use mirrord_protocol::file::XstatResponse;
@@ -26,7 +26,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn node_spawn(dylib_path: &PathBuf) {
+async fn node_spawn(dylib_path: &Path) {
     let application = Application::NodeSpawn;
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![("MIRRORD_FILE_MODE", "read")], None)

@@ -1,6 +1,6 @@
 #![allow(dead_code, unused)]
 #[cfg(test)]
-mod file_ops {
+mod file_ops_tests {
 
     use std::time::Duration;
 
