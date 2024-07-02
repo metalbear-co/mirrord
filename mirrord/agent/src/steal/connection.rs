@@ -15,7 +15,7 @@ use mirrord_protocol::{
     tcp::{
         ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, DaemonTcp, HttpRequest,
         HttpResponseFallback, InternalHttpBody, InternalHttpBodyFrame, InternalHttpRequest,
-        StealType, TcpClose, TcpData, HTTP_CHUNKED_VERSION, HTTP_FILTERED_UPGRADE_VERSION,
+        StealType, TcpClose, TcpData, HTTP_CHUNKED_REQUEST_VERSION, HTTP_FILTERED_UPGRADE_VERSION,
         HTTP_FRAMED_VERSION,
     },
     ConnectionId, Port,
@@ -150,7 +150,7 @@ impl Client {
         }
 
         let framed = HTTP_FRAMED_VERSION.matches(&self.protocol_version);
-        let chunked = HTTP_CHUNKED_VERSION.matches(&self.protocol_version);
+        let chunked = HTTP_CHUNKED_REQUEST_VERSION.matches(&self.protocol_version);
         let tx = self.tx.clone();
 
         tokio::spawn(async move {

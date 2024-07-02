@@ -103,6 +103,8 @@ pub enum IncomingProxyMessage {
     LayerClosed(LayerClosed),
     AgentMirror(DaemonTcp),
     AgentSteal(DaemonTcp),
+    /// Agent responded to [`ClientMessage::SwitchProtocolVersion`].
+    AgentProtocolVersion(semver::Version),
 }
 
 /// Handle for an [`Interceptor`].
@@ -167,6 +169,8 @@ pub struct IncomingProxy {
     request_body_txs: HashMap<(ConnectionId, RequestId), Sender<InternalHttpBodyFrame>>,
     /// For managing streamed [`LayerTcpSteal::HttpResponseChunked`] response streams.
     response_body_rxs: StreamMap<(ConnectionId, RequestId), StreamNotifyClose<ReceiverStreamBody>>,
+    /// Version of [`mirrord_protocol`] negotiated with the agent.
+    agent_protocol_version: Option<semver::Version>,
 }
 
 impl IncomingProxy {
@@ -234,7 +238,11 @@ impl IncomingProxy {
                 let interceptor_socket = bind_similar(subscription.listening_on)?;
 
                 let interceptor = self.background_tasks.register(
-                    Interceptor::new(interceptor_socket, subscription.listening_on),
+                    Interceptor::new(
+                        interceptor_socket,
+                        subscription.listening_on,
+                        self.agent_protocol_version.clone(),
+                    ),
                     id,
                     Self::CHANNEL_SIZE,
                 );
@@ -382,7 +390,11 @@ impl IncomingProxy {
                 );
 
                 let interceptor = self.background_tasks.register(
-                    Interceptor::new(interceptor_socket, subscription.listening_on),
+                    Interceptor::new(
+                        interceptor_socket,
+                        subscription.listening_on,
+                        self.agent_protocol_version.clone(),
+                    ),
                     id,
                     Self::CHANNEL_SIZE,
                 );
@@ -497,6 +509,9 @@ impl BackgroundTask for IncomingProxy {
                     }
                     Some(IncomingProxyMessage::LayerClosed(msg)) => self.handle_layer_close(msg, message_bus).await,
                     Some(IncomingProxyMessage::LayerForked(msg)) => self.handle_layer_fork(msg),
+                    Some(IncomingProxyMessage::AgentProtocolVersion(version)) => {
+                        self.agent_protocol_version.replace(version);
+                    }
                 },
 
                 Some(task_update) = self.background_tasks.next() => match task_update {

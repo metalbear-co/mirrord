@@ -12,6 +12,7 @@ use hyper::{upgrade::OnUpgrade, StatusCode, Version};
 use hyper_util::rt::TokioIo;
 use mirrord_protocol::tcp::{
     HttpRequestFallback, HttpResponse, HttpResponseFallback, InternalHttpBody, ReceiverStreamBody,
+    HTTP_CHUNKED_RESPONSE_VERSION,
 };
 use thiserror::Error;
 use tokio::{
@@ -86,8 +87,12 @@ pub type InterceptorResult<T, E = InterceptorError> = core::result::Result<T, E>
 /// When it receives [`MessageIn::Raw`], it starts acting as a simple proxy.
 /// When it received [`MessageIn::Http`], it starts acting as an HTTP gateway.
 pub struct Interceptor {
+    /// Socket that should be used to make the first connection (should already be bound).
     socket: TcpSocket,
+    /// Address of user app's listener.
     peer: SocketAddr,
+    /// Version of [`mirrord_protocol`] negotiated with the agent.
+    agent_protocol_version: Option<semver::Version>,
 }
 
 impl Interceptor {
@@ -97,8 +102,16 @@ impl Interceptor {
     /// # Note
     ///
     /// The socket can be replaced when retrying HTTP requests.
-    pub fn new(socket: TcpSocket, peer: SocketAddr) -> Self {
-        Self { socket, peer }
+    pub fn new(
+        socket: TcpSocket,
+        peer: SocketAddr,
+        agent_protocol_version: Option<semver::Version>,
+    ) -> Self {
+        Self {
+            socket,
+            peer,
+            agent_protocol_version,
+        }
     }
 }
 
@@ -139,6 +152,7 @@ impl BackgroundTask for Interceptor {
         let mut http_conn = HttpConnection {
             sender,
             peer: self.peer,
+            agent_protocol_version: self.agent_protocol_version.clone(),
         };
         let (response, on_upgrade) = http_conn.send(request).await?;
         message_bus.send(MessageOut::Http(response)).await;
@@ -176,11 +190,27 @@ struct HttpConnection {
     peer: SocketAddr,
     /// Handle to the HTTP connection between the [`Interceptor`] the server.
     sender: HttpSender,
+    /// Version of [`mirrord_protocol`] negotiated with the agent.
+    /// Determines which variant of [`LayerTcpSteal`](mirrord_protocol::tcp::LayerTcpSteal)
+    /// we use when sending HTTP responses.
+    agent_protocol_version: Option<semver::Version>,
 }
 
 impl HttpConnection {
+    /// Returns whether the agent supports
+    /// [`LayerTcpSteal::HttpResponseChunked`](mirrord_protocol::tcp::LayerTcpSteal::HttpResponseChunked).
+    pub fn agent_supports_streaming_response(&self) -> bool {
+        self.agent_protocol_version
+            .as_ref()
+            .map(|version| HTTP_CHUNKED_RESPONSE_VERSION.matches(version))
+            .unwrap_or(false)
+    }
+
     /// Handles the result of sending an HTTP request.
     /// Returns an [`HttpResponseFallback`] to be returned to the client or an [`InterceptorError`].
+    ///
+    /// See [`HttpResponseFallback::response_from_request`] for notes on picking the correct
+    /// [`HttpResponseFallback`] variant.
     async fn handle_response(
         &self,
         request: HttpRequestFallback,
@@ -209,6 +239,7 @@ impl HttpConnection {
                         request,
                         StatusCode::BAD_GATEWAY,
                         &body_message,
+                        self.agent_protocol_version.as_ref(),
                     ),
                     None,
                 ))
@@ -224,6 +255,7 @@ impl HttpConnection {
                         request,
                         StatusCode::BAD_GATEWAY,
                         &body_message,
+                        self.agent_protocol_version.as_ref(),
                     ),
                     None,
                 ))
@@ -257,7 +289,9 @@ impl HttpConnection {
                         .await
                         .map(HttpResponseFallback::Fallback)
                     }
-                    HttpRequestFallback::Streamed(..) => {
+                    HttpRequestFallback::Streamed(..)
+                        if self.agent_supports_streaming_response() =>
+                    {
                         HttpResponse::<ReceiverStreamBody>::from_hyper_response(
                             res,
                             self.peer.port(),
@@ -266,6 +300,16 @@ impl HttpConnection {
                         )
                         .await
                         .map(HttpResponseFallback::Streamed)
+                    }
+                    HttpRequestFallback::Streamed(..) => {
+                        HttpResponse::<InternalHttpBody>::from_hyper_response(
+                            res,
+                            self.peer.port(),
+                            request.connection_id(),
+                            request.request_id(),
+                        )
+                        .await
+                        .map(HttpResponseFallback::Framed)
                     }
                 };
 
@@ -283,6 +327,7 @@ impl HttpConnection {
                                 request,
                                 StatusCode::BAD_GATEWAY,
                                 "mirrord",
+                                self.agent_protocol_version.as_ref(),
                             ),
                             None,
                         )
@@ -562,7 +607,15 @@ mod test {
         let interceptor = {
             let socket = TcpSocket::new_v4().unwrap();
             socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
-            tasks.register(Interceptor::new(socket, local_destination), (), 8)
+            tasks.register(
+                Interceptor::new(
+                    socket,
+                    local_destination,
+                    Some(mirrord_protocol::VERSION.clone()),
+                ),
+                (),
+                8,
+            )
         };
 
         interceptor
@@ -638,7 +691,11 @@ mod test {
         let mut tasks: BackgroundTasks<(), MessageOut, InterceptorError> = Default::default();
         let socket = TcpSocket::new_v4().unwrap();
         socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
-        let interceptor = Interceptor::new(socket, local_destination);
+        let interceptor = Interceptor::new(
+            socket,
+            local_destination,
+            Some(mirrord_protocol::VERSION.clone()),
+        );
         let sender = tasks.register(interceptor, (), 8);
 
         let (tx, rx) = tokio::sync::mpsc::channel(12);
