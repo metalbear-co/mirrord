@@ -1,5 +1,5 @@
 use kube::CustomResource;
-use mirrord_config::target::{Target, TargetConfig};
+use mirrord_config::target::{target_handle::TargetHandle, Target, TargetConfig};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -20,15 +20,19 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 )]
 pub struct TargetSpec {
     /// None when targetless.
-    pub target: Option<Target>,
+    pub target: TargetHandle,
 }
 
 impl TargetCrd {
-    /// Creates target name in format of target_type.target_name.[container.container_name]
+    /// Creates a target name in format of `target_type.target_name.[container.container_name]`
     /// for example:
-    /// deploy.nginx
-    /// deploy.nginx.container.nginx
-    pub fn target_name(target: &Target) -> String {
+    ///
+    /// - `DeploymentTarget { deployment: "nginx", container: None }` -> `deploy.nginx`;
+    /// - `DeploymentTarget { deployment: "nginx", container: Some("pyrex") }` ->
+    ///   `deploy.nginx.container.pyrex`;
+    ///
+    /// It's used to connect to a resource through the operator.
+    pub fn urlfied_name(target: &Target) -> String {
         let (type_name, target, container) = match target {
             Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
             Target::Pod(target) => ("pod", &target.pod, &target.container),
@@ -37,7 +41,9 @@ impl TargetCrd {
             Target::CronJob(target) => ("cronjob", &target.cron_job, &target.container),
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
+            Target::Unknown(_) => return "".to_string(),
         };
+
         if let Some(container) = container {
             format!("{}.{}.container.{}", type_name, target, container)
         } else {
@@ -51,22 +57,14 @@ impl TargetCrd {
         target_config
             .path
             .as_ref()
-            .map_or_else(|| TARGETLESS_TARGET_NAME.to_string(), Self::target_name)
-    }
-
-    pub fn name(&self) -> String {
-        self.spec
-            .target
-            .as_ref()
-            .map(Self::target_name)
-            .unwrap_or(TARGETLESS_TARGET_NAME.to_string())
+            .map_or_else(|| TARGETLESS_TARGET_NAME.to_string(), Self::urlfied_name)
     }
 }
 
 impl From<TargetCrd> for TargetConfig {
     fn from(crd: TargetCrd) -> Self {
         TargetConfig {
-            path: crd.spec.target,
+            path: Some(crd.spec.target.0),
             namespace: crd.metadata.namespace,
         }
     }

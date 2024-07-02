@@ -572,13 +572,16 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
                     targets
                         .iter()
                         .filter_map(|target_crd| {
-                            let target = target_crd.spec.target.as_ref()?;
-                            if let Some(container) = target.container_name() {
-                                if SKIP_NAMES.contains(container.as_str()) {
-                                    return None;
-                                }
+                            let target = &target_crd.spec.target;
+                            if let Some(container) = target.container()
+                                && SKIP_NAMES.contains(container.as_str())
+                            {
+                                None
+                            } else {
+                                // Filter out `Unknown`, which in string form is just `""`.
+                                let target_str = format!("{target}");
+                                (!target_str.is_empty()).then_some(target_str)
                             }
-                            Some(format!("{target}"))
                         })
                         .collect::<Vec<String>>()
                 }

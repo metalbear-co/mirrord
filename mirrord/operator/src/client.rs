@@ -442,10 +442,10 @@ impl OperatorApi {
 
     /// Returns a connection url for the given [`OperatorSessionInformation`].
     /// This can be used to create a websocket connection with the operator.
-    #[tracing::instrument(level = "debug", skip(self), ret)]
+    #[tracing::instrument(level = "trace", skip(self), ret)]
     fn connect_url(&self, session: &OperatorSessionInformation) -> String {
         match (session.metadata.proxy_feature_enabled(), &session.target) {
-            (true, OperatorSessionTarget::Raw(target)) => {
+            (true, OperatorSessionTarget::Raw(crd)) => {
                 let dt = &();
                 let namespace = self.namespace();
                 let api_version = TargetCrd::api_version(dt);
@@ -453,15 +453,15 @@ impl OperatorApi {
 
                 format!(
                     "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{}?on_concurrent_steal={}&connect=true",
-                    target.name(),
+                    TargetCrd::urlfied_name(&crd.spec.target),
                     self.on_concurrent_steal,
                 )
             }
-            (false, OperatorSessionTarget::Raw(target)) => {
+            (false, OperatorSessionTarget::Raw(crd)) => {
                 format!(
                     "{}/{}?on_concurrent_steal={}&connect=true",
                     self.target_api.resource_url(),
-                    target.name(),
+                    TargetCrd::urlfied_name(&crd.spec.target),
                     self.on_concurrent_steal,
                 )
             }
@@ -568,7 +568,7 @@ impl OperatorApi {
         target: Target,
         scale_down: bool,
     ) -> Result<CopyTargetCrd> {
-        let name = TargetCrd::target_name(&target);
+        let name = TargetCrd::urlfied_name(&target);
 
         let requested = CopyTargetCrd::new(
             &name,

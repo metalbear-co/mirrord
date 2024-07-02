@@ -27,6 +27,7 @@ use crate::{config::VerifyConfigArgs, error, LayerFileConfig};
 enum VerifiedTarget {
     #[serde(rename = "targetless")]
     Targetless,
+
     #[serde(untagged)]
     Pod(PodTarget),
     #[serde(untagged)]
@@ -54,6 +55,9 @@ impl From<Target> for VerifiedTarget {
             Target::CronJob(target) => Self::CronJob(target),
             Target::StatefulSet(target) => Self::StatefulSet(target),
             Target::Targetless => Self::Targetless,
+            Target::Unknown(_) => unreachable!(
+                "`unknown` is not a valid target, and will error out before we get here!"
+            ),
         }
     }
 }
