@@ -6,6 +6,7 @@ use std::{
     collections::HashMap,
     fmt,
     net::{IpAddr, SocketAddr},
+    os::fd::RawFd,
 };
 
 use bincode::{Decode, Encode};
@@ -23,10 +24,12 @@ use mirrord_protocol::{
     tcp::StealType,
     FileRequest, FileResponse, GetEnvVarsRequest, Port, RemoteResult,
 };
+use net::UserSocket;
 
 #[cfg(feature = "codec")]
 pub mod codec;
 mod macros;
+pub mod net;
 
 /// An identifier for a message sent from the layer to the internal proxy.
 /// The layer uses this to match proxy responses with awaiting requests.
@@ -58,6 +61,7 @@ pub enum LayerToProxyMessage {
     Incoming(IncomingRequest),
     /// Fetch environment variables from the target.
     GetEnv(GetEnvVarsRequest),
+    NewSocket(NewSocketRequest),
 }
 
 /// Layer process information
@@ -91,10 +95,17 @@ pub struct LayerId(pub u64);
 #[derive(Encode, Decode, Debug)]
 pub enum NewSessionRequest {
     /// Layer initialized from its constructor, has a fresh state.
-    New(ProcessInfo),
+    // TODO(alex) [mid]: Do we need it here?
+    New {
+        info: ProcessInfo,
+        sockets: HashMap<RawFd, UserSocket>,
+    },
     /// Layer re-initialized from a [`fork`](https://man7.org/linux/man-pages/man2/fork.2.html) detour.
     /// It inherits state from its parent.
-    Forked(LayerId),
+    Forked {
+        layer: LayerId,
+        sockets: HashMap<RawFd, UserSocket>,
+    },
 }
 
 /// Supported network protocols when intercepting outgoing connections.
@@ -143,6 +154,7 @@ pub enum IncomingRequest {
     /// A request made by the layer when it accepts a connection on the socket that is listening
     /// for mirrored connections.
     ConnMetadata(ConnMetadataRequest),
+    NewSocket(NewSocketRequest),
 }
 
 /// A request for additional metadata for accepted connection.
@@ -213,7 +225,7 @@ pub struct PortUnsubscribe {
 pub enum ProxyToLayerMessage {
     /// A response to [`NewSessionRequest`]. Contains the identifier of the new `layer <-> proxy`
     /// session.
-    NewSession(LayerId),
+    NewSession(LayerId, HashMap<RawFd, UserSocket>),
     /// A response to layer's [`FileRequest`].
     File(FileResponse),
     /// A response to layer's [`GetAddrInfoRequest`].
@@ -280,6 +292,17 @@ pub trait IsLayerRequestWithResponse: IsLayerRequest {
         response: ProxyToLayerMessage,
     ) -> Result<Self::Response, ProxyToLayerMessage>;
 }
+
+#[derive(Encode, Decode, Debug, Clone)]
+pub struct NewSocketRequest {
+    pub fd: RawFd,
+    pub user: UserSocket,
+}
+
+// impl_request!(
+//     req = NewSocketRequest,
+//     req_path = LayerToProxyMessage::NewSocket => IncomingRequest::NewSocket,
+// );
 
 impl_request!(
     req = OpenFileRequest,

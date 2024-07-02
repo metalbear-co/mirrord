@@ -183,7 +183,7 @@ pub(super) unsafe extern "C" fn _accept_nocancel_detour(
 
 /// <https://github.com/metalbear-co/mirrord/issues/184>
 #[hook_fn]
-pub(super) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
+pub(crate) unsafe extern "C" fn fcntl_detour(fd: c_int, cmd: c_int, mut arg: ...) -> c_int {
     let arg = arg.arg::<usize>();
     let fcntl_result = FN_FCNTL(fd, cmd, arg);
     let guard = DetourGuard::new();

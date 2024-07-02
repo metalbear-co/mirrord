@@ -58,21 +58,32 @@ impl LayerInitializer {
         let id = self.next_layer_id;
         self.next_layer_id.0 += 1;
 
-        let parent_id = match msg.inner {
-            LayerToProxyMessage::NewSession(NewSessionRequest::New(process_info)) => {
+        // TODO(alex) [high]: Deal with the sockets we received from the layer!
+        let (parent_id, sockets) = match msg.inner {
+            LayerToProxyMessage::NewSession(NewSessionRequest::New {
+                info: process_info,
+                sockets,
+            }) => {
+                // TODO(alex) [high]: Looks like the socket is created in another process,
+                // and we end up here, not in the forked match!
                 info!(?process_info, "new session");
-                None
+                (None, sockets)
             }
-            LayerToProxyMessage::NewSession(NewSessionRequest::Forked(parent)) => Some(parent),
+            LayerToProxyMessage::NewSession(NewSessionRequest::Forked {
+                layer: parent,
+                sockets,
+            }) => (Some(parent), sockets),
             other => return Err(LayerInitializerError::UnexpectedMessage(other)),
         };
+
+        tracing::info!("lesockets {sockets:?} parent id {parent_id:?}");
 
         let mut encoder: AsyncEncoder<LocalMessage<ProxyToLayerMessage>, _> =
             AsyncEncoder::new(decoder.into_inner());
         encoder
             .send(&LocalMessage {
                 message_id: msg.message_id,
-                inner: ProxyToLayerMessage::NewSession(id),
+                inner: ProxyToLayerMessage::NewSession(id, sockets),
             })
             .await?;
         encoder.flush().await?;
