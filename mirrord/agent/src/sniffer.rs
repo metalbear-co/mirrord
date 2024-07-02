@@ -306,18 +306,16 @@ where
                     self.update_packet_filter()?;
                 }
 
-                let _ = tx.send(());
+                let _ = tx.send(port);
             }
 
             SnifferCommand {
                 client_id,
-                command: SnifferCommandInner::UnsubscribePort(port, tx),
+                command: SnifferCommandInner::UnsubscribePort(port),
             } => {
                 if self.port_subscriptions.unsubscribe(client_id, port) {
                     self.update_packet_filter()?;
                 }
-
-                let _ = tx.send(());
             }
         }
 
@@ -447,9 +445,12 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+        time::Duration,
     };
 
     use api::TcpSnifferApi;
@@ -527,6 +528,11 @@ mod test {
             .await
             .unwrap();
 
+        assert_eq!(
+            api.recv().await.unwrap(),
+            (DaemonTcp::SubscribeResult(Ok(80)), None),
+        );
+
         for dest_port in [80, 81] {
             setup
                 .packet_tx
@@ -602,6 +608,11 @@ mod test {
     }
 
     /// Tests that [`TcpCapture`] filter is replaced only when needed.
+    ///
+    /// # Note
+    ///
+    /// Due to fact that [`LayerTcp::PortUnsubscribe`] request does not generate any response, this
+    /// test does some sleeping to give the sniffer time to process.
     #[tokio::test]
     async fn filter_replace() {
         let mut setup = TestSnifferSetup::new();
@@ -613,48 +624,68 @@ mod test {
             .handle_client_message(LayerTcp::PortSubscribe(80))
             .await
             .unwrap();
+        assert_eq!(
+            api_1.recv().await.unwrap(),
+            (DaemonTcp::SubscribeResult(Ok(80)), None),
+        );
         assert_eq!(setup.times_filter_changed(), 1);
 
         api_2
             .handle_client_message(LayerTcp::PortSubscribe(80))
             .await
             .unwrap();
+        assert_eq!(
+            api_2.recv().await.unwrap(),
+            (DaemonTcp::SubscribeResult(Ok(80)), None),
+        );
         assert_eq!(setup.times_filter_changed(), 1); // api_1 already subscribed `80`
 
         api_2
             .handle_client_message(LayerTcp::PortSubscribe(81))
             .await
             .unwrap();
+        assert_eq!(
+            api_2.recv().await.unwrap(),
+            (DaemonTcp::SubscribeResult(Ok(81)), None),
+        );
         assert_eq!(setup.times_filter_changed(), 2);
 
         api_1
             .handle_client_message(LayerTcp::PortSubscribe(81))
             .await
             .unwrap();
+        assert_eq!(
+            api_1.recv().await.unwrap(),
+            (DaemonTcp::SubscribeResult(Ok(81)), None),
+        );
         assert_eq!(setup.times_filter_changed(), 2); // api_2 already subscribed `81`
 
         api_1
             .handle_client_message(LayerTcp::PortUnsubscribe(80))
             .await
             .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(setup.times_filter_changed(), 2); // api_2 still subscribes `80`
 
         api_2
             .handle_client_message(LayerTcp::PortUnsubscribe(81))
             .await
             .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(setup.times_filter_changed(), 2); // api_1 still subscribes `81`
 
         api_1
             .handle_client_message(LayerTcp::PortUnsubscribe(81))
             .await
             .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(setup.times_filter_changed(), 3);
 
         api_2
             .handle_client_message(LayerTcp::PortUnsubscribe(80))
             .await
             .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(setup.times_filter_changed(), 4);
     }
 
@@ -669,6 +700,11 @@ mod test {
         api.handle_client_message(LayerTcp::PortSubscribe(80))
             .await
             .unwrap();
+
+        assert_eq!(
+            api.recv().await.unwrap(),
+            (DaemonTcp::SubscribeResult(Ok(80)), None),
+        );
 
         let session_id = TcpSessionIdentifier {
             source_addr: "1.1.1.1".parse().unwrap(),
@@ -750,6 +786,11 @@ mod test {
         api.handle_client_message(LayerTcp::PortSubscribe(80))
             .await
             .unwrap();
+
+        assert_eq!(
+            api.recv().await.unwrap(),
+            (DaemonTcp::SubscribeResult(Ok(80)), None),
+        );
 
         let source_addr = "1.1.1.1".parse().unwrap();
         let dest_addr = "127.0.0.1".parse().unwrap();

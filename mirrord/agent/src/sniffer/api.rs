@@ -1,7 +1,7 @@
-use futures::StreamExt;
+use futures::{stream::FuturesUnordered, StreamExt};
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ConnectionId, LogMessage,
+    ConnectionId, LogMessage, Port,
 };
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
@@ -32,6 +32,8 @@ pub(crate) struct TcpSnifferApi {
     connections: StreamMap<ConnectionId, StreamNotifyClose<BroadcastStream<Vec<u8>>>>,
     /// Id for the next sniffed connection.
     next_connection_id: Option<ConnectionId>,
+    /// [`LayerTcp::PortSubscribe`] requests in progress.
+    subscriptions_in_progress: FuturesUnordered<oneshot::Receiver<Port>>,
 }
 
 impl TcpSnifferApi {
@@ -69,6 +71,7 @@ impl TcpSnifferApi {
             task_status,
             connections: Default::default(),
             next_connection_id: Some(0),
+            subscriptions_in_progress: Default::default(),
         })
     }
 
@@ -144,6 +147,13 @@ impl TcpSnifferApi {
                     ))
                 }
             },
+
+            Some(result) = self.subscriptions_in_progress.next() => match result {
+                Ok(port) => Ok((DaemonTcp::SubscribeResult(Ok(port)), None)),
+                Err(..) => {
+                    Err(self.task_status.unwrap_err().await)
+                }
+            }
         }
     }
 
@@ -155,24 +165,16 @@ impl TcpSnifferApi {
                 let (tx, rx) = oneshot::channel();
                 self.send_command(SnifferCommandInner::Subscribe(port, tx))
                     .await?;
+                self.subscriptions_in_progress.push(rx);
 
-                if rx.await.is_ok() {
-                    Ok(())
-                } else {
-                    Err(self.task_status.unwrap_err().await)
-                }
+                Ok(())
             }
+
             LayerTcp::PortUnsubscribe(port) => {
-                let (tx, rx) = oneshot::channel();
-                self.send_command(SnifferCommandInner::UnsubscribePort(port, tx))
-                    .await?;
-
-                if rx.await.is_ok() {
-                    Ok(())
-                } else {
-                    Err(self.task_status.unwrap_err().await)
-                }
+                self.send_command(SnifferCommandInner::UnsubscribePort(port))
+                    .await
             }
+
             LayerTcp::ConnectionUnsubscribe(connection_id) => {
                 self.connections.remove(&connection_id);
 

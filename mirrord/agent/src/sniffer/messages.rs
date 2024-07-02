@@ -16,15 +16,13 @@ pub(crate) enum SnifferCommandInner {
     Subscribe(
         /// Number of port to subscribe.
         Port,
-        /// Channel to notify with `()` when the operation is done.
-        oneshot::Sender<()>,
+        /// Channel to notify with the same port number when the operation is done.
+        oneshot::Sender<Port>,
     ),
     /// Client no longer wants to receive connections incoming to a specific port.
     UnsubscribePort(
         /// Number of port to unsubscribe.
         Port,
-        /// Channel to notify with `()` when the operation is done.
-        oneshot::Sender<()>,
     ),
 }
 
