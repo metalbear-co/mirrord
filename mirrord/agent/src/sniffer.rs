@@ -1,36 +1,63 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap},
+    fmt,
+    future::Future,
     hash::{Hash, Hasher},
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::Ipv4Addr,
+    pin::Pin,
+    task::{Context, Poll},
 };
 
-use mirrord_protocol::{
-    tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
-    ConnectionId, MeshVendor, Port,
-};
-use nix::sys::socket::SockaddrStorage;
-use pnet::packet::{
-    ethernet::{EtherTypes, EthernetPacket},
-    ip::IpNextHeaderProtocols,
-    ipv4::Ipv4Packet,
-    tcp::{TcpFlags, TcpPacket},
-    Packet,
-};
-use rawsocket::RawCapture;
+use futures::{stream::FuturesUnordered, StreamExt};
+use mirrord_protocol::{MeshVendor, Port};
+use pnet::packet::tcp::TcpFlags;
+use tcp_capture::TcpCapture;
 use tokio::{
-    net::UdpSocket,
     select,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::{
+        broadcast,
+        mpsc::{error::TrySendError, Receiver, Sender},
+    },
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, trace, warn};
+use tracing::Level;
 
+use self::{
+    messages::{SniffedConnection, SnifferCommand, SnifferCommandInner},
+    tcp_capture::RawSocketTcpCapture,
+};
 use crate::{
     error::AgentError,
     http::HttpVersion,
-    util::{ClientId, IndexAllocator, Subscriptions},
-    watched_task::TaskStatus,
+    util::{ClientId, Subscriptions},
 };
+
+pub(crate) mod api;
+pub(crate) mod messages;
+pub(crate) mod tcp_capture;
+
+/// [`Future`] that resolves to [`ClientId`] when the [`TcpConnectionSniffer`] client drops their
+/// [`TcpSnifferApi`](api::TcpSnifferApi).
+struct ClientClosed {
+    /// [`Sender`] used by [`TcpConnectionSniffer`] to send data to the client.
+    /// Here used only to poll [`Sender::closed`].
+    client_tx: Sender<SniffedConnection>,
+    /// Id of the client.
+    client_id: ClientId,
+}
+
+impl Future for ClientClosed {
+    type Output = ClientId;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let client_id = self.client_id;
+
+        let future = std::pin::pin!(self.get_mut().client_tx.closed());
+        std::task::ready!(future.poll(cx));
+
+        Poll::Ready(client_id)
+    }
+}
 
 #[derive(Debug, Eq, Copy, Clone)]
 pub(crate) struct TcpSessionIdentifier {
@@ -40,7 +67,7 @@ pub(crate) struct TcpSessionIdentifier {
     ///
     /// If you were to `curl {impersonated_pod_ip}:{port}`, this would be the address of whoever
     /// is making the request.
-    source_addr: Ipv4Addr,
+    pub(crate) source_addr: Ipv4Addr,
 
     /// Local address of the impersonated pod.
     ///
@@ -53,9 +80,9 @@ pub(crate) struct TcpSessionIdentifier {
     /// NAME        READY   STATUS    IP
     /// happy-pod   1/1     Running   1.2.3.4   
     /// ```
-    dest_addr: Ipv4Addr,
-    source_port: u16,
-    dest_port: u16,
+    pub(crate) dest_addr: Ipv4Addr,
+    pub(crate) source_port: u16,
+    pub(crate) dest_port: u16,
 }
 
 impl PartialEq for TcpSessionIdentifier {
@@ -91,13 +118,7 @@ impl Hash for TcpSessionIdentifier {
     }
 }
 
-#[derive(Debug)]
-struct TCPSession {
-    id: ConnectionId,
-    clients: HashSet<ClientId>,
-}
-
-type TCPSessionMap = HashMap<TcpSessionIdentifier, TCPSession>;
+type TCPSessionMap = HashMap<TcpSessionIdentifier, broadcast::Sender<Vec<u8>>>;
 
 const fn is_new_connection(flags: u8) -> bool {
     0 != (flags & TcpFlags::SYN) && 0 == (flags & (TcpFlags::ACK | TcpFlags::RST | TcpFlags::FIN))
@@ -107,408 +128,207 @@ fn is_closed_connection(flags: u8) -> bool {
     0 != (flags & (TcpFlags::FIN | TcpFlags::RST))
 }
 
-/// Connects to a remote address (`8.8.8.8:53`) so we can find which network interface to use.
-///
-/// Used when no `user_interface` is specified in [`prepare_sniffer`] to prevent mirrord from
-/// defaulting to the wrong network interface (`eth0`), as sometimes the user's machine doesn't have
-/// it available (i.e. their default network is `enp2s0`).
-#[tracing::instrument(level = "trace")]
-async fn resolve_interface() -> Result<Option<String>, AgentError> {
-    // Connect to a remote address so we can later get the default network interface.
-    let temporary_socket = UdpSocket::bind("0.0.0.0:0").await?;
-    temporary_socket.connect("8.8.8.8:53").await?;
-
-    // Create comparison address here with `port: 0`, to match the network interface's address of
-    // `sin_port: 0`.
-    let local_address = SocketAddr::new(temporary_socket.local_addr()?.ip(), 0);
-    let raw_local_address = SockaddrStorage::from(local_address);
-
-    // Try to find an interface that matches the local ip we have.
-    let usable_interface_name = nix::ifaddrs::getifaddrs()?
-        .find_map(|iface| (raw_local_address == iface.address?).then_some(iface.interface_name));
-
-    Ok(usable_interface_name)
-}
-
-// TODO(alex): Errors here are not reported back anywhere, we end up with a generic fail of:
-// "ERROR ThreadId(03) mirrord_agent: ClientConnectionHandler::start -> Client 0 disconnected with
-// error: SnifferCommand sender failed with `channel closed`"
-//
-// And to make matters worse, the error reported back to the user is the very generic:
-// "mirrord-layer received an unexpected response from the agent pod!"
-#[tracing::instrument(level = "trace")]
-async fn prepare_sniffer(
-    network_interface: Option<String>,
-    mesh: Option<MeshVendor>,
-) -> Result<RawCapture, AgentError> {
-    // Priority is whatever the user set as an option to mirrord, then we check if we're in a mesh
-    // to use `lo` interface, otherwise we try to get the appropriate interface.
-    let interface = match network_interface.or_else(|| mesh.map(|_| "lo".to_string())) {
-        Some(interface) => interface,
-        None => resolve_interface()
-            .await?
-            .unwrap_or_else(|| "eth0".to_string()),
-    };
-
-    trace!("Using {interface:#?} interface.");
-    let capture = RawCapture::from_interface_name(&interface)?;
-    // We start with a BPF that drops everything so we won't receive *EVERYTHING*
-    // as we don't know what the layer will ask us to listen for, so this is essentially setting
-    // it to none
-    // we ofc could've done this when a layer connected, but I (A.H) thought it'd make more sense
-    // to have this shared among layers (potentially, in the future) - fme.
-    capture.set_filter(rawsocket::filter::build_drop_always())?;
-    capture
-        .ignore_outgoing()
-        .map_err(AgentError::PacketIgnoreOutgoing)?;
-    Ok(capture)
-}
-
 #[derive(Debug)]
-struct TcpPacketData {
+pub(crate) struct TcpPacketData {
     bytes: Vec<u8>,
     flags: u8,
 }
 
-#[tracing::instrument(skip(eth_packet), level = "trace", fields(bytes = %eth_packet.len()))]
-fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionIdentifier, TcpPacketData)> {
-    let eth_packet = EthernetPacket::new(&eth_packet[..])?;
-    let ip_packet = match eth_packet.get_ethertype() {
-        EtherTypes::Ipv4 => Ipv4Packet::new(eth_packet.payload())?,
-        _ => return None,
-    };
+/// Main struct implementing incoming traffic mirroring feature.
+/// Utilizes [`TcpCapture`] for sniffing on incoming TCP packets. Transforms them into
+/// incoming TCP data streams and sends copy of the traffic to all subscribed clients.
+///
+/// Can be easily used via [`api::TcpSnifferApi`].
+///
+/// # Notes on behavior under high load
+///
+/// Because this struct does not talk directly with the remote peers, we can't apply any back
+/// pressure on the incoming connections. There is no reliable mechanism to ensure that all
+/// subscribed clients receive all of the traffic. If we wait too long when distributing data
+/// between the clients, raw socket's recv buffer will overflow and we'll lose packets.
+///
+/// Having this in mind, this struct distributes incoming data using [`broadcast`] channels. If the
+/// clients are not fast enough to pick up TCP packets, they will lose them
+/// ([`broadcast::error::RecvError::Lagged`]).
+///
+/// At the same time, notifying clients about new connections (and distributing
+/// [`broadcast::Receiver`]s) is done with [`tokio::sync::mpsc`] channels (one per client).
+/// To prevent global packet loss, this struct does not use the blocking [`Sender::send`] method. It
+/// uses the non-blocking [`Sender::try_send`] method, so if the client is not fast enough to pick
+/// up the [`broadcast::Receiver`], they will miss the whole connection.
+pub(crate) struct TcpConnectionSniffer<T> {
+    command_rx: Receiver<SnifferCommand>,
+    tcp_capture: T,
 
-    let tcp_packet = match ip_packet.get_next_level_protocol() {
-        IpNextHeaderProtocols::Tcp => TcpPacket::new(ip_packet.payload())?,
-        _ => return None,
-    };
-
-    let dest_port = tcp_packet.get_destination();
-    let source_port = tcp_packet.get_source();
-
-    let identifier = TcpSessionIdentifier {
-        source_addr: ip_packet.get_source(),
-        dest_addr: ip_packet.get_destination(),
-        source_port,
-        dest_port,
-    };
-
-    trace!("identifier {identifier:?}");
-    Some((
-        identifier,
-        TcpPacketData {
-            flags: tcp_packet.get_flags(),
-            bytes: tcp_packet.payload().to_vec(),
-        },
-    ))
-}
-
-#[derive(Debug)]
-enum SnifferCommands {
-    NewAgent(Sender<DaemonTcp>),
-    Subscribe(Port),
-    UnsubscribePort(Port),
-    UnsubscribeConnection(ConnectionId),
-    AgentClosed,
-}
-
-impl From<LayerTcp> for SnifferCommands {
-    fn from(value: LayerTcp) -> Self {
-        match value {
-            LayerTcp::PortSubscribe(port) => Self::Subscribe(port),
-            LayerTcp::PortUnsubscribe(port) => Self::UnsubscribePort(port),
-            LayerTcp::ConnectionUnsubscribe(id) => Self::UnsubscribeConnection(id),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct SnifferCommand {
-    client_id: ClientId,
-    command: SnifferCommands,
-}
-
-/// Interface used by clients to interact with the [`TcpConnectionSniffer`].
-/// Multiple instances of this struct operate on a single sniffer instance.
-pub(crate) struct TcpSnifferApi {
-    /// Id of the client using this struct.
-    client_id: ClientId,
-    /// Channel used to send commands to the [`TcpConnectionSniffer`].
-    sender: Sender<SnifferCommand>,
-    /// Channel used to receive messages from the [`TcpConnectionSniffer`].
-    receiver: Receiver<DaemonTcp>,
-    /// View on the sniffer task's status.
-    task_status: TaskStatus,
-}
-
-impl TcpSnifferApi {
-    /// Create a new instance of this struct and connect it to a [`TcpConnectionSniffer`] instance.
-    /// * `client_id` - id of the client using this struct
-    /// * `sniffer_sender` - channel used to send commands to the [`TcpConnectionSniffer`]
-    /// * `task_status` - handle to the [`TcpConnectionSniffer`] exit status
-    /// * `channel_size` - capacity of the channel connecting [`TcpConnectionSniffer`] back to this
-    ///   struct
-    pub async fn new(
-        client_id: ClientId,
-        sniffer_sender: Sender<SnifferCommand>,
-        task_status: TaskStatus,
-        channel_size: usize,
-    ) -> Result<TcpSnifferApi, AgentError> {
-        let (sender, receiver) = mpsc::channel(channel_size);
-
-        sniffer_sender
-            .send(SnifferCommand {
-                client_id,
-                command: SnifferCommands::NewAgent(sender),
-            })
-            .await?;
-
-        Ok(Self {
-            client_id,
-            sender: sniffer_sender,
-            receiver,
-            task_status,
-        })
-    }
-
-    /// Send the given command to the connected [`TcpConnectionSniffer`].
-    async fn send_command(&mut self, command: SnifferCommands) -> Result<(), AgentError> {
-        let command = SnifferCommand {
-            client_id: self.client_id,
-            command,
-        };
-
-        if self.sender.send(command).await.is_ok() {
-            Ok(())
-        } else {
-            Err(self.task_status.unwrap_err().await)
-        }
-    }
-
-    /// Return the next message from the connected [`TcpConnectionSniffer`].
-    pub async fn recv(&mut self) -> Result<DaemonTcp, AgentError> {
-        match self.receiver.recv().await {
-            Some(msg) => Ok(msg),
-            None => Err(self.task_status.unwrap_err().await),
-        }
-    }
-
-    /// Tansform the given message into a [`SnifferCommands`] and pass it to the connected
-    /// [`TcpConnectionSniffer`].
-    pub async fn handle_client_message(&mut self, message: LayerTcp) -> Result<(), AgentError> {
-        self.send_command(message.into()).await
-    }
-}
-
-impl Drop for TcpSnifferApi {
-    fn drop(&mut self) {
-        self.sender
-            .try_send(SnifferCommand {
-                client_id: self.client_id,
-                command: SnifferCommands::AgentClosed,
-            })
-            .unwrap();
-    }
-}
-
-pub(crate) struct TcpConnectionSniffer {
     port_subscriptions: Subscriptions<Port, ClientId>,
-    receiver: Receiver<SnifferCommand>,
-    client_senders: HashMap<ClientId, Sender<DaemonTcp>>,
-    raw_capture: RawCapture,
     sessions: TCPSessionMap,
-    //todo: impl drop for index allocator and connection id..
-    connection_id_to_tcp_identifier: HashMap<ConnectionId, TcpSessionIdentifier>,
-    index_allocator: IndexAllocator<ConnectionId, 100>,
+
+    client_txs: HashMap<ClientId, Sender<SniffedConnection>>,
+    clients_closed: FuturesUnordered<ClientClosed>,
 }
 
-impl TcpConnectionSniffer {
-    pub const TASK_NAME: &'static str = "Sniffer";
-
-    /// Runs the sniffer loop, capturing packets.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub async fn start(mut self, cancel_token: CancellationToken) -> Result<(), AgentError> {
-        loop {
-            select! {
-                command = self.receiver.recv() => {
-                    if let Some(command) = command {
-                        self.handle_command(command).await?;
-                    } else { break; }
-                },
-                packet = self.raw_capture.next() => {
-                    self.handle_packet(packet?).await?;
-                }
-                _ = cancel_token.cancelled() => {
-                    break;
-                }
-            }
-        }
-        debug!("TCPConnectionSniffer exiting");
-        Ok(())
+impl<T> fmt::Debug for TcpConnectionSniffer<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TcpConnectionSniffer")
+            .field("clients", &self.client_txs.keys())
+            .field("port_subscriptions", &self.port_subscriptions)
+            .field("open_tcp_sessions", &self.sessions.keys())
+            .finish()
     }
+}
 
+impl TcpConnectionSniffer<RawSocketTcpCapture> {
     /// Creates and prepares a new [`TcpConnectionSniffer`] that uses BPF filters to capture network
     /// packets.
     ///
     /// The capture uses a network interface specified by the user, if there is none, then it tries
     /// to find a proper one by starting a connection. If this fails, we use "eth0" as a last
     /// resort.
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = Level::TRACE, skip(command_rx), err)]
     pub async fn new(
-        receiver: Receiver<SnifferCommand>,
+        command_rx: Receiver<SnifferCommand>,
         network_interface: Option<String>,
         mesh: Option<MeshVendor>,
     ) -> Result<Self, AgentError> {
-        let raw_capture = prepare_sniffer(network_interface, mesh).await?;
+        let tcp_capture = RawSocketTcpCapture::new(network_interface, mesh).await?;
 
         Ok(Self {
-            receiver,
-            raw_capture,
+            command_rx,
+            tcp_capture,
+
             port_subscriptions: Default::default(),
-            client_senders: HashMap::new(),
             sessions: TCPSessionMap::new(),
-            //todo: impl drop for index allocator and connection id..
-            connection_id_to_tcp_identifier: HashMap::new(),
-            index_allocator: Default::default(),
+
+            client_txs: HashMap::new(),
+            clients_closed: Default::default(),
         })
+    }
+}
+
+impl<R> TcpConnectionSniffer<R>
+where
+    R: TcpCapture,
+{
+    pub const TASK_NAME: &'static str = "Sniffer";
+
+    /// Capacity of [`broadcast`] channels used to distribute incoming TCP packets between clients.
+    const CONNECTION_DATA_CHANNEL_CAPACITY: usize = 512;
+
+    /// Runs the sniffer loop, capturing packets.
+    #[tracing::instrument(level = Level::DEBUG, skip(cancel_token), err)]
+    pub async fn start(mut self, cancel_token: CancellationToken) -> Result<(), AgentError> {
+        loop {
+            select! {
+                command = self.command_rx.recv() => {
+                    let Some(command) = command else {
+                        tracing::debug!("command channel closed, exiting");
+                        break;
+                    };
+
+                    self.handle_command(command)?;
+                },
+
+                Some(client_id) = self.clients_closed.next() => {
+                    self.handle_client_closed(client_id)?;
+                }
+
+                result = self.tcp_capture.next() => {
+                    let (identifier, packet_data) = result?;
+                    self.handle_packet(identifier, packet_data)?;
+                }
+
+                _ = cancel_token.cancelled() => {
+                    tracing::debug!("token cancelled, exiting");
+                    break;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// New layer is connecting to this agent sniffer.
-    #[tracing::instrument(level = "trace", ret, skip(self, sender))]
-    fn handle_new_client(&mut self, client_id: ClientId, sender: Sender<DaemonTcp>) {
-        self.client_senders.insert(client_id, sender);
-    }
-
-    /// layer with `client_id` wants to sniff on `port`.
-    #[tracing::instrument(level = "trace", ret, skip(self))]
-    async fn handle_subscribe(
-        &mut self,
-        client_id: ClientId,
-        port: Port,
-    ) -> Result<(), AgentError> {
-        self.port_subscriptions.subscribe(client_id, port);
-        self.update_sniffer()?;
-        self.send_message_to_client(&client_id, DaemonTcp::SubscribeResult(Ok(port)))
-            .await
+    #[tracing::instrument(level = Level::TRACE, skip(sender))]
+    fn handle_new_client(&mut self, client_id: ClientId, sender: Sender<SniffedConnection>) {
+        self.client_txs.insert(client_id, sender.clone());
+        self.clients_closed.push(ClientClosed {
+            client_tx: sender.clone(),
+            client_id,
+        });
     }
 
     /// Removes the client with `client_id`, and also unsubscribes its port.
-    #[tracing::instrument(level = "trace", skip(self))]
+    /// Adjusts BPF filter if needed.
+    #[tracing::instrument(level = Level::TRACE, err)]
     fn handle_client_closed(&mut self, client_id: ClientId) -> Result<(), AgentError> {
-        self.client_senders.remove(&client_id);
-        self.port_subscriptions.remove_client(client_id);
-        self.update_sniffer()
-    }
+        self.client_txs.remove(&client_id);
 
-    /// Updates the sniffer's internal state.
-    ///
-    /// Called when the sniffer receives a new command.
-    #[tracing::instrument(level = "trace", ret, skip(self))]
-    fn update_sniffer(&mut self) -> Result<(), AgentError> {
-        let ports = self.port_subscriptions.get_subscribed_topics();
+        if self.port_subscriptions.remove_client(client_id) {
+            self.update_packet_filter()?;
+        }
 
-        if ports.is_empty() {
-            trace!("Empty ports, setting dummy bpf");
-            self.raw_capture
-                .set_filter(rawsocket::filter::build_drop_always())?
-        } else {
-            self.raw_capture
-                .set_filter(rawsocket::filter::build_tcp_port_filter(&ports))?
-        };
         Ok(())
     }
 
-    fn qualified_port(&self, port: u16) -> bool {
-        self.port_subscriptions
-            .get_subscribed_topics()
-            .contains(&port)
+    /// Updates BPF filter used by [`Self::tcp_capture`] to match state of
+    /// [`Self::port_subscriptions`].
+    #[tracing::instrument(level = Level::TRACE, err)]
+    fn update_packet_filter(&mut self) -> Result<(), AgentError> {
+        let ports = self.port_subscriptions.get_subscribed_topics();
+
+        let filter = if ports.is_empty() {
+            tracing::trace!("No ports subscribed, setting dummy bpf");
+            rawsocket::filter::build_drop_always()
+        } else {
+            rawsocket::filter::build_tcp_port_filter(&ports)
+        };
+
+        self.tcp_capture.set_filter(filter)?;
+
+        Ok(())
     }
 
-    #[tracing::instrument(level = "trace", ret, skip(self))]
-    async fn handle_command(&mut self, command: SnifferCommand) -> Result<(), AgentError> {
+    #[tracing::instrument(level = Level::TRACE, err)]
+    fn handle_command(&mut self, command: SnifferCommand) -> Result<(), AgentError> {
         match command {
             SnifferCommand {
                 client_id,
-                command: SnifferCommands::NewAgent(sender),
+                command: SnifferCommandInner::NewClient(sender),
             } => {
                 self.handle_new_client(client_id, sender);
             }
+
             SnifferCommand {
                 client_id,
-                command: SnifferCommands::Subscribe(port),
+                command: SnifferCommandInner::Subscribe(port, tx),
             } => {
-                self.handle_subscribe(client_id, port).await?;
+                if self.port_subscriptions.subscribe(client_id, port) {
+                    self.update_packet_filter()?;
+                }
+
+                let _ = tx.send(port);
             }
+
             SnifferCommand {
                 client_id,
-                command: SnifferCommands::AgentClosed,
+                command: SnifferCommandInner::UnsubscribePort(port),
             } => {
-                self.handle_client_closed(client_id)?;
-            }
-            SnifferCommand {
-                client_id,
-                command: SnifferCommands::UnsubscribeConnection(connection_id),
-            } => {
-                self.connection_id_to_tcp_identifier
-                    .get(&connection_id)
-                    .and_then(|identifier| {
-                        self.sessions
-                            .get_mut(identifier)
-                            .map(|session| session.clients.remove(&client_id))
-                    });
-            }
-            SnifferCommand {
-                client_id,
-                command: SnifferCommands::UnsubscribePort(port),
-            } => {
-                self.port_subscriptions.unsubscribe(client_id, port);
-                self.update_sniffer()?;
+                if self.port_subscriptions.unsubscribe(client_id, port) {
+                    self.update_packet_filter()?;
+                }
             }
         }
-        Ok(())
-    }
 
-    async fn send_message_to_clients(
-        &mut self,
-        clients: impl Iterator<Item = &ClientId>,
-        message: DaemonTcp,
-    ) -> Result<(), AgentError> {
-        trace!("TcpConnectionSniffer::send_message_to_clients");
-
-        for client_id in clients {
-            self.send_message_to_client(client_id, message.clone())
-                .await?;
-        }
-        Ok(())
-    }
-
-    /// Sends a [`DaemonTcp`] message back to the client with `client_id`.
-    #[tracing::instrument(level = "trace", ret, skip(self, message))]
-    async fn send_message_to_client(
-        &mut self,
-        client_id: &ClientId,
-        message: DaemonTcp,
-    ) -> Result<(), AgentError> {
-        if let Some(sender) = self.client_senders.get(client_id) {
-            sender.send(message).await.map_err(|err| {
-                warn!(
-                    "Failed to send message to client {} with {:#?}!",
-                    client_id, err
-                );
-                let _ = self.handle_client_closed(*client_id);
-                err
-            })?;
-        }
         Ok(())
     }
 
     /// First it checks the `tcp_flags` with [`is_new_connection`], if that's not the case, meaning
     /// we have traffic from some existing connection from before mirrord started, then it tries to
-    /// see if `bytes` contains an HTTP request (HTTP/1) of some sort. When an HTTP request is
+    /// see if `bytes` contains an HTTP request of some sort. When an HTTP request is
     /// detected, then the agent should start mirroring as if it was a new connection.
     ///
     /// tl;dr: checks packet flags, or if it's an HTTP packet, then begins a new sniffing session.
-    #[tracing::instrument(level = "trace", ret, skip(bytes))]
+    #[tracing::instrument(level = Level::TRACE, ret, skip(bytes), fields(bytes = bytes.len()), ret)]
     fn treat_as_new_session(tcp_flags: u8, bytes: &[u8]) -> bool {
         is_new_connection(tcp_flags)
             || matches!(
@@ -517,100 +337,540 @@ impl TcpConnectionSniffer {
             )
     }
 
-    #[tracing::instrument(level = "trace", ret, skip(self, eth_packet), fields(bytes = %eth_packet.len()))]
-    async fn handle_packet(&mut self, eth_packet: Vec<u8>) -> Result<(), AgentError> {
-        let (identifier, tcp_packet) = match get_tcp_packet(eth_packet) {
-            Some(res) => res,
-            None => return Ok(()),
-        };
-
-        let dest_port = identifier.dest_port;
-        let source_port = identifier.source_port;
-        let tcp_flags = tcp_packet.flags;
-        trace!(
-            "dest_port {:#?} | source_port {:#?} | tcp_flags {:#?}",
-            dest_port,
-            source_port,
-            tcp_flags
-        );
-
-        let is_client_packet = self.qualified_port(dest_port);
-
-        let session = match self.sessions.remove(&identifier) {
-            Some(session) => session,
-            None => {
+    /// Handles TCP packet sniffed by [`Self::tcp_capture`].
+    #[tracing::instrument(
+        level = Level::TRACE,
+        ret,
+        skip(self),
+        fields(
+            destination_port = identifier.dest_port,
+            source_port = identifier.source_port,
+            tcp_flags = tcp_packet.flags,
+            bytes = tcp_packet.bytes.len(),
+        )
+    )]
+    fn handle_packet(
+        &mut self,
+        identifier: TcpSessionIdentifier,
+        tcp_packet: TcpPacketData,
+    ) -> Result<(), AgentError> {
+        let data_tx = match self.sessions.entry(identifier) {
+            Entry::Occupied(e) => e,
+            Entry::Vacant(e) => {
                 // Performs a check on the `tcp_flags` and on the packet contents to see if this
                 // should be treated as a new connection.
-                if !Self::treat_as_new_session(tcp_flags, &tcp_packet.bytes) {
+                if !Self::treat_as_new_session(tcp_packet.flags, &tcp_packet.bytes) {
                     // Either it's an existing session, or some sort of existing traffic we don't
                     // care to start mirroring.
                     return Ok(());
                 }
 
-                if !is_client_packet {
+                let Some(client_ids) = self
+                    .port_subscriptions
+                    .get_topic_subscribers(identifier.dest_port)
+                    .filter(|ids| !ids.is_empty())
+                else {
                     return Ok(());
-                }
-
-                let id = match self.index_allocator.next_index() {
-                    Some(id) => id,
-                    None => {
-                        error!("connection index exhausted, dropping new connection");
-                        return Ok(());
-                    }
                 };
 
-                let client_ids = self.port_subscriptions.get_topic_subscribers(dest_port);
-                trace!("client_ids {:#?}", client_ids);
+                tracing::trace!(
+                    ?client_ids,
+                    "TCP packet should be treated as new session and start connections for clients"
+                );
 
-                let message = DaemonTcp::NewConnection(NewTcpConnection {
-                    destination_port: dest_port,
-                    source_port,
-                    connection_id: id,
-                    remote_address: IpAddr::V4(identifier.source_addr),
-                    local_address: IpAddr::V4(identifier.dest_addr),
-                });
-                trace!("message {:#?}", message);
+                let (data_tx, _) = broadcast::channel(Self::CONNECTION_DATA_CHANNEL_CAPACITY);
 
-                self.send_message_to_clients(client_ids.iter(), message)
-                    .await?;
+                for client_id in client_ids {
+                    let Some(client_tx) = self.client_txs.get(client_id) else {
+                        tracing::error!(
+                            client_id,
+                            destination_port = identifier.dest_port,
+                            source_port = identifier.source_port,
+                            tcp_flags = tcp_packet.flags,
+                            bytes = tcp_packet.bytes.len(),
+                            "Failed to find client while handling new sniffed TCP connection, this is a bug",
+                        );
 
-                self.connection_id_to_tcp_identifier.insert(id, identifier);
+                        continue;
+                    };
 
-                TCPSession {
-                    id,
-                    clients: client_ids.into_iter().collect(),
+                    let connection = SniffedConnection {
+                        session_id: identifier,
+                        data: data_tx.subscribe(),
+                    };
+
+                    match client_tx.try_send(connection) {
+                        Ok(()) => {}
+
+                        Err(TrySendError::Closed(..)) => {
+                            // Client closed.
+                            // State will be cleaned up when `self.clients_closed` picks it up.
+                        }
+
+                        Err(TrySendError::Full(..)) => {
+                            tracing::warn!(
+                                client_id,
+                                destination_port = identifier.dest_port,
+                                source_port = identifier.source_port,
+                                tcp_flags = tcp_packet.flags,
+                                bytes = tcp_packet.bytes.len(),
+                                "Client queue of new sniffed TCP connections is full, dropping",
+                            );
+
+                            continue;
+                        }
+                    }
                 }
+
+                e.insert_entry(data_tx)
             }
         };
-        trace!("session {:#?}", session);
 
-        if is_client_packet && !tcp_packet.bytes.is_empty() {
-            let message = DaemonTcp::Data(TcpData {
-                bytes: tcp_packet.bytes,
-                connection_id: session.id,
-            });
-            self.send_message_to_clients(session.clients.iter(), message)
-                .await?;
+        tracing::trace!("Resolved data broadcast channel");
+
+        if !tcp_packet.bytes.is_empty() && data_tx.get().send(tcp_packet.bytes).is_err() {
+            tracing::trace!("All data receivers are dead, dropping data broadcast sender");
+            data_tx.remove();
+            return Ok(());
         }
 
-        if is_closed_connection(tcp_flags) {
-            self.index_allocator.free_index(session.id);
-            self.connection_id_to_tcp_identifier.remove(&session.id);
-            let message = DaemonTcp::Close(TcpClose {
-                connection_id: session.id,
-            });
-
-            debug!(
-                "TcpConnectionSniffer::handle_packet -> message {:#?}",
-                message
-            );
-
-            self.send_message_to_clients(session.clients.iter(), message)
-                .await?;
-        } else {
-            self.sessions.insert(identifier, session);
+        if is_closed_connection(tcp_packet.flags) {
+            tracing::trace!("TCP packet closes connection, dropping data broadcast channel");
+            data_tx.remove();
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+        time::Duration,
+    };
+
+    use api::TcpSnifferApi;
+    use mirrord_protocol::{
+        tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
+        ConnectionId, LogLevel,
+    };
+    use tcp_capture::test::TcpPacketsChannel;
+    use tokio::sync::mpsc;
+
+    use super::*;
+    use crate::watched_task::{TaskStatus, WatchedTask};
+
+    struct TestSnifferSetup {
+        command_tx: Sender<SnifferCommand>,
+        task_status: TaskStatus,
+        packet_tx: Sender<(TcpSessionIdentifier, TcpPacketData)>,
+        times_filter_changed: Arc<AtomicUsize>,
+        next_client_id: ClientId,
+    }
+
+    impl TestSnifferSetup {
+        async fn get_api(&mut self) -> TcpSnifferApi {
+            let client_id = self.next_client_id;
+            self.next_client_id += 1;
+            TcpSnifferApi::new(client_id, self.command_tx.clone(), self.task_status.clone())
+                .await
+                .unwrap()
+        }
+
+        fn times_filter_changed(&self) -> usize {
+            self.times_filter_changed.load(Ordering::Relaxed)
+        }
+
+        fn new() -> Self {
+            let (packet_tx, packet_rx) = mpsc::channel(128);
+            let (command_tx, command_rx) = mpsc::channel(16);
+            let times_filter_changed = Arc::new(AtomicUsize::default());
+
+            let sniffer = TcpConnectionSniffer {
+                command_rx,
+                tcp_capture: TcpPacketsChannel {
+                    times_filter_changed: times_filter_changed.clone(),
+                    receiver: packet_rx,
+                },
+                port_subscriptions: Default::default(),
+                sessions: Default::default(),
+                client_txs: Default::default(),
+                clients_closed: Default::default(),
+            };
+            let watched_task = WatchedTask::new(
+                TcpConnectionSniffer::<TcpPacketsChannel>::TASK_NAME,
+                sniffer.start(CancellationToken::new()),
+            );
+            let task_status = watched_task.status();
+            tokio::spawn(watched_task.start());
+
+            Self {
+                command_tx,
+                task_status,
+                packet_tx,
+                times_filter_changed,
+                next_client_id: 0,
+            }
+        }
+    }
+
+    /// Simulates two sniffed connections, only one matching client's subscription.
+    #[tokio::test]
+    async fn one_client() {
+        let mut setup = TestSnifferSetup::new();
+        let mut api = setup.get_api().await;
+
+        api.handle_client_message(LayerTcp::PortSubscribe(80))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            api.recv().await.unwrap(),
+            (DaemonTcp::SubscribeResult(Ok(80)), None),
+        );
+
+        for dest_port in [80, 81] {
+            setup
+                .packet_tx
+                .send((
+                    TcpSessionIdentifier {
+                        source_addr: "1.1.1.1".parse().unwrap(),
+                        dest_addr: "127.0.0.1".parse().unwrap(),
+                        source_port: 3133,
+                        dest_port,
+                    },
+                    TcpPacketData {
+                        bytes: b"hello_1".into(),
+                        flags: TcpFlags::SYN,
+                    },
+                ))
+                .await
+                .unwrap();
+
+            setup
+                .packet_tx
+                .send((
+                    TcpSessionIdentifier {
+                        source_addr: "1.1.1.1".parse().unwrap(),
+                        dest_addr: "127.0.0.1".parse().unwrap(),
+                        source_port: 3133,
+                        dest_port: 80,
+                    },
+                    TcpPacketData {
+                        bytes: b"hello_2".into(),
+                        flags: TcpFlags::FIN,
+                    },
+                ))
+                .await
+                .unwrap();
+        }
+
+        let (message, log) = api.recv().await.unwrap();
+        assert_eq!(
+            message,
+            DaemonTcp::NewConnection(NewTcpConnection {
+                connection_id: 0,
+                remote_address: "1.1.1.1".parse().unwrap(),
+                destination_port: 80,
+                source_port: 3133,
+                local_address: "127.0.0.1".parse().unwrap(),
+            }),
+        );
+        assert_eq!(log, None);
+
+        let (message, log) = api.recv().await.unwrap();
+        assert_eq!(
+            message,
+            DaemonTcp::Data(TcpData {
+                connection_id: 0,
+                bytes: b"hello_1".into(),
+            }),
+        );
+        assert_eq!(log, None);
+
+        let (message, log) = api.recv().await.unwrap();
+        assert_eq!(
+            message,
+            DaemonTcp::Data(TcpData {
+                connection_id: 0,
+                bytes: b"hello_2".into(),
+            }),
+        );
+        assert_eq!(log, None);
+
+        let (message, log) = api.recv().await.unwrap();
+        assert_eq!(message, DaemonTcp::Close(TcpClose { connection_id: 0 }),);
+        assert_eq!(log, None);
+    }
+
+    /// Tests that [`TcpCapture`] filter is replaced only when needed.
+    ///
+    /// # Note
+    ///
+    /// Due to fact that [`LayerTcp::PortUnsubscribe`] request does not generate any response, this
+    /// test does some sleeping to give the sniffer time to process.
+    #[tokio::test]
+    async fn filter_replace() {
+        let mut setup = TestSnifferSetup::new();
+
+        let mut api_1 = setup.get_api().await;
+        let mut api_2 = setup.get_api().await;
+
+        api_1
+            .handle_client_message(LayerTcp::PortSubscribe(80))
+            .await
+            .unwrap();
+        assert_eq!(
+            api_1.recv().await.unwrap(),
+            (DaemonTcp::SubscribeResult(Ok(80)), None),
+        );
+        assert_eq!(setup.times_filter_changed(), 1);
+
+        api_2
+            .handle_client_message(LayerTcp::PortSubscribe(80))
+            .await
+            .unwrap();
+        assert_eq!(
+            api_2.recv().await.unwrap(),
+            (DaemonTcp::SubscribeResult(Ok(80)), None),
+        );
+        assert_eq!(setup.times_filter_changed(), 1); // api_1 already subscribed `80`
+
+        api_2
+            .handle_client_message(LayerTcp::PortSubscribe(81))
+            .await
+            .unwrap();
+        assert_eq!(
+            api_2.recv().await.unwrap(),
+            (DaemonTcp::SubscribeResult(Ok(81)), None),
+        );
+        assert_eq!(setup.times_filter_changed(), 2);
+
+        api_1
+            .handle_client_message(LayerTcp::PortSubscribe(81))
+            .await
+            .unwrap();
+        assert_eq!(
+            api_1.recv().await.unwrap(),
+            (DaemonTcp::SubscribeResult(Ok(81)), None),
+        );
+        assert_eq!(setup.times_filter_changed(), 2); // api_2 already subscribed `81`
+
+        api_1
+            .handle_client_message(LayerTcp::PortUnsubscribe(80))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(setup.times_filter_changed(), 2); // api_2 still subscribes `80`
+
+        api_2
+            .handle_client_message(LayerTcp::PortUnsubscribe(81))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(setup.times_filter_changed(), 2); // api_1 still subscribes `81`
+
+        api_1
+            .handle_client_message(LayerTcp::PortUnsubscribe(81))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(setup.times_filter_changed(), 3);
+
+        api_2
+            .handle_client_message(LayerTcp::PortUnsubscribe(80))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(setup.times_filter_changed(), 4);
+    }
+
+    /// Simulates scenario where client does not read connection data fast enough.
+    /// Packet buffer should overflow in the [`broadcast`] channel and the client should see the
+    /// connection being closed.
+    #[tokio::test]
+    async fn client_lagging_on_data() {
+        let mut setup = TestSnifferSetup::new();
+        let mut api = setup.get_api().await;
+
+        api.handle_client_message(LayerTcp::PortSubscribe(80))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            api.recv().await.unwrap(),
+            (DaemonTcp::SubscribeResult(Ok(80)), None),
+        );
+
+        let session_id = TcpSessionIdentifier {
+            source_addr: "1.1.1.1".parse().unwrap(),
+            dest_addr: "127.0.0.1".parse().unwrap(),
+            source_port: 3133,
+            dest_port: 80,
+        };
+
+        setup
+            .packet_tx
+            .send((
+                session_id,
+                TcpPacketData {
+                    bytes: b"hello".into(),
+                    flags: TcpFlags::SYN,
+                },
+            ))
+            .await
+            .unwrap();
+
+        let (message, log) = api.recv().await.unwrap();
+        assert_eq!(
+            message,
+            DaemonTcp::NewConnection(NewTcpConnection {
+                connection_id: 0,
+                remote_address: session_id.source_addr.into(),
+                destination_port: session_id.dest_port,
+                source_port: session_id.source_port,
+                local_address: session_id.dest_addr.into(),
+            }),
+        );
+        assert_eq!(log, None);
+
+        let (message, log) = api.recv().await.unwrap();
+        assert_eq!(
+            message,
+            DaemonTcp::Data(TcpData {
+                connection_id: 0,
+                bytes: b"hello".to_vec(),
+            }),
+        );
+        assert_eq!(log, None);
+
+        for _ in 0..TcpConnectionSniffer::<TcpPacketsChannel>::CONNECTION_DATA_CHANNEL_CAPACITY + 2
+        {
+            setup
+                .packet_tx
+                .send((
+                    session_id,
+                    TcpPacketData {
+                        bytes: vec![0],
+                        flags: 0,
+                    },
+                ))
+                .await
+                .unwrap();
+        }
+
+        // Wait until sniffer consumes all messages.
+        setup
+            .packet_tx
+            .reserve_many(setup.packet_tx.max_capacity())
+            .await
+            .unwrap();
+
+        let (message, log) = api.recv().await.unwrap();
+        assert_eq!(message, DaemonTcp::Close(TcpClose { connection_id: 0 }),);
+        let log = log.unwrap();
+        assert_eq!(log.level, LogLevel::Error);
+    }
+
+    /// Simulates scenario where client does not read notifications about new connections fast
+    /// enough. Client should miss new connections.
+    #[tokio::test]
+    async fn client_lagging_on_new_connections() {
+        let mut setup = TestSnifferSetup::new();
+        let mut api = setup.get_api().await;
+
+        api.handle_client_message(LayerTcp::PortSubscribe(80))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            api.recv().await.unwrap(),
+            (DaemonTcp::SubscribeResult(Ok(80)), None),
+        );
+
+        let source_addr = "1.1.1.1".parse().unwrap();
+        let dest_addr = "127.0.0.1".parse().unwrap();
+
+        // First send `TcpSnifferApi::CONNECTION_CHANNEL_SIZE` + 2 first connections.
+        let session_ids =
+            (0..=TcpSnifferApi::CONNECTION_CHANNEL_SIZE).map(|idx| TcpSessionIdentifier {
+                source_addr,
+                dest_addr,
+                source_port: 3000 + idx as u16,
+                dest_port: 80,
+            });
+        for session in session_ids {
+            setup
+                .packet_tx
+                .send((
+                    session,
+                    TcpPacketData {
+                        bytes: Default::default(),
+                        flags: TcpFlags::SYN,
+                    },
+                ))
+                .await
+                .unwrap();
+        }
+
+        // Wait until sniffer processes all packets.
+        let permit = setup
+            .packet_tx
+            .reserve_many(setup.packet_tx.max_capacity())
+            .await
+            .unwrap();
+        std::mem::drop(permit);
+
+        // Verify that we picked up `TcpSnifferApi::CONNECTION_CHANNEL_SIZE` first connections.
+        for i in 0..TcpSnifferApi::CONNECTION_CHANNEL_SIZE {
+            let (msg, log) = api.recv().await.unwrap();
+            assert_eq!(log, None);
+            assert_eq!(
+                msg,
+                DaemonTcp::NewConnection(NewTcpConnection {
+                    connection_id: i as ConnectionId,
+                    remote_address: source_addr.into(),
+                    destination_port: 80,
+                    source_port: 3000 + i as u16,
+                    local_address: dest_addr.into(),
+                })
+            )
+        }
+
+        // Send one more connection.
+        setup
+            .packet_tx
+            .send((
+                TcpSessionIdentifier {
+                    source_addr,
+                    dest_addr,
+                    source_port: 3222,
+                    dest_port: 80,
+                },
+                TcpPacketData {
+                    bytes: Default::default(),
+                    flags: TcpFlags::SYN,
+                },
+            ))
+            .await
+            .unwrap();
+
+        // Verify that we missed the last connections from the first batch.
+        let (msg, log) = api.recv().await.unwrap();
+        assert_eq!(log, None);
+        assert_eq!(
+            msg,
+            DaemonTcp::NewConnection(NewTcpConnection {
+                connection_id: TcpSnifferApi::CONNECTION_CHANNEL_SIZE as ConnectionId,
+                remote_address: source_addr.into(),
+                destination_port: 80,
+                source_port: 3222,
+                local_address: dest_addr.into(),
+            }),
+        );
     }
 }

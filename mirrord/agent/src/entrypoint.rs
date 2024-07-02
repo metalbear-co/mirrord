@@ -13,6 +13,7 @@ use client_connection::AgentTlsConnector;
 use dns::{DnsCommand, DnsWorker};
 use futures::TryFutureExt;
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
+use sniffer::tcp_capture::RawSocketTcpCapture;
 use tokio::{
     net::{TcpListener, TcpStream},
     process::Command,
@@ -35,7 +36,7 @@ use crate::{
     file::FileManager,
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     runtime::get_container,
-    sniffer::{SnifferCommand, TcpConnectionSniffer, TcpSnifferApi},
+    sniffer::{api::TcpSnifferApi, messages::SnifferCommand, TcpConnectionSniffer},
     steal::{
         ip_tables::{
             new_iptables, IPTablesWrapper, SafeIpTables, IPTABLE_MESH, IPTABLE_MESH_ENV,
@@ -48,8 +49,7 @@ use crate::{
     *,
 };
 
-/// Size of [`mpsc`] channels connecting [`TcpStealerApi`] and [`TcpSnifferApi`] with their
-/// background tasks.
+/// Size of [`mpsc`] channels connecting [`TcpStealerApi`] with the background task.
 const CHANNEL_SIZE: usize = 1024;
 
 /// Keeps track of next client id.
@@ -201,6 +201,8 @@ struct ClientConnectionHandler {
     udp_outgoing_api: UdpOutgoingApi,
     dns_api: DnsApi,
     state: State,
+    /// Whether the client has sent us [`ClientMessage::ReadyForLogs`].
+    ready_for_logs: bool,
 }
 
 impl ClientConnectionHandler {
@@ -233,6 +235,7 @@ impl ClientConnectionHandler {
             udp_outgoing_api,
             dns_api,
             state,
+            ready_for_logs: false,
         };
 
         Ok(client_handler)
@@ -244,7 +247,7 @@ impl ClientConnectionHandler {
         connection: &mut ClientConnection,
     ) -> Option<TcpSnifferApi> {
         if let BackgroundTask::Running(sniffer_status, sniffer_sender) = task {
-            match TcpSnifferApi::new(id, sniffer_sender, sniffer_status, CHANNEL_SIZE).await {
+            match TcpSnifferApi::new(id, sniffer_sender, sniffer_status).await {
                 Ok(api) => Some(api),
                 Err(e) => {
                     let message = format!(
@@ -338,7 +341,13 @@ impl ClientConnectionHandler {
                         unreachable!()
                     }
                 }, if self.tcp_sniffer_api.is_some() => match message {
-                    Ok(message) => self.respond(DaemonMessage::Tcp(message)).await?,
+                    Ok((message, Some(log))) if self.ready_for_logs => {
+                        self.respond(DaemonMessage::LogMessage(log)).await?;
+                        self.respond(DaemonMessage::Tcp(message)).await?;
+                    }
+                    Ok((message, _)) => {
+                        self.respond(DaemonMessage::Tcp(message)).await?;
+                    },
                     Err(e) => break e,
                 },
                 message = async {
@@ -461,7 +470,9 @@ impl ClientConnectionHandler {
                 ))
                 .await?;
             }
-            ClientMessage::ReadyForLogs => {}
+            ClientMessage::ReadyForLogs => {
+                self.ready_for_logs = true;
+            }
         }
 
         Ok(true)
@@ -498,7 +509,7 @@ async fn start_agent(args: Args) -> Result<()> {
         let mesh = args.mode.mesh();
 
         let watched_task = WatchedTask::new(
-            TcpConnectionSniffer::TASK_NAME,
+            TcpConnectionSniffer::<RawSocketTcpCapture>::TASK_NAME,
             TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface, mesh).and_then(
                 |sniffer| async move {
                     let res = sniffer.start(cancellation_token).await;
@@ -512,7 +523,7 @@ async fn start_agent(args: Args) -> Result<()> {
         let status = watched_task.status();
         let task = run_thread_in_namespace(
             watched_task.start(),
-            TcpConnectionSniffer::TASK_NAME.to_string(),
+            TcpConnectionSniffer::<RawSocketTcpCapture>::TASK_NAME.to_string(),
             state.container_pid(),
             "net",
         );
