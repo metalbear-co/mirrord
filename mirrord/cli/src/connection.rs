@@ -37,7 +37,7 @@ where
 {
     let mut operator_subtask = progress.subtask("checking operator");
 
-    let Some(mut api) = OperatorApi::try_new(config, analytics, &operator_subtask).await? else {
+    let Some(api) = OperatorApi::try_new(config, analytics, &operator_subtask).await? else {
         operator_subtask.success(Some("proceeding without operator"));
         return Ok(None);
     };
@@ -66,7 +66,7 @@ where
     }
 
     let mut user_cert_subtask = operator_subtask.subtask("preparing user credentials");
-    api.prepare_client_cert(analytics).await?;
+    let api = api.prepare_client_cert(analytics).await.into_certified()?;
     user_cert_subtask.success(Some("user credentials prepared"));
 
     let mut session_subtask = operator_subtask.subtask("starting session");

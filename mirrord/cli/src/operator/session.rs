@@ -4,7 +4,7 @@ use mirrord_config::LayerConfig;
 use mirrord_operator::{
     client::{
         error::{OperatorApiError, OperatorOperation},
-        OperatorApi,
+        MaybeClientCert, OperatorApi,
     },
     crd::SessionCrd,
 };
@@ -22,7 +22,7 @@ pub(super) struct SessionCommandHandler {
     sub_progress: ProgressTracker,
 
     /// Api to talk with session routes in the operator.
-    operator_api: OperatorApi,
+    operator_api: OperatorApi<MaybeClientCert>,
 
     /// The command the user is trying to execute from the cli.
     command: SessionCommand,
@@ -38,19 +38,17 @@ impl SessionCommandHandler {
             progress.failure(Some(&format!("failed to read config from env: {error}")));
         })?;
 
-        let mut operator_api = OperatorApi::new(&config, &mut NullReporter::default())
+        let operator_api = OperatorApi::new(&config, &mut NullReporter::default())
             .await
             .inspect_err(|_| {
                 progress.failure(Some("failed to create operator API"));
-            })?;
-
-        operator_api
+            })?
             .prepare_client_cert(&mut NullReporter::default())
-            .await
-            .inspect_err(|error| {
-                progress.warning(&format!("Failed to prepare user certificate: {error}"));
-            })
-            .ok();
+            .await;
+
+        operator_api.inspect_cert_error(|error| {
+            progress.warning(&format!("Failed to prepare user certificate: {error}"));
+        });
 
         let sub_progress = progress.subtask("preparing...");
 

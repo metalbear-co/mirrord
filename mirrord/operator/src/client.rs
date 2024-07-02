@@ -40,6 +40,55 @@ mod discovery;
 pub mod error;
 mod upgrade;
 
+/// State of client's [`Certificate`] the should be attached to some operator requests.
+pub trait ClientCertificateState: fmt::Debug {}
+
+/// Represents a [`ClientCertificateState`] where we don't have the certificate.
+#[derive(Debug)]
+pub struct NoClientCert {
+    /// [`Config::headers`] here contain some extra entries:
+    /// 1. [`CLIENT_HOSTNAME_HEADER`] (if available)
+    /// 2. [`CLIENT_NAME_HEADER`] (if available)
+    /// 3. [`MIRRORD_CLI_VERSION_HEADER`]
+    ///
+    /// Can be used to create a certified [`Client`] when the [`Certificate`] is available.
+    base_config: Config,
+}
+
+impl ClientCertificateState for NoClientCert {}
+
+/// Represents a [`ClientCertificateState`] where have the certificate.
+pub struct PreparedClientCert {
+    /// Prepared client certificate.
+    cert: Certificate,
+}
+
+impl fmt::Debug for PreparedClientCert {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PreparedClientCert")
+            .field("cert_public_key_data", &self.cert.public_key_data())
+            .finish()
+    }
+}
+
+impl ClientCertificateState for PreparedClientCert {}
+
+/// Represents a [`ClientCertificateState`] where we attempted to prepare the certificate and we may
+/// have failed.
+pub struct MaybeClientCert {
+    cert_result: Result<Certificate, OperatorApiError>,
+}
+
+impl fmt::Debug for MaybeClientCert {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MaybeClientCert")
+            .field("cert_result", &self.cert_result)
+            .finish()
+    }
+}
+
+impl ClientCertificateState for MaybeClientCert {}
+
 /// Created operator session. Can be obtained from [`OperatorApi::connect_in_new_session`] and later
 /// used in [`OperatorApi::connect_in_existing_session`].
 ///
@@ -54,7 +103,7 @@ pub struct OperatorSession {
     /// URL where websocket connection request should be sent.
     connect_url: String,
     /// Client certificate, should be included as header in the websocket connection request.
-    client_cert: Option<Certificate>,
+    client_cert: Certificate,
     /// Operator license fingerprint, right now only for setting [`Reporter`] properties.
     operator_license_fingerprint: Option<String>,
     /// Version of [`mirrord_protocol`] used by the operator.
@@ -67,7 +116,7 @@ impl fmt::Debug for OperatorSession {
         f.debug_struct("OperatorSession")
             .field("id", &self.id)
             .field("connect_url", &self.connect_url)
-            .field("client_cert_set", &self.client_cert.is_some())
+            .field("cert_public_key_data", &self.client_cert.public_key_data())
             .field(
                 "operator_license_fingerprint",
                 &self.operator_license_fingerprint,
@@ -178,25 +227,24 @@ impl OperatorSessionTarget {
 }
 
 /// Wrapper over mirrord operator API.
-pub struct OperatorApi {
+pub struct OperatorApi<C> {
     /// For making requests to kubernetes API server.
     client: Client,
     /// Prepared client certificate. If present, [`Self::client`] sends [`CLIENT_CERT_HEADER`] with
     /// each request.
-    client_cert: Option<Certificate>,
-    /// Base [`Config`] for creating kube [`Client`]s.
-    /// Includes [`MIRRORD_CLI_VERSION_HEADER`], [`CLIENT_NAME_HEADER`] and
-    /// [`CLIENT_HOSTNAME_HEADER`] extra headers.
-    base_config: Config,
+    client_cert: C,
     /// Fetched operator resource.
     operator: MirrordOperatorCrd,
 }
 
-impl fmt::Debug for OperatorApi {
+impl<C> fmt::Debug for OperatorApi<C>
+where
+    C: ClientCertificateState,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OperatorApi")
             .field("default_namespace", &self.client.default_namespace())
-            .field("client_cert_set", &self.client_cert.is_some())
+            .field("client_cert", &self.client_cert)
             .field("operator_version", &self.operator.spec.operator_version)
             .field(
                 "operator_protocol_version",
@@ -210,10 +258,7 @@ impl fmt::Debug for OperatorApi {
     }
 }
 
-impl OperatorApi {
-    /// We allow copied pods to live only for 30 seconds before the internal proxy connects.
-    const COPIED_POD_IDLE_TTL: u32 = 30;
-
+impl OperatorApi<NoClientCert> {
     /// Fetches [`MirrordOperatorCrd`] from the cluster and creates a new instance of this API.
     #[tracing::instrument(level = Level::TRACE, skip_all, err)]
     pub async fn new<R>(config: &LayerConfig, reporter: &mut R) -> OperatorApiResult<Self>
@@ -244,8 +289,7 @@ impl OperatorApi {
 
         Ok(Self {
             client,
-            client_cert: None,
-            base_config,
+            client_cert: NoClientCert { base_config },
             operator,
         })
     }
@@ -301,8 +345,7 @@ impl OperatorApi {
 
                 return Ok(Some(Self {
                     client,
-                    client_cert: None,
-                    base_config,
+                    client_cert: NoClientCert { base_config },
                     operator,
                 }));
             }
@@ -328,38 +371,80 @@ impl OperatorApi {
 
     /// Prepares client [`Certificate`] to be sent in all subsequent requests to the operator.
     /// In case of failure, state of this API instance does not change.
-    #[tracing::instrument(level = Level::TRACE, skip(reporter), err)]
-    pub async fn prepare_client_cert<R>(&mut self, reporter: &mut R) -> OperatorApiResult<()>
+    #[tracing::instrument(level = Level::TRACE, skip(reporter))]
+    pub async fn prepare_client_cert<R>(self, reporter: &mut R) -> OperatorApi<MaybeClientCert>
     where
         R: Reporter,
     {
-        let certificate = self.get_client_certificate().await?;
+        let previous_client = self.client.clone();
 
-        reporter.set_operator_properties(AnalyticsOperatorProperties {
-            client_hash: Some(AnalyticsHash::from_bytes(&certificate.public_key_data())),
-            license_hash: self
-                .operator
-                .spec
-                .license
-                .fingerprint
-                .as_deref()
-                .map(AnalyticsHash::from_base64),
-        });
+        let result = try {
+            let certificate = self.get_client_certificate().await?;
 
-        let header = Self::make_client_cert_header(&certificate)?;
+            reporter.set_operator_properties(AnalyticsOperatorProperties {
+                client_hash: Some(AnalyticsHash::from_bytes(&certificate.public_key_data())),
+                license_hash: self
+                    .operator
+                    .spec
+                    .license
+                    .fingerprint
+                    .as_deref()
+                    .map(AnalyticsHash::from_base64),
+            });
 
-        let mut config = self.base_config.clone();
-        config.headers.push((CLIENT_CERT_HEADER.clone(), header));
-        let client = Client::try_from(config)
-            .map_err(KubeApiError::from)
-            .map_err(OperatorApiError::CreateKubeClient)?;
+            let header = Self::make_client_cert_header(&certificate)?;
 
-        self.client_cert.replace(certificate);
-        self.client = client;
+            let mut config = self.client_cert.base_config;
+            config.headers.push((CLIENT_CERT_HEADER.clone(), header));
+            let client = Client::try_from(config)
+                .map_err(KubeApiError::from)
+                .map_err(OperatorApiError::CreateKubeClient)?;
 
-        Ok(())
+            (client, certificate)
+        };
+
+        match result {
+            Ok((new_client, cert)) => OperatorApi {
+                client: new_client,
+                client_cert: MaybeClientCert {
+                    cert_result: Ok(cert),
+                },
+                operator: self.operator,
+            },
+
+            Err(error) => OperatorApi {
+                client: previous_client,
+                client_cert: MaybeClientCert {
+                    cert_result: Err(error),
+                },
+                operator: self.operator,
+            },
+        }
+    }
+}
+
+impl OperatorApi<MaybeClientCert> {
+    pub fn inspect_cert_error<F: FnOnce(&OperatorApiError)>(&self, f: F) {
+        if let Err(e) = &self.client_cert.cert_result {
+            f(e);
+        }
     }
 
+    pub fn into_certified(self) -> OperatorApiResult<OperatorApi<PreparedClientCert>> {
+        let cert = self.client_cert.cert_result?;
+
+        Ok(OperatorApi {
+            client: self.client,
+            client_cert: PreparedClientCert { cert },
+            operator: self.operator,
+        })
+    }
+}
+
+impl<C> OperatorApi<C>
+where
+    C: ClientCertificateState,
+{
     /// Lists targets in the given namespace.
     #[tracing::instrument(level = Level::TRACE, ret, err)]
     pub async fn list_targets(&self, namespace: Option<&str>) -> OperatorApiResult<Vec<TargetCrd>> {
@@ -374,129 +459,6 @@ impl OperatorApi {
             operation: OperatorOperation::ListingTargets,
         })
         .map(|list| list.items)
-    }
-
-    /// Starts a new operator session and connects to the target.
-    /// Returned [`OperatorSessionConnection::session`] can be later used to create another
-    /// connection in the same session with [`OperatorApi::connect_in_existing_session`].
-    #[tracing::instrument(
-        level = Level::TRACE,
-        skip(config, progress),
-        fields(
-            target_config = ?config.target,
-            copy_target_config = ?config.feature.copy_target,
-            on_concurrent_steal = ?config.feature.network.incoming.on_concurrent_steal,
-        ),
-        ret,
-        err
-    )]
-    pub async fn connect_in_new_session<P>(
-        &self,
-        config: &LayerConfig,
-        progress: &P,
-    ) -> OperatorApiResult<OperatorSessionConnection>
-    where
-        P: Progress,
-    {
-        self.check_copy_target_feature_support(config)?;
-
-        let target = if config.feature.copy_target.enabled {
-            let mut copy_subtask = progress.subtask("copying target");
-
-            // We do not validate the `target` here, it's up to the operator.
-            let target = config.target.path.clone().unwrap_or(Target::Targetless);
-            let scale_down = config.feature.copy_target.scale_down;
-            let namespace = self.target_namespace(config);
-            let copied = self.copy_target(target, scale_down, namespace).await?;
-
-            copy_subtask.success(Some("target copied"));
-
-            OperatorSessionTarget::Copied(copied)
-        } else {
-            let mut fetch_subtask = progress.subtask("fetching target");
-
-            let target_name =
-                TargetCrd::target_name(config.target.path.as_ref().unwrap_or(&Target::Targetless));
-            let raw_target = Api::namespaced(self.client.clone(), self.target_namespace(config))
-                .get(&target_name)
-                .await
-                .map_err(|error| OperatorApiError::KubeError {
-                    error,
-                    operation: OperatorOperation::FindingTarget,
-                })?;
-
-            fetch_subtask.success(Some("target fetched"));
-
-            OperatorSessionTarget::Raw(raw_target)
-        };
-        let use_proxy_api = self
-            .operator
-            .spec
-            .features
-            .as_ref()
-            .map(|features| features.contains(&OperatorFeatures::ProxyApi))
-            .unwrap_or(false);
-        let connect_url = target.connect_url(
-            use_proxy_api,
-            config.feature.network.incoming.on_concurrent_steal,
-        );
-
-        let session = OperatorSession {
-            id: rand::random(),
-            connect_url,
-            client_cert: self.client_cert.clone(),
-            operator_license_fingerprint: self.operator.spec.license.fingerprint.clone(),
-            operator_protocol_version: self
-                .operator
-                .spec
-                .protocol_version
-                .as_ref()
-                .and_then(|version| version.parse().ok()),
-        };
-
-        let mut connection_subtask = progress.subtask("connecting to the target");
-        let (tx, rx) = Self::connect_target(&self.client, &session).await?;
-        connection_subtask.success(Some("connected to the target"));
-
-        Ok(OperatorSessionConnection { session, tx, rx })
-    }
-
-    /// Connects to the target, reusing the given [`OperatorSession`].
-    #[tracing::instrument(level = Level::TRACE, skip(layer_config, reporter), ret, err)]
-    pub async fn connect_in_existing_session<R>(
-        layer_config: &LayerConfig,
-        session: OperatorSession,
-        reporter: &mut R,
-    ) -> OperatorApiResult<OperatorSessionConnection>
-    where
-        R: Reporter,
-    {
-        reporter.set_operator_properties(AnalyticsOperatorProperties {
-            client_hash: session
-                .client_cert
-                .as_ref()
-                .map(|cert| AnalyticsHash::from_bytes(cert.public_key_data().as_ref())),
-            license_hash: session
-                .operator_license_fingerprint
-                .as_ref()
-                .map(|fingerprint| AnalyticsHash::from_base64(fingerprint)),
-        });
-
-        let mut config = Self::base_client_config(layer_config).await?;
-        if let Some(cert) = &session.client_cert {
-            let cert_header = Self::make_client_cert_header(cert)?;
-            config
-                .headers
-                .push((CLIENT_CERT_HEADER.clone(), cert_header));
-        }
-
-        let client = Client::try_from(config)
-            .map_err(KubeApiError::from)
-            .map_err(OperatorApiError::CreateKubeClient)?;
-
-        let (tx, rx) = Self::connect_target(&client, &session).await?;
-
-        Ok(OperatorSessionConnection { tx, rx, session })
     }
 
     pub fn check_license_validity<P>(&self, progress: &P) -> OperatorApiResult<()>
@@ -574,31 +536,6 @@ impl OperatorApi {
     /// Returns a reference to the [`Client`] used by this instance.
     pub fn client(&self) -> &Client {
         &self.client
-    }
-
-    /// Creates websocket connection to the operator target.
-    #[tracing::instrument(level = Level::TRACE, skip(client), err)]
-    async fn connect_target(
-        client: &Client,
-        session: &OperatorSession,
-    ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
-        let request = Request::builder()
-            .uri(&session.connect_url)
-            .header(SESSION_ID_HEADER.clone(), session.id.to_string())
-            .body(vec![])
-            .map_err(OperatorApiError::ConnectRequestBuildError)?;
-
-        let connection = upgrade::connect_ws(client, request)
-            .await
-            .map_err(|error| OperatorApiError::KubeError {
-                error,
-                operation: OperatorOperation::WebsocketConnection,
-            })?;
-
-        Ok(ConnectionWrapper::wrap(
-            connection,
-            session.operator_protocol_version.clone(),
-        ))
     }
 
     /// Creates a base [`Config`] for creating kube [`Client`]s.
@@ -721,6 +658,96 @@ impl OperatorApi {
 
         namespace_opt.unwrap_or(self.client.default_namespace())
     }
+}
+
+impl OperatorApi<PreparedClientCert> {
+    /// We allow copied pods to live only for 30 seconds before the internal proxy connects.
+    const COPIED_POD_IDLE_TTL: u32 = 30;
+
+    /// Starts a new operator session and connects to the target.
+    /// Returned [`OperatorSessionConnection::session`] can be later used to create another
+    /// connection in the same session with [`OperatorApi::connect_in_existing_session`].
+    #[tracing::instrument(
+        level = Level::TRACE,
+        skip(config, progress),
+        fields(
+            target_config = ?config.target,
+            copy_target_config = ?config.feature.copy_target,
+            on_concurrent_steal = ?config.feature.network.incoming.on_concurrent_steal,
+        ),
+        ret,
+        err
+    )]
+    pub async fn connect_in_new_session<P>(
+        &self,
+        config: &LayerConfig,
+        progress: &P,
+    ) -> OperatorApiResult<OperatorSessionConnection>
+    where
+        P: Progress,
+    {
+        self.check_copy_target_feature_support(config)?;
+
+        let target = if config.feature.copy_target.enabled {
+            let mut copy_subtask = progress.subtask("copying target");
+
+            // We do not validate the `target` here, it's up to the operator.
+            let target = config.target.path.clone().unwrap_or(Target::Targetless);
+            let scale_down = config.feature.copy_target.scale_down;
+            let namespace = self.target_namespace(config);
+            let copied = self.copy_target(target, scale_down, namespace).await?;
+
+            copy_subtask.success(Some("target copied"));
+
+            OperatorSessionTarget::Copied(copied)
+        } else {
+            let mut fetch_subtask = progress.subtask("fetching target");
+
+            let target_name =
+                TargetCrd::target_name(config.target.path.as_ref().unwrap_or(&Target::Targetless));
+            let raw_target = Api::namespaced(self.client.clone(), self.target_namespace(config))
+                .get(&target_name)
+                .await
+                .map_err(|error| OperatorApiError::KubeError {
+                    error,
+                    operation: OperatorOperation::FindingTarget,
+                })?;
+
+            fetch_subtask.success(Some("target fetched"));
+
+            OperatorSessionTarget::Raw(raw_target)
+        };
+        let use_proxy_api = self
+            .operator
+            .spec
+            .features
+            .as_ref()
+            .map(|features| features.contains(&OperatorFeatures::ProxyApi))
+            .unwrap_or(false);
+        let connect_url = target.connect_url(
+            use_proxy_api,
+            config.feature.network.incoming.on_concurrent_steal,
+        );
+
+        let session = OperatorSession {
+            id: rand::random(),
+            connect_url,
+            client_cert: self.client_cert.cert.clone(),
+            operator_license_fingerprint: self.operator.spec.license.fingerprint.clone(),
+            operator_protocol_version: self
+                .operator
+                .spec
+                .protocol_version
+                .as_ref()
+                .and_then(|version| version.parse().ok()),
+        };
+
+        let mut connection_subtask = progress.subtask("connecting to the target");
+        let (tx, rx) = Self::connect_target(&self.client, &session).await?;
+        connection_subtask.success(Some("connected to the target"));
+
+        Ok(OperatorSessionConnection { session, tx, rx })
+    }
 
     /// Creates a new [`CopyTargetCrd`] resource using the operator.
     /// This should create a new dummy pod out of the given [`Target`].
@@ -754,5 +781,65 @@ impl OperatorApi {
                 error,
                 operation: OperatorOperation::CopyingTarget,
             })
+    }
+
+    /// Connects to the target, reusing the given [`OperatorSession`].
+    #[tracing::instrument(level = Level::TRACE, skip(layer_config, reporter), ret, err)]
+    pub async fn connect_in_existing_session<R>(
+        layer_config: &LayerConfig,
+        session: OperatorSession,
+        reporter: &mut R,
+    ) -> OperatorApiResult<OperatorSessionConnection>
+    where
+        R: Reporter,
+    {
+        reporter.set_operator_properties(AnalyticsOperatorProperties {
+            client_hash: Some(AnalyticsHash::from_bytes(
+                session.client_cert.public_key_data().as_ref(),
+            )),
+            license_hash: session
+                .operator_license_fingerprint
+                .as_ref()
+                .map(|fingerprint| AnalyticsHash::from_base64(fingerprint)),
+        });
+
+        let mut config = Self::base_client_config(layer_config).await?;
+        let cert_header = Self::make_client_cert_header(&session.client_cert)?;
+        config
+            .headers
+            .push((CLIENT_CERT_HEADER.clone(), cert_header));
+
+        let client = Client::try_from(config)
+            .map_err(KubeApiError::from)
+            .map_err(OperatorApiError::CreateKubeClient)?;
+
+        let (tx, rx) = Self::connect_target(&client, &session).await?;
+
+        Ok(OperatorSessionConnection { tx, rx, session })
+    }
+
+    /// Creates websocket connection to the operator target.
+    #[tracing::instrument(level = Level::TRACE, skip(client), err)]
+    async fn connect_target(
+        client: &Client,
+        session: &OperatorSession,
+    ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
+        let request = Request::builder()
+            .uri(&session.connect_url)
+            .header(SESSION_ID_HEADER.clone(), session.id.to_string())
+            .body(vec![])
+            .map_err(OperatorApiError::ConnectRequestBuildError)?;
+
+        let connection = upgrade::connect_ws(client, request)
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::WebsocketConnection,
+            })?;
+
+        Ok(ConnectionWrapper::wrap(
+            connection,
+            session.operator_protocol_version.clone(),
+        ))
     }
 }

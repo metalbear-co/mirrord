@@ -573,14 +573,11 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     )
     .await?;
     let mut targets = match operator_api {
-        Some(mut api) => {
-            api.prepare_client_cert(&mut NullReporter::default())
-                .await
-                .inspect_err(
-                    |error| tracing::error!(%error, "failed to prepare client certificate"),
-                )
-                .ok();
-
+        Some(api) => {
+            let api = api.prepare_client_cert(&mut NullReporter::default()).await;
+            api.inspect_cert_error(
+                |error| tracing::error!(%error, "failed to prepare client certificate"),
+            );
             api.list_targets(layer_config.target.namespace.as_deref())
                 .await?
                 .iter()
