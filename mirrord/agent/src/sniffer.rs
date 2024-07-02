@@ -135,7 +135,7 @@ pub(crate) struct TcpPacketData {
 }
 
 /// Main struct implementing incoming traffic mirroring feature.
-/// Utilizes [`RawCapture`] socket for sniffing on incoming Ethernet packets. Transforms them into
+/// Utilizes [`TcpCapture`] for sniffing on incoming TCP packets. Transforms them into
 /// incoming TCP data streams and sends copy of the traffic to all subscribed clients.
 ///
 /// Can be easily used via [`api::TcpSnifferApi`].
@@ -270,7 +270,7 @@ where
         Ok(())
     }
 
-    /// Updates BPF filter used by [`Self::raw_capture`] to match state of
+    /// Updates BPF filter used by [`Self::tcp_capture`] to match state of
     /// [`Self::port_subscriptions`].
     #[tracing::instrument(level = Level::TRACE, err)]
     fn update_packet_filter(&mut self) -> Result<(), AgentError> {
@@ -339,7 +339,7 @@ where
             )
     }
 
-    /// Handles Ethernet packet sniffed by [`Self::raw_capture`].
+    /// Handles TCP packet sniffed by [`Self::tcp_capture`].
     #[tracing::instrument(
         level = Level::TRACE,
         ret,
