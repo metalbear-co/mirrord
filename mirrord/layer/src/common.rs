@@ -113,10 +113,10 @@ impl CheckedInto<PathBuf> for *const c_char {
                 // `stripped_path` is a reference to a later character in the same string as
                 // `path_str`, `stripped_path.as_ptr()` returns a pointer to a later index
                 // in the same string owned by the caller (the hooked program).
-                let prefix_len = path_str.len() - stripped_path.to_string_lossy().len();
+                let path_len = stripped_path.to_string_lossy().len();
+                let prefix_len = path_str.len() - path_len;
                 Detour::Bypass(Bypass::FileOperationInMirrordBinTempDir((
-                    prefix_len,
-                    stripped_path,
+                    prefix_len, path_len,
                 )))
             } else {
                 Detour::Success(path_str) // strip is None, path not in temp dir.

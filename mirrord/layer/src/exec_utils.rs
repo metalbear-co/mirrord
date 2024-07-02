@@ -249,14 +249,14 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
     let res = FN__NSGET_EXECUTABLE_PATH(path, buflen);
     if res == 0 {
         let path_buf_detour = CheckedInto::<PathBuf>::checked_into(path as *const c_char);
-        if let Bypass(FileOperationInMirrordBinTempDir((prefix_len, path_buf))) = path_buf_detour {
+        if let Bypass(FileOperationInMirrordBinTempDir((prefix_len, stripped_len))) =
+            path_buf_detour
+        {
             // SAFETY: If we're here, the original function was passed this pointer and was
             //         successful, so this pointer must be valid.
 
             // SAFETY:  `later_ptr` is a pointer to a later char in the same buffer.
             let later_ptr = path.wrapping_add(prefix_len);
-
-            let stripped_len = path_buf.to_string_lossy().len() as u32;
 
             // SAFETY:
             // - can read `stripped_len` bytes from `path_cstring` because it's its length.
@@ -268,7 +268,7 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
             // SAFETY:
             // - We call the original function before this, so if it's not a valid pointer we should
             //   not get back 0, and then this code is not executed.
-            *buflen = stripped_len;
+            *buflen = stripped_len as u32;
 
             // If the buffer is long enough for the path, it is long enough for the stripped
             // path.
