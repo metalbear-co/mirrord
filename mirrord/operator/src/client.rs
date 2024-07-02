@@ -4,7 +4,7 @@ use base64::{engine::general_purpose, Engine};
 use chrono::{DateTime, Utc};
 use conn_wrapper::ConnectionWrapper;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
-use http::{request::Request, HeaderValue};
+use http::{request::Request, HeaderName, HeaderValue};
 use kube::{
     api::{ListParams, PostParams},
     Api, Client, Config, Resource,
@@ -387,7 +387,9 @@ impl OperatorApi<NoClientCert> {
             let header = Self::make_client_cert_header(&certificate)?;
 
             let mut config = self.client_cert.base_config;
-            config.headers.push((CLIENT_CERT_HEADER.clone(), header));
+            config
+                .headers
+                .push((HeaderName::from_static(CLIENT_CERT_HEADER), header));
             let client = Client::try_from(config)
                 .map_err(KubeApiError::from)
                 .map_err(OperatorApiError::CreateKubeClient)?;
@@ -546,15 +548,15 @@ where
         .map_err(OperatorApiError::CreateKubeClient)?;
 
         client_config.headers.push((
-            MIRRORD_CLI_VERSION_HEADER.clone(),
+            HeaderName::from_static(MIRRORD_CLI_VERSION_HEADER),
             HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
         ));
 
         let UserIdentity { name, hostname } = UserIdentity::load();
 
         let headers = [
-            (CLIENT_NAME_HEADER.clone(), name),
-            (CLIENT_HOSTNAME_HEADER.clone(), hostname),
+            (CLIENT_NAME_HEADER, name),
+            (CLIENT_HOSTNAME_HEADER, hostname),
         ];
         for (name, raw_value) in headers {
             let Some(raw_value) = raw_value else {
@@ -568,7 +570,9 @@ where
                 .to_string();
             let value = HeaderValue::from_str(&cleaned);
             match value {
-                Ok(value) => client_config.headers.push((name, value)),
+                Ok(value) => client_config
+                    .headers
+                    .push((HeaderName::from_static(name), value)),
                 Err(error) => {
                     tracing::debug!(%error, %name, raw_value = raw_value, cleaned, "Invalid header value");
                 }
@@ -799,7 +803,7 @@ impl OperatorApi<PreparedClientCert> {
         let cert_header = Self::make_client_cert_header(&session.client_cert)?;
         config
             .headers
-            .push((CLIENT_CERT_HEADER.clone(), cert_header));
+            .push((HeaderName::from_static(CLIENT_CERT_HEADER), cert_header));
 
         let client = Client::try_from(config)
             .map_err(KubeApiError::from)
@@ -818,7 +822,7 @@ impl OperatorApi<PreparedClientCert> {
     ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
         let request = Request::builder()
             .uri(&session.connect_url)
-            .header(SESSION_ID_HEADER.clone(), session.id.to_string())
+            .header(SESSION_ID_HEADER, session.id.to_string())
             .body(vec![])
             .map_err(OperatorApiError::ConnectRequestBuildError)?;
 
