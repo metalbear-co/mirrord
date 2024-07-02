@@ -39,7 +39,7 @@ where
                 false
             }
             Entry::Vacant(e) => {
-                e.insert([client].into_iter().collect());
+                e.insert([client].into());
                 true
             }
         }
