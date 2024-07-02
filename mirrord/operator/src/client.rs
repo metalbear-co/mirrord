@@ -382,7 +382,7 @@ impl OperatorApi {
     where
         P: Progress,
     {
-        self.check_feature_support(config)?;
+        self.check_copy_target_feature_support(config)?;
 
         let target = if config.feature.copy_target.enabled {
             let mut copy_subtask = progress.subtask("copying target");
@@ -633,9 +633,9 @@ impl OperatorApi {
         Ok(client_config)
     }
 
-    /// Checks features specified in the given [`LayerConfig`] against what is supported by the
-    /// detected operator installation.
-    fn check_feature_support(&self, config: &LayerConfig) -> OperatorApiResult<()> {
+    /// If `copy_target` feature is enabled in the given [`LayerConfig`], checks that the operator
+    /// supports it.
+    fn check_copy_target_feature_support(&self, config: &LayerConfig) -> OperatorApiResult<()> {
         let client_wants_copy = config.feature.copy_target.enabled;
         let operator_supports_copy = self.operator.spec.copy_target_enabled.unwrap_or(false);
         if client_wants_copy && !operator_supports_copy {
