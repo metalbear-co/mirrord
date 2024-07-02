@@ -19,7 +19,7 @@ use crate::{
 /// When a topic has no subscribers, it is removed.
 #[derive(Debug, Default)]
 pub struct Subscriptions<T, C> {
-    _inner: HashMap<T, HashSet<C>>,
+    inner: HashMap<T, HashSet<C>>,
 }
 
 /// Id of an agent's client. Each new client connection is assigned with a unique id.
@@ -33,7 +33,7 @@ where
     /// Add a new subscription to a topic for a given client.
     /// Returns whether this resulted in adding a new topic to this mapping.
     pub fn subscribe(&mut self, client: C, topic: T) -> bool {
-        match self._inner.entry(topic) {
+        match self.inner.entry(topic) {
             Entry::Occupied(mut e) => {
                 e.get_mut().insert(client);
                 false
@@ -49,7 +49,7 @@ where
     /// Topic is removed if no subscribers left.
     /// Return whether the topic was removed.
     pub fn unsubscribe(&mut self, client: C, topic: T) -> bool {
-        match self._inner.entry(topic) {
+        match self.inner.entry(topic) {
             Entry::Occupied(mut e) => {
                 e.get_mut().remove(&client);
                 if e.get().is_empty() {
@@ -65,32 +65,32 @@ where
 
     /// Get a vector of clients subscribed to a specific topic
     pub fn get_topic_subscribers(&self, topic: T) -> Option<&HashSet<C>> {
-        self._inner.get(&topic)
+        self.inner.get(&topic)
     }
 
     /// Get subscribed topics
     pub fn get_subscribed_topics(&self) -> Vec<T> {
-        self._inner.keys().cloned().collect()
+        self.inner.keys().cloned().collect()
     }
 
     /// Remove all subscriptions of a client.
     /// Topics are removed if no subscribers left.
     /// Returns whether any topic was removed.
     pub fn remove_client(&mut self, client: C) -> bool {
-        let prev_length = self._inner.len();
+        let prev_length = self.inner.len();
 
-        self._inner.retain(|_, client_set| {
+        self.inner.retain(|_, client_set| {
             client_set.remove(&client);
             !client_set.is_empty()
         });
 
-        self._inner.len() != prev_length
+        self.inner.len() != prev_length
     }
 
     /// Removes a topic and all of it's clients
     #[allow(dead_code)] // we might want it later on
     pub fn remove_topic(&mut self, topic: T) {
-        self._inner.remove(&topic);
+        self.inner.remove(&topic);
     }
 }
 
@@ -228,7 +228,7 @@ mod subscription_tests {
         /// Get topics subscribed by a client
         fn get_client_topics(&self, client: C) -> Vec<T> {
             let mut result = Vec::new();
-            for (topic, client_set) in self._inner.iter() {
+            for (topic, client_set) in self.inner.iter() {
                 if client_set.contains(&client) {
                     result.push(*topic)
                 }

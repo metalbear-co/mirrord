@@ -431,12 +431,9 @@ impl TcpConnectionSniffer {
     /// Handles Ethernet packet sniffed by [`Self::raw_capture`].
     #[tracing::instrument(level = Level::TRACE, ret, skip(self, eth_packet), fields(bytes = %eth_packet.len()))]
     fn handle_packet(&mut self, eth_packet: Vec<u8>) -> Result<(), AgentError> {
-        let (identifier, tcp_packet) = match get_tcp_packet(eth_packet) {
-            Some(res) => res,
-            None => {
-                // Not a TCP packet, so not interesting at all.
-                return Ok(());
-            }
+        let Some((identifier, tcp_packet)) = get_tcp_packet(eth_packet) else {
+            // Not a TCP packet, so not interesting at all.
+            return Ok(());
         };
 
         tracing::trace!(
