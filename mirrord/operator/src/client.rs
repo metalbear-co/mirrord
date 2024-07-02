@@ -305,19 +305,14 @@ impl OperatorApi<NoClientCert> {
     /// step proves that the operator is installed, an error is returned. Otherwise, [`None`] is
     /// returned.
     #[tracing::instrument(level = Level::TRACE, skip_all, err)]
-    pub async fn try_new<R, P>(
+    pub async fn try_new<R>(
         config: &LayerConfig,
         reporter: &mut R,
-        progress: &P,
     ) -> OperatorApiResult<Option<Self>>
     where
         R: Reporter,
-        P: Progress,
     {
-        let mut subtask = progress.subtask("detecting operator");
-
         if config.operator == Some(false) {
-            subtask.success(Some("operator disabled"));
             return Ok(None);
         }
 
@@ -341,8 +336,6 @@ impl OperatorApi<NoClientCert> {
                         .map(AnalyticsHash::from_base64),
                 });
 
-                subtask.success(Some("operator found"));
-
                 return Ok(Some(Self {
                     client,
                     client_cert: NoClientCert { base_config },
@@ -353,7 +346,6 @@ impl OperatorApi<NoClientCert> {
             Err(error @ kube::Error::Api(..)) if config.operator.is_none() => {
                 match discovery::operator_installed(&client).await {
                     Ok(false) | Err(..) => {
-                        subtask.success(Some("operator not found"));
                         return Ok(None);
                     }
                     Ok(true) => error,

@@ -36,9 +36,13 @@ where
     R: Reporter,
 {
     let mut operator_subtask = progress.subtask("checking operator");
+    if config.operator == Some(false) {
+        operator_subtask.success(Some("operator disabled"));
+        return Ok(None);
+    }
 
-    let Some(api) = OperatorApi::try_new(config, analytics, &operator_subtask).await? else {
-        operator_subtask.success(Some("proceeding without operator"));
+    let Some(api) = OperatorApi::try_new(config, analytics).await? else {
+        operator_subtask.success(Some("operator not found"));
         return Ok(None);
     };
 

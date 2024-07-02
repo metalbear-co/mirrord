@@ -33,7 +33,7 @@ use mirrord_kube::api::{
     kubernetes::{create_kube_config, get_k8s_resource_api, rollout::Rollout},
 };
 use mirrord_operator::client::OperatorApi;
-use mirrord_progress::{NullProgress, Progress, ProgressTracker};
+use mirrord_progress::{Progress, ProgressTracker};
 use operator::operator_command;
 use semver::Version;
 use serde::de::DeserializeOwned;
@@ -566,12 +566,7 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     }
 
     // Try operator first if relevant
-    let operator_api = OperatorApi::try_new(
-        &layer_config,
-        &mut NullReporter::default(),
-        &NullProgress {},
-    )
-    .await?;
+    let operator_api = OperatorApi::try_new(&layer_config, &mut NullReporter::default()).await?;
     let mut targets = match operator_api {
         Some(api) => {
             let api = api.prepare_client_cert(&mut NullReporter::default()).await;
