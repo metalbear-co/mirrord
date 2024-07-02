@@ -8,6 +8,38 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.108.0](https://github.com/metalbear-co/mirrord/tree/3.108.0) - 2024-07-02
+
+
+### Added
+
+- Added support for streaming HTTP responses.
+  [#2557](https://github.com/metalbear-co/mirrord/issues/2557)
+
+
+### Changed
+
+- Changed http path filter to include query params in match
+  [#2551](https://github.com/metalbear-co/mirrord/issues/2551)
+- Configuration documentation contents order.
+- Errors that occur when using discovery API to detect mirrord operator are no
+  longer fatal. When such error is encountered, mirrord command falls back to
+  using the OSS version.
+
+
+### Fixed
+
+- When using mesh use `lo` interface for mirroring traffic.
+  [#2452](https://github.com/metalbear-co/mirrord/issues/2452)
+
+
+### Internal
+
+- Correct version of HTTP response is sent based on agent protocol version.
+  [#2562](https://github.com/metalbear-co/mirrord/issues/2562)
+- `mirrord-intproxy` crate unit tests are now part of the CI.
+
+
 ## [3.107.0](https://github.com/metalbear-co/mirrord/tree/3.107.0) - 2024-06-25
 
 
