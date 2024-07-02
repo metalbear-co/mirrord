@@ -299,6 +299,11 @@ impl IntProxy {
                 if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
                     self.task_txs.agent.send(ClientMessage::ReadyForLogs).await;
                 }
+
+                self.task_txs
+                    .incoming
+                    .send(IncomingProxyMessage::AgentProtocolVersion(protocol_version))
+                    .await;
             }
             DaemonMessage::LogMessage(log) => match log.level {
                 LogLevel::Error => tracing::error!("agent log: {}", log.message),

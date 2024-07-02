@@ -397,18 +397,22 @@ impl HttpRequestFallback {
     }
 }
 
-/// Minimal mirrord-protocol version that allows [`DaemonTcp::HttpRequestFramed`] instead of
-/// [`DaemonTcp::HttpRequest`].
+/// Minimal mirrord-protocol version that allows [`DaemonTcp::HttpRequestFramed`] and
+/// [`LayerTcpSteal::HttpResponseFramed`].
 pub static HTTP_FRAMED_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.3.0".parse().expect("Bad Identifier"));
 
-/// Minimal mirrord-protocol version that allows [`DaemonTcp::HttpRequestChunked`] instead of
-/// [`DaemonTcp::HttpRequest`].
-pub static HTTP_CHUNKED_VERSION: LazyLock<VersionReq> =
+/// Minimal mirrord-protocol version that allows [`DaemonTcp::HttpRequestChunked`].
+pub static HTTP_CHUNKED_REQUEST_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.7.0".parse().expect("Bad Identifier"));
 
+/// Minimal mirrord-protocol version that allows [`LayerTcpSteal::HttpResponseChunked`].
+pub static HTTP_CHUNKED_RESPONSE_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.8.1".parse().expect("Bad Identifier"));
+
 /// Minimal mirrord-protocol version that allows [`DaemonTcp::Data`] to be sent in the same
-/// connection as [`DaemonTcp::HttpRequestFramed`] and [`DaemonTcp::HttpRequest`].
+/// connection as
+/// [`DaemonTcp::HttpRequestChunked`]/[`DaemonTcp::HttpRequestFramed`]/[`DaemonTcp::HttpRequest`].
 pub static HTTP_FILTERED_UPGRADE_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.5.0".parse().expect("Bad Identifier"));
 
@@ -582,20 +586,57 @@ impl HttpResponseFallback {
         }
     }
 
+    /// Produces an [`HttpResponseFallback`] to the given [`HttpRequestFallback`].
+    ///
+    /// # Note on picking response variant
+    ///
+    /// Variant of returned [`HttpResponseFallback`] is picked based on the variant of given
+    /// [`HttpRequestFallback`] and agent protocol version. We need to consider both due
+    /// to:
+    /// 1. Old agent versions always responding with client's `mirrord_protocol` version to
+    ///    [`ClientMessage::SwitchProtocolVersion`](super::ClientMessage::SwitchProtocolVersion),
+    /// 2. [`LayerTcpSteal::HttpResponseChunked`] being introduced after
+    ///    [`DaemonTcp::HttpRequestChunked`].
     pub fn response_from_request(
         request: HttpRequestFallback,
         status: StatusCode,
         message: &str,
+        agent_protocol_version: Option<&semver::Version>,
     ) -> Self {
+        let agent_supports_streaming_response = agent_protocol_version
+            .map(|version| HTTP_CHUNKED_RESPONSE_VERSION.matches(version))
+            .unwrap_or(false);
+
         match request {
+            // We received `DaemonTcp::HttpRequestFramed` from the agent,
+            // so we know it supports `LayerTcpSteal::HttpResponseFramed` (both were introduced in
+            // the same `mirrord_protocol` version).
             HttpRequestFallback::Framed(request) => HttpResponseFallback::Framed(
                 HttpResponse::<InternalHttpBody>::response_from_request(request, status, message),
             ),
+
+            // We received `DaemonTcp::HttpRequest` from the agent, so we assume it only supports
+            // `LayerTcpSteal::HttpResponse`.
             HttpRequestFallback::Fallback(request) => HttpResponseFallback::Fallback(
                 HttpResponse::<Vec<u8>>::response_from_request(request, status, message),
             ),
-            HttpRequestFallback::Streamed(request) => HttpResponseFallback::Streamed(
-                HttpResponse::<ReceiverStreamBody>::response_from_request(request, status, message),
+
+            // We received `DaemonTcp::HttpRequestChunked` and the agent supports
+            // `LayerTcpSteal::HttpResponseChunked`.
+            HttpRequestFallback::Streamed(request) if agent_supports_streaming_response => {
+                HttpResponseFallback::Streamed(
+                    HttpResponse::<ReceiverStreamBody>::response_from_request(
+                        request, status, message,
+                    ),
+                )
+            }
+
+            // We received `DaemonTcp::HttpRequestChunked` from the agent,
+            // but the agent does not support `LayerTcpSteal::HttpResponseChunked`.
+            // However, it must support the older `LayerTcpSteal::HttpResponseFramed`
+            // variant (was introduced before `DaemonTcp::HttpRequestChunked`).
+            HttpRequestFallback::Streamed(request) => HttpResponseFallback::Framed(
+                HttpResponse::<InternalHttpBody>::response_from_request(request, status, message),
             ),
         }
     }

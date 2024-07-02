@@ -26,6 +26,7 @@ mirrord-protocol = { path = "../protocol" }
 mirrord-intproxy-protocol = { path = "./protocol", features = ["codec-async"] }
 mirrord-analytics = { path = "../analytics" }
 
+semver.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

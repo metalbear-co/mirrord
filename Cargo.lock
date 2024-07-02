@@ -4013,6 +4013,7 @@ dependencies = [
  "mirrord-operator",
  "mirrord-protocol",
  "rand",
+ "semver 1.0.23",
  "serde",
  "thiserror",
  "tokio",
@@ -4181,7 +4182,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.8.0"
+version = "1.8.1"
 dependencies = [
  "actix-codec",
  "bincode",
