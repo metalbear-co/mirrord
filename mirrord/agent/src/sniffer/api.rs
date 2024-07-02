@@ -38,7 +38,7 @@ impl TcpSnifferApi {
     /// Capacity for channel that will be used by
     /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer) to notify this struct about new
     /// connections.
-    const CONNECTION_CHANNEL_SIZE: usize = 128;
+    pub const CONNECTION_CHANNEL_SIZE: usize = 128;
 
     /// Create a new instance of this struct and connect it to a
     /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer) instance.
@@ -163,8 +163,15 @@ impl TcpSnifferApi {
                 }
             }
             LayerTcp::PortUnsubscribe(port) => {
-                self.send_command(SnifferCommandInner::UnsubscribePort(port))
-                    .await
+                let (tx, rx) = oneshot::channel();
+                self.send_command(SnifferCommandInner::UnsubscribePort(port, tx))
+                    .await?;
+
+                if rx.await.is_ok() {
+                    Ok(())
+                } else {
+                    Err(self.task_status.unwrap_err().await)
+                }
             }
             LayerTcp::ConnectionUnsubscribe(connection_id) => {
                 self.connections.remove(&connection_id);

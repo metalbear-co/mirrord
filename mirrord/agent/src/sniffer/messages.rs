@@ -14,13 +14,18 @@ pub(crate) enum SnifferCommandInner {
     ),
     /// Client wants to start receiving connections incoming to a specific port.
     Subscribe(
-        // Number of port to subscribe.
+        /// Number of port to subscribe.
         Port,
-        // Channel to notify with `()` when the subscription is done.
+        /// Channel to notify with `()` when the operation is done.
         oneshot::Sender<()>,
     ),
     /// Client no longer wants to receive connections incoming to a specific port.
-    UnsubscribePort(Port),
+    UnsubscribePort(
+        /// Number of port to unsubscribe.
+        Port,
+        /// Channel to notify with `()` when the operation is done.
+        oneshot::Sender<()>,
+    ),
 }
 
 /// Client's command for [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
