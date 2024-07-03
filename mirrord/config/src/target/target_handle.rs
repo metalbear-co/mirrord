@@ -44,6 +44,12 @@ impl FutureProofTarget {
     }
 }
 
+impl From<Target> for FutureProofTarget {
+    fn from(target: Target) -> Self {
+        Self::Known(target)
+    }
+}
+
 impl core::fmt::Display for FutureProofTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
