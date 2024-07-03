@@ -1,5 +1,5 @@
 use kube::CustomResource;
-use mirrord_config::target::{target_handle::TargetHandle, Target, TargetConfig};
+use mirrord_config::target::{target_handle::FutureProofTarget, Target, TargetConfig};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +20,7 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 )]
 pub struct TargetSpec {
     /// None when targetless.
-    pub target: TargetHandle,
+    pub target: FutureProofTarget,
 }
 
 impl TargetCrd {
@@ -41,7 +41,6 @@ impl TargetCrd {
             Target::CronJob(target) => ("cronjob", &target.cron_job, &target.container),
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
-            Target::Unknown(_) => return "".to_string(),
         };
 
         if let Some(container) = container {
@@ -64,7 +63,7 @@ impl TargetCrd {
 impl From<TargetCrd> for TargetConfig {
     fn from(crd: TargetCrd) -> Self {
         TargetConfig {
-            path: Some(crd.spec.target.0),
+            path: Some(crd.spec.target.known().clone()),
             namespace: crd.metadata.namespace,
         }
     }

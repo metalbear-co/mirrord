@@ -26,56 +26,57 @@ use super::{Target, TargetDisplay};
 #[serde(transparent, deny_unknown_fields)]
 pub struct TargetHandle(pub Target);
 
-impl core::fmt::Display for TargetHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+#[derive(Serialize, Clone, Debug, JsonSchema)]
+#[serde(untagged)]
+pub enum FutureProofTarget {
+    #[serde(serialize_with = "Target::serialize")]
+    Known(Target),
+    #[serde(skip_serializing)]
+    Unknown(String),
+}
+
+impl FutureProofTarget {
+    pub fn known(&self) -> &Target {
+        match self {
+            FutureProofTarget::Known(target) => target,
+            FutureProofTarget::Unknown(_) => unreachable!("Unknown target not supported here!"),
+        }
     }
 }
 
-impl TargetDisplay for TargetHandle {
+impl core::fmt::Display for FutureProofTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FutureProofTarget::Known(target) => target.fmt(f),
+            FutureProofTarget::Unknown(unknown) => write!(f, "{}", unknown),
+        }
+    }
+}
+
+impl TargetDisplay for FutureProofTarget {
     fn type_(&self) -> &str {
-        self.0.type_()
+        match self {
+            FutureProofTarget::Known(target) => target.type_(),
+            FutureProofTarget::Unknown(_) => unreachable!("Unknown target has no type!"),
+        }
     }
 
     fn name(&self) -> &str {
-        self.0.name()
+        match self {
+            FutureProofTarget::Known(target) => target.name(),
+            FutureProofTarget::Unknown(_) => unreachable!(),
+        }
     }
 
     fn container(&self) -> Option<&String> {
-        self.0.container()
+        match self {
+            FutureProofTarget::Known(target) => target.container(),
+            FutureProofTarget::Unknown(_) => unreachable!("Unknown target has no name!"),
+        }
     }
 }
 
-impl core::ops::Deref for TargetHandle {
-    type Target = Target;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::borrow::Borrow<Target> for TargetHandle {
-    fn borrow(&self) -> &Target {
-        self.0.borrow()
-    }
-}
-
-impl From<Target> for TargetHandle {
-    fn from(value: Target) -> Self {
-        Self(value)
-    }
-}
-
-impl Serialize for TargetHandle {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for TargetHandle {
+impl<'de> Deserialize<'de> for FutureProofTarget {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -83,10 +84,10 @@ impl<'de> Deserialize<'de> for TargetHandle {
         let deserialized = serde_json::Value::deserialize(deserializer)?;
         let maybe_unknown = deserialized.to_string();
 
-        let target = serde_json::from_value(deserialized);
+        let target = serde_json::from_value::<Target>(deserialized);
         match target {
-            Ok(target) => Ok(TargetHandle(target)),
-            Err(_) => Ok(TargetHandle(Target::Unknown(maybe_unknown))),
+            Ok(target) => Ok(FutureProofTarget::Known(target)),
+            Err(_) => Ok(FutureProofTarget::Unknown(maybe_unknown)),
         }
     }
 }

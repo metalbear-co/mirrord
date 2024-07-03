@@ -254,9 +254,6 @@ pub enum Target {
     /// Spawn a new pod.
     #[default]
     Targetless,
-
-    #[serde(skip_serializing)]
-    Unknown(String),
 }
 
 impl FromStr for Target {
@@ -293,7 +290,7 @@ impl Target {
             Target::Job(target) => target.job.clone(),
             Target::CronJob(target) => target.cron_job.clone(),
             Target::StatefulSet(target) => target.stateful_set.clone(),
-            Target::Targetless | Target::Unknown(_) => {
+            Target::Targetless => {
                 unreachable!("this shouldn't happen - called from operator on a flow where it's not targetless.")
             }
         }
@@ -367,7 +364,6 @@ impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Target::Targetless => write!(f, "targetless"),
-            Target::Unknown(_) => write!(f, ""),
             Target::Pod(target) => target.fmt(f),
             Target::Deployment(target) => target.fmt(f),
             Target::Rollout(target) => target.fmt(f),
@@ -383,7 +379,6 @@ impl TargetDisplay for Target {
     fn type_(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
-            Target::Unknown(_) => "",
             Target::Deployment(target) => target.type_(),
             Target::Pod(target) => target.type_(),
             Target::Rollout(target) => target.type_(),
@@ -397,7 +392,6 @@ impl TargetDisplay for Target {
     fn name(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
-            Target::Unknown(_) => "",
             Target::Deployment(target) => target.name(),
             Target::Pod(target) => target.name(),
             Target::Rollout(target) => target.name(),
@@ -411,7 +405,6 @@ impl TargetDisplay for Target {
     fn container(&self) -> Option<&String> {
         match self {
             Target::Targetless => None,
-            Target::Unknown(_) => None,
             Target::Deployment(target) => target.container(),
             Target::Pod(target) => target.container(),
             Target::Rollout(target) => target.container(),
@@ -483,9 +476,6 @@ impl CollectAnalytics for &TargetConfig {
                 }
                 Target::Targetless => {
                     // Targetless is essentially 0, so no need to set any flags.
-                }
-                Target::Unknown(_) => {
-                    unreachable!("Unknown is not a valid target!")
                 }
             }
         }

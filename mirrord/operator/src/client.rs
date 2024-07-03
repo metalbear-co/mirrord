@@ -453,7 +453,7 @@ impl OperatorApi {
 
                 format!(
                     "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{}?on_concurrent_steal={}&connect=true",
-                    TargetCrd::urlfied_name(&crd.spec.target),
+                    TargetCrd::urlfied_name(&crd.spec.target.known()),
                     self.on_concurrent_steal,
                 )
             }
@@ -461,7 +461,7 @@ impl OperatorApi {
                 format!(
                     "{}/{}?on_concurrent_steal={}&connect=true",
                     self.target_api.resource_url(),
-                    TargetCrd::urlfied_name(&crd.spec.target),
+                    TargetCrd::urlfied_name(&crd.spec.target.known()),
                     self.on_concurrent_steal,
                 )
             }
