@@ -129,7 +129,7 @@ pub async fn vpn_command(_args: VpnArgs) -> Result<()> {
         .up();
 
     #[cfg(target_os = "linux")]
-    config.platform(|config| {
+    config.platform_config(|config| {
         config.packet_information(true);
         config.ensure_root_privileges(true);
     });
