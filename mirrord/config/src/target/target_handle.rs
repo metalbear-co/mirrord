@@ -36,10 +36,10 @@ pub enum FutureProofTarget {
 }
 
 impl FutureProofTarget {
-    pub fn known(&self) -> &Target {
+    pub fn known(&self) -> Option<&Target> {
         match self {
-            FutureProofTarget::Known(target) => target,
-            FutureProofTarget::Unknown(_) => unreachable!("Unknown target not supported here!"),
+            FutureProofTarget::Known(target) => Some(target),
+            FutureProofTarget::Unknown(_) => None,
         }
     }
 }

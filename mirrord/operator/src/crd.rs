@@ -63,7 +63,13 @@ impl TargetCrd {
 impl From<TargetCrd> for TargetConfig {
     fn from(crd: TargetCrd) -> Self {
         TargetConfig {
-            path: Some(crd.spec.target.known().clone()),
+            path: Some(
+                crd.spec
+                    .target
+                    .known()
+                    .expect("[BUG] Unknown target should never be seen here!")
+                    .clone(),
+            ),
             namespace: crd.metadata.namespace,
         }
     }
