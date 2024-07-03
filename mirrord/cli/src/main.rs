@@ -566,7 +566,11 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     }
 
     // Try operator first if relevant
-    let operator_api = OperatorApi::try_new(&layer_config, &mut NullReporter::default()).await?;
+    let operator_api = if layer_config.operator == Some(false) {
+        None
+    } else {
+        OperatorApi::try_new(&layer_config, &mut NullReporter::default()).await?
+    };
     let mut targets = match operator_api {
         Some(api) => {
             let api = api.prepare_client_cert(&mut NullReporter::default()).await;
@@ -587,6 +591,8 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
                 })
                 .collect()
         }
+
+        None if layer_config.operator == Some(true) => return Err(CliError::OperatorNotInstalled),
 
         None => list_pods(&layer_config, args).await?,
     };
