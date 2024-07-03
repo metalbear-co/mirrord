@@ -104,13 +104,6 @@ impl AsyncRawSocket {
         self.inner.readable().await
     }
 
-    pub async fn read(&self, out: &mut [u8]) -> std::io::Result<usize> {
-        match self.inner.get_ref().read(out) {
-            Ok(result) => Ok(result),
-            Err(_would_block) => Ok(0),
-        }
-    }
-
     pub async fn write(&self, buf: &[u8]) -> std::io::Result<usize> {
         loop {
             let mut guard = self.inner.writable().await?;
@@ -289,13 +282,20 @@ impl VpnTask {
                 // We have data coming from one of our peers.
                 ready = raw_socket.readable() => {
                     let mut guard = ready.unwrap();
-                    let len = raw_socket.read(&mut buffer).await?;
-                        if len > 0 {
-                            let packet = buffer[..len].to_vec();
-                            self.daemon_tx.send(ServerVpn::Packet(packet)).await.unwrap();
+                    match guard.try_io(|inner| inner.get_ref().read(&mut buffer)) {
+                        Ok(Ok(len)) => {
+                            if len > 0 {
+                                let packet = buffer[..len].to_vec();
+                                self.daemon_tx.send(ServerVpn::Packet(packet)).await.unwrap();
+                                buffer[..len].fill(0)
+                            }
+                        },
+                        Ok(Err(error)) => {
+                            tracing::error!(%error, "could not read");
                         }
-                        guard.clear_ready();
+                        Err(_would_block) => continue,
                     }
+                }
             }
         }
     }
