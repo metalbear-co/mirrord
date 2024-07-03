@@ -31,7 +31,7 @@ mirrord-intproxy = { path = "../intproxy" }
 
 actix-codec.workspace = true
 clap.workspace = true
-tun = { version = "0.6", features = ["async"] }
+tun2 = { version = "2", features = ["async"] }
 hickory-proto = "0.24.1"
 tracing.workspace = true
 rand.workspace = true

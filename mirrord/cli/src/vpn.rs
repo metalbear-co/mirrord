@@ -121,7 +121,7 @@ pub async fn vpn_command(_args: VpnArgs) -> Result<()> {
 
     let subnet = IpNet::with_netmask(IpAddr::V4(gateway & net_mask), IpAddr::V4(net_mask)).unwrap();
 
-    let mut config = tun::Configuration::default();
+    let mut config = tun2::Configuration::default();
     config
         .address(network.ip)
         .netmask(network.net_mask)
@@ -131,9 +131,10 @@ pub async fn vpn_command(_args: VpnArgs) -> Result<()> {
     #[cfg(target_os = "linux")]
     config.platform(|config| {
         config.packet_information(true);
+        config.ensure_root_privileges(true);
     });
 
-    let dev = tun::create_as_async(&config).unwrap();
+    let dev = tun2::create_as_async(&config).unwrap();
     let (mut write_stream, read_stream) = dev.into_framed().split();
     let read_stream = read_stream.fuse();
 
@@ -175,13 +176,9 @@ pub async fn vpn_command(_args: VpnArgs) -> Result<()> {
         tokio::select! {
             packet = read_stream.next() => {
                 let packet = packet.unwrap().unwrap();
-                println!("in: {packet:#?}");
-
                 connection
                     .sender
-                    .send(mirrord_protocol::ClientMessage::Vpn(ClientVpn::Packet(
-                        packet.get_bytes().into(),
-                    )))
+                    .send(mirrord_protocol::ClientMessage::Vpn(ClientVpn::Packet(packet)))
                     .await
                     .unwrap();
             }
@@ -189,9 +186,9 @@ pub async fn vpn_command(_args: VpnArgs) -> Result<()> {
                 if let Some(message) = message {
                     match message {
                         DaemonMessage::Vpn(ServerVpn::Packet(packet)) => {
-                            let packet = tun::TunPacket::new(packet);
-                            println!("out: {packet:#?}");
-                            write_stream.send(packet).await.unwrap();
+                            if let Err(err) = write_stream.send(packet).await {
+                                tracing::warn!(%err, "Unable to pipe back packet")
+                            }
                         }
                         _ => unimplemented!("Unexpected response from agent"),
                     }
