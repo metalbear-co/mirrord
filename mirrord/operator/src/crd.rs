@@ -1,11 +1,13 @@
 use kube::CustomResource;
-use mirrord_config::target::{target_handle::FutureProofTarget, Target, TargetConfig};
+use kube_target::KubeTarget;
+use mirrord_config::target::{Target, TargetConfig};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use self::label_selector::LabelSelector;
 use crate::types::LicenseInfoOwned;
 
+pub mod kube_target;
 pub mod label_selector;
 
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
@@ -20,7 +22,7 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 )]
 pub struct TargetSpec {
     /// None when targetless.
-    pub target: FutureProofTarget,
+    pub target: KubeTarget,
 }
 
 impl TargetCrd {

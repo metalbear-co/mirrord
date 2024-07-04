@@ -23,7 +23,6 @@ pub mod job;
 pub mod pod;
 pub mod rollout;
 pub mod stateful_set;
-pub mod target_handle;
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
@@ -215,7 +214,7 @@ mirrord-layer failed to parse the provided target!
 /// - `cronjob/{sample-cronjob}`;
 /// - `statefulset/{sample-statefulset}`;
 #[warn(clippy::wildcard_enum_match_arm)]
-#[derive(Default, Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum Target {
     /// <!--${internal}-->
@@ -252,7 +251,6 @@ pub enum Target {
 
     /// <!--${internal}-->
     /// Spawn a new pod.
-    #[default]
     Targetless,
 }
 
