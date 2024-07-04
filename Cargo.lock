@@ -4246,6 +4246,7 @@ name = "mirrord-vpn"
 version = "3.107.0"
 dependencies = [
  "futures",
+ "ipnet",
  "mirrord-protocol",
  "pnet_packet",
  "tokio",

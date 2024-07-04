@@ -1,6 +1,7 @@
-use std::{fmt, path::PathBuf, sync::LazyLock};
+use std::{fmt, net::IpAddr, path::PathBuf, sync::LazyLock};
 
-use tokio::{fs, io};
+use ipnet::IpNet;
+use tokio::{fs, io, process::Command};
 
 static BASE_RESOLVE_PATH: LazyLock<PathBuf> = LazyLock::new(|| PathBuf::from("/etc/resolver"));
 
@@ -85,5 +86,49 @@ impl Drop for ResolveFileGuard {
                 path.display()
             );
         }
+    }
+}
+
+pub async fn add_subnet_route<'a>(
+    subnet: &'a IpNet,
+    gateway: &'a IpAddr,
+) -> io::Result<RouteCommandGuard<'a>> {
+    let output = Command::new("route")
+        .args([
+            "-n",
+            "add",
+            "-net",
+            &subnet.to_string(),
+            &gateway.to_string(),
+        ])
+        .output()
+        .await?;
+
+    tracing::debug!(?output, "route mounted");
+
+    Ok(RouteCommandGuard { subnet, gateway })
+}
+
+pub struct RouteCommandGuard<'a> {
+    subnet: &'a IpNet,
+    gateway: &'a IpAddr,
+}
+
+impl RouteCommandGuard<'_> {
+    pub async fn unmount(&self) -> io::Result<()> {
+        let output = Command::new("route")
+            .args([
+                "-n",
+                "delete",
+                "-net",
+                &self.subnet.to_string(),
+                &self.gateway.to_string(),
+            ])
+            .output()
+            .await?;
+
+        tracing::debug!(?output, "route unmounted");
+
+        Ok(())
     }
 }

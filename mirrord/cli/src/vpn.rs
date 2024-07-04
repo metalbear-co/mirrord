@@ -12,7 +12,7 @@ use tokio::signal;
 use crate::{
     config::VpnArgs,
     connection::{create_and_connect, AgentConnection},
-    error::Result,
+    error::{CliError, Result},
 };
 
 async fn agent_request<T>(
@@ -58,9 +58,7 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
 
     let mut config = LayerConfig::from_env()?;
     config.agent.image = AgentImageConfig("test".into());
-    config.agent.log_level = "warn,mirrord=trace".to_string();
     config.agent.privileged = true;
-    config.agent.ttl = 30;
 
     let (_, mut connection) = create_and_connect(&config, &mut sub_progress, &mut analytics)
         .await
@@ -101,24 +99,19 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
 
     #[cfg(target_os = "macos")]
     let macos_guard = {
-        use tokio::process::Command;
+        use mirrord_vpn::macos::*;
+
+        let mut subnet_guard = None;
 
         if let Some(subnet) = args.service_subnet.as_ref() {
-            let output = Command::new("route")
-                .args([
-                    "-n",
-                    "add",
-                    "-net",
-                    &subnet.to_string(),
-                    &network.gateway.to_string(),
-                ])
-                .output()
-                .await;
-
-            println!("{output:?}");
+            subnet_guard.replace(
+                add_subnet_route(subnet, &network.gateway)
+                    .await
+                    .map_err(CliError::RuntimeError)?,
+            );
         }
 
-        mirrord_vpn::macos::ResolveFile {
+        let resolve_guard = ResolveFile {
             port: 53,
             domain: args.cluster_domain.clone(),
             nameservers: dns.iter().map(|resolved| resolved.ip.to_string()).collect(),
@@ -126,7 +119,9 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
         }
         .inject()
         .await
-        .expect("Unable to inject mirrord resolve override")
+        .map_err(CliError::RuntimeError)?;
+
+        (subnet_guard, resolve_guard)
     };
 
     'main: loop {
@@ -159,24 +154,13 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
 
     #[cfg(target_os = "macos")]
     {
-        use tokio::process::Command;
+        let (subnet_guard, resolve_guard) = macos_guard;
 
-        if let Some(subnet) = args.service_subnet.as_ref() {
-            let output = Command::new("route")
-                .args([
-                    "-n",
-                    "delete",
-                    "-net",
-                    &subnet.to_string(),
-                    &network.gateway.to_string(),
-                ])
-                .output()
-                .await;
-
-            println!("{output:?}");
+        if let Some(subnet_guard) = subnet_guard {
+            let _ = subnet_guard.unmount().await;
         }
 
-        let _ = macos_guard.cleanup().await;
+        let _ = resolve_guard.cleanup().await;
     }
 
     Ok(())
