@@ -119,7 +119,7 @@ impl<'de> Deserialize<'de> for KubeTarget {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use kube::CustomResource;
     use mirrord_config::target::Target;
     use schemars::JsonSchema;
@@ -156,7 +156,7 @@ mod test {
 
     #[test]
     fn kube_target_unknown() {
-        let new = serde_json::from_str::<TargetSpec>(&r#"{"Bolesław": "the Great"}"#)
+        let new = serde_json::from_str::<TargetSpec>(&r#"{"target": "Bolesław the Great"}"#)
             .expect("Deserialization of unknown!");
 
         assert!(matches!(
@@ -175,5 +175,12 @@ mod test {
         .unwrap();
 
         serde_json::from_str::<LegacyTargetSpec>(&new).expect("Deserialization from new to old!");
+    }
+
+    #[test]
+    #[should_panic]
+    fn bonkers_kube_target_fails() {
+        serde_json::from_str::<TargetSpec>(&r#"{"king": "Sigismund II"}"#)
+            .expect("Kings are not deserializible!");
     }
 }

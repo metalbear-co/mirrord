@@ -323,7 +323,7 @@ jobs:
       - name: mirrord intproxy UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-intproxy
       - name: mirrord operator UT
-        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
 
   macos_tests:
     runs-on: macos-13
