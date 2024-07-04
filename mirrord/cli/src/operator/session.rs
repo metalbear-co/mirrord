@@ -6,7 +6,7 @@ use mirrord_operator::{
         error::{OperatorApiError, OperatorOperation},
         MaybeClientCert, OperatorApi,
     },
-    crd::{SessionCrd, NewOperatorFeature},
+    crd::{NewOperatorFeature, SessionCrd},
 };
 use mirrord_progress::{Progress, ProgressTracker};
 
