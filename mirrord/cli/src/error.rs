@@ -240,7 +240,7 @@ pub(crate) enum CliError {
     #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
         "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
-        Install the operator using the `mirrord operator setup` command or the Helm chart at https://github.com/metalbear-co/charts/tree/main/mirrord-operator.{GENERAL_HELP}"
+        Read more here: https://mirrord.dev/docs/overview/quick-start/#operator.{GENERAL_HELP}"
     ))]
     OperatorNotInstalled,
 }
