@@ -2104,7 +2104,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "libc",
 ]
@@ -3218,7 +3218,7 @@ checksum = "f8478577c03552c21db0e2724ffb8986a5ce7af88107e6be5d2ee6e158c12800"
 
 [[package]]
 name = "issue1317"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "actix-web",
  "env_logger 0.11.3",
@@ -3229,7 +3229,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "errno 0.3.9",
  "libc",
@@ -3238,7 +3238,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776portnot53"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "libc",
  "socket2",
@@ -3246,14 +3246,14 @@ dependencies = [
 
 [[package]]
 name = "issue1899"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "issue2001"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "libc",
 ]
@@ -3409,8 +3409,7 @@ dependencies = [
 [[package]]
 name = "kube"
 version = "0.92.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12dc4487eda98835dcaa7ac92a14165446db29dbd67a743c79fe9f41bf38ee72"
+source = "git+https://github.com/kube-rs/kube?rev=f9902f1439b3c0baafc2ece1680644c2bfade742#f9902f1439b3c0baafc2ece1680644c2bfade742"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -3422,8 +3421,7 @@ dependencies = [
 [[package]]
 name = "kube-client"
 version = "0.92.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "408f35eab36927d3b883e4ad54c3080ea8c49f899ac84a7856e7182e4ee3b392"
+source = "git+https://github.com/kube-rs/kube?rev=f9902f1439b3c0baafc2ece1680644c2bfade742#f9902f1439b3c0baafc2ece1680644c2bfade742"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -3464,8 +3462,7 @@ dependencies = [
 [[package]]
 name = "kube-core"
 version = "0.92.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f776624097c1e09e72eb1e9e0c2bb5d17d97c27a6a87734390a9fba246a8f67f"
+source = "git+https://github.com/kube-rs/kube?rev=f9902f1439b3c0baafc2ece1680644c2bfade742#f9902f1439b3c0baafc2ece1680644c2bfade742"
 dependencies = [
  "chrono",
  "form_urlencoded",
@@ -3481,8 +3478,7 @@ dependencies = [
 [[package]]
 name = "kube-derive"
 version = "0.92.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ae07adfd7d21b7fa582789206391243f98e155b46c806eb494839569853bcfd"
+source = "git+https://github.com/kube-rs/kube?rev=f9902f1439b3c0baafc2ece1680644c2bfade742#f9902f1439b3c0baafc2ece1680644c2bfade742"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3494,8 +3490,7 @@ dependencies = [
 [[package]]
 name = "kube-runtime"
 version = "0.92.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12e5933f2d429f3a05d4cb67f935b25c94a133b0baeb558ab3917c270a11f6ef"
+source = "git+https://github.com/kube-rs/kube?rev=f9902f1439b3c0baafc2ece1680644c2bfade742#f9902f1439b3c0baafc2ece1680644c2bfade742"
 dependencies = [
  "ahash",
  "async-broadcast",
@@ -3592,7 +3587,7 @@ checksum = "78b3ae25bc7c8c38cec158d1f2757ee79e9b3740fbc7ccf0e59e4b08d793fa89"
 
 [[package]]
 name = "listen_ports"
-version = "3.107.0"
+version = "3.108.0"
 
 [[package]]
 name = "litemap"
@@ -3814,7 +3809,7 @@ checksum = "c9be0862c1b3f26a88803c4a49de6889c10e608b3ee9344e6ef5b45fb37ad3d1"
 
 [[package]]
 name = "mirrord"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -3860,7 +3855,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3916,7 +3911,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "assert-json-diff",
  "base64 0.22.1",
@@ -3930,7 +3925,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "chrono",
  "fs4",
@@ -3951,7 +3946,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "bimap",
  "bitflags 2.5.0",
@@ -3973,7 +3968,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3983,7 +3978,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "bincode",
  "drain",
@@ -3999,7 +3994,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "bytes",
  "futures",
@@ -4013,6 +4008,7 @@ dependencies = [
  "mirrord-operator",
  "mirrord-protocol",
  "rand",
+ "semver 1.0.23",
  "serde",
  "thiserror",
  "tokio",
@@ -4022,7 +4018,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy-protocol"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "bincode",
  "mirrord-protocol",
@@ -4032,7 +4028,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "actix-codec",
  "base64 0.22.1",
@@ -4059,7 +4055,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "actix-codec",
  "anyhow",
@@ -4115,7 +4111,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4124,7 +4120,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4134,7 +4130,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -4171,7 +4167,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "enum_dispatch",
  "indicatif",
@@ -4181,7 +4177,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.7.0"
+version = "1.8.1"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -4205,7 +4201,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "apple-codesign",
  "memchr",
@@ -4542,7 +4538,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.107.0"
+version = "3.108.0"
 
 [[package]]
 name = "overload"
@@ -5612,21 +5608,21 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.107.0"
+version = "3.108.0"
 dependencies = [
  "tokio",
 ]
@@ -6783,6 +6779,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

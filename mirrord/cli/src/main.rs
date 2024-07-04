@@ -17,9 +17,11 @@ use k8s_openapi::{
     api::{apps::v1::Deployment, core::v1::Pod},
     Metadata, NamespaceResourceScope,
 };
-use kube::api::ListParams;
+use kube::{api::ListParams, Client};
 use miette::JSONReportHandler;
-use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
+use mirrord_analytics::{
+    AnalyticsError, AnalyticsReporter, CollectAnalytics, NullReporter, Reporter,
+};
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     feature::{fs::FsModeConfig, network::incoming::IncomingMode},
@@ -28,7 +30,7 @@ use mirrord_config::{
 };
 use mirrord_kube::api::{
     container::SKIP_NAMES,
-    kubernetes::{create_kube_api, get_k8s_resource_api, rollout::Rollout},
+    kubernetes::{create_kube_config, get_k8s_resource_api, rollout::Rollout},
 };
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
@@ -500,12 +502,13 @@ where
 }
 
 async fn list_pods(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<Vec<String>> {
-    let client = create_kube_api(
+    let client = create_kube_config(
         layer_config.accept_invalid_certificates,
         layer_config.kubeconfig.clone(),
         layer_config.kube_context.clone(),
     )
     .await
+    .and_then(|config| Client::try_from(config).map_err(From::from))
     .map_err(CliError::CreateKubeApiFailed)?;
 
     let namespace = args
@@ -563,39 +566,29 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     }
 
     // Try operator first if relevant
-    let mut targets = match &layer_config.operator {
-        Some(true) | None => {
-            let operator_targets = OperatorApi::list_targets(&layer_config).await;
-            match operator_targets {
-                Ok(targets) => {
-                    // adjust format to match non-operator output
-                    targets
-                        .iter()
-                        .filter_map(|target_crd| {
-                            let target = target_crd.spec.target.as_ref()?;
-                            if let Some(container) = target.container_name() {
-                                if SKIP_NAMES.contains(container.as_str()) {
-                                    return None;
-                                }
-                            }
-                            Some(format!("{target}"))
-                        })
-                        .collect::<Vec<String>>()
-                }
-
-                Err(error) => {
-                    if layer_config.operator.is_some() {
-                        error!(
-                            ?error,
-                            "Operator was explicitly enabled and we failed to list targets"
-                        );
-                        return Err(error.into());
+    let operator_api = OperatorApi::try_new(&layer_config, &mut NullReporter::default()).await?;
+    let mut targets = match operator_api {
+        Some(api) => {
+            let api = api.prepare_client_cert(&mut NullReporter::default()).await;
+            api.inspect_cert_error(
+                |error| tracing::error!(%error, "failed to prepare client certificate"),
+            );
+            api.list_targets(layer_config.target.namespace.as_deref())
+                .await?
+                .iter()
+                .filter_map(|target_crd| {
+                    let target = target_crd.spec.target.as_ref()?;
+                    if let Some(container) = target.container_name() {
+                        if SKIP_NAMES.contains(container.as_str()) {
+                            return None;
+                        }
                     }
-                    list_pods(&layer_config, args).await?
-                }
-            }
+                    Some(format!("{target}"))
+                })
+                .collect()
         }
-        Some(false) => list_pods(&layer_config, args).await?,
+
+        None => list_pods(&layer_config, args).await?,
     };
 
     targets.sort();
@@ -705,9 +698,9 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                         let command = if is_homebrew { "brew upgrade metalbear-co/mirrord/mirrord" } else { "curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash" };
                         progress.print(&format!("New mirrord version available: {}. To update, run: `{:?}`.", latest_version, command));
                         progress.print("To disable version checks, set env variable MIRRORD_CHECK_VERSION to 'false'.");
-                        progress.success(Some(&format!("Update to {latest_version} available")));
+                        progress.success(Some(&format!("update to {latest_version} available")));
                     } else {
-                        progress.success(Some(&format!("Running on latest ({CURRENT_VERSION})!")));
+                        progress.success(Some(&format!("running on latest ({CURRENT_VERSION})!")));
                     }
                 }
             }

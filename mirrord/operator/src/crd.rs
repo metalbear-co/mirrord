@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use self::label_selector::LabelSelector;
 #[cfg(feature = "client")]
-use crate::client::OperatorApiError;
+use crate::client::error::OperatorApiError;
 use crate::types::LicenseInfoOwned;
 
 pub mod label_selector;

@@ -11,7 +11,7 @@ use std::{
 
 use bincode::{Decode, Encode};
 use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
+use http_body_util::{combinators::BoxBody, BodyExt, Full, StreamBody};
 use hyper::{
     body::{Body, Frame, Incoming},
     http,
@@ -22,9 +22,10 @@ use mirrord_macros::protocol_break;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Receiver;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
 
-use crate::{ConnectionId, Port, RemoteResult, RequestId};
+use crate::{body_chunks::BodyExt as _, ConnectionId, Port, RemoteResult, RequestId};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnection {
@@ -81,13 +82,13 @@ pub enum DaemonTcp {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ChunkedRequest {
     Start(HttpRequest<Vec<InternalHttpBodyFrame>>),
-    Body(ChunkedRequestBody),
-    Error(ChunkedRequestError),
+    Body(ChunkedHttpBody),
+    Error(ChunkedHttpError),
 }
 
 /// Contents of a chunked message body frame from server.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ChunkedRequestBody {
+pub struct ChunkedHttpBody {
     #[bincode(with_serde)]
     pub frames: Vec<InternalHttpBodyFrame>,
     pub is_last: bool,
@@ -106,7 +107,7 @@ impl From<InternalHttpBodyFrame> for Frame<Bytes> {
 
 /// An error occurred while processing chunked data from server.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ChunkedRequestError {
+pub struct ChunkedHttpError {
     pub connection_id: ConnectionId,
     pub request_id: RequestId,
 }
@@ -191,6 +192,14 @@ pub enum LayerTcpSteal {
     Data(TcpData),
     HttpResponse(HttpResponse<Vec<u8>>),
     HttpResponseFramed(HttpResponse<InternalHttpBody>),
+    HttpResponseChunked(ChunkedResponse),
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum ChunkedResponse {
+    Start(HttpResponse<Vec<InternalHttpBodyFrame>>),
+    Body(ChunkedHttpBody),
+    Error(ChunkedHttpError),
 }
 
 /// (De-)Serializable HTTP request.
@@ -388,18 +397,22 @@ impl HttpRequestFallback {
     }
 }
 
-/// Minimal mirrord-protocol version that allows [`DaemonTcp::HttpRequestFramed`] instead of
-/// [`DaemonTcp::HttpRequest`].
+/// Minimal mirrord-protocol version that allows [`DaemonTcp::HttpRequestFramed`] and
+/// [`LayerTcpSteal::HttpResponseFramed`].
 pub static HTTP_FRAMED_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.3.0".parse().expect("Bad Identifier"));
 
-/// Minimal mirrord-protocol version that allows [`DaemonTcp::HttpRequestChunked`] instead of
-/// [`DaemonTcp::HttpRequest`].
-pub static HTTP_CHUNKED_VERSION: LazyLock<VersionReq> =
+/// Minimal mirrord-protocol version that allows [`DaemonTcp::HttpRequestChunked`].
+pub static HTTP_CHUNKED_REQUEST_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.7.0".parse().expect("Bad Identifier"));
 
+/// Minimal mirrord-protocol version that allows [`LayerTcpSteal::HttpResponseChunked`].
+pub static HTTP_CHUNKED_RESPONSE_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.8.1".parse().expect("Bad Identifier"));
+
 /// Minimal mirrord-protocol version that allows [`DaemonTcp::Data`] to be sent in the same
-/// connection as [`DaemonTcp::HttpRequestFramed`] and [`DaemonTcp::HttpRequest`].
+/// connection as
+/// [`DaemonTcp::HttpRequestChunked`]/[`DaemonTcp::HttpRequestFramed`]/[`DaemonTcp::HttpRequest`].
 pub static HTTP_FILTERED_UPGRADE_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.5.0".parse().expect("Bad Identifier"));
 
@@ -429,15 +442,15 @@ impl<B> HttpRequest<B> {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct InternalHttpResponse<Body> {
     #[serde(with = "http_serde::status_code")]
-    status: StatusCode,
+    pub status: StatusCode,
 
     #[serde(with = "http_serde::version")]
-    version: Version,
+    pub version: Version,
 
     #[serde(with = "http_serde::header_map")]
-    headers: HeaderMap,
+    pub headers: HeaderMap,
 
-    body: Body,
+    pub body: Body,
 }
 
 impl<B> InternalHttpResponse<B> {
@@ -536,10 +549,13 @@ impl fmt::Debug for InternalHttpBodyFrame {
     }
 }
 
+pub type ReceiverStreamBody = StreamBody<ReceiverStream<hyper::Result<Frame<Bytes>>>>;
+
 #[derive(Debug)]
 pub enum HttpResponseFallback {
     Framed(HttpResponse<InternalHttpBody>),
     Fallback(HttpResponse<Vec<u8>>),
+    Streamed(HttpResponse<ReceiverStreamBody>),
 }
 
 impl HttpResponseFallback {
@@ -547,6 +563,7 @@ impl HttpResponseFallback {
         match self {
             HttpResponseFallback::Framed(req) => req.connection_id,
             HttpResponseFallback::Fallback(req) => req.connection_id,
+            HttpResponseFallback::Streamed(req) => req.connection_id,
         }
     }
 
@@ -554,28 +571,70 @@ impl HttpResponseFallback {
         match self {
             HttpResponseFallback::Framed(req) => req.request_id,
             HttpResponseFallback::Fallback(req) => req.request_id,
+            HttpResponseFallback::Streamed(req) => req.request_id,
         }
     }
 
-    pub fn into_hyper<E>(self) -> Result<Response<BoxBody<Bytes, E>>, http::Error> {
+    pub fn into_hyper<E>(self) -> Result<Response<BoxBody<Bytes, E>>, http::Error>
+    where
+        E: From<hyper::Error>,
+    {
         match self {
             HttpResponseFallback::Framed(req) => req.internal_response.try_into(),
             HttpResponseFallback::Fallback(req) => req.internal_response.try_into(),
+            HttpResponseFallback::Streamed(req) => req.internal_response.try_into(),
         }
     }
 
+    /// Produces an [`HttpResponseFallback`] to the given [`HttpRequestFallback`].
+    ///
+    /// # Note on picking response variant
+    ///
+    /// Variant of returned [`HttpResponseFallback`] is picked based on the variant of given
+    /// [`HttpRequestFallback`] and agent protocol version. We need to consider both due
+    /// to:
+    /// 1. Old agent versions always responding with client's `mirrord_protocol` version to
+    ///    [`ClientMessage::SwitchProtocolVersion`](super::ClientMessage::SwitchProtocolVersion),
+    /// 2. [`LayerTcpSteal::HttpResponseChunked`] being introduced after
+    ///    [`DaemonTcp::HttpRequestChunked`].
     pub fn response_from_request(
         request: HttpRequestFallback,
         status: StatusCode,
         message: &str,
+        agent_protocol_version: Option<&semver::Version>,
     ) -> Self {
+        let agent_supports_streaming_response = agent_protocol_version
+            .map(|version| HTTP_CHUNKED_RESPONSE_VERSION.matches(version))
+            .unwrap_or(false);
+
         match request {
+            // We received `DaemonTcp::HttpRequestFramed` from the agent,
+            // so we know it supports `LayerTcpSteal::HttpResponseFramed` (both were introduced in
+            // the same `mirrord_protocol` version).
             HttpRequestFallback::Framed(request) => HttpResponseFallback::Framed(
                 HttpResponse::<InternalHttpBody>::response_from_request(request, status, message),
             ),
+
+            // We received `DaemonTcp::HttpRequest` from the agent, so we assume it only supports
+            // `LayerTcpSteal::HttpResponse`.
             HttpRequestFallback::Fallback(request) => HttpResponseFallback::Fallback(
                 HttpResponse::<Vec<u8>>::response_from_request(request, status, message),
             ),
+
+            // We received `DaemonTcp::HttpRequestChunked` and the agent supports
+            // `LayerTcpSteal::HttpResponseChunked`.
+            HttpRequestFallback::Streamed(request) if agent_supports_streaming_response => {
+                HttpResponseFallback::Streamed(
+                    HttpResponse::<ReceiverStreamBody>::response_from_request(
+                        request, status, message,
+                    ),
+                )
+            }
+
+            // We received `DaemonTcp::HttpRequestChunked` from the agent,
+            // but the agent does not support `LayerTcpSteal::HttpResponseChunked`.
+            // However, it must support the older `LayerTcpSteal::HttpResponseFramed`
+            // variant (was introduced before `DaemonTcp::HttpRequestChunked`).
             HttpRequestFallback::Streamed(request) => HttpResponseFallback::Framed(
                 HttpResponse::<InternalHttpBody>::response_from_request(request, status, message),
             ),
@@ -585,10 +644,7 @@ impl HttpResponseFallback {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 #[bincode(bounds = "for<'de> Body: Serialize + Deserialize<'de>")]
-pub struct HttpResponse<Body>
-where
-    for<'de> Body: Serialize + Deserialize<'de>,
-{
+pub struct HttpResponse<Body> {
     /// This is used to make sure the response is sent in its turn, after responses to all earlier
     /// requests were already sent.
     pub port: Port,
@@ -789,6 +845,88 @@ impl HttpResponse<Vec<u8>> {
     }
 }
 
+impl HttpResponse<ReceiverStreamBody> {
+    pub async fn from_hyper_response(
+        response: Response<Incoming>,
+        port: Port,
+        connection_id: ConnectionId,
+        request_id: RequestId,
+    ) -> Result<HttpResponse<ReceiverStreamBody>, hyper::Error> {
+        let (
+            Parts {
+                status,
+                version,
+                headers,
+                ..
+            },
+            mut body,
+        ) = response.into_parts();
+
+        let frames = body.next_frames(true).await?;
+        let (tx, rx) = tokio::sync::mpsc::channel(frames.frames.len().max(12));
+        for frame in frames.frames {
+            tx.try_send(Ok(frame))
+                .expect("Channel is open, capacity sufficient")
+        }
+        if !frames.is_last {
+            tokio::spawn(async move {
+                while let Some(frame) = body.frame().await {
+                    if tx.send(frame).await.is_err() {
+                        return;
+                    }
+                }
+            });
+        };
+
+        let body = StreamBody::new(ReceiverStream::from(rx));
+
+        let internal_response = InternalHttpResponse {
+            status,
+            headers,
+            version,
+            body,
+        };
+
+        Ok(HttpResponse {
+            request_id,
+            port,
+            connection_id,
+            internal_response,
+        })
+    }
+
+    pub fn response_from_request(
+        request: HttpRequest<StreamingBody>,
+        status: StatusCode,
+        message: &str,
+    ) -> Self {
+        let HttpRequest {
+            internal_request: InternalHttpRequest { version, .. },
+            connection_id,
+            request_id,
+            port,
+        } = request;
+
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        let frame = Frame::data(Bytes::copy_from_slice(message.as_bytes()));
+        tx.try_send(Ok(frame))
+            .expect("channel is open, capacity is sufficient");
+        let body = StreamBody::new(ReceiverStream::new(rx));
+
+        Self {
+            port,
+            connection_id,
+            request_id,
+            internal_response: InternalHttpResponse {
+                status,
+                version,
+                headers: Default::default(),
+                body,
+            },
+        }
+    }
+}
+
 impl<E> TryFrom<InternalHttpResponse<InternalHttpBody>> for Response<BoxBody<Bytes, E>> {
     type Error = http::Error;
 
@@ -828,5 +966,28 @@ impl<E> TryFrom<InternalHttpResponse<Vec<u8>>> for Response<BoxBody<Bytes, E>> {
         builder.body(BoxBody::new(
             Full::new(Bytes::from(body)).map_err(|_| unreachable!()),
         ))
+    }
+}
+
+impl<E> TryFrom<InternalHttpResponse<ReceiverStreamBody>> for Response<BoxBody<Bytes, E>>
+where
+    E: From<hyper::Error>,
+{
+    type Error = http::Error;
+
+    fn try_from(value: InternalHttpResponse<ReceiverStreamBody>) -> Result<Self, Self::Error> {
+        let InternalHttpResponse {
+            status,
+            version,
+            headers,
+            body,
+        } = value;
+
+        let mut builder = Response::builder().status(status).version(version);
+        if let Some(h) = builder.headers_mut() {
+            *h = headers;
+        }
+
+        builder.body(BoxBody::new(body.map_err(|e| e.into())))
     }
 }
