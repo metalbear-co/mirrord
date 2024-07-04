@@ -163,15 +163,14 @@ enum OperatorSessionTarget {
 impl OperatorSessionTarget {
     /// Returns a connection url for the given [`OperatorSessionTarget`].
     /// This can be used to create a websocket connection with the operator.
-    fn connect_url(&self, use_proxy: bool, concurrent_steal: ConcurrentSteal) -> String {
-        match (use_proxy, self) {
+    fn connect_url(
+        &self,
+        use_proxy: bool,
+        concurrent_steal: ConcurrentSteal,
+    ) -> Result<String, OperatorApiError> {
+        Ok(match (use_proxy, self) {
             (true, OperatorSessionTarget::Raw(crd)) => {
-                let name = TargetCrd::urlfied_name(
-                    crd.spec
-                        .target
-                        .known()
-                        .expect("[BUG] Unknown target should never be seen here!"),
-                );
+                let name = TargetCrd::urlfied_name(crd.spec.target.as_ref().try_into()?);
                 let namespace = crd
                     .meta()
                     .namespace
@@ -184,12 +183,7 @@ impl OperatorSessionTarget {
             }
 
             (false, OperatorSessionTarget::Raw(crd)) => {
-                let name = TargetCrd::urlfied_name(
-                    crd.spec
-                        .target
-                        .known()
-                        .expect("[BUG] Unknown target should never be seen here!"),
-                );
+                let name = TargetCrd::urlfied_name(crd.spec.target.as_ref().try_into()?);
                 let namespace = crd
                     .meta()
                     .namespace
@@ -232,7 +226,7 @@ impl OperatorSessionTarget {
 
                 format!("{url_path}/{name}?connect=true")
             }
-        }
+        })
     }
 }
 
@@ -689,7 +683,7 @@ impl OperatorApi<PreparedClientCert> {
         let connect_url = target.connect_url(
             use_proxy_api,
             config.feature.network.incoming.on_concurrent_steal,
-        );
+        )?;
 
         let session = OperatorSession {
             id: rand::random(),

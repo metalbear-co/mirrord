@@ -29,9 +29,6 @@ pub enum KubeApiError {
     #[error("None runtime data for non-targetless agent. This is a bug.")]
     MissingRuntimeData,
 
-    #[error("Failed trying to target unknown `{0}` resource!")]
-    UnknownTarget(String),
-
     #[error("Failed to load incluster Kube config: {0}")]
     KubeInclusterError(#[from] kube::config::InClusterError),
 

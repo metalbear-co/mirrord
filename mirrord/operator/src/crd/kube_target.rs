@@ -2,6 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::Target;
+use crate::client::error::OperatorApiError;
 
 /// Holds either a kubernetes target that we know about, (de)serializing it into a
 /// [`Target`], or a target we do not know about.
@@ -52,6 +53,36 @@ impl KubeTarget {
         match self {
             KubeTarget::Known(target) => Some(target),
             KubeTarget::Unknown(_) => None,
+        }
+    }
+}
+
+impl TryFrom<KubeTarget> for Target {
+    type Error = OperatorApiError;
+
+    fn try_from(kube_target: KubeTarget) -> Result<Self, Self::Error> {
+        match kube_target {
+            KubeTarget::Known(target) => Ok(target),
+            KubeTarget::Unknown(unknown) => Err(OperatorApiError::UnknownTarget(unknown)),
+        }
+    }
+}
+
+impl AsRef<KubeTarget> for KubeTarget {
+    fn as_ref(&self) -> &KubeTarget {
+        &self
+    }
+}
+
+impl<'a> TryFrom<&'a KubeTarget> for &'a Target {
+    type Error = OperatorApiError;
+
+    fn try_from(kube_target: &'a KubeTarget) -> Result<Self, Self::Error> {
+        match kube_target {
+            KubeTarget::Known(target) => Ok(target),
+            KubeTarget::Unknown(unknown) => {
+                Err(OperatorApiError::UnknownTarget(unknown.to_owned()))
+            }
         }
     }
 }

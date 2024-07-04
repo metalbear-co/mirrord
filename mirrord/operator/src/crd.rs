@@ -5,7 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use self::label_selector::LabelSelector;
-use crate::types::LicenseInfoOwned;
+use crate::{client::error::OperatorApiError, types::LicenseInfoOwned};
 
 pub mod kube_target;
 pub mod label_selector;
@@ -62,18 +62,14 @@ impl TargetCrd {
     }
 }
 
-impl From<TargetCrd> for TargetConfig {
-    fn from(crd: TargetCrd) -> Self {
-        TargetConfig {
-            path: Some(
-                crd.spec
-                    .target
-                    .known()
-                    .expect("[BUG] Unknown target should never be seen here!")
-                    .clone(),
-            ),
+impl TryFrom<TargetCrd> for TargetConfig {
+    type Error = OperatorApiError;
+
+    fn try_from(crd: TargetCrd) -> Result<Self, Self::Error> {
+        Ok(TargetConfig {
+            path: Some(Target::try_from(crd.spec.target)?.clone()),
             namespace: crd.metadata.namespace,
-        }
+        })
     }
 }
 
