@@ -566,39 +566,12 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     }
 
     // Try operator first if relevant
-    /*
-    let mut targets = match &layer_config.operator {
-        Some(true) | None => {
-            let operator_targets = OperatorApi::list_targets(&layer_config).await;
-            match operator_targets {
-                Ok(targets) => {
-                    // adjust format to match non-operator output
-                    targets
-                        .iter()
-                        .filter_map(|target_crd| {
-                            let target = &target_crd.spec.target;
-                            if let Some(container) = target.container()
-                                && SKIP_NAMES.contains(container.as_str())
-                            {
-                                None
-                            } else {
-                                // Filter out `Unknown`, which in string form is just `""`.
-                                let target_str = format!("{target}");
-                                (!target_str.is_empty()).then_some(target_str)
-                            }
-                        })
-                        .collect::<Vec<String>>()
-                }
+    let operator_api = if layer_config.operator == Some(false) {
+        None
+    } else {
+        OperatorApi::try_new(&layer_config, &mut NullReporter::default()).await?
+    };
 
-                Err(error) => {
-                    if layer_config.operator.is_some() {
-                        error!(
-                            ?error,
-                            "Operator was explicitly enabled and we failed to list targets"
-                        );
-                        return Err(error.into());
-                        */
-    let operator_api = OperatorApi::try_new(&layer_config, &mut NullReporter::default()).await?;
     let mut targets = match operator_api {
         Some(api) => {
             let api = api.prepare_client_cert(&mut NullReporter::default()).await;
@@ -619,6 +592,8 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
                 })
                 .collect()
         }
+
+        None if layer_config.operator == Some(true) => return Err(CliError::OperatorNotInstalled),
 
         None => list_pods(&layer_config, args).await?,
     };

@@ -159,11 +159,15 @@ async fn operator_status(config: Option<&Path>) -> Result<()> {
     }
 
     let mut status_progress = progress.subtask("fetching status");
-    let api = OperatorApi::new(&layer_config, &mut NullReporter::default())
+    let api = OperatorApi::try_new(&layer_config, &mut NullReporter::default())
         .await
         .inspect_err(|_| {
-            status_progress.failure(Some("unable to get status"));
+            status_progress.failure(Some("failed to get status"));
         })?;
+    let Some(api) = api else {
+        status_progress.failure(Some("operator not found"));
+        return Err(CliError::OperatorNotInstalled);
+    };
     status_progress.success(Some("fetched status"));
 
     progress.success(None);
