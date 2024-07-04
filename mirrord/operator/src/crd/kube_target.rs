@@ -117,3 +117,63 @@ impl<'de> Deserialize<'de> for KubeTarget {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use kube::CustomResource;
+    use mirrord_config::target::Target;
+    use schemars::JsonSchema;
+    use serde::{Deserialize, Serialize};
+
+    use crate::crd::{kube_target::KubeTarget, TargetSpec};
+
+    #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+    #[kube(
+        group = "operator.metalbear.co",
+        version = "v1",
+        kind = "Target",
+        root = "LegacyTargetCrd",
+        namespaced
+    )]
+    struct LegacyTargetSpec {
+        target: Option<Target>,
+    }
+
+    #[test]
+    fn none_into_kube_target() {
+        let legacy = serde_json::to_string_pretty(&LegacyTargetSpec { target: None }).unwrap();
+        serde_json::from_str::<TargetSpec>(&legacy).expect("Deserialization from old to new!");
+    }
+
+    #[test]
+    fn some_into_kube_target() {
+        let legacy = serde_json::to_string_pretty(&LegacyTargetSpec {
+            target: Some(Target::Targetless),
+        })
+        .unwrap();
+        serde_json::from_str::<TargetSpec>(&legacy).expect("Deserialization from old to new!");
+    }
+
+    #[test]
+    fn kube_target_unknown() {
+        let new = serde_json::from_str::<TargetSpec>(&r#"{"Bolesław": "the Great"}"#)
+            .expect("Deserialization of unknown!");
+
+        assert!(matches!(
+            new,
+            TargetSpec {
+                target: KubeTarget::Unknown(_)
+            }
+        ))
+    }
+
+    #[test]
+    fn kube_target_to_legacy() {
+        let new = serde_json::to_string_pretty(&TargetSpec {
+            target: KubeTarget::Known(Target::Targetless),
+        })
+        .unwrap();
+
+        serde_json::from_str::<LegacyTargetSpec>(&new).expect("Deserialization from new to old!");
+    }
+}

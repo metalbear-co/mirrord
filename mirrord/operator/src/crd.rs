@@ -21,7 +21,7 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
     namespaced
 )]
 pub struct TargetSpec {
-    /// None when targetless.
+    /// The kubernetes resource to target.
     pub target: KubeTarget,
 }
 
