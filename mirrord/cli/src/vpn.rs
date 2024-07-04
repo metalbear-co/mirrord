@@ -128,11 +128,16 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
         tokio::select! {
             packet = read_stream.next() => {
                 let packet = packet.unwrap().unwrap();
-                connection
+                if connection
                     .sender
-                    .send(mirrord_protocol::ClientMessage::Vpn(ClientVpn::Packet(packet)))
+                    .send(mirrord_protocol::ClientMessage::Vpn(ClientVpn::Packet(
+                        packet,
+                    )))
                     .await
-                    .unwrap();
+                    .is_err()
+                {
+                    break 'main;
+                }
             }
             message = connection.receiver.recv() => {
                 if let Some(message) = message {
@@ -144,6 +149,8 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
                         }
                         _ => unimplemented!("Unexpected response from agent"),
                     }
+                } else {
+                    break 'main;
                 }
             }
             _ = signal::ctrl_c() => {

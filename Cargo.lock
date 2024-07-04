@@ -4248,6 +4248,7 @@ dependencies = [
  "futures",
  "ipnet",
  "mirrord-protocol",
+ "paste",
  "pnet_packet",
  "tokio",
  "tracing",

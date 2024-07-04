@@ -1,3 +1,4 @@
+#![feature(concat_idents)]
 #![feature(lazy_cell)]
 
 #[cfg(target_os = "macos")]
