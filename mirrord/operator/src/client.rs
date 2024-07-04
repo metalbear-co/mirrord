@@ -262,51 +262,11 @@ where
 }
 
 impl OperatorApi<NoClientCert> {
-    /// Fetches [`MirrordOperatorCrd`] from the cluster and creates a new instance of this API.
-    #[tracing::instrument(level = Level::TRACE, skip_all, err)]
-    pub async fn new<R>(config: &LayerConfig, reporter: &mut R) -> OperatorApiResult<Self>
-    where
-        R: Reporter,
-    {
-        let base_config = Self::base_client_config(config).await?;
-        let client = Client::try_from(base_config.clone())
-            .map_err(KubeApiError::from)
-            .map_err(OperatorApiError::CreateKubeClient)?;
-        let operator: MirrordOperatorCrd = Api::all(client.clone())
-            .get(OPERATOR_STATUS_NAME)
-            .await
-            .map_err(|error| OperatorApiError::KubeError {
-                error,
-                operation: OperatorOperation::FindingOperator,
-            })?;
-
-        reporter.set_operator_properties(AnalyticsOperatorProperties {
-            client_hash: None,
-            license_hash: operator
-                .spec
-                .license
-                .fingerprint
-                .as_deref()
-                .map(AnalyticsHash::from_base64),
-        });
-
-        Ok(Self {
-            client,
-            client_cert: NoClientCert { base_config },
-            operator,
-        })
-    }
-
-    /// If [`LayerConfig::operator`] is explicitly disabled, returns early with [`None`].
+    /// Attempts to fetch the [`MirrordOperatorCrd`] resource and create an instance of this API.
+    /// In case of error response from the Kubernetes API server, executes an extra API discovery
+    /// step to confirm that the operator is not installed.
     ///
-    /// If [`LayerConfig::operator`] is explicitly enabled, this functions is equivalent to
-    /// [`OperatorApi::new`] and never returns [`None`].
-    ///
-    /// If [`LayerConfig::operator`] is missing, tries to fetch [`MirrordOperatorCrd`] from the
-    /// cluster and create a new instance of this API. If fetching the resource fails, an extra
-    /// discovery step is made to determine whether the operator is installed. If this extra
-    /// step proves that the operator is installed, an error is returned. Otherwise, [`None`] is
-    /// returned.
+    /// If certain that the operator is not installed, returns [`None`].
     #[tracing::instrument(level = Level::TRACE, skip_all, err)]
     pub async fn try_new<R>(
         config: &LayerConfig,
@@ -315,10 +275,6 @@ impl OperatorApi<NoClientCert> {
     where
         R: Reporter,
     {
-        if config.operator == Some(false) {
-            return Ok(None);
-        }
-
         let base_config = Self::base_client_config(config).await?;
         let client = Client::try_from(base_config.clone())
             .map_err(KubeApiError::from)
@@ -346,7 +302,7 @@ impl OperatorApi<NoClientCert> {
                 }));
             }
 
-            Err(error @ kube::Error::Api(..)) if config.operator.is_none() => {
+            Err(error @ kube::Error::Api(..)) => {
                 match discovery::operator_installed(&client).await {
                     Ok(false) | Err(..) => {
                         return Ok(None);

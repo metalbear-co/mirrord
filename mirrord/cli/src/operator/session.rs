@@ -10,7 +10,7 @@ use mirrord_operator::{
 };
 use mirrord_progress::{Progress, ProgressTracker};
 
-use crate::{Result, SessionCommand};
+use crate::{CliError, Result, SessionCommand};
 
 /// Handles the [`SessionCommand`]s that deal with session management in the operator.
 pub(super) struct SessionCommandHandler {
@@ -38,13 +38,15 @@ impl SessionCommandHandler {
             progress.failure(Some(&format!("failed to read config from env: {error}")));
         })?;
 
-        let operator_api = OperatorApi::new(&config, &mut NullReporter::default())
-            .await
-            .inspect_err(|_| {
-                progress.failure(Some("failed to create operator API"));
-            })?
-            .prepare_client_cert(&mut NullReporter::default())
-            .await;
+        let mut subtask = progress.subtask("checking operator");
+        let operator_api = match OperatorApi::try_new(&config, &mut NullReporter::default()).await?
+        {
+            Some(api) => api.prepare_client_cert(&mut NullReporter::default()).await,
+            None => {
+                subtask.failure(Some("operator not found"));
+                return Err(CliError::OperatorNotInstalled);
+            }
+        };
 
         operator_api.inspect_cert_error(|error| {
             progress.warning(&format!("Failed to prepare user certificate: {error}"));

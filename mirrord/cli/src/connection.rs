@@ -41,9 +41,13 @@ where
         return Ok(None);
     }
 
-    let Some(api) = OperatorApi::try_new(config, analytics).await? else {
-        operator_subtask.success(Some("operator not found"));
-        return Ok(None);
+    let api = match OperatorApi::try_new(config, analytics).await? {
+        Some(api) => api,
+        None if config.operator == Some(true) => return Err(CliError::OperatorNotInstalled),
+        None => {
+            operator_subtask.success(Some("operator not found"));
+            return Ok(None);
+        }
     };
 
     let mut version_cmp_subtask = operator_subtask.subtask("checking version compatibility");

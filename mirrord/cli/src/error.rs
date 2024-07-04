@@ -236,6 +236,13 @@ pub(crate) enum CliError {
     #[error("Failed to prepare mirrord operator client certificate: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     OperatorClientCertError(String),
+
+    #[error("mirrord operator was not found in the cluster.")]
+    #[diagnostic(help(
+        "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
+        Read more here: https://mirrord.dev/docs/overview/quick-start/#operator.{GENERAL_HELP}"
+    ))]
+    OperatorNotInstalled,
 }
 
 impl From<OperatorApiError> for CliError {
