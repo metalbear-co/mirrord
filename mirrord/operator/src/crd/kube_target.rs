@@ -70,7 +70,7 @@ impl TryFrom<KubeTarget> for Target {
 
 impl AsRef<KubeTarget> for KubeTarget {
     fn as_ref(&self) -> &KubeTarget {
-        &self
+        self
     }
 }
 
