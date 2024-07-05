@@ -4,14 +4,11 @@ use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 use x509_certificate::{
-    asn1time::Time, rfc2986, rfc5280, InMemorySigningKeyPair, KeyAlgorithm, X509CertificateBuilder,
+    asn1time::Time, rfc2986, rfc5280, InMemorySigningKeyPair, X509CertificateBuilder,
+    X509CertificateError,
 };
 
-use crate::{
-    certificate::Certificate,
-    error::{AuthenticationError, Result},
-    key_pair::KeyPair,
-};
+use crate::{certificate::Certificate, key_pair::KeyPair};
 
 /// Client credentials container for authentication with the operator.
 /// Contains a local [`KeyPair`] and an optional [`Certificate`].
@@ -44,16 +41,14 @@ impl Credentials {
     fn certificate_request(
         common_name: &str,
         key_pair: &InMemorySigningKeyPair,
-    ) -> Result<rfc2986::CertificationRequest> {
-        let mut builder = X509CertificateBuilder::new(KeyAlgorithm::Ed25519);
+    ) -> Result<rfc2986::CertificationRequest, X509CertificateError> {
+        let mut builder = X509CertificateBuilder::default();
 
         let _ = builder
             .subject()
             .append_common_name_utf8_string(common_name);
 
-        builder
-            .create_certificate_signing_request(key_pair)
-            .map_err(AuthenticationError::from)
+        builder.create_certificate_signing_request(key_pair)
     }
 }
 
@@ -166,9 +161,9 @@ impl DateValidityExt for rfc5280::Validity {
 #[cfg(feature = "client")]
 pub mod client {
     use kube::{api::PostParams, Api, Client, Resource};
-    use ring::rand::SystemRandom;
 
     use super::*;
+    use crate::error::CredentialStoreError;
 
     impl Credentials {
         /// Create a [`rfc2986::CertificationRequest`] and send it to the operator.
@@ -177,7 +172,7 @@ pub mod client {
             client: Client,
             common_name: &str,
             key_pair: Option<KeyPair>,
-        ) -> Result<Self>
+        ) -> Result<Self, CredentialStoreError>
         where
             R: Resource + Clone + Debug,
             R: for<'de> Deserialize<'de>,
@@ -185,18 +180,12 @@ pub mod client {
         {
             let key_pair = match key_pair {
                 Some(key_pair) => key_pair,
-                None => {
-                    let rng = SystemRandom::new();
-                    let document = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng)
-                        .map_err(|_| AuthenticationError::KeyGenerationError)?;
-                    let pem_key = pem::Pem::new("PRIVATE KEY", document.as_ref());
-                    pem::encode(&pem_key).into()
-                }
+                None => KeyPair::new_random()?,
             };
 
             let certificate_request = Self::certificate_request(common_name, &key_pair)?
                 .encode_pem()
-                .map_err(x509_certificate::X509CertificateError::from)?;
+                .map_err(X509CertificateError::from)?;
 
             let api: Api<R> = Api::all(client);
 
@@ -217,7 +206,11 @@ pub mod client {
 
         /// Create [`rfc2986::CertificationRequest`] and send it to the operator.
         /// Returned certificate replaces the [`Certificate`] stored in this struct.
-        pub async fn refresh<R>(&mut self, client: Client, common_name: &str) -> Result<()>
+        pub async fn refresh<R>(
+            &mut self,
+            client: Client,
+            common_name: &str,
+        ) -> Result<(), CredentialStoreError>
         where
             R: Resource + Clone + Debug,
             R: for<'de> Deserialize<'de>,
@@ -225,7 +218,7 @@ pub mod client {
         {
             let certificate_request = Self::certificate_request(common_name, &self.key_pair)?
                 .encode_pem()
-                .map_err(x509_certificate::X509CertificateError::from)?;
+                .map_err(X509CertificateError::from)?;
 
             let api: Api<R> = Api::all(client);
 
