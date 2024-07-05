@@ -80,3 +80,44 @@ impl Deref for Certificate {
         &self.0
     }
 }
+
+#[cfg(test)]
+mod test {
+    use chrono::{TimeZone, Utc};
+    use x509_certificate::asn1time::Time;
+
+    use super::Certificate;
+
+    /// Verifies that [`Certificate`] properly deserializes from old format.
+    #[test]
+    fn deserialize_from_old_format() {
+        const SERIALIZED: &'static str = r#""-----BEGIN CERTIFICATE-----\r\nMIICGTCCAcmgAwIBAgIBATAHBgMrZXAFADBwMUIwQAYDVQQDDDlUaGUgTWljaGHF\r\ngiBTbW9sYXJlayBPcmdhbml6YXRpb25gcyBUZWFtcyBMaWNlbnNlIChUcmlhbCkx\r\nKjAoBgNVBAoMIVRoZSBNaWNoYcWCIFNtb2xhcmVrIE9yZ2FuaXphdGlvbjAeFw0y\r\nNDAyMDgxNTUwNDFaFw0yNDEyMjQwMDAwMDBaMBsxGTAXBgNVBAMMEHJheno0Nzgw\r\nLW1hY2hpbmUwLDAHBgMrZW4FAAMhAAfxTouyk5L5lB3eFwC5Rg9iI4KmQaFpnGVM\r\n2sYpv9HOo4HYMIHVMIHSBhcvbWV0YWxiZWFyL2xpY2Vuc2UvaW5mbwEB/wSBs3si\r\ndHlwZSI6InRlYW1zIiwibWF4X3NlYXRzIjpudWxsLCJzdWJzY3JpcHRpb25faWQi\r\nOiJmMWIxZDI2ZS02NGQzLTQ4YjYtYjVkMi05MzAxMzAwNWE3MmUiLCJvcmdhbml6\r\nYXRpb25faWQiOiIzNTdhZmE4MS0yN2QxLTQ3YjEtYTFiYS1hYzM1ZjlhM2MyNjMi\r\nLCJ0cmlhbCI6dHJ1ZSwidmVyc2lvbiI6IjMuNzMuMCJ9MAcGAytlcAUAA0EAJbbo\r\nu42KnHJBbPMYspMdv9ZdTQMixJgQUheNEs/o4+XfwgYOaRjCVQTzYs1m9f720WQ9\r\n4J04GdQvcu7B/oTgDQ==\r\n-----END CERTIFICATE-----\r\n""#;
+        let cert: Certificate = serde_yaml::from_str(SERIALIZED).unwrap();
+
+        assert_eq!(
+            cert.as_ref().signature.octet_bytes().as_ref(),
+            b"%\xb6\xe8\xbb\x8d\x8a\x9crAl\xf3\x18\xb2\x93\x1d\xbf\xd6]M\x03\"\xc4\x98\x10R\x17\x8d\x12\xcf\xe8\xe3\xe5\xdf\xc2\x06\x0ei\x18\xc2U\x04\xf3b\xcdf\xf5\xfe\xf6\xd1d=\xe0\x9d8\x19\xd4/r\xee\xc1\xfe\x84\xe0\r",
+        );
+
+        assert_eq!(
+            cert.as_ref().tbs_certificate.subject_public_key_info.subject_public_key.octet_bytes().as_ref(),
+            b"\x07\xf1N\x8b\xb2\x93\x92\xf9\x94\x1d\xde\x17\0\xb9F\x0fb#\x82\xa6A\xa1i\x9ceL\xda\xc6)\xbf\xd1\xce",
+        );
+        assert_eq!(
+            cert.as_ref()
+                .tbs_certificate
+                .subject
+                .user_friendly_str()
+                .unwrap(),
+            "CN=razz4780-machine",
+        );
+        assert_eq!(
+            cert.as_ref().tbs_certificate.validity.not_before,
+            Time::from(Utc.with_ymd_and_hms(2024, 2, 8, 15, 50, 41).unwrap())
+        );
+        assert_eq!(
+            cert.as_ref().tbs_certificate.validity.not_after,
+            Time::from(Utc.with_ymd_and_hms(2024, 12, 24, 00, 00, 00).unwrap())
+        );
+    }
+}
