@@ -14,6 +14,8 @@ pub struct KeyPair {
     /// Whether the DER-encoded key pair container in [`Self::pem`] is in buggy format.
     der_bugged: bool,
     /// Deserialized and initialized key pair for signing.
+    /// The key pair is wrapped in [`Arc`] only because [`InMemorySigningKeyPair`] is not
+    /// cloneable.
     key_pair: Arc<InMemorySigningKeyPair>,
 }
 
