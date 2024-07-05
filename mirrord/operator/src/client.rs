@@ -163,11 +163,15 @@ enum OperatorSessionTarget {
 impl OperatorSessionTarget {
     /// Returns a connection url for the given [`OperatorSessionTarget`].
     /// This can be used to create a websocket connection with the operator.
-    fn connect_url(&self, use_proxy: bool, concurrent_steal: ConcurrentSteal) -> String {
-        match (use_proxy, self) {
-            (true, OperatorSessionTarget::Raw(target)) => {
-                let name = target.name();
-                let namespace = target
+    fn connect_url(
+        &self,
+        use_proxy: bool,
+        concurrent_steal: ConcurrentSteal,
+    ) -> Result<String, OperatorApiError> {
+        Ok(match (use_proxy, self) {
+            (true, OperatorSessionTarget::Raw(crd)) => {
+                let name = TargetCrd::urlfied_name(crd.spec.target.as_ref().try_into()?);
+                let namespace = crd
                     .meta()
                     .namespace
                     .as_deref()
@@ -178,9 +182,9 @@ impl OperatorSessionTarget {
                 format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?on_concurrent_steal={concurrent_steal}&connect=true")
             }
 
-            (false, OperatorSessionTarget::Raw(target)) => {
-                let name = target.name();
-                let namespace = target
+            (false, OperatorSessionTarget::Raw(crd)) => {
+                let name = TargetCrd::urlfied_name(crd.spec.target.as_ref().try_into()?);
+                let namespace = crd
                     .meta()
                     .namespace
                     .as_deref()
@@ -189,13 +193,13 @@ impl OperatorSessionTarget {
 
                 format!("{url_path}/{name}?on_concurrent_steal={concurrent_steal}&connect=true")
             }
-            (true, OperatorSessionTarget::Copied(target)) => {
-                let name = target
+            (true, OperatorSessionTarget::Copied(crd)) => {
+                let name = crd
                     .meta()
                     .name
                     .as_deref()
                     .expect("missing 'CopyTargetCrd' name");
-                let namespace = target
+                let namespace = crd
                     .meta()
                     .namespace
                     .as_deref()
@@ -207,13 +211,13 @@ impl OperatorSessionTarget {
                     "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?connect=true"
                 )
             }
-            (false, OperatorSessionTarget::Copied(target)) => {
-                let name = target
+            (false, OperatorSessionTarget::Copied(crd)) => {
+                let name = crd
                     .meta()
                     .name
                     .as_deref()
                     .expect("missing 'CopyTargetCrd' name");
-                let namespace = target
+                let namespace = crd
                     .meta()
                     .namespace
                     .as_deref()
@@ -222,7 +226,7 @@ impl OperatorSessionTarget {
 
                 format!("{url_path}/{name}?connect=true")
             }
-        }
+        })
     }
 }
 
@@ -656,7 +660,7 @@ impl OperatorApi<PreparedClientCert> {
             let mut fetch_subtask = progress.subtask("fetching target");
 
             let target_name =
-                TargetCrd::target_name(config.target.path.as_ref().unwrap_or(&Target::Targetless));
+                TargetCrd::urlfied_name(config.target.path.as_ref().unwrap_or(&Target::Targetless));
             let raw_target = Api::namespaced(self.client.clone(), self.target_namespace(config))
                 .get(&target_name)
                 .await
@@ -679,7 +683,7 @@ impl OperatorApi<PreparedClientCert> {
         let connect_url = target.connect_url(
             use_proxy_api,
             config.feature.network.incoming.on_concurrent_steal,
-        );
+        )?;
 
         let session = OperatorSession {
             id: rand::random(),
@@ -715,7 +719,7 @@ impl OperatorApi<PreparedClientCert> {
         scale_down: bool,
         namespace: &str,
     ) -> OperatorApiResult<CopyTargetCrd> {
-        let name = TargetCrd::target_name(&target);
+        let name = TargetCrd::urlfied_name(&target);
 
         let requested = CopyTargetCrd::new(
             &name,

@@ -571,6 +571,7 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     } else {
         OperatorApi::try_new(&layer_config, &mut NullReporter::default()).await?
     };
+
     let mut targets = match operator_api {
         Some(api) => {
             let api = api.prepare_client_cert(&mut NullReporter::default()).await;
@@ -581,8 +582,8 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
                 .await?
                 .iter()
                 .filter_map(|target_crd| {
-                    let target = target_crd.spec.target.as_ref()?;
-                    if let Some(container) = target.container_name() {
+                    let target = target_crd.spec.target.known()?;
+                    if let Some(container) = target.container() {
                         if SKIP_NAMES.contains(container.as_str()) {
                             return None;
                         }
