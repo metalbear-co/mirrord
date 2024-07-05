@@ -58,6 +58,13 @@ pub(crate) unsafe fn enable_execve_hook(
         Fn_nsget_executable_path,
         FN__NSGET_EXECUTABLE_PATH
     );
+    replace!(
+        hook_manager,
+        "_SecTrustEvaluateWithError",
+        _sec_trust_evaluate_with_error,
+        Fn_sec_trust_evaluate_with_error,
+        FN__SEC_TRUST_EVALUATE_WITH_ERROR
+    );
     replace!(hook_manager, "dlopen", dlopen_detour, FnDlopen, FN_DLOPEN);
 }
 
@@ -295,6 +302,17 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
         }
         _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
     }
+}
+
+#[hook_guard_fn]
+// https://developer.apple.com/documentation/security/2980705-sectrustevaluatewitherror
+pub(crate) unsafe extern "C" fn _sec_trust_evaluate_with_error(
+    trust: *const c_char,
+    error: *const c_char,
+) -> bool {
+    // trust apps locally depending on cluster trusted
+    tracing::debug!("sec_trust_evaluate_with_error called");
+    FN__SEC_TRUST_EVALUATE_WITH_ERROR(trust, error)
 }
 
 #[hook_guard_fn]
