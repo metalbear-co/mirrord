@@ -6,7 +6,7 @@ use x509_certificate::{InMemorySigningKeyPair, KeyAlgorithm, X509CertificateErro
 /// Wrapper over [`InMemorySigningKeyPair`].
 ///
 /// Can be (de)serialized from/to either valid or buggy format. The format can also be switched in
-/// memory with [`Self::bug_der`] and [`Self::fix_der`]. See https://github.com/briansmith/ring/issues/1464.
+/// memory with [`Self::bug_der`] and [`Self::fix_der`]. See <https://github.com/briansmith/ring/issues/1464>.
 #[derive(Debug, Clone)]
 pub struct KeyPair {
     /// PEM-encoded document containing the key pair.
@@ -165,7 +165,7 @@ impl<'de> Deserialize<'de> for KeyPair {
         D: Deserializer<'de>,
     {
         let pem = String::deserialize(deserializer)?;
-        Self::try_from(pem).map_err(|error| D::Error::custom(error))
+        Self::try_from(pem).map_err(D::Error::custom)
     }
 }
 
