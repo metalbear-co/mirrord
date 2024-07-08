@@ -237,3 +237,55 @@ pub mod client {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use bcder::{
+        decode::{BytesSource, Constructed},
+        Mode,
+    };
+    use x509_certificate::rfc2986::CertificationRequest;
+
+    /// Verifies that [`CertificationRequest`] properly decodes from value produced by old code.
+    #[test]
+    fn decode_old_certificate_request() {
+        const REQUEST: &'static str = "PEM: -----BEGIN CERTIFICATE REQUEST-----
+MIGXMEkCAQAwFDESMBAGA1UEAwwJc29tZV9uYW1lMCwwBwYDK2VuBQADIQDhLn5T
+fFTb4xOq+a1HyC3T7ScFiQGBy+oUcwFiCVCUI6AAMAcGAytlcAUAA0EAPBRvsUHo
++J/INwq6tn5kgcE9vMo48kRkyhWSp3XmfuUvxW/b7LufrlTcjw+4RG8pdugMXhcz
+5+u20nm4VY+sCg==
+-----END CERTIFICATE REQUEST-----
+";
+        const PUBLIC_KEY: &'static [u8] =  b"\xe1.~S|T\xdb\xe3\x13\xaa\xf9\xadG\xc8-\xd3\xed'\x05\x89\x01\x81\xcb\xea\x14s\x01b\tP\x94#";
+
+        let certification_request_pem = pem::parse(REQUEST).unwrap();
+        let certification_request_source =
+            BytesSource::new(certification_request_pem.into_contents().into());
+        let certification_request = Constructed::decode(
+            certification_request_source,
+            Mode::Der,
+            CertificationRequest::take_from,
+        )
+        .unwrap();
+
+        assert_eq!(
+            certification_request
+                .certificate_request_info
+                .subject
+                .iter_common_name()
+                .next()
+                .unwrap()
+                .to_string()
+                .unwrap(),
+            "some_name"
+        );
+        assert_eq!(
+            certification_request
+                .certificate_request_info
+                .subject_public_key_info
+                .subject_public_key
+                .octet_bytes(),
+            PUBLIC_KEY
+        );
+    }
+}
