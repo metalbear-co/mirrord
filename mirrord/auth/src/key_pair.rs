@@ -42,18 +42,18 @@ impl KeyPair {
     /// version that contains the same key pair. If not, returns [`None`].
     fn patch_buggy_der(der: &[u8]) -> Option<Vec<u8>> {
         if der.len() != 85
-            || der.get(..16).unwrap() != Self::BUGGED_PREFIX
-            || der.get(16 + 32..16 + 32 + 5).unwrap() != Self::BUGGED_MIDDLE
+            || der.get(..16).expect("length was checked") != Self::BUGGED_PREFIX
+            || der.get(16 + 32..16 + 32 + 5).expect("length was checked") != Self::BUGGED_MIDDLE
         {
             return None;
         }
 
         let seed = der
             .get(Self::BUGGED_PREFIX.len()..Self::BUGGED_PREFIX.len() + 32)
-            .unwrap();
+            .expect("length was checked");
         let public_key = der
             .get(Self::BUGGED_PREFIX.len() + 32 + Self::BUGGED_MIDDLE.len()..)
-            .unwrap();
+            .expect("length was checked");
 
         [&Self::FIXED_PREFIX, seed, &Self::FIXED_MIDDLE, public_key]
             .concat()
@@ -88,14 +88,14 @@ impl KeyPair {
             return;
         }
 
-        let pem_key = pem::parse(&self.pem).unwrap();
+        let pem_key = pem::parse(&self.pem).expect("PEM was verified when creating this KeyPair");
         let der = pem_key.contents();
         let seed = der
             .get(Self::FIXED_PREFIX.len()..Self::FIXED_PREFIX.len() + 32)
-            .unwrap();
+            .expect("PEM was verified when creating this KeyPair");
         let public_key = der
             .get(Self::FIXED_PREFIX.len() + 32 + Self::FIXED_MIDDLE.len()..)
-            .unwrap();
+            .expect("PEM was verified when creating this KeyPair");
 
         let bugged_der = [&Self::BUGGED_PREFIX, seed, &Self::BUGGED_MIDDLE, public_key].concat();
         let pem_key = pem::Pem::new("PRIVATE KEY", bugged_der);
