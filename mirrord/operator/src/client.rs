@@ -170,7 +170,7 @@ impl OperatorSessionTarget {
     ) -> Result<String, OperatorApiError> {
         Ok(match (use_proxy, self) {
             (true, OperatorSessionTarget::Raw(crd)) => {
-                let name = TargetCrd::urlfied_name(crd.spec.target.as_ref().try_into()?);
+                let name = TargetCrd::urlfied_name(crd.spec.target.as_known()?);
                 let namespace = crd
                     .meta()
                     .namespace
@@ -183,7 +183,7 @@ impl OperatorSessionTarget {
             }
 
             (false, OperatorSessionTarget::Raw(crd)) => {
-                let name = TargetCrd::urlfied_name(crd.spec.target.as_ref().try_into()?);
+                let name = TargetCrd::urlfied_name(crd.spec.target.as_known()?);
                 let namespace = crd
                     .meta()
                     .namespace

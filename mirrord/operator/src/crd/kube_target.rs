@@ -1,8 +1,12 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use super::Target;
-use crate::client::error::OperatorApiError;
+
+#[derive(Error, Debug)]
+#[error("unknown target type: {0}")]
+pub struct UnknownTargetType(pub String);
 
 /// Holds either a kubernetes target that we know about, (de)serializing it into a
 /// [`Target`], or a target we do not know about.
@@ -34,8 +38,6 @@ use crate::client::error::OperatorApiError;
 #[serde(untagged)]
 pub enum KubeTarget {
     /// A target that we know of in both mirrord and the operator.
-    ///
-    /// Avoid `match`ing on this, you should be using [`KubeTarget::known`] instead.
     #[serde(serialize_with = "Target::serialize")]
     Known(Target),
 
@@ -48,41 +50,21 @@ pub enum KubeTarget {
 }
 
 impl KubeTarget {
-    /// Instead of `match`ing on [`KubeTarget`], you should use this method.
-    pub fn known(&self) -> Option<&Target> {
+    pub fn as_known(&self) -> Result<&Target, UnknownTargetType> {
         match self {
-            KubeTarget::Known(target) => Some(target),
-            KubeTarget::Unknown(_) => None,
+            KubeTarget::Known(target) => Ok(target),
+            KubeTarget::Unknown(unknown) => Err(UnknownTargetType(unknown.clone())),
         }
     }
 }
 
 impl TryFrom<KubeTarget> for Target {
-    type Error = OperatorApiError;
+    type Error = UnknownTargetType;
 
     fn try_from(kube_target: KubeTarget) -> Result<Self, Self::Error> {
         match kube_target {
             KubeTarget::Known(target) => Ok(target),
-            KubeTarget::Unknown(unknown) => Err(OperatorApiError::UnknownTarget(unknown)),
-        }
-    }
-}
-
-impl AsRef<KubeTarget> for KubeTarget {
-    fn as_ref(&self) -> &KubeTarget {
-        self
-    }
-}
-
-impl<'a> TryFrom<&'a KubeTarget> for &'a Target {
-    type Error = OperatorApiError;
-
-    fn try_from(kube_target: &'a KubeTarget) -> Result<Self, Self::Error> {
-        match kube_target {
-            KubeTarget::Known(target) => Ok(target),
-            KubeTarget::Unknown(unknown) => {
-                Err(OperatorApiError::UnknownTarget(unknown.to_owned()))
-            }
+            KubeTarget::Unknown(unknown) => Err(UnknownTargetType(unknown)),
         }
     }
 }
