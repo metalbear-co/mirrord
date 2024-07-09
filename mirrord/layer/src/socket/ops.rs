@@ -906,6 +906,13 @@ pub(super) fn getaddrinfo(
         // name is "" because that's what happens in real flow.
         vec![("".to_string(), IpAddr::V4(Ipv4Addr::UNSPECIFIED))]
     } else {
+        if crate::setup()
+            .outgoing_selector()
+            .use_local_dns(&node, service)
+        {
+            return Detour::Bypass(Bypass::DnsFilteredByOutgoing);
+        }
+
         remote_getaddrinfo(node.clone())?
     };
 
@@ -1002,6 +1009,10 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
             Bypass::CStrConversion
         })?
         .into();
+
+    if crate::setup().outgoing_selector().use_local_dns(&name, 0) {
+        return Detour::Bypass(Bypass::DnsFilteredByOutgoing);
+    }
 
     let hosts_and_ips = remote_getaddrinfo(name.clone())?;
 

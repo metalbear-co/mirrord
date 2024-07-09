@@ -337,6 +337,45 @@ impl OutgoingSelector {
             .next()
             .ok_or(HookError::DNSNoName)
     }
+
+    #[mirrord_layer_macro::instrument(level = "trace", ret)]
+    fn use_local_dns(&self, node: &str, port: u16) -> bool {
+        let (filters, selector_is_local) = match self {
+            Self::Unfiltered => return false,
+            Self::Local(filters) => (filters, true),
+            Self::Remote(filters) => (filters, false),
+        };
+
+        let addr = node.parse::<IpAddr>().ok();
+        let matched = filters
+            .iter()
+            .filter_map(|filter| {
+                (filter.protocol == ProtocolFilter::Any).then_some(&filter.address)
+            })
+            .any(|filter| match (filter, addr) {
+                (AddressFilter::Name((filter_name, filter_port)), None) => {
+                    node == filter_name && port == *filter_port
+                }
+                (AddressFilter::Socket(filter_addr), Some(addr)) => {
+                    filter_addr.port() == port
+                        && ((filter_addr.ip().is_unspecified()
+                            && filter_addr.is_ipv4() == addr.is_ipv4())
+                            || filter_addr.ip() == addr)
+                }
+                (AddressFilter::Subnet((filter_subnet, filter_port)), Some(addr)) => {
+                    filter_subnet.contains(&addr) && port == *filter_port
+                }
+                (AddressFilter::Name(..), Some(..)) => false,
+                (AddressFilter::Socket(..), None) => false,
+                (AddressFilter::Subnet(..), None) => false,
+            });
+
+        if matched {
+            selector_is_local
+        } else {
+            !selector_is_local
+        }
+    }
 }
 
 /// [`OutgoingFilter`] extension.
@@ -421,7 +460,8 @@ impl OutgoingFilterExt for OutgoingFilter {
                 Ok(resolved_ips.into_iter().any(|ip| ip == address.ip()))
             }
             AddressFilter::Socket(addr)
-                if addr.ip().is_unspecified() || addr.ip() == address.ip() =>
+                if (addr.ip().is_unspecified() && addr.is_ipv4() == address.is_ipv4())
+                    || addr.ip() == address.ip() =>
             {
                 Ok(true)
             }

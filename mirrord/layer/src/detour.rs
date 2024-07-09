@@ -204,6 +204,10 @@ pub(crate) enum Bypass {
     /// Hostname should be resolved locally.
     /// Currently this is the case only when the layer operates in the `trace only` mode.
     LocalHostname,
+
+    /// DNS resolution was bypassed, because requested (node,service) combination matched filtered
+    /// out by outgoing local filter.
+    DnsFilteredByOutgoing,
 }
 
 /// [`ControlFlow`](std::ops::ControlFlow)-like enum to be used by hooks.
