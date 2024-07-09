@@ -644,7 +644,10 @@ impl OperatorApi<PreparedClientCert> {
     {
         self.check_feature_support(config)?;
 
-        let target = if config.feature.copy_target.enabled {
+        let target = if config.feature.copy_target.enabled
+            // use copy_target for splitting queues
+            || config.feature.split_queues.is_set()
+        {
             let mut copy_subtask = progress.subtask("copying target");
 
             // We do not validate the `target` here, it's up to the operator.
