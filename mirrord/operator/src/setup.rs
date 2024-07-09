@@ -715,7 +715,7 @@ impl OperatorClientCaRoleBinding {
         let role = RoleBinding {
             metadata: ObjectMeta {
                 name: Some(OPERATOR_CLUSTER_USER_ROLE_NAME.to_owned()),
-                namespace: role.metadata.namespace.clone(),
+                namespace: role.0.metadata.namespace.clone(),
                 ..Default::default()
             },
             role_ref: role.as_role_ref(),
