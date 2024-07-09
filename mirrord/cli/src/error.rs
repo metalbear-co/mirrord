@@ -243,6 +243,13 @@ pub(crate) enum CliError {
         Read more here: https://mirrord.dev/docs/overview/quick-start/#operator.{GENERAL_HELP}"
     ))]
     OperatorNotInstalled,
+
+    #[error("Failed targeting resource with: {0}")]
+    #[diagnostic(help(
+        "The target might be known by the mirrord operator, but your current version of mirrord doesn't support it.
+        Consider updating mirrord to have access to this resource type.{GENERAL_HELP}"
+    ))]
+    UnknownTarget(String),
 }
 
 impl From<OperatorApiError> for CliError {
@@ -281,6 +288,7 @@ impl From<OperatorApiError> for CliError {
             }
             OperatorApiError::NoLicense => Self::OperatorLicenseExpired,
             OperatorApiError::ClientCertError(error) => Self::OperatorClientCertError(error),
+            OperatorApiError::UnknownTarget(error) => Self::UnknownTarget(error),
         }
     }
 }

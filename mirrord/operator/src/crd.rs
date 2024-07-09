@@ -9,14 +9,14 @@ use mirrord_config::{
     feature::split_queues::SqsMessageFilter,
     target::{Target, TargetConfig},
 };
+use kube_target::KubeTarget;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use self::label_selector::LabelSelector;
-#[cfg(feature = "client")]
-use crate::client::error::OperatorApiError;
-use crate::types::LicenseInfoOwned;
+use crate::{client::error::OperatorApiError, types::LicenseInfoOwned};
 
+pub mod kube_target;
 pub mod label_selector;
 
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
@@ -30,16 +30,20 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
     namespaced
 )]
 pub struct TargetSpec {
-    /// None when targetless.
-    pub target: Option<Target>,
+    /// The kubernetes resource to target.
+    pub target: KubeTarget,
 }
 
 impl TargetCrd {
-    /// Creates target name in format of target_type.target_name.[container.container_name]
+    /// Creates a target name in format of `target_type.target_name.[container.container_name]`
     /// for example:
-    /// deploy.nginx
-    /// deploy.nginx.container.nginx
-    pub fn target_name(target: &Target) -> String {
+    ///
+    /// - `DeploymentTarget { deployment: "nginx", container: None }` -> `deploy.nginx`;
+    /// - `DeploymentTarget { deployment: "nginx", container: Some("pyrex") }` ->
+    ///   `deploy.nginx.container.pyrex`;
+    ///
+    /// It's used to connect to a resource through the operator.
+    pub fn urlfied_name(target: &Target) -> String {
         let (type_name, target, container) = match target {
             Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
             Target::Pod(target) => ("pod", &target.pod, &target.container),
@@ -49,6 +53,7 @@ impl TargetCrd {
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
         };
+
         if let Some(container) = container {
             format!("{}.{}.container.{}", type_name, target, container)
         } else {
@@ -62,24 +67,18 @@ impl TargetCrd {
         target_config
             .path
             .as_ref()
-            .map_or_else(|| TARGETLESS_TARGET_NAME.to_string(), Self::target_name)
-    }
-
-    pub fn name(&self) -> String {
-        self.spec
-            .target
-            .as_ref()
-            .map(Self::target_name)
-            .unwrap_or(TARGETLESS_TARGET_NAME.to_string())
+            .map_or_else(|| TARGETLESS_TARGET_NAME.to_string(), Self::urlfied_name)
     }
 }
 
-impl From<TargetCrd> for TargetConfig {
-    fn from(crd: TargetCrd) -> Self {
-        TargetConfig {
-            path: crd.spec.target,
+impl TryFrom<TargetCrd> for TargetConfig {
+    type Error = OperatorApiError;
+
+    fn try_from(crd: TargetCrd) -> Result<Self, Self::Error> {
+        Ok(TargetConfig {
+            path: Some(Target::try_from(crd.spec.target)?.clone()),
             namespace: crd.metadata.namespace,
-        }
+        })
     }
 }
 
@@ -324,11 +323,11 @@ pub enum BlockedFeature {
 /// Custom resource for policies that limit what mirrord features users can use.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
-// The operator group is handled by the operator, we want policies to be handled by k8s.
-group = "policies.mirrord.metalbear.co",
-version = "v1alpha",
-kind = "MirrordPolicy",
-namespaced
+    // The operator group is handled by the operator, we want policies to be handled by k8s.
+    group = "policies.mirrord.metalbear.co",
+    version = "v1alpha",
+    kind = "MirrordPolicy",
+    namespaced
 )]
 #[serde(rename_all = "camelCase")] // target_path -> targetPath in yaml.
 pub struct MirrordPolicySpec {

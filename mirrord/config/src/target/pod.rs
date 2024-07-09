@@ -1,6 +1,3 @@
-use core::fmt;
-use std::fmt::Display;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -16,20 +13,6 @@ pub struct PodTarget {
     /// Pod to mirror.
     pub pod: String,
     pub container: Option<String>,
-}
-
-impl Display for PodTarget {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}{}",
-            self.container
-                .as_ref()
-                .map(|c| format!("{c}/"))
-                .unwrap_or_default(),
-            self.pod.clone()
-        )
-    }
 }
 
 impl FromSplit for PodTarget {

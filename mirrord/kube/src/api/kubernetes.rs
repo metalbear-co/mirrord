@@ -317,7 +317,7 @@ where
     Ok(config)
 }
 
-#[tracing::instrument(level = "debug", skip(client))]
+#[tracing::instrument(level = "trace", skip(client))]
 pub fn get_k8s_resource_api<K>(client: &Client, namespace: Option<&str>) -> Api<K>
 where
     K: kube::Resource<Scope = NamespaceResourceScope>,

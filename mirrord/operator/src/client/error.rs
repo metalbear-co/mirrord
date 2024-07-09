@@ -65,6 +65,9 @@ pub enum OperatorApiError {
 
     #[error("failed to prepare client certificate: {0}")]
     ClientCertError(String),
+
+    #[error("Trying to target unknown kubernetes resource: {0}")]
+    UnknownTarget(String),
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;
