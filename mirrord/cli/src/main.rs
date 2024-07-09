@@ -582,7 +582,7 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
                 .await?
                 .iter()
                 .filter_map(|target_crd| {
-                    let target = target_crd.spec.target.known()?;
+                    let target = target_crd.spec.target.as_known().ok()?;
                     if let Some(container) = target.container() {
                         if SKIP_NAMES.contains(container.as_str()) {
                             return None;
