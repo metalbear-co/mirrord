@@ -1,1 +1,0 @@
-Fixed compilation errors in `mirrord-operator` crate with only `crd` feature enabled.
