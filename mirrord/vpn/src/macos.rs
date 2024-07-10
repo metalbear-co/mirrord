@@ -68,7 +68,7 @@ pub struct ResolveFileGuard {
 }
 
 impl ResolveFileGuard {
-    pub async fn cleanup(&self) -> io::Result<()> {
+    pub async fn unmount(&self) -> io::Result<()> {
         let ResolveFileGuard { path } = self;
         tokio::fs::remove_file(path).await?;
 
@@ -89,7 +89,7 @@ impl Drop for ResolveFileGuard {
     }
 }
 
-pub async fn add_subnet_route<'a>(
+pub async fn create_subnet_route<'a>(
     subnet: &'a IpNet,
     gateway: &'a IpAddr,
 ) -> io::Result<RouteCommandGuard<'a>> {

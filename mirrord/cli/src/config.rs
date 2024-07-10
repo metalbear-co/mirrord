@@ -4,7 +4,6 @@ use std::{fmt::Display, path::PathBuf};
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
-use ipnet::IpNet;
 use mirrord_operator::setup::OperatorNamespace;
 
 #[derive(Parser)]
@@ -349,12 +348,6 @@ pub(super) struct VpnArgs {
     /// Specify the namespace to vpn into.
     #[arg(short = 'n', long)]
     pub namespace: Option<String>,
-
-    #[arg(long, default_value = "cluster.local")]
-    pub cluster_domain: String,
-
-    #[arg(long)]
-    pub service_subnet: Option<IpNet>,
 
     #[cfg(target_os = "macos")]
     /// Path to resolver (macOS)
