@@ -1,5 +1,16 @@
-use mirrord_protocol::tcp::{DaemonTcp, HttpResponseFallback, LayerTcpSteal, TcpData};
+use std::collections::HashMap;
+
+use bytes::Bytes;
+use hyper::body::Frame;
+use mirrord_protocol::{
+    tcp::{
+        ChunkedResponse, DaemonTcp, HttpResponse, HttpResponseFallback, InternalHttpResponse,
+        LayerTcpSteal, ReceiverStreamBody, TcpData,
+    },
+    RequestId,
+};
 use tokio::sync::mpsc::{self, OwnedPermit, Receiver, Sender};
+use tokio_stream::wrappers::ReceiverStream;
 
 use super::*;
 use crate::{
@@ -31,6 +42,8 @@ pub(crate) struct TcpStealerApi {
 
     /// View on the stealer task's status.
     task_status: TaskStatus,
+
+    response_body_txs: HashMap<(ConnectionId, RequestId), Sender<hyper::Result<Frame<Bytes>>>>,
 }
 
 impl TcpStealerApi {
@@ -65,6 +78,7 @@ impl TcpStealerApi {
             close_permit: Some(close_permit),
             daemon_rx,
             task_status,
+            response_body_txs: HashMap::new(),
         })
     }
 
@@ -89,7 +103,13 @@ impl TcpStealerApi {
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn recv(&mut self) -> Result<DaemonTcp> {
         match self.daemon_rx.recv().await {
-            Some(msg) => Ok(msg),
+            Some(msg) => {
+                if let DaemonTcp::Close(close) = &msg {
+                    self.response_body_txs
+                        .retain(|(key_id, _), _| *key_id != close.connection_id);
+                }
+                Ok(msg)
+            }
             None => Err(self.task_status.unwrap_err().await),
         }
     }
@@ -153,6 +173,8 @@ impl TcpStealerApi {
         match message {
             LayerTcpSteal::PortSubscribe(port_steal) => self.port_subscribe(port_steal).await,
             LayerTcpSteal::ConnectionUnsubscribe(connection_id) => {
+                self.response_body_txs
+                    .retain(|(key_id, _), _| *key_id != connection_id);
                 self.connection_unsubscribe(connection_id).await
             }
             LayerTcpSteal::PortUnsubscribe(port) => self.port_unsubscribe(port).await,
@@ -165,6 +187,63 @@ impl TcpStealerApi {
                 self.http_response(HttpResponseFallback::Framed(response))
                     .await
             }
+            LayerTcpSteal::HttpResponseChunked(inner) => match inner {
+                ChunkedResponse::Start(response) => {
+                    let (tx, rx) = mpsc::channel(12);
+                    let body = ReceiverStreamBody::new(ReceiverStream::from(rx));
+                    let http_response: HttpResponse<ReceiverStreamBody> = HttpResponse {
+                        port: response.port,
+                        connection_id: response.connection_id,
+                        request_id: response.request_id,
+                        internal_response: InternalHttpResponse {
+                            status: response.internal_response.status,
+                            version: response.internal_response.version,
+                            headers: response.internal_response.headers,
+                            body,
+                        },
+                    };
+
+                    let key = (response.connection_id, response.request_id);
+                    self.response_body_txs.insert(key, tx.clone());
+
+                    self.http_response(HttpResponseFallback::Streamed(http_response))
+                        .await?;
+
+                    for frame in response.internal_response.body {
+                        if let Err(err) = tx.send(Ok(frame.into())).await {
+                            self.response_body_txs.remove(&key);
+                            tracing::trace!(?err, "error while sending streaming response frame");
+                        }
+                    }
+                    Ok(())
+                }
+                ChunkedResponse::Body(body) => {
+                    let key = &(body.connection_id, body.request_id);
+                    let mut send_err = false;
+                    if let Some(tx) = self.response_body_txs.get(key) {
+                        for frame in body.frames {
+                            if let Err(err) = tx.send(Ok(frame.into())).await {
+                                send_err = true;
+                                tracing::trace!(
+                                    ?err,
+                                    "error while sending streaming response body"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    if send_err || body.is_last {
+                        self.response_body_txs.remove(key);
+                    };
+                    Ok(())
+                }
+                ChunkedResponse::Error(err) => {
+                    self.response_body_txs
+                        .remove(&(err.connection_id, err.request_id));
+                    tracing::trace!(?err, "ChunkedResponse error received");
+                    Ok(())
+                }
+            },
         }
     }
 }

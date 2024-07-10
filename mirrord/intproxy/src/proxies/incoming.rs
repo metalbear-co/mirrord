@@ -6,22 +6,28 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
+use futures::StreamExt;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
     MessageId, PortSubscribe, PortSubscription, PortUnsubscribe, ProxyToLayerMessage,
 };
 use mirrord_protocol::{
+    body_chunks::BodyExt as _,
     tcp::{
-        ChunkedRequest, DaemonTcp, HttpRequest, HttpRequestFallback, InternalHttpBodyFrame,
-        InternalHttpRequest, NewTcpConnection, StreamingBody,
+        ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, ChunkedResponse, DaemonTcp, HttpRequest,
+        HttpRequestFallback, HttpResponse, HttpResponseFallback, InternalHttpBodyFrame,
+        InternalHttpRequest, InternalHttpResponse, LayerTcpSteal, NewTcpConnection,
+        ReceiverStreamBody, StreamingBody, TcpData,
     },
-    ConnectionId, RequestId, ResponseError,
+    ClientMessage, ConnectionId, RequestId, ResponseError,
 };
 use thiserror::Error;
 use tokio::{
     net::TcpSocket,
     sync::mpsc::{self, Sender},
 };
+use tokio_stream::{StreamMap, StreamNotifyClose};
+use tracing::debug;
 
 use self::{
     interceptor::{Interceptor, InterceptorError, MessageOut},
@@ -97,6 +103,8 @@ pub enum IncomingProxyMessage {
     LayerClosed(LayerClosed),
     AgentMirror(DaemonTcp),
     AgentSteal(DaemonTcp),
+    /// Agent responded to [`ClientMessage::SwitchProtocolVersion`].
+    AgentProtocolVersion(semver::Version),
 }
 
 /// Handle for an [`Interceptor`].
@@ -159,6 +167,10 @@ pub struct IncomingProxy {
     metadata_store: MetadataStore,
     /// For managing streamed [`DaemonTcp::HttpRequestChunked`] request channels.
     request_body_txs: HashMap<(ConnectionId, RequestId), Sender<InternalHttpBodyFrame>>,
+    /// For managing streamed [`LayerTcpSteal::HttpResponseChunked`] response streams.
+    response_body_rxs: StreamMap<(ConnectionId, RequestId), StreamNotifyClose<ReceiverStreamBody>>,
+    /// Version of [`mirrord_protocol`] negotiated with the agent.
+    agent_protocol_version: Option<semver::Version>,
 }
 
 impl IncomingProxy {
@@ -226,7 +238,11 @@ impl IncomingProxy {
                 let interceptor_socket = bind_similar(subscription.listening_on)?;
 
                 let interceptor = self.background_tasks.register(
-                    Interceptor::new(interceptor_socket, subscription.listening_on),
+                    Interceptor::new(
+                        interceptor_socket,
+                        subscription.listening_on,
+                        self.agent_protocol_version.clone(),
+                    ),
                     id,
                     Self::CHANNEL_SIZE,
                 );
@@ -253,7 +269,16 @@ impl IncomingProxy {
                 self.interceptors
                     .remove(&InterceptorId(close.connection_id));
                 self.request_body_txs
-                    .retain(|(connection_id, _), _| *connection_id != close.connection_id)
+                    .retain(|(connection_id, _), _| *connection_id != close.connection_id);
+                let keys: Vec<(ConnectionId, RequestId)> = self
+                    .response_body_rxs
+                    .keys()
+                    .filter(|key| key.0 == close.connection_id)
+                    .cloned()
+                    .collect();
+                for key in keys.iter() {
+                    self.response_body_rxs.remove(key);
+                }
             }
             DaemonTcp::Data(data) => {
                 if let Some(interceptor) = self.interceptors.get(&InterceptorId(data.connection_id))
@@ -365,7 +390,11 @@ impl IncomingProxy {
                 );
 
                 let interceptor = self.background_tasks.register(
-                    Interceptor::new(interceptor_socket, subscription.listening_on),
+                    Interceptor::new(
+                        interceptor_socket,
+                        subscription.listening_on,
+                        self.agent_protocol_version.clone(),
+                    ),
                     id,
                     Self::CHANNEL_SIZE,
                 );
@@ -418,6 +447,47 @@ impl BackgroundTask for IncomingProxy {
     async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         loop {
             tokio::select! {
+                Some(((connection_id, request_id), stream_item)) = self.response_body_rxs.next() => match stream_item {
+                    Some(Ok(frame)) => {
+                        let int_frame = InternalHttpBodyFrame::from(frame);
+                        let res = ChunkedResponse::Body(ChunkedHttpBody {
+                            frames: vec![int_frame],
+                            is_last: false,
+                            connection_id,
+                            request_id,
+                        });
+                        message_bus
+                            .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
+                                res,
+                            )))
+                            .await;
+                    },
+                    Some(Err(error)) => {
+                        debug!(%error, "Error while reading streamed response body");
+                        let res = ChunkedResponse::Error(ChunkedHttpError {connection_id, request_id});
+                        message_bus
+                            .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
+                                res,
+                            )))
+                            .await;
+                        self.response_body_rxs.remove(&(connection_id, request_id));
+                    },
+                    None => {
+                        let res = ChunkedResponse::Body(ChunkedHttpBody {
+                            frames: vec![],
+                            is_last: true,
+                            connection_id,
+                            request_id,
+                        });
+                        message_bus
+                            .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
+                                res,
+                            )))
+                            .await;
+                        self.response_body_rxs.remove(&(connection_id, request_id));
+                    }
+                },
+
                 msg = message_bus.recv() => match msg {
                     None => {
                         tracing::trace!("message bus closed, exiting");
@@ -439,6 +509,9 @@ impl BackgroundTask for IncomingProxy {
                     }
                     Some(IncomingProxyMessage::LayerClosed(msg)) => self.handle_layer_close(msg, message_bus).await,
                     Some(IncomingProxyMessage::LayerForked(msg)) => self.handle_layer_fork(msg),
+                    Some(IncomingProxyMessage::AgentProtocolVersion(version)) => {
+                        self.agent_protocol_version.replace(version);
+                    }
                 },
 
                 Some(task_update) = self.background_tasks.next() => match task_update {
@@ -456,10 +529,50 @@ impl BackgroundTask for IncomingProxy {
                     },
 
                     (id, TaskUpdate::Message(msg)) => {
-                        let msg = self.get_subscription(id).and_then(|s| s.wrap_response(msg, id.0));
-                        if let Some(msg) = msg {
-                            message_bus.send(msg).await;
-                        }
+                        let Some(PortSubscription::Steal(_)) = self.get_subscription(id) else {
+                            continue;
+                        };
+                        let msg = match msg {
+                            MessageOut::Raw(bytes) => {
+                                ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
+                                    connection_id: id.0,
+                                    bytes,
+                                }))
+                            },
+                            MessageOut::Http(HttpResponseFallback::Fallback(res)) => {
+                                ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(res))
+                            },
+                            MessageOut::Http(HttpResponseFallback::Framed(res)) => {
+                                ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(res))
+                            },
+                            MessageOut::Http(HttpResponseFallback::Streamed(mut res)) => {
+                                let mut body = vec![];
+                                let key = (res.connection_id, res.request_id);
+
+                                match res.internal_response.body.next_frames(false).await {
+                                        Ok(frames) => {
+                                            frames.frames.into_iter().map(From::from).for_each(|frame| body.push(frame));
+                                        },
+                                        Err(error) => {
+                                            debug!(%error, "Error while receving streamed response frames");
+                                            let res = ChunkedResponse::Error(ChunkedHttpError { connection_id: key.0, request_id: key.1 });
+                                            message_bus.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(res))).await;
+                                            continue;
+                                        },
+                                }
+
+                                self.response_body_rxs.insert(key, StreamNotifyClose::new(res.internal_response.body));
+
+                                let internal_response = InternalHttpResponse {
+                                    status: res.internal_response.status, version: res.internal_response.version, headers: res.internal_response.headers, body
+                                };
+                                let res = ChunkedResponse::Start(HttpResponse {
+                                    port: res.port , connection_id: res.connection_id, request_id: res.request_id, internal_response
+                                });
+                                ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(res))
+                            },
+                        };
+                        message_bus.send(msg).await;
                     },
                 },
             }

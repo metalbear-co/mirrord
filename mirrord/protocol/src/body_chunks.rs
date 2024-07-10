@@ -5,14 +5,17 @@ use std::{
 };
 
 use bytes::Bytes;
-use hyper::body::{Body, Frame, Incoming};
+use hyper::body::{Body, Frame};
 
-pub trait IncomingExt {
-    fn next_frames(&mut self, no_wait: bool) -> FramesFut<'_>;
+pub trait BodyExt<B> {
+    fn next_frames(&mut self, no_wait: bool) -> FramesFut<'_, B>;
 }
 
-impl IncomingExt for Incoming {
-    fn next_frames(&mut self, no_wait: bool) -> FramesFut<'_> {
+impl<B> BodyExt<B> for B
+where
+    B: Body,
+{
+    fn next_frames(&mut self, no_wait: bool) -> FramesFut<'_, B> {
         FramesFut {
             body: self,
             no_wait,
@@ -20,12 +23,15 @@ impl IncomingExt for Incoming {
     }
 }
 
-pub struct FramesFut<'a> {
-    body: &'a mut Incoming,
+pub struct FramesFut<'a, B> {
+    body: &'a mut B,
     no_wait: bool,
 }
 
-impl<'a> Future for FramesFut<'a> {
+impl<'a, B> Future for FramesFut<'a, B>
+where
+    B: Body<Data = Bytes, Error = hyper::Error> + Unpin,
+{
     type Output = hyper::Result<Frames>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
