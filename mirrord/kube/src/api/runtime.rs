@@ -184,7 +184,10 @@ impl RuntimeData {
 
         let mut pod_count = 0;
         let mut list_params = ListParams {
-            field_selector: Some(format!("spec.nodeName={}", self.node_name)),
+            field_selector: Some(format!(
+                "status.phase=Running,spec.nodeName={}",
+                self.node_name
+            )),
             ..Default::default()
         };
 
