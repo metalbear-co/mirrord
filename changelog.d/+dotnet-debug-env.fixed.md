@@ -1,1 +1,0 @@
-Add exclusion for DOTNET_EnableDiagnostics to make DotNet debugging work by default
