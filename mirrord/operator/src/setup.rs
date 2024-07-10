@@ -31,6 +31,7 @@ static OPERATOR_NAME: &str = "mirrord-operator";
 static OPERATOR_PORT: i32 = 3000;
 static OPERATOR_ROLE_NAME: &str = "mirrord-operator";
 static OPERATOR_ROLE_BINDING_NAME: &str = "mirrord-operator";
+static OPERATOR_CLIENT_CA_ROLE_NAME: &str = "mirrord-operator-apiserver-authentication";
 static OPERATOR_CLUSTER_USER_ROLE_NAME: &str = "mirrord-operator-user";
 static OPERATOR_LICENSE_SECRET_NAME: &str = "mirrord-operator-license";
 static OPERATOR_LICENSE_SECRET_FILE_NAME: &str = "license.pem";
@@ -676,7 +677,7 @@ impl OperatorClientCaRole {
     pub fn new() -> Self {
         let role = Role {
             metadata: ObjectMeta {
-                name: Some(OPERATOR_CLUSTER_USER_ROLE_NAME.to_owned()),
+                name: Some(OPERATOR_CLIENT_CA_ROLE_NAME.to_owned()),
                 namespace: Some("kube-system".to_owned()),
                 ..Default::default()
             },
@@ -714,7 +715,7 @@ impl OperatorClientCaRoleBinding {
     pub fn new(role: &OperatorClientCaRole, sa: &OperatorServiceAccount) -> Self {
         let role = RoleBinding {
             metadata: ObjectMeta {
-                name: Some(OPERATOR_CLUSTER_USER_ROLE_NAME.to_owned()),
+                name: Some(OPERATOR_CLIENT_CA_ROLE_NAME.to_owned()),
                 namespace: role.0.metadata.namespace.clone(),
                 ..Default::default()
             },
