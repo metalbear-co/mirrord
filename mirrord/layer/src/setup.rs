@@ -107,7 +107,7 @@ impl LayerSetup {
     }
 
     pub fn remote_dns_enabled(&self) -> bool {
-        self.config.feature.network.dns
+        self.config.feature.network.dns.enabled
     }
 
     pub fn targetless(&self) -> bool {

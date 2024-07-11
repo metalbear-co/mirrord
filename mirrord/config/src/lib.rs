@@ -338,7 +338,7 @@ impl LayerConfig {
         if matches!(
             self.feature.network.outgoing.filter,
             Some(OutgoingFilterConfig::Remote(_))
-        ) && !self.feature.network.dns
+        ) && !self.feature.network.dns.enabled
         {
             context.add_warning(
                 "The mirrord outgoing traffic filter includes host names to be connected remotely, \
@@ -745,7 +745,7 @@ mod tests {
                 env: ToggleableConfig::Enabled(true).into(),
                 fs: ToggleableConfig::Config(FsUserConfig::Simple(FsModeConfig::Write)).into(),
                 network: Some(ToggleableConfig::Config(NetworkFileConfig {
-                    dns: Some(false),
+                    dns: Some(ToggleableConfig::Enabled(false)),
                     incoming: Some(ToggleableConfig::Config(IncomingFileConfig::Advanced(
                         Box::new(IncomingAdvancedFileConfig {
                             mode: Some(IncomingMode::Mirror),

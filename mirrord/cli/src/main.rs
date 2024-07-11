@@ -269,7 +269,7 @@ fn print_config<P>(
     };
     messages.push(format!("outgoing: forwarding is {}", outgoing_info));
 
-    let dns_info = match config.feature.network.dns {
+    let dns_info = match config.feature.network.dns.enabled {
         true => "remotely",
         false => "locally",
     };
