@@ -476,6 +476,7 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
 fn enable_hooks(state: &LayerSetup) {
     let enabled_file_ops = state.fs_config().is_active();
     let enabled_remote_dns = state.remote_dns_enabled();
+    #[cfg(target_os = "macos")]
     let patch_binaries = state.sip_binaries();
 
     let mut hook_manager = HookManager::default();
