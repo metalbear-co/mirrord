@@ -119,6 +119,7 @@ impl LayerSetup {
             .unwrap_or(true)
     }
 
+    #[cfg(target_os = "macos")]
     pub fn sip_binaries(&self) -> Vec<String> {
         self.config
             .sip_binaries
