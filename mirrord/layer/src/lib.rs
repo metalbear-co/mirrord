@@ -112,6 +112,8 @@ mod macros;
 mod proxy_connection;
 mod setup;
 mod socket;
+#[cfg(target_os = "macos")]
+mod tls;
 
 #[cfg(all(
     any(target_arch = "x86_64", target_arch = "aarch64"),
@@ -341,11 +343,7 @@ fn layer_start(mut config: LayerConfig) {
     SETUP.set(state).unwrap();
 
     let state = setup();
-    enable_hooks(
-        state.fs_config().is_active(),
-        state.remote_dns_enabled(),
-        state.sip_binaries(),
-    );
+    enable_hooks(state);
 
     let _detour_guard = DetourGuard::new();
     tracing::info!("Initializing mirrord-layer!");
@@ -475,7 +473,11 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
 ///   `true`, see [`NetworkConfig`](mirrord_config::feature::network::NetworkConfig), and
 ///   [`hooks::enable_socket_hooks`](socket::hooks::enable_socket_hooks).
 #[mirrord_layer_macro::instrument(level = "trace")]
-fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries: Vec<String>) {
+fn enable_hooks(state: &LayerSetup) {
+    let enabled_file_ops = state.fs_config().is_active();
+    let enabled_remote_dns = state.remote_dns_enabled();
+    let patch_binaries = state.sip_binaries();
+
     let mut hook_manager = HookManager::default();
 
     unsafe {
@@ -525,6 +527,11 @@ fn enable_hooks(enabled_file_ops: bool, enabled_remote_dns: bool, patch_binaries
     unsafe {
         exec_utils::enable_execve_hook(&mut hook_manager, patch_binaries)
     };
+
+    #[cfg(target_os = "macos")]
+    if state.experimental().trust_any_certificate {
+        unsafe { tls::enable_tls_hooks(&mut hook_manager) };
+    }
 
     if enabled_file_ops {
         unsafe { file::hooks::enable_file_hooks(&mut hook_manager) };

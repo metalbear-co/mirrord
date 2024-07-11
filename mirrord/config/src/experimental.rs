@@ -10,22 +10,29 @@ use crate::config::source::MirrordConfigSource;
 #[config(map_to = "ExperimentalFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct ExperimentalConfig {
-    /// ## _experimental_ tcp_ping4_mock {#fexperimental-tcp_ping4_mock}
+    /// ## _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
     ///
     /// <https://github.com/metalbear-co/mirrord/issues/2421#issuecomment-2093200904>
     #[config(default = true)]
     pub tcp_ping4_mock: bool,
 
-    /// ## _experimental_ readlink {#fexperimental-readlink}
+    /// ## _experimental_ readlink {#experimental-readlink}
     ///
     /// Enables the `readlink` hook.
     #[config(default = false)]
     pub readlink: bool,
+
+    /// # _experimental_ trust_any_certificate {#experimental-trust_any_certificate}
+    ///
+    /// Enables trusting any certificate on macOS, useful for https://github.com/golang/go/issues/51991#issuecomment-2059588252
+    #[config(default = false)]
+    pub trust_any_certificate: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("tcp_ping4_mock", self.tcp_ping4_mock);
         analytics.add("readlink", self.readlink);
+        analytics.add("trust_any_certificate", self.trust_any_certificate);
     }
 }
