@@ -298,12 +298,12 @@ impl Target {
     pub fn get_target_type(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
-            Target::Pod(pod) => pod.target_type(),
-            Target::Deployment(dep) => dep.target_type(),
-            Target::Rollout(roll) => roll.target_type(),
-            Target::Job(job) => job.target_type(),
-            Target::CronJob(cron_job) => cron_job.target_type(),
-            Target::StatefulSet(stateful_set) => stateful_set.target_type(),
+            Target::Pod(pod) => pod.type_(),
+            Target::Deployment(dep) => dep.type_(),
+            Target::Rollout(roll) => roll.type_(),
+            Target::Job(job) => job.type_(),
+            Target::CronJob(cron_job) => cron_job.type_(),
+            Target::StatefulSet(stateful_set) => stateful_set.type_(),
         }
     }
 
