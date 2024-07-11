@@ -69,7 +69,7 @@ pub struct NetworkConfig {
     /// of manual resolution. Just enabling the `dns` feature in mirrord might not be enough.
     /// If you see an address resolution error, try enabling the [`fs`](#feature-fs) feature,
     /// and setting `read_only: ["/etc/resolv.conf"]`.
-    #[config(toggleable, nested)]
+    #[config(toggleable, nested, env = "MIRRORD_REMOTE_DNS", default = true)]
     pub dns: DnsConfig,
 }
 
