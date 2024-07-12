@@ -155,7 +155,7 @@ impl Client {
         let tx = self.tx.clone();
 
         tokio::spawn(async move {
-            tracing::trace!(?connection_id, ?chunked, ?framed, "starting request");
+            tracing::trace!(?request.connection_id, ?request.request_id, ?chunked, ?framed, "starting request");
             // Chunked data is preferred over framed data
             if chunked {
                 // Send headers
