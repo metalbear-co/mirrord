@@ -155,6 +155,7 @@ impl Client {
         let tx = self.tx.clone();
 
         tokio::spawn(async move {
+            tracing::trace!(?connection_id, ?chunked, ?framed, "starting request");
             // Chunked data is preferred over framed data
             if chunked {
                 // Send headers
@@ -170,10 +171,11 @@ impl Client {
                     },
                     mut body,
                 ) = request.request.into_parts();
-                tracing::trace!(?connection_id, "starting request");
                 match body.next_frames(true).await {
                     Err(..) => return,
-                    Ok(Frames { frames, is_last }) => {
+                    // We don't check is_last here since loop will finish when body.next_frames()
+                    // returns None
+                    Ok(Frames { frames, .. }) => {
                         let frames = frames
                             .into_iter()
                             .map(InternalHttpBodyFrame::try_from)
@@ -196,20 +198,6 @@ impl Client {
                         if let Err(e) = tx.send(message).await {
                             warn!(?e, ?connection_id, ?request_id, ?request.port, "failed to send chunked request start");
                             return;
-                        }
-                        if is_last {
-                            let message = DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
-                                ChunkedHttpBody {
-                                    frames: Vec::new(),
-                                    is_last,
-                                    connection_id,
-                                    request_id,
-                                },
-                            ));
-                            if let Err(e) = tx.send(message).await {
-                                warn!(?e, ?connection_id, ?request_id, ?request.port, "failed to send chunked request empty body");
-                                return;
-                            }
                         }
                     }
                 }
