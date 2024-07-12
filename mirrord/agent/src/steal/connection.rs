@@ -27,6 +27,7 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
+use tracing::warn;
 
 use crate::{
     error::{AgentError, Result},
@@ -169,6 +170,7 @@ impl Client {
                     },
                     mut body,
                 ) = request.request.into_parts();
+                tracing::trace!(?connection_id, "starting request");
                 match body.next_frames(true).await {
                     Err(..) => return,
                     Ok(Frames { frames, is_last }) => {
@@ -190,8 +192,24 @@ impl Client {
                                 request_id,
                                 port: request.port,
                             }));
-                        if tx.send(message).await.is_err() || is_last {
+
+                        if let Err(e) = tx.send(message).await {
+                            warn!(?e, ?connection_id, ?request_id, ?request.port, "failed to send chunked request start");
                             return;
+                        }
+                        if is_last {
+                            let message = DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
+                                ChunkedHttpBody {
+                                    frames: Vec::new(),
+                                    is_last,
+                                    connection_id,
+                                    request_id,
+                                },
+                            ));
+                            if let Err(e) = tx.send(message).await {
+                                warn!(?e, ?connection_id, ?request_id, ?request.port, "failed to send chunked request empty body");
+                                return;
+                            }
                         }
                     }
                 }
@@ -212,7 +230,13 @@ impl Client {
                                     request_id,
                                 },
                             ));
-                            if tx.send(message).await.is_err() || is_last {
+
+                            if let Err(e) = tx.send(message).await {
+                                warn!(?e, ?connection_id, ?request_id, ?request.port, "failed to send chunked request body");
+                                return;
+                            }
+
+                            if is_last {
                                 return;
                             }
                         }
