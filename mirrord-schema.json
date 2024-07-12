@@ -634,7 +634,7 @@
         },
         "trust_any_certificate": {
           "title": "_experimental_ trust_any_certificate {#experimental-trust_any_certificate}",
-          "description": "Enables trusting any certificate on macOS, useful for https://github.com/golang/go/issues/51991#issuecomment-2059588252",
+          "description": "Enables trusting any certificate on macOS, useful for <https://github.com/golang/go/issues/51991#issuecomment-2059588252>",
           "type": [
             "boolean",
             "null"
