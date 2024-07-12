@@ -24,7 +24,7 @@ pub struct ExperimentalConfig {
 
     /// # _experimental_ trust_any_certificate {#experimental-trust_any_certificate}
     ///
-    /// Enables trusting any certificate on macOS, useful for https://github.com/golang/go/issues/51991#issuecomment-2059588252
+    /// Enables trusting any certificate on macOS, useful for <https://github.com/golang/go/issues/51991#issuecomment-2059588252>
     #[config(default = false)]
     pub trust_any_certificate: bool,
 }
