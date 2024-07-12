@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.110.0](https://github.com/metalbear-co/mirrord/tree/3.110.0) - 2024-07-12
+
+
+### Added
+
+- Added experimental.trust_any_certificate to enable making app trust any
+  certificate on macOS
+  [#2576](https://github.com/metalbear-co/mirrord/issues/2576)
+
+
+### Fixed
+
+- Fix empty request streaming hanging forever
+  [#2590](https://github.com/metalbear-co/mirrord/issues/2590)
+
 ## [3.109.0](https://github.com/metalbear-co/mirrord/tree/3.109.0) - 2024-07-10
 
 
