@@ -433,9 +433,7 @@ impl OutgoingFilterExt for OutgoingFilter {
 
 #[inline]
 fn is_ignored_port(addr: &SocketAddr) -> bool {
-    let (ip, port) = (addr.ip(), addr.port());
-    let ignored_ip = ip == IpAddr::V4(Ipv4Addr::LOCALHOST) || ip == IpAddr::V6(Ipv6Addr::LOCALHOST);
-    port == 0 || ignored_ip && (port > 50000 && port < 60000)
+    addr.port() == 0
 }
 
 /// Fill in the sockaddr structure for the given address.
