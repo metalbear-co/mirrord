@@ -9,12 +9,12 @@ use mirrord_config::{
     feature::split_queues::SqsMessageFilter,
     target::{Target, TargetConfig},
 };
-use kube_target::KubeTarget;
+use kube_target::{KubeTarget, UnknownTargetType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use self::label_selector::LabelSelector;
-use crate::{client::error::OperatorApiError, types::LicenseInfoOwned};
+use crate::types::LicenseInfoOwned;
 
 pub mod kube_target;
 pub mod label_selector;
@@ -72,20 +72,14 @@ impl TargetCrd {
 }
 
 impl TryFrom<TargetCrd> for TargetConfig {
-    type Error = OperatorApiError;
+    type Error = UnknownTargetType;
 
     fn try_from(crd: TargetCrd) -> Result<Self, Self::Error> {
         Ok(TargetConfig {
-            path: Some(Target::try_from(crd.spec.target)?.clone()),
+            path: Some(Target::try_from(crd.spec.target)?),
             namespace: crd.metadata.namespace,
         })
     }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct TargetPortLock {
-    pub target_hash: String,
-    pub port: u16,
 }
 
 pub static OPERATOR_STATUS_NAME: &str = "operator";

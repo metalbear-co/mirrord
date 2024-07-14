@@ -6,6 +6,8 @@ use thiserror::Error;
 
 use crate::crd::NewOperatorFeature;
 
+use crate::crd::kube_target::UnknownTargetType;
+
 /// Operations performed on the operator via [`kube`] API.
 #[derive(Debug)]
 pub enum OperatorOperation {
@@ -66,8 +68,8 @@ pub enum OperatorApiError {
     #[error("failed to prepare client certificate: {0}")]
     ClientCertError(String),
 
-    #[error("Trying to target unknown kubernetes resource: {0}")]
-    UnknownTarget(String),
+    #[error("mirrord operator returned a target of unknown type: {}", .0 .0)]
+    FetchedUnknownTargetType(#[from] UnknownTargetType),
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;

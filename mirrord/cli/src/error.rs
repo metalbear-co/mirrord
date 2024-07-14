@@ -244,12 +244,9 @@ pub(crate) enum CliError {
     ))]
     OperatorNotInstalled,
 
-    #[error("Failed targeting resource with: {0}")]
-    #[diagnostic(help(
-        "The target might be known by the mirrord operator, but your current version of mirrord doesn't support it.
-        Consider updating mirrord to have access to this resource type.{GENERAL_HELP}"
-    ))]
-    UnknownTarget(String),
+    #[error("mirrord returned a target resource of unknown type: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    OperatorReturnedUnknownTargetType(String),
 }
 
 impl From<OperatorApiError> for CliError {
@@ -288,7 +285,9 @@ impl From<OperatorApiError> for CliError {
             }
             OperatorApiError::NoLicense => Self::OperatorLicenseExpired,
             OperatorApiError::ClientCertError(error) => Self::OperatorClientCertError(error),
-            OperatorApiError::UnknownTarget(error) => Self::UnknownTarget(error),
+            OperatorApiError::FetchedUnknownTargetType(error) => {
+                Self::OperatorReturnedUnknownTargetType(error.0)
+            }
         }
     }
 }

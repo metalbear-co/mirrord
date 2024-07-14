@@ -617,7 +617,7 @@
       "type": "object",
       "properties": {
         "readlink": {
-          "title": "_experimental_ readlink {#fexperimental-readlink}",
+          "title": "_experimental_ readlink {#experimental-readlink}",
           "description": "Enables the `readlink` hook.",
           "type": [
             "boolean",
@@ -625,8 +625,16 @@
           ]
         },
         "tcp_ping4_mock": {
-          "title": "_experimental_ tcp_ping4_mock {#fexperimental-tcp_ping4_mock}",
+          "title": "_experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}",
           "description": "<https://github.com/metalbear-co/mirrord/issues/2421#issuecomment-2093200904>",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "trust_any_certificate": {
+          "title": "_experimental_ trust_any_certificate {#experimental-trust_any_certificate}",
+          "description": "Enables trusting any certificate on macOS, useful for <https://github.com/golang/go/issues/51991#issuecomment-2059588252>",
           "type": [
             "boolean",
             "null"

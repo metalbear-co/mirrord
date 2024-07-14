@@ -1,1 +1,0 @@
-Fixed compilation of `mirrord-operator` crate with no features.
