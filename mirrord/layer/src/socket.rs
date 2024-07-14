@@ -1,7 +1,7 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
+    net::{SocketAddr, ToSocketAddrs},
     os::unix::io::RawFd,
     str::FromStr,
     sync::{Arc, LazyLock},
