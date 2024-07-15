@@ -78,7 +78,7 @@ pub enum AddressFilterError {
     ParsePort(#[from] ParseIntError),
     #[error("parsing subnet failed:: {0}")]
     ParseIpNet(#[from] ipnet::AddrParseError),
-    #[error("")]
+    #[error("parsing left trailing value: {0}")]
     TrailingValue(String),
 }
 
