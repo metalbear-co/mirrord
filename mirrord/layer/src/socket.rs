@@ -190,7 +190,8 @@ enum ConnectionThrough {
     Remote(SocketAddr),
 }
 
-/// Holds the [`OutgoingFilter`]s set up by the user.
+/// Holds the [`ProtocolAndAddressFilter`]s set up by the user in
+/// [`OutgoingFilterConfig`](mirrord_config::feature::network::outgoing::OutgoingFilterConfig).
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) enum OutgoingSelector {
     #[default]
@@ -350,7 +351,7 @@ trait ProtocolAndAddressFilterExt {
     ///
     /// # Note on DNS resolution
     ///
-    /// This method may require a DNS resolution (when [`OutgoingFilter::address`] is
+    /// This method may require a DNS resolution (when [`ProtocolAndAddressFilter::address`] is
     /// [`AddressFilter::Name`]). If remote DNS is disabled or `force_local_dns`
     /// flag is used, the method uses local resolution [`ToSocketAddrs`]. Otherwise, it uses
     /// remote resolution [`remote_getaddrinfo`].
