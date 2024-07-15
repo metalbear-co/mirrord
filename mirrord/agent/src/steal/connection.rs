@@ -286,13 +286,16 @@ impl TcpConnectionStealer {
     /// Initializes a new [`TcpConnectionStealer`], but doesn't start the actual work.
     /// You need to call [`TcpConnectionStealer::start`] to do so.
     #[tracing::instrument(level = "trace")]
-    pub(crate) async fn new(command_rx: Receiver<StealerCommand>) -> Result<Self, AgentError> {
+    pub(crate) async fn new(
+        command_rx: Receiver<StealerCommand>,
+        pod_ips: Option<String>,
+    ) -> Result<Self, AgentError> {
         let port_subscriptions = {
             let flush_connections = std::env::var("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS")
                 .ok()
                 .and_then(|var| var.parse::<bool>().ok())
                 .unwrap_or_default();
-            let redirector = IpTablesRedirector::new(flush_connections).await?;
+            let redirector = IpTablesRedirector::new(flush_connections, pod_ips).await?;
 
             PortSubscriptions::new(redirector, 4)
         };

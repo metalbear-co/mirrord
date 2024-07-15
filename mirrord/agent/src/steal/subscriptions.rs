@@ -58,6 +58,8 @@ pub(crate) struct IpTablesRedirector {
     redirect_to: Port,
     /// Listener to which redirect all connections.
     listener: TcpListener,
+
+    pod_ips: Option<String>,
 }
 
 impl IpTablesRedirector {
@@ -73,7 +75,10 @@ impl IpTablesRedirector {
     ///
     /// * `flush_connections` - whether exisitng connections should be flushed when adding new
     ///   redirects
-    pub(crate) async fn new(flush_connections: bool) -> Result<Self, AgentError> {
+    pub(crate) async fn new(
+        flush_connections: bool,
+        pod_ips: Option<String>,
+    ) -> Result<Self, AgentError> {
         let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await?;
         let redirect_to = listener.local_addr()?.port();
 
@@ -82,6 +87,7 @@ impl IpTablesRedirector {
             flush_connections,
             redirect_to,
             listener,
+            pod_ips,
         })
     }
 }
@@ -95,7 +101,12 @@ impl PortRedirector for IpTablesRedirector {
             Some(iptables) => iptables,
             None => {
                 let iptables = new_iptables();
-                let safe = SafeIpTables::create(iptables.into(), self.flush_connections).await?;
+                let safe = SafeIpTables::create(
+                    iptables.into(),
+                    self.flush_connections,
+                    self.pod_ips.as_deref(),
+                )
+                .await?;
                 self.iptables.insert(safe)
             }
         };

@@ -27,14 +27,14 @@ impl<IPT> MeshRedirect<IPT>
 where
     IPT: IPTables,
 {
-    pub fn create(ipt: Arc<IPT>, vendor: MeshVendor) -> Result<Self> {
+    pub fn create(ipt: Arc<IPT>, vendor: MeshVendor, pod_ips: Option<&str>) -> Result<Self> {
         let prerouteing = PreroutingRedirect::create(ipt.clone())?;
 
         for port in Self::get_skip_ports(&ipt, &vendor)? {
             prerouteing.add_rule(&format!("-m multiport -p tcp ! --dports {port} -j RETURN"))?;
         }
 
-        let output = OutputRedirect::create(ipt, IPTABLE_MESH.to_string())?;
+        let output = OutputRedirect::create(ipt, IPTABLE_MESH.to_string(), pod_ips)?;
 
         Ok(MeshRedirect {
             prerouteing,

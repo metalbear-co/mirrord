@@ -94,6 +94,11 @@ pub(super) fn base_command_line(agent: &AgentConfig, params: &ContainerParams) -
         command_line.push("--test-error".to_owned());
     }
 
+    if let Some(pod_ips) = params.pod_ips.clone() {
+        command_line.push("--pod-ips".to_owned());
+        command_line.push(pod_ips);
+    }
+
     command_line
 }
 

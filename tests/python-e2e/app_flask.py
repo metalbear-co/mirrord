@@ -5,6 +5,7 @@ from flask import Flask
 import logging
 import sys
 import threading
+import requests
 
 log = logging.getLogger("werkzeug")
 log.disabled = True
@@ -22,6 +23,27 @@ def kill_later():
         time.sleep(1)
         kill(getpid(), SIGTERM)
     threading.Thread(target=kill_thread).start()
+
+
+@app.route("/foobar", methods=["GET"])
+def get_foobar():
+    print("GET: Request completed")
+    return "GET"
+
+@app.route("/foobar", methods=["POST"])
+def post_foobar():
+    print("POST: Request completed")
+
+    x = requests.get('http://10.1.62.94/foobar')
+    return x.text
+
+
+@app.route("/foobar", methods=["PUT"])
+def put_foobar():
+    print("PUT: Request completed")
+    
+    x = requests.get('http://10.99.79.117/foobar')
+    return x.text
 
 
 @app.route("/", methods=["GET"])
