@@ -190,8 +190,7 @@ enum ConnectionThrough {
     Remote(SocketAddr),
 }
 
-/// Holds the [`ProtocolAndAddressFilter`]s set up by the user in
-/// [`OutgoingFilterConfig`](mirrord_config::feature::network::outgoing::OutgoingFilterConfig).
+/// Holds the [`ProtocolAndAddressFilter`]s set up by the user in the [`OutgoingFilterConfig`].
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) enum OutgoingSelector {
     #[default]
