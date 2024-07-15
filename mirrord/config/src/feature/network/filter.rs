@@ -60,6 +60,16 @@ pub enum AddressFilter {
     Subnet(ipnet::IpNet, u16),
 }
 
+impl AddressFilter {
+    pub fn port(&self) -> u16 {
+        match self {
+            Self::Name(_, port) => *port,
+            Self::Socket(socket) => socket.port(),
+            Self::Subnet(_, port) => *port,
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum AddressFilterError {
     #[error("parsing with nom failed: {0}")]

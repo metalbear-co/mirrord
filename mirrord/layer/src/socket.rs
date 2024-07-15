@@ -28,6 +28,7 @@ use crate::{
     socket::ops::{remote_getaddrinfo, REMOTE_DNS_REVERSE_MAPPING},
 };
 
+pub(crate) mod dns_selector;
 pub(super) mod hooks;
 pub(crate) mod ops;
 
