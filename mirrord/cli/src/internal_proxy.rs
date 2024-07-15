@@ -96,6 +96,7 @@ fn create_listen_socket() -> io::Result<TcpListener> {
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
 pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError> {
+    std::env::set_var("MIRRORD_PARENT", "0");
     let config = LayerConfig::from_env()?;
 
     if let Some(log_destination) = config.internal_proxy.log_destination.as_ref() {

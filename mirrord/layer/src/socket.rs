@@ -13,7 +13,13 @@ use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::feature::network::outgoing::{
     AddressFilter, OutgoingConfig, OutgoingFilter, OutgoingFilterConfig, ProtocolFilter,
 };
-use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
+use mirrord_intproxy_protocol::{
+    net::{
+        Bound as ProxyBound, Connected as ProxyConnected, SocketKind as ProxySocketKind,
+        SocketState as ProxySocketState, UserSocket as ProxyUserSocket,
+    },
+    NetProtocol, PortUnsubscribe,
+};
 use mirrord_protocol::{
     outgoing::SocketAddress, DnsLookupError, ResolveErrorKindInternal, ResponseError,
 };
@@ -35,7 +41,7 @@ pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock:
 /// Contains the addresses of a mirrord connected socket.
 ///
 /// - `layer_address` is only used for the outgoing feature.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Connected {
     /// The address requested by the user that we're "connected" to.
     ///
@@ -86,7 +92,7 @@ pub struct Bound {
     address: SocketAddr,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub enum SocketState {
     #[default]
     Initialized,
@@ -134,7 +140,7 @@ impl TryFrom<c_int> for SocketKind {
 // can't do that due to how `dup` interacts directly with our `Arc<UserSocket>`, because we just
 // `clone` the arc, we end up with exact duplicates, but `dup` generates a new fd that we have no
 // way of putting inside the duplicated `UserSocket`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub(crate) struct UserSocket {
     domain: c_int,
@@ -142,6 +148,76 @@ pub(crate) struct UserSocket {
     protocol: c_int,
     pub state: SocketState,
     pub(crate) kind: SocketKind,
+}
+
+impl Into<ProxyBound> for Bound {
+    fn into(self) -> ProxyBound {
+        let Self {
+            requested_address,
+            address,
+        } = self;
+
+        ProxyBound {
+            requested_address,
+            address,
+        }
+    }
+}
+
+impl Into<ProxyConnected> for Connected {
+    fn into(self) -> ProxyConnected {
+        let Self {
+            remote_address,
+            local_address,
+            layer_address,
+        } = self;
+
+        ProxyConnected {
+            remote_address: remote_address.into(),
+            local_address: local_address.into(),
+            layer_address: layer_address.map(Into::into),
+        }
+    }
+}
+
+impl Into<ProxySocketState> for SocketState {
+    fn into(self) -> ProxySocketState {
+        match self {
+            SocketState::Initialized => ProxySocketState::Initialized,
+            SocketState::Bound(bound) => ProxySocketState::Bound(bound.into()),
+            SocketState::Listening(listening) => ProxySocketState::Listening(listening.into()),
+            SocketState::Connected(connected) => ProxySocketState::Connected(connected.into()),
+        }
+    }
+}
+
+impl Into<ProxySocketKind> for SocketKind {
+    fn into(self) -> ProxySocketKind {
+        match self {
+            SocketKind::Tcp(tcp) => ProxySocketKind::Tcp(tcp),
+            SocketKind::Udp(udp) => ProxySocketKind::Udp(udp),
+        }
+    }
+}
+
+impl Into<ProxyUserSocket> for UserSocket {
+    fn into(self) -> ProxyUserSocket {
+        let Self {
+            domain,
+            type_,
+            protocol,
+            state,
+            kind,
+        } = self;
+
+        ProxyUserSocket {
+            domain,
+            type_,
+            protocol,
+            state: state.into(),
+            kind: kind.into(),
+        }
+    }
 }
 
 impl UserSocket {

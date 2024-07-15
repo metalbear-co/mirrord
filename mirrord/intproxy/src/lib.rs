@@ -367,6 +367,9 @@ impl IntProxy {
                     .send(SimpleProxyMessage::GetEnvReq(message_id, layer_id, req))
                     .await
             }
+            LayerToProxyMessage::Execve(req) => {
+                tracing::info!("we have sockets {req:?}");
+            }
             other => return Err(IntProxyError::UnexpectedLayerMessage(other)),
         }
 
