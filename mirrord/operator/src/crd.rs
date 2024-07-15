@@ -14,7 +14,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use self::label_selector::LabelSelector;
-use crate::{client::error::OperatorApiError, types::LicenseInfoOwned};
+#[cfg(feature = "client")]
+use crate::client::error::OperatorApiError;
+use crate::types::LicenseInfoOwned;
 
 pub mod kube_target;
 pub mod label_selector;
