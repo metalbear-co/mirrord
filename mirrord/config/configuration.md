@@ -715,8 +715,8 @@ and setting `read_only: ["/etc/resolv.conf"]`.
 
 Unstable: the precise syntax of this config is subject to change.
 
-List of addresses/ports/subnets that should be resolved through either the remote pod or local app,
-depending how you set this up with either `remote` or `local`.
+List of addresses/ports/subnets that should be resolved through either the remote pod or local
+app, depending how you set this up with either `remote` or `local`.
 
 You may use this option to specify when DNS resolution is done from the remote pod (which
 is the default behavior when you enable remote DNS), or from the local app (default when
@@ -732,7 +732,8 @@ Takes a list of values, such as:
 }
 ```
 
-- Only queries for addresses in subnet `1.1.1.0/24` with service port `1337`` will go through the remote pod.
+- Only queries for addresses in subnet `1.1.1.0/24` with service port `1337`` will go through
+  the remote pod.
 
 ```json
 {

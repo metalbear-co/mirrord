@@ -24,7 +24,7 @@ use mirrord_analytics::{
 };
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
-    feature::{fs::FsModeConfig, network::incoming::IncomingMode},
+    feature::{fs::FsModeConfig, network::{dns::{DnsConfig, DnsFilterConfig}, incoming::IncomingMode}},
     target::TargetDisplay,
     LayerConfig, LayerFileConfig,
 };
@@ -269,9 +269,13 @@ fn print_config<P>(
     };
     messages.push(format!("outgoing: forwarding is {}", outgoing_info));
 
-    let dns_info = match config.feature.network.dns.enabled {
-        true => "remotely",
-        false => "locally",
+    let dns_info = match &config.feature.network.dns {
+        DnsConfig { enabled: false, .. } => "locally",
+        DnsConfig { enabled: true, filter: None } => "remotely",
+        DnsConfig { enabled: true, filter: Some(DnsFilterConfig::Remote(filters)) } if filters.is_empty() => "locally",
+        DnsConfig { enabled: true, filter: Some(DnsFilterConfig::Local(filters)) } if filters.is_empty() => "remotely",
+        DnsConfig { enabled: true, filter: Some(DnsFilterConfig::Remote(..)) } => "locally with exceptions",
+        DnsConfig { enabled: true, filter: Some(DnsFilterConfig::Local(..)) } => "remotely with exceptions",
     };
     messages.push(format!("dns: DNS will be resolved {}", dns_info));
 

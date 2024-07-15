@@ -62,7 +62,7 @@ pub struct NetworkConfig {
     pub outgoing: OutgoingConfig,
 
     /// ### feature.network.dns {#feature-network-dns}
-    #[config(toggleable, nested, env = "MIRRORD_REMOTE_DNS", default = true)]
+    #[config(toggleable, nested)]
     pub dns: DnsConfig,
 }
 
