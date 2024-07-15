@@ -708,11 +708,14 @@ Resolve DNS via the remote pod.
 
 Defaults to `true`.
 
-- Caveats: DNS resolving can be done in multiple ways, some frameworks will use
-`getaddrinfo`, while others will create a connection on port `53` and perform a sort
-of manual resolution. Just enabling the `dns` feature in mirrord might not be enough.
-If you see an address resolution error, try enabling the [`fs`](#feature-fs) feature,
-and setting `read_only: ["/etc/resolv.conf"]`.
+Mind that:
+- DNS resolving can be done in multiple ways. Some frameworks use
+`getaddrinfo`/`gethostbyname` functions, while others communicate directly with the DNS server
+at port `53` and perform a sort of manual resolution. Just enabling the `dns` feature in mirrord
+might not be enough. If you see an address resolution error, try enabling the
+[`fs`](#feature-fs) feature, and setting `read_only: ["/etc/resolv.conf"]`.
+- DNS filter currently works only with frameworks that use `getaddrinfo`/`gethostbyname`
+  functions.
 
 #### feature.network.dns.filter {#feature-network-dns-filter}
 
