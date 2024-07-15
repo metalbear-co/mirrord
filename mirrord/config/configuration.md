@@ -106,7 +106,9 @@ configuration file containing all fields.
       },
       "dns": {
         "enabled": true,
-        "local": ["1.1.1.0/24:1337", "1.1.5.0/24", "google.com", ":53"]
+        "filter": {
+          "local": ["1.1.1.0/24:1337", "1.1.5.0/24", "google.com"]
+        }
       }
     },
     "copy_target": {
@@ -695,7 +697,9 @@ for more details.
       },
       "dns": {
         "enabled": true,
-        "local": ["1.1.1.0/24:1337", "1.1.5.0/24", "google.com"]
+        "filter": {
+          "local": ["1.1.1.0/24:1337", "1.1.5.0/24", "google.com"]
+        }
       }
     }
   }
