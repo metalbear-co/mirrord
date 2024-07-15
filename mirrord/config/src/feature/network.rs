@@ -41,7 +41,10 @@ pub mod outgoing;
 ///         "ignore_localhost": false,
 ///         "unix_streams": "bear.+"
 ///       },
-///       "dns": false
+///       "dns": {
+///         "enabled": true,
+///         "local": ["1.1.1.0/24:1337", "1.1.5.0/24", "google.com"]
+///       }
 ///     }
 ///   }
 /// }
@@ -59,16 +62,6 @@ pub struct NetworkConfig {
     pub outgoing: OutgoingConfig,
 
     /// ### feature.network.dns {#feature-network-dns}
-    ///
-    /// Resolve DNS via the remote pod.
-    ///
-    /// Defaults to `true`.
-    ///
-    /// - Caveats: DNS resolving can be done in multiple ways, some frameworks will use
-    /// `getaddrinfo`, while others will create a connection on port `53` and perform a sort
-    /// of manual resolution. Just enabling the `dns` feature in mirrord might not be enough.
-    /// If you see an address resolution error, try enabling the [`fs`](#feature-fs) feature,
-    /// and setting `read_only: ["/etc/resolv.conf"]`.
     #[config(toggleable, nested, env = "MIRRORD_REMOTE_DNS", default = true)]
     pub dns: DnsConfig,
 }

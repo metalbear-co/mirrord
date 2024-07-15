@@ -382,13 +382,17 @@ IP:PORT to connect to instead of using k8s api, for testing purposes.
 mirrord Experimental features.
 This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 
-## _experimental_ readlink {#fexperimental-readlink}
+## _experimental_ readlink {#experimental-readlink}
 
 Enables the `readlink` hook.
 
-## _experimental_ tcp_ping4_mock {#fexperimental-tcp_ping4_mock}
+## _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
 
 <https://github.com/metalbear-co/mirrord/issues/2421#issuecomment-2093200904>
+
+# _experimental_ trust_any_certificate {#experimental-trust_any_certificate}
+
+Enables trusting any certificate on macOS, useful for <https://github.com/golang/go/issues/51991#issuecomment-2059588252>
 
 # feature {#root-feature}
 
@@ -686,7 +690,10 @@ for more details.
         "ignore_localhost": false,
         "unix_streams": "bear.+"
       },
-      "dns": false
+      "dns": {
+        "enabled": true,
+        "local": ["1.1.1.0/24:1337", "1.1.5.0/24", "google.com"]
+      }
     }
   }
 }
@@ -703,6 +710,62 @@ Defaults to `true`.
 of manual resolution. Just enabling the `dns` feature in mirrord might not be enough.
 If you see an address resolution error, try enabling the [`fs`](#feature-fs) feature,
 and setting `read_only: ["/etc/resolv.conf"]`.
+
+#### feature.network.dns.filter {#feature-network-dns-filter}
+
+Unstable: the precise syntax of this config is subject to change.
+
+List of addresses/ports/subnets that should be resolved through either the remote pod or local app,
+depending how you set this up with either `remote` or `local`.
+
+You may use this option to specify when DNS resolution is done from the remote pod (which
+is the default behavior when you enable remote DNS), or from the local app (default when
+you have remote DNS disabled).
+
+Takes a list of values, such as:
+
+- Only queries for hostname `my-service-in-cluster` will go through the remote pod.
+
+```json
+{
+  "remote": ["my-service-in-cluster"]
+}
+```
+
+- Only queries for addresses in subnet `1.1.1.0/24` with service port `1337`` will go through the remote pod.
+
+```json
+{
+  "remote": ["1.1.1.0/24:1337"]
+}
+```
+
+- Only queries for hostname `google.com` with service port `1337` or `7331`
+will go through the remote pod.
+
+```json
+{
+  "remote": ["google.com:1337", "google.com:7331"]
+}
+```
+
+- Only queries for `localhost` with service port `1337` will go through the local app.
+
+```json
+{
+  "local": ["localhost:1337"]
+}
+```
+
+- Only queries with service port `1337` or `7331` will go through the local app.
+
+```json
+{
+  "local": [":1337", ":7331"]
+}
+```
+
+Valid values follow this pattern: `[name|address|subnet/mask][:port]`.
 
 ### feature.network.incoming {#feature-network-incoming}
 

@@ -11,33 +11,83 @@ use crate::{
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
+/// List of addresses/ports/subnets that should be resolved through either the remote pod or local
+/// app, depending how you set this up with either `remote` or `local`.
+///
+/// You may use this option to specify when DNS resolution is done from the remote pod (which
+/// is the default behavior when you enable remote DNS), or from the local app (default when
+/// you have remote DNS disabled).
+///
+/// Takes a list of values, such as:
+///
+/// - Only queries for hostname `my-service-in-cluster` will go through the remote pod.
+///
+/// ```json
+/// {
+///   "remote": ["my-service-in-cluster"]
+/// }
+/// ```
+///
+/// - Only queries for addresses in subnet `1.1.1.0/24` with service port `1337`` will go through
+///   the remote pod.
+///
+/// ```json
+/// {
+///   "remote": ["1.1.1.0/24:1337"]
+/// }
+/// ```
+///
+/// - Only queries for hostname `google.com` with service port `1337` or `7331`
+/// will go through the remote pod.
+///
+/// ```json
+/// {
+///   "remote": ["google.com:1337", "google.com:7331"]
+/// }
+/// ```
+///
+/// - Only queries for `localhost` with service port `1337` will go through the local app.
+///
+/// ```json
+/// {
+///   "local": ["localhost:1337"]
+/// }
+/// ```
+///
+/// - Only queries with service port `1337` or `7331` will go through the local app.
+///
+/// ```json
+/// {
+///   "local": [":1337", ":7331"]
+/// }
+/// ```
+///
+/// Valid values follow this pattern: `[name|address|subnet/mask][:port]`.
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum DnsFilterConfig {
-    /// Traffic that matches what's specified here will go through the remote pod, everything else
+    /// DNS queries matching what is specified here will go through the remote pod, everything else
     /// will go through local.
     Remote(VecOrSingle<String>),
 
-    /// Traffic that matches what's specified here will go through the local app, everything else
+    /// DNS queries matching what is specified here will go through the local app, everything else
     /// will go through the remote pod.
     Local(VecOrSingle<String>),
 }
 
+/// Resolve DNS via the remote pod.
+///
+/// Defaults to `true`.
+///
+/// - Caveats: DNS resolving can be done in multiple ways, some frameworks will use
+/// `getaddrinfo`, while others will create a connection on port `53` and perform a sort
+/// of manual resolution. Just enabling the `dns` feature in mirrord might not be enough.
+/// If you see an address resolution error, try enabling the [`fs`](#feature-fs) feature,
+/// and setting `read_only: ["/etc/resolv.conf"]`.
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
 #[config(map_to = "DnsFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct DnsConfig {
-    /// #### feature.network.dns.enabled {#feature-network-dns}
-    ///
-    /// Resolve DNS via the remote pod.
-    ///
-    /// Defaults to `true`.
-    ///
-    /// - Caveats: DNS resolving can be done in multiple ways, some frameworks will use
-    /// `getaddrinfo`, while others will create a connection on port `53` and perform a sort
-    /// of manual resolution. Just enabling the `dns` feature in mirrord might not be enough.
-    /// If you see an address resolution error, try enabling the [`fs`](#feature-fs) feature,
-    /// and setting `read_only: ["/etc/resolv.conf"]`.
     #[config(env = "MIRRORD_REMOTE_DNS", default = true)]
     pub enabled: bool,
 

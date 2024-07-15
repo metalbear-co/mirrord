@@ -550,6 +550,61 @@
       },
       "additionalProperties": false
     },
+    "DnsFileConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "filter": {
+          "title": "feature.network.dns.filter {#feature-network-dns-filter}",
+          "description": "Unstable: the precise syntax of this config is subject to change.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DnsFilterConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "DnsFilterConfig": {
+      "description": "List of addresses/ports/subnets that should be resolved through either the remote pod or local app, depending how you set this up with either `remote` or `local`.\n\nYou may use this option to specify when DNS resolution is done from the remote pod (which is the default behavior when you enable remote DNS), or from the local app (default when you have remote DNS disabled).\n\nTakes a list of values, such as:\n\n- Only queries for hostname `my-service-in-cluster` will go through the remote pod.\n\n```json { \"remote\": [\"my-service-in-cluster\"] } ```\n\n- Only queries for addresses in subnet `1.1.1.0/24` with service port `1337`` will go through the remote pod.\n\n```json { \"remote\": [\"1.1.1.0/24:1337\"] } ```\n\n- Only queries for hostname `google.com` with service port `1337` or `7331` will go through the remote pod.\n\n```json { \"remote\": [\"google.com:1337\", \"google.com:7331\"] } ```\n\n- Only queries for `localhost` with service port `1337` will go through the local app.\n\n```json { \"local\": [\"localhost:1337\"] } ```\n\n- Only queries with service port `1337` or `7331` will go through the local app.\n\n```json { \"local\": [\":1337\", \":7331\"] } ```\n\nValid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.",
+      "oneOf": [
+        {
+          "description": "DNS queries matching what is specified here will go through the remote pod, everything else will go through local.",
+          "type": "object",
+          "required": [
+            "remote"
+          ],
+          "properties": {
+            "remote": {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "DNS queries matching what is specified here will go through the local app, everything else will go through the remote pod.",
+          "type": "object",
+          "required": [
+            "local"
+          ],
+          "properties": {
+            "local": {
+              "$ref": "#/definitions/VecOrSingle_for_String"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "EnvFileConfig": {
       "description": "Allows the user to set or override the local process' environment variables with the ones from the remote pod.\n\nWhich environment variables to load from the remote pod are controlled by setting either [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).\n\nSee the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more details.\n\n```json { \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV;MY_APP_*\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" } } } } ```",
       "type": "object",
@@ -1067,15 +1122,19 @@
       ]
     },
     "NetworkFileConfig": {
-      "description": "Controls mirrord network operations.\n\nSee the network traffic [reference](https://mirrord.dev/docs/reference/traffic/) for more details.\n\n```json { \"feature\": { \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": false } } } ```",
+      "description": "Controls mirrord network operations.\n\nSee the network traffic [reference](https://mirrord.dev/docs/reference/traffic/) for more details.\n\n```json { \"feature\": { \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": { \"enabled\": true, \"local\": [\"1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\"] } } } } ```",
       "type": "object",
       "properties": {
         "dns": {
           "title": "feature.network.dns {#feature-network-dns}",
           "description": "Resolve DNS via the remote pod.\n\nDefaults to `true`.\n\n- Caveats: DNS resolving can be done in multiple ways, some frameworks will use `getaddrinfo`, while others will create a connection on port `53` and perform a sort of manual resolution. Just enabling the `dns` feature in mirrord might not be enough. If you see an address resolution error, try enabling the [`fs`](#feature-fs) feature, and setting `read_only: [\"/etc/resolv.conf\"]`.",
-          "type": [
-            "boolean",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToggleableConfig_for_DnsFileConfig"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "incoming": {
@@ -1350,6 +1409,16 @@
             }
           },
           "additionalProperties": false
+        }
+      ]
+    },
+    "ToggleableConfig_for_DnsFileConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/DnsFileConfig"
         }
       ]
     },
