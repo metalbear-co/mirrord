@@ -17,8 +17,8 @@ pub enum ConfigError {
     #[error("value for {1:?} not provided in {0:?} (env override {2:?})")]
     ValueNotProvided(&'static str, &'static str, Option<&'static str>),
 
-    #[error("value {0:?} for {1:?} is invalid.")]
-    InvalidValue(String, &'static str),
+    #[error("invalid {1} value `{0}`: {2}")]
+    InvalidValue(String, &'static str, String),
 
     #[error("mirrord-config: IO operation failed with `{0}`")]
     Io(#[from] std::io::Error),

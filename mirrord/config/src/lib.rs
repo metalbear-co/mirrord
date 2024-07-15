@@ -484,6 +484,8 @@ impl LayerConfig {
             ));
         }
 
+        self.feature.network.dns.verify(context)?;
+
         Ok(())
     }
 }

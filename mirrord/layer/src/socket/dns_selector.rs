@@ -7,13 +7,18 @@ use mirrord_config::feature::network::{
 
 use crate::detour::{Bypass, Detour};
 
+/// Generated from [`DnsConfig`] provided in the [`LayerConfig`](mirrord_config::LayerConfig).
+/// Decides whether DNS queries are done locally or remotely.
 #[derive(Debug)]
 pub struct DnsSelector {
+    /// Filters provided in the config.
     filters: Vec<AddressFilter>,
+    /// Whether a query matching one of [`Self::filters`] should be done locally.
     filter_is_local: bool,
 }
 
 impl DnsSelector {
+    /// Bypasses queries that should be done locally.
     pub fn check_query(&self, node: &str, port: u16) -> Detour<()> {
         let matched = self
             .filters
@@ -62,7 +67,11 @@ impl From<&DnsConfig> for DnsSelector {
         let filters = filters
             .into_iter()
             .flatten()
-            .map(|filter| filter.parse::<AddressFilter>().expect("bad address filter"))
+            .map(|filter| {
+                filter
+                    .parse::<AddressFilter>()
+                    .expect("bad address filter, should be verified in the CLI")
+            })
             .collect();
 
         Self {

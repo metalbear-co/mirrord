@@ -1,8 +1,11 @@
+use std::ops::Deref;
+
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use super::filter::AddressFilter;
 use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError},
     util::{MirrordToggleableConfig, VecOrSingle},
@@ -43,6 +46,51 @@ pub struct DnsConfig {
     /// Unstable: the precise syntax of this config is subject to change.
     #[config(default, unstable)]
     pub filter: Option<DnsFilterConfig>,
+}
+
+impl DnsConfig {
+    pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
+        let filters = match &self.filter {
+            Some(..) if !self.enabled => {
+                context.add_warning(
+                    "Remote DNS resolution is disabled, provided DNS filter will be ignored"
+                        .to_string(),
+                );
+                return Ok(());
+            }
+            None => return Ok(()),
+            Some(DnsFilterConfig::Local(filters)) if filters.is_empty() => {
+                context.add_warning(
+                    "Local DNS filter is empty, all DNS resolution will be done remotely"
+                        .to_string(),
+                );
+                return Ok(());
+            }
+            Some(DnsFilterConfig::Remote(filters)) if filters.is_empty() => {
+                context.add_warning(
+                    "Remote DNS filter is empty, all DNS resolution will be done locally"
+                        .to_string(),
+                );
+                return Ok(());
+            }
+            Some(DnsFilterConfig::Local(filters)) => filters.deref(),
+            Some(DnsFilterConfig::Remote(filters)) => filters.deref(),
+        };
+
+        for filter in filters {
+            let Err(error) = filter.parse::<AddressFilter>() else {
+                continue;
+            };
+
+            return Err(ConfigError::InvalidValue(
+                filter.to_string(),
+                "DNS filter",
+                error.to_string(),
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 impl MirrordToggleableConfig for DnsFileConfig {
