@@ -4,12 +4,12 @@ use std::{
 };
 
 use kube::CustomResource;
+use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
     feature::split_queues::SqsMessageFilter,
     target::{Target, TargetConfig},
 };
-use kube_target::{KubeTarget, UnknownTargetType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -392,6 +392,13 @@ impl QueueConsumer {
             QueueConsumer::Deployment(dep) => ("deployment", dep),
             QueueConsumer::Rollout(roll) => ("rollout", roll),
         }
+    }
+}
+
+impl Display for QueueConsumer {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let (type_, name) = self.get_type_and_name();
+        write!(f, "{}/{}", type_, name)
     }
 }
 
