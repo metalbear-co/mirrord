@@ -70,6 +70,7 @@ use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     net::SocketAddr,
+    os::unix::process::parent_id,
     panic,
     sync::OnceLock,
     time::Duration,
@@ -349,7 +350,9 @@ fn layer_start(mut config: LayerConfig) {
 
     let _detour_guard = DetourGuard::new();
     tracing::info!("Initializing mirrord-layer!");
-    tracing::debug!(executable = ?EXECUTABLE_PATH.get(), args = ?EXECUTABLE_ARGS.get(), pid = std::process::id(), "Loaded into executable");
+    tracing::debug!(executable = ?EXECUTABLE_PATH.get(), args = ?EXECUTABLE_ARGS.get(), pid = std::process::id(), "Loaded into executable {:?}",
+    parent_id()
+    );
 
     if trace_only {
         tracing::debug!("Skipping new intproxy connection (trace only)");

@@ -2,6 +2,7 @@
 //! absolute minimum
 use std::{
     net::{SocketAddr, ToSocketAddrs},
+    ops::Not,
     os::unix::io::RawFd,
     str::FromStr,
     sync::{Arc, LazyLock},
@@ -12,7 +13,7 @@ use bincode::{Decode, Encode};
 use dashmap::DashMap;
 use hashbrown::hash_set::HashSet;
 use hooks::FN_FCNTL;
-use libc::{c_int, sockaddr, socklen_t};
+use libc::{c_int, sockaddr, socklen_t, FD_CLOEXEC};
 use mirrord_config::feature::network::outgoing::{
     AddressFilter, OutgoingConfig, OutgoingFilter, OutgoingFilterConfig, ProtocolFilter,
 };
@@ -56,17 +57,20 @@ pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock:
             println!("We do {decoded:?}");
 
             DashMap::from_iter(decoded.into_iter().filter_map(|(fd, socket)| {
-                let cloexec = unsafe { FN_FCNTL(fd, libc::F_GETFD) };
+                let is_cloexec = unsafe { FN_FCNTL(fd, libc::F_GETFD) > -1 };
                 tracing::info!(
-                    "socket has flag {cloexec:?} sock {:?} {:?} {:?}",
+                    "socket has flag {is_cloexec:?} sock {:?} {:?} {:?}",
                     fd,
                     socket,
                     errno::errno()
                 );
 
-                (cloexec == 0).then(|| (fd, Arc::new(socket)))
+                is_cloexec.then(|| (fd, Arc::new(socket)))
+                // Some((fd, Arc::new(socket)))
             }))
         })
+        .inspect(|sockets| tracing::info!("the sockets {:?}: {sockets:?}", std::process::id()))
+        .inspect_err(|fail| tracing::error!("the fail: {fail:?}"))
         .unwrap_or_default()
 });
 

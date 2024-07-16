@@ -2,6 +2,7 @@ use std::{
     borrow::BorrowMut,
     ffi::{CStr, CString},
     ops::Not,
+    os::unix::process::parent_id,
 };
 
 use base64::prelude::*;
@@ -58,14 +59,8 @@ unsafe extern "C" fn execle_detour(
 
 #[hook_guard_fn]
 #[tracing::instrument(level = Level::INFO, ret)]
-unsafe extern "C" fn execv_detour(prog: *const c_char, argv: *const *const c_char) -> c_int {
-    FN_EXECV(prog, argv)
-}
-
-#[hook_guard_fn]
-#[tracing::instrument(level = Level::INFO, ret)]
 unsafe extern "C" fn execvp_detour(c: *const c_char, argv: *const *const c_char) -> c_int {
-    FN_EXECVP(c, argv)
+    todo!()
 }
 
 #[hook_guard_fn]
@@ -78,18 +73,76 @@ unsafe extern "C" fn execvpe_detour(
     FN_EXECVPE(file, argv, envp)
 }
 
-#[hook_fn]
+// TODO(alex): Read from std::env and pass those + the sockets to execve.
+#[hook_guard_fn]
+// #[tracing::instrument(level = Level::INFO, ret)]
+unsafe extern "C" fn execv_detour(prog: *const c_char, argv: *const *const c_char) -> c_int {
+    // let env_vars = std::env::vars()
+    //     .filter_map(|(key, var)| CString::new(format!("{key}={var}")).ok())
+    //     .collect::<Argv>();
+    tracing::info!("execv");
+
+    let shared_sockets = SOCKETS
+        .iter()
+        .filter_map(|inner| {
+            // let cloexec = unsafe { FN_FCNTL(*inner.key(), libc::F_GETFD) };
+            // tracing::info!(
+            //     "socket has flag {cloexec:?} sock {:?} {:?} {:?}",
+            //     inner.key(),
+            //     inner.value(),
+            //     errno::errno()
+            // );
+            // if cloexec == FD_CLOEXEC {
+            //     None
+            // } else {
+            let cloned = UserSocket::clone(inner.value());
+            Some((*inner.key(), cloned))
+            // }
+        })
+        .collect::<Vec<_>>();
+
+    let encoded = bincode::encode_to_vec(shared_sockets, bincode::config::standard())
+        .map(|bytes| BASE64_URL_SAFE.encode(bytes))
+        .unwrap_or_default();
+
+    std::env::set_var("MIRRORD_SHARED_SOCKETS", encoded);
+
+    // execve_detour(prog, argv, env_vars.null_vec().as_ptr() as *const *const _)
+    FN_EXECV(prog, argv)
+}
+
+#[hook_guard_fn]
 // #[tracing::instrument(level = Level::INFO, ret)]
 pub(crate) unsafe extern "C" fn execve_detour(
     path: *const c_char,
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
+    Nul::new_unchecked(argv).iter().for_each(|arg| {
+        tracing::info!("the arg {:?}", CStr::from_ptr(*arg));
+    });
+
     match execve(Nul::new_unchecked(envp)) {
         Detour::Success(new_envp) => {
             FN_EXECVE(path, argv, new_envp.null_vec().as_ptr() as *const *const _)
         }
         _ => FN_EXECVE(path, argv, envp),
+    }
+}
+
+#[hook_fn]
+// #[tracing::instrument(level = Level::INFO, ret)]
+pub(crate) unsafe extern "C" fn fexecve_detour(
+    fd: c_int,
+    argv: *const *const c_char,
+    envp: *const *const c_char,
+) -> c_int {
+    tracing::info!("we re in Fexecve");
+    match execve(Nul::new_unchecked(envp)) {
+        Detour::Success(new_envp) => {
+            FN_FEXECVE(fd, argv, new_envp.null_vec().as_ptr() as *const *const _)
+        }
+        _ => FN_FEXECVE(fd, argv, envp),
     }
 }
 
@@ -158,7 +211,7 @@ pub(crate) unsafe fn enable_exec_hooks(hook_manager: &mut HookManager) {
     // replace!(hook_manager, "execl", execl_detour, FnExecl, FN_EXECL);
     // replace!(hook_manager, "execlp", execlp_detour, FnExeclp, FN_EXECLP);
     // replace!(hook_manager, "execle", execle_detour, FnExecle, FN_EXECLE);
-    // replace!(hook_manager, "execv", execv_detour, FnExecv, FN_EXECV);
+    replace!(hook_manager, "execv", execv_detour, FnExecv, FN_EXECV);
     // replace!(hook_manager, "execvp", execvp_detour, FnExecvp, FN_EXECVP);
     // replace!(
     //     hook_manager,
@@ -168,6 +221,13 @@ pub(crate) unsafe fn enable_exec_hooks(hook_manager: &mut HookManager) {
     //     FN_EXECVPE
     // );
     replace!(hook_manager, "execve", execve_detour, FnExecve, FN_EXECVE);
+    replace!(
+        hook_manager,
+        "fexecve",
+        fexecve_detour,
+        FnFexecve,
+        FN_FEXECVE
+    );
     replace!(
         hook_manager,
         "posix_spawn",

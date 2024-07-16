@@ -140,14 +140,6 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
 
     SOCKETS.insert(socket_fd, Arc::new(new_socket));
 
-    let cloexec = unsafe { FN_FCNTL(socket_fd, libc::F_GETFD) };
-    tracing::info!(
-        "socket created {cloexec:?} sock {:?} {:?} pid {:?}",
-        socket_fd,
-        errno::errno(),
-        std::process::id(),
-    );
-
     Detour::Success(socket_fd)
 }
 
@@ -676,7 +668,7 @@ pub(super) fn connect(
 
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
 /// cluster)
-#[mirrord_layer_macro::instrument(level = "trace", skip(address, address_len))]
+#[mirrord_layer_macro::instrument(level = Level::DEBUG, skip(address, address_len))]
 pub(super) fn getpeername(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -705,7 +697,7 @@ pub(super) fn getpeername(
 ///
 /// When [`libc::bind`]ing on port `0`, we change the port to be the actual bound port, as this is
 /// consistent behavior with libc.
-#[mirrord_layer_macro::instrument(level = "trace", ret, skip(address, address_len))]
+#[mirrord_layer_macro::instrument(level = Level::DEBUG, ret, skip(address, address_len))]
 pub(super) fn getsockname(
     sockfd: RawFd,
     address: *mut sockaddr,
