@@ -420,13 +420,11 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
 
                 Ok(resolved_ips.into_iter().any(|ip| ip == address.ip()))
             }
-            AddressFilter::Socket(addr)
-                if addr.ip().is_unspecified() || addr.ip() == address.ip() =>
-            {
-                Ok(true)
+            AddressFilter::Socket(addr) => {
+                Ok(addr.ip().is_unspecified() || addr.ip() == address.ip())
             }
-            AddressFilter::Subnet(net, _) if net.contains(&address.ip()) => Ok(true),
-            _ => Ok(false),
+            AddressFilter::Subnet(net, _) => Ok(net.contains(&address.ip())),
+            AddressFilter::Port(..) => Ok(true),
         }
     }
 }
