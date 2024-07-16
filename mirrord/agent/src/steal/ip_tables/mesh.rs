@@ -245,8 +245,8 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let prerouting =
-            MeshRedirect::create(Arc::new(mock), MeshVendor::Linkerd).expect("Unable to create");
+        let prerouting = MeshRedirect::create(Arc::new(mock), MeshVendor::Linkerd, None)
+            .expect("Unable to create");
 
         assert!(prerouting.add_redirect(69, 420).await.is_ok());
     }
