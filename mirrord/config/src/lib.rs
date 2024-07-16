@@ -490,6 +490,7 @@ impl LayerConfig {
         }
 
         self.feature.network.dns.verify(context)?;
+        self.feature.network.outgoing.verify(context)?;
 
         Ok(())
     }

@@ -1,8 +1,11 @@
+use std::ops::Deref;
+
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use super::filter::ProtocolAndAddressFilter;
 use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError},
     util::{MirrordToggleableConfig, VecOrSingle},
@@ -172,6 +175,30 @@ impl CollectAnalytics for &OutgoingConfig {
                 }
             }
         }
+    }
+}
+
+impl OutgoingConfig {
+    pub fn verify(&self, _: &mut ConfigContext) -> Result<(), ConfigError> {
+        let filters = match self.filter.as_ref() {
+            None => return Ok(()),
+            Some(OutgoingFilterConfig::Local(filters)) => filters.deref(),
+            Some(OutgoingFilterConfig::Remote(filters)) => filters.deref(),
+        };
+
+        for filter in filters {
+            let Err(error) = filter.parse::<ProtocolAndAddressFilter>() else {
+                continue;
+            };
+
+            return Err(ConfigError::InvalidValue {
+                name: "feature.network.outgoing.filter",
+                provided: filter.to_string(),
+                error: Box::new(error),
+            });
+        }
+
+        Ok(())
     }
 }
 
