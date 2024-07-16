@@ -563,6 +563,7 @@ fn enable_hooks(state: &LayerSetup) {
 pub(crate) fn close_layer_fd(fd: c_int) {
     // Remove from sockets.
     if let Some((_, socket)) = SOCKETS.remove(&fd) {
+        tracing::debug!("closing socket {socket:?}");
         // Closed file is a socket, so if it's already bound to a port - notify agent to stop
         // mirroring/stealing that port.
         socket.close();

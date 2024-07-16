@@ -5,14 +5,21 @@ use std::{
 };
 
 use base64::prelude::*;
-use libc::{c_char, c_int};
+use libc::{c_char, c_int, FD_CLOEXEC};
 use mirrord_intproxy_protocol::{net::UserSocket as ProxyUserSocket, ExecveRequest};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use null_terminated::Nul;
 use tracing::Level;
 
 use super::Argv;
-use crate::{common, detour::Detour, hooks::HookManager, replace, socket::UserSocket, SOCKETS};
+use crate::{
+    common,
+    detour::Detour,
+    hooks::HookManager,
+    replace,
+    socket::{hooks::FN_FCNTL, UserSocket},
+    SOCKETS,
+};
 
 #[hook_guard_fn]
 unsafe extern "C" fn execl_detour(
@@ -90,12 +97,19 @@ pub(super) fn execve(rawish_envp: &Nul<*const c_char>) -> Detour<Argv> {
     let shared_sockets = SOCKETS
         .iter()
         .filter_map(|inner| {
-            // if FD_CLOEXEC & unsafe { FN_FCNTL(*inner.key(), 0) } > 0 {
-            // None
-            // } else {
-            let cloned = UserSocket::clone(inner.value());
-            Some((*inner.key(), cloned))
-            // }
+            let cloexec = unsafe { FN_FCNTL(*inner.key(), libc::F_GETFD) };
+            tracing::info!(
+                "socket has flag {cloexec:?} sock {:?} {:?} {:?}",
+                inner.key(),
+                inner.value(),
+                errno::errno()
+            );
+            if cloexec == FD_CLOEXEC {
+                None
+            } else {
+                let cloned = UserSocket::clone(inner.value());
+                Some((*inner.key(), cloned))
+            }
         })
         .collect::<Vec<_>>();
 
