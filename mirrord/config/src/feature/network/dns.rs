@@ -135,11 +135,11 @@ impl DnsConfig {
                 continue;
             };
 
-            return Err(ConfigError::InvalidValue(
-                filter.to_string(),
-                "DNS filter",
-                error.to_string(),
-            ));
+            return Err(ConfigError::InvalidValue {
+                name: "feature.network.dns.filter",
+                provided: filter.to_string(),
+                error: Box::new(error),
+            });
         }
 
         Ok(())
