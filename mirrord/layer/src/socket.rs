@@ -15,13 +15,7 @@ use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::feature::network::outgoing::{
     AddressFilter, OutgoingConfig, OutgoingFilter, OutgoingFilterConfig, ProtocolFilter,
 };
-use mirrord_intproxy_protocol::{
-    net::{
-        Bound as ProxyBound, Connected as ProxyConnected, SocketKind as ProxySocketKind,
-        SocketState as ProxySocketState, UserSocket as ProxyUserSocket,
-    },
-    NetProtocol, PortUnsubscribe,
-};
+use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
 use mirrord_protocol::{
     outgoing::SocketAddress, DnsLookupError, ResolveErrorKindInternal, ResponseError,
 };
@@ -38,13 +32,15 @@ use crate::{
 pub(super) mod hooks;
 pub(crate) mod ops;
 
+pub(crate) const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
+
 pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(|| {
     let pid = std::process::id();
     let parent_pid = parent_id();
 
     tracing::info!("pid {pid:?} with parent_pid {parent_pid:?}, does it have le sockets?");
 
-    std::env::var("MIRRORD_SHARED_SOCKETS")
+    std::env::var(SHARED_SOCKETS_ENV_VAR)
         .map(|encoded_sockets| {
             let from_base64 = BASE64_URL_SAFE
                 .decode(encoded_sockets.into_bytes())
@@ -184,76 +180,6 @@ pub(crate) struct UserSocket {
     protocol: c_int,
     pub state: SocketState,
     pub(crate) kind: SocketKind,
-}
-
-impl Into<ProxyBound> for Bound {
-    fn into(self) -> ProxyBound {
-        let Self {
-            requested_address,
-            address,
-        } = self;
-
-        ProxyBound {
-            requested_address,
-            address,
-        }
-    }
-}
-
-impl Into<ProxyConnected> for Connected {
-    fn into(self) -> ProxyConnected {
-        let Self {
-            remote_address,
-            local_address,
-            layer_address,
-        } = self;
-
-        ProxyConnected {
-            remote_address: remote_address.into(),
-            local_address: local_address.into(),
-            layer_address: layer_address.map(Into::into),
-        }
-    }
-}
-
-impl Into<ProxySocketState> for SocketState {
-    fn into(self) -> ProxySocketState {
-        match self {
-            SocketState::Initialized => ProxySocketState::Initialized,
-            SocketState::Bound(bound) => ProxySocketState::Bound(bound.into()),
-            SocketState::Listening(listening) => ProxySocketState::Listening(listening.into()),
-            SocketState::Connected(connected) => ProxySocketState::Connected(connected.into()),
-        }
-    }
-}
-
-impl Into<ProxySocketKind> for SocketKind {
-    fn into(self) -> ProxySocketKind {
-        match self {
-            SocketKind::Tcp(tcp) => ProxySocketKind::Tcp(tcp),
-            SocketKind::Udp(udp) => ProxySocketKind::Udp(udp),
-        }
-    }
-}
-
-impl Into<ProxyUserSocket> for UserSocket {
-    fn into(self) -> ProxyUserSocket {
-        let Self {
-            domain,
-            type_,
-            protocol,
-            state,
-            kind,
-        } = self;
-
-        ProxyUserSocket {
-            domain,
-            type_,
-            protocol,
-            state: state.into(),
-            kind: kind.into(),
-        }
-    }
 }
 
 impl UserSocket {

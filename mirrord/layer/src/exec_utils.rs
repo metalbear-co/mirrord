@@ -36,14 +36,13 @@ const MAX_ARGC: usize = 256;
 
 pub(crate) static PATCH_BINARIES: OnceLock<Vec<String>> = OnceLock::new();
 
-pub(crate) unsafe fn enable_execve_hook(
+pub(crate) unsafe fn enable_macos_hooks(
     hook_manager: &mut HookManager,
     patch_binaries: Vec<String>,
 ) {
     PATCH_BINARIES
         .set(patch_binaries)
         .expect("couldn't set patch_binaries");
-    replace!(hook_manager, "execve", execve_detour, FnExecve, FN_EXECVE);
     replace!(
         hook_manager,
         "posix_spawn",
@@ -202,7 +201,7 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
 /// in any of the arguments, remove it and leave only the original path of the file. If for example
 /// `argv[1]` is `"/tmp/mirrord-bin/bin/bash"`, create a new `argv` where `argv[1]` is
 /// `"/bin/bash"`.
-unsafe fn patch_sip_for_new_process(
+pub(crate) unsafe fn patch_sip_for_new_process(
     path: *const c_char,
     argv: *const *const c_char,
     envp: *const *const c_char,

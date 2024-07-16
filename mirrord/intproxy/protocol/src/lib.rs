@@ -6,7 +6,6 @@ use std::{
     collections::HashMap,
     fmt,
     net::{IpAddr, SocketAddr},
-    os::fd::RawFd,
 };
 
 use bincode::{Decode, Encode};
@@ -24,12 +23,10 @@ use mirrord_protocol::{
     tcp::StealType,
     FileRequest, FileResponse, GetEnvVarsRequest, Port, RemoteResult,
 };
-use net::UserSocket;
 
 #[cfg(feature = "codec")]
 pub mod codec;
 mod macros;
-pub mod net;
 
 /// An identifier for a message sent from the layer to the internal proxy.
 /// The layer uses this to match proxy responses with awaiting requests.
@@ -61,13 +58,6 @@ pub enum LayerToProxyMessage {
     Incoming(IncomingRequest),
     /// Fetch environment variables from the target.
     GetEnv(GetEnvVarsRequest),
-
-    Execve(ExecveRequest),
-}
-
-#[derive(Encode, Decode, Debug)]
-pub struct ExecveRequest {
-    pub shared_sockets: Vec<(RawFd, UserSocket)>,
 }
 
 /// Layer process information
@@ -438,5 +428,3 @@ impl_request!(
     req_path = LayerToProxyMessage::GetEnv,
     res_path = ProxyToLayerMessage::GetEnv,
 );
-
-impl_request!(req = ExecveRequest, req_path = LayerToProxyMessage::Execve,);
