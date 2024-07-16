@@ -20,14 +20,21 @@ workspace = true
 
 [dependencies]
 containerd-client = "0.5"
-tokio = { workspace = true, features = ["rt", "net", "macros", "fs", "process", "signal"] }
+tokio = { workspace = true, features = [
+    "rt",
+    "net",
+    "macros",
+    "fs",
+    "process",
+    "signal",
+] }
 procfs = "0.16.0"
 serde.workspace = true
 serde_json.workspace = true
 pnet = "0.35"
-nix = { workspace  = true, features = ["mount", "sched", "user"] }
+nix = { workspace = true, features = ["mount", "sched", "user"] }
 clap = { workspace = true, features = ["env"] }
-mirrord-protocol = { path = "../protocol"}
+mirrord-protocol = { path = "../protocol" }
 actix-codec.workspace = true
 futures.workspace = true
 tracing.workspace = true
@@ -67,11 +74,12 @@ x509-parser = "0.16"
 rustls.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-iptables = {git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624"}
-rawsocket = {git = "https://github.com/metalbear-co/rawsocket.git"}
+iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624" }
+rawsocket = { git = "https://github.com/metalbear-co/rawsocket.git" }
 
 
 [dev-dependencies]
+rstest = "0.21"
 mockall = "0.12" # 0.11.3 is broken
 test_bin = "0.4"
 rcgen = "0.13"

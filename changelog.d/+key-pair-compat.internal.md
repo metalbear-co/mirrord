@@ -1,1 +1,0 @@
-Updated `x509-certificate` dependency.
