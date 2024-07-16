@@ -41,9 +41,6 @@ pub struct Args {
     /// If not given, the agent will not use TLS.
     #[arg(long, env = AGENT_OPERATOR_CERT_ENV)]
     pub operator_tls_cert_pem: Option<String>,
-
-    #[arg(long)]
-    pub pod_ips: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Subcommand)]
