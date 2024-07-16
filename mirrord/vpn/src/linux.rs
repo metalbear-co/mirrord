@@ -1,6 +1,5 @@
 use std::{
     ffi::OsStr,
-    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -8,6 +7,7 @@ pub struct ResolvOverride {
     path: PathBuf,
     original_file: PathBuf,
 }
+
 impl ResolvOverride {
     pub async fn accuire_override<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
         let path = PathBuf::from(path.as_ref());
@@ -30,18 +30,8 @@ impl ResolvOverride {
         })
     }
 
-    pub async fn update_resolv(&self, nameservers: &[String]) -> std::io::Result<()> {
-        let mut updated_file = Vec::default();
-
-        updated_file.write_all(b"search home\n")?;
-
-        for nameserver in nameservers {
-            updated_file.write_all(b"nameserver ")?;
-            updated_file.write_all(nameserver.as_bytes())?;
-            updated_file.write_all(b"\n")?;
-        }
-
-        tokio::fs::write(&self.path, updated_file).await?;
+    pub async fn update_resolv(&self, bytes: &[u8]) -> std::io::Result<()> {
+        tokio::fs::write(&self.path, bytes).await?;
 
         Ok(())
     }

@@ -193,6 +193,7 @@ struct VpnTask {
     pid: Option<u64>,
     layer_rx: Receiver<ClientVpn>,
     daemon_tx: Sender<ServerVpn>,
+    socket: Option<AsyncRawSocket>,
 }
 
 impl fmt::Debug for VpnTask {
@@ -234,6 +235,7 @@ impl VpnTask {
             pid,
             layer_rx,
             daemon_tx,
+            socket: None,
         }
     }
 
@@ -263,7 +265,8 @@ impl VpnTask {
             gateway,
         };
 
-        let mut raw_socket = create_raw_socket().await.unwrap();
+        tracing::debug!(socket_init = %self.socket.is_some(), "begin loop");
+
         let mut buffer = [0u8; 1500 * 5];
         loop {
             select! {
@@ -271,7 +274,7 @@ impl VpnTask {
 
                 message = self.layer_rx.recv() => match message {
                     // We have a message from the layer to be handled.
-                    Some(message) => self.handle_layer_msg(message, &mut raw_socket, &network_configuration).await.unwrap(),
+                    Some(message) => self.handle_layer_msg(message, &network_configuration).await.unwrap(),
                     // Our channel with the layer is closed, this task is no longer needed.
                     None => {
                         tracing::trace!("VpnTask -> Channel with the layer is closed, exiting.");
@@ -280,7 +283,7 @@ impl VpnTask {
                 },
 
                 // We have data coming from one of our peers.
-                ready = raw_socket.readable() => {
+                ready = (async { self.socket.as_mut().expect("is checked").readable().await }), if self.socket.is_some() => {
                     let mut guard = ready.unwrap();
                     match guard.try_io(|inner| inner.get_ref().read(&mut buffer)) {
                         Ok(Ok(len)) => {
@@ -300,11 +303,10 @@ impl VpnTask {
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(socket), ret, err(Debug))]
+    #[tracing::instrument(level = "trace", ret, err(Debug))]
     async fn handle_layer_msg(
         &mut self,
         message: ClientVpn,
-        socket: &mut AsyncRawSocket,
         network_configuration: &NetworkConfiguration,
     ) -> Result<(), SendError<ServerVpn>> {
         match message {
@@ -312,12 +314,19 @@ impl VpnTask {
             // `io::split`, and put them into respective maps.
             ClientVpn::GetNetworkConfiguration => {
                 self.daemon_tx
-                    .send((ServerVpn::NetworkConfiguration(network_configuration.clone())))
+                    .send(ServerVpn::NetworkConfiguration(
+                        network_configuration.clone(),
+                    ))
                     .await
                     .unwrap();
             }
             ClientVpn::Packet(packet) => {
-                socket.write(&packet).await.unwrap();
+                if let Some(socket) = self.socket.as_mut() {
+                    socket.write(&packet).await.unwrap();
+                }
+            }
+            ClientVpn::OpenSocket => {
+                self.socket.replace(create_raw_socket().await.unwrap());
             }
         }
 

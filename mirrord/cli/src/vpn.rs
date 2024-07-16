@@ -30,22 +30,20 @@ async fn agent_request<T>(
     tracing::debug!(client_message = ?request, "out");
     connection.sender.send(request).await.ok()?;
 
-    loop {
-        let daemon_message = connection.receiver.recv().await?;
-
-        tracing::debug!(?daemon_message, "in");
-
-        let extracted = mapper(daemon_message);
-
-        if extracted.is_some() {
-            break extracted;
-        }
-    }
+    connection.receiver.recv().await.and_then(mapper)
 }
 
 fn get_server_vpn(message: DaemonMessage) -> Option<ServerVpn> {
     match message {
         DaemonMessage::Vpn(response) => Some(response),
+        _ => None,
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn get_file_response(message: DaemonMessage) -> Option<mirrord_protocol::FileResponse> {
+    match message {
+        DaemonMessage::File(response) => Some(response),
         _ => None,
     }
 }
@@ -60,6 +58,7 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
     let mut config = LayerConfig::from_env()?;
 
     config.agent.image = AgentImageConfig("test".into());
+    config.agent.log_level = "info,mirrord=trace".into();
     config.agent.privileged = true;
     config.operator = Some(false);
     config.target.path = None;
@@ -80,7 +79,6 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
     sub_progress.success(None);
-    progress.success(None);
 
     let Some(ServerVpn::NetworkConfiguration(network)) = agent_request(
         &mut connection,
@@ -94,13 +92,58 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
 
     tracing::debug!(?network, "loaded vpn network configuration");
 
+    let mut sub_progress = progress.subtask("create tun socket");
+
     let (mut write_stream, read_stream) = mirrord_vpn::socket::create_vpn_socket(&network).split();
     let read_stream = read_stream.fuse();
     tokio::pin!(read_stream);
 
+    sub_progress.success(None);
+
     #[cfg(not(target_os = "macos"))]
     let linux_guard = {
+        use mirrord_protocol::{file::*, FileRequest, FileResponse};
         use mirrord_vpn::linux::*;
+
+        let Some(FileResponse::Open(Ok(OpenFileResponse { fd }))) = agent_request(
+            &mut connection,
+            ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
+                path: "/etc/resolv.conf".into(),
+                open_options: OpenOptionsInternal {
+                    read: true,
+                    ..Default::default()
+                },
+            })),
+            get_file_response,
+        )
+        .await
+        else {
+            return Ok(());
+        };
+
+        tracing::debug!(?fd, "opened remote /etc/resolv.conf");
+
+        let Some(FileResponse::Read(Ok(response))) = agent_request(
+            &mut connection,
+            ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
+                remote_fd: fd,
+                buffer_size: 10000,
+            })),
+            get_file_response,
+        )
+        .await
+        else {
+            return Ok(());
+        };
+
+        tracing::debug!(?fd, ?response, "read remote /etc/resolv.conf");
+
+        let _ = connection
+            .sender
+            .send(ClientMessage::FileRequest(FileRequest::Close(
+                CloseFileRequest { fd },
+            )))
+            .await;
 
         let Ok(resolv_override) = ResolvOverride::accuire_override("/etc/resolv.conf")
             .await
@@ -110,7 +153,7 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
         };
 
         if resolv_override
-            .update_resolv(&vpn_config.dns_nameservers)
+            .update_resolv(&response.bytes)
             .await
             .is_err()
         {
@@ -150,6 +193,13 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
     let bytes_recived = AtomicUsize::default();
 
     let mut statistic_interval = tokio::time::interval(Duration::from_secs(10));
+
+    progress.success(None);
+
+    let _ = connection
+        .sender
+        .send(ClientMessage::Vpn(ClientVpn::OpenSocket))
+        .await;
 
     'main: loop {
         tokio::select! {
