@@ -350,8 +350,13 @@ fn layer_start(mut config: LayerConfig) {
 
     let _detour_guard = DetourGuard::new();
     tracing::info!("Initializing mirrord-layer!");
-    tracing::debug!(executable = ?EXECUTABLE_PATH.get(), args = ?EXECUTABLE_ARGS.get(), pid = std::process::id(), "Loaded into executable {:?}",
-    parent_id()
+    tracing::debug!(
+        executable = ?EXECUTABLE_PATH.get(),
+        args = ?EXECUTABLE_ARGS.get(),
+        pid = std::process::id(),
+        parent_pid = parent_id(),
+        env_vars = ?std::env::vars(),
+        "Loaded into executable",
     );
 
     if trace_only {
@@ -562,11 +567,11 @@ fn enable_hooks(state: &LayerSetup) {
 ///
 /// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`].
 /// **DON'T ADD LOGS HERE SINCE CALLER MIGHT CLOSE STDOUT/STDERR CAUSING THIS TO CRASH**
-#[mirrord_layer_macro::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()))]
 pub(crate) fn close_layer_fd(fd: c_int) {
     // Remove from sockets.
-    if let Some((_, socket)) = SOCKETS.remove(&fd) {
-        tracing::debug!("closing socket {socket:?}");
+    if let Some((fd, socket)) = SOCKETS.remove(&fd) {
+        tracing::debug!("closing le socket fd {fd} {socket:?}");
         // Closed file is a socket, so if it's already bound to a port - notify agent to stop
         // mirroring/stealing that port.
         socket.close();

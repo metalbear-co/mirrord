@@ -2,8 +2,7 @@
 //! absolute minimum
 use std::{
     net::{SocketAddr, ToSocketAddrs},
-    ops::Not,
-    os::unix::io::RawFd,
+    os::unix::{io::RawFd, process::parent_id},
     str::FromStr,
     sync::{Arc, LazyLock},
 };
@@ -12,8 +11,7 @@ use base64::prelude::*;
 use bincode::{Decode, Encode};
 use dashmap::DashMap;
 use hashbrown::hash_set::HashSet;
-use hooks::FN_FCNTL;
-use libc::{c_int, sockaddr, socklen_t, FD_CLOEXEC};
+use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::feature::network::outgoing::{
     AddressFilter, OutgoingConfig, OutgoingFilter, OutgoingFilterConfig, ProtocolFilter,
 };
@@ -41,7 +39,11 @@ pub(super) mod hooks;
 pub(crate) mod ops;
 
 pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(|| {
-    println!("Do we have vars {:?}?", std::process::id());
+    let pid = std::process::id();
+    let parent_pid = parent_id();
+
+    tracing::info!("pid {pid:?} with parent_pid {parent_pid:?}, does it have le sockets?");
+
     std::env::var("MIRRORD_SHARED_SOCKETS")
         .map(|encoded_sockets| {
             let from_base64 = BASE64_URL_SAFE
@@ -52,25 +54,23 @@ pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock:
                 &from_base64,
                 bincode::config::standard(),
             )
+            .inspect_err(|fail| tracing::error!("Failed decoding le socket {fail:?}!"))
             .unwrap_or_default();
 
-            println!("We do {decoded:?}");
-
-            DashMap::from_iter(decoded.into_iter().filter_map(|(fd, socket)| {
-                let is_cloexec = unsafe { FN_FCNTL(fd, libc::F_GETFD) > -1 };
-                tracing::info!(
-                    "socket has flag {is_cloexec:?} sock {:?} {:?} {:?}",
-                    fd,
-                    socket,
-                    errno::errno()
-                );
-
-                is_cloexec.then(|| (fd, Arc::new(socket)))
-                // Some((fd, Arc::new(socket)))
-            }))
+            DashMap::from_iter(
+                decoded
+                    .into_iter()
+                    .map(|(fd, socket)| (fd, Arc::new(socket))),
+            )
         })
-        .inspect(|sockets| tracing::info!("the sockets {:?}: {sockets:?}", std::process::id()))
-        .inspect_err(|fail| tracing::error!("the fail: {fail:?}"))
+        .inspect(|sockets| {
+            tracing::info!("pid {pid:?} with parent_pid {parent_pid:?} has le sockets {sockets:?}")
+        })
+        .inspect_err(|fail| {
+            tracing::error!(
+                "pid {pid:?} with parent_pid {parent_pid:?} failed getting le sockets env var {fail:?}"
+            )
+        })
         .unwrap_or_default()
 });
 
@@ -274,7 +274,7 @@ impl UserSocket {
     }
 
     /// Inform internal proxy about closing a listening port.
-    #[mirrord_layer_macro::instrument(level = "trace", ret)]
+    #[mirrord_layer_macro::instrument(level = "debug", fields(pid = std::process::id()), ret)]
     pub(crate) fn close(&self) {
         if let Self {
             state: SocketState::Listening(bound),

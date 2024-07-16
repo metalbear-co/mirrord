@@ -114,7 +114,7 @@ impl From<ConnectResult> for i32 {
 }
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-#[mirrord_layer_macro::instrument(level = Level::DEBUG, ret)]
+#[mirrord_layer_macro::instrument(level = Level::DEBUG, fields(pid = std::process::id()), ret)]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
     let socket_kind = type_.try_into()?;
 
@@ -226,7 +226,7 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
 /// If the socket is not found in [`SOCKETS`], bypass.
 /// Otherwise, if it's not an ignored port, bind (possibly with a fallback to random port) and
 /// update socket state in [`SOCKETS`]. If it's an ignored port, remove the socket from [`SOCKETS`].
-#[mirrord_layer_macro::instrument(level = Level::DEBUG, ret, skip(raw_address))]
+#[mirrord_layer_macro::instrument(level = Level::DEBUG, fields(pid = std::process::id()), ret, skip(raw_address))]
 pub(super) fn bind(
     sockfd: c_int,
     raw_address: *const sockaddr,
@@ -337,16 +337,8 @@ pub(super) fn bind(
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
-#[mirrord_layer_macro::instrument(level = Level::DEBUG, ret)]
+#[mirrord_layer_macro::instrument(level = Level::DEBUG, fields(pid = std::process::id()), ret)]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
-    let cloexec = unsafe { FN_FCNTL(sockfd, libc::F_GETFD) };
-    tracing::info!(
-        "socket has flag {cloexec:?} sock {:?} {:?} pid {:?}",
-        sockfd,
-        errno::errno(),
-        std::process::id(),
-    );
-
     let mut socket = {
         SOCKETS
             .remove(&sockfd)
