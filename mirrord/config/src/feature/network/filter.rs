@@ -1,4 +1,8 @@
-use std::{net::SocketAddr, num::ParseIntError, str::FromStr};
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    num::ParseIntError,
+    str::FromStr,
+};
 
 use nom::{
     branch::alt,
@@ -43,6 +47,9 @@ impl FromStr for ProtocolFilter {
 /// Parsed addresses can be one of these 3 variants.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AddressFilter {
+    /// Only port was specified.
+    Port(u16),
+
     /// Just a plain old [`SocketAddr`], specified as `a.b.c.d:e`.
     ///
     /// We treat `0`s here as if it meant **any**, so `0.0.0.0` means we filter any IP, and `:0`
@@ -63,6 +70,7 @@ pub enum AddressFilter {
 impl AddressFilter {
     pub fn port(&self) -> u16 {
         match self {
+            Self::Port(port) => *port,
             Self::Name(_, port) => *port,
             Self::Socket(socket) => socket.port(),
             Self::Subnet(_, port) => *port,
@@ -74,12 +82,24 @@ impl AddressFilter {
 pub enum AddressFilterError {
     #[error("parsing with nom failed: {0}")]
     Nom(nom::Err<nom::error::Error<String>>),
+
     #[error("parsing port number failed: {0}")]
-    ParsePort(#[from] ParseIntError),
-    #[error("parsing subnet failed:: {0}")]
-    ParseIpNet(#[from] ipnet::AddrParseError),
+    ParsePort(ParseIntError),
+
     #[error("parsing left trailing value: {0}")]
     TrailingValue(String),
+
+    #[error("parsing subnet prefix length failed: {0}")]
+    ParseSubnetPrefixLength(ParseIntError),
+
+    #[error("parsing subnet base IP address failed")]
+    ParseSubnetBaseAddress,
+
+    #[error("invalid subnet: {0}")]
+    SubnetPrefixLen(#[from] ipnet::PrefixLenError),
+
+    #[error("provided empty string")]
+    Empty,
 }
 
 impl From<nom::Err<nom::error::Error<&str>>> for AddressFilterError {
@@ -97,33 +117,62 @@ impl FromStr for AddressFilter {
         let (rest, subnet) = subnet(rest)?;
         let (rest, port) = port(rest)?;
 
-        // Stringify and convert to proper types.
-        let port = port
-            .map(|port| port.parse::<u16>())
-            .transpose()?
-            .unwrap_or(0);
+        if !rest.is_empty() {
+            return Err(Self::Err::TrailingValue(rest.to_string()));
+        }
 
-        let filter = subnet
-            .map(|subnet| format!("{address}/{subnet}").parse::<ipnet::IpNet>())
-            .transpose()?
-            .map_or_else(
-                // Try to parse as an IPv4 address.
-                || {
-                    format!("{address}:{port}")
-                        .parse::<SocketAddr>()
-                        // Try again as IPv6.
-                        .or_else(|_| format!("[{address}]:{port}").parse())
-                        .map(AddressFilter::Socket)
-                        // Neither IPv4 nor IPv6, it's probably a name.
-                        .unwrap_or(AddressFilter::Name(address.to_string(), port))
-                },
-                |subnet| AddressFilter::Subnet(subnet, port),
-            );
+        match (address, subnet, port) {
+            // Only port specified.
+            (None, None, Some(port)) => {
+                let port = port.parse::<u16>().map_err(AddressFilterError::ParsePort)?;
 
-        if rest.is_empty() {
-            Ok(filter)
-        } else {
-            Err(Self::Err::TrailingValue(rest.to_string()))
+                Ok(Self::Port(port))
+            }
+
+            // Subnet specified. Address must be IP.
+            (Some(address), Some(subnet), port) => {
+                let as_ip = address
+                    .parse::<Ipv4Addr>()
+                    .map(IpAddr::from)
+                    .or_else(|_| format!("[{address}]").parse::<Ipv6Addr>().map(IpAddr::from))
+                    .map_err(|_| AddressFilterError::ParseSubnetBaseAddress)?;
+                let prefix_len = subnet
+                    .parse::<u8>()
+                    .map_err(AddressFilterError::ParseSubnetPrefixLength)?;
+                let ip_net = ipnet::IpNet::new(as_ip, prefix_len)?;
+
+                let port = port
+                    .map(u16::from_str)
+                    .transpose()
+                    .map_err(AddressFilterError::ParsePort)?
+                    .unwrap_or(0);
+
+                Ok(Self::Subnet(ip_net, port))
+            }
+
+            // Subnet not specified. Address can be a name or an IP.
+            (Some(address), None, _) => {
+                let port = port
+                    .map(u16::from_str)
+                    .transpose()
+                    .map_err(AddressFilterError::ParsePort)?
+                    .unwrap_or(0);
+
+                let result = address
+                    .parse::<Ipv4Addr>()
+                    .map(IpAddr::from)
+                    .or_else(|_| format!("[{address}]").parse::<Ipv6Addr>().map(IpAddr::from))
+                    .map(|ip| Self::Socket(SocketAddr::new(ip, port)))
+                    .unwrap_or(Self::Name(address, port));
+
+                Ok(result)
+            }
+
+            // Subnet specified but address is missing, error.
+            (None, Some(_), _) => Err(AddressFilterError::ParseSubnetBaseAddress),
+
+            // Nothing is specified, error.
+            (None, None, None) => Err(AddressFilterError::Empty),
         }
     }
 }
@@ -190,9 +239,7 @@ fn protocol(input: &str) -> IResult<&str, &str> {
 /// The parser is not interested in only eating correct values here for hostnames, ip addresses,
 /// etc., it just tries to get a good enough string that could be parsed by
 /// `SocketAddr::parse`, or `IpNet::parse`.
-///
-/// Returns `0.0.0.0` if it doesn't parse anything.
-fn address(input: &str) -> IResult<&str, String> {
+fn address(input: &str) -> IResult<&str, Option<String>> {
     let ipv6 = many1(alt((alphanumeric1, tag(":"))));
     let ipv6_host = delimited(tag("["), ipv6, tag("]"));
 
@@ -201,9 +248,7 @@ fn address(input: &str) -> IResult<&str, String> {
 
     let (rest, address) = opt(alt((dotted_address, ipv6_host)))(input)?;
 
-    let address = address
-        .map(|addr| addr.concat())
-        .unwrap_or(String::from("0.0.0.0"));
+    let address = address.map(|addr| addr.concat());
 
     Ok((rest, address))
 }
