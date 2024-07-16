@@ -220,7 +220,7 @@ mod tests {
         mock.expect_insert_rule()
             .with(
                 eq(IPTABLE_MESH.as_str()),
-                eq(format!("-m owner --gid-owner {gid} -p tcp -j RETURN")),
+                eq(format!("-m owner --gid-owner {gid} -p tcp  -j RETURN")),
                 eq(1),
             )
             .times(1)
