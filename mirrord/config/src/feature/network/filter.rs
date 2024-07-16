@@ -1,5 +1,5 @@
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, SocketAddr},
     num::ParseIntError,
     str::FromStr,
 };
@@ -132,9 +132,7 @@ impl FromStr for AddressFilter {
             // Subnet specified. Address must be IP.
             (Some(address), Some(subnet), port) => {
                 let as_ip = address
-                    .parse::<Ipv4Addr>()
-                    .map(IpAddr::from)
-                    .or_else(|_| format!("[{address}]").parse::<Ipv6Addr>().map(IpAddr::from))
+                    .parse::<IpAddr>()
                     .map_err(|_| AddressFilterError::ParseSubnetBaseAddress)?;
                 let prefix_len = subnet
                     .parse::<u8>()
@@ -159,9 +157,7 @@ impl FromStr for AddressFilter {
                     .unwrap_or(0);
 
                 let result = address
-                    .parse::<Ipv4Addr>()
-                    .map(IpAddr::from)
-                    .or_else(|_| format!("[{address}]").parse::<Ipv6Addr>().map(IpAddr::from))
+                    .parse::<IpAddr>()
                     .map(|ip| Self::Socket(SocketAddr::new(ip, port)))
                     .unwrap_or(Self::Name(address, port));
 
@@ -210,7 +206,10 @@ impl FromStr for ProtocolAndAddressFilter {
         let (rest, protocol) = protocol(input)?;
         let protocol = protocol.parse()?;
 
-        let address = rest.parse()?;
+        let address = rest.parse().or_else(|error| match error {
+            AddressFilterError::Empty => Ok(AddressFilter::Port(0)),
+            other => Err(other),
+        })?;
 
         Ok(Self { protocol, address })
     }
@@ -320,7 +319,7 @@ mod tests {
     fn protocol_only_converted() -> ProtocolAndAddressFilter {
         ProtocolAndAddressFilter {
             protocol: ProtocolFilter::Tcp,
-            address: AddressFilter::Socket(SocketAddr::from_str("0.0.0.0:0").unwrap()),
+            address: AddressFilter::Port(0),
         }
     }
 
@@ -398,7 +397,7 @@ mod tests {
     fn protocol_port_converted() -> ProtocolAndAddressFilter {
         ProtocolAndAddressFilter {
             protocol: ProtocolFilter::Udp,
-            address: AddressFilter::Socket(SocketAddr::from_str("0.0.0.0:7777").unwrap()),
+            address: AddressFilter::Port(7777),
         }
     }
 
@@ -411,7 +410,7 @@ mod tests {
     fn port_only_converted() -> ProtocolAndAddressFilter {
         ProtocolAndAddressFilter {
             protocol: ProtocolFilter::Any,
-            address: AddressFilter::Socket(SocketAddr::from_str("0.0.0.0:7777").unwrap()),
+            address: AddressFilter::Port(7777),
         }
     }
 
