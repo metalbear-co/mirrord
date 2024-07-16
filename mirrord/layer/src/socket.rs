@@ -375,11 +375,7 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
             return Ok(false);
         };
 
-        let port = match &self.address {
-            AddressFilter::Name(_, port) => *port,
-            AddressFilter::Socket(addr) => addr.port(),
-            AddressFilter::Subnet(_, port) => *port,
-        };
+        let port = self.address.port();
         if port != 0 && port != address.port() {
             return Ok(false);
         }

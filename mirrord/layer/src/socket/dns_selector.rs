@@ -30,9 +30,11 @@ impl DnsSelector {
                 filter_port == 0 || filter_port == port
             })
             .any(|filter| match filter {
+                AddressFilter::Port(..) => true,
                 AddressFilter::Name(filter_name, _) => filter_name == node,
                 AddressFilter::Socket(filter_socket) => {
-                    Some(filter_socket.ip()) == node.parse().ok()
+                    filter_socket.ip().is_unspecified()
+                        || Some(filter_socket.ip()) == node.parse().ok()
                 }
                 AddressFilter::Subnet(filter_subnet, _) => {
                     let Ok(ip) = node.parse::<IpAddr>() else {
