@@ -140,6 +140,14 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
 
     SOCKETS.insert(socket_fd, Arc::new(new_socket));
 
+    let cloexec = unsafe { FN_FCNTL(socket_fd, libc::F_GETFD) };
+    tracing::info!(
+        "socket created {cloexec:?} sock {:?} {:?} pid {:?}",
+        socket_fd,
+        errno::errno(),
+        std::process::id(),
+    );
+
     Detour::Success(socket_fd)
 }
 
@@ -339,6 +347,14 @@ pub(super) fn bind(
 /// later be routed to the fake local port.
 #[mirrord_layer_macro::instrument(level = Level::DEBUG, ret)]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
+    let cloexec = unsafe { FN_FCNTL(sockfd, libc::F_GETFD) };
+    tracing::info!(
+        "socket has flag {cloexec:?} sock {:?} {:?} pid {:?}",
+        sockfd,
+        errno::errno(),
+        std::process::id(),
+    );
+
     let mut socket = {
         SOCKETS
             .remove(&sockfd)

@@ -40,7 +40,7 @@ pub(super) mod hooks;
 pub(crate) mod ops;
 
 pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(|| {
-    println!("Do we have vars?");
+    println!("Do we have vars {:?}?", std::process::id());
     std::env::var("MIRRORD_SHARED_SOCKETS")
         .map(|encoded_sockets| {
             let from_base64 = BASE64_URL_SAFE

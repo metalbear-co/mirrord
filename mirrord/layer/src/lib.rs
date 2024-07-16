@@ -349,7 +349,7 @@ fn layer_start(mut config: LayerConfig) {
 
     let _detour_guard = DetourGuard::new();
     tracing::info!("Initializing mirrord-layer!");
-    tracing::trace!(executable = ?EXECUTABLE_PATH.get(), args = ?EXECUTABLE_ARGS.get(), pid = std::process::id(), "Loaded into executable");
+    tracing::debug!(executable = ?EXECUTABLE_PATH.get(), args = ?EXECUTABLE_ARGS.get(), pid = std::process::id(), "Loaded into executable");
 
     if trace_only {
         tracing::debug!("Skipping new intproxy connection (trace only)");

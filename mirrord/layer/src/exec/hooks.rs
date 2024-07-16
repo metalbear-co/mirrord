@@ -5,7 +5,9 @@ use std::{
 };
 
 use base64::prelude::*;
-use libc::{c_char, c_int, FD_CLOEXEC};
+use libc::{
+    c_char, c_int, c_void, pid_t, posix_spawn_file_actions_t, posix_spawnattr_t, FD_CLOEXEC,
+};
 use mirrord_intproxy_protocol::{net::UserSocket as ProxyUserSocket, ExecveRequest};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use null_terminated::Nul;
@@ -76,7 +78,7 @@ unsafe extern "C" fn execvpe_detour(
     FN_EXECVPE(file, argv, envp)
 }
 
-#[hook_guard_fn]
+#[hook_fn]
 // #[tracing::instrument(level = Level::INFO, ret)]
 pub(crate) unsafe extern "C" fn execve_detour(
     path: *const c_char,
@@ -126,6 +128,32 @@ pub(super) fn execve(rawish_envp: &Nul<*const c_char>) -> Detour<Argv> {
     Detour::Success(env_vars)
 }
 
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn posix_spawn_detour(
+    pid: *const pid_t,
+    path: *const c_char,
+    file_actions: *const c_void,
+    attrp: *const c_void,
+    argv: *const *const c_char,
+    envp: *const *const c_char,
+) -> c_int {
+    tracing::info!("IN POSIX SPAWN");
+    FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp)
+}
+
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn posix_spawnp_detour(
+    pid: *const pid_t,
+    path: *const c_char,
+    file_actions: *const posix_spawn_file_actions_t,
+    attrp: *const posix_spawnattr_t,
+    argv: *const *const c_char,
+    envp: *const *const c_char,
+) -> c_int {
+    tracing::info!("IN POSIX SPAWN");
+    FN_POSIX_SPAWNP(pid, path, file_actions, attrp, argv, envp)
+}
+
 pub(crate) unsafe fn enable_exec_hooks(hook_manager: &mut HookManager) {
     // replace!(hook_manager, "execl", execl_detour, FnExecl, FN_EXECL);
     // replace!(hook_manager, "execlp", execlp_detour, FnExeclp, FN_EXECLP);
@@ -140,5 +168,19 @@ pub(crate) unsafe fn enable_exec_hooks(hook_manager: &mut HookManager) {
     //     FN_EXECVPE
     // );
     replace!(hook_manager, "execve", execve_detour, FnExecve, FN_EXECVE);
+    replace!(
+        hook_manager,
+        "posix_spawn",
+        posix_spawn_detour,
+        FnPosix_spawn,
+        FN_POSIX_SPAWN
+    );
+    replace!(
+        hook_manager,
+        "posix_spawnp",
+        posix_spawnp_detour,
+        FnPosix_spawnp,
+        FN_POSIX_SPAWNP
+    );
     // replace!(hook_manager, "exec", exec_detour, FnExec, FN_EXEC);
 }
