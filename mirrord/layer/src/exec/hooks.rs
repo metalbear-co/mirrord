@@ -1,8 +1,17 @@
+use std::{
+    borrow::BorrowMut,
+    ffi::{CStr, CString},
+    ops::Not,
+};
+
+use base64::prelude::*;
 use libc::{c_char, c_int};
 use mirrord_intproxy_protocol::{net::UserSocket as ProxyUserSocket, ExecveRequest};
-use mirrord_layer_macro::hook_guard_fn;
+use mirrord_layer_macro::{hook_fn, hook_guard_fn};
+use null_terminated::Nul;
 use tracing::Level;
 
+use super::Argv;
 use crate::{common, detour::Detour, hooks::HookManager, replace, socket::UserSocket, SOCKETS};
 
 #[hook_guard_fn]
@@ -61,24 +70,23 @@ unsafe extern "C" fn execvpe_detour(
 }
 
 #[hook_guard_fn]
-#[tracing::instrument(level = Level::INFO, ret)]
+// #[tracing::instrument(level = Level::INFO, ret)]
 pub(crate) unsafe extern "C" fn execve_detour(
     path: *const c_char,
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    execve();
-    FN_EXECVE(path, argv, envp)
+    match execve(Nul::new_unchecked(envp)) {
+        Detour::Success(new_envp) => {
+            FN_EXECVE(path, argv, new_envp.null_vec().as_ptr() as *const *const _)
+        }
+        _ => FN_EXECVE(path, argv, envp),
+    }
 }
 
 // TODO(alex) [high]: Set env var and save sockets.
-#[mirrord_layer_macro::instrument(level = Level::INFO, ret)]
-pub(super) fn execve() -> Detour<()> {
-    // if std::env::var("MIRRORD_PARENT")
-    //     .inspect(|_| tracing::info!("Lets gooo"))
-    //     .inspect_err(|fail| tracing::error!("Lets not gooo {fail:?}"))
-    //     .is_ok()
-    // {
+#[mirrord_layer_macro::instrument(level = Level::INFO, skip(rawish_envp), ret)]
+pub(super) fn execve(rawish_envp: &Nul<*const c_char>) -> Detour<Argv> {
     let shared_sockets = SOCKETS
         .iter()
         .filter_map(|inner| {
@@ -86,16 +94,22 @@ pub(super) fn execve() -> Detour<()> {
             // None
             // } else {
             let cloned = UserSocket::clone(inner.value());
-            Some((*inner.key(), cloned.into()))
+            Some((*inner.key(), cloned))
             // }
         })
-        .collect();
-    tracing::info!("shared sockets {shared_sockets:?}");
+        .collect::<Vec<_>>();
 
-    common::make_proxy_request_no_response(ExecveRequest { shared_sockets })?;
-    // }
+    let encoded = bincode::encode_to_vec(shared_sockets, bincode::config::standard())
+        .map(|bytes| BASE64_URL_SAFE.encode(bytes))?;
 
-    Detour::Success(())
+    let mut env_vars = rawish_envp
+        .iter()
+        .map(|raw_env_var| unsafe { CStr::from_ptr(*raw_env_var) }.to_owned())
+        .collect::<Argv>();
+
+    env_vars.push(CString::new(format!("MIRRORD_SHARED_SOCKETS={}", encoded))?);
+
+    Detour::Success(env_vars)
 }
 
 pub(crate) unsafe fn enable_exec_hooks(hook_manager: &mut HookManager) {

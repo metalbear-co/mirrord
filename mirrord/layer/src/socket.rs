@@ -7,6 +7,8 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
+use base64::prelude::*;
+use bincode::{Decode, Encode};
 use dashmap::DashMap;
 use hashbrown::hash_set::HashSet;
 use libc::{c_int, sockaddr, socklen_t};
@@ -36,12 +38,35 @@ use crate::{
 pub(super) mod hooks;
 pub(crate) mod ops;
 
-pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(DashMap::new);
+pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(|| {
+    println!("Do we have vars?");
+    std::env::var("MIRRORD_SHARED_SOCKETS")
+        .map(|encoded_sockets| {
+            let from_base64 = BASE64_URL_SAFE
+                .decode(encoded_sockets.into_bytes())
+                .unwrap();
+
+            let (decoded, _) = bincode::decode_from_slice::<Vec<(i32, UserSocket)>, _>(
+                &from_base64,
+                bincode::config::standard(),
+            )
+            .unwrap_or_default();
+
+            println!("We do {decoded:?}");
+
+            DashMap::from_iter(
+                decoded
+                    .into_iter()
+                    .map(|(key, value)| (key, Arc::new(value))),
+            )
+        })
+        .unwrap_or_default()
+});
 
 /// Contains the addresses of a mirrord connected socket.
 ///
 /// - `layer_address` is only used for the outgoing feature.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Encode, Decode)]
 pub struct Connected {
     /// The address requested by the user that we're "connected" to.
     ///
@@ -82,7 +107,7 @@ pub struct Connected {
 /// The original user requested address is assigned to `Bound::requested_address`, and used as an
 /// illusion for when the user calls [`libc::getsockname`], as if this address was the actual local
 /// bound address.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Encode, Decode)]
 pub struct Bound {
     /// Address originally requested by the user for `bind`.
     requested_address: SocketAddr,
@@ -92,7 +117,7 @@ pub struct Bound {
     address: SocketAddr,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Encode, Decode)]
 pub enum SocketState {
     #[default]
     Initialized,
@@ -101,7 +126,7 @@ pub enum SocketState {
     Connected(Connected),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
 pub(crate) enum SocketKind {
     Tcp(c_int),
     Udp(c_int),
@@ -140,7 +165,7 @@ impl TryFrom<c_int> for SocketKind {
 // can't do that due to how `dup` interacts directly with our `Arc<UserSocket>`, because we just
 // `clone` the arc, we end up with exact duplicates, but `dup` generates a new fd that we have no
 // way of putting inside the duplicated `UserSocket`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Encode, Decode)]
 #[allow(dead_code)]
 pub(crate) struct UserSocket {
     domain: c_int,
