@@ -97,19 +97,19 @@ pub(super) fn execve(rawish_envp: &Nul<*const c_char>) -> Detour<Argv> {
     let shared_sockets = SOCKETS
         .iter()
         .filter_map(|inner| {
-            let cloexec = unsafe { FN_FCNTL(*inner.key(), libc::F_GETFD) };
-            tracing::info!(
-                "socket has flag {cloexec:?} sock {:?} {:?} {:?}",
-                inner.key(),
-                inner.value(),
-                errno::errno()
-            );
-            if cloexec == FD_CLOEXEC {
-                None
-            } else {
-                let cloned = UserSocket::clone(inner.value());
-                Some((*inner.key(), cloned))
-            }
+            // let cloexec = unsafe { FN_FCNTL(*inner.key(), libc::F_GETFD) };
+            // tracing::info!(
+            //     "socket has flag {cloexec:?} sock {:?} {:?} {:?}",
+            //     inner.key(),
+            //     inner.value(),
+            //     errno::errno()
+            // );
+            // if cloexec == FD_CLOEXEC {
+            //     None
+            // } else {
+            let cloned = UserSocket::clone(inner.value());
+            Some((*inner.key(), cloned))
+            // }
         })
         .collect::<Vec<_>>();
 
