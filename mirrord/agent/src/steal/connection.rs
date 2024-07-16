@@ -695,6 +695,7 @@ mod test {
     };
     use hyper_util::rt::TokioIo;
     use mirrord_protocol::tcp::{ChunkedRequest, DaemonTcp, InternalHttpBodyFrame};
+    use rstest::rstest;
     use tokio::{
         net::{TcpListener, TcpStream},
         sync::{
@@ -802,7 +803,7 @@ mod test {
         };
         assert_eq!(
             x.internal_request.body,
-            vec![InternalHttpBodyFrame::Data(b"string".to_vec().into())]
+            vec![InternalHttpBodyFrame::Data(b"string".to_vec())]
         );
         let x = client_rx.recv().now_or_never();
         assert!(x.is_none());
@@ -818,10 +819,64 @@ mod test {
         };
         assert_eq!(
             x.frames,
-            vec![InternalHttpBodyFrame::Data(
-                b"another_string".to_vec().into()
-            )]
+            vec![InternalHttpBodyFrame::Data(b"another_string".to_vec())]
         );
+        let x = client_rx.recv().now_or_never();
+        assert!(x.is_none());
+
+        let _ = response_tx.send(Response::new(Empty::default()));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[timeout(std::time::Duration::from_secs(5))]
+    async fn test_empty_streaming_request() {
+        let (addr, mut request_rx) = prepare_dummy_service().await;
+        let conn = TcpStream::connect(addr).await.unwrap();
+        let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(conn))
+            .await
+            .unwrap();
+        tokio::spawn(conn);
+
+        tokio::spawn(
+            sender.send_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/")
+                    .version(Version::HTTP_11)
+                    .body(http_body_util::Empty::<Bytes>::new())
+                    .unwrap(),
+            ),
+        );
+
+        let (client_tx, mut client_rx) = mpsc::channel::<DaemonTcp>(4);
+        let client = Client {
+            tx: client_tx,
+            protocol_version: "1.7.0".parse().unwrap(),
+            subscribed_connections: Default::default(),
+        };
+
+        let (request, response_tx) = request_rx.recv().await.unwrap();
+        client.send_request_async(MatchedHttpRequest {
+            connection_id: 0,
+            port: 80,
+            request_id: 0,
+            request,
+        });
+
+        // Verify that ChunkedRequest::Start request is as expected
+        let msg = client_rx.recv().await.unwrap();
+        let DaemonTcp::HttpRequestChunked(ChunkedRequest::Start(_)) = msg else {
+            panic!("unexpected type received: {msg:?}")
+        };
+
+        // Verify that empty ChunkedRequest::Body request is as expected
+        let msg = client_rx.recv().await.unwrap();
+        let DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(x)) = msg else {
+            panic!("unexpected type received: {msg:?}")
+        };
+        assert_eq!(x.frames, vec![]);
+        assert!(x.is_last);
         let x = client_rx.recv().now_or_never();
         assert!(x.is_none());
 
