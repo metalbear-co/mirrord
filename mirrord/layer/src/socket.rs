@@ -2,7 +2,7 @@
 //! absolute minimum
 use std::{
     net::{SocketAddr, ToSocketAddrs},
-    os::unix::{io::RawFd, process::parent_id},
+    os::unix::io::RawFd,
     str::FromStr,
     sync::{Arc, LazyLock},
 };
@@ -34,37 +34,23 @@ pub(crate) mod ops;
 
 pub(crate) const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
 
+/// TODO(alex) [mid]: Document this and say don't log stuff in here, maybe doc stack size issue?
 pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(|| {
-    let pid = std::process::id();
-    let parent_pid = parent_id();
-
-    tracing::info!("pid {pid:?} with parent_pid {parent_pid:?}, does it have le sockets?");
-
     std::env::var(SHARED_SOCKETS_ENV_VAR)
-        .map(|encoded_sockets| {
-            let from_base64 = BASE64_URL_SAFE
-                .decode(encoded_sockets.into_bytes())
-                .unwrap();
-
-            let (decoded, _) = bincode::decode_from_slice::<Vec<(i32, UserSocket)>, _>(
-                &from_base64,
+        .ok()
+        .and_then(|encoded| BASE64_URL_SAFE.decode(encoded.into_bytes()).ok())
+        .and_then(|decoded| {
+            bincode::decode_from_slice::<Vec<(i32, UserSocket)>, _>(
+                &decoded,
                 bincode::config::standard(),
             )
-            .inspect_err(|fail| tracing::error!("Failed decoding le socket {fail:?}!"))
-            .unwrap_or_default();
-
+            .ok()
+        })
+        .map(|(fds_and_sockets, _)| {
             DashMap::from_iter(
-                decoded
+                fds_and_sockets
                     .into_iter()
                     .map(|(fd, socket)| (fd, Arc::new(socket))),
-            )
-        })
-        .inspect(|sockets| {
-            tracing::info!("pid {pid:?} with parent_pid {parent_pid:?} has le sockets {sockets:?}")
-        })
-        .inspect_err(|fail| {
-            tracing::error!(
-                "pid {pid:?} with parent_pid {parent_pid:?} failed getting le sockets env var {fail:?}"
             )
         })
         .unwrap_or_default()
