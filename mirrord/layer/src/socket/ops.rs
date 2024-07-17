@@ -873,6 +873,7 @@ pub(super) fn getaddrinfo(
         })?
         .into();
 
+    // Convert `service` to port
     let service = rawish_service
         .map(CStr::to_str)
         .transpose()
@@ -884,7 +885,10 @@ pub(super) fn getaddrinfo(
 
             Bypass::CStrConversion
         })?
-        .map(String::from);
+        .and_then(|service| service.parse::<u16>().ok())
+        .unwrap_or(0);
+
+    crate::setup().dns_selector().check_query(&node, service)?;
 
     let raw_hints = raw_hints
         .cloned()
@@ -896,9 +900,6 @@ pub(super) fn getaddrinfo(
         ai_protocol,
         ..
     } = raw_hints;
-
-    // Convert `service` into a port.
-    let service = service.map_or(0, |s| s.parse().unwrap_or_default());
 
     // Some apps (gRPC on Python) use `::` to listen on all interfaces, and usually that just means
     // resolve on unspecified. So we just return that in IpV4 because we don't support ipv6.
@@ -1002,6 +1003,8 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
             Bypass::CStrConversion
         })?
         .into();
+
+    crate::setup().dns_selector().check_query(&name, 0)?;
 
     let hosts_and_ips = remote_getaddrinfo(name.clone())?;
 

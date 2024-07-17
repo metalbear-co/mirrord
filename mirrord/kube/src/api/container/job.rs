@@ -245,6 +245,7 @@ mod test {
             port: 3000,
             gid: 13,
             tls_cert: None,
+            pod_ips: None,
         };
 
         let update = JobVariant::new(&agent, &params).as_update();
@@ -327,6 +328,7 @@ mod test {
             port: 3000,
             gid: 13,
             tls_cert: None,
+            pod_ips: None,
         };
 
         let update = JobTargetedVariant::new(
@@ -335,6 +337,7 @@ mod test {
             &RuntimeData {
                 mesh: None,
                 pod_name: "pod".to_string(),
+                pod_ips: vec![],
                 pod_namespace: None,
                 node_name: "foobaz".to_string(),
                 container_id: "container".to_string(),
