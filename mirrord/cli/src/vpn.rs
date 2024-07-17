@@ -110,12 +110,7 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
     let mut analytics = NullReporter::default();
 
     let mut config = LayerConfig::from_env()?;
-
-    config.accept_invalid_certificates = true;
-    config.agent.image = AgentImageConfig("test".into());
-    config.agent.log_level = "info,mirrord=trace".into();
     config.agent.privileged = true;
-    config.operator = Some(false);
     config.target.path = None;
     config.target.namespace = args.namespace;
 

@@ -58,6 +58,7 @@ pub(super) enum Commands {
     Diagnose(Box<DiagnoseArgs>),
 
     /// Run mirrord vpn
+    #[command(hide = true)]
     Vpn(Box<VpnArgs>),
 }
 
