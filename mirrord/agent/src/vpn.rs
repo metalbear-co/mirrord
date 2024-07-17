@@ -153,10 +153,10 @@ async fn resolve_interface() -> Result<(IpAddr, IpAddr, IpAddr)> {
     // Try to find an interface that matches the local ip we have.
     let usable_interface = nix::ifaddrs::getifaddrs()?
         .find(|iface| {
-            (iface
+            iface
                 .address
                 .map(|addr| addr == raw_local_address)
-                .unwrap_or(false))
+                .unwrap_or(false)
         })
         .ok_or_else(|| AgentError::VpnError("usable_interface".to_owned()))?;
 
@@ -188,8 +188,7 @@ async fn resolve_interface() -> Result<(IpAddr, IpAddr, IpAddr)> {
         temp_gateway[1],
         temp_gateway[2],
         1,
-    ))
-    .into();
+    ));
 
     Ok((ip, net_mask, gateway))
 }
@@ -243,6 +242,7 @@ impl VpnTask {
         }
     }
 
+    #[allow(clippy::indexing_slicing)]
     async fn run(mut self) -> Result<()> {
         // so host won't respond with RST to our packets.
         // need to do it for UDP as well to avoid ICMP unreachable.
