@@ -12,9 +12,8 @@ use tokio::{
     io::unix::{AsyncFd, AsyncFdReadyGuard},
     net::UdpSocket,
     select,
-    sync::mpsc::{self, error::SendError, Receiver, Sender},
+    sync::mpsc::{self, Receiver, Sender},
 };
-use tracing::debug;
 
 use crate::{
     error::{AgentError, Result},
@@ -73,7 +72,7 @@ impl VpnApi {
         }
     }
 
-    /// Sends the [`LayerTcpOutgoing`] message to the background task.
+    /// Sends the [`ClientVpn`] message to the background task.
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn layer_message(&mut self, message: ClientVpn) -> Result<()> {
         if self.layer_tx.send(message).await.is_ok() {
@@ -83,7 +82,7 @@ impl VpnApi {
         }
     }
 
-    /// Receives a [`DaemonTcpOutgoing`] message from the background task.
+    /// Receives a [`ServerVpn`] message from the background task.
     pub(crate) async fn daemon_message(&mut self) -> Result<ServerVpn> {
         match self.daemon_rx.recv().await {
             Some(msg) => Ok(msg),
