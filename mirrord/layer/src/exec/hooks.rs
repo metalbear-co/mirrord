@@ -5,7 +5,7 @@ use std::{
 
 use base64::prelude::*;
 use libc::{c_char, c_int, FD_CLOEXEC};
-use mirrord_layer_macro::hook_guard_fn;
+use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use null_terminated::Nul;
 use tracing::Level;
 
@@ -20,13 +20,13 @@ use crate::{
     SOCKETS,
 };
 
-#[tracing::instrument(level = Level::DEBUG, ret)]
+#[tracing::instrument(level = Level::DEBUG)]
 fn shared_sockets() -> Vec<(i32, UserSocket)> {
     SOCKETS
         .iter()
         .filter_map(|inner| {
-            // let is_shared = unsafe { FN_FCNTL(*inner.key(), libc::F_GETFD) } & FD_CLOEXEC > 0;
-            let is_shared = true;
+            let is_shared = unsafe { FN_FCNTL(*inner.key(), libc::F_GETFD) } & FD_CLOEXEC > 0;
+            // let is_shared = true;
             is_shared.then(|| (*inner.key(), UserSocket::clone(inner.value())))
         })
         .collect::<Vec<_>>()
@@ -56,8 +56,15 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
         .filter_map(|(key, var)| CString::new(format!("{key}={var}")).ok())
         .collect::<Argv>();
 
+    let encoded = bincode::encode_to_vec(shared_sockets(), bincode::config::standard())
+        .map(|bytes| BASE64_URL_SAFE.encode(bytes))
+        .unwrap_or_default();
+
+    std::env::set_var("MIRRORD_SHARED_SOCKETS", encoded);
+
     if let Detour::Success(()) = execve(&mut env_vars) {
-        FN_EXECVE(path, argv, env_vars.null_vec().as_ptr() as *const *const _)
+        // FN_EXECVE(path, argv, env_vars.null_vec().as_ptr() as *const *const _)
+        FN_EXECV(path, argv)
     } else {
         FN_EXECV(path, argv)
     }
@@ -82,7 +89,7 @@ pub(crate) unsafe extern "C" fn execve_detour(
     }
 }
 
-#[hook_guard_fn]
+#[hook_fn]
 pub(crate) unsafe extern "C" fn fexecve_detour(
     fd: c_int,
     argv: *const *const c_char,
