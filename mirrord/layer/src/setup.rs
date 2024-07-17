@@ -17,7 +17,11 @@ use mirrord_protocol::{
 };
 use regex::RegexSet;
 
-use crate::{debugger_ports::DebuggerPorts, file::filter::FileFilter, socket::OutgoingSelector};
+use crate::{
+    debugger_ports::DebuggerPorts,
+    file::filter::FileFilter,
+    socket::{dns_selector::DnsSelector, OutgoingSelector},
+};
 
 /// Complete layer setup.
 /// Contains [`LayerConfig`] and derived from it structs, which are used in multiple places across
@@ -29,6 +33,7 @@ pub struct LayerSetup {
     debugger_ports: DebuggerPorts,
     remote_unix_streams: RegexSet,
     outgoing_selector: OutgoingSelector,
+    dns_selector: DnsSelector,
     proxy_address: SocketAddr,
     incoming_mode: IncomingMode,
     local_hostname: bool,
@@ -52,8 +57,9 @@ impl LayerSetup {
             .expect("invalid unix stream regex set")
             .unwrap_or_default();
 
-        let outgoing_selector: OutgoingSelector =
-            OutgoingSelector::new(&config.feature.network.outgoing);
+        let outgoing_selector = OutgoingSelector::new(&config.feature.network.outgoing);
+
+        let dns_selector = DnsSelector::from(&config.feature.network.dns);
 
         let proxy_address = config
             .connect_tcp
@@ -74,6 +80,7 @@ impl LayerSetup {
             debugger_ports,
             remote_unix_streams,
             outgoing_selector,
+            dns_selector,
             proxy_address,
             incoming_mode,
             local_hostname,
@@ -107,7 +114,7 @@ impl LayerSetup {
     }
 
     pub fn remote_dns_enabled(&self) -> bool {
-        self.config.feature.network.dns
+        self.config.feature.network.dns.enabled
     }
 
     pub fn targetless(&self) -> bool {
@@ -134,6 +141,10 @@ impl LayerSetup {
 
     pub fn outgoing_selector(&self) -> &OutgoingSelector {
         &self.outgoing_selector
+    }
+
+    pub fn dns_selector(&self) -> &DnsSelector {
+        &self.dns_selector
     }
 
     pub fn remote_unix_streams(&self) -> &RegexSet {
