@@ -126,17 +126,7 @@ impl ContainerVariant for PodVariant<'_> {
                     // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                     resources: Some(resources),
                     security_context: Some(SecurityContext {
-                        run_as_group: Some(params.gid.into()),
                         privileged: Some(agent.privileged),
-                        capabilities: Some(Capabilities {
-                            add: Some(
-                                get_capabilities(agent)
-                                    .iter()
-                                    .map(ToString::to_string)
-                                    .collect(),
-                            ),
-                            ..Default::default()
-                        }),
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -196,6 +186,9 @@ impl ContainerVariant for PodTargetedVariant<'_> {
     fn as_update(&self) -> Pod {
         let PodTargetedVariant { runtime_data, .. } = self;
 
+        let agent = self.agent_config();
+        let params = self.params();
+
         let update = Pod {
             spec: Some(PodSpec {
                 host_pid: Some(true),
@@ -220,6 +213,20 @@ impl ContainerVariant for PodTargetedVariant<'_> {
                 ]),
                 containers: vec![Container {
                     name: "mirrord-agent".to_string(),
+                    security_context: Some(SecurityContext {
+                        run_as_group: Some(params.gid.into()),
+                        privileged: Some(agent.privileged),
+                        capabilities: Some(Capabilities {
+                            add: Some(
+                                get_capabilities(agent)
+                                    .iter()
+                                    .map(ToString::to_string)
+                                    .collect(),
+                            ),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
                     volume_mounts: Some(vec![
                         VolumeMount {
                             mount_path: "/host/run".to_string(),
