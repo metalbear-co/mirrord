@@ -22,6 +22,7 @@ use mirrord_protocol::{
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
     RequestId,
 };
+use serde::Deserialize;
 use tokio::{
     net::TcpStream,
     sync::mpsc::{Receiver, Sender},
@@ -260,6 +261,12 @@ impl Client {
     }
 }
 
+#[derive(Deserialize, Debug, Default)]
+struct TcpStealerConfig {
+    stealer_flush_connections: bool,
+    pod_ips: Option<String>,
+}
+
 /// Created once per agent during initialization.
 ///
 /// Meant to be run (see [`TcpConnectionStealer::start`]) in a separate thread while the agent
@@ -287,12 +294,13 @@ impl TcpConnectionStealer {
     /// You need to call [`TcpConnectionStealer::start`] to do so.
     #[tracing::instrument(level = "trace")]
     pub(crate) async fn new(command_rx: Receiver<StealerCommand>) -> Result<Self, AgentError> {
+        let config = envy::prefixed("MIRRORD_AGENT_")
+            .from_env::<TcpStealerConfig>()
+            .unwrap_or_default();
+
         let port_subscriptions = {
-            let flush_connections = std::env::var("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS")
-                .ok()
-                .and_then(|var| var.parse::<bool>().ok())
-                .unwrap_or_default();
-            let redirector = IpTablesRedirector::new(flush_connections).await?;
+            let redirector =
+                IpTablesRedirector::new(config.stealer_flush_connections, config.pod_ips).await?;
 
             PortSubscriptions::new(redirector, 4)
         };
