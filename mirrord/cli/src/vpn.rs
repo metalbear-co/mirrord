@@ -7,7 +7,7 @@ use futures::{SinkExt, StreamExt};
 use humansize::{format_size, DECIMAL};
 use k8s_openapi::api::core::v1::ConfigMap;
 use mirrord_analytics::{AnalyticsError, NullReporter, Reporter};
-use mirrord_config::{agent::AgentImageConfig, LayerConfig};
+use mirrord_config::LayerConfig;
 use mirrord_kube::api::kubernetes::create_kube_config;
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{
@@ -95,6 +95,7 @@ fn get_server_vpn(message: DaemonMessage) -> Option<ServerVpn> {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn get_file_response(message: DaemonMessage) -> Option<mirrord_protocol::FileResponse> {
     match message {
         DaemonMessage::File(response) => Some(response),

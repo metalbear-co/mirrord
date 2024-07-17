@@ -4213,7 +4213,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.8.1"
+version = "1.9.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -4251,7 +4251,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-vpn"
-version = "3.110.0"
+version = "3.111.0"
 dependencies = [
  "futures",
  "ipnet",
