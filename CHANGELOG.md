@@ -8,6 +8,31 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.111.0](https://github.com/metalbear-co/mirrord/tree/3.111.0) - 2024-07-17
+
+
+### Added
+
+- Extended `feature.network.dns` config with an optional local/remote filter,
+  following `feature.network.outgoing` pattern.
+  [#2581](https://github.com/metalbear-co/mirrord/issues/2581)
+
+
+### Fixed
+
+- Update loopback detection to include pod ip's
+  [#2572](https://github.com/metalbear-co/mirrord/issues/2572)
+- Fixed a bug where enabling remote DNS prevented making a local connection
+  with telnet. [#2579](https://github.com/metalbear-co/mirrord/issues/2579)
+- Remove automatic ignore of incoming/outgoing traffic for ports 50000-60000
+  [#2597](https://github.com/metalbear-co/mirrord/issues/2597)
+
+
+### Internal
+
+- Add test to ensure empty streamed request doesn't hang if empty
+  [#2593](https://github.com/metalbear-co/mirrord/issues/2593)
+
 ## [3.110.0](https://github.com/metalbear-co/mirrord/tree/3.110.0) - 2024-07-12
 
 
