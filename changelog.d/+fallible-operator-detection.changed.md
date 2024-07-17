@@ -1,1 +1,0 @@
-Errors that occur when using discovery API to detect mirrord operator are no longer fatal. When such error is encountered, mirrord command falls back to using the OSS version.

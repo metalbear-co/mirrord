@@ -6,7 +6,7 @@ use mirrord_config::config::ConfigError;
 use mirrord_console::error::ConsoleError;
 use mirrord_intproxy::error::IntProxyError;
 use mirrord_kube::error::KubeApiError;
-use mirrord_operator::client::{HttpError, OperatorApiError, OperatorOperation};
+use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
 use reqwest::StatusCode;
 use thiserror::Error;
 
@@ -232,6 +232,21 @@ pub(crate) enum CliError {
         "This usually means that connectivity was lost while pinging.{GENERAL_HELP}"
     ))]
     PingPongFailed(String),
+
+    #[error("Failed to prepare mirrord operator client certificate: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    OperatorClientCertError(String),
+
+    #[error("mirrord operator was not found in the cluster.")]
+    #[diagnostic(help(
+        "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
+        Read more here: https://mirrord.dev/docs/overview/quick-start/#operator.{GENERAL_HELP}"
+    ))]
+    OperatorNotInstalled,
+
+    #[error("mirrord returned a target resource of unknown type: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    OperatorReturnedUnknownTargetType(String),
 }
 
 impl From<OperatorApiError> for CliError {
@@ -244,7 +259,7 @@ impl From<OperatorApiError> for CliError {
                 feature,
                 operator_version,
             },
-            OperatorApiError::CreateApiError(e) => Self::CreateKubeApiFailed(e),
+            OperatorApiError::CreateKubeClient(e) => Self::CreateKubeApiFailed(e),
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
             OperatorApiError::KubeError {
                 error: kube::Error::Api(ErrorResponse { message, code, .. }),
@@ -269,6 +284,10 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorApiFailed(operation, error)
             }
             OperatorApiError::NoLicense => Self::OperatorLicenseExpired,
+            OperatorApiError::ClientCertError(error) => Self::OperatorClientCertError(error),
+            OperatorApiError::FetchedUnknownTargetType(error) => {
+                Self::OperatorReturnedUnknownTargetType(error.0)
+            }
         }
     }
 }

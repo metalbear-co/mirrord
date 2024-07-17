@@ -3,6 +3,7 @@
 #![feature(lazy_cell)]
 #![warn(clippy::indexing_slicing)]
 
+pub mod body_chunks;
 pub mod codec;
 pub mod dns;
 pub mod error;

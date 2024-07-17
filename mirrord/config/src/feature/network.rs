@@ -1,13 +1,16 @@
+use dns::{DnsConfig, DnsFileConfig};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 
 use self::{incoming::*, outgoing::*};
 use crate::{
-    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError},
+    config::{ConfigContext, ConfigError},
     util::MirrordToggleableConfig,
 };
 
+pub mod dns;
+pub mod filter;
 pub mod incoming;
 pub mod outgoing;
 
@@ -38,7 +41,12 @@ pub mod outgoing;
 ///         "ignore_localhost": false,
 ///         "unix_streams": "bear.+"
 ///       },
-///       "dns": false
+///       "dns": {
+///         "enabled": true,
+///         "filter": {
+///           "local": ["1.1.1.0/24:1337", "1.1.5.0/24", "google.com"]
+///         }
+///       }
 ///     }
 ///   }
 /// }
@@ -56,30 +64,15 @@ pub struct NetworkConfig {
     pub outgoing: OutgoingConfig,
 
     /// ### feature.network.dns {#feature-network-dns}
-    ///
-    /// Resolve DNS via the remote pod.
-    ///
-    /// Defaults to `true`.
-    ///
-    /// - Caveats: DNS resolving can be done in multiple ways, some frameworks will use
-    /// `getaddrinfo`, while others will create a connection on port `53` and perform a sort
-    /// of manual resolution. Just enabling the `dns` feature in mirrord might not be enough.
-    /// If you see an address resolution error, try enabling the [`fs`](#feature-fs) feature,
-    /// and setting `read_only: ["/etc/resolv.conf"]`.
-    #[config(env = "MIRRORD_REMOTE_DNS", default = true)]
-    pub dns: bool,
+    #[config(toggleable, nested)]
+    pub dns: DnsConfig,
 }
 
 impl MirrordToggleableConfig for NetworkFileConfig {
     fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
-        let dns = FromEnv::new("MIRRORD_REMOTE_DNS")
-            .source_value(context)
-            .transpose()?
-            .unwrap_or(false);
-
         Ok(NetworkConfig {
             incoming: IncomingFileConfig::disabled_config(context)?,
-            dns,
+            dns: DnsFileConfig::disabled_config(context)?,
             outgoing: OutgoingFileConfig::disabled_config(context)?,
         })
     }
@@ -89,7 +82,7 @@ impl CollectAnalytics for &NetworkConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("incoming", &self.incoming);
         analytics.add("outgoing", &self.outgoing);
-        analytics.add("dns", self.dns);
+        analytics.add("dns", &self.dns);
     }
 }
 
@@ -131,7 +124,7 @@ mod tests {
                     .unwrap();
 
                 assert_eq!(env.incoming, incoming.1);
-                assert_eq!(env.dns, dns.1);
+                assert_eq!(env.dns.enabled, dns.1);
             },
         );
     }

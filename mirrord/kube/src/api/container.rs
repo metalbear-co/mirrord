@@ -39,10 +39,11 @@ pub struct ContainerParams {
     /// Value for [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV) set in
     /// the agent container.
     pub tls_cert: Option<String>,
+    pub pod_ips: Option<String>,
 }
 
 impl ContainerParams {
-    pub fn new() -> ContainerParams {
+    pub fn new(tls_cert: Option<String>, pod_ips: Option<String>) -> ContainerParams {
         let port: u16 = rand::thread_rng().gen_range(30000..=65535);
         let gid: u16 = rand::thread_rng().gen_range(3000..u16::MAX);
 
@@ -57,14 +58,9 @@ impl ContainerParams {
             name,
             gid,
             port,
-            tls_cert: None,
+            tls_cert,
+            pod_ips,
         }
-    }
-}
-
-impl Default for ContainerParams {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

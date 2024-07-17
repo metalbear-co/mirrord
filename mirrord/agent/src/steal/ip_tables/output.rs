@@ -20,12 +20,18 @@ where
 {
     const ENTRYPOINT: &'static str = "OUTPUT";
 
-    pub fn create(ipt: Arc<IPT>, chain_name: String) -> Result<Self> {
+    pub fn create(ipt: Arc<IPT>, chain_name: String, pod_ips: Option<&str>) -> Result<Self> {
         let managed = IPTableChain::create(ipt, chain_name)?;
+
+        let exclude_source_ips = pod_ips
+            .map(|pod_ips| format!("! -s {pod_ips}"))
+            .unwrap_or_default();
 
         let gid = getgid();
         managed
-            .add_rule(&format!("-m owner --gid-owner {gid} -p tcp -j RETURN"))
+            .add_rule(&format!(
+                "-m owner --gid-owner {gid} -p tcp {exclude_source_ips} -j RETURN"
+            ))
             .inspect_err(|_| {
                 warn!("Unable to create iptable rule with \"--gid-owner {gid}\" filter")
             })?;
@@ -34,7 +40,7 @@ where
     }
 
     pub fn load(ipt: Arc<IPT>, chain_name: String) -> Result<Self> {
-        let managed = IPTableChain::create(ipt, chain_name)?;
+        let managed = IPTableChain::load(ipt, chain_name)?;
 
         Ok(OutputRedirect { managed })
     }

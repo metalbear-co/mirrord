@@ -60,6 +60,7 @@ impl EnvFilter {
                 WildMatch::new("RUBYOPT"),
                 WildMatch::new("RUST_LOG"),
                 WildMatch::new("_JAVA_OPTIONS"),
+                WildMatch::new("DOTNET_EnableDiagnostics"),
             ];
 
             for selector in &filter_env_vars {
