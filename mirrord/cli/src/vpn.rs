@@ -8,6 +8,7 @@ use humansize::{format_size, DECIMAL};
 use k8s_openapi::api::core::v1::ConfigMap;
 use mirrord_analytics::{AnalyticsError, NullReporter, Reporter};
 use mirrord_config::{agent::AgentImageConfig, LayerConfig};
+use mirrord_kube::api::kubernetes::create_kube_config;
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{
     vpn::{ClientVpn, ServerVpn},
@@ -33,6 +34,60 @@ async fn agent_request<T>(
     connection.receiver.recv().await.and_then(mapper)
 }
 
+#[cfg(not(target_os = "macos"))]
+async fn agent_fetch_file<const B: u64>(
+    connection: &mut AgentConnection,
+    path: std::path::PathBuf,
+) -> mirrord_protocol::RemoteResult<Vec<u8>> {
+    use mirrord_protocol::{file::*, FileRequest, FileResponse};
+
+    let request = FileRequest::Open(OpenFileRequest {
+        path,
+        open_options: OpenOptionsInternal {
+            read: true,
+            ..Default::default()
+        },
+    });
+
+    let Some(FileResponse::Open(response)) = agent_request(
+        connection,
+        ClientMessage::FileRequest(request),
+        get_file_response,
+    )
+    .await
+    else {
+        todo!()
+    };
+
+    let OpenFileResponse { fd } = response?;
+
+    let request = FileRequest::Read(ReadFileRequest {
+        remote_fd: fd,
+        buffer_size: B,
+    });
+
+    let Some(FileResponse::Read(response)) = agent_request(
+        connection,
+        ClientMessage::FileRequest(request),
+        get_file_response,
+    )
+    .await
+    else {
+        todo!();
+    };
+
+    let ReadFileResponse { bytes, .. } = response?;
+
+    let request = FileRequest::Close(CloseFileRequest { fd });
+
+    let _ = connection
+        .sender
+        .send(ClientMessage::FileRequest(request))
+        .await;
+
+    Ok(bytes)
+}
+
 fn get_server_vpn(message: DaemonMessage) -> Option<ServerVpn> {
     match message {
         DaemonMessage::Vpn(response) => Some(response),
@@ -40,7 +95,6 @@ fn get_server_vpn(message: DaemonMessage) -> Option<ServerVpn> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
 fn get_file_response(message: DaemonMessage) -> Option<mirrord_protocol::FileResponse> {
     match message {
         DaemonMessage::File(response) => Some(response),
@@ -57,6 +111,7 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
 
     let mut config = LayerConfig::from_env()?;
 
+    config.accept_invalid_certificates = true;
     config.agent.image = AgentImageConfig("test".into());
     config.agent.log_level = "info,mirrord=trace".into();
     config.agent.privileged = true;
@@ -64,12 +119,18 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
     config.target.path = None;
     config.target.namespace = args.namespace;
 
-    let client = kube::Client::try_default()
-        .await
-        .map_err(|err| CliError::CreateKubeApiFailed(err.into()))?;
+    let client = create_kube_config(
+        config.accept_invalid_certificates,
+        config.kubeconfig.clone(),
+        config.kube_context.clone(),
+    )
+    .await
+    .and_then(|config| kube::Client::try_from(config).map_err(From::from))
+    .map_err(CliError::CreateKubeApiFailed)?;
 
     let configmap_api = kube::Api::<ConfigMap>::namespaced(client, "kube-system");
 
+    // TODO: this may fail but
     let Some(vpn_config) = VpnConfig::from_configmaps(&configmap_api).await else {
         return Ok(());
     };
@@ -102,48 +163,13 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
 
     #[cfg(not(target_os = "macos"))]
     let linux_guard = {
-        use mirrord_protocol::{file::*, FileRequest, FileResponse};
         use mirrord_vpn::linux::*;
 
-        let Some(FileResponse::Open(Ok(OpenFileResponse { fd }))) = agent_request(
-            &mut connection,
-            ClientMessage::FileRequest(FileRequest::Open(OpenFileRequest {
-                path: "/etc/resolv.conf".into(),
-                open_options: OpenOptionsInternal {
-                    read: true,
-                    ..Default::default()
-                },
-            })),
-            get_file_response,
-        )
-        .await
+        let Ok(remote_resolv) =
+            agent_fetch_file::<10000>(&mut connection, "/etc/resolv.conf".into()).await
         else {
             return Ok(());
         };
-
-        tracing::debug!(?fd, "opened remote /etc/resolv.conf");
-
-        let Some(FileResponse::Read(Ok(response))) = agent_request(
-            &mut connection,
-            ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
-                remote_fd: fd,
-                buffer_size: 10000,
-            })),
-            get_file_response,
-        )
-        .await
-        else {
-            return Ok(());
-        };
-
-        tracing::debug!(?fd, ?response, "read remote /etc/resolv.conf");
-
-        let _ = connection
-            .sender
-            .send(ClientMessage::FileRequest(FileRequest::Close(
-                CloseFileRequest { fd },
-            )))
-            .await;
 
         let Ok(resolv_override) = ResolvOverride::accuire_override("/etc/resolv.conf")
             .await
@@ -152,15 +178,23 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
             return Ok(());
         };
 
-        if resolv_override
-            .update_resolv(&response.bytes)
-            .await
-            .is_err()
-        {
+        if resolv_override.update_resolv(&remote_resolv).await.is_err() {
             let _ = resolv_override.unmount().await;
 
             return Ok(());
         }
+
+        let _ = tokio::process::Command::new("ip")
+            .args([
+                "route".to_owned(),
+                "add".to_owned(),
+                vpn_config.service_subnet.to_string(),
+                "via".to_owned(),
+                network.gateway.to_string(),
+            ])
+            .output()
+            .await
+            .inspect_err(|error| tracing::error!(%error, "could not bind service_subnet"));
 
         resolv_override
     };

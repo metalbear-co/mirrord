@@ -138,6 +138,10 @@ pub(crate) enum AgentError {
 
     #[error("Exhausted possible identifiers for incoming connections.")]
     ExhaustedConnectionId,
+
+    /// Temporary error for vpn feature
+    #[error("Generic error in vpn: {0}")]
+    VpnError(String),
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;
