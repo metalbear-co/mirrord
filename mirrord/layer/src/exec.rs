@@ -28,7 +28,7 @@ impl Argv {
 
     /// Get a vector of pointers of which the data buffer is memory-same as a null-terminated array
     /// of pointers to null-terminated strings.
-    fn null_vec(&self) -> Vec<StringPtr> {
+    pub(crate) fn null_vec(&self) -> Vec<StringPtr> {
         let mut vec: Vec<StringPtr> = self
             .0
             .iter()

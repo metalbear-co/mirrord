@@ -3,9 +3,7 @@
 use std::{
     env,
     ffi::{c_void, CStr, CString},
-    marker::PhantomData,
     path::PathBuf,
-    ptr,
     sync::OnceLock,
 };
 
@@ -130,7 +128,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
             // without consuming the original data.
             .to_owned();
 
-        c_string_vec.0.push(CString::new(stripped)?)
+        c_string_vec.push(CString::new(stripped)?)
     }
     Success(c_string_vec)
 }
@@ -143,7 +141,7 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
     for arg in envp_arr.iter() {
         let Detour::Success(arg_str): Detour<&str> = arg.checked_into() else {
             tracing::debug!("Failed to convert envp argument to string. Skipping.");
-            unsafe { c_string_vec.0.push(CStr::from_ptr(*arg).to_owned()) };
+            c_string_vec.push(unsafe { CStr::from_ptr(*arg).to_owned() });
             continue;
         };
 
@@ -151,12 +149,12 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
             found_dyld = true;
         }
 
-        c_string_vec.0.push(CString::new(arg_str)?)
+        c_string_vec.push(CString::new(arg_str)?)
     }
 
     if !found_dyld {
         for (key, value) in crate::setup().env_backup() {
-            c_string_vec.0.push(CString::new(format!("{key}={value}"))?);
+            c_string_vec.push(CString::new(format!("{key}={value}"))?);
         }
     }
     Success(c_string_vec)
