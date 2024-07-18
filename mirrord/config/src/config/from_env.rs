@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{marker::PhantomData, str::FromStr};
 
 use super::ConfigContext;
@@ -15,13 +16,18 @@ impl<T> FromEnv<T> {
 impl<T> MirrordConfigSource for FromEnv<T>
 where
     T: FromStr,
+    T::Err: 'static + Send + Sync + fmt::Display + std::error::Error,
 {
     type Value = T;
 
     fn source_value(self, _context: &mut ConfigContext) -> Option<Result<Self::Value>> {
         std::env::var(self.0).ok().map(|var| {
-            var.parse()
-                .map_err(|_| ConfigError::InvalidValue(var.to_string(), self.0))
+            var.parse::<Self::Value>()
+                .map_err(|err| ConfigError::InvalidValue {
+                    name: self.0,
+                    provided: var,
+                    error: Box::new(err),
+                })
         })
     }
 }

@@ -328,7 +328,7 @@ fn layer_start(mut config: LayerConfig) {
     // Disable all features that require the agent
     if trace_only {
         config.feature.fs.mode = FsModeConfig::Local;
-        config.feature.network.dns = false;
+        config.feature.network.dns.enabled = false;
         config.feature.network.incoming.mode = IncomingMode::Off;
         config.feature.network.outgoing.tcp = false;
         config.feature.network.outgoing.udp = false;
