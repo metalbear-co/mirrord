@@ -439,16 +439,23 @@ pub struct QueueDetails {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // active_filters -> activeFilters
 pub struct WorkloadQueueRegistryStatus {
-    pub queue_details: QueueDetails,
+    /// Optional even though it's currently the only field, because in the future there will be
+    /// fields for other queue types.
+    pub sqs_details: Option<QueueDetails>,
 }
 
 impl WorkloadQueueRegistryStatus {
     pub fn output_queue_names(&self) -> Vec<&str> {
-        self.queue_details
-            .queue_names
-            .values()
-            .map(|QueueNameUpdate { output_name, .. }| output_name.as_str())
-            .collect()
+        self.sqs_details
+            .as_ref()
+            .map(|details| {
+                details
+                    .queue_names
+                    .values()
+                    .map(|QueueNameUpdate { output_name, .. }| output_name.as_str())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 
