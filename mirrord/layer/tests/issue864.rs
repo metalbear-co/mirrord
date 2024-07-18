@@ -10,14 +10,13 @@ mod common;
 
 pub use common::*;
 
-/// Start an HTTP server injected with the layer, simulate the agent, verify expected messages from
-/// the layer, send HTTP requests and verify in the server output that the application received
-/// them. Tests the layer's communication with the agent, the bind hook, and the forwarding of
-/// mirrored traffic to the application.
+/// Verify that issue [#864](https://github.com/metalbear-co/mirrord/issues/864) is fixed.
+///
+/// Share sockets between `execve` and `execv` with python's uvicorn.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn mirroring_with_http(
+async fn test_issue854(
     #[values(Application::PythonIssue864)] application: Application,
     dylib_path: &PathBuf,
     config_dir: &PathBuf,
