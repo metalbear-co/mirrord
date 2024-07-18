@@ -350,7 +350,7 @@ fn layer_start(mut config: LayerConfig) {
 
     let _detour_guard = DetourGuard::new();
     tracing::info!("Initializing mirrord-layer!");
-    tracing::debug!(
+    tracing::trace!(
         executable = ?EXECUTABLE_PATH.get(),
         args = ?EXECUTABLE_ARGS.get(),
         pid = std::process::id(),

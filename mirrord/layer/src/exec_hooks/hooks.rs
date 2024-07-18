@@ -20,7 +20,7 @@ use crate::{
     SOCKETS,
 };
 
-#[tracing::instrument(level = Level::DEBUG)]
+#[tracing::instrument(level = Level::TRACE)]
 fn shared_sockets() -> Vec<(i32, UserSocket)> {
     SOCKETS
         .iter()
@@ -33,7 +33,7 @@ fn shared_sockets() -> Vec<(i32, UserSocket)> {
 }
 
 #[mirrord_layer_macro::instrument(
-    level = Level::DEBUG,
+    level = Level::TRACE,
     ret,
     fields(
         pid = std::process::id(),
