@@ -119,15 +119,6 @@ impl LayerSetup {
             .unwrap_or(true)
     }
 
-    #[cfg(target_os = "macos")]
-    pub fn sip_binaries(&self) -> Vec<String> {
-        self.config
-            .sip_binaries
-            .as_deref()
-            .map(<[_]>::to_vec)
-            .unwrap_or_default()
-    }
-
     pub fn is_debugger_port(&self, addr: &SocketAddr) -> bool {
         self.debugger_ports.contains(addr)
     }
