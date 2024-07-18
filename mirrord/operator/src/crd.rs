@@ -436,27 +436,21 @@ pub struct ActiveSqsSplits {
     pub env_updates: BTreeMap<String, QueueNameUpdate>,
 }
 
+impl ActiveSqsSplits {
+    pub fn output_queue_names(&self) -> Vec<&str> {
+        self.queue_names
+            .values()
+            .map(|QueueNameUpdate { output_name, .. }| output_name.as_str())
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // active_filters -> activeFilters
 pub struct WorkloadQueueRegistryStatus {
     /// Optional even though it's currently the only field, because in the future there will be
     /// fields for other queue types.
     pub sqs_details: Option<ActiveSqsSplits>,
-}
-
-impl WorkloadQueueRegistryStatus {
-    pub fn output_queue_names(&self) -> Vec<&str> {
-        self.sqs_details
-            .as_ref()
-            .map(|details| {
-                details
-                    .queue_names
-                    .values()
-                    .map(|QueueNameUpdate { output_name, .. }| output_name.as_str())
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
 }
 
 /// Defines a Custom Resource that holds a central configuration for splitting a queue. mirrord
