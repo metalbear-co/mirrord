@@ -628,6 +628,7 @@ pub enum Application {
     Go20HTTP,
     NodeHTTP,
     PythonFastApiHTTP,
+    /// Shared sockets [#864](https://github.com/metalbear-co/mirrord/issues/864).
     PythonIssue864,
     PythonFlaskHTTP,
     PythonSelfConnect,
@@ -876,7 +877,8 @@ impl Application {
             Application::PythonIssue864 => {
                 // uvicorn --  --reload --port 80 main:app
                 vec![
-                    String::from("--port=9998"),
+                    String::from("--port=9999"),
+                    String::from("--host=0.0.0.0"),
                     String::from("--app-dir=tests/apps/"),
                     String::from("shared_sockets:app"),
                 ]

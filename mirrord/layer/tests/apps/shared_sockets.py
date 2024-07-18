@@ -11,10 +11,6 @@ app = FastAPI()
 @unique
 class HttpMethod(str, Enum):
     GET = "GET"
-    POST = "POST"
-    PUT = "PUT"
-    DELETE = "DELETE"
-
 
 done = {method: False for method in HttpMethod}
 
@@ -37,18 +33,3 @@ def handle_request(method: HttpMethod):
 @app.get("/")
 def get():
     return handle_request(HttpMethod.GET)
-
-
-@app.post("/")
-def post():
-    return handle_request(HttpMethod.POST)
-
-
-@app.put("/")
-def put():
-    return handle_request(HttpMethod.PUT)
-
-
-@app.delete("/")
-def delete():
-    return handle_request(HttpMethod.DELETE)

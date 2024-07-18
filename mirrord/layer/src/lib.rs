@@ -105,7 +105,7 @@ mod common;
 mod debugger_ports;
 mod detour;
 mod error;
-mod exec;
+mod exec_hooks;
 #[cfg(target_os = "macos")]
 mod exec_utils;
 mod file;
@@ -534,7 +534,7 @@ fn enable_hooks(state: &LayerSetup) {
 
     unsafe { socket::hooks::enable_socket_hooks(&mut hook_manager, enabled_remote_dns) };
 
-    unsafe { exec::hooks::enable_exec_hooks(&mut hook_manager) };
+    unsafe { exec_hooks::hooks::enable_exec_hooks(&mut hook_manager) };
 
     #[cfg(target_os = "macos")]
     if state.experimental().trust_any_certificate {

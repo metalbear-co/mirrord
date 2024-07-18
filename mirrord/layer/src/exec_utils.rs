@@ -23,7 +23,7 @@ use crate::{
         Detour::{Bypass, Error, Success},
     },
     error::HookError,
-    exec::*,
+    exec_hooks::*,
     hooks::HookManager,
     replace,
 };
