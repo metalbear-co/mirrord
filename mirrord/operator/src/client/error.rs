@@ -4,9 +4,7 @@ pub use http::Error as HttpError;
 use mirrord_kube::error::KubeApiError;
 use thiserror::Error;
 
-use crate::crd::NewOperatorFeature;
-
-use crate::crd::kube_target::UnknownTargetType;
+use crate::crd::{kube_target::UnknownTargetType, NewOperatorFeature};
 
 /// Operations performed on the operator via [`kube`] API.
 #[derive(Debug)]
