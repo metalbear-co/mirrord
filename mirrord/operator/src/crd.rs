@@ -417,7 +417,7 @@ pub struct QueueNameUpdate {
 // controller's code a bit simpler.
 // Some information is present in the spec, but it is organized differently.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct QueueDetails {
+pub struct ActiveSqsSplits {
     /// For each queue_id, the actual queue name as retrieved from the target's pod spec or config
     /// map, together with the name of its temporary output queue.
     pub queue_names: BTreeMap<QueueId, QueueNameUpdate>,
@@ -441,7 +441,7 @@ pub struct QueueDetails {
 pub struct WorkloadQueueRegistryStatus {
     /// Optional even though it's currently the only field, because in the future there will be
     /// fields for other queue types.
-    pub sqs_details: Option<QueueDetails>,
+    pub sqs_details: Option<ActiveSqsSplits>,
 }
 
 impl WorkloadQueueRegistryStatus {
