@@ -230,44 +230,8 @@ pub(crate) unsafe fn patch_sip_for_new_process(
     Success((path_c_string, argv_vec, envp_vec))
 }
 
-/// Hook for `libc::execve`.
-///
-/// We change 3 arguments and then call the original functions:
-/// 1. The executable path - we check it for SIP, create a patched binary and use the path to the
-///    new path instead of the original path. If there is no SIP, we use a new string with the same
-///    path.
-/// 2. argv - we strip mirrord's temporary directory from the start of arguments. So if argv[1] is
-///    "/var/folders/1337/mirrord-bin/opt/homebrew/bin/npx" Switch it to "/opt/homebrew/bin/npx"
-///    Also here we create a new array with pointers to new strings, even if there are no changes
-///    needed (except for the case of an error).
-/// 3. envp - We found out that Turbopack (Vercel) spawns a clean "Node" instance without env,
-///    basically stripping all of the important mirrord env.
-///    https://github.com/metalbear-co/mirrord/issues/2500
-///    We restore the `DYLD_INSERT_LIBRARIES` environment variable and all env vars starting with `MIRRORD_` if the dyld var can't be found in `envp`.
-/// If there is an error in the detour, we don't exit or anything, we just call the original libc
-/// function with the original passed arguments.
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn execve_detour(
-    path: *const c_char,
-    argv: *const *const c_char,
-    envp: *const *const c_char,
-) -> c_int {
-    match patch_sip_for_new_process(path, argv, envp) {
-        Success((new_path, new_argv, new_envp)) => {
-            let new_argv = new_argv.null_vec();
-            let new_envp = new_envp.null_vec();
-            FN_EXECVE(
-                new_path.as_ptr(),
-                new_argv.as_ptr() as *const *const c_char,
-                new_envp.as_ptr() as *const *const c_char,
-            )
-        }
-        _ => FN_EXECVE(path, argv, envp),
-    }
-}
-
 /// Hook for `libc::posix_spawn`.
-/// Same as [`execve_detour`], with all the extra arguments present here being passed untouched.
+/// Same as `execve_detour`, with all the extra arguments present here being passed untouched.
 // TODO: do we also need to hook posix_spawnp?
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn posix_spawn_detour(
