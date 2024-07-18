@@ -877,6 +877,7 @@ impl Application {
             Application::PythonIssue864 => {
                 // uvicorn --  --reload --port 80 main:app
                 vec![
+                    String::from("--reload"),
                     String::from("--port=9999"),
                     String::from("--host=0.0.0.0"),
                     String::from("--app-dir=tests/apps/"),
