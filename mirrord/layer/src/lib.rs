@@ -165,7 +165,6 @@ static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
 /// Set to 10 seconds as most agent operations timeout after 5 seconds
 const PROXY_CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[allow(unused_variables)]
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
     let given_process = EXECUTABLE_ARGS.get_or_try_init(ExecuteArgs::from_env)?;
@@ -487,8 +486,6 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
 fn enable_hooks(state: &LayerSetup) {
     let enabled_file_ops = state.fs_config().is_active();
     let enabled_remote_dns = state.remote_dns_enabled();
-    #[cfg(target_os = "macos")]
-    let patch_binaries = state.sip_binaries();
 
     let mut hook_manager = HookManager::default();
 
