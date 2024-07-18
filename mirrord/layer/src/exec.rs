@@ -8,18 +8,18 @@ pub(crate) mod hooks;
 
 /// Hold a vector of new CStrings to use instead of the original argv.
 #[derive(Default, Debug)]
-struct Argv(Vec<CString>);
+pub(crate) struct Argv(Vec<CString>);
 
 /// This must be memory-same as just a `*const c_char`.
 #[repr(C)]
-struct StringPtr<'a> {
+pub(crate) struct StringPtr<'a> {
     ptr: *const c_char,
     _phantom: PhantomData<&'a ()>,
 }
 
 impl Argv {
     /// Get a null-pointer [`StringPtr`].
-    fn null_string_ptr() -> StringPtr<'static> {
+    pub(crate) fn null_string_ptr() -> StringPtr<'static> {
         StringPtr {
             ptr: ptr::null(),
             _phantom: Default::default(),
@@ -41,7 +41,7 @@ impl Argv {
         vec
     }
 
-    fn push(&mut self, item: CString) {
+    pub(crate) fn push(&mut self, item: CString) {
         self.0.push(item);
     }
 }
