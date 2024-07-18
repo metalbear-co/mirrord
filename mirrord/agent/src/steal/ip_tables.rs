@@ -236,13 +236,17 @@ impl<IPT> SafeIpTables<IPT>
 where
     IPT: IPTables + Send + Sync,
 {
-    pub(super) async fn create(ipt: IPT, flush_connections: bool) -> Result<Self> {
+    pub(super) async fn create(
+        ipt: IPT,
+        flush_connections: bool,
+        pod_ips: Option<&str>,
+    ) -> Result<Self> {
         let ipt = Arc::new(ipt);
 
         let mut redirect = if let Some(vendor) = MeshVendor::detect(ipt.as_ref())? {
-            Redirects::Mesh(MeshRedirect::create(ipt.clone(), vendor)?)
+            Redirects::Mesh(MeshRedirect::create(ipt.clone(), vendor, pod_ips)?)
         } else {
-            match StandardRedirect::create(ipt.clone()) {
+            match StandardRedirect::create(ipt.clone(), pod_ips) {
                 Err(err) => {
                     warn!("Unable to create StandardRedirect chain: {err}");
 
@@ -416,7 +420,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::create(mock, false)
+        let ipt = SafeIpTables::create(mock, false, None)
             .await
             .expect("Create Failed");
 
@@ -549,7 +553,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::create(mock, false)
+        let ipt = SafeIpTables::create(mock, false, None)
             .await
             .expect("Create Failed");
 

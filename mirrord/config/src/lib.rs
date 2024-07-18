@@ -138,7 +138,12 @@ use crate::{
 ///         "ignore_localhost": false,
 ///         "unix_streams": "bear.+"
 ///       },
-///       "dns": false
+///       "dns": {
+///         "enabled": true,
+///         "filter": {
+///           "local": ["1.1.1.0/24:1337", "1.1.5.0/24", "google.com"]
+///         }
+///       }
 ///     },
 ///     "copy_target": {
 ///       "scale_down": false
@@ -338,7 +343,7 @@ impl LayerConfig {
         if matches!(
             self.feature.network.outgoing.filter,
             Some(OutgoingFilterConfig::Remote(_))
-        ) && !self.feature.network.dns
+        ) && !self.feature.network.dns.enabled
         {
             context.add_warning(
                 "The mirrord outgoing traffic filter includes host names to be connected remotely, \
@@ -483,6 +488,9 @@ impl LayerConfig {
                     .to_string(),
             ));
         }
+
+        self.feature.network.dns.verify(context)?;
+        self.feature.network.outgoing.verify(context)?;
 
         Ok(())
     }
@@ -745,7 +753,7 @@ mod tests {
                 env: ToggleableConfig::Enabled(true).into(),
                 fs: ToggleableConfig::Config(FsUserConfig::Simple(FsModeConfig::Write)).into(),
                 network: Some(ToggleableConfig::Config(NetworkFileConfig {
-                    dns: Some(false),
+                    dns: Some(ToggleableConfig::Enabled(false)),
                     incoming: Some(ToggleableConfig::Config(IncomingFileConfig::Advanced(
                         Box::new(IncomingAdvancedFileConfig {
                             mode: Some(IncomingMode::Mirror),
