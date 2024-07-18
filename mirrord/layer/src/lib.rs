@@ -165,6 +165,7 @@ static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
 /// Set to 10 seconds as most agent operations timeout after 5 seconds
 const PROXY_CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
+#[allow(unused_variables)]
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
     let given_process = EXECUTABLE_ARGS.get_or_try_init(ExecuteArgs::from_env)?;
