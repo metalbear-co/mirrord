@@ -628,6 +628,7 @@ pub enum Application {
     Go20HTTP,
     NodeHTTP,
     PythonFastApiHTTP,
+    PythonIssue864,
     PythonFlaskHTTP,
     PythonSelfConnect,
     PythonDontLoad,
@@ -714,7 +715,7 @@ impl Application {
             | Application::PythonSelfConnect
             | Application::PythonDontLoad
             | Application::PythonListen => Self::get_python3_executable().await,
-            Application::PythonFastApiHTTP => String::from("uvicorn"),
+            Application::PythonFastApiHTTP | Application::PythonIssue864 => String::from("uvicorn"),
             Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
             Application::ReadLink => String::from("tests/apps/readlink/out.c_test_app"),
             Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
@@ -872,6 +873,14 @@ impl Application {
                 String::from("--app-dir=tests/apps/"),
                 String::from("app_fastapi:app"),
             ],
+            Application::PythonIssue864 => {
+                // uvicorn --  --reload --port 80 main:app
+                vec![
+                    String::from("--port=9998"),
+                    String::from("--app-dir=tests/apps/"),
+                    String::from("shared_sockets:app"),
+                ]
+            }
             Application::NodeHTTP => {
                 app_path.push("app_node.js");
                 vec![app_path.to_string_lossy().to_string()]
@@ -962,6 +971,7 @@ impl Application {
             | Application::PythonFlaskHTTP => 80,
             // mapped from 9999 in `configs/port_mapping.json`
             Application::PythonFastApiHTTP => 1234,
+            Application::PythonIssue864 => 1234,
             Application::RustIssue1123 => 41222,
             Application::PythonListen => 21232,
             Application::PythonDontLoad

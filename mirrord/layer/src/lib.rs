@@ -537,11 +537,6 @@ fn enable_hooks(state: &LayerSetup) {
     unsafe { exec::hooks::enable_exec_hooks(&mut hook_manager) };
 
     #[cfg(target_os = "macos")]
-    unsafe {
-        exec_utils::enable_execve_hook(&mut hook_manager, patch_binaries)
-    };
-
-    #[cfg(target_os = "macos")]
     if state.experimental().trust_any_certificate {
         unsafe { tls::enable_tls_hooks(&mut hook_manager) };
     }
