@@ -1,6 +1,7 @@
+#[cfg(target_os = "macos")]
+use std::marker::PhantomData;
 use std::{
     ffi::{c_char, CString},
-    marker::PhantomData,
     ptr,
 };
 
