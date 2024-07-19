@@ -33,11 +33,13 @@ fn shared_sockets() -> Vec<(i32, UserSocket)> {
 }
 
 #[mirrord_layer_macro::instrument(
-    level = Level::TRACE,
+    level = Level::DEBUG,
     ret,
+    skip(env_vars),
     fields(
         pid = std::process::id(),
-        parent_pid = parent_id()
+        parent_pid = parent_id(),
+        env_len = env_vars.len()
     )
 )]
 fn execve(env_vars: &mut Argv) -> Detour<()> {
@@ -108,9 +110,11 @@ pub(crate) unsafe extern "C" fn execve_detour(
             _ => FN_EXECVE(path, argv, envp),
         }
 
+        tracing::info!("Success execve!");
         #[cfg(target_os = "linux")]
         FN_EXECVE(path, argv, modified_envp)
     } else {
+        tracing::info!("Not success execve!");
         FN_EXECVE(path, argv, envp)
     }
 }

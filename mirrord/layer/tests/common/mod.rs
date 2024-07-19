@@ -875,7 +875,6 @@ impl Application {
                 String::from("app_fastapi:app"),
             ],
             Application::PythonIssue864 => {
-                // uvicorn --  --reload --port 80 main:app
                 vec![
                     String::from("--reload"),
                     String::from("--port=9999"),
