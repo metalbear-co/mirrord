@@ -206,7 +206,7 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
     envp: *const *const c_char,
 ) -> c_int {
     match patch_sip_for_new_process(path, argv, envp) {
-        Success((new_path, new_argv, new_envp)) => {
+        Success((new_path, mut new_argv, mut new_envp)) => {
             let new_argv = new_argv.null_vec();
             let new_envp = new_envp.null_vec();
 
