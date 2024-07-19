@@ -286,7 +286,8 @@ fn init_tracing() {
             .with(
                 tracing_subscriber::fmt::layer()
                     .with_thread_ids(true)
-                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+                    .with_span_events(FmtSpan::ACTIVE)
+                    .without_time()
                     .compact()
                     .with_writer(std::io::stderr),
             )
