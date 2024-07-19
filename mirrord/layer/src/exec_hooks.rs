@@ -11,6 +11,7 @@ pub(crate) mod hooks;
 pub(crate) struct Argv(Vec<CString>);
 
 /// This must be memory-same as just a `*const c_char`.
+#[cfg(target_os = "macos")]
 #[repr(C)]
 pub(crate) struct StringPtr<'a> {
     ptr: *const c_char,
@@ -19,6 +20,7 @@ pub(crate) struct StringPtr<'a> {
 
 impl Argv {
     /// Get a null-pointer [`StringPtr`].
+    #[cfg(target_os = "macos")]
     pub(crate) fn null_string_ptr() -> StringPtr<'static> {
         StringPtr {
             ptr: ptr::null(),
@@ -28,7 +30,8 @@ impl Argv {
 
     /// Get a vector of pointers of which the data buffer is memory-same as a null-terminated array
     /// of pointers to null-terminated strings.
-    pub(crate) fn null_vec(&self) -> Vec<StringPtr> {
+    #[cfg(target_os = "macos")]
+    pub(crate) fn null_vec(&mut self) -> Vec<StringPtr> {
         let mut vec: Vec<StringPtr> = self
             .0
             .iter()
@@ -41,12 +44,20 @@ impl Argv {
         vec
     }
 
-    pub(crate) fn push(&mut self, item: CString) {
-        self.0.push(item);
+    pub(crate) fn leak(self) -> *const *const c_char {
+        let mut list = self
+            .0
+            .into_iter()
+            .map(|value| value.into_raw().cast_const())
+            .collect::<Vec<_>>();
+
+        list.push(ptr::null());
+
+        list.into_raw_parts().0.cast_const()
     }
 
-    pub(crate) fn len(&self) -> usize {
-        self.0.len()
+    pub(crate) fn push(&mut self, item: CString) {
+        self.0.push(item);
     }
 }
 
