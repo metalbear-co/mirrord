@@ -1,5 +1,6 @@
 use std::{
     ffi::{CStr, CString},
+    ops::Not,
     os::unix::process::parent_id,
 };
 
@@ -20,7 +21,7 @@ use crate::{
     SOCKETS,
 };
 
-#[tracing::instrument(level = Level::TRACE)]
+// #[tracing::instrument(level = Level::TRACE)]
 fn shared_sockets() -> Vec<(i32, UserSocket)> {
     SOCKETS
         .iter()
@@ -54,13 +55,43 @@ fn execve(env_vars: &mut Argv) -> Detour<()> {
 
 #[hook_guard_fn]
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
-    let encoded = bincode::encode_to_vec(shared_sockets(), bincode::config::standard())
-        .map(|bytes| BASE64_URL_SAFE.encode(bytes))
-        .unwrap_or_default();
+    // let encoded = bincode::encode_to_vec(shared_sockets(), bincode::config::standard())
+    //     .map(|bytes| BASE64_URL_SAFE.encode(bytes))
+    //     .unwrap_or_default();
 
-    std::env::set_var("MIRRORD_SHARED_SOCKETS", encoded);
+    // std::env::set_var("MIRRORD_SHARED_SOCKETS", encoded);
 
-    FN_EXECV(path, argv)
+    // FN_EXECV(path, argv)
+
+    let mut env_vars = std::env::vars()
+        .filter_map(|(key, value)| CString::new(format!("{key}={value}")).ok())
+        .collect::<Argv>();
+
+    if let Detour::Success(()) = execve(&mut env_vars) {
+        let (ptr, _, _) = env_vars.null_vec().into_raw_parts();
+        // let modified_envp = env_vars.null_vec().as_ptr() as *const *const c_char;
+        let modified_envp = ptr as *const *const c_char;
+
+        #[cfg(target_os = "macos")]
+        match patch_sip_for_new_process(path, argv, modified_envp) {
+            Detour::Success((new_path, new_argv, new_envp)) => {
+                let new_argv = new_argv.null_vec();
+                let new_envp = new_envp.null_vec();
+                FN_EXECVE(
+                    new_path.as_ptr(),
+                    new_argv.as_ptr() as *const *const c_char,
+                    new_envp.as_ptr() as *const *const c_char,
+                )
+            }
+            _ => FN_EXECV(path, argv),
+        }
+
+        // tracing::info!("Success execve!");
+        #[cfg(target_os = "linux")]
+        FN_EXECVE(path, argv, modified_envp)
+    } else {
+        FN_EXECV(path, argv)
+    }
 }
 
 /// Hook for `libc::execve`.
@@ -90,11 +121,14 @@ pub(crate) unsafe extern "C" fn execve_detour(
     let rawish_envp = Nul::new_unchecked(envp);
     let mut env_vars = rawish_envp
         .iter()
+        .filter(|v| v.is_null().not())
         .map(|raw_env_var| unsafe { CStr::from_ptr(*raw_env_var) }.to_owned())
         .collect::<Argv>();
 
     if let Detour::Success(()) = execve(&mut env_vars) {
-        let modified_envp = env_vars.null_vec().as_ptr() as *const *const c_char;
+        let (ptr, _, _) = env_vars.null_vec().into_raw_parts();
+        // let modified_envp = env_vars.null_vec().as_ptr() as *const *const c_char;
+        let modified_envp = ptr as *const *const c_char;
 
         #[cfg(target_os = "macos")]
         match patch_sip_for_new_process(path, argv, modified_envp) {
@@ -110,7 +144,7 @@ pub(crate) unsafe extern "C" fn execve_detour(
             _ => FN_EXECVE(path, argv, envp),
         }
 
-        tracing::info!("Success execve!");
+        // tracing::info!("Success execve!");
         #[cfg(target_os = "linux")]
         FN_EXECVE(path, argv, modified_envp)
     } else {
