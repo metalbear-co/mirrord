@@ -4,7 +4,7 @@
 #[cfg(target_os = "linux")]
 use std::assert_matches::assert_matches;
 #[cfg(target_os = "macos")]
-use std::{env, fs};
+use std::{env, fs, path::Path};
 use std::{env::temp_dir, path::PathBuf, time::Duration};
 
 use libc::{pid_t, O_RDWR};
@@ -67,11 +67,11 @@ async fn read_from_mirrord_bin(dylib_path: &PathBuf) {
     // Make sure we write and read from different paths (this is "meta check").
     assert_ne!(file_path, path_in_mirrord_bin);
 
-    let executable = sip_patch("cat", &Vec::new()).unwrap().unwrap();
+    let executable = sip_patch(Path::new("cat"), &Vec::new()).unwrap().unwrap();
 
     // <TMPDIR>/mirrord-bin/cat <TMPDIR>/mirrord-bin/<TMPDIR>/mirrord-test-read-from-mirrord-bin
     let application = Application::DynamicApp(
-        executable,
+        executable.to_string_lossy().to_string(),
         vec![path_in_mirrord_bin.to_string_lossy().to_string()],
     );
 
