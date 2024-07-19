@@ -12,9 +12,6 @@ app = FastAPI()
 class HttpMethod(str, Enum):
     GET = "GET"
 
-done = {method: False for method in HttpMethod}
-
-
 def kill_later():
     def kill_thread():
         time.sleep(1)
@@ -25,9 +22,7 @@ def kill_later():
 
 def handle_request(method: HttpMethod):
     print(f'{method}: Request completed')
-    done[method] = True
-    if all(done.values()):
-        kill_later()
+    kill_later()
     return Response(content=method, media_type="text/plain")
 
 @app.get("/")
