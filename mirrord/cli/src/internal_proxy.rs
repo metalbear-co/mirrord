@@ -64,9 +64,9 @@ unsafe fn detach_io() -> Result<(), InternalProxyError> {
 
 /// Print the port for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.
-fn print_port(listener: &TcpListener) -> io::Result<()> {
-    let port = listener.local_addr()?.port();
-    println!("{port}\n");
+fn print_addr(listener: &TcpListener) -> io::Result<()> {
+    let addr = listener.local_addr()?;
+    println!("{addr}\n");
     Ok(())
 }
 
@@ -83,7 +83,7 @@ fn create_listen_socket() -> io::Result<TcpListener> {
     )?;
 
     socket.bind(&socket2::SockAddr::from(SocketAddrV4::new(
-        Ipv4Addr::LOCALHOST,
+        Ipv4Addr::UNSPECIFIED,
         0,
     )))?;
     socket.listen(1024)?;
@@ -145,7 +145,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
 
     // Let it assign port for us then print it for the user.
     let listener = create_listen_socket().map_err(InternalProxyError::ListenerSetup)?;
-    print_port(&listener).map_err(InternalProxyError::ListenerSetup)?;
+    print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
 
     unsafe {
         detach_io()?;

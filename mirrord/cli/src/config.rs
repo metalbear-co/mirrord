@@ -1,10 +1,12 @@
 #![deny(missing_docs)]
 
-use std::{fmt::Display, path::PathBuf};
+use std::{ffi::OsString, fmt::Display, path::PathBuf, str::FromStr};
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 use mirrord_operator::setup::OperatorNamespace;
+
+use crate::error::{CliError, UnsupportedRuntimeVariant};
 
 #[derive(Parser)]
 #[command(
@@ -56,6 +58,9 @@ pub(super) enum Commands {
 
     /// Diagnostic commands
     Diagnose(Box<DiagnoseArgs>),
+
+    /// Create and run a new container from an image with mirrord loaded
+    Container(Box<ContainerArgs>),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -83,8 +88,7 @@ impl Display for FsMode {
 }
 
 #[derive(Args, Debug)]
-#[command(group(ArgGroup::new("exec")))]
-pub(super) struct ExecArgs {
+pub(super) struct ExecParams {
     /// Target name to mirror.    
     /// Target can either be a deployment or a pod.
     /// Valid formats: deployment/name, pod/name, pod/name/container/name
@@ -123,9 +127,6 @@ pub(super) struct ExecArgs {
     #[arg(long)]
     pub no_remote_dns: bool,
 
-    /// Binary to execute and connect with the remote pod.
-    pub binary: String,
-
     /// mirrord will not load into these processes, they will run completely locally.
     #[arg(long)]
     pub skip_processes: Option<String>,
@@ -141,9 +142,6 @@ pub(super) struct ExecArgs {
     /// Accept/reject invalid certificates.
     #[arg(short = 'c', long)]
     pub accept_invalid_certificates: bool,
-
-    /// Arguments to pass to the binary.
-    pub(super) binary_args: Vec<String>,
 
     /// Use an Ephemeral Container to mirror traffic.
     #[arg(short, long)]
@@ -180,6 +178,122 @@ pub(super) struct ExecArgs {
     /// Kube context to use from Kubeconfig
     #[arg(long)]
     pub context: Option<String>,
+}
+
+impl ExecParams {
+    pub fn to_env(&self) -> Result<Vec<(OsString, OsString)>, CliError> {
+        let mut envs: Vec<(OsString, OsString)> = Vec::new();
+
+        if let Some(target) = &self.target {
+            envs.push(("MIRRORD_IMPERSONATED_TARGET".into(), target.into()));
+        }
+
+        if self.no_telemetry {
+            envs.push(("MIRRORD_TELEMETRY".into(), "false".into()));
+        }
+
+        if let Some(skip_processes) = &self.skip_processes {
+            envs.push(("MIRRORD_SKIP_PROCESSES".into(), skip_processes.into()));
+        }
+
+        if let Some(namespace) = &self.target_namespace {
+            envs.push(("MIRRORD_TARGET_NAMESPACE".into(), namespace.into()));
+        }
+
+        if let Some(namespace) = &self.agent_namespace {
+            envs.push(("MIRRORD_AGENT_NAMESPACE".into(), namespace.into()));
+        }
+
+        if let Some(log_level) = &self.agent_log_level {
+            envs.push(("MIRRORD_AGENT_RUST_LOG".into(), log_level.into()));
+        }
+
+        if let Some(image) = &self.agent_image {
+            envs.push(("MIRRORD_AGENT_IMAGE".into(), image.into()));
+        }
+
+        if let Some(agent_ttl) = &self.agent_ttl {
+            envs.push(("MIRRORD_AGENT_TTL".into(), agent_ttl.to_string().into()));
+        }
+        if let Some(agent_startup_timeout) = &self.agent_startup_timeout {
+            envs.push((
+                "MIRRORD_AGENT_STARTUP_TIMEOUT".into(),
+                agent_startup_timeout.to_string().into(),
+            ));
+        }
+
+        if let Some(fs_mode) = self.fs_mode {
+            envs.push(("MIRRORD_FILE_MODE".into(), fs_mode.to_string().into()));
+        }
+
+        if let Some(override_env_vars_exclude) = &self.override_env_vars_exclude {
+            envs.push((
+                "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE".into(),
+                override_env_vars_exclude.into(),
+            ));
+        }
+
+        if let Some(override_env_vars_include) = &self.override_env_vars_include {
+            envs.push((
+                "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE".into(),
+                override_env_vars_include.into(),
+            ));
+        }
+
+        if self.no_remote_dns {
+            envs.push(("MIRRORD_REMOTE_DNS".into(), "false".into()));
+        }
+
+        if self.accept_invalid_certificates {
+            envs.push(("MIRRORD_ACCEPT_INVALID_CERTIFICATES".into(), "true".into()));
+            tracing::warn!("Accepting invalid certificates");
+        }
+
+        if self.ephemeral_container {
+            envs.push(("MIRRORD_EPHEMERAL_CONTAINER".into(), "true".into()));
+        };
+
+        if self.tcp_steal {
+            envs.push(("MIRRORD_AGENT_TCP_STEAL_TRAFFIC".into(), "true".into()));
+        };
+
+        if self.no_outgoing || self.no_tcp_outgoing {
+            envs.push(("MIRRORD_TCP_OUTGOING".into(), "false".into()));
+        }
+
+        if self.no_outgoing || self.no_udp_outgoing {
+            envs.push(("MIRRORD_UDP_OUTGOING".into(), "false".into()));
+        }
+
+        if let Some(context) = &self.context {
+            envs.push(("MIRRORD_KUBE_CONTEXT".into(), context.into()));
+        }
+
+        if let Some(config_file) = &self.config_file {
+            // Set canoncialized path to config file, in case forks/children are in different
+            // working directories.
+            let full_path = std::fs::canonicalize(config_file)
+                .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.clone(), e))?;
+            envs.push((
+                "MIRRORD_CONFIG_FILE".into(),
+                full_path.as_os_str().to_owned(),
+            ));
+        }
+
+        Ok(envs)
+    }
+}
+
+#[derive(Args, Debug)]
+pub(super) struct ExecArgs {
+    #[clap(flatten)]
+    pub params: ExecParams,
+
+    /// Binary to execute and connect with the remote pod.
+    pub binary: String,
+
+    /// Arguments to pass to the binary.
+    pub(super) binary_args: Vec<String>,
 }
 
 #[derive(Args, Debug)]
@@ -338,4 +452,38 @@ pub(super) enum DiagnoseCommand {
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
         config_file: Option<PathBuf>,
     },
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum ContainerRuntime {
+    Docker,
+}
+
+impl core::fmt::Display for ContainerRuntime {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ContainerRuntime::Docker => write!(f, "docker"),
+        }
+    }
+}
+
+impl FromStr for ContainerRuntime {
+    type Err = UnsupportedRuntimeVariant;
+
+    fn from_str(runtime: &str) -> Result<Self, Self::Err> {
+        match runtime {
+            "docker" => Ok(ContainerRuntime::Docker),
+            _ => Err(UnsupportedRuntimeVariant),
+        }
+    }
+}
+
+#[derive(Args, Debug)]
+pub(super) struct ContainerArgs {
+    #[clap(flatten)]
+    pub params: ExecParams,
+
+    pub runtime: ContainerRuntime,
+
+    pub runtime_args: Vec<String>,
 }

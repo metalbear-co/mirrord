@@ -8,6 +8,7 @@ use std::{collections::HashMap, time::Duration};
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
+use container::container_command;
 use diagnose::diagnose_command;
 use exec::execvp;
 use execution::MirrordExecution;
@@ -50,6 +51,7 @@ use which::which;
 
 mod config;
 mod connection;
+mod container;
 mod diagnose;
 mod error;
 mod execution;
@@ -312,7 +314,7 @@ fn print_config<P>(
 
 async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord exec");
-    if !args.disable_version_check {
+    if !args.params.disable_version_check {
         prompt_outdated_version(&progress).await;
     }
     info!(
@@ -320,101 +322,12 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
         args.binary, args.binary_args
     );
 
-    if !(args.no_tcp_outgoing || args.no_udp_outgoing) && args.no_remote_dns {
+    if !(args.params.no_tcp_outgoing || args.params.no_udp_outgoing) && args.params.no_remote_dns {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
 
-    if let Some(target) = &args.target {
-        std::env::set_var("MIRRORD_IMPERSONATED_TARGET", target);
-    }
-
-    if args.no_telemetry {
-        std::env::set_var("MIRRORD_TELEMETRY", "false");
-    }
-
-    if let Some(skip_processes) = &args.skip_processes {
-        std::env::set_var("MIRRORD_SKIP_PROCESSES", skip_processes.clone());
-    }
-
-    if let Some(namespace) = &args.target_namespace {
-        std::env::set_var("MIRRORD_TARGET_NAMESPACE", namespace.clone());
-    }
-
-    if let Some(namespace) = &args.agent_namespace {
-        std::env::set_var("MIRRORD_AGENT_NAMESPACE", namespace.clone());
-    }
-
-    if let Some(log_level) = &args.agent_log_level {
-        std::env::set_var("MIRRORD_AGENT_RUST_LOG", log_level.clone());
-    }
-
-    if let Some(image) = &args.agent_image {
-        std::env::set_var("MIRRORD_AGENT_IMAGE", image.clone());
-    }
-
-    if let Some(agent_ttl) = &args.agent_ttl {
-        std::env::set_var("MIRRORD_AGENT_TTL", agent_ttl.to_string());
-    }
-    if let Some(agent_startup_timeout) = &args.agent_startup_timeout {
-        std::env::set_var(
-            "MIRRORD_AGENT_STARTUP_TIMEOUT",
-            agent_startup_timeout.to_string(),
-        );
-    }
-
-    if let Some(fs_mode) = args.fs_mode {
-        std::env::set_var("MIRRORD_FILE_MODE", fs_mode.to_string());
-    }
-
-    if let Some(override_env_vars_exclude) = &args.override_env_vars_exclude {
-        std::env::set_var(
-            "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE",
-            override_env_vars_exclude,
-        );
-    }
-
-    if let Some(override_env_vars_include) = &args.override_env_vars_include {
-        std::env::set_var(
-            "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE",
-            override_env_vars_include,
-        );
-    }
-
-    if args.no_remote_dns {
-        std::env::set_var("MIRRORD_REMOTE_DNS", "false");
-    }
-
-    if args.accept_invalid_certificates {
-        std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
-        warn!("Accepting invalid certificates");
-    }
-
-    if args.ephemeral_container {
-        std::env::set_var("MIRRORD_EPHEMERAL_CONTAINER", "true");
-    };
-
-    if args.tcp_steal {
-        std::env::set_var("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", "true");
-    };
-
-    if args.no_outgoing || args.no_tcp_outgoing {
-        std::env::set_var("MIRRORD_TCP_OUTGOING", "false");
-    }
-
-    if args.no_outgoing || args.no_udp_outgoing {
-        std::env::set_var("MIRRORD_UDP_OUTGOING", "false");
-    }
-
-    if let Some(context) = &args.context {
-        std::env::set_var("MIRRORD_KUBE_CONTEXT", context);
-    }
-
-    if let Some(config_file) = &args.config_file {
-        // Set canoncialized path to config file, in case forks/children are in different
-        // working directories.
-        let full_path = std::fs::canonicalize(config_file)
-            .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.clone(), e))?;
-        std::env::set_var("MIRRORD_CONFIG_FILE", full_path);
+    for (name, value) in args.params.to_env()? {
+        std::env::set_var(name, value);
     }
 
     let (config, mut context) = LayerConfig::from_env_with_warnings()?;
@@ -677,6 +590,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::Teams => teams::navigate_to_intro().await,
             Commands::Diagnose(args) => diagnose_command(*args).await?,
+            Commands::Container(args) => container_command(*args, watch).await?,
         };
 
         Ok(())

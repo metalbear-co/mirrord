@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    net::SocketAddr,
     time::Duration,
 };
 
@@ -28,11 +29,13 @@ use crate::{
     Result,
 };
 
+pub(crate) const LINUX_INJECTION_ENV_VAR: &str = "LD_PRELOAD";
+
 #[cfg(target_os = "linux")]
-const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
+pub(crate) const INJECTION_ENV_VAR: &str = LINUX_INJECTION_ENV_VAR;
 
 #[cfg(target_os = "macos")]
-const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
+pub(crate) const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 
 /// Struct for holding the execution information
 /// What agent to connect to, what environment variables to set
@@ -195,10 +198,11 @@ impl MirrordExecution {
 
         let stdout = proxy_process.stdout.take().expect("stdout was piped");
 
-        let port: u16 = BufReader::new(stdout)
+        let socket: SocketAddr = BufReader::new(stdout)
             .lines()
             .next_line()
             .await
+            .inspect(|val| println!("{val:?}"))
             .map_err(|e| {
                 CliError::InternalProxySpawnError(format!("failed to read proxy stdout: {e}"))
             })?
@@ -217,7 +221,7 @@ impl MirrordExecution {
         // Provide details for layer to connect to agent via internal proxy
         env_vars.insert(
             "MIRRORD_CONNECT_TCP".to_string(),
-            format!("127.0.0.1:{port}"),
+            format!("127.0.0.1:{}", socket.port()),
         );
 
         // Fix <https://github.com/metalbear-co/mirrord/issues/1745>
