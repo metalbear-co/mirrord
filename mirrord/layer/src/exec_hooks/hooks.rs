@@ -91,15 +91,11 @@ pub(crate) unsafe extern "C" fn execve_detour(
     if let Detour::Success(modified_envp) = execve(checked_envp) {
         #[cfg(target_os = "macos")]
         match patch_sip_for_new_process(path, argv, modified_envp) {
-            Detour::Success((new_path, new_argv, new_envp)) => {
-                let new_argv = new_argv.leak();
-                let new_envp = new_envp.leak();
-                FN_EXECVE(
-                    new_path.into_raw().cast_const(),
-                    new_argv.leak(),
-                    new_envp.leak(),
-                )
-            }
+            Detour::Success((new_path, new_argv, new_envp)) => FN_EXECVE(
+                new_path.into_raw().cast_const(),
+                new_argv.leak(),
+                new_envp.leak(),
+            ),
             _ => FN_EXECVE(path, argv, envp),
         }
 
