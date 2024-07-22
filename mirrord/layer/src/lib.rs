@@ -537,6 +537,8 @@ fn enable_hooks(state: &LayerSetup) {
 
     #[cfg(target_os = "macos")]
     {
+        use crate::exec_utils::enable_macos_hooks;
+
         let patch_binaries = state.sip_binaries();
         unsafe { enable_macos_hooks(&mut hook_manager, patch_binaries) };
 
