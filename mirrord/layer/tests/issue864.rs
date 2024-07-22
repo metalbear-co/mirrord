@@ -58,6 +58,10 @@ async fn test_issue854(
         .send_connection_then_data(&prepare_request_body("GET", ""), application.get_app_port())
         .await;
 
+    test_process
+        .wait_for_line(Duration::from_secs(5), "GET: Request completed")
+        .await;
+
     signal::kill(
         Pid::from_raw(test_process.child.id().expect("Child must have pid!") as i32),
         Signal::SIGTERM,
