@@ -211,14 +211,17 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
     if let Detour::Success(modified_envp) = exec_hooks::hooks::execve(checked_envp) {
         match patch_sip_for_new_process(path, argv, modified_envp) {
             Detour::Success((new_path, new_argv, new_envp)) => FN_POSIX_SPAWN(
+                pid,
                 new_path.into_raw().cast_const(),
+                file_actions,
+                attrp,
                 new_argv.leak(),
                 new_envp.leak(),
             ),
-            _ => FN_POSIX_SPAWN(path, argv, envp),
+            _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
         }
     } else {
-        FN_POSIX_SPAWN(path, argv, envp)
+        FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp)
     }
 
     match patch_sip_for_new_process(path, argv, envp) {
