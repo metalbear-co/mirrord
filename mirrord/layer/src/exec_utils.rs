@@ -1,5 +1,4 @@
 #![cfg(target_os = "macos")]
-
 use std::{
     env,
     ffi::{c_void, CStr, CString},
@@ -23,7 +22,7 @@ use crate::{
         Detour::{Bypass, Error, Success},
     },
     error::HookError,
-    exec_hooks::*,
+    exec_hooks::{hooks, *},
     hooks::HookManager,
     replace,
 };
@@ -208,7 +207,7 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
 ) -> c_int {
     let checked_envp = envp.checked_into();
 
-    if let Detour::Success(modified_envp) = exec_hooks::hooks::execve(checked_envp) {
+    if let Detour::Success(modified_envp) = hooks::execve(checked_envp) {
         match patch_sip_for_new_process(path, argv, modified_envp) {
             Detour::Success((new_path, new_argv, new_envp)) => FN_POSIX_SPAWN(
                 pid,
