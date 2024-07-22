@@ -164,6 +164,7 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
 /// in any of the arguments, remove it and leave only the original path of the file. If for example
 /// `argv[1]` is `"/tmp/mirrord-bin/bin/bash"`, create a new `argv` where `argv[1]` is
 /// `"/bin/bash"`.
+#[tracing::instrument(level = "info", skip_all, ret)]
 pub(crate) unsafe fn patch_sip_for_new_process(
     path: *const c_char,
     argv: *const *const c_char,

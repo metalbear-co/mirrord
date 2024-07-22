@@ -103,7 +103,6 @@ pub(crate) unsafe extern "C" fn execve_detour(
         #[cfg(target_os = "linux")]
         FN_EXECVE(path, argv, modified_envp)
     } else {
-        tracing::info!("Not success execve!");
         FN_EXECVE(path, argv, envp)
     }
 }
