@@ -4,6 +4,10 @@
 
 use std::{path::PathBuf, time::Duration};
 
+use nix::{
+    sys::{signal, signal::Signal},
+    unistd::Pid,
+};
 use rstest::rstest;
 
 mod common;
@@ -21,7 +25,7 @@ async fn test_issue854(
     dylib_path: &PathBuf,
     config_dir: &PathBuf,
 ) {
-    let (mut test_process, mut intproxy) = application
+    let (test_process, mut intproxy) = application
         .start_process_with_layer_and_port(
             dylib_path,
             vec![
@@ -54,7 +58,12 @@ async fn test_issue854(
         .send_connection_then_data(&prepare_request_body("GET", ""), application.get_app_port())
         .await;
 
-    test_process.wait().await;
+    signal::kill(
+        Pid::from_raw(test_process.child.id().expect("Child must have pid!") as i32),
+        Signal::SIGTERM,
+    )
+    .expect("Process has been `SIGTERM`!");
+
     test_process
         .assert_stdout_contains("GET: Request completed")
         .await;
