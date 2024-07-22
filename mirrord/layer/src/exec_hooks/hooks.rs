@@ -37,7 +37,7 @@ fn shared_sockets() -> Vec<(i32, UserSocket)> {
         parent_pid = parent_id(),
     )
 )]
-fn execve(env_vars: Detour<Argv>) -> Detour<*const *const c_char> {
+pub(crate) fn execve(env_vars: Detour<Argv>) -> Detour<*const *const c_char> {
     let mut env_vars = env_vars?;
     let encoded = bincode::encode_to_vec(shared_sockets(), bincode::config::standard())
         .map(|bytes| BASE64_URL_SAFE.encode(bytes))?;
