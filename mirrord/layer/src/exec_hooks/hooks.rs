@@ -94,7 +94,11 @@ pub(crate) unsafe extern "C" fn execve_detour(
             Detour::Success((new_path, new_argv, new_envp)) => {
                 let new_argv = new_argv.leak();
                 let new_envp = new_envp.leak();
-                FN_EXECVE(new_path.into_raw().cast_const(), new_argv, new_envp)
+                FN_EXECVE(
+                    new_path.into_raw().cast_const(),
+                    new_argv.leak(),
+                    new_envp.leak(),
+                )
             }
             _ => FN_EXECVE(path, argv, envp),
         }
