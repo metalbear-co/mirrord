@@ -59,7 +59,7 @@ async fn test_issue854(
         .await;
 
     test_process
-        .wait_for_line(Duration::from_secs(5), "GET: Request completed")
+        .wait_for_line(Duration::from_secs(5), "HttpMethod.GET: Request completed")
         .await;
 
     signal::kill(
