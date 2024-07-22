@@ -223,23 +223,6 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
     } else {
         FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp)
     }
-
-    match patch_sip_for_new_process(path, argv, envp) {
-        Success((new_path, mut new_argv, mut new_envp)) => {
-            let new_argv = new_argv.null_vec();
-            let new_envp = new_envp.null_vec();
-
-            FN_POSIX_SPAWN(
-                pid,
-                new_path.as_ptr(),
-                file_actions,
-                attrp,
-                new_argv.as_ptr() as *const *const c_char,
-                new_envp.as_ptr() as *const *const c_char,
-            )
-        }
-        _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
-    }
 }
 
 #[hook_guard_fn]
