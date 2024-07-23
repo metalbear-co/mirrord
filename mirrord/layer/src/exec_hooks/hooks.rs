@@ -17,6 +17,8 @@ use crate::{
     SOCKETS,
 };
 
+/// Converts the [`SOCKETS`] map into a vector of pairs `(Fd, UserSocket)`, so we can rebuild
+/// it as a map.
 #[tracing::instrument(level = Level::TRACE, ret)]
 fn shared_sockets() -> Vec<(i32, UserSocket)> {
     SOCKETS
@@ -25,6 +27,11 @@ fn shared_sockets() -> Vec<(i32, UserSocket)> {
         .collect::<Vec<_>>()
 }
 
+/// Takes an [`Argv`] with the enviroment variables from an `exec` call, extending it with
+/// an encoded version of our [`SOCKETS`].
+///
+/// The check for [`libc::FD_CLOEXEC`] is performed during the [`SOCKETS`] initialization
+/// by the child process.
 #[mirrord_layer_macro::instrument(
     level = Level::DEBUG,
     ret,
@@ -43,6 +50,10 @@ pub(crate) fn execve(env_vars: Detour<Argv>) -> Detour<*const *const c_char> {
     Detour::Success(env_vars.leak())
 }
 
+/// Hook for `libc::execv` for linux only.
+///
+/// On macos this just calls `execve(path, argv, _environ)`, so we'll be handling it in our
+/// [`execve_detour`].
 #[cfg(not(target_os = "macos"))]
 #[hook_guard_fn]
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
@@ -50,6 +61,7 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
         .map(|bytes| BASE64_URL_SAFE.encode(bytes))
         .unwrap_or_default();
 
+    // `encoded` is emtpy if the encoding failed, so we don't set the env var.
     if !encoded.is_empty() {
         std::env::set_var("MIRRORD_SHARED_SOCKETS", encoded);
     }
@@ -58,6 +70,8 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
 }
 
 /// Hook for `libc::execve`.
+///
+/// We can't change the pointers, to get around that we create our own and **leak** them.
 ///
 /// - #[cfg(target_os = "macos")]
 ///
@@ -102,6 +116,7 @@ pub(crate) unsafe extern "C" fn execve_detour(
     }
 }
 
+/// Enables `exec` hooks.
 pub(crate) unsafe fn enable_exec_hooks(hook_manager: &mut HookManager) {
     #[cfg(not(target_os = "macos"))]
     replace!(hook_manager, "execv", execv_detour, FnExecv, FN_EXECV);
