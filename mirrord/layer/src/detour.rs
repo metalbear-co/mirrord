@@ -9,7 +9,9 @@ use core::{
     convert,
     ops::{FromResidual, Residual, Try},
 };
-use std::{cell::RefCell, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::OnceLock};
+use std::{
+    cell::RefCell, ffi::CString, ops::Deref, os::unix::prelude::*, path::PathBuf, sync::OnceLock,
+};
 
 #[cfg(target_os = "macos")]
 use libc::c_char;
@@ -150,10 +152,10 @@ pub(crate) enum Bypass {
     FileOperationInMirrordBinTempDir(*const c_char),
 
     /// File [`PathBuf`] should be ignored (used for tests).
-    IgnoredFile(PathBuf),
+    IgnoredFile(CString),
 
     /// Some operations only handle absolute [`PathBuf`]s.
-    RelativePath(PathBuf),
+    RelativePath(CString),
 
     /// Started mirrord with [`FsModeConfig`](mirrord_config::feature::fs::mode::FsModeConfig) set
     /// to [`FsModeConfig::Read`](mirrord_config::feature::fs::FsModeConfig::Read), but
@@ -207,6 +209,16 @@ pub(crate) enum Bypass {
 
     /// DNS query should be done locally.
     LocalDns,
+}
+
+impl Bypass {
+    pub fn relative_path(path: impl Into<Vec<u8>>) -> Self {
+        Bypass::RelativePath(CString::new(path).expect("Should be CStringable"))
+    }
+
+    pub fn ignored_file(path: impl Into<Vec<u8>>) -> Self {
+        Bypass::IgnoredFile(CString::new(path).expect("Should be CStringable"))
+    }
 }
 
 /// [`ControlFlow`](std::ops::ControlFlow)-like enum to be used by hooks.
