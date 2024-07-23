@@ -11,6 +11,7 @@ use base64::prelude::*;
 use bincode::{Decode, Encode};
 use dashmap::DashMap;
 use hashbrown::hash_set::HashSet;
+use hooks::FN_FCNTL;
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::feature::network::{
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
@@ -49,11 +50,13 @@ pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock:
             .ok()
         })
         .map(|(fds_and_sockets, _)| {
-            DashMap::from_iter(
-                fds_and_sockets
-                    .into_iter()
-                    .map(|(fd, socket)| (fd, Arc::new(socket))),
-            )
+            DashMap::from_iter(fds_and_sockets.into_iter().filter_map(|(fd, socket)| {
+                if unsafe{ FN_FCNTL(fd, libc::F_GETFD, 0) != -1}  {
+                    Some((fd, Arc::new(socket)))
+                } else {
+                    None
+                }
+            }))
         })
         .unwrap_or_default()
 });

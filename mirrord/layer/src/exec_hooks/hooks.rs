@@ -21,10 +21,8 @@ use crate::{
 fn shared_sockets() -> Vec<(i32, UserSocket)> {
     SOCKETS
         .iter()
-        .filter_map(|inner| {
-            // We only want to share the sockets that are not `FD_CLOEXEC`.
-            let is_shared = unsafe { FN_FCNTL(*inner.key(), libc::F_GETFD) } & FD_CLOEXEC > 0;
-            is_shared.then(|| (*inner.key(), UserSocket::clone(inner.value())))
+        .map(|inner| {
+            (*inner.key(), UserSocket::clone(inner.value()))
         })
         .collect::<Vec<_>>()
 }
