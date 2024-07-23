@@ -46,6 +46,8 @@ pub(crate) fn execve(env_vars: Detour<Argv>) -> Detour<*const *const c_char> {
         env_vars.push(CString::new(format!("{SHARED_SOCKETS_ENV_VAR}={encoded}"))?);
     }
 
+    tracing::info!("too many args? {:?}", env_vars.len() > 256);
+
     Detour::Success(env_vars.leak())
 }
 
