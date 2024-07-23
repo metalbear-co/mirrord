@@ -8,6 +8,7 @@ use std::{
 };
 
 use bytes::BytesMut;
+use local_ip_address::{local_ip, local_ipv6};
 use mirrord_intproxy_protocol::NetProtocol;
 use mirrord_protocol::{
     outgoing::{
@@ -84,8 +85,12 @@ impl NetProtocolExt for NetProtocol {
         let socket = match for_remote_address {
             SocketAddress::Ip(addr) => {
                 let ip_addr = match addr.ip() {
-                    IpAddr::V4(..) => IpAddr::V4(Ipv4Addr::new(10, 0, 0, 4)),
-                    IpAddr::V6(..) => IpAddr::V6(Ipv6Addr::LOCALHOST),
+                    IpAddr::V4(..) => {
+                        local_ip().unwrap_or_else(|_| IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+                    }
+                    IpAddr::V6(..) => {
+                        local_ipv6().unwrap_or_else(|_| IpAddr::V6(Ipv6Addr::UNSPECIFIED))
+                    }
                 };
                 let bind_at = SocketAddr::new(ip_addr, 0);
 
