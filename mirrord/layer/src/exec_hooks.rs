@@ -25,10 +25,6 @@ impl Argv {
     pub(crate) fn push(&mut self, item: CString) {
         self.0.push(item);
     }
-
-    pub(crate) fn len(&self) -> usize {
-        self.0.len()
-    }
 }
 
 impl FromIterator<CString> for Argv {
