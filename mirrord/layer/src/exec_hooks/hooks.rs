@@ -1,7 +1,7 @@
 use std::{ffi::CString, os::unix::process::parent_id};
 
 use base64::prelude::*;
-use libc::{c_char, c_int, FD_CLOEXEC};
+use libc::{c_char, c_int};
 use mirrord_layer_macro::hook_guard_fn;
 use tracing::Level;
 
@@ -13,7 +13,7 @@ use crate::{
     detour::Detour,
     hooks::HookManager,
     replace,
-    socket::{hooks::FN_FCNTL, UserSocket, SHARED_SOCKETS_ENV_VAR},
+    socket::{UserSocket, SHARED_SOCKETS_ENV_VAR},
     SOCKETS,
 };
 
@@ -21,9 +21,7 @@ use crate::{
 fn shared_sockets() -> Vec<(i32, UserSocket)> {
     SOCKETS
         .iter()
-        .map(|inner| {
-            (*inner.key(), UserSocket::clone(inner.value()))
-        })
+        .map(|inner| (*inner.key(), UserSocket::clone(inner.value())))
         .collect::<Vec<_>>()
 }
 
@@ -40,11 +38,7 @@ pub(crate) fn execve(env_vars: Detour<Argv>) -> Detour<*const *const c_char> {
     let encoded = bincode::encode_to_vec(shared_sockets(), bincode::config::standard())
         .map(|bytes| BASE64_URL_SAFE.encode(bytes))?;
 
-    if !encoded.is_empty() {
-        env_vars.push(CString::new(format!("{SHARED_SOCKETS_ENV_VAR}={encoded}"))?);
-    }
-
-    tracing::info!("too many args? {:?}", env_vars.len() > 256);
+    env_vars.push(CString::new(format!("{SHARED_SOCKETS_ENV_VAR}={encoded}"))?);
 
     Detour::Success(env_vars.leak())
 }
