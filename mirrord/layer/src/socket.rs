@@ -207,7 +207,7 @@ impl UserSocket {
     }
 
     /// Inform internal proxy about closing a listening port.
-    #[mirrord_layer_macro::instrument(level = "debug", fields(pid = std::process::id()), ret)]
+    #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()), ret)]
     pub(crate) fn close(&self) {
         if let Self {
             state: SocketState::Listening(bound),

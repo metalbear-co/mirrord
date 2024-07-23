@@ -1,10 +1,5 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{
-    ffi::CStr,
-    fmt::{Debug, Display},
-    ops::Not,
-    path::PathBuf,
-};
+use std::{ffi::CStr, fmt::Debug, ops::Not, path::PathBuf};
 
 use libc::c_char;
 use mirrord_intproxy_protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};

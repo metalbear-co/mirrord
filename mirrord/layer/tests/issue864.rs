@@ -17,6 +17,8 @@ pub use common::*;
 /// Verify that issue [#864](https://github.com/metalbear-co/mirrord/issues/864) is fixed.
 ///
 /// Share sockets between `execve` and `execv` with python's uvicorn.
+///
+/// We run the `shared_sockets.py` app with the `--reload` flag to trigger the issue.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]

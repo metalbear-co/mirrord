@@ -282,12 +282,11 @@ fn init_tracing() {
     if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
         mirrord_console::init_logger(&console_addr).expect("logger initialization failed");
     } else {
-        std::env::set_var("NO_COLOR", "boo");
         tracing_subscriber::registry()
             .with(
                 tracing_subscriber::fmt::layer()
                     .with_thread_ids(true)
-                    .with_span_events(FmtSpan::ACTIVE)
+                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
                     .without_time()
                     .compact()
                     .with_writer(std::io::stderr),
@@ -352,7 +351,7 @@ fn layer_start(mut config: LayerConfig) {
 
     let _detour_guard = DetourGuard::new();
     tracing::info!("Initializing mirrord-layer!");
-    tracing::debug!(
+    tracing::trace!(
         executable = ?EXECUTABLE_PATH.get(),
         args = ?EXECUTABLE_ARGS.get(),
         pid = std::process::id(),
