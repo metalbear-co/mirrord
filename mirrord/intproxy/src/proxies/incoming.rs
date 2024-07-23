@@ -53,14 +53,14 @@ mod subscriptions;
 /// If the given `addr` is unspecified, this function binds to localhost.
 fn bind_similar(addr: SocketAddr) -> io::Result<TcpSocket> {
     match addr.ip() {
-        IpAddr::V4(Ipv4Addr::UNSPECIFIED) => {
+        IpAddr::V4(Ipv4Addr::LOCALHOST) => {
             let socket = TcpSocket::new_v4()?;
-            socket.bind(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))?;
+            socket.bind(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0))?;
             Ok(socket)
         }
-        IpAddr::V6(Ipv6Addr::UNSPECIFIED) => {
+        IpAddr::V6(Ipv6Addr::LOCALHOST) => {
             let socket = TcpSocket::new_v6()?;
-            socket.bind(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0))?;
+            socket.bind(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0))?;
             Ok(socket)
         }
         addr @ IpAddr::V4(..) => {

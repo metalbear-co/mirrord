@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{ffi::OsStr, path::Path};
 
 use exec::execvp;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
@@ -6,10 +6,105 @@ use mirrord_config::LayerConfig;
 use mirrord_progress::{Progress, ProgressTracker};
 
 use crate::{
-    config::ContainerArgs,
+    config::{ContainerArgs, ContainerCommand, ContainerRuntime},
     error::Result,
-    execution::{MirrordExecution, INJECTION_ENV_VAR, LINUX_INJECTION_ENV_VAR},
+    execution::{MirrordExecution, INJECTION_ENV_VAR},
 };
+
+struct Empty;
+struct WithCommand {
+    command: ContainerCommand,
+}
+
+struct RuntimeCommandBuilder<T = Empty> {
+    step: T,
+    runtime: String,
+    extra_args: Vec<String>,
+}
+
+impl RuntimeCommandBuilder {
+    fn new(runtime: ContainerRuntime) -> Self {
+        RuntimeCommandBuilder {
+            step: Empty,
+            runtime: runtime.to_string(),
+            extra_args: Vec::new(),
+        }
+    }
+
+    fn add_env<K, V>(&mut self, key: K, value: V)
+    where
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
+        let key = key.as_ref().to_str().unwrap_or_default();
+        let value = value.as_ref().to_str().unwrap_or_default();
+
+        self.extra_args.push("-e".to_owned());
+        self.extra_args.push(format!("{key}={value}"))
+    }
+
+    fn add_envs<I, K, V>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
+        for (key, value) in iter {
+            self.add_env(key, value);
+        }
+    }
+
+    fn add_volume<H, C>(&mut self, host_path: H, container_path: C)
+    where
+        H: AsRef<Path>,
+        C: AsRef<Path>,
+    {
+        self.extra_args.push("-v".to_owned());
+        self.extra_args.push(format!(
+            "{}:{}",
+            host_path.as_ref().display(),
+            container_path.as_ref().display()
+        ));
+    }
+
+    #[must_use]
+    fn with_command(self, command: ContainerCommand) -> RuntimeCommandBuilder<WithCommand> {
+        let RuntimeCommandBuilder {
+            runtime,
+            extra_args,
+            ..
+        } = self;
+
+        RuntimeCommandBuilder {
+            step: WithCommand { command },
+            runtime,
+            extra_args,
+        }
+    }
+}
+
+impl RuntimeCommandBuilder<WithCommand> {
+    pub fn into_execvp_args(self) -> (String, Vec<String>) {
+        let RuntimeCommandBuilder {
+            runtime,
+            extra_args,
+            step,
+        } = self;
+
+        let (runtime_command, runtime_args) = match step.command {
+            ContainerCommand::Run { runtime_args } => ("run".to_owned(), runtime_args),
+        };
+
+        (
+            runtime.clone(),
+            std::iter::once(runtime)
+                .chain(std::iter::once(runtime_command))
+                .chain(extra_args)
+                .chain(runtime_args)
+                .collect(),
+        )
+    }
+}
 
 pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord container");
@@ -35,13 +130,14 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     #[cfg(target_os = "macos")]
     let mut execution_info =
         MirrordExecution::start(&config, None, &mut sub_progress, &mut analytics).await?;
-    #[cfg(not(target_os = "macos"))]
-    let mut execution_info = MirrordExecution::start(&config, &mut sub_progress, analytics).await?;
+    #[cfg(target_os = "linux")]
+    let mut execution_info =
+        MirrordExecution::start(&config, &mut sub_progress, &mut analytics).await?;
 
     tracing::info!(?execution_info, "starting");
 
     if let Some(connect_tcp) = execution_info.environment.get_mut("MIRRORD_CONNECT_TCP") {
-        *connect_tcp = str::replace(connect_tcp, "127.0.0.1", "10.0.0.3");
+        *connect_tcp = str::replace(connect_tcp, "127.0.0.1", "10.0.0.4");
     }
 
     #[cfg(target_os = "macos")]
@@ -51,22 +147,27 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
         let library_path = "/Users/dmitry/ws/metalbear/mirrord/target/aarch64-unknown-linux-gnu/debug/libmirrord_layer.so".to_owned();
 
         execution_info.environment.insert(
-            LINUX_INJECTION_ENV_VAR.to_string(),
+            crate::execution::LINUX_INJECTION_ENV_VAR.to_string(),
             "/tmp/libmirrord_layer.so".to_string(),
         );
 
         library_path
     };
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     let library_path = {
-        let path = execution_info
+        let library_path = execution_info
             .environment
             .get(INJECTION_ENV_VAR)
             .cloned()
             .unwrap_or_default();
 
-        (path.clone(), path)
+        execution_info.environment.insert(
+            INJECTION_ENV_VAR.to_string(),
+            "/tmp/libmirrord_layer.so".to_string(),
+        );
+
+        library_path
     };
 
     let mirrord_config_path = config_env
@@ -87,52 +188,23 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
             (host_path, continer_path)
         });
 
-    let mut extra_args = Vec::new();
+    let mut command = RuntimeCommandBuilder::new(args.runtime);
 
-    for (key, value) in execution_info.environment.iter() {
-        if key == "HOSTNAME" {
-            continue;
-        }
-
-        extra_args.push("-e".to_owned());
-        extra_args.push(format!("{key}={value}"));
-    }
-
-    for (key, value) in config_env {
-        let (Some(key), Some(value)) = (key.to_str(), value.to_str()) else {
-            continue;
-        };
-
-        extra_args.push("-e".to_owned());
-        extra_args.push(format!("{key}={value}"));
-    }
-
-    extra_args.push("-v".to_owned());
-    extra_args.push(format!("{library_path}:/tmp/libmirrord_layer.so"));
+    command.add_envs(config_env.clone());
+    command.add_envs(
+        execution_info
+            .environment
+            .iter()
+            .filter(|(key, _)| key != &"HOSTNAME"),
+    );
+    command.add_volume(library_path, "/tmp/libmirrord_layer.so");
 
     if let Some((host_path, continer_path)) = mirrord_config_path {
-        extra_args.push("-v".to_owned());
-        extra_args.push(format!("{host_path}:{continer_path}"));
+        command.add_volume(host_path, continer_path);
     }
 
-    tracing::warn!(?extra_args, "adding args");
-
-    let mut runtime_args_iter = args.runtime_args.into_iter().peekable();
-
-    let first_arg: Option<&str> = runtime_args_iter.peek().map(|x| x.as_str());
-
-    assert_eq!(first_arg, Some("run"));
-
-    let runtime_args: Vec<_> = [
-        args.runtime.to_string(),
-        runtime_args_iter.next().expect("Should Exist"),
-    ]
-    .into_iter()
-    .chain(extra_args)
-    .chain(runtime_args_iter)
-    .collect();
-
-    let err = execvp(args.runtime.to_string(), runtime_args);
+    let (binary, binary_args) = command.with_command(args.command).into_execvp_args();
+    let err = execvp(binary, binary_args);
     tracing::error!("Couldn't execute {:?}", err);
 
     analytics.set_error(AnalyticsError::BinaryExecuteFailed);

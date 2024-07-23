@@ -454,15 +454,17 @@ pub(super) enum DiagnoseCommand {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub(super) enum ContainerRuntime {
     Docker,
+    Podman,
 }
 
 impl core::fmt::Display for ContainerRuntime {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             ContainerRuntime::Docker => write!(f, "docker"),
+            ContainerRuntime::Podman => write!(f, "podman"),
         }
     }
 }
@@ -473,6 +475,7 @@ impl FromStr for ContainerRuntime {
     fn from_str(runtime: &str) -> Result<Self, Self::Err> {
         match runtime {
             "docker" => Ok(ContainerRuntime::Docker),
+            "podman" => Ok(ContainerRuntime::Podman),
             _ => Err(UnsupportedRuntimeVariant),
         }
     }
@@ -485,5 +488,11 @@ pub(super) struct ContainerArgs {
 
     pub runtime: ContainerRuntime,
 
-    pub runtime_args: Vec<String>,
+    #[command(subcommand)]
+    pub command: ContainerCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(super) enum ContainerCommand {
+    Run { runtime_args: Vec<String> },
 }
