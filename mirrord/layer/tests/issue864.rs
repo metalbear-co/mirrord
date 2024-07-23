@@ -20,7 +20,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn test_issue854(
+async fn test_issue864(
     #[values(Application::PythonIssue864)] application: Application,
     dylib_path: &PathBuf,
     config_dir: &PathBuf,
