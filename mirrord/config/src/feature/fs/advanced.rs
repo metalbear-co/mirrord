@@ -111,7 +111,21 @@ pub struct FsConfig {
 
     /// ### feature.fs.mapping {#feature-fs-mapping}
     ///
-    /// Specify map of patterns that if matched will replace the path according to specification
+    /// Specify map of patterns that if matched will replace the path according to specification.
+    ///
+    /// *Capture groups are allowed.*
+    ///
+    /// Example:
+    /// ```json
+    /// {
+    ///   "^/home/(?<user>\S+)/dev/tomcat": "/etc/tomcat"
+    ///   "^/home/(?<user>\S+)/dev/config/(?<app>\S+)": "/mnt/configs/${user}-$app"
+    /// }
+    /// ```
+    /// Will do the next replacements for any io operaton
+    ///
+    /// `/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml`
+    /// `/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`
     pub mapping: Option<HashMap<String, String>>,
 }
 
