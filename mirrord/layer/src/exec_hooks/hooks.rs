@@ -19,7 +19,7 @@ use crate::{
 
 /// Converts the [`SOCKETS`] map into a vector of pairs `(Fd, UserSocket)`, so we can rebuild
 /// it as a map.
-#[tracing::instrument(level = Level::TRACE, ret)]
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 fn shared_sockets() -> Vec<(i32, UserSocket)> {
     SOCKETS
         .iter()
@@ -95,6 +95,7 @@ pub(crate) unsafe extern "C" fn execve_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
+    // Hopefully `envp` is a properly null-terminated list.
     let checked_envp = envp.checked_into();
 
     if let Detour::Success(modified_envp) = execve(checked_envp) {
@@ -108,7 +109,6 @@ pub(crate) unsafe extern "C" fn execve_detour(
             _ => FN_EXECVE(path, argv, envp),
         }
 
-        // tracing::info!("Success execve!");
         #[cfg(target_os = "linux")]
         FN_EXECVE(path, argv, modified_envp)
     } else {

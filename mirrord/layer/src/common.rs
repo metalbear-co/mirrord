@@ -1,5 +1,10 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{ffi::CStr, fmt::Debug, ops::Not, path::PathBuf};
+use std::{
+    ffi::CStr,
+    fmt::{Debug, Display},
+    ops::Not,
+    path::PathBuf,
+};
 
 use libc::c_char;
 use mirrord_intproxy_protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
@@ -118,6 +123,8 @@ impl CheckedInto<PathBuf> for *const c_char {
     }
 }
 
+// **Warning**: The implementation here expects that `*const *const c_char` be a valid,
+// null-terminated list! We're using `Nul::new_unchecked`, which doesn't check for this.
 impl CheckedInto<Argv> for *const *const c_char {
     fn checked_into(self) -> Detour<Argv> {
         let c_list = self
