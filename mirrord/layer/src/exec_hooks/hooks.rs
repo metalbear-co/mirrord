@@ -86,7 +86,7 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
 /// to new strings, even if there are no changes needed (except for the case of an error).
 /// 3. envp - We found out that Turbopack (Vercel) spawns a clean "Node" instance without env,
 /// basically stripping all of the important mirrord env.
-/// https://github.com/metalbear-co/mirrord/issues/2500
+/// [#2500](https://github.com/metalbear-co/mirrord/issues/2500)
 /// We restore the `DYLD_INSERT_LIBRARIES` environment variable and all env vars
 /// starting with `MIRRORD_` if the dyld var can't be found in `envp`.
 ///
