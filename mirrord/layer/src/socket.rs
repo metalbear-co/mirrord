@@ -51,7 +51,8 @@ pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock:
         })
         .map(|(fds_and_sockets, _)| {
             DashMap::from_iter(fds_and_sockets.into_iter().filter_map(|(fd, socket)| {
-                if unsafe{ FN_FCNTL(fd, libc::F_GETFD, 0) != -1}  {
+                // Do not inherit sockets that are `FD_CLOEXEC`.
+                if unsafe { FN_FCNTL(fd, libc::F_GETFD, 0) != -1 } {
                     Some((fd, Arc::new(socket)))
                 } else {
                     None
