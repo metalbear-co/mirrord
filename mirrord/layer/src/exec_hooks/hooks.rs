@@ -51,6 +51,7 @@ pub(crate) fn execve(env_vars: Detour<Argv>) -> Detour<*const *const c_char> {
     Detour::Success(env_vars.leak())
 }
 
+#[cfg(not(target_os = "macos"))]
 #[hook_guard_fn]
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
     let encoded = bincode::encode_to_vec(shared_sockets(), bincode::config::standard())
