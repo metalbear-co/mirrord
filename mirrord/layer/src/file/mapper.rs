@@ -35,7 +35,7 @@ impl FileRemapper {
             let (pattern, value) = self
                 .mapping
                 .get(index)
-                .expect("RegexSet matches returned an imposible index");
+                .expect("RegexSet matches returned an impossible index");
 
             pattern.replace(path_str, value)
         } else {
