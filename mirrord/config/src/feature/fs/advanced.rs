@@ -38,7 +38,8 @@ use crate::{
 /// The logic for choosing the behavior is as follows:
 ///
 ///
-/// 1. Check agains "mapping" if path needs to be replaced, if matched then continue to next step with new path after replacements otherwise continue as usual.
+/// 1. Check agains "mapping" if path needs to be replaced, if matched then continue to next step
+///    with new path after replacements otherwise continue as usual.
 /// 2. Check if one of the patterns match the file path, do the corresponding action. There's
 /// no specified order if two lists match the same path, we will use the first one (and we
 /// do not guarantee what is first).
