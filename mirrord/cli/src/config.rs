@@ -1,6 +1,6 @@
 #![deny(missing_docs)]
 
-use std::{ffi::OsString, fmt::Display, path::PathBuf, str::FromStr};
+use std::{collections::HashMap, ffi::OsString, fmt::Display, path::PathBuf, str::FromStr};
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
@@ -181,92 +181,92 @@ pub(super) struct ExecParams {
 }
 
 impl ExecParams {
-    pub fn to_env(&self) -> Result<Vec<(OsString, OsString)>, CliError> {
-        let mut envs: Vec<(OsString, OsString)> = Vec::new();
+    pub fn to_env(&self) -> Result<HashMap<String, OsString>, CliError> {
+        let mut envs: HashMap<String, OsString> = HashMap::new();
 
         if let Some(target) = &self.target {
-            envs.push(("MIRRORD_IMPERSONATED_TARGET".into(), target.into()));
+            envs.insert("MIRRORD_IMPERSONATED_TARGET".into(), target.into());
         }
 
         if self.no_telemetry {
-            envs.push(("MIRRORD_TELEMETRY".into(), "false".into()));
+            envs.insert("MIRRORD_TELEMETRY".into(), "false".into());
         }
 
         if let Some(skip_processes) = &self.skip_processes {
-            envs.push(("MIRRORD_SKIP_PROCESSES".into(), skip_processes.into()));
+            envs.insert("MIRRORD_SKIP_PROCESSES".into(), skip_processes.into());
         }
 
         if let Some(namespace) = &self.target_namespace {
-            envs.push(("MIRRORD_TARGET_NAMESPACE".into(), namespace.into()));
+            envs.insert("MIRRORD_TARGET_NAMESPACE".into(), namespace.into());
         }
 
         if let Some(namespace) = &self.agent_namespace {
-            envs.push(("MIRRORD_AGENT_NAMESPACE".into(), namespace.into()));
+            envs.insert("MIRRORD_AGENT_NAMESPACE".into(), namespace.into());
         }
 
         if let Some(log_level) = &self.agent_log_level {
-            envs.push(("MIRRORD_AGENT_RUST_LOG".into(), log_level.into()));
+            envs.insert("MIRRORD_AGENT_RUST_LOG".into(), log_level.into());
         }
 
         if let Some(image) = &self.agent_image {
-            envs.push(("MIRRORD_AGENT_IMAGE".into(), image.into()));
+            envs.insert("MIRRORD_AGENT_IMAGE".into(), image.into());
         }
 
         if let Some(agent_ttl) = &self.agent_ttl {
-            envs.push(("MIRRORD_AGENT_TTL".into(), agent_ttl.to_string().into()));
+            envs.insert("MIRRORD_AGENT_TTL".into(), agent_ttl.to_string().into());
         }
         if let Some(agent_startup_timeout) = &self.agent_startup_timeout {
-            envs.push((
+            envs.insert(
                 "MIRRORD_AGENT_STARTUP_TIMEOUT".into(),
                 agent_startup_timeout.to_string().into(),
-            ));
+            );
         }
 
         if let Some(fs_mode) = self.fs_mode {
-            envs.push(("MIRRORD_FILE_MODE".into(), fs_mode.to_string().into()));
+            envs.insert("MIRRORD_FILE_MODE".into(), fs_mode.to_string().into());
         }
 
         if let Some(override_env_vars_exclude) = &self.override_env_vars_exclude {
-            envs.push((
+            envs.insert(
                 "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE".into(),
                 override_env_vars_exclude.into(),
-            ));
+            );
         }
 
         if let Some(override_env_vars_include) = &self.override_env_vars_include {
-            envs.push((
+            envs.insert(
                 "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE".into(),
                 override_env_vars_include.into(),
-            ));
+            );
         }
 
         if self.no_remote_dns {
-            envs.push(("MIRRORD_REMOTE_DNS".into(), "false".into()));
+            envs.insert("MIRRORD_REMOTE_DNS".into(), "false".into());
         }
 
         if self.accept_invalid_certificates {
-            envs.push(("MIRRORD_ACCEPT_INVALID_CERTIFICATES".into(), "true".into()));
+            envs.insert("MIRRORD_ACCEPT_INVALID_CERTIFICATES".into(), "true".into());
             tracing::warn!("Accepting invalid certificates");
         }
 
         if self.ephemeral_container {
-            envs.push(("MIRRORD_EPHEMERAL_CONTAINER".into(), "true".into()));
+            envs.insert("MIRRORD_EPHEMERAL_CONTAINER".into(), "true".into());
         };
 
         if self.tcp_steal {
-            envs.push(("MIRRORD_AGENT_TCP_STEAL_TRAFFIC".into(), "true".into()));
+            envs.insert("MIRRORD_AGENT_TCP_STEAL_TRAFFIC".into(), "true".into());
         };
 
         if self.no_outgoing || self.no_tcp_outgoing {
-            envs.push(("MIRRORD_TCP_OUTGOING".into(), "false".into()));
+            envs.insert("MIRRORD_TCP_OUTGOING".into(), "false".into());
         }
 
         if self.no_outgoing || self.no_udp_outgoing {
-            envs.push(("MIRRORD_UDP_OUTGOING".into(), "false".into()));
+            envs.insert("MIRRORD_UDP_OUTGOING".into(), "false".into());
         }
 
         if let Some(context) = &self.context {
-            envs.push(("MIRRORD_KUBE_CONTEXT".into(), context.into()));
+            envs.insert("MIRRORD_KUBE_CONTEXT".into(), context.into());
         }
 
         if let Some(config_file) = &self.config_file {
@@ -274,10 +274,10 @@ impl ExecParams {
             // working directories.
             let full_path = std::fs::canonicalize(config_file)
                 .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.clone(), e))?;
-            envs.push((
+            envs.insert(
                 "MIRRORD_CONFIG_FILE".into(),
                 full_path.as_os_str().to_owned(),
-            ));
+            );
         }
 
         Ok(envs)

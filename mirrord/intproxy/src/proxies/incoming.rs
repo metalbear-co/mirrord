@@ -51,6 +51,7 @@ mod subscriptions;
 /// # Exception
 ///
 /// If the given `addr` is unspecified, this function binds to localhost.
+#[tracing::instrument(level = "debug", ret)]
 fn bind_similar(addr: SocketAddr) -> io::Result<TcpSocket> {
     match addr.ip() {
         IpAddr::V4(Ipv4Addr::LOCALHOST) => {
