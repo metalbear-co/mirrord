@@ -45,6 +45,13 @@ enum VerifiedTarget {
     StatefulSet(StatefulSetTarget),
 }
 
+impl VerifiedTarget {
+    /// Returns `true` for target types that are not part of the OSS mirrord.
+    fn requires_operator(&self) -> bool {
+        matches!(self, Self::CronJob(_) | Self::Job(_) | Self::StatefulSet(_))
+    }
+}
+
 impl From<Target> for VerifiedTarget {
     fn from(value: Target) -> Self {
         match value {
@@ -192,11 +199,11 @@ pub(super) async fn verify_config(VerifyConfigArgs { ide, path }: VerifyConfigAr
                 .clone()
                 .map(VerifiedTarget::from)
                 .zip(config.operator)
-                && matches!(verified_target, VerifiedTarget::StatefulSet(_))
+                && verified_target.requires_operator()
             {
                 VerifiedConfig::Fail {
                     errors: vec![
-                        "StatefulSet target requires the mirrord-operator, but the config \
+                        "{verified_target} target requires the mirrord-operator, but the config \
                         was set to `operator: false`! Consider setting `operator: true` for \
                         this target type."
                             .to_string(),
