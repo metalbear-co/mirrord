@@ -179,14 +179,14 @@ mod test {
     #[test]
     fn deserialize_old_format() {
         // Produced with previous version of this crate.
-        const SERIALIZED: &'static str = "-----BEGIN PRIVATE KEY-----\r\nMFMCAQEwBQYDK2VwBCIEIAnnKqvgSX5b4p2WZhe/hQOpt/D7z4P1H9UHJ2iiIat1\r\noSMDIQCQaTis0CQ62Y8+pePb3+x7umYRY0368BNyD5UrLZCMqA==\r\n-----END PRIVATE KEY-----\r\n";
-        const EXPECTED_SIGNATURE: &'static [u8] = &[
+        const SERIALIZED: &str = "-----BEGIN PRIVATE KEY-----\r\nMFMCAQEwBQYDK2VwBCIEIAnnKqvgSX5b4p2WZhe/hQOpt/D7z4P1H9UHJ2iiIat1\r\noSMDIQCQaTis0CQ62Y8+pePb3+x7umYRY0368BNyD5UrLZCMqA==\r\n-----END PRIVATE KEY-----\r\n";
+        const EXPECTED_SIGNATURE: &[u8] = &[
             138, 4, 156, 91, 93, 73, 133, 216, 66, 25, 175, 249, 20, 105, 24, 28, 39, 28, 188, 63,
             249, 207, 106, 200, 98, 81, 184, 66, 241, 182, 24, 77, 2, 112, 208, 30, 189, 192, 138,
             69, 77, 143, 244, 61, 250, 18, 241, 254, 230, 160, 250, 208, 66, 217, 124, 86, 186,
             188, 139, 24, 152, 16, 185, 4,
         ];
-        const MESSAGE_TO_SIGN: &'static [u8] = b"hello";
+        const MESSAGE_TO_SIGN: &[u8] = b"hello";
 
         // Verify that we're able to deserialize.
         let key_pair: KeyPair = serde_yaml::from_str(SERIALIZED).unwrap();
@@ -201,7 +201,7 @@ mod test {
     /// de(serializing) correct variant.
     #[test]
     fn format_conversion() {
-        const MESSAGE_TO_SIGN: &'static [u8] = b"hello there";
+        const MESSAGE_TO_SIGN: &[u8] = b"hello there";
 
         let key_pair = KeyPair::new_random().unwrap();
         let expected_signature = key_pair.sign(MESSAGE_TO_SIGN);

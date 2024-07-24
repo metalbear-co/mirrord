@@ -1,6 +1,6 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
-use std::{path::PathBuf, time::Duration};
+use std::{path::Path, time::Duration};
 
 use mirrord_protocol::{tcp::LayerTcp, ClientMessage};
 use rstest::rstest;
@@ -15,7 +15,7 @@ pub use common::*;
 #[timeout(Duration::from_secs(60))]
 async fn test_issue1123(
     #[values(Application::RustIssue1123)] application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     let port = application.get_app_port();
 

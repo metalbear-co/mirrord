@@ -2,7 +2,10 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use rstest::rstest;
 
@@ -15,7 +18,7 @@ pub use common::*;
 #[timeout(Duration::from_secs(20))]
 async fn test_issue2204(
     #[values(Application::RustIssue2204)] application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, Default::default(), None)

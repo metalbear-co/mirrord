@@ -1,5 +1,5 @@
 #![feature(assert_matches)]
-use std::{path::PathBuf, time::Duration};
+use std::{path::Path, time::Duration};
 
 use rstest::rstest;
 
@@ -12,13 +12,13 @@ pub use common::*;
 #[timeout(Duration::from_secs(60))]
 async fn readlink(
     #[values(Some("readlink.json"))] with_config: Option<&str>,
-    dylib_path: &PathBuf,
-    config_dir: &PathBuf,
+    dylib_path: &Path,
+    config_dir: &Path,
 ) {
     let application = Application::ReadLink;
 
     let config = with_config.map(|config| {
-        let mut config_path = config_dir.clone();
+        let mut config_path = config_dir.to_path_buf();
         config_path.push(config);
         config_path
     });
