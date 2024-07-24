@@ -1,7 +1,7 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{env::temp_dir, os::unix::fs, path::PathBuf, time::Duration};
+use std::{env::temp_dir, os::unix::fs, path::Path, time::Duration};
 
 use rand::prelude::*;
 use rstest::rstest;
@@ -28,7 +28,7 @@ async fn symlink_app(app: &Application) -> Application {
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
-async fn skip_based_on_exec_name(dylib_path: &PathBuf) {
+async fn skip_based_on_exec_name(dylib_path: &Path) {
     let app = Application::OpenFile;
     let symlinked_app = symlink_app(&app).await;
 
@@ -50,7 +50,7 @@ async fn skip_based_on_exec_name(dylib_path: &PathBuf) {
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
-async fn skip_based_on_invocation_name(dylib_path: &PathBuf) {
+async fn skip_based_on_invocation_name(dylib_path: &Path) {
     let app = Application::OpenFile;
     let symlinked_app = symlink_app(&app).await;
 
@@ -73,7 +73,7 @@ async fn skip_based_on_invocation_name(dylib_path: &PathBuf) {
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
-async fn dont_skip(dylib_path: &PathBuf) {
+async fn dont_skip(dylib_path: &Path) {
     let app = Application::OpenFile;
     let symlinked_app = symlink_app(&app).await;
 

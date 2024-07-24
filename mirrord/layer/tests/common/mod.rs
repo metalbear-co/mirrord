@@ -1,6 +1,11 @@
 use std::{
-    assert_matches::assert_matches, cmp::min, collections::HashMap, fmt::Debug, path::PathBuf,
-    process::Stdio, str::FromStr, time::Duration,
+    assert_matches::assert_matches,
+    collections::HashMap,
+    fmt::Debug,
+    path::{Path, PathBuf},
+    process::Stdio,
+    str::FromStr,
+    time::Duration,
 };
 
 use actix_codec::Framed;
@@ -469,8 +474,11 @@ impl TestIntProxy {
         expected_fd: u64,
         buffer_size: u64,
     ) {
-        let read_amount = min(buffer_size, contents.len() as u64);
-        let contents = contents.as_bytes()[0..read_amount as usize].to_vec();
+        let contents = contents
+            .as_bytes()
+            .get(0..buffer_size as usize)
+            .unwrap_or(contents.as_bytes())
+            .to_vec();
         self.answer_file_read(contents).await;
         // last call returns 0.
         let _buffer_size = self.expect_only_file_read(expected_fd).await;
@@ -495,8 +503,11 @@ impl TestIntProxy {
     /// For when the application does not keep reading until it gets 0 bytes.
     pub async fn expect_single_file_read(&mut self, contents: &str, expected_fd: u64) {
         let buffer_size = self.expect_only_file_read(expected_fd).await;
-        let read_amount = min(buffer_size, contents.len() as u64);
-        let contents = contents.as_bytes()[0..read_amount as usize].to_vec();
+        let contents = contents
+            .as_bytes()
+            .get(0..buffer_size as usize)
+            .unwrap_or(contents.as_bytes())
+            .to_vec();
         self.answer_file_read(contents).await;
     }
 
@@ -1044,7 +1055,7 @@ impl Application {
     /// Will start it with env from `get_env` plus whatever is passed in `extra_env_vars`.
     pub async fn start_process_with_layer(
         &self,
-        dylib_path: &PathBuf,
+        dylib_path: &Path,
         extra_env_vars: Vec<(&str, &str)>,
         configuration_file: Option<&str>,
     ) -> (TestProcess, TestIntProxy) {
@@ -1064,7 +1075,7 @@ impl Application {
     /// Like `start_process_with_layer`, but also verify a port subscribe.
     pub async fn start_process_with_layer_and_port(
         &self,
-        dylib_path: &PathBuf,
+        dylib_path: &Path,
         extra_env_vars: Vec<(&str, &str)>,
         configuration_file: Option<&str>,
     ) -> (TestProcess, TestIntProxy) {

@@ -1,7 +1,7 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::PathBuf, time::Duration};
+use std::{path::Path, time::Duration};
 
 use rstest::rstest;
 use tokio::net::TcpListener;
@@ -17,7 +17,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
-async fn java_temurin_sip(dylib_path: &PathBuf) {
+async fn java_temurin_sip(dylib_path: &Path) {
     let application = Application::JavaTemurinSip;
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -527,7 +527,8 @@ mod test {
                     break;
                 }
 
-                upgraded.write_all(&buf[..bytes_read]).await?;
+                let echo_back = buf.get(0..bytes_read).unwrap();
+                upgraded.write_all(echo_back).await?;
             }
 
             Ok(())

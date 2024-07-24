@@ -8,7 +8,7 @@
 /// You should probably only add new tests here.
 #[cfg(test)]
 mod cli {
-    use std::time::Duration;
+    use std::{path::Path, time::Duration};
 
     use regex::Regex;
     use rstest::rstest;
@@ -23,8 +23,8 @@ mod cli {
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
-    pub async fn path_ide_verify_config(config_dir: &std::path::PathBuf) {
-        let mut config_path = config_dir.clone();
+    pub async fn path_ide_verify_config(config_dir: &Path) {
+        let mut config_path = config_dir.to_path_buf();
         config_path.push("default_ide.json");
 
         let mut process = run_verify_config(Some(vec![
@@ -44,8 +44,8 @@ mod cli {
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
-    pub async fn no_ide_verify_config(config_dir: &std::path::PathBuf) {
-        let mut config_path = config_dir.clone();
+    pub async fn no_ide_verify_config(config_dir: &Path) {
+        let mut config_path = config_dir.to_path_buf();
         config_path.push("default_ide.json");
 
         let mut process = run_verify_config(Some(vec![config_path
@@ -66,8 +66,8 @@ mod cli {
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
-    pub async fn no_path_verify_config(config_dir: &std::path::PathBuf) {
-        let mut config_path = config_dir.clone();
+    pub async fn no_path_verify_config(config_dir: &Path) {
+        let mut config_path = config_dir.to_path_buf();
         config_path.push("default_ide.json");
 
         let mut process = run_verify_config(Some(vec!["--ide"])).await;
@@ -85,8 +85,8 @@ mod cli {
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
-    pub async fn no_path_no_ide_verify_config(config_dir: &std::path::PathBuf) {
-        let mut config_path = config_dir.clone();
+    pub async fn no_path_no_ide_verify_config(config_dir: &Path) {
+        let mut config_path = config_dir.to_path_buf();
         config_path.push("default_ide.json");
 
         let mut process = run_verify_config(None).await;
