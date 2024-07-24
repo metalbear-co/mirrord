@@ -8,7 +8,9 @@ use k8s_openapi::{
             Probe, ResourceRequirements, Secret, SecretVolumeSource, SecurityContext, Service,
             ServiceAccount, ServicePort, ServiceSpec, Volume, VolumeMount,
         },
-        rbac::v1::{ClusterRole, ClusterRoleBinding, PolicyRule, RoleRef, Subject},
+        rbac::v1::{
+            ClusterRole, ClusterRoleBinding, PolicyRule, Role, RoleBinding, RoleRef, Subject,
+        },
     },
     apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition,
     apimachinery::pkg::{
@@ -29,6 +31,7 @@ static OPERATOR_NAME: &str = "mirrord-operator";
 static OPERATOR_PORT: i32 = 3000;
 static OPERATOR_ROLE_NAME: &str = "mirrord-operator";
 static OPERATOR_ROLE_BINDING_NAME: &str = "mirrord-operator";
+static OPERATOR_CLIENT_CA_ROLE_NAME: &str = "mirrord-operator-apiserver-authentication";
 static OPERATOR_CLUSTER_USER_ROLE_NAME: &str = "mirrord-operator-user";
 static OPERATOR_LICENSE_SECRET_NAME: &str = "mirrord-operator-license";
 static OPERATOR_LICENSE_SECRET_FILE_NAME: &str = "license.pem";
@@ -95,6 +98,8 @@ pub struct Operator {
     service: OperatorService,
     service_account: OperatorServiceAccount,
     user_cluster_role: OperatorClusterUserRole,
+    client_ca_role: OperatorClientCaRole,
+    client_ca_role_binding: OperatorClientCaRoleBinding,
 }
 
 impl Operator {
@@ -118,6 +123,10 @@ impl Operator {
         let role_binding = OperatorRoleBinding::new(&role, &service_account);
         let user_cluster_role = OperatorClusterUserRole::new();
 
+        let client_ca_role = OperatorClientCaRole::new();
+        let client_ca_role_binding =
+            OperatorClientCaRoleBinding::new(&client_ca_role, &service_account);
+
         let deployment = OperatorDeployment::new(
             &namespace,
             &service_account,
@@ -140,6 +149,8 @@ impl Operator {
             service,
             service_account,
             user_cluster_role,
+            client_ca_role,
+            client_ca_role_binding,
         }
     }
 }
@@ -163,7 +174,13 @@ impl OperatorSetup for Operator {
         self.user_cluster_role.to_writer(&mut writer)?;
 
         writer.write_all(b"---\n")?;
+        self.client_ca_role.to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
         self.role_binding.to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        self.client_ca_role_binding.to_writer(&mut writer)?;
 
         writer.write_all(b"---\n")?;
         self.deployment.to_writer(&mut writer)?;
@@ -653,6 +670,63 @@ impl Default for OperatorClusterUserRole {
     }
 }
 
+#[derive(Debug)]
+pub struct OperatorClientCaRole(Role);
+
+impl OperatorClientCaRole {
+    pub fn new() -> Self {
+        let role = Role {
+            metadata: ObjectMeta {
+                name: Some(OPERATOR_CLIENT_CA_ROLE_NAME.to_owned()),
+                namespace: Some("kube-system".to_owned()),
+                ..Default::default()
+            },
+            rules: Some(vec![PolicyRule {
+                api_groups: Some(vec!["".to_owned()]),
+                resources: Some(vec!["configmaps".to_owned()]),
+                verbs: vec!["get".to_owned()],
+                resource_names: Some(vec!["extension-apiserver-authentication".to_owned()]),
+                ..Default::default()
+            }]),
+        };
+
+        OperatorClientCaRole(role)
+    }
+
+    fn as_role_ref(&self) -> RoleRef {
+        RoleRef {
+            api_group: "rbac.authorization.k8s.io".to_owned(),
+            kind: "Role".to_owned(),
+            name: self.0.metadata.name.clone().unwrap_or_default(),
+        }
+    }
+}
+
+impl Default for OperatorClientCaRole {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug)]
+pub struct OperatorClientCaRoleBinding(RoleBinding);
+
+impl OperatorClientCaRoleBinding {
+    pub fn new(role: &OperatorClientCaRole, sa: &OperatorServiceAccount) -> Self {
+        let role = RoleBinding {
+            metadata: ObjectMeta {
+                name: Some(OPERATOR_CLIENT_CA_ROLE_NAME.to_owned()),
+                namespace: role.0.metadata.namespace.clone(),
+                ..Default::default()
+            },
+            role_ref: role.as_role_ref(),
+            subjects: Some(vec![sa.as_subject()]),
+        };
+
+        OperatorClientCaRoleBinding(role)
+    }
+}
+
 impl OperatorSetup for CustomResourceDefinition {
     fn to_writer<W: Write>(&self, writer: W) -> Result<()> {
         serde_yaml::to_writer(writer, &self).map_err(SetupWriteError::from)
@@ -668,5 +742,7 @@ writer_impl![
     OperatorLicenseSecret,
     OperatorService,
     OperatorApiService,
-    OperatorClusterUserRole
+    OperatorClusterUserRole,
+    OperatorClientCaRole,
+    OperatorClientCaRoleBinding
 ];

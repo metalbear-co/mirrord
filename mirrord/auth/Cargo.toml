@@ -42,12 +42,10 @@ serde = { version = "1", features = ["derive"] }
 serde_yaml = { version = "0.9", optional = true }
 tokio = { workspace = true, features = ["fs"], optional = true  }
 thiserror = "1"
-# don't upgrade it due to https://github.com/metalbear-co/operator/issues/556
-# unless you know what you're doing!!!
-x509-certificate = "0.21"
+x509-certificate = "0.23.1"
 # not direct dependency, but if we don't put it here it'll use openssl :(
 reqwest = { workspace = true, features=["json", "rustls-tls-native-roots"], default-features = false, optional = true }
 tracing.workspace = true
-# don't upgrade it due to https://github.com/metalbear-co/operator/issues/556
-# unless you know what you're doing!!!
-ring = "0.16"
+
+[dev-dependencies]
+bcder = "0.7"

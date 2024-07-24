@@ -20,9 +20,9 @@ impl<IPT> StandardRedirect<IPT>
 where
     IPT: IPTables,
 {
-    pub fn create(ipt: Arc<IPT>) -> Result<Self> {
+    pub fn create(ipt: Arc<IPT>, pod_ips: Option<&str>) -> Result<Self> {
         let prerouteing = PreroutingRedirect::create(ipt.clone())?;
-        let output = OutputRedirect::create(ipt, IPTABLE_STANDARD.to_string())?;
+        let output = OutputRedirect::create(ipt, IPTABLE_STANDARD.to_string(), pod_ips)?;
 
         Ok(StandardRedirect {
             prerouteing,

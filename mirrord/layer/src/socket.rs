@@ -1,7 +1,7 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
+    net::{SocketAddr, ToSocketAddrs},
     os::unix::io::RawFd,
     str::FromStr,
     sync::{Arc, LazyLock},
@@ -10,8 +10,9 @@ use std::{
 use dashmap::DashMap;
 use hashbrown::hash_set::HashSet;
 use libc::{c_int, sockaddr, socklen_t};
-use mirrord_config::feature::network::outgoing::{
-    AddressFilter, OutgoingConfig, OutgoingFilter, OutgoingFilterConfig, ProtocolFilter,
+use mirrord_config::feature::network::{
+    filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
+    outgoing::{OutgoingConfig, OutgoingFilterConfig},
 };
 use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
 use mirrord_protocol::{
@@ -27,6 +28,7 @@ use crate::{
     socket::ops::{remote_getaddrinfo, REMOTE_DNS_REVERSE_MAPPING},
 };
 
+pub(crate) mod dns_selector;
 pub(super) mod hooks;
 pub(crate) mod ops;
 
@@ -188,16 +190,16 @@ enum ConnectionThrough {
     Remote(SocketAddr),
 }
 
-/// Holds the [`OutgoingFilter`]s set up by the user.
+/// Holds the [`ProtocolAndAddressFilter`]s set up by the user in the [`OutgoingFilterConfig`].
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) enum OutgoingSelector {
     #[default]
     Unfiltered,
     /// If the address from `connect` matches this, then we send the connection through the
     /// remote pod.
-    Remote(HashSet<OutgoingFilter>),
+    Remote(HashSet<ProtocolAndAddressFilter>),
     /// If the address from `connect` matches this, then we send the connection from the local app.
-    Local(HashSet<OutgoingFilter>),
+    Local(HashSet<ProtocolAndAddressFilter>),
 }
 
 impl OutgoingSelector {
@@ -205,12 +207,14 @@ impl OutgoingSelector {
         filters: I,
         tcp_enabled: bool,
         udp_enabled: bool,
-    ) -> HashSet<OutgoingFilter> {
+    ) -> HashSet<ProtocolAndAddressFilter> {
         filters
-            .map(|filter| OutgoingFilter::from_str(filter).expect("invalid outgoing filter"))
+            .map(|filter| {
+                ProtocolAndAddressFilter::from_str(filter).expect("invalid outgoing filter")
+            })
             .collect::<HashSet<_>>()
             .into_iter()
-            .filter(|OutgoingFilter { protocol, .. }| match protocol {
+            .filter(|ProtocolAndAddressFilter { protocol, .. }| match protocol {
                 ProtocolFilter::Any => tcp_enabled || udp_enabled,
                 ProtocolFilter::Tcp => tcp_enabled,
                 ProtocolFilter::Udp => udp_enabled,
@@ -339,14 +343,14 @@ impl OutgoingSelector {
     }
 }
 
-/// [`OutgoingFilter`] extension.
-trait OutgoingFilterExt {
+/// [`ProtocolAndAddressFilter`] extension.
+trait ProtocolAndAddressFilterExt {
     /// Matches the outgoing connection request (given as [[`SocketAddr`], [`NetProtocol`]] pair)
     /// against this filter.
     ///
     /// # Note on DNS resolution
     ///
-    /// This method may require a DNS resolution (when [`OutgoingFilter::address`] is
+    /// This method may require a DNS resolution (when [`ProtocolAndAddressFilter::address`] is
     /// [`AddressFilter::Name`]). If remote DNS is disabled or `force_local_dns`
     /// flag is used, the method uses local resolution [`ToSocketAddrs`]. Otherwise, it uses
     /// remote resolution [`remote_getaddrinfo`].
@@ -358,7 +362,7 @@ trait OutgoingFilterExt {
     ) -> HookResult<bool>;
 }
 
-impl OutgoingFilterExt for OutgoingFilter {
+impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
     fn matches(
         &self,
         address: SocketAddr,
@@ -371,17 +375,13 @@ impl OutgoingFilterExt for OutgoingFilter {
             return Ok(false);
         };
 
-        let port = match &self.address {
-            AddressFilter::Name((_, port)) => *port,
-            AddressFilter::Socket(addr) => addr.port(),
-            AddressFilter::Subnet((_, port)) => *port,
-        };
+        let port = self.address.port();
         if port != 0 && port != address.port() {
             return Ok(false);
         }
 
         match &self.address {
-            AddressFilter::Name((name, port)) => {
+            AddressFilter::Name(name, port) => {
                 let resolved_ips = if crate::setup().remote_dns_enabled() && !force_local_dns {
                     match remote_getaddrinfo(name.to_string()) {
                         Ok(res) => res.into_iter().map(|(_, ip)| ip).collect(),
@@ -420,22 +420,18 @@ impl OutgoingFilterExt for OutgoingFilter {
 
                 Ok(resolved_ips.into_iter().any(|ip| ip == address.ip()))
             }
-            AddressFilter::Socket(addr)
-                if addr.ip().is_unspecified() || addr.ip() == address.ip() =>
-            {
-                Ok(true)
+            AddressFilter::Socket(addr) => {
+                Ok(addr.ip().is_unspecified() || addr.ip() == address.ip())
             }
-            AddressFilter::Subnet((net, _)) if net.contains(&address.ip()) => Ok(true),
-            _ => Ok(false),
+            AddressFilter::Subnet(net, _) => Ok(net.contains(&address.ip())),
+            AddressFilter::Port(..) => Ok(true),
         }
     }
 }
 
 #[inline]
 fn is_ignored_port(addr: &SocketAddr) -> bool {
-    let (ip, port) = (addr.ip(), addr.port());
-    let ignored_ip = ip == IpAddr::V4(Ipv4Addr::LOCALHOST) || ip == IpAddr::V6(Ipv6Addr::LOCALHOST);
-    port == 0 || ignored_ip && (port > 50000 && port < 60000)
+    addr.port() == 0
 }
 
 /// Fill in the sockaddr structure for the given address.

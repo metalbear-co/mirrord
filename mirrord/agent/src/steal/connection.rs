@@ -11,21 +11,24 @@ use hyper::{
     http::{header::UPGRADE, request::Parts},
 };
 use mirrord_protocol::{
+    body_chunks::{BodyExt as _, Frames},
     tcp::{
-        ChunkedRequest, ChunkedRequestBody, ChunkedRequestError, DaemonTcp, HttpRequest,
+        ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, DaemonTcp, HttpRequest,
         HttpResponseFallback, InternalHttpBody, InternalHttpBodyFrame, InternalHttpRequest,
-        StealType, TcpClose, TcpData, HTTP_CHUNKED_VERSION, HTTP_FILTERED_UPGRADE_VERSION,
+        StealType, TcpClose, TcpData, HTTP_CHUNKED_REQUEST_VERSION, HTTP_FILTERED_UPGRADE_VERSION,
         HTTP_FRAMED_VERSION,
     },
     ConnectionId, Port,
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
     RequestId,
 };
+use serde::Deserialize;
 use tokio::{
     net::TcpStream,
     sync::mpsc::{Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
+use tracing::warn;
 
 use crate::{
     error::{AgentError, Result},
@@ -33,7 +36,7 @@ use crate::{
         connections::{
             ConnectionMessageIn, ConnectionMessageOut, StolenConnection, StolenConnections,
         },
-        http::{Frames, HttpFilter, IncomingExt},
+        http::HttpFilter,
         orig_dst,
         subscriptions::{IpTablesRedirector, PortSubscriptions},
         Command, StealerCommand,
@@ -149,10 +152,11 @@ impl Client {
         }
 
         let framed = HTTP_FRAMED_VERSION.matches(&self.protocol_version);
-        let chunked = HTTP_CHUNKED_VERSION.matches(&self.protocol_version);
+        let chunked = HTTP_CHUNKED_REQUEST_VERSION.matches(&self.protocol_version);
         let tx = self.tx.clone();
 
         tokio::spawn(async move {
+            tracing::trace!(?request.connection_id, ?request.request_id, ?chunked, ?framed, "starting request");
             // Chunked data is preferred over framed data
             if chunked {
                 // Send headers
@@ -170,7 +174,9 @@ impl Client {
                 ) = request.request.into_parts();
                 match body.next_frames(true).await {
                     Err(..) => return,
-                    Ok(Frames { frames, is_last }) => {
+                    // We don't check is_last here since loop will finish when body.next_frames()
+                    // returns None
+                    Ok(Frames { frames, .. }) => {
                         let frames = frames
                             .into_iter()
                             .map(InternalHttpBodyFrame::try_from)
@@ -189,7 +195,9 @@ impl Client {
                                 request_id,
                                 port: request.port,
                             }));
-                        if tx.send(message).await.is_err() || is_last {
+
+                        if let Err(e) = tx.send(message).await {
+                            warn!(?e, ?connection_id, ?request_id, ?request.port, "failed to send chunked request start");
                             return;
                         }
                     }
@@ -204,21 +212,27 @@ impl Client {
                                 .filter_map(Result::ok)
                                 .collect();
                             let message = DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
-                                ChunkedRequestBody {
+                                ChunkedHttpBody {
                                     frames,
                                     is_last,
                                     connection_id,
                                     request_id,
                                 },
                             ));
-                            if tx.send(message).await.is_err() || is_last {
+
+                            if let Err(e) = tx.send(message).await {
+                                warn!(?e, ?connection_id, ?request_id, ?request.port, "failed to send chunked request body");
+                                return;
+                            }
+
+                            if is_last {
                                 return;
                             }
                         }
                         Err(_) => {
                             let _ = tx
                                 .send(DaemonTcp::HttpRequestChunked(ChunkedRequest::Error(
-                                    ChunkedRequestError {
+                                    ChunkedHttpError {
                                         connection_id,
                                         request_id,
                                     },
@@ -245,6 +259,12 @@ impl Client {
 
         true
     }
+}
+
+#[derive(Deserialize, Debug, Default)]
+struct TcpStealerConfig {
+    stealer_flush_connections: bool,
+    pod_ips: Option<String>,
 }
 
 /// Created once per agent during initialization.
@@ -274,12 +294,13 @@ impl TcpConnectionStealer {
     /// You need to call [`TcpConnectionStealer::start`] to do so.
     #[tracing::instrument(level = "trace")]
     pub(crate) async fn new(command_rx: Receiver<StealerCommand>) -> Result<Self, AgentError> {
+        let config = envy::prefixed("MIRRORD_AGENT_")
+            .from_env::<TcpStealerConfig>()
+            .unwrap_or_default();
+
         let port_subscriptions = {
-            let flush_connections = std::env::var("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS")
-                .ok()
-                .and_then(|var| var.parse::<bool>().ok())
-                .unwrap_or_default();
-            let redirector = IpTablesRedirector::new(flush_connections).await?;
+            let redirector =
+                IpTablesRedirector::new(config.stealer_flush_connections, config.pod_ips).await?;
 
             PortSubscriptions::new(redirector, 4)
         };
@@ -674,6 +695,7 @@ mod test {
     };
     use hyper_util::rt::TokioIo;
     use mirrord_protocol::tcp::{ChunkedRequest, DaemonTcp, InternalHttpBodyFrame};
+    use rstest::rstest;
     use tokio::{
         net::{TcpListener, TcpStream},
         sync::{
@@ -797,8 +819,64 @@ mod test {
         };
         assert_eq!(
             x.frames,
-            vec![InternalHttpBodyFrame::Data(b"another_string".to_vec(),)]
+            vec![InternalHttpBodyFrame::Data(b"another_string".to_vec())]
         );
+        let x = client_rx.recv().now_or_never();
+        assert!(x.is_none());
+
+        let _ = response_tx.send(Response::new(Empty::default()));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[timeout(std::time::Duration::from_secs(5))]
+    async fn test_empty_streaming_request() {
+        let (addr, mut request_rx) = prepare_dummy_service().await;
+        let conn = TcpStream::connect(addr).await.unwrap();
+        let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(conn))
+            .await
+            .unwrap();
+        tokio::spawn(conn);
+
+        tokio::spawn(
+            sender.send_request(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/")
+                    .version(Version::HTTP_11)
+                    .body(http_body_util::Empty::<Bytes>::new())
+                    .unwrap(),
+            ),
+        );
+
+        let (client_tx, mut client_rx) = mpsc::channel::<DaemonTcp>(4);
+        let client = Client {
+            tx: client_tx,
+            protocol_version: "1.7.0".parse().unwrap(),
+            subscribed_connections: Default::default(),
+        };
+
+        let (request, response_tx) = request_rx.recv().await.unwrap();
+        client.send_request_async(MatchedHttpRequest {
+            connection_id: 0,
+            port: 80,
+            request_id: 0,
+            request,
+        });
+
+        // Verify that ChunkedRequest::Start request is as expected
+        let msg = client_rx.recv().await.unwrap();
+        let DaemonTcp::HttpRequestChunked(ChunkedRequest::Start(_)) = msg else {
+            panic!("unexpected type received: {msg:?}")
+        };
+
+        // Verify that empty ChunkedRequest::Body request is as expected
+        let msg = client_rx.recv().await.unwrap();
+        let DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(x)) = msg else {
+            panic!("unexpected type received: {msg:?}")
+        };
+        assert_eq!(x.frames, vec![]);
+        assert!(x.is_last);
         let x = client_rx.recv().now_or_never();
         assert!(x.is_none());
 

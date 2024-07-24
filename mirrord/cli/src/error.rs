@@ -6,7 +6,7 @@ use mirrord_config::config::ConfigError;
 use mirrord_console::error::ConsoleError;
 use mirrord_intproxy::error::IntProxyError;
 use mirrord_kube::error::KubeApiError;
-use mirrord_operator::client::{HttpError, OperatorApiError, OperatorOperation};
+use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
 use reqwest::StatusCode;
 use thiserror::Error;
 
@@ -233,15 +233,20 @@ pub(crate) enum CliError {
     ))]
     PingPongFailed(String),
 
-    #[error("Failed to check whether mirrord operator is installed in the cluster: {0}")]
+    #[error("Failed to prepare mirrord operator client certificate: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    OperatorClientCertError(String),
+
+    #[error("mirrord operator was not found in the cluster.")]
     #[diagnostic(help(
-    "Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.
-
-    If you want to run without the operator, please set `\"operator\": false` in the mirrord configuration file.
-
-    Please remember that some features are supported only when using mirrord operator (https://mirrord.dev/docs/overview/teams/#supported-features).{GENERAL_HELP}"
+        "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
+        Read more here: https://mirrord.dev/docs/overview/quick-start/#operator.{GENERAL_HELP}"
     ))]
-    OperatorInstallationCheckError(KubeApiError),
+    OperatorNotInstalled,
+
+    #[error("mirrord returned a target resource of unknown type: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    OperatorReturnedUnknownTargetType(String),
 }
 
 impl From<OperatorApiError> for CliError {
@@ -254,7 +259,7 @@ impl From<OperatorApiError> for CliError {
                 feature,
                 operator_version,
             },
-            OperatorApiError::CreateApiError(e) => Self::CreateKubeApiFailed(e),
+            OperatorApiError::CreateKubeClient(e) => Self::CreateKubeApiFailed(e),
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
             OperatorApiError::KubeError {
                 error: kube::Error::Api(ErrorResponse { message, code, .. }),
@@ -279,6 +284,10 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorApiFailed(operation, error)
             }
             OperatorApiError::NoLicense => Self::OperatorLicenseExpired,
+            OperatorApiError::ClientCertError(error) => Self::OperatorClientCertError(error),
+            OperatorApiError::FetchedUnknownTargetType(error) => {
+                Self::OperatorReturnedUnknownTargetType(error.0)
+            }
         }
     }
 }

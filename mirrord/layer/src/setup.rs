@@ -17,7 +17,11 @@ use mirrord_protocol::{
 };
 use regex::RegexSet;
 
-use crate::{debugger_ports::DebuggerPorts, file::filter::FileFilter, socket::OutgoingSelector};
+use crate::{
+    debugger_ports::DebuggerPorts,
+    file::{filter::FileFilter, mapper::FileRemapper},
+    socket::{dns_selector::DnsSelector, OutgoingSelector},
+};
 
 /// Complete layer setup.
 /// Contains [`LayerConfig`] and derived from it structs, which are used in multiple places across
@@ -26,9 +30,11 @@ use crate::{debugger_ports::DebuggerPorts, file::filter::FileFilter, socket::Out
 pub struct LayerSetup {
     config: LayerConfig,
     file_filter: FileFilter,
+    file_remapper: FileRemapper,
     debugger_ports: DebuggerPorts,
     remote_unix_streams: RegexSet,
     outgoing_selector: OutgoingSelector,
+    dns_selector: DnsSelector,
     proxy_address: SocketAddr,
     incoming_mode: IncomingMode,
     local_hostname: bool,
@@ -40,6 +46,8 @@ pub struct LayerSetup {
 impl LayerSetup {
     pub fn new(config: LayerConfig, debugger_ports: DebuggerPorts, local_hostname: bool) -> Self {
         let file_filter = FileFilter::new(config.feature.fs.clone());
+        let file_remapper =
+            FileRemapper::new(config.feature.fs.mapping.clone().unwrap_or_default());
 
         let remote_unix_streams = config
             .feature
@@ -52,8 +60,9 @@ impl LayerSetup {
             .expect("invalid unix stream regex set")
             .unwrap_or_default();
 
-        let outgoing_selector: OutgoingSelector =
-            OutgoingSelector::new(&config.feature.network.outgoing);
+        let outgoing_selector = OutgoingSelector::new(&config.feature.network.outgoing);
+
+        let dns_selector = DnsSelector::from(&config.feature.network.dns);
 
         let proxy_address = config
             .connect_tcp
@@ -71,9 +80,11 @@ impl LayerSetup {
         Self {
             config,
             file_filter,
+            file_remapper,
             debugger_ports,
             remote_unix_streams,
             outgoing_selector,
+            dns_selector,
             proxy_address,
             incoming_mode,
             local_hostname,
@@ -94,6 +105,10 @@ impl LayerSetup {
         &self.file_filter
     }
 
+    pub fn file_remapper(&self) -> &FileRemapper {
+        &self.file_remapper
+    }
+
     pub fn incoming_config(&self) -> &IncomingConfig {
         &self.config.feature.network.incoming
     }
@@ -107,7 +122,7 @@ impl LayerSetup {
     }
 
     pub fn remote_dns_enabled(&self) -> bool {
-        self.config.feature.network.dns
+        self.config.feature.network.dns.enabled
     }
 
     pub fn targetless(&self) -> bool {
@@ -119,6 +134,7 @@ impl LayerSetup {
             .unwrap_or(true)
     }
 
+    #[cfg(target_os = "macos")]
     pub fn sip_binaries(&self) -> Vec<String> {
         self.config
             .sip_binaries
@@ -133,6 +149,10 @@ impl LayerSetup {
 
     pub fn outgoing_selector(&self) -> &OutgoingSelector {
         &self.outgoing_selector
+    }
+
+    pub fn dns_selector(&self) -> &DnsSelector {
+        &self.dns_selector
     }
 
     pub fn remote_unix_streams(&self) -> &RegexSet {

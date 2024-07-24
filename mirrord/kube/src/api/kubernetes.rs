@@ -42,12 +42,13 @@ pub struct KubernetesAPI {
 
 impl KubernetesAPI {
     pub async fn create(config: &LayerConfig) -> Result<Self> {
-        let client = create_kube_api(
+        let client = create_kube_config(
             config.accept_invalid_certificates,
             config.kubeconfig.clone(),
             config.kube_context.clone(),
         )
-        .await?;
+        .await?
+        .try_into()?;
 
         Ok(KubernetesAPI::new(client, config.agent.clone()))
     }
@@ -189,8 +190,12 @@ impl KubernetesAPI {
                 .into(),
         };
 
-        let mut params = ContainerParams::new();
-        params.tls_cert = tls_cert;
+        let pod_ips = runtime_data
+            .as_ref()
+            .filter(|runtime_data| !runtime_data.pod_ips.is_empty())
+            .map(|runtime_data| runtime_data.pod_ips.join(","));
+
+        let params = ContainerParams::new(tls_cert, pod_ips);
 
         Ok((params, runtime_data))
     }
@@ -285,11 +290,11 @@ pub struct AgentKubernetesConnectInfo {
     pub agent_version: Option<String>,
 }
 
-pub async fn create_kube_api<P>(
+pub async fn create_kube_config<P>(
     accept_invalid_certificates: bool,
     kubeconfig: Option<P>,
     kube_context: Option<String>,
-) -> Result<Client>
+) -> Result<Config>
 where
     P: AsRef<str>,
 {
@@ -312,10 +317,11 @@ where
         Config::infer().await?
     };
     config.accept_invalid_certs = accept_invalid_certificates;
-    Client::try_from(config).map_err(KubeApiError::from)
+
+    Ok(config)
 }
 
-#[tracing::instrument(level = "debug", skip(client))]
+#[tracing::instrument(level = "trace", skip(client))]
 pub fn get_k8s_resource_api<K>(client: &Client, namespace: Option<&str>) -> Api<K>
 where
     K: kube::Resource<Scope = NamespaceResourceScope>,
