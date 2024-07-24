@@ -249,14 +249,14 @@ mod test {
     /// Verifies that [`CertificationRequest`] properly decodes from value produced by old code.
     #[test]
     fn decode_old_certificate_request() {
-        const REQUEST: &'static str = "PEM: -----BEGIN CERTIFICATE REQUEST-----
+        const REQUEST: &str = "PEM: -----BEGIN CERTIFICATE REQUEST-----
 MIGXMEkCAQAwFDESMBAGA1UEAwwJc29tZV9uYW1lMCwwBwYDK2VuBQADIQDhLn5T
 fFTb4xOq+a1HyC3T7ScFiQGBy+oUcwFiCVCUI6AAMAcGAytlcAUAA0EAPBRvsUHo
 +J/INwq6tn5kgcE9vMo48kRkyhWSp3XmfuUvxW/b7LufrlTcjw+4RG8pdugMXhcz
 5+u20nm4VY+sCg==
 -----END CERTIFICATE REQUEST-----
 ";
-        const PUBLIC_KEY: &'static [u8] =  b"\xe1.~S|T\xdb\xe3\x13\xaa\xf9\xadG\xc8-\xd3\xed'\x05\x89\x01\x81\xcb\xea\x14s\x01b\tP\x94#";
+        const PUBLIC_KEY: &[u8] =  b"\xe1.~S|T\xdb\xe3\x13\xaa\xf9\xadG\xc8-\xd3\xed'\x05\x89\x01\x81\xcb\xea\x14s\x01b\tP\x94#";
 
         let certification_request_pem = pem::parse(REQUEST).unwrap();
         let certification_request_source =
