@@ -8,6 +8,112 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.111.0](https://github.com/metalbear-co/mirrord/tree/3.111.0) - 2024-07-17
+
+
+### Added
+
+- Extended `feature.network.dns` config with an optional local/remote filter,
+  following `feature.network.outgoing` pattern.
+  [#2581](https://github.com/metalbear-co/mirrord/issues/2581)
+
+
+### Fixed
+
+- Update loopback detection to include pod ip's
+  [#2572](https://github.com/metalbear-co/mirrord/issues/2572)
+- Fixed a bug where enabling remote DNS prevented making a local connection
+  with telnet. [#2579](https://github.com/metalbear-co/mirrord/issues/2579)
+- Remove automatic ignore of incoming/outgoing traffic for ports 50000-60000
+  [#2597](https://github.com/metalbear-co/mirrord/issues/2597)
+
+
+### Internal
+
+- Add test to ensure empty streamed request doesn't hang if empty
+  [#2593](https://github.com/metalbear-co/mirrord/issues/2593)
+
+## [3.110.0](https://github.com/metalbear-co/mirrord/tree/3.110.0) - 2024-07-12
+
+
+### Added
+
+- Added experimental.trust_any_certificate to enable making app trust any
+  certificate on macOS
+  [#2576](https://github.com/metalbear-co/mirrord/issues/2576)
+
+
+### Fixed
+
+- Fix empty request streaming hanging forever
+  [#2590](https://github.com/metalbear-co/mirrord/issues/2590)
+
+## [3.109.0](https://github.com/metalbear-co/mirrord/tree/3.109.0) - 2024-07-10
+
+
+### Changed
+
+- mirrord commands now provide a nicer error message when the operator required
+  but not installed.
+  [#1730](https://github.com/metalbear-co/mirrord/issues/1730)
+- Add Unknown target variant for forwards compatibility.
+  [#2515](https://github.com/metalbear-co/mirrord/issues/2515)
+
+
+### Fixed
+
+- Improved agent performance when mirroring is under high load.
+  [#2529](https://github.com/metalbear-co/mirrord/issues/2529)
+- Don't include non-running pods in node capacity check
+  [#2582](https://github.com/metalbear-co/mirrord/issues/2582)
+- Add exclusion for DOTNET_EnableDiagnostics to make DotNet debugging work by
+  default
+
+
+### Internal
+
+- CLI now sends additional headers with each request to the mirrord operator.
+  [#2466](https://github.com/metalbear-co/mirrord/issues/2466)
+- Add mirrord-operator-apiserver-authentication `Role` and `RoleBinding` to
+  fetch `extension-apiserver-authentication` configmap from "kube-system".
+- Fixed compilation errors in `mirrord-operator` crate with only `crd` feature
+  enabled.
+- Fixed compilation of `mirrord-operator` crate with no features.
+- Updated `x509-certificate` dependency.
+
+
+## [3.108.0](https://github.com/metalbear-co/mirrord/tree/3.108.0) - 2024-07-02
+
+
+### Added
+
+- Added support for streaming HTTP responses.
+  [#2557](https://github.com/metalbear-co/mirrord/issues/2557)
+
+
+### Changed
+
+- Changed http path filter to include query params in match
+  [#2551](https://github.com/metalbear-co/mirrord/issues/2551)
+- Configuration documentation contents order.
+- Errors that occur when using discovery API to detect mirrord operator are no
+  longer fatal. When such error is encountered, mirrord command falls back to
+  using the OSS version.
+
+
+### Fixed
+
+- When using mesh use `lo` interface for mirroring traffic.
+  [#2452](https://github.com/metalbear-co/mirrord/issues/2452)
+
+
+### Internal
+
+- Correct version of HTTP response is sent based on agent protocol version.
+  [#2562](https://github.com/metalbear-co/mirrord/issues/2562)
+- `mirrord-intproxy` crate unit tests are now part of the CI.
+
+
 ## [3.107.0](https://github.com/metalbear-co/mirrord/tree/3.107.0) - 2024-06-25
 
 

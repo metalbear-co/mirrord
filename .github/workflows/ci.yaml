@@ -144,9 +144,11 @@ jobs:
       - run: python3 -m pip install cargo-zigbuild
       - run: cargo fmt --all -- --check
       # x64
-      - run: cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
       # Check that compiles for the supported linux targets (aarch64)
-      - run: cargo-zigbuild clippy --lib --bins --all-features --target aarch64-unknown-linux-gnu -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo-zigbuild clippy --lib --bins --all-features --target aarch64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
+      # Check whether `mirrord-operator` crate compiles the way it's used in the operator
+      - run: cargo-zigbuild check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
 
   # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
   # the output of this test is a boolean indicating if it's a release branch
@@ -322,6 +324,10 @@ jobs:
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-kube --all-features
       - name: mirrord intproxy UT
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-intproxy
+      - name: mirrord auth UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-auth
+      - name: mirrord operator UT
+        run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-operator --features "crd, client"
 
   macos_tests:
     runs-on: macos-13
@@ -343,9 +349,9 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: clippy x64
-        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=x86_64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
+        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=x86_64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
       - name: clippy aarch64
-        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=aarch64-apple-darwin -- -Wclippy::indexing_slicing -D warnings
+        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=aarch64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
       - name: mirrord SIP UT
         run: cargo test --target=x86_64-apple-darwin -p mirrord-sip
       # prepare stuff needed for integration tests

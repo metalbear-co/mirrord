@@ -1,1 +1,0 @@
-`mirrord-intproxy` crate unit tests are now part of the CI.

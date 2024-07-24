@@ -1,7 +1,5 @@
-use std::{
-    fmt::{self},
-    str::FromStr,
-};
+use core::fmt;
+use std::str::FromStr;
 
 use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
@@ -215,6 +213,7 @@ mirrord-layer failed to parse the provided target!
 /// - `job/{sample-job}`;
 /// - `cronjob/{sample-cronjob}`;
 /// - `statefulset/{sample-statefulset}`;
+#[warn(clippy::wildcard_enum_match_arm)]
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum Target {
@@ -294,41 +293,59 @@ impl Target {
             }
         }
     }
-}
 
-pub trait TargetDisplay {
-    fn target_type(&self) -> &str;
-
-    fn target_name(&self) -> &str;
-
-    fn container_name(&self) -> Option<&String>;
-
-    fn fmt_display(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}/{}{}",
-            self.target_type(),
-            self.target_name(),
-            self.container_name()
-                .map(|name| format!("/container/{name}"))
-                .unwrap_or_default()
+    /// `true` if this [`Target`] is only supported when the copy target feature is enabled.
+    pub(super) fn requires_copy(&self) -> bool {
+        matches!(
+            self,
+            Target::Job(_) | Target::CronJob(_) | Target::StatefulSet(_)
         )
     }
 }
 
+/// Trait used to convert different aspects of a [`Target`] into a string.
+///
+/// It's mainly implemented using the `impl_target_display` macro, except for [`Target`]
+/// and `TargetHandle`, which manually implement this.
+pub trait TargetDisplay {
+    /// The string version of a [`Target`]'s type, e.g. `Pod` -> `"Pod"`.
+    fn type_(&self) -> &str;
+
+    /// The `name` of a [`Target`], e.g. `"pod-of-beans"`.
+    fn name(&self) -> &str;
+
+    /// The optional name of a [`Target`]'s container, e.g. `"can-of-beans"`.
+    fn container(&self) -> Option<&String>;
+}
+
+/// Implements the [`TargetDisplay`] and [`fmt::Display`] traits for a target type.
 macro_rules! impl_target_display {
     ($struct_name:ident, $target_type:ident) => {
         impl TargetDisplay for $struct_name {
-            fn target_type(&self) -> &str {
+            fn type_(&self) -> &str {
                 stringify!($target_type)
             }
 
-            fn target_name(&self) -> &str {
+            fn name(&self) -> &str {
                 self.$target_type.as_str()
             }
 
-            fn container_name(&self) -> Option<&String> {
+            fn container(&self) -> Option<&String> {
                 self.container.as_ref()
+            }
+        }
+
+        impl fmt::Display for $struct_name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(
+                    f,
+                    "{}/{}{}",
+                    self.type_(),
+                    self.name(),
+                    self.container()
+                        .map(|name| format!("/container/{name}"))
+                        .unwrap_or_default()
+                )
             }
         }
     };
@@ -345,50 +362,53 @@ impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Target::Targetless => write!(f, "targetless"),
-            Target::Pod(target) => target.fmt_display(f),
-            Target::Deployment(target) => target.fmt_display(f),
-            Target::Rollout(target) => target.fmt_display(f),
-            Target::Job(target) => target.fmt_display(f),
-            Target::CronJob(target) => target.fmt_display(f),
-            Target::StatefulSet(target) => target.fmt_display(f),
+            Target::Pod(target) => target.fmt(f),
+            Target::Deployment(target) => target.fmt(f),
+            Target::Rollout(target) => target.fmt(f),
+            Target::Job(target) => target.fmt(f),
+            Target::CronJob(target) => target.fmt(f),
+            Target::StatefulSet(target) => target.fmt(f),
         }
     }
 }
 
 impl TargetDisplay for Target {
-    fn target_type(&self) -> &str {
+    #[tracing::instrument(level = "trace", ret)]
+    fn type_(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
-            Target::Deployment(target) => target.target_type(),
-            Target::Pod(target) => target.target_type(),
-            Target::Rollout(target) => target.target_type(),
-            Target::Job(target) => target.target_type(),
-            Target::CronJob(target) => target.target_type(),
-            Target::StatefulSet(target) => target.target_type(),
+            Target::Deployment(target) => target.type_(),
+            Target::Pod(target) => target.type_(),
+            Target::Rollout(target) => target.type_(),
+            Target::Job(target) => target.type_(),
+            Target::CronJob(target) => target.type_(),
+            Target::StatefulSet(target) => target.type_(),
         }
     }
 
-    fn target_name(&self) -> &str {
+    #[tracing::instrument(level = "trace", ret)]
+    fn name(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
-            Target::Deployment(target) => target.target_name(),
-            Target::Pod(target) => target.target_name(),
-            Target::Rollout(target) => target.target_name(),
-            Target::Job(target) => target.target_name(),
-            Target::CronJob(target) => target.target_name(),
-            Target::StatefulSet(target) => target.target_name(),
+            Target::Deployment(target) => target.name(),
+            Target::Pod(target) => target.name(),
+            Target::Rollout(target) => target.name(),
+            Target::Job(target) => target.name(),
+            Target::CronJob(target) => target.name(),
+            Target::StatefulSet(target) => target.name(),
         }
     }
 
-    fn container_name(&self) -> Option<&String> {
+    #[tracing::instrument(level = "trace", ret)]
+    fn container(&self) -> Option<&String> {
         match self {
             Target::Targetless => None,
-            Target::Deployment(target) => target.container_name(),
-            Target::Pod(target) => target.container_name(),
-            Target::Rollout(target) => target.container_name(),
-            Target::Job(target) => target.container_name(),
-            Target::CronJob(target) => target.container_name(),
-            Target::StatefulSet(target) => target.container_name(),
+            Target::Deployment(target) => target.container(),
+            Target::Pod(target) => target.container(),
+            Target::Rollout(target) => target.container(),
+            Target::Job(target) => target.container(),
+            Target::CronJob(target) => target.container(),
+            Target::StatefulSet(target) => target.container(),
         }
     }
 }

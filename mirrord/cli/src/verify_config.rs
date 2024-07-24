@@ -27,6 +27,7 @@ use crate::{config::VerifyConfigArgs, error, LayerFileConfig};
 enum VerifiedTarget {
     #[serde(rename = "targetless")]
     Targetless,
+
     #[serde(untagged)]
     Pod(PodTarget),
     #[serde(untagged)]

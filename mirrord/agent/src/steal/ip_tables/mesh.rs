@@ -27,14 +27,14 @@ impl<IPT> MeshRedirect<IPT>
 where
     IPT: IPTables,
 {
-    pub fn create(ipt: Arc<IPT>, vendor: MeshVendor) -> Result<Self> {
+    pub fn create(ipt: Arc<IPT>, vendor: MeshVendor, pod_ips: Option<&str>) -> Result<Self> {
         let prerouteing = PreroutingRedirect::create(ipt.clone())?;
 
         for port in Self::get_skip_ports(&ipt, &vendor)? {
             prerouteing.add_rule(&format!("-m multiport -p tcp ! --dports {port} -j RETURN"))?;
         }
 
-        let output = OutputRedirect::create(ipt, IPTABLE_MESH.to_string())?;
+        let output = OutputRedirect::create(ipt, IPTABLE_MESH.to_string(), pod_ips)?;
 
         Ok(MeshRedirect {
             prerouteing,
@@ -220,7 +220,7 @@ mod tests {
         mock.expect_insert_rule()
             .with(
                 eq(IPTABLE_MESH.as_str()),
-                eq(format!("-m owner --gid-owner {gid} -p tcp -j RETURN")),
+                eq(format!("-m owner --gid-owner {gid} -p tcp  -j RETURN")),
                 eq(1),
             )
             .times(1)
@@ -245,8 +245,8 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let prerouting =
-            MeshRedirect::create(Arc::new(mock), MeshVendor::Linkerd).expect("Unable to create");
+        let prerouting = MeshRedirect::create(Arc::new(mock), MeshVendor::Linkerd, None)
+            .expect("Unable to create");
 
         assert!(prerouting.add_redirect(69, 420).await.is_ok());
     }

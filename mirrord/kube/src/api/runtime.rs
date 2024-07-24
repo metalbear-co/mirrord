@@ -65,6 +65,7 @@ impl Display for ContainerRuntime {
 #[derive(Debug)]
 pub struct RuntimeData {
     pub pod_name: String,
+    pub pod_ips: Vec<String>,
     pub pod_namespace: Option<String>,
     pub node_name: String,
     pub container_id: String,
@@ -108,6 +109,16 @@ impl RuntimeData {
             .and_then(|spec| spec.node_name.as_ref())
             .ok_or_else(|| KubeApiError::missing_field(pod, ".spec.nodeName"))?
             .to_owned();
+
+        let pod_ips = pod
+            .status
+            .as_ref()
+            .and_then(|spec| spec.pod_ips.as_ref())
+            .ok_or_else(|| KubeApiError::missing_field(pod, ".status.podIPs"))?
+            .iter()
+            .filter_map(|pod_ip| pod_ip.ip.as_ref())
+            .cloned()
+            .collect();
 
         let container_statuses = pod
             .status
@@ -155,6 +166,7 @@ impl RuntimeData {
         };
 
         Ok(RuntimeData {
+            pod_ips,
             pod_name,
             pod_namespace: pod.metadata.namespace.clone(),
             node_name,
@@ -184,7 +196,10 @@ impl RuntimeData {
 
         let mut pod_count = 0;
         let mut list_params = ListParams {
-            field_selector: Some(format!("spec.nodeName={}", self.node_name)),
+            field_selector: Some(format!(
+                "status.phase=Running,spec.nodeName={}",
+                self.node_name
+            )),
             ..Default::default()
         };
 

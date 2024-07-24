@@ -12,13 +12,10 @@ use tokio::{
     fs,
     io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, SeekFrom},
 };
-use tracing::info;
 use whoami::fallible;
 
 use crate::{
-    certificate::Certificate,
-    credentials::Credentials,
-    error::{AuthenticationError, CertificateStoreError, Result},
+    certificate::Certificate, credentials::Credentials, error::CredentialStoreError,
     key_pair::KeyPair,
 };
 
@@ -69,28 +66,27 @@ impl UserIdentity {
 
 impl CredentialStore {
     /// Load contents of store from file
-    async fn load<R: AsyncRead + Unpin>(source: &mut R) -> Result<Self> {
+    async fn load<R: AsyncRead + Unpin>(source: &mut R) -> Result<Self, CredentialStoreError> {
         let mut buffer = Vec::new();
-
         source
             .read_to_end(&mut buffer)
             .await
-            .map_err(CertificateStoreError::from)?;
-
-        serde_yaml::from_slice(&buffer)
-            .map_err(CertificateStoreError::from)
-            .map_err(AuthenticationError::from)
+            .map_err(CredentialStoreError::FileAccess)?;
+        serde_yaml::from_slice(&buffer).map_err(From::from)
     }
 
     /// Save contents of store to file
-    async fn save<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<()> {
-        let buffer = serde_yaml::to_string(&self).map_err(CertificateStoreError::from)?;
-
+    async fn save<W: AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+    ) -> Result<(), CredentialStoreError> {
+        let buffer = serde_yaml::to_string(&self)?;
         writer
             .write_all(buffer.as_bytes())
             .await
-            .map_err(CertificateStoreError::from)
-            .map_err(AuthenticationError::from)
+            .map_err(CredentialStoreError::FileAccess)?;
+
+        Ok(())
     }
 
     /// Get hostname to be used as common name in a certification request.
@@ -124,7 +120,7 @@ impl CredentialStore {
         client: &Client,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
-    ) -> Result<&mut Credentials>
+    ) -> Result<&mut Credentials, CredentialStoreError>
     where
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
@@ -173,11 +169,11 @@ pub struct CredentialStoreSync {
 }
 
 impl CredentialStoreSync {
-    pub async fn open() -> Result<Self> {
+    pub async fn open() -> Result<Self, CredentialStoreError> {
         if !CREDENTIALS_DIR.exists() {
             fs::create_dir_all(&*CREDENTIALS_DIR)
                 .await
-                .map_err(CertificateStoreError::from)?;
+                .map_err(CredentialStoreError::ParentDir)?;
         }
 
         let store_file = fs::OpenOptions::new()
@@ -187,7 +183,7 @@ impl CredentialStoreSync {
             .truncate(false)
             .open(&*CREDENTIALS_PATH)
             .await
-            .map_err(CertificateStoreError::from)?;
+            .map_err(CredentialStoreError::FileAccess)?;
 
         Ok(Self { store_file })
     }
@@ -200,7 +196,7 @@ impl CredentialStoreSync {
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
         callback: C,
-    ) -> Result<V>
+    ) -> Result<V, CredentialStoreError>
     where
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
@@ -209,7 +205,7 @@ impl CredentialStoreSync {
     {
         let mut store = CredentialStore::load(&mut self.store_file)
             .await
-            .inspect_err(|err| info!("CredentialStore Load Error {err:?}"))
+            .inspect_err(|error| tracing::warn!(%error, "CredentialStore load failed"))
             .unwrap_or_default();
 
         let value = callback(
@@ -222,7 +218,7 @@ impl CredentialStoreSync {
         self.store_file
             .seek(SeekFrom::Start(0))
             .await
-            .map_err(CertificateStoreError::from)?;
+            .map_err(CredentialStoreError::FileAccess)?;
 
         store.save(&mut self.store_file).await?;
 
@@ -235,7 +231,7 @@ impl CredentialStoreSync {
         client: &Client,
         operator_fingerprint: String,
         operator_subscription_id: Option<String>,
-    ) -> Result<Certificate>
+    ) -> Result<Certificate, CredentialStoreError>
     where
         R: Resource + Clone + Debug,
         R: for<'de> Deserialize<'de>,
@@ -243,7 +239,7 @@ impl CredentialStoreSync {
     {
         self.store_file
             .lock_exclusive()
-            .map_err(CertificateStoreError::Lockfile)?;
+            .map_err(CredentialStoreError::Lockfile)?;
 
         let result = self
             .access_credential::<R, _, Certificate>(
@@ -256,7 +252,7 @@ impl CredentialStoreSync {
 
         self.store_file
             .unlock()
-            .map_err(CertificateStoreError::Lockfile)?;
+            .map_err(CredentialStoreError::Lockfile)?;
 
         result
     }

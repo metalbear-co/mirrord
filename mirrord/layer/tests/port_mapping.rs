@@ -1,7 +1,7 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::PathBuf, time::Duration};
+use std::{path::Path, time::Duration};
 
 use rstest::rstest;
 
@@ -13,8 +13,8 @@ pub use common::*;
 #[timeout(Duration::from_secs(20))]
 async fn port_mapping(
     #[values(Application::RustIssue2058)] application: Application,
-    dylib_path: &PathBuf,
-    config_dir: &PathBuf,
+    dylib_path: &Path,
+    config_dir: &Path,
 ) {
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer_and_port(

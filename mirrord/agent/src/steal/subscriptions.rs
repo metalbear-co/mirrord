@@ -58,6 +58,8 @@ pub(crate) struct IpTablesRedirector {
     redirect_to: Port,
     /// Listener to which redirect all connections.
     listener: TcpListener,
+
+    pod_ips: Option<String>,
 }
 
 impl IpTablesRedirector {
@@ -73,7 +75,10 @@ impl IpTablesRedirector {
     ///
     /// * `flush_connections` - whether exisitng connections should be flushed when adding new
     ///   redirects
-    pub(crate) async fn new(flush_connections: bool) -> Result<Self, AgentError> {
+    pub(crate) async fn new(
+        flush_connections: bool,
+        pod_ips: Option<String>,
+    ) -> Result<Self, AgentError> {
         let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await?;
         let redirect_to = listener.local_addr()?.port();
 
@@ -82,6 +87,7 @@ impl IpTablesRedirector {
             flush_connections,
             redirect_to,
             listener,
+            pod_ips,
         })
     }
 }
@@ -95,7 +101,12 @@ impl PortRedirector for IpTablesRedirector {
             Some(iptables) => iptables,
             None => {
                 let iptables = new_iptables();
-                let safe = SafeIpTables::create(iptables.into(), self.flush_connections).await?;
+                let safe = SafeIpTables::create(
+                    iptables.into(),
+                    self.flush_connections,
+                    self.pod_ips.as_deref(),
+                )
+                .await?;
                 self.iptables.insert(safe)
             }
         };
@@ -356,11 +367,7 @@ mod test {
     macro_rules! check_redirector {
         ( $redirector: expr $(, $x:expr )* ) => {
             {
-                let mut temp_vec = Vec::<Port>::new();
-                $(
-                    temp_vec.push($x);
-                )*
-
+                let mut temp_vec: Vec<u16> = vec![$($x,)*];
                 temp_vec.sort();
 
                 let mut redirections = $redirector.redirections.iter().copied().collect::<Vec<_>>();
