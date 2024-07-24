@@ -66,7 +66,7 @@ async fn read_from_mirrord_bin(dylib_path: &Path) {
 
     // <TMPDIR>/mirrord-bin/<TMPDIR>/mirrord-test-read-from-mirrord-bin.
     let path_in_mirrord_bin =
-        MIRRORD_TEMP_BIN_DIR_PATH_BUF.join(&file_path.strip_prefix("/").unwrap());
+        MIRRORD_TEMP_BIN_DIR_PATH_BUF.join(file_path.strip_prefix("/").unwrap());
 
     // Make sure we write and read from different paths (this is "meta check").
     assert_ne!(file_path, path_in_mirrord_bin);
