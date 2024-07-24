@@ -12,7 +12,7 @@ use mirrord_progress::{
     messages::MULTIPOD_WARNING, IdeAction, IdeMessage, NotificationLevel, Progress,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-use tokio::sync::mpsc;
+use tokio::{net::TcpSocket, sync::mpsc};
 
 use crate::{CliError, Result};
 
@@ -103,6 +103,18 @@ pub(crate) async fn create_and_connect<P, R: Reporter>(
 where
     P: Progress + Send + Sync,
 {
+    if let Some(connect_tcp) = config.connect_tcp.as_ref() {
+        let proxy_addr = connect_tcp.parse().unwrap();
+        let socket = TcpSocket::new_v4().unwrap();
+
+        let (sender, receiver) = wrap_raw_connection(socket.connect(proxy_addr).await.unwrap());
+
+        return Ok((
+            AgentConnectInfo::ExtProxy(proxy_addr),
+            AgentConnection { sender, receiver },
+        ));
+    }
+
     if let Some(connection) = try_connect_using_operator(config, progress, analytics).await? {
         return Ok((
             AgentConnectInfo::Operator(connection.session),

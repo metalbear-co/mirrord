@@ -61,6 +61,9 @@ pub(super) enum Commands {
 
     /// Create and run a new container from an image with mirrord loaded
     Container(Box<ContainerArgs>),
+
+    #[command(hide = true, name = "extproxy")]
+    ExternalProxy,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]

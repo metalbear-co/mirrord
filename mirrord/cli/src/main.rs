@@ -56,6 +56,7 @@ mod diagnose;
 mod error;
 mod execution;
 mod extension;
+mod external_proxy;
 mod extract;
 mod internal_proxy;
 mod operator;
@@ -591,6 +592,7 @@ fn main() -> miette::Result<()> {
             Commands::Teams => teams::navigate_to_intro().await,
             Commands::Diagnose(args) => diagnose_command(*args).await?,
             Commands::Container(args) => container_command(*args, watch).await?,
+            Commands::ExternalProxy => external_proxy::proxy(watch).await?,
         };
 
         Ok(())

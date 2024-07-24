@@ -6,10 +6,8 @@ use mirrord_config::LayerConfig;
 use mirrord_progress::{Progress, ProgressTracker};
 
 use crate::{
-    config::ContainerArgs,
-    container::command_builder::RuntimeCommandBuilder,
-    error::Result,
-    execution::{MirrordExecution, INJECTION_ENV_VAR},
+    config::ContainerArgs, container::command_builder::RuntimeCommandBuilder, error::Result,
+    execution::MirrordExecution,
 };
 
 mod command_builder;
@@ -35,43 +33,20 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
 
     let mut sub_progress = progress.subtask("preparing to launch process");
 
-    #[cfg(target_os = "macos")]
-    let mut execution_info =
-        MirrordExecution::start(&config, None, &mut sub_progress, &mut analytics).await?;
-    #[cfg(target_os = "linux")]
-    let mut execution_info =
-        MirrordExecution::start(&config, &mut sub_progress, &mut analytics).await?;
+    let execution_info =
+        MirrordExecution::start_ext(&config, &mut sub_progress, &mut analytics).await?;
 
     tracing::info!(?execution_info, "starting");
 
-    let mut command = RuntimeCommandBuilder::new(args.runtime);
-
-    execution_info.environment.remove("HOSTNAME");
-
-    if let Some(connect_tcp) = execution_info.environment.remove("MIRRORD_CONNECT_TCP") {
-        command.add_env(
-            "MIRRORD_CONNECT_TCP",
-            str::replace(&connect_tcp, "127.0.0.1", "10.0.0.4"),
-        );
-    }
+    let mut runtime_command = RuntimeCommandBuilder::new(args.runtime);
+    runtime_command.add_env("MIRRORD_PROGRESS_MODE", "off");
 
     #[cfg(target_os = "macos")]
     {
-        execution_info.environment.remove(INJECTION_ENV_VAR);
-
-        command.add_env(
-            crate::execution::LINUX_INJECTION_ENV_VAR,
-            "/tmp/libmirrord_layer.so",
+        runtime_command.add_volume(
+            "/Users/dmitry/ws/metalbear/mirrord/target/aarch64-unknown-linux-gnu/debug/mirrord",
+            "/tmp/mirrord",
         );
-        command.add_volume("/Users/dmitry/ws/metalbear/mirrord/target/aarch64-unknown-linux-gnu/debug/libmirrord_layer.so", "/tmp/libmirrord_layer.so");
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        if let Some((_, library_path)) = execution_info.environment.remove(INJECTION_ENV_VAR) {
-            command.add_env(INJECTION_ENV_VAR, "/tmp/libmirrord_layer.so");
-            command.add_volume(library_path, "/tmp/libmirrord_layer.so");
-        }
     }
 
     if let Some(mirrord_config_path) = config_env.remove("MIRRORD_CONFIG_FILE") {
@@ -87,14 +62,22 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
 
         let continer_path = format!("/tmp/{}", config_name);
 
-        command.add_env("MIRRORD_CONFIG_FILE", &continer_path);
-        command.add_volume(host_path, continer_path);
+        runtime_command.add_env("MIRRORD_CONFIG_FILE", &continer_path);
+        runtime_command.add_volume(host_path, continer_path);
     }
 
-    command.add_envs(config_env);
-    command.add_envs(&execution_info.environment);
+    runtime_command.add_envs(config_env);
+    runtime_command.add_envs(
+        execution_info
+            .environment
+            .iter()
+            .filter(|(key, _)| key != &"HOSTNAME"),
+    );
 
-    let (binary, binary_args) = command.with_command(args.command).into_execvp_args();
+    let (binary, binary_args) = runtime_command
+        .with_command(args.command)
+        .into_execvp_args();
+
     let err = execvp(binary, binary_args);
     tracing::error!("Couldn't execute {:?}", err);
 

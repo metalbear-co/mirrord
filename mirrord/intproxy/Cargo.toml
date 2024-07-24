@@ -37,6 +37,4 @@ hyper-util.workspace = true
 http-body-util.workspace = true
 bytes.workspace = true
 futures.workspace = true
-
 rand = "0.8"
-local-ip-address = "0.6"

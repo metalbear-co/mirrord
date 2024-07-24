@@ -34,6 +34,34 @@ const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Discord or G
 
 "#;
 
+/// Errors that can occur when executing the `mirrord extproxy` command.
+#[derive(Debug, Error, Diagnostic)]
+pub(crate) enum ExternalProxyError {
+    #[error("Failed to deserialize connect info `{0}`: {1}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    DeseralizeConnectInfo(String, serde_json::Error),
+
+    #[error("Initial ping pong with the agent failed: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    InitialPingPongFailed(String),
+
+    #[error("Main internal proxy logic failed: {0}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    Intproxy(#[from] IntProxyError),
+
+    #[error("Failed to set up TPC listener for accepting intproxy connections: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    ListenerSetup(std::io::Error),
+
+    #[error("Failed to open log file at `{0}`: {1}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    OpenLogFile(String, std::io::Error),
+
+    #[error("Failed to set sid: {0}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    SetSid(nix::Error),
+}
+
 /// Errors that can occur when executing the `mirrord intproxy` command.
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum InternalProxyError {
@@ -170,6 +198,11 @@ pub(crate) enum CliError {
     #[error("An error ocurred when spawning internal proxy: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     InternalProxySpawnError(String),
+
+    /// Errors produced by `mirrord extproxy` command.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    ExternalProxyError(#[from] ExternalProxyError),
 
     /// Errors produced by `mirrord intproxy` command.
     #[error(transparent)]

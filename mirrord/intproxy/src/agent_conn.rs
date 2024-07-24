@@ -17,7 +17,7 @@ use mirrord_protocol::{ClientMessage, DaemonMessage};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
-    net::TcpStream,
+    net::{TcpSocket, TcpStream},
     sync::mpsc::{Receiver, Sender},
 };
 
@@ -46,6 +46,7 @@ pub enum AgentConnectionError {
 /// Directive for the proxy on how to connect to the agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentConnectInfo {
+    ExtProxy(SocketAddr),
     /// Connect to the agent through the operator.
     Operator(OperatorSession),
     /// Connect directly to the agent by name and port using k8s port forward.
@@ -78,6 +79,12 @@ impl AgentConnection {
                 let connection =
                     OperatorApi::connect_in_existing_session(config, session, analytics).await?;
                 (connection.tx, connection.rx)
+            }
+
+            Some(AgentConnectInfo::ExtProxy(proxy_addr)) => {
+                let socket = TcpSocket::new_v4().unwrap();
+
+                wrap_raw_connection(socket.connect(proxy_addr).await.unwrap())
             }
 
             Some(AgentConnectInfo::DirectKubernetes(connect_info)) => {

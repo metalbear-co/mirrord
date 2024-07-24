@@ -29,10 +29,8 @@ use crate::{
     Result,
 };
 
-pub(crate) const LINUX_INJECTION_ENV_VAR: &str = "LD_PRELOAD";
-
 #[cfg(target_os = "linux")]
-pub(crate) const INJECTION_ENV_VAR: &str = LINUX_INJECTION_ENV_VAR;
+pub(crate) const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
 
 #[cfg(target_os = "macos")]
 pub(crate) const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
@@ -202,7 +200,6 @@ impl MirrordExecution {
             .lines()
             .next_line()
             .await
-            .inspect(|val| println!("{val:?}"))
             .map_err(|e| {
                 CliError::InternalProxySpawnError(format!("failed to read proxy stdout: {e}"))
             })?
@@ -255,6 +252,95 @@ impl MirrordExecution {
             environment: env_vars,
             child: proxy_process,
             patched_path,
+            env_to_unset: config
+                .feature
+                .env
+                .unset
+                .clone()
+                .map(|unset| unset.to_vec())
+                .unwrap_or_default(),
+            uses_operator: matches!(connect_info, AgentConnectInfo::Operator(..)),
+        })
+    }
+
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub(crate) async fn start_ext<P>(
+        config: &LayerConfig,
+        progress: &mut P,
+        analytics: &mut AnalyticsReporter,
+    ) -> Result<Self>
+    where
+        P: Progress + Send + Sync,
+    {
+        if !config.use_proxy {
+            remove_proxy_env();
+        }
+
+        let (connect_info, mut connection) = create_and_connect(config, progress, analytics)
+            .await
+            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+
+        let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
+            Default::default()
+        } else {
+            Self::fetch_env_vars(config, &mut connection)
+                .await
+                .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
+        };
+
+        // stderr is inherited so we can see logs/errors.
+        let mut proxy_command =
+            Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
+
+        // Set timeout when running from extension to be 30 seconds
+        // since it might need to compile, build until it runs the actual process
+        // and layer connects
+        proxy_command
+            .arg("extproxy")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .stdin(std::process::Stdio::null());
+
+        proxy_command.env(
+            AGENT_CONNECT_INFO_ENV_KEY,
+            serde_json::to_string(&connect_info)?,
+        );
+
+        let mut proxy_process = proxy_command.spawn().map_err(|e| {
+            CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
+        })?;
+
+        let stderr = proxy_process.stderr.take().expect("stderr was piped");
+        let _stderr_guard = watch_stderr(stderr, progress).await;
+
+        let stdout = proxy_process.stdout.take().expect("stdout was piped");
+
+        let socket: SocketAddr = BufReader::new(stdout)
+            .lines()
+            .next_line()
+            .await
+            .map_err(|e| {
+                CliError::InternalProxySpawnError(format!("failed to read proxy stdout: {e}"))
+            })?
+            .ok_or_else(|| {
+                CliError::InternalProxySpawnError(
+                    "proxy did not print port number to stdout".to_string(),
+                )
+            })?
+            .parse()
+            .map_err(|e| {
+                CliError::InternalProxySpawnError(format!(
+                    "failed to parse port number printed by proxy: {e}"
+                ))
+            })?;
+
+        // Provide details for layer to connect to agent via internal proxy
+        env_vars.insert("MIRRORD_CONNECT_TCP".to_string(), socket.to_string());
+
+        Ok(Self {
+            environment: env_vars,
+            child: proxy_process,
+            patched_path: None,
             env_to_unset: config
                 .feature
                 .env
