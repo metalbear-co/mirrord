@@ -17,7 +17,7 @@ use fancy_regex::Regex;
 use futures::FutureExt;
 use futures_util::{future::BoxFuture, stream::TryStreamExt};
 use k8s_openapi::api::{
-    apps::v1::{Deployment, StatefulSet},
+    apps::v1::Deployment,
     core::v1::{Namespace, Pod, Service},
 };
 use kube::{
@@ -642,7 +642,6 @@ pub struct KubeService {
     pod_guard: ResourceGuard,
     service_guard: ResourceGuard,
     namespace_guard: Option<ResourceGuard>,
-    stateful_set_guard: Option<ResourceGuard>,
 }
 
 impl Drop for KubeService {
@@ -651,9 +650,6 @@ impl Drop for KubeService {
             self.pod_guard.take_deleter(),
             self.service_guard.take_deleter(),
             self.namespace_guard
-                .as_mut()
-                .and_then(ResourceGuard::take_deleter),
-            self.stateful_set_guard
                 .as_mut()
                 .and_then(ResourceGuard::take_deleter),
         ]
@@ -674,66 +670,6 @@ impl Drop for KubeService {
         })
         .join();
     }
-}
-
-fn stateful_set_from_json(name: &str, image: &str) -> StatefulSet {
-    serde_json::from_value(json!({
-        "apiVersion": "apps/v1",
-        "kind": "StatefulSet",
-        "metadata": {
-            "name": name,
-            "labels": {
-                "app": name,
-                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-                "test-label-for-statefulsets": format!("statefulset-{name}")
-            }
-        },
-        "spec": {
-            "replicas": 1,
-            "selector": {
-                "matchLabels": {
-                    "app": &name
-                }
-            },
-            "template": {
-                "metadata": {
-                    "labels": {
-                        "app": &name,
-                        "test-label-for-pods": format!("pod-{name}"),
-                        format!("test-label-for-pods-{name}"): &name
-                    }
-                },
-                "spec": {
-                    "containers": [
-                        {
-                            "name": &CONTAINER_NAME,
-                            "image": image,
-                            "ports": [
-                                {
-                                    "containerPort": 80
-                                }
-                            ],
-                            "env": [
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_FIRST",
-                                  "value": "mirrord.is.running"
-                                },
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_SECOND",
-                                  "value": "7777"
-                                },
-                                {
-                                    "name": "MIRRORD_FAKE_VAR_THIRD",
-                                    "value": "foo=bar"
-                                }
-                            ],
-                        }
-                    ]
-                }
-            }
-        }
-    }))
-    .expect("Failed creating `statefulset` from json spec!")
 }
 
 fn deployment_from_json(name: &str, image: &str) -> Deployment {
@@ -944,7 +880,6 @@ pub async fn service(
         pod_guard,
         service_guard,
         namespace_guard,
-        stateful_set_guard: None,
     }
 }
 
@@ -961,7 +896,6 @@ pub async fn service_for_mirrord_ls(
 
     let kube_client = kube_client.await;
     let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
-    let stateful_set_api: Api<StatefulSet> = Api::namespaced(kube_client.clone(), namespace);
     let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
     let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
 
@@ -1011,18 +945,6 @@ pub async fn service_for_mirrord_ls(
         watch_resource_exists(&namespace_api, namespace).await;
     }
 
-    // `StatefulSet`
-    let stateful_set = stateful_set_from_json(&name, image);
-    let stateful_set_guard = ResourceGuard::create(
-        stateful_set_api.clone(),
-        name.to_string(),
-        &stateful_set,
-        delete_after_fail,
-    )
-    .await
-    .unwrap();
-    watch_resource_exists(&stateful_set_api, &name).await;
-
     // `Deployment`
     let deployment = deployment_from_json(&name, image);
     let pod_guard = ResourceGuard::create(
@@ -1069,7 +991,6 @@ pub async fn service_for_mirrord_ls(
         pod_guard,
         service_guard,
         namespace_guard,
-        stateful_set_guard: Some(stateful_set_guard),
     }
 }
 /// Service that should only be reachable from inside the cluster, as a communication partner
