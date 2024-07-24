@@ -3,6 +3,10 @@ use std::{
     io,
     io::Write,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 
 use futures::{SinkExt, StreamExt};
@@ -15,8 +19,8 @@ use mirrord_intproxy::{
 };
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, LogLevel, LogMessage};
 use nix::libc;
-use tokio::net::TcpListener;
-use tokio_util::codec::Framed;
+use tokio::net::{TcpListener, TcpStream};
+use tokio_util::{codec::Framed, sync::CancellationToken};
 use tracing_subscriber::EnvFilter;
 
 use crate::{
@@ -118,6 +122,45 @@ async fn connect_and_ping(
     }
 }
 
+async fn handle_connection(socket: TcpStream, mut agent_conn: AgentConnection) {
+    let mut socket = Framed::new(socket, DaemonCodec::default());
+
+    loop {
+        tokio::select! {
+            client_message = socket.next() => {
+                match client_message {
+                    Some(Ok(client_message)) => {
+                        if let Err(error) = agent_conn.agent_tx.send(client_message).await {
+                            tracing::error!(%error, "unable to send message to agent");
+
+                            break;
+                        }
+                    }
+                    Some(Err(error)) => {
+                        tracing::error!(%error, "unable to recive message from intproxy");
+
+                        break;
+                    }
+                    None => {
+                        break;
+                    }
+                }
+            }
+            daemon_message = agent_conn.agent_rx.recv() => {
+                if let Some(daemon_message) = daemon_message {
+                    if let Err(error) = socket.send(daemon_message).await {
+                        tracing::error!(%error, "unable to send message to intproxy");
+
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+}
+
 pub async fn proxy(watch: drain::Watch) -> Result<()> {
     let config = LayerConfig::from_env()?;
 
@@ -161,32 +204,42 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
         detach_io()?;
     }
 
-    while let Ok((socket, _)) = listener.accept().await {
-        let mut socket = Framed::new(socket, DaemonCodec::default());
+    let cancellation_token = CancellationToken::new();
+    let connections = Arc::new(AtomicUsize::new(0));
 
-        let mut agent_conn =
-            connect_and_ping(&config, agent_connect_info.clone(), &mut analytics).await?;
+    loop {
+        tokio::select! {
+            conn = listener.accept() => {
+                if let Ok((socket, addr)) = conn {
+                    tracing::debug!(?addr, "new connection");
 
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    client_message = socket.next() => {
-                        if let Some(Ok(client_message)) = client_message {
-                            let _ = agent_conn.agent_tx.send(client_message).await;
-                        } else {
-                            break;
+                    let agent_conn =
+                        connect_and_ping(&config, agent_connect_info.clone(), &mut analytics).await?;
+
+                    connections.fetch_add(1, Ordering::Relaxed);
+
+                    tokio::spawn({
+                        let connections = connections.clone();
+                        let cancellation_token = cancellation_token.clone();
+
+                        async move {
+                            handle_connection(socket, agent_conn).await;
+
+                            tracing::debug!(?addr, "closed connection");
+
+                            if connections.fetch_sub(1, Ordering::Relaxed) == 1 {
+                                cancellation_token.cancel();
+                            }
                         }
-                    }
-                    daemon_message = agent_conn.agent_rx.recv() => {
-                        if let Some(daemon_message) = daemon_message {
-                            let _ = socket.send(daemon_message).await;
-                        } else {
-                            break;
-                        }
-                    }
+                    });
+                } else {
+                    break;
                 }
             }
-        });
+            _ = cancellation_token.cancelled() => {
+                break;
+            }
+        }
     }
 
     Ok(())

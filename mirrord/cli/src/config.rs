@@ -497,5 +497,8 @@ pub(super) struct ContainerArgs {
 
 #[derive(Subcommand, Debug)]
 pub(super) enum ContainerCommand {
-    Run { runtime_args: Vec<String> },
+    Run {
+        #[arg(raw = true)]
+        runtime_args: Vec<String>,
+    },
 }

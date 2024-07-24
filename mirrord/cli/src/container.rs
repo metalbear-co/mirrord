@@ -1,9 +1,10 @@
-use std::path::Path;
+use std::{fs::Permissions, os::unix::fs::PermissionsExt, path::Path};
 
 use exec::execvp;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_progress::{Progress, ProgressTracker};
+use tokio::fs::set_permissions;
 
 use crate::{
     config::ContainerArgs, container::command_builder::RuntimeCommandBuilder, error::Result,
@@ -45,7 +46,7 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     {
         runtime_command.add_volume(
             "/Users/dmitry/ws/metalbear/mirrord/target/aarch64-unknown-linux-gnu/debug/mirrord",
-            "/tmp/mirrord",
+            "/usr/bin/mirrord",
         );
     }
 
@@ -74,9 +75,31 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
             .filter(|(key, _)| key != &"HOSTNAME"),
     );
 
-    let (binary, binary_args) = runtime_command
-        .with_command(args.command)
-        .into_execvp_args();
+    let mut runtime_command = runtime_command.with_command(args.command);
+
+    let temp_entrypoint = {
+        let entrypoint = runtime_command
+            .entrypoint()
+            .map(|entrypoint| format!("{entrypoint} -- "))
+            .unwrap_or_default();
+
+        let temp_entrypoint = tempfile::NamedTempFile::new().unwrap();
+
+        let _ = tokio::fs::write(
+            &temp_entrypoint,
+            format!("#!/usr/bin/env sh\n\nmirrord exec {entrypoint}$@\n"),
+        )
+        .await;
+
+        let _ = set_permissions(&temp_entrypoint, Permissions::from_mode(0o511)).await;
+
+        runtime_command.add_volume(&temp_entrypoint, "/tmp/mirrord-entrypoint.sh");
+        runtime_command.add_entrypoint("/tmp/mirrord-entrypoint.sh");
+
+        temp_entrypoint
+    };
+
+    let (binary, binary_args) = runtime_command.into_execvp_args();
 
     let err = execvp(binary, binary_args);
     tracing::error!("Couldn't execute {:?}", err);
@@ -85,6 +108,7 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
 
     // Kills the intproxy, freeing the agent.
     execution_info.stop().await;
+    let _ = temp_entrypoint.close();
 
     Ok(())
 }
