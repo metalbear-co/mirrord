@@ -831,7 +831,6 @@ fn service_from_json(name: &str, service_type: &str) -> Service {
     .expect("Failed creating `service` from json spec!")
 }
 
-
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
 /// This behavior can be changed, see `FORCE_CLEANUP_ENV_NAME`.
