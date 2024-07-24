@@ -803,7 +803,7 @@ mod main {
         fn set_fallback_frameworks_path() {
             let example_path = "/Applications/Postman.app/Contents/MacOS/Postman";
             let frameworks_path = "/Applications/Postman.app/Contents/Frameworks";
-            let is_frameworks_path = |&path: &'_ &str| path == frameworks_path;
+            let is_frameworks_path = |path: &str| path == frameworks_path;
 
             // Verify that the path was not there before.
             assert!(!env::var(FRAMEWORKS_ENV_VAR_NAME)
