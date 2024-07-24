@@ -605,10 +605,7 @@ mod main {
 
         #[test]
         fn is_sip_true() {
-            assert!(matches!(
-                get_sip_status("/bin/ls", &vec![]),
-                Ok(SipBinary(_))
-            ));
+            assert!(matches!(get_sip_status("/bin/ls", &[]), Ok(SipBinary(_))));
         }
 
         #[test]
@@ -618,7 +615,7 @@ mod main {
             f.write_all(&data).unwrap();
             f.flush().unwrap();
             assert!(matches!(
-                get_sip_status(f.path().to_str().unwrap(), &vec![]).unwrap(),
+                get_sip_status(f.path().to_str().unwrap(), &[]).unwrap(),
                 NoSip
             ));
         }
@@ -626,7 +623,7 @@ mod main {
         #[test]
         fn is_sip_notfound() {
             let err =
-                get_sip_status("/donald/duck/was/a/duck/not/a/quack/a/duck", &vec![]).unwrap_err();
+                get_sip_status("/donald/duck/was/a/duck/not/a/quack/a/duck", &[]).unwrap_err();
             assert!(err.to_string().contains("executable file not found"));
         }
 
@@ -635,7 +632,7 @@ mod main {
             let path = "/bin/ls";
             let output = patch_binary(path.as_ref()).unwrap();
             assert!(matches!(
-                get_sip_status(output.to_str().unwrap(), &vec![]).unwrap(),
+                get_sip_status(output.to_str().unwrap(), &[]).unwrap(),
                 NoSip
             ));
             // Check DYLD_* features work on it:
@@ -656,7 +653,7 @@ mod main {
             let patched_path_buf = patch_binary(path.as_ref()).unwrap();
             let patched_path = patched_path_buf.to_str().unwrap();
             assert!(matches!(
-                get_sip_status(patched_path, &vec![]).unwrap(),
+                get_sip_status(patched_path, &[]).unwrap(),
                 SipStatus::NoSip
             ));
             // Check DYLD_* features work on it:
@@ -810,7 +807,7 @@ mod main {
 
             // Verify that the path was not there before.
             assert!(!env::var(FRAMEWORKS_ENV_VAR_NAME)
-                .map(|value| value.split(":").find(is_frameworks_path).is_some())
+                .map(|value| value.split(':').any(is_frameworks_path))
                 .unwrap_or_default());
 
             set_fallback_frameworks_path_if_mac_app(Path::new(example_path));
@@ -818,9 +815,8 @@ mod main {
             // Verify that the path is there after.
             assert!(env::var(FRAMEWORKS_ENV_VAR_NAME)
                 .unwrap()
-                .split(":")
-                .find(is_frameworks_path)
-                .is_some());
+                .split(':')
+                .any(is_frameworks_path));
         }
     }
 }
