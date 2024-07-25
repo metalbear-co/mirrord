@@ -24,8 +24,8 @@ pub use common::*;
 #[timeout(Duration::from_secs(60))]
 async fn test_issue864(
     #[values(Application::PythonIssue864)] application: Application,
-    dylib_path: &PathBuf,
-    config_dir: &PathBuf,
+    dylib_path: &Path,
+    config_dir: &Path,
 ) {
     let (test_process, mut intproxy) = application
         .start_process_with_layer_and_port(
@@ -41,7 +41,6 @@ async fn test_issue864(
         .await;
 
     println!("Application subscribed to port, sending HTTP requests.");
-    // TODO(alex): Finish this test.
 
     fn prepare_request_body(method: &str, content: &str) -> String {
         let content_headers = if content.is_empty() {
