@@ -83,7 +83,7 @@ fn create_listen_socket() -> io::Result<TcpListener> {
     )?;
 
     socket.bind(&socket2::SockAddr::from(SocketAddrV4::new(
-        Ipv4Addr::UNSPECIFIED,
+        Ipv4Addr::LOCALHOST,
         0,
     )))?;
     socket.listen(1024)?;
@@ -147,8 +147,10 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
     let listener = create_listen_socket().map_err(InternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
 
-    unsafe {
-        detach_io()?;
+    if config.internal_proxy.detach_io {
+        unsafe {
+            detach_io()?;
+        }
     }
 
     let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);

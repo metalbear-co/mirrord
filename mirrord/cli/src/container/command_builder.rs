@@ -14,6 +14,13 @@ pub struct RuntimeCommandBuilder<T = Empty> {
 }
 
 impl<T> RuntimeCommandBuilder<T> {
+    pub fn push_arg<V>(&mut self, value: V)
+    where
+        V: Into<String>,
+    {
+        self.extra_args.push(value.into())
+    }
+
     pub fn add_env<K, V>(&mut self, key: K, value: V)
     where
         K: AsRef<OsStr>,
@@ -22,8 +29,8 @@ impl<T> RuntimeCommandBuilder<T> {
         let key = key.as_ref().to_str().unwrap_or_default();
         let value = value.as_ref().to_str().unwrap_or_default();
 
-        self.extra_args.push("-e".to_owned());
-        self.extra_args.push(format!("{key}={value}"))
+        self.push_arg("-e");
+        self.push_arg(format!("{key}={value}"))
     }
 
     pub fn add_envs<I, K, V>(&mut self, iter: I)
@@ -42,8 +49,8 @@ impl<T> RuntimeCommandBuilder<T> {
         H: AsRef<Path>,
         C: AsRef<Path>,
     {
-        self.extra_args.push("-v".to_owned());
-        self.extra_args.push(format!(
+        self.push_arg("-v");
+        self.push_arg(format!(
             "{}:{}",
             host_path.as_ref().display(),
             container_path.as_ref().display()
@@ -77,51 +84,6 @@ impl RuntimeCommandBuilder {
 }
 
 impl RuntimeCommandBuilder<WithCommand> {
-    pub fn add_entrypoint<S>(&mut self, entrypoint: S)
-    where
-        S: Into<String>,
-    {
-        if let Some(in_command) = self.entrypoint_mut() {
-            *in_command = entrypoint.into();
-        } else {
-            self.extra_args.push("--entrypoint".to_owned());
-            self.extra_args.push(entrypoint.into());
-        }
-    }
-
-    pub fn entrypoint(&self) -> Option<&str> {
-        let entrypoint_index = self.entrypoint_index();
-
-        let ContainerCommand::Run { runtime_args } = &self.step.command;
-        entrypoint_index
-            .and_then(|index| runtime_args.get(index))
-            .map(|entrypoint| entrypoint.as_str())
-    }
-
-    fn entrypoint_index(&self) -> Option<usize> {
-        let ContainerCommand::Run { runtime_args } = &self.step.command;
-
-        let mut runtime_args_iter = runtime_args.iter().enumerate();
-
-        loop {
-            match runtime_args_iter.next() {
-                Some((_, arg)) if arg == "--entrypoint" => {
-                    break runtime_args_iter.next().map(|(index, _)| index)
-                }
-                None => break None,
-                _ => {}
-            }
-        }
-    }
-
-    fn entrypoint_mut(&mut self) -> Option<&mut String> {
-        let entrypoint_index = self.entrypoint_index();
-
-        let ContainerCommand::Run { runtime_args } = &mut self.step.command;
-
-        entrypoint_index.and_then(|index| runtime_args.get_mut(index))
-    }
-
     pub fn into_execvp_args(self) -> (String, Vec<String>) {
         let RuntimeCommandBuilder {
             runtime,

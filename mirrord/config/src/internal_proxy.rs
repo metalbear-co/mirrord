@@ -64,4 +64,7 @@ pub struct InternalProxyConfig {
     /// ### internal_proxy.log_destination {#internal_proxy-log_destination}
     /// Set the log file destination for the internal proxy.
     pub log_destination: Option<String>,
+
+    #[config(default = true, env = "MIRRORD_INTPROXY_DETACH_IO")]
+    pub detach_io: bool,
 }

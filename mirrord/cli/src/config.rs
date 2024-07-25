@@ -486,6 +486,10 @@ impl FromStr for ContainerRuntime {
 
 #[derive(Args, Debug)]
 pub(super) struct ContainerArgs {
+    ///
+    #[arg(long, default_value = "localhost/mirrord-cli:latest")]
+    pub cli_image: String,
+
     #[clap(flatten)]
     pub params: ExecParams,
 

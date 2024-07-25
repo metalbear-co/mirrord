@@ -336,6 +336,10 @@ impl MirrordExecution {
 
         // Provide details for layer to connect to agent via internal proxy
         env_vars.insert("MIRRORD_CONNECT_TCP".to_string(), socket.to_string());
+        env_vars.insert(
+            AGENT_CONNECT_INFO_ENV_KEY.to_string(),
+            serde_json::to_string(&AgentConnectInfo::ExtProxy(socket))?,
+        );
 
         Ok(Self {
             environment: env_vars,

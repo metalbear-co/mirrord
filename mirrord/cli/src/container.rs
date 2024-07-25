@@ -1,24 +1,53 @@
-use std::{fs::Permissions, os::unix::fs::PermissionsExt, path::Path};
+use std::{
+    ffi::OsStr,
+    io::{BufRead, BufReader, Cursor},
+    net::SocketAddr,
+    path::Path,
+};
 
 use exec::execvp;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_progress::{Progress, ProgressTracker};
-use tokio::fs::set_permissions;
+use tokio::process::Command;
 
 use crate::{
-    config::ContainerArgs, container::command_builder::RuntimeCommandBuilder, error::Result,
+    config::{ContainerArgs, ContainerCommand},
+    connection::AGENT_CONNECT_INFO_ENV_KEY,
+    container::command_builder::RuntimeCommandBuilder,
+    error::Result,
     execution::MirrordExecution,
 };
 
 mod command_builder;
 
+fn add_config_path<P>(command: &mut RuntimeCommandBuilder, config_path: P)
+where
+    P: AsRef<OsStr>,
+{
+    let host_path = config_path
+        .as_ref()
+        .to_str()
+        .expect("should convert")
+        .to_owned();
+
+    let config_name = Path::new(&config_path)
+        .file_name()
+        .and_then(|os_str| os_str.to_str())
+        .unwrap_or_default();
+
+    let continer_path = format!("/tmp/{}", config_name);
+
+    command.add_env("MIRRORD_CONFIG_FILE", &continer_path);
+    command.add_volume(host_path, continer_path);
+}
+
 pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord container");
 
-    let mut config_env = args.params.to_env()?;
+    let mut config_env_values = args.params.to_env()?;
 
-    for (name, value) in &config_env {
+    for (name, value) in &config_env_values {
         std::env::set_var(name, value);
     }
 
@@ -37,69 +66,95 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     let execution_info =
         MirrordExecution::start_ext(&config, &mut sub_progress, &mut analytics).await?;
 
-    tracing::info!(?execution_info, "starting");
+    sub_progress.success(None);
 
     let mut runtime_command = RuntimeCommandBuilder::new(args.runtime);
+    let mut sidecar_command = RuntimeCommandBuilder::new(args.runtime);
+
     runtime_command.add_env("MIRRORD_PROGRESS_MODE", "off");
+    sidecar_command.add_env("MIRRORD_PROGRESS_MODE", "off");
 
-    #[cfg(target_os = "macos")]
-    {
-        runtime_command.add_volume(
-            "/Users/dmitry/ws/metalbear/mirrord/target/aarch64-unknown-linux-gnu/debug/mirrord",
-            "/usr/bin/mirrord",
-        );
+    if let Some(config_path) = config_env_values.remove("MIRRORD_CONFIG_FILE") {
+        add_config_path(&mut runtime_command, &config_path);
+        add_config_path(&mut sidecar_command, &config_path);
     }
 
-    if let Some(mirrord_config_path) = config_env.remove("MIRRORD_CONFIG_FILE") {
-        let host_path = mirrord_config_path
-            .to_str()
-            .expect("should convert")
-            .to_owned();
+    runtime_command.add_envs(config_env_values.iter());
+    sidecar_command.add_envs(config_env_values);
+    sidecar_command.add_env("MIRRORD_INTPROXY_DETACH_IO", "false");
 
-        let config_name = Path::new(&mirrord_config_path)
-            .file_name()
-            .and_then(|os_str| os_str.to_str())
-            .unwrap_or_default();
-
-        let continer_path = format!("/tmp/{}", config_name);
-
-        runtime_command.add_env("MIRRORD_CONFIG_FILE", &continer_path);
-        runtime_command.add_volume(host_path, continer_path);
-    }
-
-    runtime_command.add_envs(config_env);
-    runtime_command.add_envs(
+    sidecar_command.add_envs(
         execution_info
             .environment
             .iter()
             .filter(|(key, _)| key != &"HOSTNAME"),
     );
 
-    let mut runtime_command = runtime_command.with_command(args.command);
+    let (sidecar_binary, sidecar_args) = sidecar_command
+        .with_command(ContainerCommand::Run {
+            runtime_args: vec![
+                "--rm".to_string(),
+                "-d".to_string(),
+                args.cli_image.clone(),
+                "mirrord".to_string(),
+                "intproxy".to_string(),
+            ],
+        })
+        .into_execvp_args();
 
-    let temp_entrypoint = {
-        let entrypoint = runtime_command
-            .entrypoint()
-            .map(|entrypoint| format!("{entrypoint} -- "))
-            .unwrap_or_default();
+    let sidecar = Command::new(sidecar_binary)
+        .args(&sidecar_args[1..])
+        .output()
+        .await
+        .expect("Sidecar failure");
 
-        let temp_entrypoint = tempfile::NamedTempFile::new().unwrap();
+    let container_id = BufReader::new(Cursor::new(sidecar.stdout))
+        .lines()
+        .next()
+        .transpose()
+        .unwrap()
+        .unwrap();
 
-        let _ = tokio::fs::write(
-            &temp_entrypoint,
-            format!("#!/usr/bin/env sh\n\nmirrord exec {entrypoint}$@\n"),
-        )
-        .await;
+    let sidecar_log = Command::new(args.runtime.to_string())
+        .args(["logs", &container_id])
+        .output()
+        .await
+        .unwrap();
 
-        let _ = set_permissions(&temp_entrypoint, Permissions::from_mode(0o511)).await;
+    let intproxt_socket: SocketAddr = BufReader::new(Cursor::new(sidecar_log.stdout))
+        .lines()
+        .next()
+        .transpose()
+        .unwrap()
+        .unwrap()
+        .parse()
+        .unwrap();
 
-        runtime_command.add_volume(&temp_entrypoint, "/tmp/mirrord-entrypoint.sh");
-        runtime_command.add_entrypoint("/tmp/mirrord-entrypoint.sh");
+    runtime_command.push_arg("--network");
+    runtime_command.push_arg(format!("container:{container_id}"));
+    runtime_command.push_arg("--volumes-from");
+    runtime_command.push_arg(&container_id);
 
-        temp_entrypoint
-    };
+    runtime_command.add_env("LD_PRELOAD", "/opt/mirrord/lib/libmirrord_layer.so");
 
-    let (binary, binary_args) = runtime_command.into_execvp_args();
+    runtime_command.add_envs(
+        execution_info
+            .environment
+            .iter()
+            .filter(|(key, _)| {
+                key != &"HOSTNAME"
+                    && key != &"MIRRORD_CONNECT_TCP"
+                    && key != &AGENT_CONNECT_INFO_ENV_KEY
+            })
+            .chain([(
+                &"MIRRORD_CONNECT_TCP".to_owned(),
+                &intproxt_socket.to_string(),
+            )]),
+    );
+
+    let (binary, binary_args) = runtime_command
+        .with_command(args.command)
+        .into_execvp_args();
 
     let err = execvp(binary, binary_args);
     tracing::error!("Couldn't execute {:?}", err);
@@ -108,7 +163,6 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
 
     // Kills the intproxy, freeing the agent.
     execution_info.stop().await;
-    let _ = temp_entrypoint.close();
 
     Ok(())
 }
