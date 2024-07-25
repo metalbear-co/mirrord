@@ -66,9 +66,9 @@ impl From<Target> for VerifiedTarget {
     }
 }
 
-impl Into<TargetType> for VerifiedTarget {
-    fn into(self) -> TargetType {
-        match self {
+impl From<VerifiedTarget> for TargetType {
+    fn from(value: VerifiedTarget) -> Self {
+        match value {
             VerifiedTarget::Targetless => TargetType::Targetless,
             VerifiedTarget::Pod(_) => TargetType::Pod,
             VerifiedTarget::Deployment(_) => TargetType::Deployment,
@@ -236,7 +236,7 @@ pub(super) async fn verify_config(VerifyConfigArgs { ide, path }: VerifyConfigAr
                         "`{}` targets require the mirrord-operator, but operator usage \
                         was explicitly disabled. Consider enabling mirrord-operator in \
                         your mirrord config.",
-                        Into::<TargetType>::into(verified_target)
+                        TargetType::from(verified_target)
                     )],
                 }
             } else {
