@@ -66,6 +66,20 @@ impl From<Target> for VerifiedTarget {
     }
 }
 
+impl Into<TargetType> for VerifiedTarget {
+    fn into(self) -> TargetType {
+        match self {
+            VerifiedTarget::Targetless => TargetType::Targetless,
+            VerifiedTarget::Pod(_) => TargetType::Pod,
+            VerifiedTarget::Deployment(_) => TargetType::Deployment,
+            VerifiedTarget::Rollout(_) => TargetType::Rollout,
+            VerifiedTarget::Job(_) => TargetType::Job,
+            VerifiedTarget::CronJob(_) => TargetType::CronJob,
+            VerifiedTarget::StatefulSet(_) => TargetType::StatefulSet,
+        }
+    }
+}
+
 #[derive(Serialize, Clone)]
 struct VerifiedTargetConfig {
     path: Option<VerifiedTarget>,
@@ -92,6 +106,22 @@ enum TargetType {
     Job,
     CronJob,
     StatefulSet,
+}
+
+impl std::fmt::Display for TargetType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let stringifed = match self {
+            TargetType::Targetless => "targetless",
+            TargetType::Pod => "pod",
+            TargetType::Deployment => "deployment",
+            TargetType::Rollout => "rollout",
+            TargetType::Job => "job",
+            TargetType::CronJob => "cronjob",
+            TargetType::StatefulSet => "statefulset",
+        };
+
+        f.write_str(stringifed)
+    }
 }
 
 impl TargetType {
@@ -202,12 +232,12 @@ pub(super) async fn verify_config(VerifyConfigArgs { ide, path }: VerifyConfigAr
                 && verified_target.requires_operator()
             {
                 VerifiedConfig::Fail {
-                    errors: vec![
-                        "{verified_target} target requires the mirrord-operator, but the config \
-                        was set to `operator: false`! Consider setting `operator: true` for \
-                        this target type."
-                            .to_string(),
-                    ],
+                    errors: vec![format!(
+                        "`{}` targets require the mirrord-operator, but operator usage \
+                        was explicitly disabled. Consider enabling mirrord-operator in \
+                        your mirrord config.",
+                        Into::<TargetType>::into(verified_target)
+                    )],
                 }
             } else {
                 VerifiedConfig::Success {
