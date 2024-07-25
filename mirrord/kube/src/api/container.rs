@@ -28,6 +28,7 @@ pub static SKIP_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
         "linkerd-init",
         "vault-agent",
         "vault-agent-init",
+        "queue-proxy", // Knative
     ])
 });
 
