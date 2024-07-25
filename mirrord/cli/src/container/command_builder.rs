@@ -2,11 +2,14 @@ use std::{ffi::OsStr, path::Path};
 
 use crate::config::{ContainerCommand, ContainerRuntime};
 
+#[derive(Debug, Clone)]
 pub struct Empty;
+#[derive(Debug, Clone)]
 pub struct WithCommand {
     command: ContainerCommand,
 }
 
+#[derive(Debug, Clone)]
 pub struct RuntimeCommandBuilder<T = Empty> {
     step: T,
     runtime: String,

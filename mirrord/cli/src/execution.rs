@@ -29,8 +29,10 @@ use crate::{
     Result,
 };
 
+pub(crate) const LINUX_INJECTION_ENV_VAR: &str = "LD_PRELOAD";
+
 #[cfg(target_os = "linux")]
-pub(crate) const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
+pub(crate) const INJECTION_ENV_VAR: &str = LINUX_INJECTION_ENV_VAR;
 
 #[cfg(target_os = "macos")]
 pub(crate) const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";

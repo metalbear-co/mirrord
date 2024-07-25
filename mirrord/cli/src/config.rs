@@ -486,9 +486,11 @@ impl FromStr for ContainerRuntime {
 
 #[derive(Args, Debug)]
 pub(super) struct ContainerArgs {
-    ///
     #[arg(long, default_value = "localhost/mirrord-cli:latest")]
     pub cli_image: String,
+
+    #[arg(long, default_value = "/opt/mirrord/lib/libmirrord_layer.so")]
+    pub cli_image_lib_path: PathBuf,
 
     #[clap(flatten)]
     pub params: ExecParams,
@@ -499,7 +501,7 @@ pub(super) struct ContainerArgs {
     pub command: ContainerCommand,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub(super) enum ContainerCommand {
     Run {
         #[arg(raw = true)]
