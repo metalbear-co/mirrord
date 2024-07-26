@@ -41,12 +41,9 @@ impl SplitQueuesConfig {
     pub fn get_sqs_filter(&self) -> Option<HashMap<String, SqsMessageFilter>> {
         self.0.as_ref().map(BTreeMap::iter).map(|filters| {
             filters
-                .filter_map(|(queue_id, queue_filter)| match queue_filter {
-                    QueueFilter::Sqs(filter_mapping) => {
-                        Some((queue_id.clone(), filter_mapping.clone()))
-                    }
-                    #[allow(unreachable_patterns)] // will become reachable when we add variants
-                    _ => None,
+                // When there are more variants of QueueFilter, change this to a `filter_map`.
+                .map(|(queue_id, queue_filter)| match queue_filter {
+                    QueueFilter::Sqs(filter_mapping) => (queue_id.clone(), filter_mapping.clone()),
                 })
                 .collect()
         })
