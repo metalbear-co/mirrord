@@ -19,7 +19,11 @@ workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-mirrord-operator = { path = "../operator", features = ["client", "license-fetch", "setup"] }
+mirrord-operator = { path = "../operator", features = [
+    "client",
+    "license-fetch",
+    "setup",
+] }
 mirrord-progress = { path = "../progress" }
 mirrord-kube = { path = "../kube" }
 mirrord-config = { path = "../config" }
@@ -40,13 +44,13 @@ semver.workspace = true
 exec.workspace = true
 reqwest.workspace = true
 const-random = "0.1.15"
-tokio = { workspace = true, features = ["rt", "net", "macros", "process"]}
+tokio = { workspace = true, features = ["rt", "net", "macros", "process"] }
 kube.workspace = true
 k8s-openapi.workspace = true
 miette = { version = "7", features = ["fancy"] }
 thiserror.workspace = true
 humantime = "2"
-nix = {workspace = true, features = ["process", "resource"]}
+nix = { workspace = true, features = ["process", "resource"] }
 tokio-util.workspace = true
 socket2.workspace = true
 drain.workspace = true
@@ -59,10 +63,11 @@ rcgen = "0.13"
 rustls-pemfile = "2"
 tokio-rustls = "0.26"
 
+tokio-stream = { workspace = true, features = ["net"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
 
 
 [build-dependencies]
-mirrord-layer = { artifact = "cdylib", path="../layer" }
+mirrord-layer = { artifact = "cdylib", path = "../layer" }

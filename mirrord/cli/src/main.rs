@@ -8,6 +8,7 @@ use std::time::Duration;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
+use connection::create_and_connect;
 use container::container_command;
 use diagnose::diagnose_command;
 use exec::execvp;
@@ -54,6 +55,7 @@ mod extract;
 mod internal_proxy;
 mod kube_resource;
 mod operator;
+pub mod port_forward;
 mod teams;
 mod util;
 mod verify_config;
@@ -454,6 +456,137 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     Ok(())
 }
 
+async fn port_forward(args: &ExecArgs) -> Result<()> {
+    // TODO: setup
+    let progress = ProgressTracker::from_env("mirrord port-forward");
+    if !args.disable_version_check {
+        prompt_outdated_version(&progress).await;
+    }
+    info!(
+        "Launching {:?} with arguments {:?}",
+        args.binary, args.binary_args
+    );
+
+    if !(args.no_tcp_outgoing || args.no_udp_outgoing) && args.no_remote_dns {
+        warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
+    }
+
+    if let Some(target) = &args.target {
+        std::env::set_var("MIRRORD_IMPERSONATED_TARGET", target);
+    }
+
+    if args.no_telemetry {
+        std::env::set_var("MIRRORD_TELEMETRY", "false");
+    }
+
+    if let Some(skip_processes) = &args.skip_processes {
+        std::env::set_var("MIRRORD_SKIP_PROCESSES", skip_processes.clone());
+    }
+
+    if let Some(namespace) = &args.target_namespace {
+        std::env::set_var("MIRRORD_TARGET_NAMESPACE", namespace.clone());
+    }
+
+    if let Some(namespace) = &args.agent_namespace {
+        std::env::set_var("MIRRORD_AGENT_NAMESPACE", namespace.clone());
+    }
+
+    if let Some(log_level) = &args.agent_log_level {
+        std::env::set_var("MIRRORD_AGENT_RUST_LOG", log_level.clone());
+    }
+
+    if let Some(image) = &args.agent_image {
+        std::env::set_var("MIRRORD_AGENT_IMAGE", image.clone());
+    }
+
+    if let Some(agent_ttl) = &args.agent_ttl {
+        std::env::set_var("MIRRORD_AGENT_TTL", agent_ttl.to_string());
+    }
+    if let Some(agent_startup_timeout) = &args.agent_startup_timeout {
+        std::env::set_var(
+            "MIRRORD_AGENT_STARTUP_TIMEOUT",
+            agent_startup_timeout.to_string(),
+        );
+    }
+
+    if let Some(fs_mode) = args.fs_mode {
+        std::env::set_var("MIRRORD_FILE_MODE", fs_mode.to_string());
+    }
+
+    if let Some(override_env_vars_exclude) = &args.override_env_vars_exclude {
+        std::env::set_var(
+            "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE",
+            override_env_vars_exclude,
+        );
+    }
+
+    if let Some(override_env_vars_include) = &args.override_env_vars_include {
+        std::env::set_var(
+            "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE",
+            override_env_vars_include,
+        );
+    }
+
+    if args.no_remote_dns {
+        std::env::set_var("MIRRORD_REMOTE_DNS", "false");
+    }
+
+    if args.accept_invalid_certificates {
+        std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
+        warn!("Accepting invalid certificates");
+    }
+
+    if args.ephemeral_container {
+        std::env::set_var("MIRRORD_EPHEMERAL_CONTAINER", "true");
+    };
+
+    if args.tcp_steal {
+        std::env::set_var("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", "true");
+    };
+
+    if args.no_outgoing || args.no_tcp_outgoing {
+        std::env::set_var("MIRRORD_TCP_OUTGOING", "false");
+    }
+
+    if args.no_outgoing || args.no_udp_outgoing {
+        std::env::set_var("MIRRORD_UDP_OUTGOING", "false");
+    }
+
+    if let Some(context) = &args.context {
+        std::env::set_var("MIRRORD_KUBE_CONTEXT", context);
+    }
+
+    // TODO: add port forwarding specific args
+
+    if let Some(config_file) = &args.config_file {
+        // Set canoncialized path to config file, in case forks/children are in different
+        // working directories.
+        let full_path = std::fs::canonicalize(config_file)
+            .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.clone(), e))?;
+        std::env::set_var("MIRRORD_CONFIG_FILE", full_path);
+    }
+
+    let (config, mut context) = LayerConfig::from_env_with_warnings()?;
+
+    let mut analytics = AnalyticsReporter::only_error(config.telemetry, watch);
+    (&config).collect_analytics(analytics.get_mut());
+
+    config.verify(&mut context)?;
+    for warning in context.get_warnings() {
+        progress.warning(warning);
+    }
+
+    // let execution_result = exec_process(config, args, &progress, &mut analytics).await;
+    // if execution_result.is_err() && !analytics.has_error() {
+    //     analytics.set_error(AnalyticsError::Unknown);
+    // }
+    // execution_result
+
+    // TODO: connect to agent
+    let res = create_and_connect(&config, &mut progress, &mut analytics).await?;
+    todo!()
+}
+
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> miette::Result<()> {
@@ -503,6 +636,7 @@ fn main() -> miette::Result<()> {
             Commands::Diagnose(args) => diagnose_command(*args).await?,
             Commands::Container(args) => container_command(*args, watch).await?,
             Commands::ExternalProxy => external_proxy::proxy(watch).await?,
+            Commands::PortForward(args) => port_forward(&args).await?,
         };
 
         Ok(())

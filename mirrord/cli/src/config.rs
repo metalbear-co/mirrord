@@ -1,11 +1,19 @@
 #![deny(missing_docs)]
 
-use std::{collections::HashMap, ffi::OsString, fmt::Display, path::PathBuf};
+use std::{
+    collections::HashMap,
+    ffi::OsString,
+    fmt::Display,
+    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
+    path::PathBuf,
+    str::FromStr,
+};
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 use mirrord_config::MIRRORD_CONFIG_FILE_ENV;
 use mirrord_operator::setup::OperatorNamespace;
+use thiserror::Error;
 
 use crate::error::CliError;
 
@@ -57,6 +65,10 @@ pub(super) enum Commands {
     /// Internal proxy - used to aggregate connections from multiple layers
     #[command(hide = true, name = "intproxy")]
     InternalProxy,
+
+    /// Port forwarding
+    #[command(hide = true, name = "portforward")]
+    PortForward(Box<ExecArgs>),
 
     /// Verify config file without starting mirrord.
     #[command(hide = true)]
@@ -301,6 +313,143 @@ pub(super) struct ExecArgs {
 
     /// Arguments to pass to the binary.
     pub(super) binary_args: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+#[command(group(ArgGroup::new("port-forward")))]
+pub(super) struct PortForwardArgs {
+    /// Target name to mirror.    
+    /// Target can either be a deployment or a pod.
+    /// Valid formats: deployment/name, pod/name, pod/name/container/name
+    #[arg(short = 't', long)]
+    pub target: Option<String>,
+
+    /// Namespace of the pod to mirror. Defaults to "default".
+    #[arg(short = 'n', long)]
+    pub target_namespace: Option<String>,
+
+    /// Namespace to place agent in.
+    #[arg(short = 'a', long)]
+    pub agent_namespace: Option<String>,
+
+    /// Agent log level
+    #[arg(short = 'l', long)]
+    pub agent_log_level: Option<String>,
+
+    /// Agent image
+    #[arg(short = 'i', long)]
+    pub agent_image: Option<String>,
+
+    /// Agent TTL
+    #[arg(long)]
+    pub agent_ttl: Option<u16>,
+
+    /// Agent Startup Timeout seconds
+    #[arg(long)]
+    pub agent_startup_timeout: Option<u16>,
+
+    /// Accept/reject invalid certificates.
+    #[arg(short = 'c', long)]
+    pub accept_invalid_certificates: bool,
+
+    /// Use an Ephemeral Container to mirror traffic.
+    #[arg(short, long)]
+    pub ephemeral_container: bool,
+
+    /// Disable telemetry. See <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>
+    #[arg(long)]
+    pub no_telemetry: bool,
+
+    #[arg(long)]
+    /// Disable version check on startup.
+    pub disable_version_check: bool,
+
+    /// Load config from config file
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
+    pub config_file: Option<PathBuf>,
+
+    /// Kube context to use from Kubeconfig
+    #[arg(long)]
+    pub context: Option<String>,
+
+    /// Mappings
+    pub mappings: Vec<PortMapping>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PortMapping {
+    local: SocketAddr,
+    remote: SocketAddr,
+}
+
+impl FromStr for PortMapping {
+    type Err = PortMappingParseErr;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // expected format = local_port:dest_server:remote_port
+        let vec: Vec<&str> = s.split(":").collect();
+        let (local_port, remote_ip, remote_port) = match vec.len() {
+            3 => {
+                // local port included
+                let local_port = match vec[0].parse::<u16>() {
+                    Ok(port) => port,
+                    Err(_error) => return Err(PortMappingParseErr::PortParseErr(vec[0].into())),
+                };
+                let remote_port = match vec[2].parse::<u16>() {
+                    Ok(0) => return Err(PortMappingParseErr::PortZeroInvalid(s.into())),
+                    Ok(port) => port,
+                    Err(_error) => return Err(PortMappingParseErr::PortParseErr(vec[2].into())),
+                };
+                let ip_parts: Vec<u8> = vec[1]
+                    .split(".")
+                    .filter_map(|s| s.parse::<u8>().ok())
+                    .collect();
+                let remote_ip = match ip_parts.len() {
+                    4 => Ipv4Addr::new(ip_parts[0], ip_parts[1], ip_parts[2], ip_parts[3]),
+                    _ => return Err(PortMappingParseErr::IpParseErr(vec[1].into())),
+                };
+                (local_port, remote_ip, remote_port)
+            }
+            2 => {
+                // local port excluded, default to same as remote port
+                let remote_port = match vec[1].parse::<u16>() {
+                    Ok(port) => port,
+                    Err(_error) => return Err(PortMappingParseErr::PortParseErr(vec[0].into())),
+                };
+                let ip_parts: Vec<u8> = vec[0]
+                    .split(".")
+                    .filter_map(|s| s.parse::<u8>().ok())
+                    .collect();
+                let remote_ip = match ip_parts.len() {
+                    4 => Ipv4Addr::new(ip_parts[0], ip_parts[1], ip_parts[2], ip_parts[3]),
+                    _ => return Err(PortMappingParseErr::IpParseErr(vec[1].into())),
+                };
+                (remote_port.clone(), remote_ip, remote_port)
+            }
+            num @ _ => {
+                return Err(PortMappingParseErr::NumSubArgs(num, s.into()));
+            }
+        };
+        Ok(Self {
+            local: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), local_port),
+            remote: SocketAddr::new(IpAddr::V4(remote_ip), remote_port),
+        })
+    }
+}
+
+#[derive(Error, Debug)]
+enum PortMappingParseErr {
+    #[error("Incorrect number of sub-arguments found for port forwarding: expected 2 or 3, found {0} in argument `{1}`")]
+    NumSubArgs(usize, String),
+
+    #[error("Failed to parse `{0}` into port (u16)")]
+    PortParseErr(String),
+
+    #[error("Failed to parse `{0}` into IP address (u8.u8.u8.u8)")]
+    IpParseErr(String),
+
+    #[error("Failed to set remote port for port forwarding while parsing `{0}`: `0` is never a valid remote port")]
+    PortZeroInvalid(String),
 }
 
 #[derive(Args, Debug)]
