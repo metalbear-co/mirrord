@@ -294,19 +294,6 @@ impl Target {
         }
     }
 
-    /// Get the target type - "pod", "deployment", "rollout" or "targetless"
-    pub fn get_target_type(&self) -> &str {
-        match self {
-            Target::Targetless => "targetless",
-            Target::Pod(pod) => pod.type_(),
-            Target::Deployment(dep) => dep.type_(),
-            Target::Rollout(roll) => roll.type_(),
-            Target::Job(job) => job.type_(),
-            Target::CronJob(cron_job) => cron_job.type_(),
-            Target::StatefulSet(stateful_set) => stateful_set.type_(),
-        }
-    }
-
     /// `true` if this [`Target`] is only supported when the copy target feature is enabled.
     pub(super) fn requires_copy(&self) -> bool {
         matches!(
