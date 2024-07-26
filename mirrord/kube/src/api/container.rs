@@ -107,7 +107,7 @@ where
 /// Choose container logic:
 ///
 /// 1. Try to find based on given name
-/// 2. Try to find first container in pod that isn't a mesh side car
+/// 2. Try to find first container in pod that isn't a mesh sidecar
 /// 3. Take first container in pod
 ///
 /// We also check if we're in a mesh based on `MESH_LIST`, returning whether we are or not.
@@ -115,7 +115,7 @@ where
 pub fn choose_container<'a>(
     container_name: Option<&str>,
     container_statuses: &'a [ContainerStatus],
-) -> (Option<&'a ContainerStatus>, Option<MeshVendor>) {
+) -> (Option<&'a ContainerStatus>, Option<MeshVendor>, bool) {
     const ISTIO: [&str; 2] = ["istio-proxy", "istio-init"];
     const LINKERD: [&str; 2] = ["linkerd-proxy", "linkerd-init"];
     const KUMA: [&str; 2] = ["kuma-sidecar", "kuma-init"];
@@ -132,17 +132,38 @@ pub fn choose_container<'a>(
         }
     });
 
+    // How many containers does mirrord have to choose from:
+    // 0: no containers, or container was specified.
+    // 1: only one, no choice.
+    // 2: 2 or more choices (non-mesh, or only non-mesh, but multiple of them).
+    let mut possible_containers = 0u8;
+
     let container = if let Some(name) = container_name {
         container_statuses
             .iter()
             .find(|&status| status.name == name)
     } else {
         // Choose any container that isn't part of the skip list
-        container_statuses
+        let container_refs = container_statuses
             .iter()
-            .find(|&status| !SKIP_NAMES.contains(status.name.as_str()))
-            .or_else(|| container_statuses.first())
+            .take_while(|&status| !SKIP_NAMES.contains(status.name.as_str()))
+            .inspect(|_| possible_containers += 1)
+            // Iterate up to 2 even though we're taking the first container, so that we know if
+            // there are other possible choices for target container (for the purposes of showing a
+            // warning).
+            .take(2)
+            // Collect so that counting happens before we only take the first.
+            .collect::<Vec<&ContainerStatus>>();
+        container_refs
+            .into_iter()
+            .next()
+            .or_else(|| {
+                tracing::warn!("Target has only containers with names that we would otherwise skip. Picking first one.");
+                possible_containers = 2; // So that we display the progress warning.
+                container_statuses.first()
+            })
     };
 
-    (container, mesh)
+    // container_counter is only incremented if there is no specified container name.
+    (container, mesh, possible_containers > 1)
 }
