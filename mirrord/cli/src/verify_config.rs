@@ -45,13 +45,6 @@ enum VerifiedTarget {
     StatefulSet(StatefulSetTarget),
 }
 
-impl VerifiedTarget {
-    /// Returns `true` for target types that are not part of the OSS mirrord.
-    fn requires_operator(&self) -> bool {
-        matches!(self, Self::CronJob(_) | Self::Job(_) | Self::StatefulSet(_))
-    }
-}
-
 impl From<Target> for VerifiedTarget {
     fn from(value: Target) -> Self {
         match value {
@@ -219,36 +212,13 @@ pub(super) async fn verify_config(VerifyConfigArgs { ide, path }: VerifyConfigAr
         });
 
     let verified = match layer_config {
-        Ok(config) => {
-            let verified_target_config = VerifiedTargetConfig::from(config.target);
-
-            // Check if we're dealing with an operator-only target, and `config.operator`
-            // was set to `false` (operator purposefully disabled).
-            if let Some((verified_target, false)) = verified_target_config
-                .path
-                .clone()
-                .map(VerifiedTarget::from)
-                .zip(config.operator)
-                && verified_target.requires_operator()
-            {
-                VerifiedConfig::Fail {
-                    errors: vec![format!(
-                        "`{}` targets require the mirrord-operator, but operator usage \
-                        was explicitly disabled. Consider enabling mirrord-operator in \
-                        your mirrord config.",
-                        TargetType::from(verified_target)
-                    )],
-                }
-            } else {
-                VerifiedConfig::Success {
-                    config: verified_target_config,
-                    warnings: config_context.get_warnings().to_owned(),
-                    compatible_target_types: TargetType::all()
-                        .filter(|tt| tt.compatible_with(&config.feature))
-                        .collect(),
-                }
-            }
-        }
+        Ok(config) => VerifiedConfig::Success {
+            config: config.target.into(),
+            warnings: config_context.get_warnings().to_owned(),
+            compatible_target_types: TargetType::all()
+                .filter(|tt| tt.compatible_with(&config.feature))
+                .collect(),
+        },
         Err(fail) => VerifiedConfig::Fail {
             errors: vec![fail.to_string()],
         },
