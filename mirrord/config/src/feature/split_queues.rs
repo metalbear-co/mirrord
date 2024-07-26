@@ -39,8 +39,8 @@ impl SplitQueuesConfig {
 
     /// Out of the whole queue splitting config, get only the sqs queues.
     pub fn get_sqs_filter(&self) -> Option<HashMap<String, SqsMessageFilter>> {
-        self.0.as_ref().map(|queue_id2queue_filter| {
-            queue_id2queue_filter
+        self.0.as_ref().map(|filters| {
+            filters
                 .iter()
                 .filter_map(|(queue_id, queue_filter)| match queue_filter {
                     QueueFilter::Sqs(filter_mapping) => {
