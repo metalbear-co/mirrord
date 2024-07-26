@@ -101,8 +101,8 @@ enum TargetType {
     StatefulSet,
 }
 
-impl std::fmt::Display for TargetType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for TargetType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let stringifed = match self {
             TargetType::Targetless => "targetless",
             TargetType::Pod => "pod",
