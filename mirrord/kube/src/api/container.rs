@@ -132,38 +132,28 @@ pub fn choose_container<'a>(
         }
     });
 
-    // How many containers does mirrord have to choose from:
-    // 0: no containers, or container was specified.
-    // 1: only one, no choice.
-    // 2: 2 or more choices (non-mesh, or only non-mesh, but multiple of them).
-    let mut possible_containers = 0u8;
+    let mut picked_from_many = false;
 
     let container = if let Some(name) = container_name {
         container_statuses
             .iter()
             .find(|&status| status.name == name)
     } else {
-        // Choose any container that isn't part of the skip list
-        let container_refs = container_statuses
+        let mut container_refs = container_statuses
             .iter()
-            .take_while(|&status| !SKIP_NAMES.contains(status.name.as_str()))
-            .inspect(|_| possible_containers += 1)
-            // Iterate up to 2 even though we're taking the first container, so that we know if
-            // there are other possible choices for target container (for the purposes of showing a
-            // warning).
-            .take(2)
-            // Collect so that counting happens before we only take the first.
-            .collect::<Vec<&ContainerStatus>>();
-        container_refs
-            .into_iter()
-            .next()
-            .or_else(|| {
-                tracing::warn!("Target has only containers with names that we would otherwise skip. Picking first one.");
-                possible_containers = 2; // So that we display the progress warning.
-                container_statuses.first()
-            })
+            .filter(|&status| !SKIP_NAMES.contains(status.name.as_str()));
+        // Choose first container that isn't part of the skip list
+        let container = container_refs.next().or_else(|| {
+            tracing::warn!(
+                "Target has only containers with names that we would otherwise skip. Picking one."
+            );
+            picked_from_many = container_statuses.len() > 1;
+            container_statuses.first()
+        });
+        picked_from_many = picked_from_many || container_refs.next().is_some();
+        container
     };
 
     // container_counter is only incremented if there is no specified container name.
-    (container, mesh, possible_containers > 1)
+    (container, mesh, picked_from_many)
 }
