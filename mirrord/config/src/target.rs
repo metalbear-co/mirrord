@@ -77,7 +77,6 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
 /// The simplified configuration supports:
 ///
 /// - `pod/{sample-pod}/[container]/{sample-container}`;
-/// - `podname/{sample-pod}/[container]/{sample-container}`;
 /// - `deployment/{sample-deployment}/[container]/{sample-container}`;
 ///
 /// Shortened setup:
@@ -113,7 +112,6 @@ pub struct TargetConfig {
     ///
     /// Supports:
     /// - `pod/{sample-pod}`;
-    /// - `podname/{sample-pod}`;
     /// - `deployment/{sample-deployment}`;
     /// - `container/{sample-container}`;
     /// - `containername/{sample-container}`.
@@ -206,7 +204,6 @@ mirrord-layer failed to parse the provided target!
 ///
 /// Supports:
 /// - `pod/{sample-pod}`;
-/// - `podname/{sample-pod}`;
 /// - `deployment/{sample-deployment}`;
 /// - `container/{sample-container}`;
 /// - `containername/{sample-container}`.
