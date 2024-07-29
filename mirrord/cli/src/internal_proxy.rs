@@ -137,7 +137,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
 
     // The agent is spawned and our parent process already established a connection.
     // However, the parent process (`exec` or `ext` command) is free to exec/exit as soon as it
-    // reads the TPC listener port from our stdout. We open our own connection with the agent
+    // reads the TCP listener port from our stdout. We open our own connection with the agent
     // **before** this happens to ensure that the agent does not prematurely exit.
     // We also perform initial ping pong round to ensure that k8s runtime actually made connection
     // with the agent (it's a must, because port forwarding may be done lazily).

@@ -24,7 +24,7 @@
       ]
     },
     "connect_tcp": {
-      "title": "connect_tcp {#root-connect_tpc}",
+      "title": "connect_tcp {#root-connect_tcp}",
       "description": "IP:PORT to connect to instead of using k8s api, for testing purposes.\n\n```json { \"connect_tcp\": \"10.10.0.100:7777\" } ```",
       "type": [
         "string",

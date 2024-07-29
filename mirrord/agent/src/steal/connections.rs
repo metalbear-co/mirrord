@@ -368,7 +368,7 @@ impl StolenConnections {
     }
 }
 
-/// An incoming TPC connection stolen by an active [`PortSubscription`].
+/// An incoming TCP connection stolen by an active [`PortSubscription`].
 pub struct StolenConnection {
     /// Raw OS stream.
     pub stream: TcpStream,

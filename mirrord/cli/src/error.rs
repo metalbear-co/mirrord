@@ -49,7 +49,7 @@ pub(crate) enum ExternalProxyError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     Intproxy(#[from] IntProxyError),
 
-    #[error("Failed to set up TPC listener for accepting intproxy connections: {0}")]
+    #[error("Failed to set up TCP listener for accepting intproxy connections: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     ListenerSetup(std::io::Error),
 
@@ -65,7 +65,7 @@ pub(crate) enum ExternalProxyError {
 /// Errors that can occur when executing the `mirrord intproxy` command.
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum InternalProxyError {
-    #[error("Failed to set up TPC listener for accepting layer connections: {0}")]
+    #[error("Failed to set up TCP listener for accepting layer connections: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     ListenerSetup(std::io::Error),
 

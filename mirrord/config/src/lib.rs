@@ -200,7 +200,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true)]
     pub skip_build_tools: bool,
 
-    /// ## connect_tcp {#root-connect_tpc}
+    /// ## connect_tcp {#root-connect_tcp}
     ///
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
     ///

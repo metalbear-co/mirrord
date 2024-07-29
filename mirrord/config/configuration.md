@@ -372,7 +372,7 @@ Can be useful for collecting logs.
 
 Defaults to `1`.
 
-## connect_tcp {#root-connect_tpc}
+## connect_tcp {#root-connect_tcp}
 
 IP:PORT to connect to instead of using k8s api, for testing purposes.
 
