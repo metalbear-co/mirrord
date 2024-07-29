@@ -1,12 +1,12 @@
 #![deny(missing_docs)]
 
-use std::{collections::HashMap, ffi::OsString, fmt::Display, path::PathBuf, str::FromStr};
+use std::{collections::HashMap, ffi::OsString, fmt::Display, path::PathBuf};
 
-use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
+use clap::{builder::PossibleValue, ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 use mirrord_operator::setup::OperatorNamespace;
 
-use crate::error::{CliError, UnsupportedRuntimeVariant};
+use crate::error::CliError;
 
 #[derive(Parser)]
 #[command(
@@ -465,23 +465,24 @@ pub(super) enum ContainerRuntime {
     Podman,
 }
 
-impl core::fmt::Display for ContainerRuntime {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl ValueEnum for ContainerRuntime {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Docker, Self::Podman]
+    }
+
+    fn to_possible_value(&self) -> Option<PossibleValue> {
         match self {
-            ContainerRuntime::Docker => write!(f, "docker"),
-            ContainerRuntime::Podman => write!(f, "podman"),
+            ContainerRuntime::Docker => Some(PossibleValue::new("docker")),
+            ContainerRuntime::Podman => Some(PossibleValue::new("podman")),
         }
     }
 }
 
-impl FromStr for ContainerRuntime {
-    type Err = UnsupportedRuntimeVariant;
-
-    fn from_str(runtime: &str) -> Result<Self, Self::Err> {
-        match runtime {
-            "docker" => Ok(ContainerRuntime::Docker),
-            "podman" => Ok(ContainerRuntime::Podman),
-            _ => Err(UnsupportedRuntimeVariant),
+impl std::fmt::Display for ContainerRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContainerRuntime::Docker => write!(f, "docker"),
+            ContainerRuntime::Podman => write!(f, "podman"),
         }
     }
 }
@@ -501,7 +502,8 @@ pub(super) struct ContainerArgs {
     /// Parameters to be passed to mirrord.
     pub params: ExecParams,
 
-    /// Which kind of container runtime to use. Currently supports `docker` and `podman`.
+    /// Which kind of container runtime to use.
+    #[arg(value_enum)]
     pub runtime: ContainerRuntime,
 
     #[command(subcommand)]
@@ -512,6 +514,7 @@ pub(super) struct ContainerArgs {
 #[derive(Subcommand, Debug, Clone)]
 pub(super) enum ContainerCommand {
     Run {
+        /// Arguments that will be propogated to underlying `<RUNTIME> run` command.
         #[arg(raw = true)]
         runtime_args: Vec<String>,
     },
