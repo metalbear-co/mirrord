@@ -13,7 +13,7 @@ use null_terminated::Nul;
 use tracing::{trace, warn};
 
 use crate::{
-    common::{strip_mirrord_path, CheckedInto},
+    common::strip_mirrord_path,
     detour::{
         Bypass::{
             ExecOnNonExistingFile, FileOperationInMirrordBinTempDir, NoSipDetected, TooManyArgs,
