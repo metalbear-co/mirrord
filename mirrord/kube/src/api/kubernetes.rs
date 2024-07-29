@@ -218,6 +218,14 @@ impl KubernetesAPI {
         P: Progress + Send + Sync,
     {
         let (params, runtime_data) = self.create_agent_params(target, tls_cert).await?;
+        if let Some(RuntimeData {
+            guessed_container: true,
+            container_name,
+            ..
+        }) = runtime_data.as_ref()
+        {
+            progress.warning(format!("Target has multiple containers, mirrord picked \"{container_name}\". To target a different one, include it in the target path.").as_str());
+        }
 
         let incoming_mode = config.map(|config| config.feature.network.incoming.mode);
         let is_mesh = runtime_data
