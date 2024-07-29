@@ -3693,6 +3693,7 @@ dependencies = [
  "prettytable-rs",
  "rcgen",
  "reqwest 0.12.5",
+ "rstest",
  "rustls 0.23.12",
  "rustls-pemfile 2.1.3",
  "semver 1.0.23",

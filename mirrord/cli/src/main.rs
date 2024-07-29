@@ -456,7 +456,7 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     Ok(())
 }
 
-async fn port_forward(args: &ExecArgs) -> Result<()> {
+async fn port_forward(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     // TODO: setup
     let progress = ProgressTracker::from_env("mirrord port-forward");
     if !args.disable_version_check {
@@ -556,8 +556,6 @@ async fn port_forward(args: &ExecArgs) -> Result<()> {
         std::env::set_var("MIRRORD_KUBE_CONTEXT", context);
     }
 
-    // TODO: add port forwarding specific args
-
     if let Some(config_file) = &args.config_file {
         // Set canoncialized path to config file, in case forks/children are in different
         // working directories.
@@ -576,14 +574,17 @@ async fn port_forward(args: &ExecArgs) -> Result<()> {
         progress.warning(warning);
     }
 
-    // let execution_result = exec_process(config, args, &progress, &mut analytics).await;
-    // if execution_result.is_err() && !analytics.has_error() {
-    //     analytics.set_error(AnalyticsError::Unknown);
-    // }
-    // execution_result
+    // TODO: post-config
+
+    let execution_result = exec_process(config, args, &progress, &mut analytics).await;
+    if execution_result.is_err() && !analytics.has_error() {
+        analytics.set_error(AnalyticsError::Unknown);
+    }
+    execution_result;
 
     // TODO: connect to agent
-    let res = create_and_connect(&config, &mut progress, &mut analytics).await?;
+    // TODO: use port forwarding specific arg args.port_mappings
+    // let res = create_and_connect(&config, &mut progress, &mut analytics).await?;
     todo!()
 }
 
@@ -636,7 +637,7 @@ fn main() -> miette::Result<()> {
             Commands::Diagnose(args) => diagnose_command(*args).await?,
             Commands::Container(args) => container_command(*args, watch).await?,
             Commands::ExternalProxy => external_proxy::proxy(watch).await?,
-            Commands::PortForward(args) => port_forward(&args).await?,
+            Commands::PortForward(args) => port_forward(&args, watch).await?,
         };
 
         Ok(())

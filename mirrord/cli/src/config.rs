@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     ffi::OsString,
     fmt::Display,
-    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
     str::FromStr,
 };
@@ -13,6 +13,7 @@ use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 use mirrord_config::MIRRORD_CONFIG_FILE_ENV;
 use mirrord_operator::setup::OperatorNamespace;
+use rstest::rstest;
 use thiserror::Error;
 
 use crate::error::CliError;
@@ -372,11 +373,12 @@ pub(super) struct PortForwardArgs {
     #[arg(long)]
     pub context: Option<String>,
 
-    /// Mappings
-    pub mappings: Vec<PortMapping>,
+    /// Mappings for port forwarding
+    #[arg(short = 'L', long)]
+    pub port_mappings: Vec<PortMapping>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PortMapping {
     local: SocketAddr,
     remote: SocketAddr,
@@ -387,6 +389,7 @@ impl FromStr for PortMapping {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // expected format = local_port:dest_server:remote_port
+        // alternatively,  = dest_server:remote_port
         let vec: Vec<&str> = s.split(":").collect();
         let (local_port, remote_ip, remote_port) = match vec.len() {
             3 => {
@@ -431,14 +434,14 @@ impl FromStr for PortMapping {
             }
         };
         Ok(Self {
-            local: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), local_port),
+            local: SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), local_port),
             remote: SocketAddr::new(IpAddr::V4(remote_ip), remote_port),
         })
     }
 }
 
-#[derive(Error, Debug)]
-enum PortMappingParseErr {
+#[derive(Error, Debug, PartialEq)]
+pub enum PortMappingParseErr {
     #[error("Incorrect number of sub-arguments found for port forwarding: expected 2 or 3, found {0} in argument `{1}`")]
     NumSubArgs(usize, String),
 
@@ -450,6 +453,34 @@ enum PortMappingParseErr {
 
     #[error("Failed to set remote port for port forwarding while parsing `{0}`: `0` is never a valid remote port")]
     PortZeroInvalid(String),
+}
+
+#[rstest]
+#[case("3030:152.37.110.132:3038", "127.0.0.1:3030", "152.37.110.132:3038")]
+#[case("152.37.110.132:3038", "127.0.0.1:3038", "152.37.110.132:3038")]
+fn parse_valid_mapping(
+    #[case] input: &str,
+    #[case] expected_local: &str,
+    #[case] expected_remote: &str,
+) {
+    let expected = PortMapping {
+        local: expected_local.parse().unwrap(),
+        remote: expected_remote.parse().unwrap(),
+    };
+    assert_eq!(PortMapping::from_str(input).unwrap(), expected);
+}
+
+#[rstest]
+#[case("3030:152.37.110.132:3038:2027")]
+#[case("152.37.110.132:3030:3038")]
+#[case("3030:152.37.110.132:0")]
+#[case("3o3o:152.37.11o.132:3o38")]
+#[case("3030:152110.132:3038")]
+#[case("30303030:152.37.110.132:3038")]
+#[case("")]
+#[should_panic]
+fn parse_invalid_mapping(#[case] input: &str) {
+    PortMapping::from_str(input).unwrap();
 }
 
 #[derive(Args, Debug)]
