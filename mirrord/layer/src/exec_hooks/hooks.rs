@@ -33,7 +33,7 @@ fn shared_sockets() -> Vec<(i32, UserSocket)> {
 /// The check for [`libc::FD_CLOEXEC`] is performed during the [`SOCKETS`] initialization
 /// by the child process.
 #[mirrord_layer_macro::instrument(
-    level = Level::DEBUG,
+    level = Level::TRACE,
     ret,
     fields(
         pid = std::process::id(),
