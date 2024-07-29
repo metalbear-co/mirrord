@@ -590,17 +590,21 @@ Case insensitive.
 3. `"local"` - List of patterns that should be read locally.
 4. `"not_found"` - List of patters that should never be read nor written. These files should be
 treated as non-existent.
+4. `"mapping"` - Map of patterns and their corresponding replacers. The replacement happens before any specific behavior as defined above or mode (uses [`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace))
 
 The logic for choosing the behavior is as follows:
 
-1. Check if one of the patterns match the file path, do the corresponding action. There's
+
+1. Check agains "mapping" if path needs to be replaced, if matched then continue to next step
+   with new path after replacements otherwise continue as usual.
+2. Check if one of the patterns match the file path, do the corresponding action. There's
 no specified order if two lists match the same path, we will use the first one (and we
 do not guarantee what is first).
 
     **Warning**: Specifying the same path in two lists is unsupported and can lead to undefined
     behaviour.
 
-2. There are pre-defined exceptions to the set FS mode.
+3. There are pre-defined exceptions to the set FS mode.
     1. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs)
        are read locally by default.
     2. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_remote_by_default.rs)
@@ -614,7 +618,7 @@ do not guarantee what is first).
     though it is covered by [the set of patterns that are read locally by default](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs),
     add `"^/etc/."` to the `read_only` set.
 
-3. If none of the above match, use the default behavior (mode).
+4. If none of the above match, use the default behavior (mode).
 
 For more information, check the file operations
 [technical reference](https://mirrord.dev/docs/reference/fileops/).
@@ -636,6 +640,24 @@ For more information, check the file operations
 ### feature.fs.local {#feature-fs-local}
 
 Specify file path patterns that if matched will be opened locally.
+
+### feature.fs.mapping {#feature-fs-mapping}
+
+Specify map of patterns that if matched will replace the path according to specification.
+
+*Capture groups are allowed.*
+
+Example:
+```json
+{
+  "^/home/(?<user>\S+)/dev/tomcat": "/etc/tomcat"
+  "^/home/(?<user>\S+)/dev/config/(?<app>\S+)": "/mnt/configs/${user}-$app"
+}
+```
+Will do the next replacements for any io operaton
+
+`/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml`
+`/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`
 
 ### feature.fs.mode {#feature-fs-mode}
 
