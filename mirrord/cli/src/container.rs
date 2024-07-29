@@ -68,18 +68,15 @@ async fn create_sidecar_intproxy(
         sidecar_command.add_env("MIRRORD_CONSOLE_ADDR", console_addr);
     }
     sidecar_command.add_env("MIRRORD_INTPROXY_DETACH_IO", "false");
-
     sidecar_command.add_envs(connection_info);
 
-    let sidecar_container_command = ContainerCommand::Run {
-        runtime_args: vec![
-            "--rm".to_string(),
-            "-d".to_string(),
-            args.cli_image.clone(),
-            "mirrord".to_string(),
-            "intproxy".to_string(),
-        ],
-    };
+    let sidecar_container_command = ContainerCommand::run(vec![
+        "--rm".to_string(),
+        "-d".to_string(),
+        args.cli_image.clone(),
+        "mirrord".to_string(),
+        "intproxy".to_string(),
+    ]);
 
     let (runtime_binary, sidecar_args) = sidecar_command
         .with_command(sidecar_container_command)

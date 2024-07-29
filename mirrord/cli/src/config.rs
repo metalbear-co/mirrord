@@ -489,7 +489,7 @@ impl FromStr for ContainerRuntime {
 #[derive(Args, Debug)]
 /// Args for the `mirrord container` command.
 pub(super) struct ContainerArgs {
-    #[arg(long, default_value = "localhost/mirrord-cli:latest")]
+    #[arg(long, default_value = concat!("ghcr.io/metalbear-co/mirrord-cli:", env!("CARGO_PKG_VERSION")))]
     /// Tag of the `mirrord-cli` image you want to use.
     pub cli_image: String,
 
@@ -515,4 +515,10 @@ pub(super) enum ContainerCommand {
         #[arg(raw = true)]
         runtime_args: Vec<String>,
     },
+}
+
+impl ContainerCommand {
+    pub fn run(runtime_args: Vec<String>) -> Self {
+        ContainerCommand::Run { runtime_args }
+    }
 }
