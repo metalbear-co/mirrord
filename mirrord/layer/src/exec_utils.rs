@@ -206,23 +206,23 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
     envp: *const *const c_char,
 ) -> c_int {
     match patch_sip_for_new_process(path, argv, envp) {
-        Detour::Success((new_path, new_argv, new_envp)) => {
-            match hooks::prepare_execve_envp(Detour::Success(new_envp.clone())) {
-                Detour::Success(modified_envp) => FN_POSIX_SPAWN(
+        Detour::Success((path, argv, envp)) => {
+            match hooks::prepare_execve_envp(Detour::Success(envp.clone())) {
+                Detour::Success(envp) => FN_POSIX_SPAWN(
                     pid,
-                    new_path.into_raw().cast_const(),
+                    path.into_raw().cast_const(),
                     file_actions,
                     attrp,
-                    new_argv.leak(),
-                    modified_envp.leak(),
+                    argv.leak(),
+                    envp.leak(),
                 ),
                 _ => FN_POSIX_SPAWN(
                     pid,
-                    new_path.into_raw().cast_const(),
+                    path.into_raw().cast_const(),
                     file_actions,
                     attrp,
-                    new_argv.leak(),
-                    new_envp.leak(),
+                    argv.leak(),
+                    envp.leak(),
                 ),
             }
         }
