@@ -91,6 +91,7 @@ impl Display for FsMode {
 }
 
 #[derive(Args, Debug)]
+/// Parameters for the `mirrord exec` (and `mirrord container`?) commands.
 pub(super) struct ExecParams {
     /// Target name to mirror.    
     /// Target can either be a deployment or a pod.
@@ -458,6 +459,7 @@ pub(super) enum DiagnoseCommand {
 }
 
 #[derive(Clone, Copy, Debug)]
+/// Runtimes supported by the `mirrord container` command.
 pub(super) enum ContainerRuntime {
     Docker,
     Podman,
@@ -485,19 +487,25 @@ impl FromStr for ContainerRuntime {
 }
 
 #[derive(Args, Debug)]
+/// Args for the `mirrord container` command.
 pub(super) struct ContainerArgs {
     #[arg(long, default_value = "localhost/mirrord-cli:latest")]
+    /// Tag of the `mirrord-cli` image you want to use.
     pub cli_image: String,
 
     #[arg(long, default_value = "/opt/mirrord/lib/libmirrord_layer.so")]
+    /// Path of the mirrord lib.
     pub cli_image_lib_path: PathBuf,
 
     #[clap(flatten)]
+    /// Parameters to be passed to mirrord.
     pub params: ExecParams,
 
+    /// Which kind of container runtime to use. Currently supports `docker` and `podman`.
     pub runtime: ContainerRuntime,
 
     #[command(subcommand)]
+    /// Command to use with `mirrord container`.
     pub command: ContainerCommand,
 }
 
