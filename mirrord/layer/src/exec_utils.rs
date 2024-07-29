@@ -205,22 +205,28 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    let checked_envp = envp.checked_into();
-
-    if let Detour::Success(modified_envp) = hooks::execve(checked_envp) {
-        match patch_sip_for_new_process(path, argv, modified_envp) {
-            Detour::Success((new_path, new_argv, new_envp)) => FN_POSIX_SPAWN(
-                pid,
-                new_path.into_raw().cast_const(),
-                file_actions,
-                attrp,
-                new_argv.leak(),
-                new_envp.leak(),
-            ),
-            _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
+    match patch_sip_for_new_process(path, argv, envp) {
+        Detour::Success((new_path, new_argv, new_envp)) => {
+            match hooks::prepare_execve_envp(Detour::Success(new_envp.clone())) {
+                Detour::Success(modified_envp) => FN_POSIX_SPAWN(
+                    pid,
+                    new_path.into_raw().cast_const(),
+                    file_actions,
+                    attrp,
+                    new_argv.leak(),
+                    new_envp.leak(),
+                ),
+                _ => FN_POSIX_SPAWN(
+                    pid,
+                    new_path.into_raw().cast_const(),
+                    file_actions,
+                    attrp,
+                    new_argv.leak(),
+                    new_envp.leak(),
+                ),
+            }
         }
-    } else {
-        FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp)
+        _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
     }
 }
 

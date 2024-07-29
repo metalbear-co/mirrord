@@ -10,7 +10,7 @@ use super::*;
 use crate::exec_utils::*;
 use crate::{
     common::CheckedInto,
-    detour::Detour,
+    detour::{Bypass, Detour},
     hooks::HookManager,
     replace,
     socket::{UserSocket, SHARED_SOCKETS_ENV_VAR},
@@ -40,9 +40,9 @@ fn shared_sockets() -> Vec<(i32, UserSocket)> {
         parent_pid = parent_id(),
     )
 )]
-pub(crate) fn execve(env_vars: Detour<Argv>) -> Detour<*const *const c_char> {
-    let mut env_vars = env_vars.or_bypass(|x| match x {
-        crate::detour::Bypass::EmptyOption => Detour::Success(Argv(Vec::new())),
+pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
+    let mut env_vars = env_vars.or_bypass(|reason| match reason {
+        Bypass::EmptyOption => Detour::Success(Argv(Vec::new())),
         other => Detour::Bypass(other),
     })?;
 
@@ -51,7 +51,7 @@ pub(crate) fn execve(env_vars: Detour<Argv>) -> Detour<*const *const c_char> {
 
     env_vars.push(CString::new(format!("{SHARED_SOCKETS_ENV_VAR}={encoded}"))?);
 
-    Detour::Success(env_vars.leak())
+    Detour::Success(env_vars)
 }
 
 /// Hook for `libc::execv` for linux only.
@@ -71,6 +71,26 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
     }
 
     FN_EXECV(path, argv)
+}
+
+/// Hook for `libc::execve`.
+///
+/// We can't change the pointers, to get around that we create our own and **leak** them.
+#[cfg(not(target_os = "macos"))]
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn execve_detour(
+    path: *const c_char,
+    argv: *const *const c_char,
+    envp: *const *const c_char,
+) -> c_int {
+    // Hopefully `envp` is a properly null-terminated list.
+    let checked_envp = envp.checked_into();
+
+    if let Detour::Success(modified_envp) = prepare_execve_envp(checked_envp) {
+        FN_EXECVE(path, argv, modified_envp.leak())
+    } else {
+        FN_EXECVE(path, argv, envp)
+    }
 }
 
 /// Hook for `libc::execve`.
@@ -96,30 +116,29 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
 ///
 /// If there is an error in the detour, we don't exit or anything, we just call the original libc
 /// function with the original passed arguments.
+#[cfg(target_os = "macos")]
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn execve_detour(
     path: *const c_char,
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    // Hopefully `envp` is a properly null-terminated list.
-    let checked_envp = envp.checked_into();
-
-    if let Detour::Success(modified_envp) = execve(checked_envp) {
-        #[cfg(target_os = "macos")]
-        match patch_sip_for_new_process(path, argv, modified_envp) {
-            Detour::Success((new_path, new_argv, new_envp)) => FN_EXECVE(
-                new_path.into_raw().cast_const(),
-                new_argv.leak(),
-                new_envp.leak(),
-            ),
-            _ => FN_EXECVE(path, argv, envp),
+    match patch_sip_for_new_process(path, argv, envp) {
+        Detour::Success((new_path, new_argv, new_envp)) => {
+            match prepare_execve_envp(Detour::Success(new_envp.clone())) {
+                Detour::Success(modified_envp) => FN_EXECVE(
+                    new_path.into_raw().cast_const(),
+                    new_argv.leak(),
+                    modified_envp.leak(),
+                ),
+                _ => FN_EXECVE(
+                    new_path.into_raw().cast_const(),
+                    new_argv.leak(),
+                    new_envp.leak(),
+                ),
+            }
         }
-
-        #[cfg(target_os = "linux")]
-        FN_EXECVE(path, argv, modified_envp)
-    } else {
-        FN_EXECVE(path, argv, envp)
+        _ => FN_EXECVE(path, argv, envp),
     }
 }
 

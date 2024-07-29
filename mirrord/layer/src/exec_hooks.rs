@@ -6,7 +6,7 @@ use std::{
 pub(crate) mod hooks;
 
 /// Hold a vector of new CStrings to use instead of the original argv.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub(crate) struct Argv(Vec<CString>);
 
 impl Argv {
