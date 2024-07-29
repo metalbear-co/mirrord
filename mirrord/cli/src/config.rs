@@ -69,7 +69,7 @@ pub(super) enum Commands {
 
     /// Port forwarding
     #[command(hide = true, name = "portforward")]
-    PortForward(Box<ExecArgs>),
+    PortForward(Box<PortForwardArgs>),
 
     /// Verify config file without starting mirrord.
     #[command(hide = true)]

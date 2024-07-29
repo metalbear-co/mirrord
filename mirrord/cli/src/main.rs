@@ -37,6 +37,7 @@ use mirrord_kube::api::{container::SKIP_NAMES, kubernetes::create_kube_config};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
 use operator::operator_command;
+use port_forward::PortForwarder;
 use semver::Version;
 use serde_json::json;
 use tracing::{error, info, warn};
@@ -456,19 +457,11 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     Ok(())
 }
 
-async fn port_forward(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
+async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()> {
     // TODO: setup
-    let progress = ProgressTracker::from_env("mirrord port-forward");
+    let mut progress = ProgressTracker::from_env("mirrord port-forward");
     if !args.disable_version_check {
         prompt_outdated_version(&progress).await;
-    }
-    info!(
-        "Launching {:?} with arguments {:?}",
-        args.binary, args.binary_args
-    );
-
-    if !(args.no_tcp_outgoing || args.no_udp_outgoing) && args.no_remote_dns {
-        warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
 
     if let Some(target) = &args.target {
@@ -477,10 +470,6 @@ async fn port_forward(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
 
     if args.no_telemetry {
         std::env::set_var("MIRRORD_TELEMETRY", "false");
-    }
-
-    if let Some(skip_processes) = &args.skip_processes {
-        std::env::set_var("MIRRORD_SKIP_PROCESSES", skip_processes.clone());
     }
 
     if let Some(namespace) = &args.target_namespace {
@@ -509,28 +498,6 @@ async fn port_forward(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
         );
     }
 
-    if let Some(fs_mode) = args.fs_mode {
-        std::env::set_var("MIRRORD_FILE_MODE", fs_mode.to_string());
-    }
-
-    if let Some(override_env_vars_exclude) = &args.override_env_vars_exclude {
-        std::env::set_var(
-            "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE",
-            override_env_vars_exclude,
-        );
-    }
-
-    if let Some(override_env_vars_include) = &args.override_env_vars_include {
-        std::env::set_var(
-            "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE",
-            override_env_vars_include,
-        );
-    }
-
-    if args.no_remote_dns {
-        std::env::set_var("MIRRORD_REMOTE_DNS", "false");
-    }
-
     if args.accept_invalid_certificates {
         std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
         warn!("Accepting invalid certificates");
@@ -539,18 +506,6 @@ async fn port_forward(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     if args.ephemeral_container {
         std::env::set_var("MIRRORD_EPHEMERAL_CONTAINER", "true");
     };
-
-    if args.tcp_steal {
-        std::env::set_var("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", "true");
-    };
-
-    if args.no_outgoing || args.no_tcp_outgoing {
-        std::env::set_var("MIRRORD_TCP_OUTGOING", "false");
-    }
-
-    if args.no_outgoing || args.no_udp_outgoing {
-        std::env::set_var("MIRRORD_UDP_OUTGOING", "false");
-    }
 
     if let Some(context) = &args.context {
         std::env::set_var("MIRRORD_KUBE_CONTEXT", context);
@@ -574,18 +529,10 @@ async fn port_forward(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
         progress.warning(warning);
     }
 
-    // TODO: post-config
-
-    let execution_result = exec_process(config, args, &progress, &mut analytics).await;
-    if execution_result.is_err() && !analytics.has_error() {
-        analytics.set_error(AnalyticsError::Unknown);
-    }
-    execution_result;
-
-    // TODO: connect to agent
-    // TODO: use port forwarding specific arg args.port_mappings
-    // let res = create_and_connect(&config, &mut progress, &mut analytics).await?;
-    todo!()
+    let (_connection_info, connection) =
+        create_and_connect(&config, &mut progress, &mut analytics).await?;
+    let port_forward = PortForwarder::new(connection, args.port_mappings.clone());
+    port_forward.run().await
 }
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");

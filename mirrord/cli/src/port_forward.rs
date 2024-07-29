@@ -2,9 +2,9 @@ use std::net::SocketAddr;
 
 use tokio_stream::{wrappers::TcpListenerStream, StreamMap};
 
-use crate::{connection::AgentConnection, PortMapping};
+use crate::{connection::AgentConnection, CliError, PortMapping};
 
-struct PortForwarder {
+pub struct PortForwarder {
     agent_con: AgentConnection,
     listeners: StreamMap<SocketAddr, TcpListenerStream>,
     // rx_connections: some type,
@@ -12,7 +12,7 @@ struct PortForwarder {
 }
 
 impl PortForwarder {
-    fn new(agent_connection: AgentConnection, mappings: Vec<PortMapping>) -> () {
+    pub fn new(_agent_connection: AgentConnection, _mappings: Vec<PortMapping>) -> Self {
         // open tcp listener for local addrs
         // verify mappings - all local addrs unique, no port 0? ask aviram
 
@@ -20,7 +20,7 @@ impl PortForwarder {
         todo!()
     }
 
-    fn run() -> () {
+    pub async fn run(&self) -> Result<(), CliError> {
         // when accepting conn spawn tokio task to serve conn
         // when we get first data need to talk 2 agent and make outg. conn then proxy data
         // ssh syntax req. -L to create mapping
