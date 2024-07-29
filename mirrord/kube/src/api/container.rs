@@ -28,6 +28,7 @@ pub static SKIP_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
         "linkerd-init",
         "vault-agent",
         "vault-agent-init",
+        "queue-proxy", // Knative
     ])
 });
 
@@ -106,7 +107,7 @@ where
 /// Choose container logic:
 ///
 /// 1. Try to find based on given name
-/// 2. Try to find first container in pod that isn't a mesh side car
+/// 2. Try to find first container in pod that isn't a mesh sidecar
 /// 3. Take first container in pod
 ///
 /// We also check if we're in a mesh based on `MESH_LIST`, returning whether we are or not.
@@ -114,7 +115,7 @@ where
 pub fn choose_container<'a>(
     container_name: Option<&str>,
     container_statuses: &'a [ContainerStatus],
-) -> (Option<&'a ContainerStatus>, Option<MeshVendor>) {
+) -> (Option<&'a ContainerStatus>, Option<MeshVendor>, bool) {
     const ISTIO: [&str; 2] = ["istio-proxy", "istio-init"];
     const LINKERD: [&str; 2] = ["linkerd-proxy", "linkerd-init"];
     const KUMA: [&str; 2] = ["kuma-sidecar", "kuma-init"];
@@ -131,17 +132,28 @@ pub fn choose_container<'a>(
         }
     });
 
+    let mut picked_from_many = false;
+
     let container = if let Some(name) = container_name {
         container_statuses
             .iter()
             .find(|&status| status.name == name)
     } else {
-        // Choose any container that isn't part of the skip list
-        container_statuses
+        let mut container_refs = container_statuses
             .iter()
-            .find(|&status| !SKIP_NAMES.contains(status.name.as_str()))
-            .or_else(|| container_statuses.first())
+            .filter(|&status| !SKIP_NAMES.contains(status.name.as_str()));
+        // Choose first container that isn't part of the skip list
+        let container = container_refs.next().or_else(|| {
+            tracing::warn!(
+                "Target has only containers with names that we would otherwise skip. Picking one."
+            );
+            picked_from_many = container_statuses.len() > 1;
+            container_statuses.first()
+        });
+        picked_from_many = picked_from_many || container_refs.next().is_some();
+        container
     };
 
-    (container, mesh)
+    // container_counter is only incremented if there is no specified container name.
+    (container, mesh, picked_from_many)
 }
