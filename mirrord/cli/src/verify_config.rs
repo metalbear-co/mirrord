@@ -23,7 +23,7 @@ use crate::{config::VerifyConfigArgs, error, LayerFileConfig};
 /// Changing the way [`Target::Targetless`] serializes would be cumbersome for two reasons:
 /// 1. It's used in a lot of places, e.g. CRDs
 /// 2. `schemars` crate does not support nested `[serde(untagged)]` tags
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 enum VerifiedTarget {
     #[serde(rename = "targetless")]
     Targetless,
@@ -59,7 +59,21 @@ impl From<Target> for VerifiedTarget {
     }
 }
 
-#[derive(Serialize)]
+impl From<VerifiedTarget> for TargetType {
+    fn from(value: VerifiedTarget) -> Self {
+        match value {
+            VerifiedTarget::Targetless => TargetType::Targetless,
+            VerifiedTarget::Pod(_) => TargetType::Pod,
+            VerifiedTarget::Deployment(_) => TargetType::Deployment,
+            VerifiedTarget::Rollout(_) => TargetType::Rollout,
+            VerifiedTarget::Job(_) => TargetType::Job,
+            VerifiedTarget::CronJob(_) => TargetType::CronJob,
+            VerifiedTarget::StatefulSet(_) => TargetType::StatefulSet,
+        }
+    }
+}
+
+#[derive(Serialize, Clone)]
 struct VerifiedTargetConfig {
     path: Option<VerifiedTarget>,
     namespace: Option<String>,
@@ -87,6 +101,22 @@ enum TargetType {
     StatefulSet,
 }
 
+impl core::fmt::Display for TargetType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let stringifed = match self {
+            TargetType::Targetless => "targetless",
+            TargetType::Pod => "pod",
+            TargetType::Deployment => "deployment",
+            TargetType::Rollout => "rollout",
+            TargetType::Job => "job",
+            TargetType::CronJob => "cronjob",
+            TargetType::StatefulSet => "statefulset",
+        };
+
+        f.write_str(stringifed)
+    }
+}
+
 impl TargetType {
     fn all() -> impl Iterator<Item = Self> {
         [
@@ -105,8 +135,8 @@ impl TargetType {
         match self {
             Self::Targetless | Self::Rollout => !config.copy_target.enabled,
             Self::Pod => !(config.copy_target.enabled && config.copy_target.scale_down),
-            Self::Job | Self::CronJob | Self::StatefulSet => config.copy_target.enabled,
-            Self::Deployment => true,
+            Self::Job | Self::CronJob => config.copy_target.enabled,
+            Self::Deployment | Self::StatefulSet => true,
         }
     }
 }

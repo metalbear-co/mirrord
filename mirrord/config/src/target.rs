@@ -296,6 +296,11 @@ impl Target {
 
     /// `true` if this [`Target`] is only supported when the copy target feature is enabled.
     pub(super) fn requires_copy(&self) -> bool {
+        matches!(self, Target::Job(_) | Target::CronJob(_))
+    }
+
+    /// `true` if this [`Target`] is only supported when the operator is enabled.
+    pub(super) fn requires_operator(&self) -> bool {
         matches!(
             self,
             Target::Job(_) | Target::CronJob(_) | Target::StatefulSet(_)
