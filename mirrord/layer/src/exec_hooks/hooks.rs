@@ -6,10 +6,11 @@ use mirrord_layer_macro::hook_guard_fn;
 use tracing::Level;
 
 use super::*;
+#[cfg(not(target_os = "macos"))]
+use crate::common::CheckedInto;
 #[cfg(target_os = "macos")]
 use crate::exec_utils::*;
 use crate::{
-    common::CheckedInto,
     detour::{Bypass, Detour},
     hooks::HookManager,
     replace,
