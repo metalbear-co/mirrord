@@ -214,7 +214,7 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
                     file_actions,
                     attrp,
                     new_argv.leak(),
-                    new_envp.leak(),
+                    modified_envp.leak(),
                 ),
                 _ => FN_POSIX_SPAWN(
                     pid,
