@@ -672,6 +672,101 @@ impl Drop for KubeService {
     }
 }
 
+fn deployment_from_json(name: &str, image: &str) -> Deployment {
+    serde_json::from_value(json!({
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+            "name": name,
+            "labels": {
+                "app": name,
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                "test-label-for-deployments": format!("deployment-{name}")
+            }
+        },
+        "spec": {
+            "replicas": 1,
+            "selector": {
+                "matchLabels": {
+                    "app": &name
+                }
+            },
+            "template": {
+                "metadata": {
+                    "labels": {
+                        "app": &name,
+                        "test-label-for-pods": format!("pod-{name}"),
+                        format!("test-label-for-pods-{name}"): &name
+                    }
+                },
+                "spec": {
+                    "containers": [
+                        {
+                            "name": &CONTAINER_NAME,
+                            "image": image,
+                            "ports": [
+                                {
+                                    "containerPort": 80
+                                }
+                            ],
+                            "env": [
+                                {
+                                  "name": "MIRRORD_FAKE_VAR_FIRST",
+                                  "value": "mirrord.is.running"
+                                },
+                                {
+                                  "name": "MIRRORD_FAKE_VAR_SECOND",
+                                  "value": "7777"
+                                },
+                                {
+                                    "name": "MIRRORD_FAKE_VAR_THIRD",
+                                    "value": "foo=bar"
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        }
+    }))
+    .expect("Failed creating `deployment` from json spec!")
+}
+
+fn service_from_json(name: &str, service_type: &str) -> Service {
+    serde_json::from_value(json!({
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+            "name": name,
+            "labels": {
+                "app": name,
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+            }
+        },
+        "spec": {
+            "type": service_type,
+            "selector": {
+                "app": name
+            },
+            "sessionAffinity": "None",
+            "ports": [
+                {
+                    "name": "udp",
+                    "protocol": "UDP",
+                    "port": 31415,
+                },
+                {
+                    "name": "http",
+                    "protocol": "TCP",
+                    "port": 80,
+                    "targetPort": 80,
+                },
+            ]
+        }
+    }))
+    .expect("Failed creating `service` from json spec!")
+}
+
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
 /// This behavior can be changed, see `FORCE_CLEANUP_ENV_NAME`.
@@ -739,63 +834,8 @@ pub async fn service(
         watch_resource_exists(&namespace_api, namespace).await;
     }
 
-    let deployment: Deployment = serde_json::from_value(json!({
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {
-            "name": &name,
-            "labels": {
-                "app": &name,
-                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-                "test-label-for-deployments": format!("deployment-{name}")
-            }
-        },
-        "spec": {
-            "replicas": 1,
-            "selector": {
-                "matchLabels": {
-                    "app": &name
-                }
-            },
-            "template": {
-                "metadata": {
-                    "labels": {
-                        "app": &name,
-                        "test-label-for-pods": format!("pod-{name}"),
-                        format!("test-label-for-pods-{name}"): &name
-                    }
-                },
-                "spec": {
-                    "containers": [
-                        {
-                            "name": &CONTAINER_NAME,
-                            "image": &image,
-                            "ports": [
-                                {
-                                    "containerPort": 80
-                                }
-                            ],
-                            "env": [
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_FIRST",
-                                  "value": "mirrord.is.running"
-                                },
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_SECOND",
-                                  "value": "7777"
-                                },
-                                {
-                                    "name": "MIRRORD_FAKE_VAR_THIRD",
-                                    "value": "foo=bar"
-                                }
-                            ],
-                        }
-                    ]
-                }
-            }
-        }
-    }))
-    .unwrap();
+    // `Deployment`
+    let deployment = deployment_from_json(&name, image);
     let pod_guard = ResourceGuard::create(
         deployment_api.clone(),
         name.to_string(),
@@ -806,38 +846,8 @@ pub async fn service(
     .unwrap();
     watch_resource_exists(&deployment_api, &name).await;
 
-    let service: Service = serde_json::from_value(json!({
-        "apiVersion": "v1",
-        "kind": "Service",
-        "metadata": {
-            "name": &name,
-            "labels": {
-                "app": &name,
-                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-            }
-        },
-        "spec": {
-            "type": &service_type,
-            "selector": {
-                "app": &name
-            },
-            "sessionAffinity": "None",
-            "ports": [
-                {
-                    "name": "udp",
-                    "protocol": "UDP",
-                    "port": 31415,
-                },
-                {
-                    "name": "http",
-                    "protocol": "TCP",
-                    "port": 80,
-                    "targetPort": 80,
-                },
-            ]
-        }
-    }))
-    .unwrap();
+    // `Service`
+    let service = service_from_json(&name, service_type);
     let service_guard = ResourceGuard::create(
         service_api.clone(),
         name.clone(),
@@ -873,6 +883,116 @@ pub async fn service(
     }
 }
 
+#[fixture]
+pub async fn service_for_mirrord_ls(
+    #[default("default")] namespace: &str,
+    #[default("NodePort")] service_type: &str,
+    #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
+    #[default("http-echo")] service_name: &str,
+    #[default(true)] randomize_name: bool,
+    #[future] kube_client: Client,
+) -> KubeService {
+    let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
+
+    let kube_client = kube_client.await;
+    let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
+    let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
+    let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
+
+    let name = if randomize_name {
+        format!("{}-{}", service_name, random_string())
+    } else {
+        // If using a non-random name, delete existing resources first.
+        // Just continue if they don't exist.
+        // Force delete
+        let delete_params = DeleteParams {
+            grace_period_seconds: Some(0),
+            ..Default::default()
+        };
+
+        let _ = service_api.delete(service_name, &delete_params).await;
+        let _ = deployment_api.delete(service_name, &delete_params).await;
+
+        service_name.to_string()
+    };
+
+    println!(
+        "{} creating service {name:?} in namespace {namespace:?}",
+        format_time()
+    );
+
+    let namespace_resource: Namespace = serde_json::from_value(json!({
+        "apiVersion": "v1",
+        "kind": "Namespace",
+        "metadata": {
+            "name": namespace,
+            "labels": {
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+            }
+        },
+    }))
+    .unwrap();
+    // Create namespace and wrap it in ResourceGuard if it does not yet exist.
+    let namespace_guard = ResourceGuard::create(
+        namespace_api.clone(),
+        namespace.to_string(),
+        &namespace_resource,
+        delete_after_fail,
+    )
+    .await
+    .ok();
+    if namespace_guard.is_some() {
+        watch_resource_exists(&namespace_api, namespace).await;
+    }
+
+    // `Deployment`
+    let deployment = deployment_from_json(&name, image);
+    let pod_guard = ResourceGuard::create(
+        deployment_api.clone(),
+        name.to_string(),
+        &deployment,
+        delete_after_fail,
+    )
+    .await
+    .unwrap();
+    watch_resource_exists(&deployment_api, &name).await;
+
+    // `Service`
+    let service = service_from_json(&name, service_type);
+    let service_guard = ResourceGuard::create(
+        service_api.clone(),
+        name.clone(),
+        &service,
+        delete_after_fail,
+    )
+    .await
+    .unwrap();
+    watch_resource_exists(&service_api, "default").await;
+
+    let target = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
+        .await
+        .unwrap();
+
+    let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
+
+    await_condition(pod_api, &target, is_pod_running())
+        .await
+        .unwrap();
+
+    println!(
+        "{:?} done creating service {name:?} in namespace {namespace:?}",
+        Utc::now()
+    );
+
+    KubeService {
+        name,
+        namespace: namespace.to_string(),
+        target: format!("pod/{target}/container/{CONTAINER_NAME}"),
+        pod_guard,
+        service_guard,
+        namespace_guard,
+    }
+}
 /// Service that should only be reachable from inside the cluster, as a communication partner
 /// for testing outgoing traffic. If this service receives the application's messages, they
 /// must have been intercepted and forwarded via the agent to be sent from the impersonated pod.

@@ -13,7 +13,9 @@ mod cli {
     use regex::Regex;
     use rstest::rstest;
 
-    use crate::utils::{config_dir, run_ls, run_verify_config, service, KubeService};
+    use crate::utils::{
+        config_dir, run_ls, run_verify_config, service_for_mirrord_ls, KubeService,
+    };
 
     /// Tests `verify-config` with `path` and `--ide` args, which should be:
     ///
@@ -97,8 +99,8 @@ mod cli {
     /// Tests for the `mirrord ls` command
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn mirrord_ls(#[future] service: KubeService) {
-        let service = service.await;
+    pub async fn mirrord_ls(#[future] service_for_mirrord_ls: KubeService) {
+        let service = service_for_mirrord_ls.await;
         let mut process = run_ls::<false>(None, None).await;
         let res = process.wait().await;
         assert!(res.success());
