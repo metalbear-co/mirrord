@@ -1,6 +1,7 @@
 use std::{
-    fs::OpenOptions,
+    fs::{File, OpenOptions},
     io,
+    io::BufReader,
     net::{Ipv4Addr, SocketAddr},
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -16,6 +17,7 @@ use mirrord_config::LayerConfig;
 use mirrord_intproxy::agent_conn::AgentConnection;
 use mirrord_protocol::DaemonCodec;
 use tokio::net::{TcpListener, TcpStream};
+use tokio_rustls::server::TlsStream;
 use tokio_util::{codec::Framed, sync::CancellationToken};
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
@@ -37,6 +39,8 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 
 pub async fn proxy(watch: drain::Watch) -> Result<()> {
     let config = LayerConfig::from_env()?;
+
+    tracing::info!(?config, "external_proxy starting");
 
     if let Some(log_destination) = config.external_proxy.log_destination.as_ref() {
         let output_file = OpenOptions::new()
@@ -69,6 +73,44 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
     let mut analytics = AnalyticsReporter::new(config.telemetry, watch);
     (&config).collect_analytics(analytics.get_mut());
 
+    let (Some(client_tls_certificate), Some(tls_certificate), Some(tls_key)) = (
+        config.external_proxy.client_tls_certificate.as_ref(),
+        config.external_proxy.tls_certificate.as_ref(),
+        config.external_proxy.tls_key.as_ref(),
+    ) else {
+        panic!("tls must be provided {:?}", config.external_proxy)
+    };
+
+    let tls_client_certificates = rustls_pemfile::certs(&mut BufReader::new(
+        File::open(client_tls_certificate).unwrap(),
+    ))
+    .collect::<Result<Vec<_>, _>>()
+    .unwrap();
+
+    let tls_certificate =
+        rustls_pemfile::certs(&mut BufReader::new(File::open(tls_certificate).unwrap()))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+    let tls_keys = rustls_pemfile::private_key(&mut BufReader::new(File::open(tls_key).unwrap()))
+        .unwrap()
+        .unwrap();
+
+    let mut roots = rustls::RootCertStore::empty();
+
+    roots.add_parsable_certificates(tls_client_certificates);
+
+    let client_verifier = rustls::server::WebPkiClientVerifier::builder(roots.into())
+        .build()
+        .unwrap();
+
+    let tls_config = rustls::ServerConfig::builder()
+        .with_client_cert_verifier(client_verifier)
+        .with_single_cert(tls_certificate, tls_keys)
+        .unwrap();
+
+    let tls_acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(tls_config));
+
     let listener = create_listen_socket(SocketAddr::new(
         local_ip().unwrap_or_else(|_| Ipv4Addr::UNSPECIFIED.into()),
         0,
@@ -90,9 +132,11 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
     loop {
         tokio::select! {
             conn = listener.accept() => {
-                if let Ok((socket, peer_addr)) = conn {
+                if let Ok((stream, peer_addr)) = conn {
+
                     tracing::debug!(?peer_addr, "new connection");
 
+                    let tls_acceptor = tls_acceptor.clone();
                     let connections = connections.clone();
                     let cancellation_token = cancellation_token.clone();
 
@@ -102,7 +146,8 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
                     connections.fetch_add(1, Ordering::Relaxed);
 
                     let fut = async move {
-                        handle_connection(socket, agent_conn).await;
+                        let stream = tls_acceptor.accept(stream).await.unwrap();
+                        handle_connection(stream, agent_conn).await;
 
                         tracing::debug!(?peer_addr, "closed connection");
 
@@ -131,13 +176,13 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
     Ok(())
 }
 
-#[tracing::instrument(level = Level::TRACE, skip_all, fields(local_addr = ?socket.local_addr(), peer_addr = ?socket.peer_addr()))]
-async fn handle_connection(socket: TcpStream, mut agent_conn: AgentConnection) {
-    let mut socket = Framed::new(socket, DaemonCodec::default());
+#[tracing::instrument(level = Level::TRACE, skip(agent_conn))]
+async fn handle_connection(stream: TlsStream<TcpStream>, mut agent_conn: AgentConnection) {
+    let mut stream = Framed::new(stream, DaemonCodec::default());
 
     loop {
         tokio::select! {
-            client_message = socket.next() => {
+            client_message = stream.next() => {
                 match client_message {
                     Some(Ok(client_message)) => {
                         if let Err(error) = agent_conn.agent_tx.send(client_message).await {
@@ -158,7 +203,7 @@ async fn handle_connection(socket: TcpStream, mut agent_conn: AgentConnection) {
             }
             daemon_message = agent_conn.agent_rx.recv() => {
                 if let Some(daemon_message) = daemon_message {
-                    if let Err(error) = socket.send(daemon_message).await {
+                    if let Err(error) = stream.send(daemon_message).await {
                         tracing::error!(%error, "unable to send message to intproxy");
 
                         break;

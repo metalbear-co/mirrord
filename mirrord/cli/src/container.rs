@@ -4,6 +4,7 @@ use std::{
 };
 
 use exec::execvp;
+use local_ip_address::local_ip;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_progress::{Progress, ProgressTracker};
@@ -86,7 +87,7 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
         std::env::set_var(name, value);
     }
 
-    let (config, mut context) = LayerConfig::from_env_with_warnings()?;
+    let (mut config, mut context) = LayerConfig::from_env_with_warnings()?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, watch);
     (&config).collect_analytics(analytics.get_mut());
@@ -96,10 +97,101 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
         progress.warning(warning);
     }
 
-    let mut temp_config_file = tempfile::NamedTempFile::new().unwrap();
-    temp_config_file
+    let _internal_proxy_tls_guards = if config.external_proxy.client_tls_certificate.is_none()
+        || config.external_proxy.client_tls_key.is_none()
+    {
+        let internal_proxy_tls =
+            rcgen::generate_simple_self_signed(vec!["intproxy".to_owned()]).unwrap();
+
+        let mut internal_proxy_cert = tempfile::NamedTempFile::new().unwrap();
+        internal_proxy_cert
+            .write_all(internal_proxy_tls.cert.pem().as_bytes())
+            .unwrap();
+
+        config.external_proxy.client_tls_certificate =
+            Some(internal_proxy_cert.path().to_path_buf());
+
+        let mut internal_proxy_key = tempfile::NamedTempFile::new().unwrap();
+        internal_proxy_key
+            .write_all(internal_proxy_tls.key_pair.serialize_pem().as_bytes())
+            .unwrap();
+
+        config.external_proxy.client_tls_key = Some(internal_proxy_key.path().to_path_buf());
+
+        Some((internal_proxy_cert, internal_proxy_key))
+    } else {
+        None
+    };
+
+    let _external_proxy_tls_guards = if config.external_proxy.tls_certificate.is_none()
+        || config.external_proxy.tls_key.is_none()
+    {
+        let external_proxy_subject_alt_names: Vec<_> = local_ip()
+            .into_iter()
+            .map(|item| item.to_string())
+            .collect();
+
+        let external_proxy_tls =
+            rcgen::generate_simple_self_signed(external_proxy_subject_alt_names).unwrap();
+
+        let mut external_proxy_cert = tempfile::NamedTempFile::new().unwrap();
+        external_proxy_cert
+            .write_all(external_proxy_tls.cert.pem().as_bytes())
+            .unwrap();
+
+        config.external_proxy.tls_certificate = Some(external_proxy_cert.path().to_path_buf());
+
+        let mut external_proxy_key = tempfile::NamedTempFile::new().unwrap();
+        external_proxy_key
+            .write_all(external_proxy_tls.key_pair.serialize_pem().as_bytes())
+            .unwrap();
+
+        config.external_proxy.tls_key = Some(external_proxy_key.path().to_path_buf());
+
+        Some((external_proxy_cert, external_proxy_key))
+    } else {
+        None
+    };
+
+    let mut composed_config_file = tempfile::Builder::new().suffix(".json").tempfile().unwrap();
+    composed_config_file
         .write_all(&serde_json::to_vec_pretty(&config).unwrap())
         .unwrap();
+
+    let mut runtime_command = RuntimeCommandBuilder::new(args.runtime);
+
+    if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
+        runtime_command.add_env("MIRRORD_CONSOLE_ADDR", console_addr);
+    }
+
+    runtime_command.add_env("MIRRORD_PROGRESS_MODE", "off");
+
+    std::env::set_var("MIRRORD_CONFIG_FILE", composed_config_file.path());
+    runtime_command.add_env("MIRRORD_CONFIG_FILE", "/tmp/mirrord-config.json");
+    runtime_command.add_volume(composed_config_file.path(), "/tmp/mirrord-config.json");
+
+    if let Some(client_tls_certificate) = config.external_proxy.client_tls_certificate.as_ref() {
+        runtime_command.add_env(
+            "MIRRORD_EXTERNAL_CLIENT_TLS_CERTIFICATE",
+            "/tmp/client_tls.cert",
+        );
+        runtime_command.add_volume(client_tls_certificate, "/tmp/client_tls.cert");
+    }
+
+    if let Some(client_tls_key) = config.external_proxy.client_tls_key.as_ref() {
+        runtime_command.add_env("MIRRORD_EXTERNAL_CLIENT_TLS_KEY", "/tmp/client_tls.key");
+        runtime_command.add_volume(client_tls_key, "/tmp/client_tls.key");
+    }
+
+    if let Some(tls_certificate) = config.external_proxy.tls_certificate.as_ref() {
+        runtime_command.add_env("MIRRORD_EXTERNAL_TLS_CERTIFICATE", "/tmp/tls.cert");
+        runtime_command.add_volume(tls_certificate, "/tmp/tls.cert");
+    }
+
+    if let Some(tls_key) = config.external_proxy.tls_key.as_ref() {
+        runtime_command.add_env("MIRRORD_EXTERNAL_TLS_KEY", "/tmp/tls.key");
+        runtime_command.add_volume(tls_key, "/tmp/tls.key");
+    }
 
     let mut sub_progress = progress.subtask("preparing to launch process");
 
@@ -118,11 +210,6 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     }
 
     sub_progress.success(None);
-
-    let mut runtime_command = RuntimeCommandBuilder::new(args.runtime);
-    runtime_command.add_env("MIRRORD_PROGRESS_MODE", "off");
-    runtime_command.add_env("MIRRORD_CONFIG_FILE", "/tmp/mirrord-config.json");
-    runtime_command.add_volume(temp_config_file.path(), "/tmp/mirrord-config.json");
 
     runtime_command.add_envs(execution_info_env_without_connection_info);
 
@@ -149,7 +236,6 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
 
     // Kills the intproxy, freeing the agent.
     execution_info.stop().await;
-    temp_config_file.close().unwrap();
 
     Ok(())
 }

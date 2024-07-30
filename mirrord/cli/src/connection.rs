@@ -1,4 +1,4 @@
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, fs::File, io::BufReader, sync::Arc, time::Duration};
 
 use mirrord_analytics::Reporter;
 use mirrord_config::LayerConfig;
@@ -13,6 +13,7 @@ use mirrord_progress::{
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::{net::TcpSocket, sync::mpsc};
+use tokio_rustls::TlsConnector;
 use tracing::Level;
 
 use crate::{CliError, Result};
@@ -108,7 +109,51 @@ where
         let proxy_addr = connect_tcp.parse().unwrap();
         let socket = TcpSocket::new_v4().unwrap();
 
-        let (sender, receiver) = wrap_raw_connection(socket.connect(proxy_addr).await.unwrap());
+        let stream = socket.connect(proxy_addr).await.unwrap();
+
+        let (sender, receiver) =
+            if let (Some(client_tls_certificate), Some(client_tls_key), Some(tls_certificate)) = (
+                config.external_proxy.client_tls_certificate.as_ref(),
+                config.external_proxy.client_tls_key.as_ref(),
+                config.external_proxy.tls_certificate.as_ref(),
+            ) {
+                let mut root_cert_store = rustls::RootCertStore::empty();
+
+                root_cert_store.add_parsable_certificates(
+                    rustls_pemfile::certs(&mut BufReader::new(
+                        File::open(tls_certificate).unwrap(),
+                    ))
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap(),
+                );
+
+                let client_tls_certificate = rustls_pemfile::certs(&mut BufReader::new(
+                    File::open(client_tls_certificate).unwrap(),
+                ))
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+
+                let client_tls_keys = rustls_pemfile::private_key(&mut BufReader::new(
+                    File::open(client_tls_key).unwrap(),
+                ))
+                .unwrap()
+                .unwrap();
+
+                let tls_config = rustls::ClientConfig::builder()
+                    .with_root_certificates(root_cert_store)
+                    .with_client_auth_cert(client_tls_certificate, client_tls_keys)
+                    .unwrap();
+
+                let connector = TlsConnector::from(Arc::new(tls_config));
+
+                let domain = rustls::pki_types::ServerName::try_from(proxy_addr.ip().to_string())
+                    .unwrap()
+                    .to_owned();
+
+                wrap_raw_connection(connector.connect(domain, stream).await.unwrap())
+            } else {
+                wrap_raw_connection(stream)
+            };
 
         return Ok((
             AgentConnectInfo::ExternalProxy(proxy_addr),

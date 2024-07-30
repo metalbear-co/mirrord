@@ -27,7 +27,7 @@ RUN cp /build/target/$(cat /.platform)/release/libmirrord_layer.so /libmirrord_l
 
 FROM --platform=$BUILDPLATFORM debian as runtime
 
-RUN mkdir -p /opt/mirrord/bin && mkdir -p /opt/mirrord/lib
+RUN mkdir -p /opt/mirrord/bin && mkdir -p /opt/mirrord/lib && mkdir -p /opt/mirrord/tls
 COPY --from=builder /mirrord /opt/mirrord/bin/mirrord
 COPY --from=builder /libmirrord_layer.so /opt/mirrord/lib/libmirrord_layer.so
 

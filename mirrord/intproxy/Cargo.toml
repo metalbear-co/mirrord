@@ -38,3 +38,6 @@ http-body-util.workspace = true
 bytes.workspace = true
 futures.workspace = true
 rand = "0.8"
+tokio-rustls = "0.26"
+rustls.workspace = true
+rustls-pemfile = "2"

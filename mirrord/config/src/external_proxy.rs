@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -31,6 +33,22 @@ pub struct ExternalProxyConfig {
     /// ```
     #[config(env = "MIRRORD_EXTERNAL_CONNECT_TCP")]
     pub connect_tcp: Option<String>,
+
+    /// ### external_proxy.client_tls_certificate {#external_proxy-client_tls_certificate}
+    #[config(env = "MIRRORD_EXTERNAL_CLIENT_TLS_CERTIFICATE")]
+    pub client_tls_certificate: Option<PathBuf>,
+
+    /// ### external_proxy.client_tls_key {#external_proxy-client_tls_key}
+    #[config(env = "MIRRORD_EXTERNAL_CLIENT_TLS_KEY")]
+    pub client_tls_key: Option<PathBuf>,
+
+    /// ### external_proxy.tls_certificate {#external_proxy-tls_certificate}
+    #[config(env = "MIRRORD_EXTERNAL_TLS_CERTIFICATE")]
+    pub tls_certificate: Option<PathBuf>,
+
+    /// ### external_proxy.tls_key {#external_proxy-tls_key}
+    #[config(env = "MIRRORD_EXTERNAL_TLS_KEY")]
+    pub tls_key: Option<PathBuf>,
 
     /// ### external_proxy.start_idle_timeout {#external_proxy-start_idle_timeout}
     ///

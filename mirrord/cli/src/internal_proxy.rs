@@ -50,6 +50,8 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError> {
     let config = LayerConfig::from_env()?;
 
+    tracing::info!(?config, "internal_proxy starting");
+
     if let Some(log_destination) = config.internal_proxy.log_destination.as_ref() {
         let output_file = OpenOptions::new()
             .create(true)

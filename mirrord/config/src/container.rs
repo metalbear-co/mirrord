@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -17,6 +19,6 @@ pub struct ContainerConfig {
     /// ### container.cli_image_lib_path {#container-cli_image}
     ///
     /// Path of the mirrord lib.
-    #[config(default = "/opt/mirrord/lib/libmirrord_layer.so")]
-    pub cli_image_lib_path: String,
+    #[config(default = PathBuf::from("/opt/mirrord/lib/libmirrord_layer.so"))]
+    pub cli_image_lib_path: PathBuf,
 }
