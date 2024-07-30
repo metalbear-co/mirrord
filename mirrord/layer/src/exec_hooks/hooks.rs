@@ -2,6 +2,8 @@ use std::{ffi::CString, os::unix::process::parent_id};
 
 use base64::prelude::*;
 use libc::{c_char, c_int};
+use mirrord_layer_macro::hook_fn;
+#[cfg(target_os = "macos")]
 use mirrord_layer_macro::hook_guard_fn;
 use tracing::Level;
 
@@ -59,8 +61,13 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
 ///
 /// On macos this just calls `execve(path, argv, _environ)`, so we'll be handling it in our
 /// [`execve_detour`].
+///
+/// # NO `hook_guard_fn`
+///
+/// This hook should **not** use the hook guard or tracing.
+/// Both were observed to break the flow with Flask, we assume it's about stack limit.
 #[cfg(not(target_os = "macos"))]
-#[hook_guard_fn]
+#[hook_fn]
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
     let encoded = bincode::encode_to_vec(shared_sockets(), bincode::config::standard())
         .map(|bytes| BASE64_URL_SAFE.encode(bytes))
@@ -77,8 +84,13 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
 /// Hook for `libc::execve`.
 ///
 /// We can't change the pointers, to get around that we create our own and **leak** them.
+///
+/// # NO `hook_guard_fn`
+///
+/// This hook should **not** use the hook guard or tracing.
+/// Both were observed to break the flow with Flask, we assume it's about stack limit.
 #[cfg(not(target_os = "macos"))]
-#[hook_guard_fn]
+#[hook_fn]
 pub(crate) unsafe extern "C" fn execve_detour(
     path: *const c_char,
     argv: *const *const c_char,
