@@ -35,6 +35,9 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
         .map_err(|err| todo!("{err}"))
 }
 
+/// Create a "sidecar" container that is running `mirrord intproy` that connects to `mirrord
+/// extproxy` running on user machine to be used by execution container (via mounting on same
+/// network)
 async fn create_sidecar_intproxy(
     config: &LayerConfig,
     base_command: &RuntimeCommandBuilder,
@@ -74,6 +77,8 @@ async fn create_sidecar_intproxy(
     Ok((sidecar_container_id, intproxt_socket))
 }
 
+/// Main entry point for the `mirrord container` command.
+/// This spawns: "agent" - "external proxy" - "intproxy sidecar" - "execution container"
 pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord container");
 
