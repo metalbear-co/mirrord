@@ -185,7 +185,7 @@ pub(super) struct ExecParams {
 }
 
 impl ExecParams {
-    pub fn to_env(&self) -> Result<HashMap<String, OsString>, CliError> {
+    pub fn as_env_vars(&self) -> Result<HashMap<String, OsString>, CliError> {
         let mut envs: HashMap<String, OsString> = HashMap::new();
 
         if let Some(target) = &self.target {
@@ -490,14 +490,6 @@ impl std::fmt::Display for ContainerRuntime {
 #[derive(Args, Debug)]
 /// Args for the `mirrord container` command.
 pub(super) struct ContainerArgs {
-    #[arg(long, default_value = concat!("ghcr.io/metalbear-co/mirrord-cli:", env!("CARGO_PKG_VERSION")))]
-    /// Tag of the `mirrord-cli` image you want to use.
-    pub cli_image: String,
-
-    #[arg(long, default_value = "/opt/mirrord/lib/libmirrord_layer.so")]
-    /// Path of the mirrord lib.
-    pub cli_image_lib_path: PathBuf,
-
     #[clap(flatten)]
     /// Parameters to be passed to mirrord.
     pub params: ExecParams,

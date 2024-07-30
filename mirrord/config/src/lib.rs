@@ -9,6 +9,7 @@
 //! including if you only made documentation changes.
 pub mod agent;
 pub mod config;
+pub mod container;
 pub mod experimental;
 pub mod external_proxy;
 pub mod feature;
@@ -30,9 +31,9 @@ use tera::Tera;
 use tracing::warn;
 
 use crate::{
-    agent::AgentConfig, config::source::MirrordConfigSource, external_proxy::ExternalProxyConfig,
-    feature::FeatureConfig, internal_proxy::InternalProxyConfig, target::TargetConfig,
-    util::VecOrSingle,
+    agent::AgentConfig, config::source::MirrordConfigSource, container::ContainerConfig,
+    external_proxy::ExternalProxyConfig, feature::FeatureConfig,
+    internal_proxy::InternalProxyConfig, target::TargetConfig, util::VecOrSingle,
 };
 
 /// mirrord allows for a high degree of customization when it comes to which features you want to
@@ -252,6 +253,9 @@ pub struct LayerConfig {
     /// }
     /// ```
     pub sip_binaries: Option<VecOrSingle<String>>,
+
+    #[config(nested)]
+    pub container: ContainerConfig,
 
     /// ## target {#root-target}
     #[config(nested)]

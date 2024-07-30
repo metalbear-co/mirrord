@@ -37,7 +37,7 @@ use crate::{
     util::{create_listen_socket, detach_io},
 };
 
-/// Print the port for the caller (mirrord cli execution flow) so it can pass it
+/// Print the address for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.
 fn print_addr(listener: &TcpListener) -> io::Result<()> {
     let addr = listener.local_addr()?;

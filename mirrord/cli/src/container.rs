@@ -36,7 +36,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
 }
 
 async fn create_sidecar_intproxy(
-    args: &ContainerArgs,
+    config: &LayerConfig,
     base_command: &RuntimeCommandBuilder,
     connection_info: Vec<(&str, &str)>,
 ) -> Result<(String, SocketAddr)> {
@@ -48,7 +48,7 @@ async fn create_sidecar_intproxy(
     let sidecar_container_command = ContainerCommand::run(vec![
         "--rm".to_string(),
         "-d".to_string(),
-        args.cli_image.clone(),
+        config.container.cli_image.clone(),
         "mirrord".to_string(),
         "intproxy".to_string(),
     ]);
@@ -77,7 +77,7 @@ async fn create_sidecar_intproxy(
 pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord container");
 
-    for (name, value) in args.params.to_env()? {
+    for (name, value) in args.params.as_env_vars()? {
         std::env::set_var(name, value);
     }
 
@@ -122,12 +122,12 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     runtime_command.add_envs(execution_info_env_without_connection_info);
 
     let (sidecar_container_id, sidecar_intproxt_socket) =
-        create_sidecar_intproxy(&args, &runtime_command, connection_info).await?;
+        create_sidecar_intproxy(&config, &runtime_command, connection_info).await?;
 
     runtime_command.add_network(format!("container:{sidecar_container_id}"));
     runtime_command.add_volumes_from(sidecar_container_id);
 
-    runtime_command.add_env(LINUX_INJECTION_ENV_VAR, args.cli_image_lib_path);
+    runtime_command.add_env(LINUX_INJECTION_ENV_VAR, config.container.cli_image_lib_path);
     runtime_command.add_env(
         MIRRORD_CONNECT_TCP_ENV_VAR,
         sidecar_intproxt_socket.to_string(),

@@ -327,7 +327,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
 
-    for (name, value) in args.params.to_env()? {
+    for (name, value) in args.params.as_env_vars()? {
         std::env::set_var(name, value);
     }
 
