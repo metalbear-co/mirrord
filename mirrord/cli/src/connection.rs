@@ -103,14 +103,14 @@ pub(crate) async fn create_and_connect<P, R: Reporter>(
 where
     P: Progress + Send + Sync,
 {
-    if let Some(connect_tcp) = config.connect_tcp.as_ref() {
+    if let Some(connect_tcp) = config.external_proxy.connect_tcp.as_ref() {
         let proxy_addr = connect_tcp.parse().unwrap();
         let socket = TcpSocket::new_v4().unwrap();
 
         let (sender, receiver) = wrap_raw_connection(socket.connect(proxy_addr).await.unwrap());
 
         return Ok((
-            AgentConnectInfo::ExtProxy(proxy_addr),
+            AgentConnectInfo::ExternalProxy(proxy_addr),
             AgentConnection { sender, receiver },
         ));
     }

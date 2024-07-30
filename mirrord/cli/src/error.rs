@@ -41,10 +41,6 @@ pub(crate) enum ExternalProxyError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     DeseralizeConnectInfo(String, serde_json::Error),
 
-    #[error("Initial ping pong with the agent failed: {0}")]
-    #[diagnostic(help("{GENERAL_BUG}"))]
-    InitialPingPongFailed(String),
-
     #[error("Main internal proxy logic failed: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     Intproxy(#[from] IntProxyError),

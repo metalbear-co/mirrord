@@ -1,24 +1,20 @@
 use std::{
     fs::OpenOptions,
     io,
-    io::Write,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{Ipv4Addr, SocketAddr},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
+    time::Duration,
 };
 
 use futures::{SinkExt, StreamExt};
-use local_ip_address::{local_ip, local_ipv6};
+use local_ip_address::local_ip;
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
-use mirrord_intproxy::{
-    agent_conn::{AgentConnectInfo, AgentConnection},
-    error::IntProxyError,
-};
-use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, LogLevel, LogMessage};
-use nix::libc;
+use mirrord_intproxy::agent_conn::AgentConnection;
+use mirrord_protocol::DaemonCodec;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::{codec::Framed, sync::CancellationToken};
 use tracing_subscriber::EnvFilter;
@@ -26,100 +22,16 @@ use tracing_subscriber::EnvFilter;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{ExternalProxyError, Result},
+    internal_proxy::connect_and_ping,
+    util::{create_listen_socket, detach_io},
 };
-
-unsafe fn redirect_fd_to_dev_null(fd: libc::c_int) {
-    let devnull_fd = libc::open(b"/dev/null\0" as *const [u8; 10] as _, libc::O_RDWR);
-    libc::dup2(devnull_fd, fd);
-    libc::close(devnull_fd);
-}
-
-unsafe fn detach_io() -> Result<(), ExternalProxyError> {
-    // Create a new session for the proxy process, detaching from the original terminal.
-    // This makes the process not to receive signals from the "mirrord" process or it's parent
-    // terminal fixes some side effects such as https://github.com/metalbear-co/mirrord/issues/1232
-    nix::unistd::setsid().map_err(ExternalProxyError::SetSid)?;
-
-    // flush before redirection
-    {
-        // best effort
-        let _ = std::io::stdout().lock().flush();
-    }
-    for fd in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
-        redirect_fd_to_dev_null(fd);
-    }
-    Ok(())
-}
 
 /// Print the port for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.
 fn print_addr(listener: &TcpListener) -> io::Result<()> {
     let addr = listener.local_addr()?;
-
-    let connect_tcp = SocketAddr::new(
-        match addr.ip() {
-            IpAddr::V4(_) => local_ip().unwrap_or_else(|_| Ipv4Addr::LOCALHOST.into()),
-            IpAddr::V6(_) => local_ipv6().unwrap_or_else(|_| Ipv6Addr::LOCALHOST.into()),
-        },
-        addr.port(),
-    );
-
-    println!("{connect_tcp}\n");
+    println!("{addr}\n");
     Ok(())
-}
-
-/// Creates a connection with the agent and handles one round of ping pong.
-async fn connect_and_ping(
-    config: &LayerConfig,
-    connect_info: Option<AgentConnectInfo>,
-    analytics: &mut AnalyticsReporter,
-) -> Result<AgentConnection, ExternalProxyError> {
-    let mut agent_conn = AgentConnection::new(config, connect_info, analytics)
-        .await
-        .map_err(IntProxyError::from)?;
-
-    agent_conn
-        .agent_tx
-        .send(ClientMessage::Ping)
-        .await
-        .map_err(|_| {
-            ExternalProxyError::InitialPingPongFailed(
-                "agent closed connection before ping".to_string(),
-            )
-        })?;
-
-    loop {
-        match agent_conn.agent_rx.recv().await {
-            Some(DaemonMessage::Pong) => break Ok(agent_conn),
-            Some(DaemonMessage::LogMessage(LogMessage {
-                level: LogLevel::Error,
-                message,
-            })) => {
-                tracing::error!("agent log: {message}");
-            }
-            Some(DaemonMessage::LogMessage(LogMessage {
-                level: LogLevel::Warn,
-                message,
-            })) => {
-                tracing::warn!("agent log: {message}");
-            }
-            Some(DaemonMessage::Close(reason)) => {
-                break Err(ExternalProxyError::InitialPingPongFailed(format!(
-                    "agent closed connection with message: {reason}"
-                )));
-            }
-            Some(message) => {
-                break Err(ExternalProxyError::InitialPingPongFailed(format!(
-                    "agent sent an unexpected message: {message:?}"
-                )));
-            }
-            None => {
-                break Err(ExternalProxyError::InitialPingPongFailed(
-                    "agent unexpectedly closed connection".to_string(),
-                ));
-            }
-        }
-    }
 }
 
 async fn handle_connection(socket: TcpStream, mut agent_conn: AgentConnection) {
@@ -164,7 +76,7 @@ async fn handle_connection(socket: TcpStream, mut agent_conn: AgentConnection) {
 pub async fn proxy(watch: drain::Watch) -> Result<()> {
     let config = LayerConfig::from_env()?;
 
-    if let Some(log_destination) = config.internal_proxy.log_destination.as_ref() {
+    if let Some(log_destination) = config.external_proxy.log_destination.as_ref() {
         let output_file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -175,7 +87,7 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
             .with_writer(output_file)
             .with_ansi(false);
 
-        if let Some(log_level) = config.internal_proxy.log_level.as_ref() {
+        if let Some(log_level) = config.external_proxy.log_level.as_ref() {
             tracing_registry
                 .with_env_filter(EnvFilter::builder().parse_lossy(log_level))
                 .init();
@@ -195,17 +107,23 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
     let mut analytics = AnalyticsReporter::new(config.telemetry, watch);
     (&config).collect_analytics(analytics.get_mut());
 
-    let listener = TcpListener::bind(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0))
-        .await
-        .map_err(ExternalProxyError::ListenerSetup)?;
+    let listener = create_listen_socket(SocketAddr::new(
+        local_ip().unwrap_or_else(|_| Ipv4Addr::UNSPECIFIED.into()),
+        0,
+    ))
+    .map_err(ExternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(ExternalProxyError::ListenerSetup)?;
 
     unsafe {
-        detach_io()?;
+        detach_io().map_err(ExternalProxyError::SetSid)?;
     }
 
     let cancellation_token = CancellationToken::new();
     let connections = Arc::new(AtomicUsize::new(0));
+
+    let mut initial_connection_timeout = Box::pin(tokio::time::sleep(Duration::from_secs(
+        config.external_proxy.start_idle_timeout,
+    )));
 
     loop {
         tokio::select! {
@@ -235,6 +153,10 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
                 } else {
                     break;
                 }
+            }
+
+            _ = initial_connection_timeout.as_mut(), if connections.load(Ordering::Relaxed) == 0 => {
+                break;
             }
             _ = cancellation_token.cancelled() => {
                 break;

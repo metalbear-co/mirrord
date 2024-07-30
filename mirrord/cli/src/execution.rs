@@ -266,7 +266,7 @@ impl MirrordExecution {
     }
 
     #[tracing::instrument(level = "trace", skip_all)]
-    pub(crate) async fn start_ext<P>(
+    pub(crate) async fn start_external<P>(
         config: &LayerConfig,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
@@ -337,10 +337,13 @@ impl MirrordExecution {
             })?;
 
         // Provide details for layer to connect to agent via internal proxy
-        env_vars.insert("MIRRORD_CONNECT_TCP".to_string(), socket.to_string());
+        env_vars.insert(
+            "MIRRORD_EXTERNAL_CONNECT_TCP".to_string(),
+            socket.to_string(),
+        );
         env_vars.insert(
             AGENT_CONNECT_INFO_ENV_KEY.to_string(),
-            serde_json::to_string(&AgentConnectInfo::ExtProxy(socket))?,
+            serde_json::to_string(&AgentConnectInfo::ExternalProxy(socket))?,
         );
 
         Ok(Self {

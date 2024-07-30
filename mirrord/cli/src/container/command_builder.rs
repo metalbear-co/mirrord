@@ -12,16 +12,26 @@ pub struct WithCommand {
 #[derive(Debug, Clone)]
 pub struct RuntimeCommandBuilder<T = Empty> {
     step: T,
-    runtime: String,
+    runtime: ContainerRuntime,
     extra_args: Vec<String>,
 }
 
 impl<T> RuntimeCommandBuilder<T> {
-    pub fn push_arg<V>(&mut self, value: V)
+    fn push_arg<V>(&mut self, value: V)
     where
         V: Into<String>,
     {
         self.extra_args.push(value.into())
+    }
+}
+
+impl RuntimeCommandBuilder {
+    pub fn new(runtime: ContainerRuntime) -> Self {
+        RuntimeCommandBuilder {
+            step: Empty,
+            runtime,
+            extra_args: Vec::new(),
+        }
     }
 
     pub fn add_env<K, V>(&mut self, key: K, value: V)
@@ -52,25 +62,42 @@ impl<T> RuntimeCommandBuilder<T> {
         H: AsRef<Path>,
         C: AsRef<Path>,
     {
-        self.push_arg("-v");
-        self.push_arg(format!(
-            "{}:{}",
-            host_path.as_ref().display(),
-            container_path.as_ref().display()
-        ));
-    }
-}
-
-impl RuntimeCommandBuilder {
-    pub fn new(runtime: ContainerRuntime) -> Self {
-        RuntimeCommandBuilder {
-            step: Empty,
-            runtime: runtime.to_string(),
-            extra_args: Vec::new(),
+        match self.runtime {
+            ContainerRuntime::Podman | ContainerRuntime::Docker => {
+                self.push_arg("-v");
+                self.push_arg(format!(
+                    "{}:{}",
+                    host_path.as_ref().display(),
+                    container_path.as_ref().display()
+                ));
+            }
         }
     }
 
-    #[must_use]
+    pub fn add_volumes_from<V>(&mut self, volumes_from: V)
+    where
+        V: Into<String>,
+    {
+        match self.runtime {
+            ContainerRuntime::Podman | ContainerRuntime::Docker => {
+                self.push_arg("--volumes-from");
+                self.push_arg(volumes_from);
+            }
+        }
+    }
+
+    pub fn add_network<N>(&mut self, network: N)
+    where
+        N: Into<String>,
+    {
+        match self.runtime {
+            ContainerRuntime::Podman | ContainerRuntime::Docker => {
+                self.push_arg("--network");
+                self.push_arg(network);
+            }
+        }
+    }
+
     pub fn with_command(self, command: ContainerCommand) -> RuntimeCommandBuilder<WithCommand> {
         let RuntimeCommandBuilder {
             runtime,
@@ -99,8 +126,8 @@ impl RuntimeCommandBuilder<WithCommand> {
         };
 
         (
-            runtime.clone(),
-            std::iter::once(runtime)
+            runtime.to_string(),
+            std::iter::once(runtime.to_string())
                 .chain(std::iter::once(runtime_command))
                 .chain(extra_args)
                 .chain(runtime_args)

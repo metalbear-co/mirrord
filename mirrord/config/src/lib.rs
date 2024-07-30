@@ -10,6 +10,7 @@
 pub mod agent;
 pub mod config;
 pub mod experimental;
+pub mod external_proxy;
 pub mod feature;
 pub mod internal_proxy;
 pub mod target;
@@ -28,8 +29,9 @@ use tera::Tera;
 use tracing::warn;
 
 use crate::{
-    agent::AgentConfig, config::source::MirrordConfigSource, feature::FeatureConfig,
-    internal_proxy::InternalProxyConfig, target::TargetConfig, util::VecOrSingle,
+    agent::AgentConfig, config::source::MirrordConfigSource, external_proxy::ExternalProxyConfig,
+    feature::FeatureConfig, internal_proxy::InternalProxyConfig, target::TargetConfig,
+    util::VecOrSingle,
 };
 
 /// mirrord allows for a high degree of customization when it comes to which features you want to
@@ -286,6 +288,10 @@ pub struct LayerConfig {
     /// # internal_proxy {#root-internal_proxy}
     #[config(nested)]
     pub internal_proxy: InternalProxyConfig,
+
+    /// # external_proxy {#root-external_proxy}
+    #[config(nested)]
+    pub external_proxy: ExternalProxyConfig,
 
     /// ## use_proxy {#root-use_proxy}
     ///

@@ -46,7 +46,8 @@ pub enum AgentConnectionError {
 /// Directive for the proxy on how to connect to the agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentConnectInfo {
-    ExtProxy(SocketAddr),
+    /// Connect to agent through `mirrord extproxy`.
+    ExternalProxy(SocketAddr),
     /// Connect to the agent through the operator.
     Operator(OperatorSession),
     /// Connect directly to the agent by name and port using k8s port forward.
@@ -81,7 +82,7 @@ impl AgentConnection {
                 (connection.tx, connection.rx)
             }
 
-            Some(AgentConnectInfo::ExtProxy(proxy_addr)) => {
+            Some(AgentConnectInfo::ExternalProxy(proxy_addr)) => {
                 let socket = TcpSocket::new_v4().unwrap();
 
                 wrap_raw_connection(socket.connect(proxy_addr).await.unwrap())

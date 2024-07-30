@@ -10,6 +10,7 @@ use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Rep
 use mirrord_config::LayerConfig;
 use mirrord_progress::{Progress, ProgressTracker};
 use tokio::process::Command;
+use tracing::Level;
 
 use crate::{
     config::{ContainerArgs, ContainerCommand},
@@ -44,7 +45,7 @@ where
     command.add_volume(host_path, continer_path);
 }
 
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = Level::TRACE, ret)]
 async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>> {
     let result = command.output().await.expect("TODO: Replace");
 
@@ -64,9 +65,6 @@ async fn create_sidecar_intproxy(
 ) -> Result<(String, SocketAddr)> {
     let mut sidecar_command = base_command.clone();
 
-    if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
-        sidecar_command.add_env("MIRRORD_CONSOLE_ADDR", console_addr);
-    }
     sidecar_command.add_env("MIRRORD_INTPROXY_DETACH_IO", "false");
     sidecar_command.add_envs(connection_info);
 
@@ -121,7 +119,7 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     let mut sub_progress = progress.subtask("preparing to launch process");
 
     let execution_info =
-        MirrordExecution::start_ext(&config, &mut sub_progress, &mut analytics).await?;
+        MirrordExecution::start_external(&config, &mut sub_progress, &mut analytics).await?;
 
     let mut connection_info = Vec::new();
     let mut execution_info_env_without_connection_info = Vec::new();
@@ -150,10 +148,8 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     let (sidecar_container_id, sidecar_intproxt_socket) =
         create_sidecar_intproxy(&args, &runtime_command, connection_info).await?;
 
-    runtime_command.push_arg("--network");
-    runtime_command.push_arg(format!("container:{sidecar_container_id}"));
-    runtime_command.push_arg("--volumes-from");
-    runtime_command.push_arg(&sidecar_container_id);
+    runtime_command.add_network(format!("container:{sidecar_container_id}"));
+    runtime_command.add_volumes_from(sidecar_container_id);
 
     runtime_command.add_env(LINUX_INJECTION_ENV_VAR, args.cli_image_lib_path);
     runtime_command.add_env(
