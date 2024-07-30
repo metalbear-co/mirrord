@@ -1,0 +1,1 @@
+Fixed an issue where operator license was incorrectly recognized as expired when it was expiring later the same day.

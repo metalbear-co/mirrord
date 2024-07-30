@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
 use x509_certificate::{
@@ -60,6 +60,8 @@ impl AsRef<Certificate> for Credentials {
 
 /// Extends a date type ([`DateTime<Utc>`]) to help us when checking for a license's
 /// certificate validity.
+///
+/// Also implemented for [`NaiveDate`], because that's what we get from operator status.
 pub trait LicenseValidity {
     /// How many days we consider a license is close to expiring.
     ///
@@ -73,34 +75,31 @@ pub trait LicenseValidity {
     /// How many days until expiration from this date counting from _now_, which means that an
     /// expiration date of `today + 3` means we have 2 days left until expiry.
     fn days_until_expiration(&self) -> Option<u64>;
-
-    /// Converts a [`NaiveDate`] into a [`DateTime`], so we can turn it into a
-    /// [`DateTime<UTC>`] to check a license's validity.
-    ///
-    /// I(alex) think this might cause trouble with potential mismatched timezone offsets, but
-    /// this is used only for a warning to the user.
-    fn from_naive_date(naive_date: NaiveDate) -> DateTime<Utc> {
-        let now = Utc::now();
-        let offset = *now.offset();
-        DateTime::<Utc>::from_naive_utc_and_offset(
-            naive_date
-                .and_time(NaiveTime::from_hms_opt(0, 0, 0).expect("Manually building valid date!")),
-            offset,
-        )
-    }
 }
 
 impl LicenseValidity for DateTime<Utc> {
     fn is_good(&self) -> bool {
-        let now = Utc::now();
-        now < *self
+        Utc::now() < *self
     }
 
     fn days_until_expiration(&self) -> Option<u64> {
-        let expiration_in_days = (*self - Utc::now()).num_days();
+        self.signed_duration_since(Utc::now())
+            .num_days()
+            .try_into()
+            .ok()
+    }
+}
 
-        // We only want to return `Some(>= 0)`, never any negative numbers.
-        (self.is_good() && expiration_in_days >= 0).then(|| (*self - Utc::now()).num_days() as u64)
+impl LicenseValidity for NaiveDate {
+    fn is_good(&self) -> bool {
+        Utc::now().naive_utc().date() <= *self
+    }
+
+    fn days_until_expiration(&self) -> Option<u64> {
+        self.signed_duration_since(Utc::now().naive_utc().date())
+            .num_days()
+            .try_into()
+            .ok()
     }
 }
 
@@ -132,6 +131,39 @@ mod tests {
         let expiration_date = today.checked_add_days(Days::new(3)).unwrap();
 
         assert_eq!(expiration_date.days_until_expiration(), Some(2));
+    }
+
+    #[test]
+    fn license_validity_valid_naive() {
+        let today = Utc::now().naive_utc().date();
+        let expiration_date = today.checked_add_days(Days::new(7)).unwrap();
+
+        assert!(expiration_date.is_good())
+    }
+
+    #[test]
+    fn license_validity_expired_naive() {
+        let today = Utc::now().naive_utc().date();
+        let expiration_date = today.checked_sub_days(Days::new(7)).unwrap();
+
+        assert!(!expiration_date.is_good());
+    }
+
+    #[test]
+    fn license_validity_close_to_expiring_naive() {
+        let today = Utc::now().naive_utc().date();
+        let expiration_date = today.checked_add_days(Days::new(3)).unwrap();
+
+        assert_eq!(expiration_date.days_until_expiration(), Some(3));
+    }
+
+    #[test]
+    fn license_validity_same_day_naive() {
+        let today = Utc::now().naive_utc().date();
+        let expiration_date = today;
+
+        assert!(expiration_date.is_good());
+        assert_eq!(expiration_date.days_until_expiration(), Some(0));
     }
 }
 
