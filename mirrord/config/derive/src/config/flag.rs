@@ -121,7 +121,11 @@ impl ConfigFlags {
                     Meta::NameValue(meta)
                         if mode == ConfigFlagsType::Field && meta.path.is_ident("default") =>
                     {
-                        flags.default = lit_in_meta_name_value(&meta).map(DefaultFlag::Value);
+                        flags.default = Some(
+                            lit_in_meta_name_value(&meta)
+                                .map(DefaultFlag::Value)
+                                .unwrap_or_else(|| DefaultFlag::Expr(meta.value)),
+                        );
                     }
                     Meta::NameValue(meta)
                         if mode == ConfigFlagsType::Field && meta.path.is_ident("rename") =>
@@ -204,8 +208,10 @@ impl ToTokens for EnvFlag {
 
 #[derive(Debug)]
 pub enum DefaultFlag {
-    // When default has value
+    // When default has literal value
     Value(Lit),
+    // When default has value but it's not a literal
+    Expr(Expr),
     // Just a flag
     Flag,
 }
@@ -221,6 +227,7 @@ impl ToTokens for DefaultFlag {
                 };
                 tokens.extend(output);
             }
+            DefaultFlag::Expr(expr) => tokens.extend(quote! { .unwrap_or_else(|| #expr .into())}),
             DefaultFlag::Flag => {
                 tokens.extend(quote! { .unwrap_or_default() });
             }

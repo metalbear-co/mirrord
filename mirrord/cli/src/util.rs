@@ -2,6 +2,7 @@ use std::{io, io::Write, net::SocketAddr};
 
 use nix::libc;
 use tokio::net::TcpListener;
+use tracing::Level;
 
 /// Removes `HTTP_PROXY` and `https_proxy` from the environment
 pub(crate) fn remove_proxy_env() {
@@ -45,6 +46,7 @@ pub(crate) unsafe fn detach_io() -> Result<(), nix::Error> {
 /// the proxy is under heavy load.
 /// <https://github.com/metalbear-co/mirrord/issues/1716#issuecomment-1663736500>
 /// in macOS backlog is documented to be hardcoded limited to 128.
+#[tracing::instrument(level = Level::TRACE, ret)]
 pub(crate) fn create_listen_socket(addr: SocketAddr) -> io::Result<TcpListener> {
     let socket = socket2::Socket::new(
         socket2::Domain::IPV4,

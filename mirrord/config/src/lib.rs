@@ -254,9 +254,6 @@ pub struct LayerConfig {
     /// ```
     pub sip_binaries: Option<VecOrSingle<String>>,
 
-    #[config(nested)]
-    pub container: ContainerConfig,
-
     /// ## target {#root-target}
     #[config(nested)]
     pub target: TargetConfig,
@@ -264,6 +261,10 @@ pub struct LayerConfig {
     /// ## agent {#root-agent}
     #[config(nested)]
     pub agent: AgentConfig,
+
+    /// ## container {#root-container}
+    #[config(nested)]
+    pub container: ContainerConfig,
 
     /// # feature {#root-feature}
     #[config(nested)]

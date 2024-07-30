@@ -17,6 +17,7 @@ use mirrord_intproxy::agent_conn::AgentConnection;
 use mirrord_protocol::DaemonCodec;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::{codec::Framed, sync::CancellationToken};
+use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
 use crate::{
@@ -32,45 +33,6 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
     let addr = listener.local_addr()?;
     println!("{addr}\n");
     Ok(())
-}
-
-async fn handle_connection(socket: TcpStream, mut agent_conn: AgentConnection) {
-    let mut socket = Framed::new(socket, DaemonCodec::default());
-
-    loop {
-        tokio::select! {
-            client_message = socket.next() => {
-                match client_message {
-                    Some(Ok(client_message)) => {
-                        if let Err(error) = agent_conn.agent_tx.send(client_message).await {
-                            tracing::error!(%error, "unable to send message to agent");
-
-                            break;
-                        }
-                    }
-                    Some(Err(error)) => {
-                        tracing::error!(%error, "unable to recive message from intproxy");
-
-                        break;
-                    }
-                    None => {
-                        break;
-                    }
-                }
-            }
-            daemon_message = agent_conn.agent_rx.recv() => {
-                if let Some(daemon_message) = daemon_message {
-                    if let Err(error) = socket.send(daemon_message).await {
-                        tracing::error!(%error, "unable to send message to intproxy");
-
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
-        }
-    }
 }
 
 pub async fn proxy(watch: drain::Watch) -> Result<()> {
@@ -128,28 +90,30 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
     loop {
         tokio::select! {
             conn = listener.accept() => {
-                if let Ok((socket, addr)) = conn {
-                    tracing::debug!(?addr, "new connection");
+                if let Ok((socket, peer_addr)) = conn {
+                    tracing::debug!(?peer_addr, "new connection");
+
+                    let connections = connections.clone();
+                    let cancellation_token = cancellation_token.clone();
 
                     let agent_conn =
                         connect_and_ping(&config, agent_connect_info.clone(), &mut analytics).await?;
 
                     connections.fetch_add(1, Ordering::Relaxed);
 
-                    tokio::spawn({
-                        let connections = connections.clone();
-                        let cancellation_token = cancellation_token.clone();
+                    let fut = async move {
+                        handle_connection(socket, agent_conn).await;
 
-                        async move {
-                            handle_connection(socket, agent_conn).await;
+                        tracing::debug!(?peer_addr, "closed connection");
 
-                            tracing::debug!(?addr, "closed connection");
+                        if connections.fetch_sub(1, Ordering::Relaxed) == 1 {
+                            cancellation_token.cancel();
 
-                            if connections.fetch_sub(1, Ordering::Relaxed) == 1 {
-                                cancellation_token.cancel();
-                            }
+                            tracing::debug!(?peer_addr, "final connection, closing listener");
                         }
-                    });
+                    };
+
+                    tokio::spawn(fut);
                 } else {
                     break;
                 }
@@ -165,4 +129,44 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[tracing::instrument(level = Level::TRACE, skip_all, fields(local_addr = ?socket.local_addr(), peer_addr = ?socket.peer_addr()))]
+async fn handle_connection(socket: TcpStream, mut agent_conn: AgentConnection) {
+    let mut socket = Framed::new(socket, DaemonCodec::default());
+
+    loop {
+        tokio::select! {
+            client_message = socket.next() => {
+                match client_message {
+                    Some(Ok(client_message)) => {
+                        if let Err(error) = agent_conn.agent_tx.send(client_message).await {
+                            tracing::error!(%error, "unable to send message to agent");
+
+                            break;
+                        }
+                    }
+                    Some(Err(error)) => {
+                        tracing::error!(%error, "unable to recive message from intproxy");
+
+                        break;
+                    }
+                    None => {
+                        break;
+                    }
+                }
+            }
+            daemon_message = agent_conn.agent_rx.recv() => {
+                if let Some(daemon_message) = daemon_message {
+                    if let Err(error) = socket.send(daemon_message).await {
+                        tracing::error!(%error, "unable to send message to intproxy");
+
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+    }
 }
