@@ -362,8 +362,6 @@ pub enum QueueNameSource {
     EnvVar(String),
 }
 
-pub type OutputQueueName = String;
-
 /// The details of a queue that should be split.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "queueType")]
