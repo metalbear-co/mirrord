@@ -380,8 +380,8 @@ pub(super) struct PortForwardArgs {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PortMapping {
-    local: SocketAddr,
-    remote: SocketAddr,
+    pub local: SocketAddr,
+    pub remote: SocketAddr,
 }
 
 impl FromStr for PortMapping {
@@ -395,6 +395,7 @@ impl FromStr for PortMapping {
             3 => {
                 // local port included
                 let local_port = match vec[0].parse::<u16>() {
+                    Ok(0) => return Err(PortMappingParseErr::PortZeroInvalid(s.into())),
                     Ok(port) => port,
                     Err(_error) => return Err(PortMappingParseErr::PortParseErr(vec[0].into())),
                 };
@@ -416,6 +417,7 @@ impl FromStr for PortMapping {
             2 => {
                 // local port excluded, default to same as remote port
                 let remote_port = match vec[1].parse::<u16>() {
+                    Ok(0) => return Err(PortMappingParseErr::PortZeroInvalid(s.into())),
                     Ok(port) => port,
                     Err(_error) => return Err(PortMappingParseErr::PortParseErr(vec[0].into())),
                 };
@@ -451,7 +453,7 @@ pub enum PortMappingParseErr {
     #[error("Failed to parse `{0}` into IP address (u8.u8.u8.u8)")]
     IpParseErr(String),
 
-    #[error("Failed to set remote port for port forwarding while parsing `{0}`: `0` is never a valid remote port")]
+    #[error("Failed to set port for port forwarding while parsing `{0}`: `0` is not a valid port address")]
     PortZeroInvalid(String),
 }
 

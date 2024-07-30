@@ -531,8 +531,10 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
 
     let (_connection_info, connection) =
         create_and_connect(&config, &mut progress, &mut analytics).await?;
-    let port_forward = PortForwarder::new(connection, args.port_mappings.clone());
-    port_forward.run().await
+    let mut port_forward = PortForwarder::new(connection, args.port_mappings.clone())
+        .await
+        .unwrap(); // TODO: remove unwrap
+    Ok(port_forward.run().await.unwrap()) // TODO: remove unwrap, Ok()
 }
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
