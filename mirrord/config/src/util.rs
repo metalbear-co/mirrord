@@ -2,7 +2,7 @@ use std::{collections::HashSet, fmt, hash::Hash, marker::PhantomData, ops::Deref
 
 use schemars::JsonSchema;
 use serde::{
-    de::{self, MapAccess, Visitor},
+    de::{self, EnumAccess, MapAccess, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize,
 };
 
@@ -16,7 +16,7 @@ pub trait MirrordToggleableConfig: MirrordConfig + Default {
     fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError>;
 }
 
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[derive(PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum ToggleableConfig<T> {
     Enabled(bool),
@@ -49,6 +49,99 @@ where
     T: FromMirrordConfig,
 {
     type Generator = T::Generator;
+}
+
+impl<'de, T> Deserialize<'de> for ToggleableConfig<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<ToggleableConfig<T>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(ToggleableConfigVisitor(PhantomData))
+    }
+}
+
+struct ToggleableConfigVisitor<T>(PhantomData<T>);
+
+impl<'de, T> Visitor<'de> for ToggleableConfigVisitor<T>
+where
+    T: Deserialize<'de>,
+{
+    type Value = ToggleableConfig<T>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("bool or map")
+    }
+
+    fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(ToggleableConfig::Enabled(value))
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Deserialize::deserialize(de::value::StrDeserializer::new(value))
+            .map(ToggleableConfig::Config)
+    }
+
+    fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Deserialize::deserialize(de::value::StringDeserializer::new(value))
+            .map(ToggleableConfig::Config)
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        T::deserialize(deserializer).map(ToggleableConfig::Config)
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Deserialize::deserialize(de::value::UnitDeserializer::new()).map(ToggleableConfig::Config)
+    }
+
+    fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        T::deserialize(deserializer).map(ToggleableConfig::Config)
+    }
+
+    fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        Deserialize::deserialize(de::value::SeqAccessDeserializer::new(seq))
+            .map(ToggleableConfig::Config)
+    }
+
+    fn visit_map<M>(self, map: M) -> Result<Self::Value, M::Error>
+    where
+        M: MapAccess<'de>,
+    {
+        Deserialize::deserialize(de::value::MapAccessDeserializer::new(map))
+            .map(ToggleableConfig::Config)
+    }
+
+    fn visit_enum<A>(self, data: A) -> Result<Self::Value, A::Error>
+    where
+        A: EnumAccess<'de>,
+    {
+        Deserialize::deserialize(de::value::EnumAccessDeserializer::new(data))
+            .map(ToggleableConfig::Config)
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]

@@ -91,9 +91,10 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
         progress.warning(warning);
     }
 
-    let mut config_path = tempfile::NamedTempFile::new().unwrap();
-    let _ = config_path.write_all(&serde_json::to_vec(&config).unwrap());
-    let _ = config_path.flush();
+    let mut temp_config_file = tempfile::NamedTempFile::new().unwrap();
+    temp_config_file
+        .write_all(&serde_json::to_vec_pretty(&config).unwrap())
+        .unwrap();
 
     let mut sub_progress = progress.subtask("preparing to launch process");
 
@@ -116,7 +117,7 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     let mut runtime_command = RuntimeCommandBuilder::new(args.runtime);
     runtime_command.add_env("MIRRORD_PROGRESS_MODE", "off");
     runtime_command.add_env("MIRRORD_CONFIG_FILE", "/tmp/mirrord-config.json");
-    runtime_command.add_volume(config_path.path(), "/tmp/mirrord-config.json");
+    runtime_command.add_volume(temp_config_file.path(), "/tmp/mirrord-config.json");
 
     runtime_command.add_envs(execution_info_env_without_connection_info);
 
@@ -143,7 +144,7 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
 
     // Kills the intproxy, freeing the agent.
     execution_info.stop().await;
-    let _ = config_path.close();
+    temp_config_file.close().unwrap();
 
     Ok(())
 }
