@@ -27,6 +27,7 @@ mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"
 
 ctor = "0.2"
 libc.workspace = true
+bincode.workspace = true
 nix = { workspace = true, features = ["net", "process", "signal"]}
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -56,16 +57,16 @@ dashmap = "5.4"
 hashbrown = "0.14"
 exec.workspace = true
 syscalls = { version = "0.6", features = ["full"] }
+null-terminated = "0.3"
+base64.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
-null-terminated = "0.3"
 
 [dev-dependencies]
 mirrord-intproxy = { path = "../intproxy" }
 k8s-openapi.workspace = true
 chrono = { version = "0.4", features = ["clock"] }
-base64.workspace = true
 http-body = { workspace = true }
 hyper = { workspace = true }
 rstest = "*"

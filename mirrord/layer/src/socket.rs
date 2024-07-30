@@ -7,8 +7,11 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
+use base64::prelude::*;
+use bincode::{Decode, Encode};
 use dashmap::DashMap;
 use hashbrown::hash_set::HashSet;
+use hooks::FN_FCNTL;
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::feature::network::{
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
@@ -32,12 +35,52 @@ pub(crate) mod dns_selector;
 pub(super) mod hooks;
 pub(crate) mod ops;
 
-pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(DashMap::new);
+pub(crate) const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
+
+/// Stores the [`UserSocket`]s created by the user.
+///
+/// **Warning**: Do not put logs in here! If you try logging stuff inside this initialization
+/// you're gonna have a bad time. The process hanging is the min you should expect, if you
+/// choose to ignore this warning.
+///
+/// - [`SHARED_SOCKETS_ENV_VAR`]: Some sockets may have been initialized by a parent process
+/// through [`libc::execve`] (or any `exec*`), and the spawned children may want to use those
+/// sockets. As memory is not shared via `exec*` calls (unlike `fork`), we need a way to pass
+/// parent sockets to child processes. The way we achieve this is by setting the
+/// [`SHARED_SOCKETS_ENV_VAR`] with an [`BASE64_URL_SAFE`] encoded version of our [`SOCKETS`].
+/// The env var is set as `MIRRORD_SHARED_SOCKETS=({fd}, {UserSocket}),*`.
+///
+/// - [`libc::FD_CLOEXEC`] behaviour: While rebuilding sockets from the env var, we also
+/// check if they're set with the cloexec flag, so that children processes don't end up using
+/// sockets that are exclusive for their parents.
+pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(|| {
+    std::env::var(SHARED_SOCKETS_ENV_VAR)
+        .ok()
+        .and_then(|encoded| BASE64_URL_SAFE.decode(encoded.into_bytes()).ok())
+        .and_then(|decoded| {
+            bincode::decode_from_slice::<Vec<(i32, UserSocket)>, _>(
+                &decoded,
+                bincode::config::standard(),
+            )
+            .ok()
+        })
+        .map(|(fds_and_sockets, _)| {
+            DashMap::from_iter(fds_and_sockets.into_iter().filter_map(|(fd, socket)| {
+                // Do not inherit sockets that are `FD_CLOEXEC`.
+                if unsafe { FN_FCNTL(fd, libc::F_GETFD, 0) != -1 } {
+                    Some((fd, Arc::new(socket)))
+                } else {
+                    None
+                }
+            }))
+        })
+        .unwrap_or_default()
+});
 
 /// Contains the addresses of a mirrord connected socket.
 ///
 /// - `layer_address` is only used for the outgoing feature.
-#[derive(Debug)]
+#[derive(Debug, Clone, Encode, Decode)]
 pub struct Connected {
     /// The address requested by the user that we're "connected" to.
     ///
@@ -78,7 +121,7 @@ pub struct Connected {
 /// The original user requested address is assigned to `Bound::requested_address`, and used as an
 /// illusion for when the user calls [`libc::getsockname`], as if this address was the actual local
 /// bound address.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Encode, Decode)]
 pub struct Bound {
     /// Address originally requested by the user for `bind`.
     requested_address: SocketAddr,
@@ -88,7 +131,7 @@ pub struct Bound {
     address: SocketAddr,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Encode, Decode)]
 pub enum SocketState {
     #[default]
     Initialized,
@@ -97,7 +140,7 @@ pub enum SocketState {
     Connected(Connected),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
 pub(crate) enum SocketKind {
     Tcp(c_int),
     Udp(c_int),
@@ -136,7 +179,7 @@ impl TryFrom<c_int> for SocketKind {
 // can't do that due to how `dup` interacts directly with our `Arc<UserSocket>`, because we just
 // `clone` the arc, we end up with exact duplicates, but `dup` generates a new fd that we have no
 // way of putting inside the duplicated `UserSocket`.
-#[derive(Debug)]
+#[derive(Debug, Clone, Encode, Decode)]
 #[allow(dead_code)]
 pub(crate) struct UserSocket {
     domain: c_int,
@@ -164,7 +207,7 @@ impl UserSocket {
     }
 
     /// Inform internal proxy about closing a listening port.
-    #[mirrord_layer_macro::instrument(level = "trace", ret)]
+    #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()), ret)]
     pub(crate) fn close(&self) {
         if let Self {
             state: SocketState::Listening(bound),

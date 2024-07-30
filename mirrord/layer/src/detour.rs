@@ -351,6 +351,15 @@ impl<S> Detour<S> {
             Detour::Error(e) => op(e),
         }
     }
+
+    #[inline]
+    pub fn or_bypass<O: FnOnce(Bypass) -> Detour<S>>(self, op: O) -> Detour<S> {
+        match self {
+            Detour::Success(s) => Detour::Success(s),
+            Detour::Bypass(b) => op(b),
+            Detour::Error(e) => Detour::Error(e),
+        }
+    }
 }
 
 impl<S> Detour<S>
