@@ -19,7 +19,7 @@ use tokio::{
     sync::mpsc::{self, UnboundedReceiver},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, trace, warn, Level};
 
 use crate::{
     connection::{create_and_connect, AgentConnection, AGENT_CONNECT_INFO_ENV_KEY},
@@ -133,7 +133,7 @@ where
 impl MirrordExecution {
     /// Starts the internal proxy (`intproxy`), and mirrord-layer, even if a bogus binary
     /// was passed by the user.
-    #[tracing::instrument(level = "trace", skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     pub(crate) async fn start<P>(
         config: &LayerConfig,
         // We only need the executable on macos, for SIP handling.
@@ -265,7 +265,7 @@ impl MirrordExecution {
         })
     }
 
-    #[tracing::instrument(level = "trace", skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     pub(crate) async fn start_external<P>(
         config: &LayerConfig,
         progress: &mut P,
@@ -414,7 +414,7 @@ impl MirrordExecution {
     }
 
     /// Retrieve remote environment from the connected agent.
-    #[tracing::instrument(level = "trace", skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn get_remote_env(
         connection: &mut AgentConnection,
         env_vars_filter: HashSet<String>,

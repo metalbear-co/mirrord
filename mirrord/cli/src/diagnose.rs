@@ -8,6 +8,7 @@ use mirrord_config::{
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::{sync::mpsc, time::Instant};
+use tracing::Level;
 
 use crate::{
     connection::create_and_connect, util::remove_proxy_env, CliError, DiagnoseArgs,
@@ -45,7 +46,7 @@ async fn ping(
 }
 
 /// Create a targetless session and run pings to diagnose network latency.
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = Level::TRACE, ret)]
 async fn diagnose_latency(config: Option<&Path>) -> Result<()> {
     let mut progress = ProgressTracker::from_env("mirrord network diagnosis");
 
