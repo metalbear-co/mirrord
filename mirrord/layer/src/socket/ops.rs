@@ -25,7 +25,7 @@ use mirrord_protocol::{
 };
 use nix::sys::socket::{sockopt, SockaddrLike, SockaddrStorage};
 use socket2::SockAddr;
-use tracing::{error, trace, Level};
+use tracing::{error, trace};
 
 use super::{hooks::*, *};
 use crate::{
@@ -114,7 +114,7 @@ impl From<ConnectResult> for i32 {
 }
 
 /// Create the socket, add it to SOCKETS if successful and matching protocol and domain (Tcpv4/v6)
-#[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<RawFd> {
     let socket_kind = type_.try_into()?;
 
@@ -226,7 +226,7 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
 /// If the socket is not found in [`SOCKETS`], bypass.
 /// Otherwise, if it's not an ignored port, bind (possibly with a fallback to random port) and
 /// update socket state in [`SOCKETS`]. If it's an ignored port, remove the socket from [`SOCKETS`].
-#[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret, skip(raw_address))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(raw_address))]
 pub(super) fn bind(
     sockfd: c_int,
     raw_address: *const sockaddr,
@@ -337,7 +337,7 @@ pub(super) fn bind(
 
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
-#[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     let mut socket = {
         SOCKETS
@@ -660,7 +660,7 @@ pub(super) fn connect(
 
 /// Resolve fake local address to real remote address. (IP & port of incoming traffic on the
 /// cluster)
-#[mirrord_layer_macro::instrument(level = Level::TRACE, skip(address, address_len))]
+#[mirrord_layer_macro::instrument(level = "trace", skip(address, address_len))]
 pub(super) fn getpeername(
     sockfd: RawFd,
     address: *mut sockaddr,
@@ -689,7 +689,7 @@ pub(super) fn getpeername(
 ///
 /// When [`libc::bind`]ing on port `0`, we change the port to be the actual bound port, as this is
 /// consistent behavior with libc.
-#[mirrord_layer_macro::instrument(level = Level::TRACE, ret, skip(address, address_len))]
+#[mirrord_layer_macro::instrument(level = "trace", ret, skip(address, address_len))]
 pub(super) fn getsockname(
     sockfd: RawFd,
     address: *mut sockaddr,

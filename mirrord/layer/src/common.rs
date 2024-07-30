@@ -1,16 +1,14 @@
 //! Shared place for a few types and functions that are used everywhere by the layer.
-use std::{ffi::CStr, fmt::Debug, ops::Not, path::PathBuf};
+use std::{ffi::CStr, fmt::Debug, path::PathBuf};
 
 use libc::c_char;
 use mirrord_intproxy_protocol::{IsLayerRequest, IsLayerRequestWithResponse, MessageId};
 use mirrord_protocol::file::OpenOptionsInternal;
-use null_terminated::Nul;
 use tracing::warn;
 
 use crate::{
     detour::{Bypass, Detour},
     error::{HookError, HookResult},
-    exec_hooks::Argv,
     file::OpenOptionsInternalExt,
     PROXY_CONNECTION,
 };
@@ -115,26 +113,6 @@ impl CheckedInto<PathBuf> for *const c_char {
             }
         });
         str_det.map(From::from)
-    }
-}
-
-// **Warning**: The implementation here expects that `*const *const c_char` be a valid,
-// null-terminated list! We're using `Nul::new_unchecked`, which doesn't check for this.
-impl CheckedInto<Argv> for *const *const c_char {
-    fn checked_into(self) -> Detour<Argv> {
-        let c_list = self
-            .is_null()
-            .not()
-            .then(|| unsafe { Nul::new_unchecked(self) })?;
-
-        let list = c_list
-            .iter()
-            // Remove the last `null` pointer.
-            .filter(|value| !value.is_null())
-            .map(|value| unsafe { CStr::from_ptr(*value) }.to_owned())
-            .collect::<Argv>();
-
-        Detour::Success(list)
     }
 }
 

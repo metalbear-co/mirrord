@@ -115,9 +115,6 @@ pub(crate) enum HookError {
 
     #[error("mirrord-layer: address passed to `bind` is not valid for the socket domain")]
     InvalidBindAddressForDomain,
-
-    #[error("mirrord-layer: Failed encoding value with `{0}`!")]
-    BincodeEncode(#[from] bincode::error::EncodeError),
 }
 
 /// Errors internal to mirrord-layer.
@@ -240,7 +237,6 @@ impl From<HookError> for i64 {
             HookError::ProxyError(_) => libc::EINVAL,
             HookError::IO(io_fail) => io_fail.raw_os_error().unwrap_or(libc::EIO),
             HookError::LockError => libc::EINVAL,
-            HookError::BincodeEncode(_) => libc::EINVAL,
             HookError::ResponseError(response_fail) => match response_fail {
                 ResponseError::AllocationFailure(_) => libc::ENOMEM,
                 ResponseError::NotFound(_) => libc::ENOENT,
