@@ -24,6 +24,7 @@ use feature::network::outgoing::OutgoingFilterConfig;
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
+use serde::Serialize;
 use target::Target;
 use tera::Tera;
 use tracing::warn;
@@ -160,7 +161,7 @@ use crate::{
 /// ```
 ///
 /// # Options {#root-options}
-#[derive(MirrordConfig, Clone, Debug)]
+#[derive(MirrordConfig, Clone, Debug, Serialize)]
 #[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct LayerConfig {

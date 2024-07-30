@@ -67,7 +67,7 @@ impl fmt::Display for LinuxCapability {
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Clone, Debug)]
+#[derive(MirrordConfig, Clone, Debug, Serialize)]
 #[config(map_to = "AgentFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct AgentConfig {
@@ -454,7 +454,7 @@ impl AgentFileConfig {
     }
 }
 
-#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize)]
 #[config(derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct AgentDnsConfig {

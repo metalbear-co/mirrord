@@ -1,12 +1,13 @@
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
+use serde::Serialize;
 
 use crate::config::source::MirrordConfigSource;
 
 /// mirrord Experimental features.
 /// This shouldn't be used unless someone from MetalBear/mirrord tells you to.
-#[derive(MirrordConfig, Clone, Debug)]
+#[derive(MirrordConfig, Clone, Debug, Serialize)]
 #[config(map_to = "ExperimentalFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct ExperimentalConfig {

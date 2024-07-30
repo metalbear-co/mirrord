@@ -304,7 +304,7 @@ pub struct IncomingAdvancedFileConfig {
 ///   }
 /// }
 /// ```
-#[derive(Default, PartialEq, Eq, Clone, Debug)]
+#[derive(Default, PartialEq, Eq, Clone, Debug, Serialize)]
 pub struct IncomingConfig {
     /// #### feature.network.incoming.port_mapping {#feature-network-incoming-port_mapping}
     ///
@@ -390,7 +390,7 @@ impl IncomingConfig {
 /// 2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming
 /// data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and
 /// steals the traffic on the port if it is HTTP;
-#[derive(Deserialize, PartialEq, Eq, Clone, Copy, Debug, JsonSchema, Default)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Copy, Debug, JsonSchema, Default)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum IncomingMode {
     /// <!--${internal}-->

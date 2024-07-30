@@ -55,7 +55,7 @@ use crate::{
 /// ```
 /// Setting this filter will make mirrord only steal requests to URIs that do not start with
 /// "/health/".
-#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize)]
 #[config(map_to = "HttpFilterFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct HttpFilterConfig {

@@ -1,8 +1,6 @@
 use std::{
-    ffi::OsStr,
-    io::{BufRead, BufReader, Cursor},
+    io::{BufRead, BufReader, Cursor, Write},
     net::SocketAddr,
-    path::Path,
 };
 
 use exec::execvp;
@@ -23,27 +21,6 @@ use crate::{
 mod command_builder;
 
 static MIRRORD_CONNECT_TCP_ENV_VAR: &str = "MIRRORD_CONNECT_TCP";
-
-fn add_config_path<P>(command: &mut RuntimeCommandBuilder, config_path: P)
-where
-    P: AsRef<OsStr>,
-{
-    let host_path = config_path
-        .as_ref()
-        .to_str()
-        .expect("should convert")
-        .to_owned();
-
-    let config_name = Path::new(&config_path)
-        .file_name()
-        .and_then(|os_str| os_str.to_str())
-        .unwrap_or_default();
-
-    let continer_path = format!("/tmp/{}", config_name);
-
-    command.add_env("MIRRORD_CONFIG_FILE", &continer_path);
-    command.add_volume(host_path, continer_path);
-}
 
 #[tracing::instrument(level = Level::TRACE, ret)]
 async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>> {
@@ -100,9 +77,7 @@ async fn create_sidecar_intproxy(
 pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord container");
 
-    let mut config_env_values = args.params.to_env()?;
-
-    for (name, value) in &config_env_values {
+    for (name, value) in args.params.to_env()? {
         std::env::set_var(name, value);
     }
 
@@ -115,6 +90,10 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     for warning in context.get_warnings() {
         progress.warning(warning);
     }
+
+    let mut config_path = tempfile::NamedTempFile::new().unwrap();
+    let _ = config_path.write_all(&serde_json::to_vec(&config).unwrap());
+    let _ = config_path.flush();
 
     let mut sub_progress = progress.subtask("preparing to launch process");
 
@@ -135,14 +114,10 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     sub_progress.success(None);
 
     let mut runtime_command = RuntimeCommandBuilder::new(args.runtime);
-
     runtime_command.add_env("MIRRORD_PROGRESS_MODE", "off");
+    runtime_command.add_env("MIRRORD_CONFIG_FILE", "/tmp/mirrord-config.json");
+    runtime_command.add_volume(config_path.path(), "/tmp/mirrord-config.json");
 
-    if let Some(config_path) = config_env_values.remove("MIRRORD_CONFIG_FILE") {
-        add_config_path(&mut runtime_command, &config_path);
-    }
-
-    runtime_command.add_envs(config_env_values);
     runtime_command.add_envs(execution_info_env_without_connection_info);
 
     let (sidecar_container_id, sidecar_intproxt_socket) =
@@ -168,6 +143,7 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
 
     // Kills the intproxy, freeing the agent.
     execution_info.stop().await;
+    let _ = config_path.close();
 
     Ok(())
 }

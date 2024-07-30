@@ -1,5 +1,6 @@
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
+use serde::Serialize;
 
 use crate::config::source::MirrordConfigSource;
 
@@ -17,7 +18,7 @@ use crate::config::source::MirrordConfigSource;
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Clone, Debug)]
+#[derive(MirrordConfig, Clone, Debug, Serialize)]
 #[config(map_to = "ExternalProxyFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct ExternalProxyConfig {

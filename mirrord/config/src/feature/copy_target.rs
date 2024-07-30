@@ -6,7 +6,7 @@
 
 use mirrord_analytics::CollectAnalytics;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig, Result};
 
@@ -67,7 +67,7 @@ impl FromMirrordConfig for CopyTargetConfig {
 ///   }
 /// }
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct CopyTargetConfig {
     pub enabled: bool,
 
