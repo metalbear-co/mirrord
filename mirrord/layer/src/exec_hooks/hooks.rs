@@ -1,13 +1,13 @@
-use std::{ffi::CString, os::unix::process::parent_id};
+use std::ffi::CString;
 
 use base64::prelude::*;
 use libc::{c_char, c_int};
+#[cfg(not(target_os = "macos"))]
+use mirrord_layer_macro::hook_fn;
+#[cfg(target_os = "macos")]
 use mirrord_layer_macro::hook_guard_fn;
-use tracing::Level;
 
 use super::*;
-#[cfg(not(target_os = "macos"))]
-use crate::common::CheckedInto;
 #[cfg(target_os = "macos")]
 use crate::exec_utils::*;
 use crate::{
@@ -20,7 +20,6 @@ use crate::{
 
 /// Converts the [`SOCKETS`] map into a vector of pairs `(Fd, UserSocket)`, so we can rebuild
 /// it as a map.
-#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 fn shared_sockets() -> Vec<(i32, UserSocket)> {
     SOCKETS
         .iter()
@@ -33,14 +32,6 @@ fn shared_sockets() -> Vec<(i32, UserSocket)> {
 ///
 /// The check for [`libc::FD_CLOEXEC`] is performed during the [`SOCKETS`] initialization
 /// by the child process.
-#[mirrord_layer_macro::instrument(
-    level = Level::TRACE,
-    ret,
-    fields(
-        pid = std::process::id(),
-        parent_pid = parent_id(),
-    )
-)]
 pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
     let mut env_vars = env_vars.or_bypass(|reason| match reason {
         Bypass::EmptyOption => Detour::Success(Argv(Vec::new())),
@@ -55,12 +46,21 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
     Detour::Success(env_vars)
 }
 
+#[cfg(not(target_os = "macos"))]
+unsafe fn environ() -> *const *const c_char {
+    extern "C" {
+        static environ: *const *const c_char;
+    }
+
+    environ
+}
+
 /// Hook for `libc::execv` for linux only.
 ///
 /// On macos this just calls `execve(path, argv, _environ)`, so we'll be handling it in our
 /// [`execve_detour`].
 #[cfg(not(target_os = "macos"))]
-#[hook_guard_fn]
+#[hook_fn]
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
     let encoded = bincode::encode_to_vec(shared_sockets(), bincode::config::standard())
         .map(|bytes| BASE64_URL_SAFE.encode(bytes))
@@ -71,19 +71,23 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
         std::env::set_var("MIRRORD_SHARED_SOCKETS", encoded);
     }
 
-    FN_EXECV(path, argv)
+    FN_EXECVE(path, argv, environ())
 }
 
 /// Hook for `libc::execve`.
 ///
 /// We can't change the pointers, to get around that we create our own and **leak** them.
 #[cfg(not(target_os = "macos"))]
-#[hook_guard_fn]
+#[hook_fn]
 pub(crate) unsafe extern "C" fn execve_detour(
     path: *const c_char,
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
+    use crate::{common::CheckedInto, detour::DetourGuard};
+
+    let _guard = DetourGuard::new();
+
     // Hopefully `envp` is a properly null-terminated list.
     if let Detour::Success(envp) = prepare_execve_envp(envp.checked_into()) {
         FN_EXECVE(path, argv, envp.leak())
