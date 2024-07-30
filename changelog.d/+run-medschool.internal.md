@@ -1,1 +1,0 @@
-Regenerated config docs.
