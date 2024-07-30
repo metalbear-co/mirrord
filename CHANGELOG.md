@@ -8,6 +8,52 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.112.0](https://github.com/metalbear-co/mirrord/tree/3.112.0) - 2024-07-30
+
+
+### Added
+
+- Add fs mapping, under `feature.fs.mapping` now it's possible to specify regex
+  match and replace for paths while running mirrord exec.
+
+  Example:
+
+  ```toml
+  [feature.fs.mapping]
+  "/var/app/temp" = "/tmp" # Will replace all calls to read/write/scan for
+  "/var/app/temp/sample.txt" to "/tmp/sample.txt"
+  "/var/app/.cache" = "/workspace/mirrord$0" # Will replace
+  "/var/app/.cache/sample.txt" to
+  "/workspace/mirrord/var/app/.cache/sample.txt" see
+  [Regex::replace](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace)
+  ``` [#2068](https://github.com/metalbear-co/mirrord/issues/2068)
+- Warning when mirrord automatically picked one of multiple containers on the
+  target.
+
+
+### Changed
+
+- Allows targeting StatefulSet without the copy_target feature (still requires
+  operator though).
+
+
+### Fixed
+
+- Remove invalid schema doc mentioning podname as a valid pod target selector.
+  [#721](https://github.com/metalbear-co/mirrord/issues/721)
+- Pass the list of UserSocket to child processes when exec is called through an
+  env var MIRRORD_SHARED_SOCKETS.
+  [#864](https://github.com/metalbear-co/mirrord/issues/864)
+- Fixed an issue where operator license was incorrectly recognized as expired
+  when it was expiring later the same day.
+- Fixed new exec hooks breaking execution of Flask apps.
+
+
+### Internal
+
+- Added `clippy` check on test code to the CI.
+- Regenerated config docs.
+
 ## [3.111.0](https://github.com/metalbear-co/mirrord/tree/3.111.0) - 2024-07-17
 
 

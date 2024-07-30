@@ -1,1 +1,0 @@
-Allows targeting StatefulSet without the copy_target feature (still requires operator though).
