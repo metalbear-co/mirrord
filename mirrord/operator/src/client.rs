@@ -555,7 +555,7 @@ where
         if config.feature.split_queues.is_set() {
             self.operator
                 .spec
-                .require_feature(NewOperatorFeature::Sqs)?;
+                .require_feature(NewOperatorFeature::SqsQueueSplitting)?;
         }
 
         Ok(())

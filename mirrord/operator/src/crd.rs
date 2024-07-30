@@ -253,12 +253,12 @@ pub enum OperatorFeatures {
 pub enum NewOperatorFeature {
     ProxyApi,
     CopyTarget,
-    Sqs,
+    SqsQueueSplitting,
     SessionManagement,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[serde(other)]
-    FeatureFromTheFuture,
+    Unknown,
 }
 
 impl Display for NewOperatorFeature {
@@ -266,8 +266,8 @@ impl Display for NewOperatorFeature {
         let name = match self {
             NewOperatorFeature::ProxyApi => "proxy API",
             NewOperatorFeature::CopyTarget => "copy target",
-            NewOperatorFeature::Sqs => "SQS queue splitting",
-            NewOperatorFeature::FeatureFromTheFuture => "unknown feature",
+            NewOperatorFeature::SqsQueueSplitting => "SQS queue splitting",
+            NewOperatorFeature::Unknown => "unknown feature",
             NewOperatorFeature::SessionManagement => "session management",
         };
         f.write_str(name)
