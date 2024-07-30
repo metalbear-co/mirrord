@@ -66,6 +66,8 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
 ///
 /// This hook should **not** use the hook guard or tracing.
 /// Both were observed to break the flow with Flask, we assume it's about stack limit.
+/// 
+/// Make sure to call libc functions directly as to not introduce a loop.
 #[cfg(not(target_os = "macos"))]
 #[hook_fn]
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
@@ -89,6 +91,8 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
 ///
 /// This hook should **not** use the hook guard or tracing.
 /// Both were observed to break the flow with Flask, we assume it's about stack limit.
+/// 
+/// Make sure to call libc functions directly as to not introduce a loop.
 #[cfg(not(target_os = "macos"))]
 #[hook_fn]
 pub(crate) unsafe extern "C" fn execve_detour(
