@@ -2,9 +2,9 @@ use std::ffi::CString;
 
 use base64::prelude::*;
 use libc::{c_char, c_int};
-#[cfg(not(target = "macos"))]
+#[cfg(not(target_os = "macos"))]
 use mirrord_layer_macro::hook_fn;
-#[cfg(target = "macos")]
+#[cfg(target_os = "macos")]
 use mirrord_layer_macro::hook_guard_fn;
 
 use super::*;
