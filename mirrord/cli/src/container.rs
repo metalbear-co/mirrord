@@ -26,6 +26,8 @@ mod command_builder;
 /// Env variable mirrord-layer uses to connect to intproxy
 static MIRRORD_CONNECT_TCP_ENV_VAR: &str = "MIRRORD_CONNECT_TCP";
 
+/// Format [`Command`] to look like the executated command (currently without env because we don't
+/// use it in these scenarios)
 fn format_command(command: &Command) -> String {
     let command = command.as_std();
 
