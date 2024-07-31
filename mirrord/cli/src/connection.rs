@@ -1,8 +1,8 @@
-use std::{collections::HashSet, fs::File, io::BufReader, sync::Arc, time::Duration};
+use std::{collections::HashSet, time::Duration};
 
 use mirrord_analytics::Reporter;
 use mirrord_config::LayerConfig;
-use mirrord_intproxy::agent_conn::AgentConnectInfo;
+use mirrord_intproxy::agent_conn::{wrap_connection_with_tls, AgentConnectInfo};
 use mirrord_kube::{
     api::{kubernetes::KubernetesAPI, wrap_raw_connection},
     error::KubeApiError,
@@ -13,10 +13,9 @@ use mirrord_progress::{
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::{net::TcpSocket, sync::mpsc};
-use tokio_rustls::TlsConnector;
 use tracing::Level;
 
-use crate::{CliError, Result};
+use crate::{error::ExternalProxyError, CliError, Result};
 
 pub(crate) struct AgentConnection {
     pub sender: mpsc::Sender<ClientMessage>,
@@ -105,11 +104,13 @@ pub(crate) async fn create_and_connect<P, R: Reporter>(
 where
     P: Progress + Send + Sync,
 {
-    if let Some(connect_tcp) = config.external_proxy.connect_tcp.as_ref() {
-        let proxy_addr = connect_tcp.parse().unwrap();
-        let socket = TcpSocket::new_v4().unwrap();
+    if let Some(proxy_addr) = config.external_proxy.connect_tcp {
+        let socket = TcpSocket::new_v4().map_err(ExternalProxyError::Io)?;
 
-        let stream = socket.connect(proxy_addr).await.unwrap();
+        let stream = socket
+            .connect(proxy_addr)
+            .await
+            .map_err(ExternalProxyError::Io)?;
 
         let (sender, receiver) =
             if let (Some(client_tls_certificate), Some(client_tls_key), Some(tls_certificate)) = (
@@ -117,40 +118,15 @@ where
                 config.external_proxy.client_tls_key.as_ref(),
                 config.external_proxy.tls_certificate.as_ref(),
             ) {
-                let mut root_cert_store = rustls::RootCertStore::empty();
-
-                root_cert_store.add_parsable_certificates(
-                    rustls_pemfile::certs(&mut BufReader::new(
-                        File::open(tls_certificate).unwrap(),
-                    ))
-                    .collect::<Result<Vec<_>, _>>()
-                    .unwrap(),
-                );
-
-                let client_tls_certificate = rustls_pemfile::certs(&mut BufReader::new(
-                    File::open(client_tls_certificate).unwrap(),
-                ))
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap();
-
-                let client_tls_keys = rustls_pemfile::private_key(&mut BufReader::new(
-                    File::open(client_tls_key).unwrap(),
-                ))
-                .unwrap()
-                .unwrap();
-
-                let tls_config = rustls::ClientConfig::builder()
-                    .with_root_certificates(root_cert_store)
-                    .with_client_auth_cert(client_tls_certificate, client_tls_keys)
-                    .unwrap();
-
-                let connector = TlsConnector::from(Arc::new(tls_config));
-
-                let domain = rustls::pki_types::ServerName::try_from(proxy_addr.ip().to_string())
-                    .unwrap()
-                    .to_owned();
-
-                wrap_raw_connection(connector.connect(domain, stream).await.unwrap())
+                wrap_connection_with_tls(
+                    stream,
+                    proxy_addr.ip(),
+                    tls_certificate,
+                    client_tls_certificate,
+                    client_tls_key,
+                )
+                .await
+                .map_err(ExternalProxyError::from)?
             } else {
                 wrap_raw_connection(stream)
             };

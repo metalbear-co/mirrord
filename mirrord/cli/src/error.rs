@@ -4,7 +4,7 @@ use kube::core::ErrorResponse;
 use miette::Diagnostic;
 use mirrord_config::config::ConfigError;
 use mirrord_console::error::ConsoleError;
-use mirrord_intproxy::error::IntProxyError;
+use mirrord_intproxy::{agent_conn::ConnectionTlsError, error::IntProxyError};
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
 use reqwest::StatusCode;
@@ -56,6 +56,20 @@ pub(crate) enum ExternalProxyError {
     #[error("Failed to set sid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     SetSid(nix::Error),
+
+    #[error(transparent)]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    Io(std::io::Error),
+
+    #[error(transparent)]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    Tls(#[from] ConnectionTlsError),
+
+    #[error(
+        "there was no tls information provided, see `external_proxy` keys in config if specified"
+    )]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    MissingTlsInfo,
 }
 
 /// Errors that can occur when executing the `mirrord intproxy` command.

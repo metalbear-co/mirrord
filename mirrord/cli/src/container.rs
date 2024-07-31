@@ -158,40 +158,7 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
         .write_all(&serde_json::to_vec_pretty(&config).unwrap())
         .unwrap();
 
-    let mut runtime_command = RuntimeCommandBuilder::new(args.runtime);
-
-    if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
-        runtime_command.add_env("MIRRORD_CONSOLE_ADDR", console_addr);
-    }
-
-    runtime_command.add_env("MIRRORD_PROGRESS_MODE", "off");
-
     std::env::set_var("MIRRORD_CONFIG_FILE", composed_config_file.path());
-    runtime_command.add_env("MIRRORD_CONFIG_FILE", "/tmp/mirrord-config.json");
-    runtime_command.add_volume(composed_config_file.path(), "/tmp/mirrord-config.json");
-
-    if let Some(client_tls_certificate) = config.external_proxy.client_tls_certificate.as_ref() {
-        runtime_command.add_env(
-            "MIRRORD_EXTERNAL_CLIENT_TLS_CERTIFICATE",
-            "/tmp/client_tls.cert",
-        );
-        runtime_command.add_volume(client_tls_certificate, "/tmp/client_tls.cert");
-    }
-
-    if let Some(client_tls_key) = config.external_proxy.client_tls_key.as_ref() {
-        runtime_command.add_env("MIRRORD_EXTERNAL_CLIENT_TLS_KEY", "/tmp/client_tls.key");
-        runtime_command.add_volume(client_tls_key, "/tmp/client_tls.key");
-    }
-
-    if let Some(tls_certificate) = config.external_proxy.tls_certificate.as_ref() {
-        runtime_command.add_env("MIRRORD_EXTERNAL_TLS_CERTIFICATE", "/tmp/tls.cert");
-        runtime_command.add_volume(tls_certificate, "/tmp/tls.cert");
-    }
-
-    if let Some(tls_key) = config.external_proxy.tls_key.as_ref() {
-        runtime_command.add_env("MIRRORD_EXTERNAL_TLS_KEY", "/tmp/tls.key");
-        runtime_command.add_volume(tls_key, "/tmp/tls.key");
-    }
 
     let mut sub_progress = progress.subtask("preparing to launch process");
 
@@ -210,6 +177,35 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     }
 
     sub_progress.success(None);
+
+    let mut runtime_command = RuntimeCommandBuilder::new(args.runtime);
+
+    if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
+        if console_addr
+            .parse()
+            .map(|addr: SocketAddr| !addr.ip().is_loopback())
+            .unwrap_or_default()
+        {
+            runtime_command.add_env("MIRRORD_CONSOLE_ADDR", console_addr);
+        } else {
+            tracing::warn!(
+                ?console_addr,
+                "MIRRORD_CONSOLE_ADDR needs to be a non loopback address when used with containers"
+            );
+        }
+    }
+
+    runtime_command.add_env("MIRRORD_PROGRESS_MODE", "off");
+
+    runtime_command.add_env("MIRRORD_CONFIG_FILE", "/tmp/mirrord-config.json");
+    runtime_command.add_volume(composed_config_file.path(), "/tmp/mirrord-config.json");
+
+    for (env, path) in config.external_proxy.as_tls_envs() {
+        let container_path = format!("/tmp/{}.pem", env.to_lowercase());
+
+        runtime_command.add_env(env, &container_path);
+        runtime_command.add_volume(path, container_path);
+    }
 
     runtime_command.add_envs(execution_info_env_without_connection_info);
 

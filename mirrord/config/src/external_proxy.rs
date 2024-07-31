@@ -1,4 +1,7 @@
-use std::path::PathBuf;
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+};
 
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -32,7 +35,7 @@ pub struct ExternalProxyConfig {
     /// }
     /// ```
     #[config(env = "MIRRORD_EXTERNAL_CONNECT_TCP")]
-    pub connect_tcp: Option<String>,
+    pub connect_tcp: Option<SocketAddr>,
 
     /// ### external_proxy.client_tls_certificate {#external_proxy-client_tls_certificate}
     #[config(env = "MIRRORD_EXTERNAL_CLIENT_TLS_CERTIFICATE")]
@@ -76,4 +79,32 @@ pub struct ExternalProxyConfig {
     /// ### external_proxy.log_destination {#external_proxy-log_destination}
     /// Set the log file destination for the external proxy.
     pub log_destination: Option<String>,
+}
+
+fn env_iter<'a>(
+    env: &'static str,
+    value: Option<&'a Path>,
+) -> impl Iterator<Item = (&'static str, &'a Path)> {
+    value.into_iter().map(move |path| (env, path))
+}
+
+impl ExternalProxyConfig {
+    pub fn as_tls_envs(&self) -> impl Iterator<Item = (&'static str, &Path)> {
+        env_iter(
+            "MIRRORD_EXTERNAL_CLIENT_TLS_CERTIFICATE",
+            self.client_tls_certificate.as_deref(),
+        )
+        .chain(env_iter(
+            "MIRRORD_EXTERNAL_CLIENT_TLS_KEY",
+            self.client_tls_key.as_deref(),
+        ))
+        .chain(env_iter(
+            "MIRRORD_EXTERNAL_TLS_CERTIFICATE",
+            self.tls_certificate.as_deref(),
+        ))
+        .chain(env_iter(
+            "MIRRORD_EXTERNAL_TLS_KEY",
+            self.tls_key.as_deref(),
+        ))
+    }
 }

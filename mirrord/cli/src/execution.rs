@@ -198,7 +198,7 @@ impl MirrordExecution {
 
         let stdout = proxy_process.stdout.take().expect("stdout was piped");
 
-        let socket: SocketAddr = BufReader::new(stdout)
+        let address: SocketAddr = BufReader::new(stdout)
             .lines()
             .next_line()
             .await
@@ -220,7 +220,7 @@ impl MirrordExecution {
         // Provide details for layer to connect to agent via internal proxy
         env_vars.insert(
             "MIRRORD_CONNECT_TCP".to_string(),
-            format!("127.0.0.1:{}", socket.port()),
+            format!("127.0.0.1:{}", address.port()),
         );
 
         // Fix <https://github.com/metalbear-co/mirrord/issues/1745>
@@ -317,7 +317,7 @@ impl MirrordExecution {
 
         let stdout = proxy_process.stdout.take().expect("stdout was piped");
 
-        let socket: SocketAddr = BufReader::new(stdout)
+        let address: SocketAddr = BufReader::new(stdout)
             .lines()
             .next_line()
             .await
@@ -339,11 +339,11 @@ impl MirrordExecution {
         // Provide details for layer to connect to agent via internal proxy
         env_vars.insert(
             "MIRRORD_EXTERNAL_CONNECT_TCP".to_string(),
-            socket.to_string(),
+            address.to_string(),
         );
         env_vars.insert(
             AGENT_CONNECT_INFO_ENV_KEY.to_string(),
-            serde_json::to_string(&AgentConnectInfo::ExternalProxy(socket))?,
+            serde_json::to_string(&AgentConnectInfo::ExternalProxy(address))?,
         );
 
         Ok(Self {
