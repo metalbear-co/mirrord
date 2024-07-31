@@ -66,6 +66,10 @@ pub struct InternalProxyConfig {
     /// Set the log file destination for the internal proxy.
     pub log_destination: Option<String>,
 
+    /// ### internal_proxy.detach_io {#internal_proxy-detach_io}
+    ///
+    /// This makes the process not to receive signals from the "mirrord" process or it's parent
+    /// terminal, this prevents unwanted side effects.
     #[config(default = true, env = "MIRRORD_INTPROXY_DETACH_IO")]
     pub detach_io: bool,
 }
