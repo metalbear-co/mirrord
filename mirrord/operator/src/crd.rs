@@ -420,7 +420,7 @@ pub struct ActiveSqsSplits {
     /// map, together with the name of its temporary output queue.
     pub queue_names: BTreeMap<QueueId, QueueNameUpdate>,
 
-    /// Names of env vars that contain the queue name directly in the pod spec, without config
+    /// Names of env vars that contain the queue name directly in the pod template, without config
     /// map refs, mapped to their queue id.
     pub direct_env_vars: HashMap<String, QueueId>,
 
