@@ -32,9 +32,14 @@ pub enum DebuggerType {
     /// An implementation of the [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) for Python 3.
     /// Used in VS Code.
     ///
-    /// Command used to invoke this debugger looked like
-    /// `/path/to/python /path/to/vscode/extensions/debugpy --connect 127.0.0.1:57141
-    /// --configure-qt none --adapter-access-token
+    /// Command used to invoke this debugger looked like either:
+    /// `/path/to/python -X frozen_modules=off /path/to/vscode/extensions/debugpy --connect
+    /// 127.0.0.1:57141 --configure-qt none --adapter-access-token
+    /// c2d745556a5a571d09dbf9c14af2898b3d6c174597d6b7198d9d30c105d5ab24 /path/to/script.py`
+    ///
+    /// or in older versions:
+    /// `/path/to/python /path/to/vscode/extensions/debugpy --connect
+    /// 127.0.0.1:57141 --configure-qt none --adapter-access-token
     /// c2d745556a5a571d09dbf9c14af2898b3d6c174597d6b7198d9d30c105d5ab24 /path/to/script.py`
     ///
     /// Port would not be extracted from a command like `/path/to/python /path/to/script.py ...`
@@ -97,7 +102,11 @@ impl DebuggerType {
         match self {
             Self::DebugPy => {
                 let is_python = args.first()?.rsplit('/').next()?.starts_with("py");
-                let runs_debugpy = args.get(1)?.ends_with("debugpy");
+                let runs_debugpy = if args.get(1)?.starts_with("-X") {
+                    args.get(3)?.ends_with("debugpy") // newer args layout
+                } else {
+                    args.get(1)?.ends_with("debugpy") // older args layout
+                };
 
                 if !is_python || !runs_debugpy {
                     None?
