@@ -1,5 +1,5 @@
-//! Implementation of `proxy <-> agent` connection through [`mpsc`](tokio::sync::mpsc) channels
-//! created in different mirrord crates.
+//! Implementation of `proxy <-> agent` connection through [`mpsc`] channels created in different
+//! mirrord crates.
 
 use std::{
     fs::File,
@@ -102,8 +102,7 @@ pub enum AgentConnectInfo {
 /// The raw IO is managed in a separate [`tokio::task`] created in a different mirrord crate.
 /// This differs from the [`LayerConnection`](crate::layer_conn::LayerConnection) implementation,
 /// but this logic was already implemented elsewhere. This struct simply wraps the
-/// [`mpsc`](tokio::sync::mpsc) channels returned from other functions and implements the
-/// [`BackgroundTask`] trait.
+/// [`mpsc`] channels returned from other functions and implements the [`BackgroundTask`] trait.
 pub struct AgentConnection {
     pub agent_tx: Sender<ClientMessage>,
     pub agent_rx: Receiver<DaemonMessage>,
