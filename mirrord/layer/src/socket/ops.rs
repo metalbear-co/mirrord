@@ -25,7 +25,9 @@ use mirrord_protocol::{
 };
 use nix::sys::socket::{sockopt, SockaddrLike, SockaddrStorage};
 use socket2::SockAddr;
-use tracing::{error, trace, Level};
+#[cfg(debug_assertions)]
+use tracing::Level;
+use tracing::{error, trace};
 
 use super::{hooks::*, *};
 use crate::{
