@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{net::SocketAddr, path::PathBuf, str::FromStr};
 
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
@@ -33,6 +33,38 @@ const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Discord or G
 >> Or email us at hi@metalbear.co
 
 "#;
+
+/// Errors that can occur when executing the `mirrord container` command.
+#[derive(Debug, Error, Diagnostic)]
+pub(crate) enum ContainerError {
+    #[error("Could not serialize config to pass into container: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    ConfigSerialization(serde_json::Error),
+
+    #[error("Could not write serialized config file: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    ConfigWrite(std::io::Error),
+
+    #[error("Could not create a self sigend certificate for proxy: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    SelfSignedCertificate(rcgen::Error),
+
+    #[error("Could not write self sigend certificate for proxy: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    WriteSelfSignedCertificate(std::io::Error),
+
+    #[error("Failed to execute command: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    UnableToExecuteCommand(std::io::Error),
+
+    #[error("Failed parse command stdout: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    UnableParseCommandStdout(std::io::Error),
+
+    #[error("Failed get running proxy socket addr: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    UnableParseProxySocketAddr(<SocketAddr as FromStr>::Err),
+}
 
 /// Errors that can occur when executing the `mirrord extproxy` command.
 #[derive(Debug, Error, Diagnostic)]
@@ -208,6 +240,11 @@ pub(crate) enum CliError {
     #[error("An error ocurred when spawning internal proxy: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     InternalProxySpawnError(String),
+
+    /// Errors produced by `mirrord container` command.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    ContainerError(#[from] ContainerError),
 
     /// Errors produced by `mirrord extproxy` command.
     #[error(transparent)]

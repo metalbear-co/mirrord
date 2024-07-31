@@ -106,10 +106,12 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
                     let agent_conn =
                         connect_and_ping(&config, agent_connect_info.clone(), &mut analytics).await?;
 
-                    connections.fetch_add(1, Ordering::Relaxed);
 
                     let fut = async move {
-                        let stream = tls_acceptor.accept(stream).await.unwrap();
+                        let stream = tls_acceptor.accept(stream).await?;
+
+                        connections.fetch_add(1, Ordering::Relaxed);
+
                         handle_connection(stream, agent_conn).await;
 
                         tracing::debug!(?peer_addr, "closed connection");
@@ -119,9 +121,15 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
 
                             tracing::debug!(?peer_addr, "final connection, closing listener");
                         }
+
+                        Ok::<(), std::io::Error>(())
                     };
 
-                    tokio::spawn(fut);
+                    tokio::spawn(async move {
+                        if let Err(error) = fut.await {
+                            tracing::error!(%error, "error handling proxy connection");
+                        }
+                    });
                 } else {
                     break;
                 }

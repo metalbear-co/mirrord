@@ -513,7 +513,9 @@ pub(super) enum ContainerCommand {
 }
 
 impl ContainerCommand {
-    pub fn run(runtime_args: Vec<String>) -> Self {
-        ContainerCommand::Run { runtime_args }
+    pub fn run<T: Into<String>>(runtime_args: impl IntoIterator<Item = T>) -> Self {
+        ContainerCommand::Run {
+            runtime_args: runtime_args.into_iter().map(T::into).collect(),
+        }
     }
 }

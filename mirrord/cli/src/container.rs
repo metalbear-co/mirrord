@@ -15,7 +15,7 @@ use crate::{
     config::{ContainerArgs, ContainerCommand},
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     container::command_builder::RuntimeCommandBuilder,
-    error::Result,
+    error::{ContainerError, Result},
     execution::{MirrordExecution, LINUX_INJECTION_ENV_VAR},
 };
 
@@ -23,9 +23,13 @@ mod command_builder;
 
 static MIRRORD_CONNECT_TCP_ENV_VAR: &str = "MIRRORD_CONNECT_TCP";
 
+/// Execute a [`Command`] and read first line from stdout
 #[tracing::instrument(level = Level::TRACE, ret)]
-async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>> {
-    let result = command.output().await.expect("TODO: Replace");
+async fn exec_and_get_first_line(command: &mut Command) -> Result<String, ContainerError> {
+    let result = command
+        .output()
+        .await
+        .map_err(ContainerError::UnableToExecuteCommand)?;
 
     let reader = BufReader::new(Cursor::new(result.stdout));
 
@@ -33,7 +37,10 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
         .lines()
         .next()
         .transpose()
-        .map_err(|err| todo!("{err}"))
+        .map_err(ContainerError::UnableParseCommandStdout)?
+        .ok_or_else(|| {
+            ContainerError::UnableParseCommandStdout(std::io::Error::other("stdout was empty"))
+        })
 }
 
 /// Create a "sidecar" container that is running `mirrord intproy` that connects to `mirrord
@@ -43,18 +50,18 @@ async fn create_sidecar_intproxy(
     config: &LayerConfig,
     base_command: &RuntimeCommandBuilder,
     connection_info: Vec<(&str, &str)>,
-) -> Result<(String, SocketAddr)> {
+) -> Result<(String, SocketAddr), ContainerError> {
     let mut sidecar_command = base_command.clone();
 
     sidecar_command.add_env("MIRRORD_INTPROXY_DETACH_IO", "false");
     sidecar_command.add_envs(connection_info);
 
-    let sidecar_container_command = ContainerCommand::run(vec![
-        "--rm".to_string(),
-        "-d".to_string(),
-        config.container.cli_image.clone(),
-        "mirrord".to_string(),
-        "intproxy".to_string(),
+    let sidecar_container_command = ContainerCommand::run([
+        "--rm",
+        "-d",
+        &config.container.cli_image,
+        "mirrord",
+        "intproxy",
     ]);
 
     let (runtime_binary, sidecar_args) = sidecar_command
@@ -64,16 +71,13 @@ async fn create_sidecar_intproxy(
     // We skip first index of sidecar_args because `RuntimeCommandBuilder::into_execvp_args` adds
     // the binary as first arg for `execvp`
     let sidecar_container_id =
-        exec_and_get_first_line(Command::new(&runtime_binary).args(&sidecar_args[1..]))
-            .await?
-            .unwrap();
+        exec_and_get_first_line(Command::new(&runtime_binary).args(&sidecar_args[1..])).await?;
 
     let intproxt_socket: SocketAddr =
         exec_and_get_first_line(Command::new(runtime_binary).args(["logs", &sidecar_container_id]))
             .await?
-            .unwrap()
             .parse()
-            .unwrap();
+            .map_err(ContainerError::UnableParseProxySocketAddr)?;
 
     Ok((sidecar_container_id, intproxt_socket))
 }
@@ -100,21 +104,23 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     let _internal_proxy_tls_guards = if config.external_proxy.client_tls_certificate.is_none()
         || config.external_proxy.client_tls_key.is_none()
     {
-        let internal_proxy_tls =
-            rcgen::generate_simple_self_signed(vec!["intproxy".to_owned()]).unwrap();
+        let internal_proxy_tls = rcgen::generate_simple_self_signed(vec!["intproxy".to_owned()])
+            .map_err(ContainerError::SelfSignedCertificate)?;
 
-        let mut internal_proxy_cert = tempfile::NamedTempFile::new().unwrap();
+        let mut internal_proxy_cert =
+            tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
         internal_proxy_cert
             .write_all(internal_proxy_tls.cert.pem().as_bytes())
-            .unwrap();
+            .map_err(ContainerError::WriteSelfSignedCertificate)?;
 
         config.external_proxy.client_tls_certificate =
             Some(internal_proxy_cert.path().to_path_buf());
 
-        let mut internal_proxy_key = tempfile::NamedTempFile::new().unwrap();
+        let mut internal_proxy_key =
+            tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
         internal_proxy_key
             .write_all(internal_proxy_tls.key_pair.serialize_pem().as_bytes())
-            .unwrap();
+            .map_err(ContainerError::WriteSelfSignedCertificate)?;
 
         config.external_proxy.client_tls_key = Some(internal_proxy_key.path().to_path_buf());
 
@@ -132,19 +138,22 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
             .collect();
 
         let external_proxy_tls =
-            rcgen::generate_simple_self_signed(external_proxy_subject_alt_names).unwrap();
+            rcgen::generate_simple_self_signed(external_proxy_subject_alt_names)
+                .map_err(ContainerError::SelfSignedCertificate)?;
 
-        let mut external_proxy_cert = tempfile::NamedTempFile::new().unwrap();
+        let mut external_proxy_cert =
+            tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
         external_proxy_cert
             .write_all(external_proxy_tls.cert.pem().as_bytes())
-            .unwrap();
+            .map_err(ContainerError::WriteSelfSignedCertificate)?;
 
         config.external_proxy.tls_certificate = Some(external_proxy_cert.path().to_path_buf());
 
-        let mut external_proxy_key = tempfile::NamedTempFile::new().unwrap();
+        let mut external_proxy_key =
+            tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
         external_proxy_key
             .write_all(external_proxy_tls.key_pair.serialize_pem().as_bytes())
-            .unwrap();
+            .map_err(ContainerError::WriteSelfSignedCertificate)?;
 
         config.external_proxy.tls_key = Some(external_proxy_key.path().to_path_buf());
 
@@ -153,10 +162,13 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
         None
     };
 
-    let mut composed_config_file = tempfile::Builder::new().suffix(".json").tempfile().unwrap();
+    let mut composed_config_file = tempfile::Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .map_err(ContainerError::ConfigWrite)?;
     composed_config_file
-        .write_all(&serde_json::to_vec_pretty(&config).unwrap())
-        .unwrap();
+        .write_all(&serde_json::to_vec(&config).map_err(ContainerError::ConfigSerialization)?)
+        .map_err(ContainerError::ConfigWrite)?;
 
     std::env::set_var("MIRRORD_CONFIG_FILE", composed_config_file.path());
 
