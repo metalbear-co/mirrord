@@ -46,6 +46,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<String, Contai
 /// Create a "sidecar" container that is running `mirrord intproy` that connects to `mirrord
 /// extproxy` running on user machine to be used by execution container (via mounting on same
 /// network)
+#[tracing::instrument(level = Level::TRACE, ret)]
 async fn create_sidecar_intproxy(
     config: &LayerConfig,
     base_command: &RuntimeCommandBuilder,
@@ -73,13 +74,15 @@ async fn create_sidecar_intproxy(
     let sidecar_container_id =
         exec_and_get_first_line(Command::new(&runtime_binary).args(&sidecar_args[1..])).await?;
 
-    let intproxt_socket: SocketAddr =
+    // After spawning sidecard with -d flag it prints container_id, now we need the address of
+    // intproxy running in sidecar to be used by mirrord-layer in execution container
+    let intproxy_address: SocketAddr =
         exec_and_get_first_line(Command::new(runtime_binary).args(["logs", &sidecar_container_id]))
             .await?
             .parse()
             .map_err(ContainerError::UnableParseProxySocketAddr)?;
 
-    Ok((sidecar_container_id, intproxt_socket))
+    Ok((sidecar_container_id, intproxy_address))
 }
 
 /// Main entry point for the `mirrord container` command.
@@ -221,7 +224,7 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
 
     runtime_command.add_envs(execution_info_env_without_connection_info);
 
-    let (sidecar_container_id, sidecar_intproxt_socket) =
+    let (sidecar_container_id, sidecar_intproxy_address) =
         create_sidecar_intproxy(&config, &runtime_command, connection_info).await?;
 
     runtime_command.add_network(format!("container:{sidecar_container_id}"));
@@ -230,7 +233,7 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     runtime_command.add_env(LINUX_INJECTION_ENV_VAR, config.container.cli_image_lib_path);
     runtime_command.add_env(
         MIRRORD_CONNECT_TCP_ENV_VAR,
-        sidecar_intproxt_socket.to_string(),
+        sidecar_intproxy_address.to_string(),
     );
 
     let (binary, binary_args) = runtime_command
