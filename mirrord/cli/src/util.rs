@@ -4,6 +4,9 @@ use nix::libc;
 use tokio::net::TcpListener;
 use tracing::Level;
 
+/// Address for mirrord-console is listening on.
+pub(crate) static MIRRORD_CONSOLE_ADDR_ENV: &str = "MIRRORD_CONSOLE_ADDR";
+
 /// Removes `HTTP_PROXY` and `https_proxy` from the environment
 pub(crate) fn remove_proxy_env() {
     for (key, _val) in std::env::vars() {

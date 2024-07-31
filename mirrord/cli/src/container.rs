@@ -6,8 +6,9 @@ use std::{
 use exec::execvp;
 use local_ip_address::local_ip;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
-use mirrord_config::LayerConfig;
-use mirrord_progress::{Progress, ProgressTracker};
+use mirrord_config::{LayerConfig, MIRRORD_CONFIG_FILE_ENV};
+use mirrord_progress::{Progress, ProgressTracker, MIRRORD_PROGRESS_ENV};
+use tempfile::NamedTempFile;
 use tokio::process::Command;
 use tracing::Level;
 
@@ -17,10 +18,12 @@ use crate::{
     container::command_builder::RuntimeCommandBuilder,
     error::{ContainerError, Result},
     execution::{MirrordExecution, LINUX_INJECTION_ENV_VAR},
+    util::MIRRORD_CONSOLE_ADDR_ENV,
 };
 
 mod command_builder;
 
+/// Env variable mirrord-layer uses to connect to intproxy
 static MIRRORD_CONNECT_TCP_ENV_VAR: &str = "MIRRORD_CONNECT_TCP";
 
 /// Execute a [`Command`] and read first line from stdout
@@ -41,6 +44,44 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<String, Contai
         .ok_or_else(|| {
             ContainerError::UnableParseCommandStdout(std::io::Error::other("stdout was empty"))
         })
+}
+
+/// Create a temfile with a json serialized [`LayerConfig`] to be loaded by container and external
+/// proxy
+#[tracing::instrument(level = Level::TRACE, ret)]
+fn create_composed_config(config: &LayerConfig) -> Result<NamedTempFile, ContainerError> {
+    let mut composed_config_file = tempfile::Builder::new()
+        .suffix(".json")
+        .tempfile()
+        .map_err(ContainerError::ConfigWrite)?;
+    composed_config_file
+        .write_all(&serde_json::to_vec(config).map_err(ContainerError::ConfigSerialization)?)
+        .map_err(ContainerError::ConfigWrite)?;
+
+    Ok(composed_config_file)
+}
+
+/// Create a tempfile and write to it a self-signed certificate with the provided subject alt names
+#[tracing::instrument(level = Level::TRACE, ret)]
+fn create_self_signed_certificate(
+    subject_alt_names: Vec<String>,
+) -> Result<(NamedTempFile, NamedTempFile), ContainerError> {
+    let geerated = rcgen::generate_simple_self_signed(subject_alt_names)
+        .map_err(ContainerError::SelfSignedCertificate)?;
+
+    let mut certificate =
+        tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
+    certificate
+        .write_all(geerated.cert.pem().as_bytes())
+        .map_err(ContainerError::WriteSelfSignedCertificate)?;
+
+    let mut private_key =
+        tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
+    private_key
+        .write_all(geerated.key_pair.serialize_pem().as_bytes())
+        .map_err(ContainerError::WriteSelfSignedCertificate)?;
+
+    Ok((certificate, private_key))
 }
 
 /// Create a "sidecar" container that is running `mirrord intproy` that connects to `mirrord
@@ -107,25 +148,17 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     let _internal_proxy_tls_guards = if config.external_proxy.client_tls_certificate.is_none()
         || config.external_proxy.client_tls_key.is_none()
     {
-        let internal_proxy_tls = rcgen::generate_simple_self_signed(vec!["intproxy".to_owned()])
-            .map_err(ContainerError::SelfSignedCertificate)?;
+        let (internal_proxy_cert, internal_proxy_key) =
+            create_self_signed_certificate(vec!["intproxy".to_owned()])?;
 
-        let mut internal_proxy_cert =
-            tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
-        internal_proxy_cert
-            .write_all(internal_proxy_tls.cert.pem().as_bytes())
-            .map_err(ContainerError::WriteSelfSignedCertificate)?;
-
-        config.external_proxy.client_tls_certificate =
-            Some(internal_proxy_cert.path().to_path_buf());
-
-        let mut internal_proxy_key =
-            tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
-        internal_proxy_key
-            .write_all(internal_proxy_tls.key_pair.serialize_pem().as_bytes())
-            .map_err(ContainerError::WriteSelfSignedCertificate)?;
-
-        config.external_proxy.client_tls_key = Some(internal_proxy_key.path().to_path_buf());
+        config
+            .external_proxy
+            .client_tls_certificate
+            .replace(internal_proxy_cert.path().to_path_buf());
+        config
+            .external_proxy
+            .client_tls_key
+            .replace(internal_proxy_key.path().to_path_buf());
 
         Some((internal_proxy_cert, internal_proxy_key))
     } else {
@@ -135,45 +168,30 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     let _external_proxy_tls_guards = if config.external_proxy.tls_certificate.is_none()
         || config.external_proxy.tls_key.is_none()
     {
-        let external_proxy_subject_alt_names: Vec<_> = local_ip()
-            .into_iter()
+        let external_proxy_subject_alt_names = local_ip()
             .map(|item| item.to_string())
+            .into_iter()
             .collect();
 
-        let external_proxy_tls =
-            rcgen::generate_simple_self_signed(external_proxy_subject_alt_names)
-                .map_err(ContainerError::SelfSignedCertificate)?;
+        let (external_proxy_cert, external_proxy_key) =
+            create_self_signed_certificate(external_proxy_subject_alt_names)?;
 
-        let mut external_proxy_cert =
-            tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
-        external_proxy_cert
-            .write_all(external_proxy_tls.cert.pem().as_bytes())
-            .map_err(ContainerError::WriteSelfSignedCertificate)?;
-
-        config.external_proxy.tls_certificate = Some(external_proxy_cert.path().to_path_buf());
-
-        let mut external_proxy_key =
-            tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
-        external_proxy_key
-            .write_all(external_proxy_tls.key_pair.serialize_pem().as_bytes())
-            .map_err(ContainerError::WriteSelfSignedCertificate)?;
-
-        config.external_proxy.tls_key = Some(external_proxy_key.path().to_path_buf());
+        config
+            .external_proxy
+            .tls_certificate
+            .replace(external_proxy_cert.path().to_path_buf());
+        config
+            .external_proxy
+            .tls_key
+            .replace(external_proxy_key.path().to_path_buf());
 
         Some((external_proxy_cert, external_proxy_key))
     } else {
         None
     };
 
-    let mut composed_config_file = tempfile::Builder::new()
-        .suffix(".json")
-        .tempfile()
-        .map_err(ContainerError::ConfigWrite)?;
-    composed_config_file
-        .write_all(&serde_json::to_vec(&config).map_err(ContainerError::ConfigSerialization)?)
-        .map_err(ContainerError::ConfigWrite)?;
-
-    std::env::set_var("MIRRORD_CONFIG_FILE", composed_config_file.path());
+    let composed_config_file = create_composed_config(&config)?;
+    std::env::set_var(MIRRORD_CONFIG_FILE_ENV, composed_config_file.path());
 
     let mut sub_progress = progress.subtask("preparing to launch process");
 
@@ -195,24 +213,24 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
 
     let mut runtime_command = RuntimeCommandBuilder::new(args.runtime);
 
-    if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
+    if let Ok(console_addr) = std::env::var(MIRRORD_CONSOLE_ADDR_ENV) {
         if console_addr
             .parse()
             .map(|addr: SocketAddr| !addr.ip().is_loopback())
             .unwrap_or_default()
         {
-            runtime_command.add_env("MIRRORD_CONSOLE_ADDR", console_addr);
+            runtime_command.add_env(MIRRORD_CONSOLE_ADDR_ENV, console_addr);
         } else {
             tracing::warn!(
                 ?console_addr,
-                "MIRRORD_CONSOLE_ADDR needs to be a non loopback address when used with containers"
+                "{MIRRORD_CONSOLE_ADDR_ENV} needs to be a non loopback address when used with containers"
             );
         }
     }
 
-    runtime_command.add_env("MIRRORD_PROGRESS_MODE", "off");
+    runtime_command.add_env(MIRRORD_PROGRESS_ENV, "off");
 
-    runtime_command.add_env("MIRRORD_CONFIG_FILE", "/tmp/mirrord-config.json");
+    runtime_command.add_env(MIRRORD_CONFIG_FILE_ENV, "/tmp/mirrord-config.json");
     runtime_command.add_volume(composed_config_file.path(), "/tmp/mirrord-config.json");
 
     for (env, path) in config.external_proxy.as_tls_envs() {

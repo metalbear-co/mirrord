@@ -4,6 +4,7 @@ use std::{collections::HashMap, ffi::OsString, fmt::Display, path::PathBuf};
 
 use clap::{builder::PossibleValue, ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
+use mirrord_config::MIRRORD_CONFIG_FILE_ENV;
 use mirrord_operator::setup::OperatorNamespace;
 
 use crate::error::CliError;
@@ -280,7 +281,7 @@ impl ExecParams {
             let full_path = std::fs::canonicalize(config_file)
                 .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.clone(), e))?;
             envs.insert(
-                "MIRRORD_CONFIG_FILE".into(),
+                MIRRORD_CONFIG_FILE_ENV.into(),
                 full_path.as_os_str().to_owned(),
             );
         }

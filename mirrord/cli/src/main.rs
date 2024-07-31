@@ -30,7 +30,7 @@ use mirrord_config::{
         },
     },
     target::TargetDisplay,
-    LayerConfig, LayerFileConfig,
+    LayerConfig, LayerFileConfig, MIRRORD_CONFIG_FILE_ENV,
 };
 use mirrord_kube::api::{container::SKIP_NAMES, kubernetes::create_kube_config};
 use mirrord_operator::client::OperatorApi;
@@ -160,7 +160,7 @@ fn print_config<P>(
     } else {
         "mirrord will run without a target"
     };
-    let config_info = if let Ok(path) = std::env::var("MIRRORD_CONFIG_FILE") {
+    let config_info = if let Ok(path) = std::env::var(MIRRORD_CONFIG_FILE_ENV) {
         &format!("a configuration file was loaded from: {} ", path)[..]
     } else {
         "no configuration file was loaded"

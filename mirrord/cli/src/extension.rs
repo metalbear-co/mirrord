@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
-use mirrord_config::LayerConfig;
+use mirrord_config::{LayerConfig, MIRRORD_CONFIG_FILE_ENV};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
 use crate::{config::ExtensionExecArgs, error::CliError, execution::MirrordExecution, Result};
@@ -47,9 +47,9 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch)
         // working directories.
         let full_path = std::fs::canonicalize(config_file)
             .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.into(), e))?;
-        std::env::set_var("MIRRORD_CONFIG_FILE", full_path.clone());
+        std::env::set_var(MIRRORD_CONFIG_FILE_ENV, full_path.clone());
         env.insert(
-            "MIRRORD_CONFIG_FILE".into(),
+            MIRRORD_CONFIG_FILE_ENV.into(),
             full_path.to_string_lossy().into(),
         );
     }

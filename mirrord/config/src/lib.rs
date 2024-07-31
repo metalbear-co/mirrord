@@ -36,6 +36,9 @@ use crate::{
     internal_proxy::InternalProxyConfig, target::TargetConfig, util::VecOrSingle,
 };
 
+/// Env variable to load config from file (json, yaml and toml supported).
+pub static MIRRORD_CONFIG_FILE_ENV: &str = "MIRRORD_CONFIG_FILE";
+
 /// mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
 ///
@@ -320,7 +323,7 @@ impl LayerConfig {
     /// To be used from CLI to verify config and print warnings
     pub fn from_env_with_warnings() -> Result<(Self, ConfigContext), ConfigError> {
         let mut cfg_context = ConfigContext::default();
-        if let Ok(path) = std::env::var("MIRRORD_CONFIG_FILE") {
+        if let Ok(path) = std::env::var(MIRRORD_CONFIG_FILE_ENV) {
             LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
         } else {
             LayerFileConfig::default().generate_config(&mut cfg_context)
