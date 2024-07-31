@@ -54,7 +54,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: install towncrier
-        run: pip install towncrier
+        run: pip install towncrier==23.11.0
       - name: verify newsfragment exist
         run: towncrier check
 
