@@ -38,6 +38,7 @@ pub(super) enum Commands {
 
     #[command(hide = true)]
     Extract { path: String },
+
     /// Operator commands eg. setup
     Operator(Box<OperatorArgs>),
 
@@ -49,7 +50,7 @@ pub(super) enum Commands {
     #[command(hide = true, name = "ext")]
     ExtensionExec(Box<ExtensionExecArgs>),
 
-    /// External Proxy
+    /// External Proxy - used for intproxy when it's running with `mirrord container` command.
     #[command(hide = true, name = "extproxy")]
     ExternalProxy,
 
@@ -505,8 +506,10 @@ pub(super) struct ContainerArgs {
     pub command: ContainerCommand,
 }
 
+/// Commands for using mirrord with container runtimes.
 #[derive(Subcommand, Debug, Clone)]
 pub(super) enum ContainerCommand {
+    /// Execute a `<RUNTIME> run` command with mirrord loaded.
     Run {
         /// Arguments that will be propogated to underlying `<RUNTIME> run` command.
         #[arg(raw = true)]
