@@ -52,14 +52,14 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<String, Contai
         .lines()
         .next()
         .transpose()
-        .map_err(|error| ContainerError::UnableParseCommandStdout(format_command(&command), error))?
+        .map_err(|error| ContainerError::UnableParseCommandStdout(format_command(command), error))?
         .ok_or_else(|| {
             let message = (!result.stderr.is_empty())
                 .then(|| String::from_utf8(result.stderr).ok())
                 .flatten()
                 .unwrap_or_else(|| "stdout and stderr were empty".to_owned());
 
-            ContainerError::UnseccesfulCommandOutput(format_command(&command), message)
+            ContainerError::UnseccesfulCommandOutput(format_command(command), message)
         })
 }
 
@@ -129,6 +129,7 @@ async fn create_sidecar_intproxy(
 
     // We skip first index of sidecar_args because `RuntimeCommandBuilder::into_execvp_args` adds
     // the binary as first arg for `execvp`
+    #[allow(clippy::indexing_slicing)]
     let sidecar_container_id =
         exec_and_get_first_line(Command::new(&runtime_binary).args(&sidecar_args[1..])).await?;
 

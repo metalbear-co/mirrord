@@ -29,7 +29,7 @@ unsafe fn redirect_fd_to_dev_null(fd: libc::c_int) {
 
 /// Create a new session for the proxy process, detaching from the original terminal.
 /// This makes the process not to receive signals from the "mirrord" process or it's parent
-/// terminal fixes some side effects such as https://github.com/metalbear-co/mirrord/issues/1232
+/// terminal fixes some side effects such as <https://github.com/metalbear-co/mirrord/issues/1232>
 pub(crate) unsafe fn detach_io() -> Result<(), nix::Error> {
     nix::unistd::setsid()?;
 
