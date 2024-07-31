@@ -24,6 +24,9 @@ pub(super) struct Cli {
 
 #[derive(Subcommand)]
 pub(super) enum Commands {
+    /// Create and run a new container from an image with mirrord loaded
+    Container(Box<ContainerArgs>),
+
     /// Execute a binary using mirrord, mirror remote traffic to it, provide it access to remote
     /// resources (network, files) and environment variables.
     Exec(Box<ExecArgs>),
@@ -45,6 +48,10 @@ pub(super) enum Commands {
     #[command(hide = true, name = "ext")]
     ExtensionExec(Box<ExtensionExecArgs>),
 
+    /// External Proxy
+    #[command(hide = true, name = "extproxy")]
+    ExternalProxy,
+
     /// Internal proxy - used to aggregate connections from multiple layers
     #[command(hide = true, name = "intproxy")]
     InternalProxy,
@@ -58,12 +65,6 @@ pub(super) enum Commands {
 
     /// Diagnostic commands
     Diagnose(Box<DiagnoseArgs>),
-
-    /// Create and run a new container from an image with mirrord loaded
-    Container(Box<ContainerArgs>),
-
-    #[command(hide = true, name = "extproxy")]
-    ExternalProxy,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
