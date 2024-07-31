@@ -7,7 +7,7 @@ use serde::Serialize;
 use crate::config::source::MirrordConfigSource;
 
 #[derive(MirrordConfig, Clone, Debug, Serialize)]
-#[config(map_to = "ExternalProxyFileConfig", derive = "JsonSchema")]
+#[config(map_to = "ContainerFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct ContainerConfig {
     /// ### container.cli_image {#container-cli_image}

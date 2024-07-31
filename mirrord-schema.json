@@ -35,7 +35,7 @@
       "title": "container {#root-container}",
       "anyOf": [
         {
-          "$ref": "#/definitions/ExternalProxyFileConfig"
+          "$ref": "#/definitions/ContainerFileConfig"
         },
         {
           "type": "null"
@@ -57,7 +57,7 @@
       "title": "external_proxy {#root-external_proxy}",
       "anyOf": [
         {
-          "$ref": "#/definitions/ExternalProxyFileConfig2"
+          "$ref": "#/definitions/ExternalProxyFileConfig"
         },
         {
           "type": "null"
@@ -526,6 +526,28 @@
         }
       ]
     },
+    "ContainerFileConfig": {
+      "type": "object",
+      "properties": {
+        "cli_image": {
+          "title": "container.cli_image {#container-cli_image}",
+          "description": "Tag of the `mirrord-cli` image you want to use.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cli_image_lib_path": {
+          "title": "container.cli_image_lib_path {#container-cli_image}",
+          "description": "Path of the mirrord lib.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "CopyTargetFileConfig": {
       "anyOf": [
         {
@@ -739,28 +761,6 @@
       "additionalProperties": false
     },
     "ExternalProxyFileConfig": {
-      "type": "object",
-      "properties": {
-        "cli_image": {
-          "title": "container.cli_image {#container-cli_image}",
-          "description": "Tag of the `mirrord-cli` image you want to use.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "cli_image_lib_path": {
-          "title": "container.cli_image_lib_path {#container-cli_image}",
-          "description": "Path of the mirrord lib.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "additionalProperties": false
-    },
-    "ExternalProxyFileConfig2": {
       "description": "Configuration for the external proxy mirrord spawns for mirrord container support, this proxy is used to allow intproxy running in sidecar to connect to agent\n\nThis is seldom used, but if you get `ConnectionRefused` errors, you might want to increase the timeouts a bit.\n\n```json { \"external_proxy\": { \"start_idle_timeout\": 30, \"idle_timeout\": 5 } } ```",
       "type": "object",
       "properties": {
