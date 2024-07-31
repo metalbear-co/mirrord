@@ -59,7 +59,11 @@ pub(crate) enum ContainerError {
 
     #[error("Failed parse command stdout: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
-    UnableParseCommandStdout(std::io::Error),
+    UnableParseCommandStdout(String, std::io::Error),
+
+    #[error("Comand failed to execute command [{0}]: {1}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    UnseccesfulCommandOutput(String, String),
 
     #[error("Failed get running proxy socket addr: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]

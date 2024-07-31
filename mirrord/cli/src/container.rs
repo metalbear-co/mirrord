@@ -26,6 +26,16 @@ mod command_builder;
 /// Env variable mirrord-layer uses to connect to intproxy
 static MIRRORD_CONNECT_TCP_ENV_VAR: &str = "MIRRORD_CONNECT_TCP";
 
+fn format_command(command: &Command) -> String {
+    let command = command.as_std();
+
+    std::iter::once(command.get_program())
+        .chain(command.get_args())
+        .filter_map(|arg| arg.to_str())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Execute a [`Command`] and read first line from stdout
 #[tracing::instrument(level = Level::TRACE, ret)]
 async fn exec_and_get_first_line(command: &mut Command) -> Result<String, ContainerError> {
@@ -40,9 +50,14 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<String, Contai
         .lines()
         .next()
         .transpose()
-        .map_err(ContainerError::UnableParseCommandStdout)?
+        .map_err(|error| ContainerError::UnableParseCommandStdout(format_command(&command), error))?
         .ok_or_else(|| {
-            ContainerError::UnableParseCommandStdout(std::io::Error::other("stdout was empty"))
+            let message = (!result.stderr.is_empty())
+                .then(|| String::from_utf8(result.stderr).ok())
+                .flatten()
+                .unwrap_or_else(|| "stdout and stderr were empty".to_owned());
+
+            ContainerError::UnseccesfulCommandOutput(format_command(&command), message)
         })
 }
 
