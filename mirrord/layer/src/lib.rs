@@ -7,6 +7,7 @@
 #![feature(c_size_t)]
 #![feature(lazy_cell)]
 #![feature(once_cell_try)]
+#![feature(vec_into_raw_parts)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::indexing_slicing)]
 
@@ -69,6 +70,7 @@ use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     net::SocketAddr,
+    os::unix::process::parent_id,
     panic,
     sync::OnceLock,
     time::Duration,
@@ -103,6 +105,7 @@ mod common;
 mod debugger_ports;
 mod detour;
 mod error;
+mod exec_hooks;
 #[cfg(target_os = "macos")]
 mod exec_utils;
 mod file;
@@ -347,7 +350,14 @@ fn layer_start(mut config: LayerConfig) {
 
     let _detour_guard = DetourGuard::new();
     tracing::info!("Initializing mirrord-layer!");
-    tracing::trace!(executable = ?EXECUTABLE_PATH.get(), args = ?EXECUTABLE_ARGS.get(), pid = std::process::id(), "Loaded into executable");
+    tracing::debug!(
+        executable = ?EXECUTABLE_PATH.get(),
+        args = ?EXECUTABLE_ARGS.get(),
+        pid = std::process::id(),
+        parent_pid = parent_id(),
+        env_vars = ?std::env::vars(),
+        "Loaded into executable",
+    );
 
     if trace_only {
         tracing::debug!("Skipping new intproxy connection (trace only)");
@@ -443,7 +453,7 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
 
     let mut hook_manager = HookManager::default();
 
-    unsafe { exec_utils::enable_execve_hook(&mut hook_manager, patch_binaries) };
+    unsafe { exec_utils::enable_macos_hooks(&mut hook_manager, patch_binaries) };
 
     // we need to hook file access to patch path to our temp bin.
     config.feature.fs = FsConfig {
@@ -452,6 +462,7 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
         read_only: None,
         local: None,
         not_found: None,
+        mapping: None,
     };
     let debugger_ports = DebuggerPorts::from_env();
     let setup = LayerSetup::new(config, debugger_ports, true);
@@ -476,8 +487,6 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
 fn enable_hooks(state: &LayerSetup) {
     let enabled_file_ops = state.fs_config().is_active();
     let enabled_remote_dns = state.remote_dns_enabled();
-    #[cfg(target_os = "macos")]
-    let patch_binaries = state.sip_binaries();
 
     let mut hook_manager = HookManager::default();
 
@@ -524,14 +533,18 @@ fn enable_hooks(state: &LayerSetup) {
 
     unsafe { socket::hooks::enable_socket_hooks(&mut hook_manager, enabled_remote_dns) };
 
-    #[cfg(target_os = "macos")]
-    unsafe {
-        exec_utils::enable_execve_hook(&mut hook_manager, patch_binaries)
-    };
+    unsafe { exec_hooks::hooks::enable_exec_hooks(&mut hook_manager) };
 
     #[cfg(target_os = "macos")]
-    if state.experimental().trust_any_certificate {
-        unsafe { tls::enable_tls_hooks(&mut hook_manager) };
+    {
+        use crate::exec_utils::enable_macos_hooks;
+
+        let patch_binaries = state.sip_binaries();
+        unsafe { enable_macos_hooks(&mut hook_manager, patch_binaries) };
+
+        if state.experimental().trust_any_certificate {
+            unsafe { tls::enable_tls_hooks(&mut hook_manager) };
+        }
     }
 
     if enabled_file_ops {
@@ -555,7 +568,7 @@ fn enable_hooks(state: &LayerSetup) {
 ///
 /// Removes the `fd` key from either [`SOCKETS`] or [`OPEN_FILES`].
 /// **DON'T ADD LOGS HERE SINCE CALLER MIGHT CLOSE STDOUT/STDERR CAUSING THIS TO CRASH**
-#[mirrord_layer_macro::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()))]
 pub(crate) fn close_layer_fd(fd: c_int) {
     // Remove from sockets.
     if let Some((_, socket)) = SOCKETS.remove(&fd) {

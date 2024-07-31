@@ -8,12 +8,14 @@
 /// You should probably only add new tests here.
 #[cfg(test)]
 mod cli {
-    use std::time::Duration;
+    use std::{path::Path, time::Duration};
 
     use regex::Regex;
     use rstest::rstest;
 
-    use crate::utils::{config_dir, run_ls, run_verify_config, service, KubeService};
+    use crate::utils::{
+        config_dir, run_ls, run_verify_config, service_for_mirrord_ls, KubeService,
+    };
 
     /// Tests `verify-config` with `path` and `--ide` args, which should be:
     ///
@@ -23,8 +25,8 @@ mod cli {
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
-    pub async fn path_ide_verify_config(config_dir: &std::path::PathBuf) {
-        let mut config_path = config_dir.clone();
+    pub async fn path_ide_verify_config(config_dir: &Path) {
+        let mut config_path = config_dir.to_path_buf();
         config_path.push("default_ide.json");
 
         let mut process = run_verify_config(Some(vec![
@@ -44,8 +46,8 @@ mod cli {
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
-    pub async fn no_ide_verify_config(config_dir: &std::path::PathBuf) {
-        let mut config_path = config_dir.clone();
+    pub async fn no_ide_verify_config(config_dir: &Path) {
+        let mut config_path = config_dir.to_path_buf();
         config_path.push("default_ide.json");
 
         let mut process = run_verify_config(Some(vec![config_path
@@ -66,8 +68,8 @@ mod cli {
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
-    pub async fn no_path_verify_config(config_dir: &std::path::PathBuf) {
-        let mut config_path = config_dir.clone();
+    pub async fn no_path_verify_config(config_dir: &Path) {
+        let mut config_path = config_dir.to_path_buf();
         config_path.push("default_ide.json");
 
         let mut process = run_verify_config(Some(vec!["--ide"])).await;
@@ -85,8 +87,8 @@ mod cli {
     #[rstest]
     #[tokio::test]
     #[timeout(Duration::from_secs(30))]
-    pub async fn no_path_no_ide_verify_config(config_dir: &std::path::PathBuf) {
-        let mut config_path = config_dir.clone();
+    pub async fn no_path_no_ide_verify_config(config_dir: &Path) {
+        let mut config_path = config_dir.to_path_buf();
         config_path.push("default_ide.json");
 
         let mut process = run_verify_config(None).await;
@@ -97,8 +99,8 @@ mod cli {
     /// Tests for the `mirrord ls` command
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn mirrord_ls(#[future] service: KubeService) {
-        let service = service.await;
+    pub async fn mirrord_ls(#[future] service_for_mirrord_ls: KubeService) {
+        let service = service_for_mirrord_ls.await;
         let mut process = run_ls::<false>(None, None).await;
         let res = process.wait().await;
         assert!(res.success());

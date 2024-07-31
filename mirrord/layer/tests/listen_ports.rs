@@ -2,7 +2,7 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{assert_matches::assert_matches, path::PathBuf, time::Duration};
+use std::{assert_matches::assert_matches, path::Path, time::Duration};
 
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcpSteal, StealType},
@@ -23,10 +23,10 @@ use tokio::net::TcpStream;
 #[timeout(Duration::from_secs(60))]
 async fn listen_ports(
     #[values(Application::RustListenPorts)] application: Application,
-    dylib_path: &PathBuf,
-    config_dir: &PathBuf,
+    dylib_path: &Path,
+    config_dir: &Path,
 ) {
-    let mut config_path = config_dir.clone();
+    let mut config_path = config_dir.to_path_buf();
     config_path.push("listen_ports.json");
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(

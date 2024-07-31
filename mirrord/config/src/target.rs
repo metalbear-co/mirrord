@@ -77,7 +77,6 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
 /// The simplified configuration supports:
 ///
 /// - `pod/{sample-pod}/[container]/{sample-container}`;
-/// - `podname/{sample-pod}/[container]/{sample-container}`;
 /// - `deployment/{sample-deployment}/[container]/{sample-container}`;
 ///
 /// Shortened setup:
@@ -113,7 +112,6 @@ pub struct TargetConfig {
     ///
     /// Supports:
     /// - `pod/{sample-pod}`;
-    /// - `podname/{sample-pod}`;
     /// - `deployment/{sample-deployment}`;
     /// - `container/{sample-container}`;
     /// - `containername/{sample-container}`.
@@ -206,7 +204,6 @@ mirrord-layer failed to parse the provided target!
 ///
 /// Supports:
 /// - `pod/{sample-pod}`;
-/// - `podname/{sample-pod}`;
 /// - `deployment/{sample-deployment}`;
 /// - `container/{sample-container}`;
 /// - `containername/{sample-container}`.
@@ -296,6 +293,11 @@ impl Target {
 
     /// `true` if this [`Target`] is only supported when the copy target feature is enabled.
     pub(super) fn requires_copy(&self) -> bool {
+        matches!(self, Target::Job(_) | Target::CronJob(_))
+    }
+
+    /// `true` if this [`Target`] is only supported when the operator is enabled.
+    pub(super) fn requires_operator(&self) -> bool {
         matches!(
             self,
             Target::Job(_) | Target::CronJob(_) | Target::StatefulSet(_)

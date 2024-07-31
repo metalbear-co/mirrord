@@ -1,6 +1,6 @@
 #[cfg(test)]
 
-mod env {
+mod env_tests {
     use std::time::Duration;
 
     use rstest::*;

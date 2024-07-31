@@ -477,6 +477,17 @@ impl LayerConfig {
             }
         }
 
+        // operator is disabled, but target requires it.
+        if self
+            .target
+            .path
+            .as_ref()
+            .is_some_and(Target::requires_operator)
+            && !self.operator.unwrap_or(true)
+        {
+            return Err(ConfigError::TargetRequiresOperator);
+        }
+
         if self
             .feature
             .network

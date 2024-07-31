@@ -280,9 +280,8 @@ pub mod testing {
             }
         }
 
-        match panic::catch_unwind(|| {
-            closure();
-        }) {
+        let result = panic::catch_unwind(closure);
+        match result {
             Ok(_) => {
                 for (k, v) in old_kvs {
                     reset_env(k, v);

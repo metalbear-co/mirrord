@@ -19,7 +19,7 @@ use regex::RegexSet;
 
 use crate::{
     debugger_ports::DebuggerPorts,
-    file::filter::FileFilter,
+    file::{filter::FileFilter, mapper::FileRemapper},
     socket::{dns_selector::DnsSelector, OutgoingSelector},
 };
 
@@ -30,6 +30,7 @@ use crate::{
 pub struct LayerSetup {
     config: LayerConfig,
     file_filter: FileFilter,
+    file_remapper: FileRemapper,
     debugger_ports: DebuggerPorts,
     remote_unix_streams: RegexSet,
     outgoing_selector: OutgoingSelector,
@@ -45,6 +46,8 @@ pub struct LayerSetup {
 impl LayerSetup {
     pub fn new(config: LayerConfig, debugger_ports: DebuggerPorts, local_hostname: bool) -> Self {
         let file_filter = FileFilter::new(config.feature.fs.clone());
+        let file_remapper =
+            FileRemapper::new(config.feature.fs.mapping.clone().unwrap_or_default());
 
         let remote_unix_streams = config
             .feature
@@ -77,6 +80,7 @@ impl LayerSetup {
         Self {
             config,
             file_filter,
+            file_remapper,
             debugger_ports,
             remote_unix_streams,
             outgoing_selector,
@@ -99,6 +103,10 @@ impl LayerSetup {
 
     pub fn file_filter(&self) -> &FileFilter {
         &self.file_filter
+    }
+
+    pub fn file_remapper(&self) -> &FileRemapper {
+        &self.file_remapper
     }
 
     pub fn incoming_config(&self) -> &IncomingConfig {

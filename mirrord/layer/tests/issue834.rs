@@ -2,7 +2,7 @@
 #![cfg(target_os = "linux")]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::PathBuf, time::Duration};
+use std::{path::Path, time::Duration};
 
 use rstest::rstest;
 
@@ -21,7 +21,7 @@ async fn test_issue834(
         Application::Go21Issue834
     )]
     application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     let (mut test_process, _intproxy) = application
         .start_process_with_layer(dylib_path, vec![], None)

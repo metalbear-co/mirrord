@@ -1,6 +1,6 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::{net::SocketAddr, path::Path, time::Duration};
 
 use mirrord_protocol::{
     outgoing::{
@@ -24,10 +24,10 @@ pub use common::*;
 #[timeout(Duration::from_secs(60))]
 async fn test_issue1776(
     #[values(Application::RustIssue1776)] application: Application,
-    dylib_path: &PathBuf,
-    config_dir: &PathBuf,
+    dylib_path: &Path,
+    config_dir: &Path,
 ) {
-    let mut config_path = config_dir.clone();
+    let mut config_path = config_dir.to_path_buf();
     config_path.push("issue1776.json");
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![], Some(config_path.to_str().unwrap()))
@@ -94,10 +94,10 @@ async fn test_issue1776(
 #[timeout(Duration::from_secs(60))]
 async fn test_issue1776_port_not_53(
     #[values(Application::RustIssue1776PortNot53)] application: Application,
-    dylib_path: &PathBuf,
-    config_dir: &PathBuf,
+    dylib_path: &Path,
+    config_dir: &Path,
 ) {
-    let mut config_path = config_dir.clone();
+    let mut config_path = config_dir.to_path_buf();
     config_path.push("issue1776.json");
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![], Some(config_path.to_str().unwrap()))

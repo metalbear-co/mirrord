@@ -1,6 +1,6 @@
 /// Tests for mirroring existing connections.
 #[cfg(test)]
-mod issue1317 {
+mod issue1317_tests {
     use std::{path::PathBuf, time::Duration};
 
     use bytes::Bytes;

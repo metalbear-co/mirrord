@@ -1,10 +1,7 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{path::Path, time::Duration};
 
 #[cfg(not(target_os = "macos"))]
 use mirrord_protocol::{
@@ -26,8 +23,8 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn bash_script(dylib_path: &Path, config_dir: &PathBuf) {
-    let mut config_path = config_dir.clone();
+async fn bash_script(dylib_path: &Path, config_dir: &Path) {
+    let mut config_path = config_dir.to_path_buf();
     // use a config file since cat sometimes opens some weird paths
     // before opening the file we want to read, and it makes testing easier
     // to ignore those paths.

@@ -1,35 +1,34 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 #![allow(non_snake_case)]
+#![cfg(not(target_os = "macos"))]
 
 use std::{path::Path, time::Duration};
 
+use nix::{
+    sys::{signal, signal::Signal},
+    unistd::Pid,
+};
 use rstest::rstest;
 
 mod common;
 
 pub use common::*;
 
-/// Start an HTTP server injected with the layer, simulate the agent, verify expected messages from
-/// the layer, send HTTP requests and verify in the server output that the application received
-/// them. Tests the layer's communication with the agent, the bind hook, and the forwarding of
-/// mirrored traffic to the application.
+/// Verify that issue [#864](https://github.com/metalbear-co/mirrord/issues/864) is fixed.
+///
+/// Share sockets between `execve` and `execv` with python's uvicorn.
+///
+/// We run the `shared_sockets.py` app with the `--reload` flag to trigger the issue.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn mirroring_with_http(
-    #[values(
-        Application::PythonFlaskHTTP,
-        Application::PythonFastApiHTTP,
-        Application::NodeHTTP,
-        Application::Go19HTTP,
-        Application::Go20HTTP
-    )]
-    application: Application,
+async fn test_issue864(
+    #[values(Application::PythonIssue864)] application: Application,
     dylib_path: &Path,
     config_dir: &Path,
 ) {
-    let (mut test_process, mut intproxy) = application
+    let (test_process, mut intproxy) = application
         .start_process_with_layer_and_port(
             dylib_path,
             vec![
@@ -60,37 +59,17 @@ async fn mirroring_with_http(
     intproxy
         .send_connection_then_data(&prepare_request_body("GET", ""), application.get_app_port())
         .await;
-    intproxy
-        .send_connection_then_data(
-            &prepare_request_body("POST", "post-data"),
-            application.get_app_port(),
-        )
-        .await;
-    intproxy
-        .send_connection_then_data(
-            &prepare_request_body("PUT", "put-data"),
-            application.get_app_port(),
-        )
-        .await;
-    intproxy
-        .send_connection_then_data(
-            &prepare_request_body("DELETE", "delete-data"),
-            application.get_app_port(),
-        )
-        .await;
 
-    test_process.wait().await;
+    tokio::time::sleep(Duration::from_secs(10)).await;
+
+    signal::kill(
+        Pid::from_raw(test_process.child.id().expect("Child must have pid!") as i32),
+        Signal::SIGTERM,
+    )
+    .expect("Process has been `SIGTERM`!");
+
     test_process
         .assert_stdout_contains("GET: Request completed")
-        .await;
-    test_process
-        .assert_stdout_contains("POST: Request completed")
-        .await;
-    test_process
-        .assert_stdout_contains("PUT: Request completed")
-        .await;
-    test_process
-        .assert_stdout_contains("DELETE: Request completed")
         .await;
     test_process.assert_no_error_in_stdout().await;
     test_process.assert_no_error_in_stderr().await;
