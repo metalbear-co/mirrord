@@ -533,7 +533,9 @@ fn enable_hooks(state: &LayerSetup) {
 
     unsafe { socket::hooks::enable_socket_hooks(&mut hook_manager, enabled_remote_dns) };
 
-    unsafe { exec_hooks::hooks::enable_exec_hooks(&mut hook_manager) };
+    if cfg!(target_os = "macos") || state.experimental().enable_exec_hooks_linux {
+        unsafe { exec_hooks::hooks::enable_exec_hooks(&mut hook_manager) };
+    }
 
     #[cfg(target_os = "macos")]
     {

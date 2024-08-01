@@ -37,7 +37,12 @@ async fn test_issue864(
                 ("MIRRORD_UDP_OUTGOING", "false"),
                 ("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES"),
             ],
-            Some(config_dir.join("port_mapping.json").to_str().unwrap()),
+            Some(
+                config_dir
+                    .join("port_mapping_shared_sockets.json")
+                    .to_str()
+                    .unwrap(),
+            ),
         )
         .await;
 

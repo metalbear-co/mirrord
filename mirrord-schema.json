@@ -683,6 +683,14 @@
       "description": "mirrord Experimental features. This shouldn't be used unless someone from MetalBear/mirrord tells you to.",
       "type": "object",
       "properties": {
+        "enable_exec_hooks_linux": {
+          "title": "_experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}",
+          "description": "Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application shares sockets with child commands (e.g Python web servers with reload), but the feature is not stable and may cause other issues.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "readlink": {
           "title": "_experimental_ readlink {#experimental-readlink}",
           "description": "Enables the `readlink` hook.",
