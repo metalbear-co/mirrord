@@ -64,8 +64,8 @@ impl Deref for EnvVars {
 pub enum MeshVendor {
     Linkerd,
     Istio,
-    IstioAmbient,
     Kuma,
+    IstioAmbient,
 }
 
 impl fmt::Display for MeshVendor {
@@ -73,8 +73,8 @@ impl fmt::Display for MeshVendor {
         match self {
             MeshVendor::Linkerd => write!(f, "linkerd"),
             MeshVendor::Istio => write!(f, "istio"),
-            MeshVendor::IstioAmbient => write!(f, "istio-ambient"),
             MeshVendor::Kuma => write!(f, "kuma"),
+            MeshVendor::IstioAmbient => write!(f, "istio-ambient"),
         }
     }
 }
@@ -86,8 +86,8 @@ impl FromStr for MeshVendor {
         match s {
             "linkerd" => Ok(Self::Linkerd),
             "istio" => Ok(Self::Istio),
-            "istio-ambient" => Ok(Self::IstioAmbient),
             "kuma" => Ok(Self::Kuma),
+            "istio-ambient" => Ok(Self::IstioAmbient),
             invalid => Err(MeshVendorParseError(invalid.into())),
         }
     }
