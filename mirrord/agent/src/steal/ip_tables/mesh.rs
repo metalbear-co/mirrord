@@ -11,6 +11,7 @@ use crate::{
         IPTABLE_MESH,
     },
 };
+pub mod istio;
 
 static MULTIPORT_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"-p tcp -m multiport --dports ([\d:,]+)").unwrap());
@@ -20,7 +21,7 @@ static TCP_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
 
 pub(crate) struct MeshRedirect<IPT: IPTables> {
     prerouteing: PreroutingRedirect<IPT>,
-    output: OutputRedirect<IPT>,
+    output: OutputRedirect<false, IPT>,
 }
 
 impl<IPT> MeshRedirect<IPT>
@@ -126,7 +127,7 @@ impl MeshVendorExt for MeshVendor {
     fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Option<Self>> {
         let output = ipt.list_rules("OUTPUT")?;
 
-        Ok(output.iter().find_map(|rule| {
+        let nat_result = output.iter().find_map(|rule| {
             if rule.contains("-j PROXY_INIT_OUTPUT") {
                 Some(MeshVendor::Linkerd)
             } else if rule.contains("-j ISTIO_OUTPUT") {
@@ -136,13 +137,31 @@ impl MeshVendorExt for MeshVendor {
             } else {
                 None
             }
-        }))
+        });
+
+        match &nat_result {
+            Some(MeshVendor::Istio) => {
+                let is_ambient = ipt
+                    .with_table("mangle")
+                    .list_rules("OUTPUT")?
+                    .iter()
+                    .find(|rule| rule.contains("-j ISTIO_OUTPUT"))
+                    .is_some();
+
+                Ok(Some(if is_ambient {
+                    MeshVendor::IstioAmbient
+                } else {
+                    MeshVendor::Istio
+                }))
+            }
+            _ => Ok(nat_result),
+        }
     }
 
     fn input_chain(&self) -> &str {
         match self {
             MeshVendor::Linkerd => "PROXY_INIT_REDIRECT",
-            MeshVendor::Istio => "ISTIO_INBOUND",
+            MeshVendor::Istio | MeshVendor::IstioAmbient => "ISTIO_INBOUND",
             MeshVendor::Kuma => "KUMA_MESH_INBOUND",
         }
     }
@@ -150,7 +169,7 @@ impl MeshVendorExt for MeshVendor {
     fn skip_ports_regex(&self) -> &Regex {
         match self {
             MeshVendor::Linkerd => &MULTIPORT_SKIP_PORTS_LOOKUP_REGEX,
-            MeshVendor::Istio => &TCP_SKIP_PORTS_LOOKUP_REGEX,
+            MeshVendor::Istio | MeshVendor::IstioAmbient => &TCP_SKIP_PORTS_LOOKUP_REGEX,
             MeshVendor::Kuma => &TCP_SKIP_PORTS_LOOKUP_REGEX,
         }
     }

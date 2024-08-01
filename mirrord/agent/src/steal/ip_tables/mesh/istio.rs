@@ -6,25 +6,25 @@ use mirrord_protocol::Port;
 use crate::{
     error::Result,
     steal::ip_tables::{
-        output::OutputRedirect, prerouting::PreroutingRedirect, IPTables, Redirect,
-        IPTABLE_STANDARD,
+        output::OutputRedirect, prerouting::PreroutingRedirect, redirect::Redirect, IPTables,
+        IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL, IPTABLE_MESH,
     },
 };
 
-pub(crate) struct StandardRedirect<IPT: IPTables> {
+pub(crate) struct AmbientRedirect<IPT: IPTables> {
     prerouteing: PreroutingRedirect<IPT>,
-    output: OutputRedirect<false, IPT>,
+    output: OutputRedirect<true, IPT>,
 }
 
-impl<IPT> StandardRedirect<IPT>
+impl<IPT> AmbientRedirect<IPT>
 where
     IPT: IPTables,
 {
     pub fn create(ipt: Arc<IPT>, pod_ips: Option<&str>) -> Result<Self> {
         let prerouteing = PreroutingRedirect::create(ipt.clone())?;
-        let output = OutputRedirect::create(ipt, IPTABLE_STANDARD.to_string(), pod_ips)?;
+        let output = OutputRedirect::create(ipt, IPTABLE_MESH.to_string(), pod_ips)?;
 
-        Ok(StandardRedirect {
+        Ok(AmbientRedirect {
             prerouteing,
             output,
         })
@@ -32,23 +32,23 @@ where
 
     pub fn load(ipt: Arc<IPT>) -> Result<Self> {
         let prerouteing = PreroutingRedirect::load(ipt.clone())?;
-        let output = OutputRedirect::load(ipt, IPTABLE_STANDARD.to_string())?;
+        let output = OutputRedirect::load(ipt, IPTABLE_MESH.to_string())?;
 
-        Ok(StandardRedirect {
+        Ok(AmbientRedirect {
             prerouteing,
             output,
         })
     }
 }
 
-/// This wrapper adds a new rule to the NAT OUTPUT chain to redirect "localhost" traffic as well
-/// Note: OUTPUT chain is only traversed for packets produced by local applications
 #[async_trait]
-impl<IPT> Redirect for StandardRedirect<IPT>
+impl<IPT> Redirect for AmbientRedirect<IPT>
 where
     IPT: IPTables + Send + Sync,
 {
     async fn mount_entrypoint(&self) -> Result<()> {
+        tokio::fs::write("/proc/sys/net/ipv4/conf/all/route_localnet", "1".as_bytes()).await?;
+
         self.prerouteing.mount_entrypoint().await?;
         self.output.mount_entrypoint().await?;
 
@@ -58,6 +58,12 @@ where
     async fn unmount_entrypoint(&self) -> Result<()> {
         self.prerouteing.unmount_entrypoint().await?;
         self.output.unmount_entrypoint().await?;
+
+        tokio::fs::write(
+            "/proc/sys/net/ipv4/conf/all/route_localnet",
+            IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL.as_bytes(),
+        )
+        .await?;
 
         Ok(())
     }
