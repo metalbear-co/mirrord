@@ -28,13 +28,13 @@ pub struct ExperimentalConfig {
     #[config(default = false)]
     pub trust_any_certificate: bool,
 
-    /// ## _experimental_ disable_exec_hooks {#experimental-disable_exec_hooks}
+    /// ## _experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}
     ///
-    /// Disables exec hooks on Linux. Disabling Linux hooks will cause issues when the application
-    /// shares sockets with child commands (e.g Python web servers with reload), but may solve
-    /// other issues.
+    /// Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application
+    /// shares sockets with child commands (e.g Python web servers with reload),
+    /// but the feature is not stable and may cause other issues.
     #[config(default = false)]
-    pub disable_exec_hooks_linux: bool,
+    pub enable_exec_hooks_linux: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -42,6 +42,6 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("tcp_ping4_mock", self.tcp_ping4_mock);
         analytics.add("readlink", self.readlink);
         analytics.add("trust_any_certificate", self.trust_any_certificate);
-        analytics.add("disable_exec_hooks_linux", self.disable_exec_hooks_linux);
+        analytics.add("enable_exec_hooks_linux", self.enable_exec_hooks_linux);
     }
 }

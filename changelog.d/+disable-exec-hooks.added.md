@@ -1,1 +1,0 @@
-Added experimental switch in the configuration to allow for disabling `exec` hooks on Linux.
