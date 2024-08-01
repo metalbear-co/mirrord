@@ -145,8 +145,7 @@ impl MeshVendorExt for MeshVendor {
                     .with_table("mangle")
                     .list_rules("OUTPUT")?
                     .iter()
-                    .find(|rule| rule.contains("-j ISTIO_OUTPUT"))
-                    .is_some();
+                    .any(|rule| rule.contains("-j ISTIO_OUTPUT"));
 
                 Ok(Some(if is_ambient {
                     MeshVendor::IstioAmbient
