@@ -387,6 +387,12 @@ IP:PORT to connect to instead of using k8s api, for testing purposes.
 mirrord Experimental features.
 This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 
+## _experimental_ disable_exec_hooks {#experimental-disable_exec_hooks}
+
+Disables exec hooks on Linux. Disabling Linux hooks will cause issues when the application
+shares sockets with child commands (e.g Python web servers with reload), but may solve
+other issues.
+
 ## _experimental_ readlink {#experimental-readlink}
 
 Enables the `readlink` hook.
@@ -395,7 +401,7 @@ Enables the `readlink` hook.
 
 <https://github.com/metalbear-co/mirrord/issues/2421#issuecomment-2093200904>
 
-# _experimental_ trust_any_certificate {#experimental-trust_any_certificate}
+## _experimental_ trust_any_certificate {#experimental-trust_any_certificate}
 
 Enables trusting any certificate on macOS, useful for <https://github.com/golang/go/issues/51991#issuecomment-2059588252>
 
