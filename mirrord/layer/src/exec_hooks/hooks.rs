@@ -68,7 +68,7 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
 
     // `encoded` is emtpy if the encoding failed, so we don't set the env var.
     if !encoded.is_empty() {
-        std::env::set_var("MIRRORD_SHARED_SOCKETS", encoded);
+        std::env::set_var(SHARED_SOCKETS_ENV_VAR, encoded);
     }
 
     FN_EXECVE(path, argv, environ())
