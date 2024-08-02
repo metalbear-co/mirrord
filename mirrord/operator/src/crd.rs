@@ -342,23 +342,11 @@ pub struct MirrordPolicySpec {
     pub block: Vec<BlockedFeature>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")] // queue_name_key -> queueNameKey in yaml.
-pub struct ConfigMapQueueNameSource {
-    /// The name of the config map that holds the name of the queue we want to split.
-    pub name: String,
-
-    /// The name of the key in the config map that holds the name of the queue we want to
-    /// split.
-    pub queue_name_key: String,
-}
-
 /// Set where the application reads the name of the queue from, so that mirrord can find that queue,
 /// split it, and temporarily change the name there to the name of the branch queue when splitting.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")] // ConfigMap -> configMap in yaml.
+#[serde(rename_all = "camelCase")] // EnvVar -> envVar in yaml.
 pub enum QueueNameSource {
-    ConfigMap(ConfigMapQueueNameSource),
     EnvVar(String),
 }
 
@@ -424,13 +412,6 @@ pub struct ActiveSqsSplits {
     /// map refs, mapped to their queue id.
     pub direct_env_vars: HashMap<String, QueueId>,
 
-    /// For each config map name, a mapping from queue id to key name in the map that holds the
-    /// name of that queue.
-    pub config_map_updates: BTreeMap<String, HashMap<QueueId, String>>,
-    //                               ^               ^        ^
-    //                               |               |        ---- name of key that points to Q name
-    //                               |               ---- queue id
-    //                               ---- ConfigMap name
     pub env_updates: BTreeMap<String, QueueNameUpdate>,
 }
 
