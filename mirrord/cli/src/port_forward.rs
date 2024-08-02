@@ -1,6 +1,7 @@
 use std::{collections::HashMap, net::SocketAddr};
 
-use mirrord_protocol::DaemonMessage;
+use mirrord_protocol::{ClientMessage, DaemonMessage};
+use thiserror::Error;
 use tokio::{
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
@@ -37,7 +38,7 @@ impl PortForwarder {
         for mapping in parsed_mappings {
             if listeners.contains_key(&mapping.local) {
                 // two mappings shared a key thus keys were not unique
-                return Err(PortForwardError::SetupError);
+                return Err(PortForwardError::PortMapSetupError(mapping.local));
             }
             let listener = TcpListener::bind(mapping.local).await;
             match listener {
@@ -45,7 +46,7 @@ impl PortForwarder {
                     listeners.insert(mapping.local, TcpListenerStream::new(listener));
                     mappings.insert(mapping.local, mapping.remote);
                 }
-                Err(_error) => return Err(PortForwardError::TcpListenerError),
+                Err(error) => return Err(PortForwardError::TcpListenerError(error)),
             }
         }
 
@@ -63,13 +64,14 @@ impl PortForwarder {
             select! {
                 message = self.agent_connection.receiver.recv() => match message {
                     // message incoming from agent
+                    // TODO: are some variants ignored and left for other arm to handle?
                     Some(message) => {
                         match message {
-                            DaemonMessage::Close(_) => todo!(),                         // kills intproxy, kills portfwd as well?
+                            DaemonMessage::Close(_) => break Ok(()),                    // kills intproxy, kills portfwd as well?
                             DaemonMessage::Tcp(_) => todo!(),                           // pass back to user app with tx_connections
                             DaemonMessage::TcpSteal(_) => todo!(),                      // pass back to user app with tx_connections
                             DaemonMessage::TcpOutgoing(_) => todo!(),                   // outgoing?
-                            DaemonMessage::UdpOutgoing(_) => todo!(),                   // udp not supported, ignore? or send err?
+                            DaemonMessage::UdpOutgoing(_) => todo!(),                   // udp not supported, ignore or send err?
                             DaemonMessage::LogMessage(_) => todo!(),                    // log given?
                             DaemonMessage::File(_) => todo!(),                          // ???
                             DaemonMessage::Pong => todo!(),                             // do nothing? or part of setup handshake?
@@ -93,14 +95,17 @@ impl PortForwarder {
                         self.rx_connections.insert(socket, read);
                         self.tx_connections.insert(socket, write);
                         // get destination socket from mappings
-                        let _destination = self.mappings.get(&socket);
-                        // TODO: spawn tokio task to proxy data here
+                        let _destination =  match self.mappings.get(&socket) {
+                            Some(address) => address,
+                            None => return Err(PortForwardError::SocketMappingNotFound(socket)),
+                        };
                         tokio::spawn(async move {
                             // when first data received: talk 2 agent and make outgoing connection, then proxy data
                             // TODO: ClientMessage Variant?
-                            // self.agent_connection.sender.send(ClientMessage);
+                            // self.agent_connection.sender.send(ClientMessage::GetAddrInfoRequest); // <- send destination info
+                            // let connection = self.agent_connection.receiver.recv(); // <- recv connection to destination
+                            // connection.send(read.recv()); // <- send data to remote port
                         });
-                        todo!()
                     },
                     Some((_socket, Err(_error))) => {
                         // error from TcpStream
@@ -115,8 +120,14 @@ impl PortForwarder {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum PortForwardError {
-    SetupError,
-    TcpListenerError,
+    #[error("Multiple port forwarding mappings found for local address `{0}`")]
+    PortMapSetupError(SocketAddr),
+
+    #[error("Failed to bind TcpListener with error: `{0}`")]
+    TcpListenerError(std::io::Error),
+
+    #[error("No destination address found for local address `{0}`")]
+    SocketMappingNotFound(SocketAddr),
 }
