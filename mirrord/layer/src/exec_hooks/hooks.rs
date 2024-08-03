@@ -11,7 +11,8 @@ use super::*;
 #[cfg(target_os = "macos")]
 use crate::exec_utils::*;
 use crate::{
-    detour::{Bypass, Detour},
+    common::CheckedInto,
+    detour::{Bypass, Detour, DetourGuard},
     hooks::HookManager,
     replace,
     socket::{UserSocket, SHARED_SOCKETS_ENV_VAR},
@@ -62,7 +63,8 @@ unsafe fn environ() -> *const *const c_char {
 #[cfg(not(target_os = "macos"))]
 #[hook_fn]
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
-    if let Detour::Success(envp) = prepare_execve_envp(environ()) {
+    let envp = environ();
+    if let Detour::Success(envp) = prepare_execve_envp(envp.checked_into()) {
         FN_EXECVE(path, argv, envp.leak())
     } else {
         FN_EXECVE(path, argv, envp)
@@ -79,10 +81,6 @@ pub(crate) unsafe extern "C" fn execve_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    use crate::{common::CheckedInto, detour::DetourGuard};
-
-    let _guard = DetourGuard::new();
-
     // Hopefully `envp` is a properly null-terminated list.
     if let Detour::Success(envp) = prepare_execve_envp(envp.checked_into()) {
         FN_EXECVE(path, argv, envp.leak())

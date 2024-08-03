@@ -12,6 +12,7 @@ use crate::{
     error::{HookError, HookResult},
     exec_hooks::Argv,
     file::OpenOptionsInternalExt,
+    socket::SHARED_SOCKETS_ENV_VAR,
     PROXY_CONNECTION,
 };
 
@@ -118,8 +119,9 @@ impl CheckedInto<PathBuf> for *const c_char {
     }
 }
 
-// **Warning**: The implementation here expects that `*const *const c_char` be a valid,
-// null-terminated list! We're using `Nul::new_unchecked`, which doesn't check for this.
+/// **Warning**: The implementation here expects that `*const *const c_char` be a valid,
+/// null-terminated list! We're using `Nul::new_unchecked`, which doesn't check for this.
+/// NOTE: It also strips shared sockets to avoid it being double set.
 impl CheckedInto<Argv> for *const *const c_char {
     fn checked_into(self) -> Detour<Argv> {
         let c_list = self
@@ -132,6 +134,7 @@ impl CheckedInto<Argv> for *const *const c_char {
             // Remove the last `null` pointer.
             .filter(|value| !value.is_null())
             .map(|value| unsafe { CStr::from_ptr(*value) }.to_owned())
+            .filter(|value| !value.to_string_lossy().starts_with(SHARED_SOCKETS_ENV_VAR))
             .collect::<Argv>();
 
         Detour::Success(list)
