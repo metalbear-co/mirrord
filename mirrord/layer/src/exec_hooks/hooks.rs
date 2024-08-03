@@ -62,16 +62,11 @@ unsafe fn environ() -> *const *const c_char {
 #[cfg(not(target_os = "macos"))]
 #[hook_fn]
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
-    let encoded = bincode::encode_to_vec(shared_sockets(), bincode::config::standard())
-        .map(|bytes| BASE64_URL_SAFE.encode(bytes))
-        .unwrap_or_default();
-
-    // `encoded` is emtpy if the encoding failed, so we don't set the env var.
-    if !encoded.is_empty() {
-        std::env::set_var(SHARED_SOCKETS_ENV_VAR, encoded);
+    if let Detour::Success(envp) = prepare_execve_envp(environ()) {
+        FN_EXECVE(path, argv, envp.leak())
+    } else {
+        FN_EXECVE(path, argv, envp)
     }
-
-    FN_EXECVE(path, argv, environ())
 }
 
 /// Hook for `libc::execve`.
