@@ -22,11 +22,14 @@ use crate::{
 
 /// Converts the [`SOCKETS`] map into a vector of pairs `(Fd, UserSocket)`, so we can rebuild
 /// it as a map.
-fn shared_sockets() -> Vec<(i32, UserSocket)> {
-    SOCKETS
-        .iter()
-        .map(|inner| (*inner.key(), UserSocket::clone(inner.value())))
-        .collect::<Vec<_>>()
+fn shared_sockets() -> Detour<Vec<(i32, UserSocket)>> {
+    Detour::Success(
+        SOCKETS
+            .lock()?
+            .iter()
+            .map(|(key, value)| (key.clone(), value.as_ref().clone()))
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// Takes an [`Argv`] with the enviroment variables from an `exec` call, extending it with
@@ -40,7 +43,7 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
         other => Detour::Bypass(other),
     })?;
 
-    let encoded = bincode::encode_to_vec(shared_sockets(), bincode::config::standard())
+    let encoded = bincode::encode_to_vec(shared_sockets()?, bincode::config::standard())
         .map(|bytes| BASE64_URL_SAFE.encode(bytes))?;
 
     env_vars.push(CString::new(format!("{SHARED_SOCKETS_ENV_VAR}={encoded}"))?);
@@ -82,7 +85,6 @@ pub(crate) unsafe extern "C" fn execve_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    // Hopefully `envp` is a properly null-terminated list.
     if let Detour::Success(envp) = prepare_execve_envp(envp.checked_into()) {
         FN_EXECVE(path, argv, envp.leak())
     } else {

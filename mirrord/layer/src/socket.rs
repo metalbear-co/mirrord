@@ -1,15 +1,15 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
 use std::{
+    collections::HashMap,
     net::{SocketAddr, ToSocketAddrs},
     os::unix::io::RawFd,
     str::FromStr,
-    sync::{Arc, LazyLock},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use base64::prelude::*;
 use bincode::{Decode, Encode};
-use dashmap::DashMap;
 use hashbrown::hash_set::HashSet;
 use hooks::FN_FCNTL;
 use libc::{c_int, sockaddr, socklen_t};
@@ -53,7 +53,7 @@ pub(crate) const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
 /// - [`libc::FD_CLOEXEC`] behaviour: While rebuilding sockets from the env var, we also
 /// check if they're set with the cloexec flag, so that children processes don't end up using
 /// sockets that are exclusive for their parents.
-pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock::new(|| {
+pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> = LazyLock::new(|| {
     std::env::var(SHARED_SOCKETS_ENV_VAR)
         .ok()
         .and_then(|encoded| BASE64_URL_SAFE.decode(encoded.into_bytes()).ok())
@@ -65,14 +65,16 @@ pub(crate) static SOCKETS: LazyLock<DashMap<RawFd, Arc<UserSocket>>> = LazyLock:
             .ok()
         })
         .map(|(fds_and_sockets, _)| {
-            DashMap::from_iter(fds_and_sockets.into_iter().filter_map(|(fd, socket)| {
-                // Do not inherit sockets that are `FD_CLOEXEC`.
-                if unsafe { FN_FCNTL(fd, libc::F_GETFD, 0) != -1 } {
-                    Some((fd, Arc::new(socket)))
-                } else {
-                    None
-                }
-            }))
+            Mutex::new(HashMap::from_iter(fds_and_sockets.into_iter().filter_map(
+                |(fd, socket)| {
+                    // Do not inherit sockets that are `FD_CLOEXEC`.
+                    if unsafe { FN_FCNTL(fd, libc::F_GETFD, 0) != -1 } {
+                        Some((fd, Arc::new(socket)))
+                    } else {
+                        None
+                    }
+                },
+            )))
         })
         .unwrap_or_default()
 });
@@ -372,8 +374,9 @@ impl OutgoingSelector {
         }
 
         let cached = REMOTE_DNS_REVERSE_MAPPING
+            .lock()?
             .get(&address.ip())
-            .map(|entry| entry.value().clone());
+            .map(|hostname| hostname.clone());
         let Some(hostname) = cached else {
             return Ok(address);
         };

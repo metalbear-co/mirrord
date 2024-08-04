@@ -1,8 +1,11 @@
 use alloc::ffi::CString;
 use core::{cmp, ffi::CStr};
-use std::{os::unix::io::RawFd, sync::LazyLock};
+use std::{
+    collections::HashSet,
+    os::unix::io::RawFd,
+    sync::{LazyLock, Mutex},
+};
 
-use dashmap::DashSet;
 use errno::{set_errno, Errno};
 use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
@@ -12,7 +15,8 @@ use crate::{detour::DetourGuard, hooks::HookManager, replace};
 
 /// Here we keep addr infos that we allocated so we'll know when to use the original
 /// freeaddrinfo function and when to use our implementation
-pub(crate) static MANAGED_ADDRINFO: LazyLock<DashSet<usize>> = LazyLock::new(DashSet::new);
+pub(crate) static MANAGED_ADDRINFO: LazyLock<Mutex<HashSet<usize>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
 
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn socket_detour(
@@ -267,7 +271,10 @@ unsafe extern "C" fn getaddrinfo_detour(
     getaddrinfo(rawish_node, rawish_service, rawish_hints)
         .map(|c_addr_info_ptr| {
             out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
-            MANAGED_ADDRINFO.insert(c_addr_info_ptr as usize);
+            MANAGED_ADDRINFO
+                .lock()
+                .expect("couldn't lock")
+                .insert(c_addr_info_ptr as usize);
             0
         })
         .unwrap_or_bypass_with(|_| FN_GETADDRINFO(raw_node, raw_service, raw_hints, out_addr_info))
@@ -295,29 +302,27 @@ unsafe extern "C" fn getaddrinfo_detour(
 /// This can be solved probably by adding each pointer in the linked list to our HashSet.
 #[hook_guard_fn]
 unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
-    MANAGED_ADDRINFO
-        .remove(&(addrinfo as usize))
-        .map(|_| {
-            // Iterate over `addrinfo` linked list dropping it.
-            let mut current = addrinfo;
-            while !current.is_null() {
-                let current_box = Box::from_raw(current);
-                let ai_addr = Box::from_raw(current_box.ai_addr);
-                let ai_canonname = CString::from_raw(current_box.ai_canonname);
+    let mut managed_addr_info = MANAGED_ADDRINFO
+        .lock()
+        .expect("couldn't lock MANAGED_ADDRINFO");
+    if managed_addr_info.remove(&(addrinfo as usize)) {
+        // Iterate over `addrinfo` linked list dropping it.
+        let mut current = addrinfo;
+        while !current.is_null() {
+            let current_box = Box::from_raw(current);
+            let ai_addr = Box::from_raw(current_box.ai_addr);
+            let ai_canonname = CString::from_raw(current_box.ai_canonname);
 
-                current = (*current).ai_next;
+            current = (*current).ai_next;
 
-                drop(ai_addr);
-                drop(ai_canonname);
-                drop(current_box);
-                MANAGED_ADDRINFO.remove(&(current as usize));
-            }
-        })
-        .unwrap_or_else(|| {
-            // If the `addrinfo` pointer was not allocated by `getaddrinfo_detour`, then it
-            // is bypassed.
-            FN_FREEADDRINFO(addrinfo);
-        })
+            drop(ai_addr);
+            drop(ai_canonname);
+            drop(current_box);
+            managed_addr_info.remove(&(current as usize));
+        }
+    } else {
+        FN_FREEADDRINFO(addrinfo);
+    }
 }
 
 /// Not a faithful reproduction of what [`libc::recvmsg`] is supposed to do, see [`recv_from`].
