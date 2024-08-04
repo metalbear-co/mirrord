@@ -63,7 +63,7 @@ impl RuntimeCommandBuilder {
         C: AsRef<Path>,
     {
         match self.runtime {
-            ContainerRuntime::Podman | ContainerRuntime::Docker => {
+            ContainerRuntime::Podman | ContainerRuntime::Docker | ContainerRuntime::Nerdctl => {
                 self.push_arg("-v");
                 self.push_arg(format!(
                     "{}:{}",
@@ -79,7 +79,7 @@ impl RuntimeCommandBuilder {
         V: Into<String>,
     {
         match self.runtime {
-            ContainerRuntime::Podman | ContainerRuntime::Docker => {
+            ContainerRuntime::Podman | ContainerRuntime::Docker | ContainerRuntime::Nerdctl => {
                 self.push_arg("--volumes-from");
                 self.push_arg(volumes_from);
             }
@@ -91,7 +91,7 @@ impl RuntimeCommandBuilder {
         N: Into<String>,
     {
         match self.runtime {
-            ContainerRuntime::Podman | ContainerRuntime::Docker => {
+            ContainerRuntime::Podman | ContainerRuntime::Docker | ContainerRuntime::Nerdctl => {
                 self.push_arg("--network");
                 self.push_arg(network);
             }

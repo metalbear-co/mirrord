@@ -461,24 +461,12 @@ pub(super) enum DiagnoseCommand {
     },
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, ValueEnum)]
 /// Runtimes supported by the `mirrord container` command.
 pub(super) enum ContainerRuntime {
     Docker,
     Podman,
-}
-
-impl ValueEnum for ContainerRuntime {
-    fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Docker, Self::Podman]
-    }
-
-    fn to_possible_value(&self) -> Option<PossibleValue> {
-        match self {
-            ContainerRuntime::Docker => Some(PossibleValue::new("docker")),
-            ContainerRuntime::Podman => Some(PossibleValue::new("podman")),
-        }
-    }
+    Nerdctl,
 }
 
 impl std::fmt::Display for ContainerRuntime {
@@ -486,6 +474,7 @@ impl std::fmt::Display for ContainerRuntime {
         match self {
             ContainerRuntime::Docker => write!(f, "docker"),
             ContainerRuntime::Podman => write!(f, "podman"),
+            ContainerRuntime::Nerdctl => write!(f, "nerdctl"),
         }
     }
 }
