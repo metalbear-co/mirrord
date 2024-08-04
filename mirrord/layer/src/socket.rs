@@ -376,7 +376,7 @@ impl OutgoingSelector {
         let cached = REMOTE_DNS_REVERSE_MAPPING
             .lock()?
             .get(&address.ip())
-            .map(|hostname| hostname.clone());
+            .cloned();
         let Some(hostname) = cached else {
             return Ok(address);
         };

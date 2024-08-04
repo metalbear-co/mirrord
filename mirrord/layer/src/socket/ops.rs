@@ -349,7 +349,6 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
         SOCKETS
             .lock()?
             .remove(&sockfd)
-            .map(|socket| socket)
             .bypass(Bypass::LocalFdNotFound(sockfd))?
     };
 
@@ -814,7 +813,7 @@ pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), Hoo
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
     let mut sockets = SOCKETS.lock()?;
-    if let Some(socket) = sockets.get(&fd).map(|socket| socket.clone()) {
+    if let Some(socket) = sockets.get(&fd).cloned() {
         sockets.insert(dup_fd as RawFd, socket);
 
         if SWITCH_MAP {
