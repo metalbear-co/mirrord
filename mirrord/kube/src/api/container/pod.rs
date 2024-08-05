@@ -194,10 +194,10 @@ impl ContainerVariant for PodTargetedVariant<'_> {
         let agent = self.agent_config();
         let params = self.params();
 
-        let env = self.runtime_data.mesh.map(|mesh| {
+        let env = self.runtime_data.mesh.map(|_| {
             vec![EnvVar {
                 name: "MIRRORD_AGENT_IN_SERVICE_MESH".into(),
-                value: Some(mesh.to_string()),
+                value: Some("true".into()),
                 ..Default::default()
             }]
         });
