@@ -4,10 +4,10 @@ use k8s_openapi::{
     api::{
         apps::v1::{Deployment, DeploymentSpec},
         core::v1::{
-            Container, ContainerPort, EnvVar, HTTPGetAction, Namespace,
-            PodSecurityContext, PodSpec, PodTemplateSpec, Probe, ResourceRequirements, Secret,
-            SecretVolumeSource, SecurityContext, Service, ServiceAccount, ServicePort, ServiceSpec,
-            Sysctl, Volume, VolumeMount,
+            Container, ContainerPort, EnvVar, HTTPGetAction, Namespace, PodSecurityContext,
+            PodSpec, PodTemplateSpec, Probe, ResourceRequirements, Secret, SecretVolumeSource,
+            SecurityContext, Service, ServiceAccount, ServicePort, ServiceSpec, Sysctl, Volume,
+            VolumeMount,
         },
         rbac::v1::{
             ClusterRole, ClusterRoleBinding, PolicyRule, Role, RoleBinding, RoleRef, Subject,
