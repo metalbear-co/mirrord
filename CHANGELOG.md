@@ -11,17 +11,19 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 ## [3.112.1](https://github.com/metalbear-co/mirrord/tree/3.112.1) - 2024-08-05
 
 
+### Added
+
+- Added `experimental.enable_exec_hooks_linux` switch to the mirrord config.
+
+
 ### Changed
 
 - Change operator port from 3000 to 443 to work without any FW exceptions
-- Disabled exec hooks on Linux by default. Added
-  `experimental.enable_exec_hooks_linux` switch to the mirrord config.
 
 
 ### Fixed
 
-- Fix execve, make hooks on Linux enabled by default (fix data race on process
-  initialization, might fix more stuff)
+- Fixed execve hook (fix data race on process initialization, might fix more stuff)
   [#2624](https://github.com/metalbear-co/mirrord/issues/2624)
 - Added new VSCode debugpy args layout to debugger port detection
 
