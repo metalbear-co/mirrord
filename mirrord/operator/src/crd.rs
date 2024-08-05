@@ -459,25 +459,50 @@ pub struct MirrordWorkloadQueueRegistrySpec {
     pub tags: Option<HashMap<String, String>>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum SqsSessionStartError {
+    /// SQS Splitter could not split queues with the given config.
+    SplitterError(String),
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum SqsSessionCleanupError {
+    #[serde(other)]
+    Unknown,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename = "SQSSessionStatus", rename_all = "camelCase")]
-pub struct SqsSessionStatus {
-    /// Queue ID -> old and new queue names.
-    pub queue_names: BTreeMap<QueueId, QueueNameUpdate>,
+pub enum SqsSessionStatus {
+    #[default]
+    Starting,
+    Ready {
+        /// Queue ID -> old and new queue names.
+        queue_names: BTreeMap<QueueId, QueueNameUpdate>,
 
-    // A bit redundant, because the registry resource status has the mapping from env var name
-    // to queue id, and `queue_names` has the mapping from queue id to name update, but, saving
-    // it here in the form that is useful to reader, for simplicity and readability.
-    /// Env var name -> old and new queue names.
-    pub env_updates: BTreeMap<String, QueueNameUpdate>,
-    // TODO: add updates to config map references.
+        // A bit redundant, because the registry resource status has the mapping from env var name
+        // to queue id, and `queue_names` has the mapping from queue id to name update, but, saving
+        // it here in the form that is useful to reader, for simplicity and readability.
+        /// Env var name -> old and new queue names.
+        env_updates: BTreeMap<String, QueueNameUpdate>,
+    },
+    StartError(SqsSessionStartError),
+    CleanupError(SqsSessionCleanupError),
 }
 
 /// The [`kube::runtime::wait::Condition`] trait is auto-implemented for this function.
 /// To be used in [`kube::runtime::wait::await_condition`].
 pub fn is_session_ready(session: Option<&MirrordSqsSession>) -> bool {
     session
-        .map(|session| session.status.is_some())
+        .and_then(|session| session.status.as_ref())
+        .map(|status| {
+            matches!(
+                status,
+                SqsSessionStatus::Ready { .. } | SqsSessionStatus::StartError(..)
+            )
+        })
         .unwrap_or_default()
 }
 
