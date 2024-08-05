@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, ffi::OsString, fmt::Display, path::PathBuf};
 
-use clap::{builder::PossibleValue, ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 use mirrord_config::MIRRORD_CONFIG_FILE_ENV;
 use mirrord_operator::setup::OperatorNamespace;
