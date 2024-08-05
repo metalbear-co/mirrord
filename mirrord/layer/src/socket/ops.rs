@@ -829,7 +829,7 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
         open_files.insert(dup_fd as RawFd, cloned_file);
 
         if SWITCH_MAP {
-            SOCKETS.lock()?.remove(&dup_fd);
+            sockets.remove(&dup_fd);
         }
     }
 
@@ -1227,8 +1227,8 @@ pub(super) fn send_to(
     let destination = SockAddr::try_from_raw(raw_destination, destination_length)?;
     trace!("destination {:?}", destination.as_socket());
 
-    let mut sockets = SOCKETS.lock()?;
-    let user_socket_info = sockets
+    let user_socket_info = SOCKETS
+        .lock()?
         .remove(&sockfd)
         .ok_or(Bypass::LocalFdNotFound(sockfd))?;
 
@@ -1271,7 +1271,8 @@ pub(super) fn send_to(
             NetProtocol::Datagrams,
         )?;
 
-        let layer_address: SockAddr = sockets
+        let layer_address: SockAddr = SOCKETS
+            .lock()?
             .get(&sockfd)
             .and_then(|socket| match &socket.state {
                 SocketState::Connected(connected) => connected.layer_address.clone(),
@@ -1314,8 +1315,9 @@ pub(super) fn sendmsg(
 
     trace!("destination {:?}", destination.as_socket());
 
-    let mut sockets = SOCKETS.lock()?;
-    let user_socket_info = sockets
+    // send_dns_patch acquires lock, so don't hold it
+    let user_socket_info = SOCKETS
+        .lock()?
         .remove(&sockfd)
         .ok_or(Bypass::LocalFdNotFound(sockfd))?;
 
@@ -1362,7 +1364,8 @@ pub(super) fn sendmsg(
             NetProtocol::Datagrams,
         )?;
 
-        let layer_address: SockAddr = sockets
+        let layer_address: SockAddr = SOCKETS
+            .lock()?
             .get(&sockfd)
             .and_then(|socket| match &socket.state {
                 SocketState::Connected(connected) => connected.layer_address.clone(),
