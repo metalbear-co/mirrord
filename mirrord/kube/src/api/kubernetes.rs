@@ -240,18 +240,18 @@ impl KubernetesAPI {
                      unsupported. You can set `network.incoming.mode` to \"steal\" (check out the\
                      `http_filter` configuration value if you only want to steal some of the traffic).",
                 );
+            }
 
-                let privileged = config
-                    .map(|config| config.agent.privileged)
-                    .unwrap_or_default();
+            let privileged = config
+                .map(|config| config.agent.privileged)
+                .unwrap_or_default();
 
-                if matches!(mesh, MeshVendor::IstioAmbient) && !privileged {
-                    progress.warning(
-                        "mirrord detected an ambient Istio service mesh but\
-                         the agent is not configured to run in a privileged SecurityContext.\
-                         Please set `agent.privileged = true`, otherwise the agent will not be able to start.",
-                    );
-                }
+            if matches!(mesh, MeshVendor::IstioAmbient) && !privileged {
+                progress.warning(
+                    "mirrord detected an ambient Istio service mesh but\
+                     the agent is not configured to run in a privileged SecurityContext.\
+                     Please set `agent.privileged = true`, otherwise the agent will not be able to start.",
+                );
             }
         }
 
