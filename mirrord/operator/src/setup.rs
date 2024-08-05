@@ -28,7 +28,8 @@ use thiserror::Error;
 use crate::crd::{MirrordPolicy, TargetCrd};
 
 static OPERATOR_NAME: &str = "mirrord-operator";
-static OPERATOR_PORT: i32 = 3000;
+/// 443 is standard port for APIService, do not change this value (will require users to add FW rules)
+static OPERATOR_PORT: i32 = 443;
 static OPERATOR_ROLE_NAME: &str = "mirrord-operator";
 static OPERATOR_ROLE_BINDING_NAME: &str = "mirrord-operator";
 static OPERATOR_CLIENT_CA_ROLE_NAME: &str = "mirrord-operator-apiserver-authentication";
