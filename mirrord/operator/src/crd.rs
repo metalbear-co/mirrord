@@ -353,9 +353,6 @@ pub enum QueueNameSource {
 /// The details of a queue that should be split.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "queueType")]
-// So that controllers that only handle 1 type of queue don't have to adapt when we add more queue
-// types.
-#[non_exhaustive]
 pub enum SplitQueue {
     /// Amazon SQS
     ///
