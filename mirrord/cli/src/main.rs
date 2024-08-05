@@ -458,7 +458,6 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
 }
 
 async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()> {
-    // TODO: setup
     let mut progress = ProgressTracker::from_env("mirrord port-forward");
     if !args.disable_version_check {
         prompt_outdated_version(&progress).await;
@@ -531,10 +530,9 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
 
     let (_connection_info, connection) =
         create_and_connect(&config, &mut progress, &mut analytics).await?;
-    let mut port_forward = PortForwarder::new(connection, args.port_mappings.clone())
-        .await
-        .unwrap(); // TODO: remove unwrap
-    Ok(port_forward.run().await.unwrap()) // TODO: remove unwrap, Ok()
+    let mut port_forward = PortForwarder::new(connection, args.port_mappings.clone()).await?;
+    port_forward.run().await?;
+    Ok(())
 }
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");

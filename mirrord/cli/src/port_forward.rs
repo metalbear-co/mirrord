@@ -1,6 +1,6 @@
 use std::{collections::HashMap, net::SocketAddr};
 
-use mirrord_protocol::{ClientMessage, DaemonMessage};
+use mirrord_protocol::DaemonMessage;
 use thiserror::Error;
 use tokio::{
     net::{
@@ -11,7 +11,7 @@ use tokio::{
 };
 use tokio_stream::{wrappers::TcpListenerStream, StreamExt, StreamMap};
 
-use crate::{connection::AgentConnection, PortMapping};
+use crate::{connection::AgentConnection, CliError, PortMapping};
 
 pub struct PortForwarder {
     // communicates with the agent (only TCP supported)
@@ -130,4 +130,10 @@ pub enum PortForwardError {
 
     #[error("No destination address found for local address `{0}`")]
     SocketMappingNotFound(SocketAddr),
+}
+
+impl From<PortForwardError> for CliError {
+    fn from(value: PortForwardError) -> Self {
+        CliError::PortForwardingError(value)
+    }
 }
