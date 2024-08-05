@@ -273,7 +273,7 @@ unsafe extern "C" fn getaddrinfo_detour(
             out_addr_info.copy_from_nonoverlapping(&c_addr_info_ptr, 1);
             MANAGED_ADDRINFO
                 .lock()
-                .expect("couldn't lock")
+                .expect("MANAGED_ADDRINFO lock failed")
                 .insert(c_addr_info_ptr as usize);
             0
         })
@@ -304,7 +304,7 @@ unsafe extern "C" fn getaddrinfo_detour(
 unsafe extern "C" fn freeaddrinfo_detour(addrinfo: *mut libc::addrinfo) {
     let mut managed_addr_info = MANAGED_ADDRINFO
         .lock()
-        .expect("couldn't lock MANAGED_ADDRINFO");
+        .expect("MANAGED_ADDRINFO lock failed");
     if managed_addr_info.remove(&(addrinfo as usize)) {
         // Iterate over `addrinfo` linked list dropping it.
         let mut current = addrinfo;
