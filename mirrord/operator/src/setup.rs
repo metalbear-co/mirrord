@@ -4,9 +4,10 @@ use k8s_openapi::{
     api::{
         apps::v1::{Deployment, DeploymentSpec},
         core::v1::{
-            Container, ContainerPort, EnvVar, HTTPGetAction, Namespace, PodSpec, PodTemplateSpec,
-            Probe, ResourceRequirements, Secret, SecretVolumeSource, SecurityContext, Service,
-            ServiceAccount, ServicePort, ServiceSpec, Volume, VolumeMount,
+            Capabilities, Container, ContainerPort, EnvVar, HTTPGetAction, Namespace, PodSpec,
+            PodTemplateSpec, Probe, ResourceRequirements, Secret, SecretVolumeSource,
+            SecurityContext, Service, ServiceAccount, ServicePort, ServiceSpec, Volume,
+            VolumeMount,
         },
         rbac::v1::{
             ClusterRole, ClusterRoleBinding, PolicyRule, Role, RoleBinding, RoleRef, Subject,
@@ -28,7 +29,8 @@ use thiserror::Error;
 use crate::crd::{MirrordPolicy, TargetCrd};
 
 static OPERATOR_NAME: &str = "mirrord-operator";
-/// 443 is standard port for APIService, do not change this value (will require users to add FW rules)
+/// 443 is standard port for APIService, do not change this value
+/// (will require users to add FW rules)
 static OPERATOR_PORT: i32 = 443;
 static OPERATOR_ROLE_NAME: &str = "mirrord-operator";
 static OPERATOR_ROLE_BINDING_NAME: &str = "mirrord-operator";
@@ -318,6 +320,10 @@ impl OperatorDeployment {
             security_context: Some(SecurityContext {
                 allow_privilege_escalation: Some(false),
                 privileged: Some(false),
+                capabilities: Some(Capabilities {
+                    add: Some(vec!["NET_BIND_SERVICE".to_owned()]),
+                    ..Default::default()
+                }),
                 ..Default::default()
             }),
             resources: Some(ResourceRequirements {
