@@ -11,7 +11,6 @@ use kube::{
 };
 use mirrord_config::{
     agent::AgentConfig,
-    feature::network::incoming::IncomingMode,
     target::{Target, TargetConfig},
     LayerConfig,
 };
