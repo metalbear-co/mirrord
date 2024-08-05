@@ -161,9 +161,10 @@ impl<'c> PodTargetedVariant<'c> {
             command_line.extend([
                 "--mesh".to_string(),
                 match mesh {
-                    MeshVendor::IstioAmbient => "istio".to_string(),
-                    mesh => mesh.to_string(),
-                },
+                    MeshVendor::IstioAmbient => MeshVendor::Istio,
+                    mesh => mesh,
+                }
+                .to_string(),
             ]);
         }
 
