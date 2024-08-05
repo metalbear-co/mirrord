@@ -2,11 +2,11 @@
 //! `readdir` family.
 
 use std::{
+    collections::HashMap,
     ffi::CString,
     sync::{Arc, LazyLock, Mutex},
 };
 
-use dashmap::DashMap;
 use mirrord_protocol::file::{CloseDirRequest, DirEntryInternal, ReadDirRequest, ReadDirResponse};
 
 use super::{DirStreamFd, LocalFd, RemoteFd, OPEN_FILES};
@@ -21,14 +21,14 @@ pub static OPEN_DIRS: LazyLock<OpenDirs> = LazyLock::new(OpenDirs::new);
 
 /// State related to open remote directories.
 pub struct OpenDirs {
-    inner: DashMap<DirStreamFd, Arc<Mutex<OpenDir>>>,
+    inner: Mutex<HashMap<DirStreamFd, Arc<Mutex<OpenDir>>>>,
 }
 
 impl OpenDirs {
     /// Creates an empty state.
     fn new() -> Self {
         Self {
-            inner: DashMap::with_capacity(4),
+            inner: Mutex::new(HashMap::new()),
         }
     }
 
@@ -38,17 +38,24 @@ impl OpenDirs {
     ///
     /// * `local_dir_fd` - opaque identifier
     /// * `remote_fd` - descriptor of the remote directory (received from the agent)
-    pub fn insert(&self, local_dir_fd: DirStreamFd, remote_fd: RemoteFd, base_fd: LocalFd) {
-        self.inner.insert(
+    pub fn insert(
+        &self,
+        local_dir_fd: DirStreamFd,
+        remote_fd: RemoteFd,
+        base_fd: LocalFd,
+    ) -> Detour<()> {
+        self.inner.lock()?.insert(
             local_dir_fd,
             Mutex::new(OpenDir::new(local_dir_fd, remote_fd, base_fd)).into(),
         );
+        Detour::Success(())
     }
 
     /// Reads next entry from the open directory with the given [`DirStreamFd`].
     pub fn read_r(&self, local_dir_fd: DirStreamFd) -> Detour<Option<DirEntryInternal>> {
         let dir = self
             .inner
+            .lock()?
             .get(&local_dir_fd)
             .ok_or(Bypass::LocalDirStreamNotFound(local_dir_fd))?
             .clone();
@@ -62,6 +69,7 @@ impl OpenDirs {
     pub fn get_fd(&self, local_dir_fd: DirStreamFd) -> Detour<LocalFd> {
         let dir = self
             .inner
+            .lock()?
             .get(&local_dir_fd)
             .ok_or(Bypass::LocalDirStreamNotFound(local_dir_fd))?
             .clone();
@@ -86,6 +94,7 @@ impl OpenDirs {
     pub fn read(&self, local_dir_fd: DirStreamFd) -> Detour<*const libc::dirent> {
         let dir = self
             .inner
+            .lock()?
             .get(&local_dir_fd)
             .ok_or(Bypass::LocalDirStreamNotFound(local_dir_fd))?
             .clone();
@@ -117,6 +126,7 @@ impl OpenDirs {
     pub fn read64(&self, local_dir_fd: DirStreamFd) -> Detour<*const libc::dirent64> {
         let dir = self
             .inner
+            .lock()?
             .get(&local_dir_fd)
             .ok_or(Bypass::LocalDirStreamNotFound(local_dir_fd))?
             .clone();
@@ -134,14 +144,15 @@ impl OpenDirs {
 
     /// Closes the open directory with the given [`DirStreamFd`].
     pub fn close(&self, local_dir_fd: DirStreamFd) -> Detour<libc::c_int> {
-        let (_, dir) = self
+        let dir = self
             .inner
+            .lock()?
             .remove(&local_dir_fd)
             .ok_or(Bypass::LocalDirStreamNotFound(local_dir_fd))?;
 
         let mut guard = dir.lock().expect("lock poisoned");
         guard.closed = true;
-        OPEN_FILES.remove(&guard.base_fd);
+        OPEN_FILES.lock()?.remove(&guard.base_fd);
         common::make_proxy_request_no_response(CloseDirRequest {
             remote_fd: guard.remote_fd,
         })?;

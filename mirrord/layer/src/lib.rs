@@ -573,12 +573,15 @@ fn enable_hooks(state: &LayerSetup) {
 #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()))]
 pub(crate) fn close_layer_fd(fd: c_int) {
     // Remove from sockets.
-    if let Some((_, socket)) = SOCKETS.remove(&fd) {
+    if let Some(socket) = SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd) {
         // Closed file is a socket, so if it's already bound to a port - notify agent to stop
         // mirroring/stealing that port.
         socket.close();
     } else if setup().fs_config().is_active() {
-        OPEN_FILES.remove(&fd);
+        OPEN_FILES
+            .lock()
+            .expect("OPEN_FILES lock failed")
+            .remove(&fd);
     }
 }
 

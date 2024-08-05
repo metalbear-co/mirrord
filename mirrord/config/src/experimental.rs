@@ -34,7 +34,7 @@ pub struct ExperimentalConfig {
     /// Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application
     /// shares sockets with child commands (e.g Python web servers with reload),
     /// but the feature is not stable and may cause other issues.
-    #[config(default = false)]
+    #[config(default = true)]
     pub enable_exec_hooks_linux: bool,
 }
 
