@@ -17,7 +17,10 @@ use serde::de::DeserializeOwned;
 use thiserror::Error;
 
 use crate::{
-    api::{container::choose_container, kubernetes::get_k8s_resource_api},
+    api::{
+        container::{check_mesh_vendor, choose_container},
+        kubernetes::get_k8s_resource_api,
+    },
     error::{KubeApiError, Result},
 };
 
@@ -136,7 +139,7 @@ impl RuntimeData {
             );
         }
 
-        let (chosen_container, mesh, guessed_container) =
+        let (chosen_container, guessed_container) =
             choose_container(container_name, container_statuses.as_ref());
 
         if guessed_container {
@@ -178,6 +181,8 @@ impl RuntimeData {
                 ));
             }
         };
+
+        let mesh = check_mesh_vendor(pod);
 
         Ok(RuntimeData {
             pod_ips,
