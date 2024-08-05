@@ -59,25 +59,10 @@ impl TestIntProxy {
         let (stream, _buffer_size) = fake_agent_listener.accept().await.unwrap();
         let codec = Framed::new(stream, DaemonCodec::default());
 
-        let mut res = Self {
+        Self {
             codec,
             num_connections: 0,
-        };
-
-        let msg = res.recv().await;
-        let ClientMessage::SwitchProtocolVersion(version) = msg else {
-            panic!("unexpected message: {msg:?}");
-        };
-
-        res.send(DaemonMessage::SwitchProtocolVersionResponse(version))
-            .await;
-
-        let msg = res.recv().await;
-        let ClientMessage::ReadyForLogs = msg else {
-            panic!("unexpected message: {msg:?}");
-        };
-
-        res
+        }
     }
 
     pub async fn recv(&mut self) -> ClientMessage {
@@ -90,11 +75,13 @@ impl TestIntProxy {
 
             match msg {
                 ClientMessage::Ping => {
-                    self.codec
-                        .send(DaemonMessage::Pong)
-                        .await
-                        .expect("inproxy connection failed");
+                    self.send(DaemonMessage::Pong).await;
                 }
+                ClientMessage::SwitchProtocolVersion(version) => {
+                    self.send(DaemonMessage::SwitchProtocolVersionResponse(version))
+                        .await;
+                }
+                ClientMessage::ReadyForLogs => {}
                 other => break Some(other),
             }
         }
