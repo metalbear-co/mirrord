@@ -231,17 +231,6 @@ impl KubernetesAPI {
         if let Some(mesh) = runtime_data.as_ref().and_then(|data| data.mesh.as_ref()) {
             progress.info(&format!("service mesh detected: {mesh}"));
 
-            let incoming_mode = config.map(|config| config.feature.network.incoming.mode);
-
-            if matches!(incoming_mode, Some(IncomingMode::Mirror)) {
-                progress.warning(
-                    "mirrord has detected that you might be running on a cluster with a \
-                     service mesh and `network.incoming.mode = \"mirror\"`, which is currently \
-                     unsupported. You can set `network.incoming.mode` to \"steal\" (check out the\
-                     `http_filter` configuration value if you only want to steal some of the traffic).",
-                );
-            }
-
             let privileged = config
                 .map(|config| config.agent.privileged)
                 .unwrap_or_default();
