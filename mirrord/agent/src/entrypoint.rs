@@ -506,20 +506,18 @@ async fn start_agent(args: Args) -> Result<()> {
         (None, None)
     } else {
         let cancellation_token = cancellation_token.clone();
-
-        let mesh = args.mode.mesh();
+        let is_mesh = args.is_mesh();
 
         let watched_task = WatchedTask::new(
             TcpConnectionSniffer::<RawSocketTcpCapture>::TASK_NAME,
-            TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface, mesh).and_then(
-                |sniffer| async move {
+            TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface, is_mesh)
+                .and_then(|sniffer| async move {
                     let res = sniffer.start(cancellation_token).await;
                     if let Err(err) = res.as_ref() {
                         error!("Sniffer failed: {err}");
                     }
                     Ok(())
-                },
-            ),
+                }),
         );
         let status = watched_task.status();
         let task = run_thread_in_namespace(

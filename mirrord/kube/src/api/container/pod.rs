@@ -1,12 +1,13 @@
 use k8s_openapi::{
     api::core::v1::{
-        Capabilities, Container, HostPathVolumeSource, LocalObjectReference, Pod, PodSpec,
+        Capabilities, Container, EnvVar, HostPathVolumeSource, LocalObjectReference, Pod, PodSpec,
         SecurityContext, Volume, VolumeMount,
     },
     DeepMerge,
 };
 use kube::api::ObjectMeta;
 use mirrord_config::agent::AgentConfig;
+use mirrord_protocol::MeshVendor;
 
 use super::util::agent_env;
 use crate::api::{
@@ -155,8 +156,15 @@ impl<'c> PodTargetedVariant<'c> {
             runtime_data.container_runtime.to_string(),
         ]);
 
+        // This is for backward compatabilty but needs to be remove at some point
         if let Some(mesh) = runtime_data.mesh {
-            command_line.extend(["--mesh".to_string(), mesh.to_string()]);
+            command_line.extend([
+                "--mesh".to_string(),
+                match mesh {
+                    MeshVendor::IstioAmbient => "istio".to_string(),
+                    mesh => mesh.to_string(),
+                },
+            ]);
         }
 
         let inner = PodVariant::with_command_line(agent, params, command_line);
@@ -184,6 +192,14 @@ impl ContainerVariant for PodTargetedVariant<'_> {
 
         let agent = self.agent_config();
         let params = self.params();
+
+        let env = self.runtime_data.mesh.map(|mesh| {
+            vec![EnvVar {
+                name: "MIRRORD_AGENT_IN_SERVICE_MESH".into(),
+                value: Some(mesh.to_string()),
+                ..Default::default()
+            }]
+        });
 
         let update = Pod {
             spec: Some(PodSpec {
@@ -223,6 +239,7 @@ impl ContainerVariant for PodTargetedVariant<'_> {
                         }),
                         ..Default::default()
                     }),
+                    env,
                     volume_mounts: Some(vec![
                         VolumeMount {
                             mount_path: "/host/run".to_string(),

@@ -1,6 +1,6 @@
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::{
-    Capabilities, EphemeralContainer as KubeEphemeralContainer, Pod, SecurityContext,
+    Capabilities, EnvVar, EphemeralContainer as KubeEphemeralContainer, Pod, SecurityContext,
 };
 use kube::{
     api::PostParams,
@@ -9,6 +9,7 @@ use kube::{
 };
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
+use mirrord_protocol::MeshVendor;
 use tokio::pin;
 use tracing::debug;
 
@@ -172,8 +173,16 @@ impl<'c> EphemeralTargetedVariant<'c> {
         let mut command_line = base_command_line(agent, params);
 
         command_line.extend(["ephemeral".to_string()]);
+
+        // This is for backward compatabilty but needs to be remove at some point
         if let Some(mesh) = runtime_data.mesh {
-            command_line.extend(["--mesh".to_string(), mesh.to_string()]);
+            command_line.extend([
+                "--mesh".to_string(),
+                match mesh {
+                    MeshVendor::IstioAmbient => "istio".to_string(),
+                    mesh => mesh.to_string(),
+                },
+            ]);
         }
 
         EphemeralTargetedVariant {
@@ -203,7 +212,15 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
             runtime_data,
             command_line,
         } = self;
-        let env = agent_env(agent, params);
+        let mut env = agent_env(agent, params);
+
+        if self.runtime_data.mesh.as_ref().is_some() {
+            env.push(EnvVar {
+                name: "MIRRORD_AGENT_IN_SERVICE_MESH".into(),
+                value: Some("true".into()),
+                ..Default::default()
+            });
+        }
 
         KubeEphemeralContainer {
             name: params.name.clone(),
