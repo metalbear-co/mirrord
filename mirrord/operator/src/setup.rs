@@ -4,10 +4,10 @@ use k8s_openapi::{
     api::{
         apps::v1::{Deployment, DeploymentSpec},
         core::v1::{
-            Capabilities, Container, ContainerPort, EnvVar, HTTPGetAction, Namespace, PodSpec,
-            PodTemplateSpec, Probe, ResourceRequirements, Secret, SecretVolumeSource,
-            SecurityContext, Service, ServiceAccount, ServicePort, ServiceSpec, Volume,
-            VolumeMount,
+            Capabilities, Container, ContainerPort, EnvVar, HTTPGetAction, Namespace,
+            PodSecurityContext, PodSpec, PodTemplateSpec, Probe, ResourceRequirements, Secret,
+            SecretVolumeSource, SecurityContext, Service, ServiceAccount, ServicePort, ServiceSpec,
+            Sysctl, Volume, VolumeMount,
         },
         rbac::v1::{
             ClusterRole, ClusterRoleBinding, PolicyRule, Role, RoleBinding, RoleRef, Subject,
@@ -320,10 +320,6 @@ impl OperatorDeployment {
             security_context: Some(SecurityContext {
                 allow_privilege_escalation: Some(false),
                 privileged: Some(false),
-                capabilities: Some(Capabilities {
-                    add: Some(vec!["NET_BIND_SERVICE".to_owned()]),
-                    ..Default::default()
-                }),
                 ..Default::default()
             }),
             resources: Some(ResourceRequirements {
@@ -336,6 +332,13 @@ impl OperatorDeployment {
         };
 
         let pod_spec = PodSpec {
+            security_context: Some(PodSecurityContext {
+                sysctls: Some(vec![Sysctl {
+                    name: "net.ipv4.ip_unprivileged_port_start".to_owned(),
+                    value: "443".to_owned(),
+                }]),
+                ..Default::default()
+            }),
             containers: vec![container],
             service_account_name: Some(sa.name().to_owned()),
             volumes: Some(volumes),
