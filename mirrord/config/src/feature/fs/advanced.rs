@@ -122,7 +122,7 @@ pub struct FsConfig {
     /// Example:
     /// ```json
     /// {
-    ///   "^/home/(?<user>\\S+)/dev/tomcat": "/etc/tomcat"
+    ///   "^/home/(?<user>\\S+)/dev/tomcat": "/etc/tomcat",
     ///   "^/home/(?<user>\\S+)/dev/config/(?<app>\\S+)": "/mnt/configs/${user}-$app"
     /// }
     /// ```

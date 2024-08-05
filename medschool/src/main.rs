@@ -17,7 +17,9 @@
 
 use std::{fs, fs::File, io::Read, path::PathBuf};
 
+use jsonschema::JSONSchema;
 use parse::parse_docs_into_set;
+use serde_json::Value;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{error::DocsError, parse::resolve_references};
@@ -25,6 +27,7 @@ use crate::{error::DocsError, parse::resolve_references};
 mod error;
 mod parse;
 mod types;
+mod validate;
 
 // TODO(alex): Support specifying a path.
 /// Converts all files in the [`glob::glob`] pattern defined within, in the current directory,
@@ -64,6 +67,9 @@ struct MedschoolArgs {
     /// Defaults to `./configuration.md`.
     #[arg(short, long)]
     output: Option<PathBuf>,
+
+    #[arg(short, long)]
+    schema: Option<PathBuf>,
 }
 
 /// # Attention when using `RUST_LOG`
@@ -89,11 +95,24 @@ fn main() -> Result<(), DocsError> {
         prepend,
         output,
         input,
+        schema,
     } = <MedschoolArgs as clap::Parser>::parse();
 
     let files = parse_files(input.unwrap_or_else(|| PathBuf::from("./src")))?;
     let type_docs = parse_docs_into_set(files)?;
-    let resolved = resolve_references(type_docs.clone());
+
+    let schema = if let Some(schema) = schema {
+        let schema = fs::read_to_string(schema)?;
+        let schema: Value =
+            serde_json::from_str(&schema).map_err(|e| DocsError::Json(e, schema))?;
+        let compiled_schema =
+            JSONSchema::compile(&schema).map_err(|e| DocsError::JsonSchema(e.to_string()))?;
+        Some(compiled_schema)
+    } else {
+        None
+    };
+
+    let resolved = resolve_references(type_docs.clone(), schema)?;
 
     if let Some(produced) = resolved {
         let mut final_docs = produced.produce_docs();
@@ -258,7 +277,9 @@ mod test {
         let type_docs = super::parse_docs_into_set(files).unwrap();
         println!("parsed {type_docs:#?}");
 
-        let root_type = resolve_references(type_docs.clone()).unwrap();
+        let root_type = resolve_references(type_docs.clone(), None)
+            .unwrap()
+            .unwrap();
 
         let final_docs = root_type.produce_docs();
         println!("final_docs {final_docs:#?}");
@@ -276,7 +297,9 @@ mod test {
             files.sort_unstable_by(|_, _| rand::random::<i32>().cmp(&rand::random()));
 
             let type_docs = super::parse_docs_into_set(files).unwrap();
-            let root_type = resolve_references(type_docs.clone()).unwrap();
+            let root_type = resolve_references(type_docs.clone(), None)
+                .unwrap()
+                .unwrap();
             let final_docs = root_type.produce_docs();
 
             assert_eq!(final_docs, EXPECTED);
@@ -290,7 +313,9 @@ mod test {
         let files = parse_string_files(UNORDERED_FILES.map(ToString::to_string).to_vec());
 
         let type_docs = super::parse_docs_into_set(files).unwrap();
-        let root_type = resolve_references(type_docs.clone()).unwrap();
+        let root_type = resolve_references(type_docs.clone(), None)
+            .unwrap()
+            .unwrap();
         let final_docs = root_type.produce_docs();
         assert_eq!(final_docs, UNORDERED_EXPECTED);
     }

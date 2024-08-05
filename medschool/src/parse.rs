@@ -2,10 +2,13 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+use jsonschema::JSONSchema;
 use syn::{Attribute, Expr, Ident, Type, TypePath};
+use tracing::error;
 
 use crate::{
     types::{PartialField, PartialType},
+    validate::validate_json_blocks,
     DocsError,
 };
 
@@ -200,43 +203,53 @@ pub fn parse_docs_into_set<'a>(
 /// DFS helper function to resolve the references of the types. Returns the docs of the fields of
 /// the field we're currently looking at search till its leaf nodes. The leaf here means a primitive
 /// type for which we don't have a [`PartialType`].
+#[tracing::instrument(level = "trace", ret)]
 fn dfs_fields<'a, const MAX_RECURSION_LEVEL: usize>(
     field: &PartialField<'a>,
     types: &'a HashSet<PartialType>,
     cache: &mut HashMap<&'a str, Vec<String>>,
     recursion_level: &mut usize,
-) -> Vec<String> {
+    schema: &Option<JSONSchema>,
+) -> Result<Vec<String>, DocsError> {
     if *recursion_level >= MAX_RECURSION_LEVEL {
-        return vec!["Recursion limit reached".to_string()];
+        return Ok(vec!["Recursion limit reached".to_string()]);
     }
-    // increment the recursion level as we're going deeper into the tree
-    types // get the type of the field from the types set to recurse into it's fields
-        .get(&field.ty)
-        .map(|type_| {
-            cache.get(&type_.ident as &str).cloned().unwrap_or_else(|| {
-                // check if we've already resolved the type
-                let mut max_recursion_level = 0;
-                let mut new_type_docs = type_.docs.clone();
-                new_type_docs.reserve(type_.fields.len());
-                type_.fields.iter().for_each(|field| {
-                    let mut current_recursion_level = *recursion_level + 1;
-                    let resolved_type_docs = dfs_fields::<MAX_RECURSION_LEVEL>(
-                        field,
-                        types,
-                        cache,
-                        &mut current_recursion_level,
-                    );
-                    max_recursion_level = max_recursion_level.max(current_recursion_level);
-                    cache.insert(&field.ty, resolved_type_docs.clone());
-                    // append the docs of the field to the resolved type docs
-                    new_type_docs.extend(field.docs.clone().into_iter().chain(resolved_type_docs));
-                });
-                cache.insert(&type_.ident, new_type_docs.clone());
-                *recursion_level = max_recursion_level;
-                new_type_docs
-            })
-        })
-        .unwrap_or_default()
+    if let Some(schema) = schema {
+        validate_json_blocks(&field.docs, schema)
+            .inspect_err(|e| error!(error = ?e, context=?field, "Error validating JSON blocks"))?;
+    }
+    // get the type of the field from the types set to recurse into it's fields
+    match types.get(&field.ty) {
+        Some(type_) => {
+            if let Some(cached_docs) = cache.get(&type_.ident as &str) {
+                return Ok(cached_docs.clone());
+            }
+
+            let mut max_recursion_level = 0;
+            let mut new_type_docs = type_.docs.clone();
+            new_type_docs.reserve(type_.fields.len());
+
+            for field in &type_.fields {
+                // increment the recursion level as we're going deeper into the tree
+                let mut current_recursion_level = *recursion_level + 1;
+                let resolved_type_docs = dfs_fields::<MAX_RECURSION_LEVEL>(
+                    field,
+                    types,
+                    cache,
+                    &mut current_recursion_level,
+                    schema,
+                )?;
+                max_recursion_level = max_recursion_level.max(current_recursion_level);
+                cache.insert(&field.ty, resolved_type_docs.clone());
+                new_type_docs.extend(field.docs.clone().into_iter().chain(resolved_type_docs));
+            }
+
+            cache.insert(&type_.ident, new_type_docs.clone());
+            *recursion_level = max_recursion_level;
+            Ok(new_type_docs)
+        }
+        None => Ok(Vec::new()),
+    }
 }
 
 /// Resolves the references of the types, so we can inline the docs of the types that are fields of
@@ -279,8 +292,11 @@ fn dfs_fields<'a, const MAX_RECURSION_LEVEL: usize>(
 /// be where we resolve all references and return the same HashSet and let the caller
 /// decide what the root should be.
 #[tracing::instrument(level = "trace", ret)]
-pub fn resolve_references(types: HashSet<PartialType>) -> Option<PartialType> {
-    /// Maximum recursion level for safety.
+pub fn resolve_references(
+    types: HashSet<PartialType>,
+    schema: Option<JSONSchema>,
+) -> Result<Option<PartialType>, DocsError> {
+    // Maximum recursion level for safety.
     const MAX_RECURSION_LEVEL: usize = 10;
     // Cache to perform memoization between recursive calls so we don't have to resolve the same
     // type multiple times. Mapping between `ident` -> `resolved_docs`.
@@ -288,39 +304,47 @@ pub fn resolve_references(types: HashSet<PartialType>) -> Option<PartialType> {
     // field of type `C`, and `C` has already been resolved, we don't want to resolve `C` again
     // as we iterate over the types. A -> (B -> C), (B -> C), (C)
     let mut cache = HashMap::with_capacity(types.len());
+    let mut max_area = 0;
+    let mut root_type = None;
 
-    types
-        .clone()
-        .into_iter()
-        .flat_map(|mut type_| {
-            // Check if the type has already been resolved.
-            (!cache.contains_key(&type_.ident as &str)).then(|| {
-                // We need to calculate the recursion level for the type, so we can get the root
-                // type later on.
-                let mut recursion_level = 0;
-                // Resolve the references of the fields of the type and modify the type.
-                type_.fields = type_
-                    .fields
-                    .into_iter()
-                    .map(|mut field| {
-                        // Depth first search to resolve the references of the fields with the types
-                        // as our lookup table.
-                        let resolved_type_docs = dfs_fields::<MAX_RECURSION_LEVEL>(
-                            &field,
-                            &types,
-                            &mut cache,
-                            &mut recursion_level,
-                        );
-                        // append the docs of the field to the resolved type docs
-                        field.docs.extend(resolved_type_docs);
-                        field
-                    })
-                    .collect::<BTreeSet<_>>();
-                (recursion_level, type_)
-            })
-        })
+    for type_ in &types {
+        // Check if the type has already been resolved.
+        if cache.contains_key(&type_.ident as &str) {
+            continue;
+        }
+        if let Some(schema) = &schema {
+            validate_json_blocks(&type_.docs, schema).inspect_err(
+                |e| error!(error = ?e, context=?type_, "Error validating JSON blocks"),
+            )?;
+        }
+        let mut recursion_level = 0;
+        let mut new_fields = BTreeSet::new();
+        let mut new_type = type_.clone();
+
+        // Depth first search to resolve the references of the fields with the types
+        // as our lookup table.
+        for mut field in type_.fields.clone() {
+            let resolved_type_docs = dfs_fields::<MAX_RECURSION_LEVEL>(
+                &field,
+                &types,
+                &mut cache,
+                &mut recursion_level,
+                &schema,
+            )?;
+            field.docs.extend(resolved_type_docs);
+            new_fields.insert(field);
+        }
+
+        new_type.fields = new_fields;
+
         // Get the type with the maximum "area", which should be our root type.
         // Area is recursion_level * number of fields in the type.
-        .max_by_key(|(recursion_level, type_)| *recursion_level * type_.fields.len())
-        .map(|(_, type_)| type_)
+        let area = recursion_level * new_type.fields.len();
+        if area >= max_area {
+            max_area = area;
+            root_type = Some(new_type);
+        }
+    }
+
+    Ok(root_type)
 }

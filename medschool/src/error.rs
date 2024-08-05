@@ -28,4 +28,12 @@ pub enum DocsError {
     /// Error when parsing the source files into `syn::File`.
     #[error(transparent)]
     ParseInt(#[from] std::num::ParseIntError),
+
+    /// Error parsing Json.
+    #[error("Error parsing Json: {0} {1}")]
+    Json(serde_json::Error, String),
+
+    /// Error parsing Json schema.
+    #[error("Error parsing Json schema: {0}")]
+    JsonSchema(String),
 }
