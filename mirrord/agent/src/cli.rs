@@ -43,7 +43,12 @@ pub struct Args {
     pub operator_tls_cert_pem: Option<String>,
 
     /// Which kind of mesh the remote pod is in, see [`MeshVendor`].
-    #[arg(default_value_t = false, env = "MIRRORD_AGENT_IN_SERVICE_MESH")]
+    #[arg(
+        long,
+        default_value_t = false,
+        hide = true,
+        env = "MIRRORD_AGENT_IN_SERVICE_MESH"
+    )]
     pub is_mesh: bool,
 }
 
