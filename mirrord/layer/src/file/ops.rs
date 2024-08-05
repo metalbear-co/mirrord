@@ -127,6 +127,7 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
     // don't add a trace here since it causes deadlocks in some cases.
     Detour::Success(
         OPEN_FILES
+            .lock()?
             .get(&local_fd)
             .map(|remote_file| remote_file.fd)
             // Bypass if we're not managing the relative part.
@@ -188,7 +189,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
     // the fd to a string.
     let local_file_fd = create_local_fake_file(remote_fd)?;
 
-    OPEN_FILES.insert(
+    OPEN_FILES.lock()?.insert(
         local_file_fd,
         Arc::new(RemoteFile::new(remote_fd, path.display().to_string())),
     );
@@ -202,7 +203,11 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
     // usize == ptr size
     // we don't return a pointer to an address that contains DIR
 
-    let remote_file_fd = OPEN_FILES.get(&fd).ok_or(Bypass::LocalFdNotFound(fd))?.fd;
+    let remote_file_fd = OPEN_FILES
+        .lock()?
+        .get(&fd)
+        .ok_or(Bypass::LocalFdNotFound(fd))?
+        .fd;
 
     let open_dir_request = FdOpenDirRequest {
         remote_fd: remote_file_fd,
@@ -212,7 +217,7 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
         common::make_proxy_request_with_response(open_dir_request)??;
 
     let local_dir_fd = create_local_fake_file(remote_dir_fd)?;
-    OPEN_DIRS.insert(local_dir_fd as usize, remote_dir_fd, fd);
+    OPEN_DIRS.insert(local_dir_fd as usize, remote_dir_fd, fd)?;
 
     // Let it stay in OPEN_FILES, as some functions might use it in comibination with dirfd
 
@@ -248,7 +253,7 @@ pub(crate) fn openat(
 
         let local_file_fd = create_local_fake_file(remote_fd)?;
 
-        OPEN_FILES.insert(
+        OPEN_FILES.lock()?.insert(
             local_file_fd,
             Arc::new(RemoteFile::new(remote_fd, path.display().to_string())),
         );

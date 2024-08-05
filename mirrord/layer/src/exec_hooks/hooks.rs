@@ -8,6 +8,8 @@ use mirrord_layer_macro::hook_fn;
 use mirrord_layer_macro::hook_guard_fn;
 
 use super::*;
+#[cfg(not(target_os = "macos"))]
+use crate::common::CheckedInto;
 #[cfg(target_os = "macos")]
 use crate::exec_utils::*;
 use crate::{
@@ -20,11 +22,14 @@ use crate::{
 
 /// Converts the [`SOCKETS`] map into a vector of pairs `(Fd, UserSocket)`, so we can rebuild
 /// it as a map.
-fn shared_sockets() -> Vec<(i32, UserSocket)> {
-    SOCKETS
-        .iter()
-        .map(|inner| (*inner.key(), UserSocket::clone(inner.value())))
-        .collect::<Vec<_>>()
+fn shared_sockets() -> Detour<Vec<(i32, UserSocket)>> {
+    Detour::Success(
+        SOCKETS
+            .lock()?
+            .iter()
+            .map(|(key, value)| (*key, value.as_ref().clone()))
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// Takes an [`Argv`] with the enviroment variables from an `exec` call, extending it with
@@ -38,7 +43,7 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
         other => Detour::Bypass(other),
     })?;
 
-    let encoded = bincode::encode_to_vec(shared_sockets(), bincode::config::standard())
+    let encoded = bincode::encode_to_vec(shared_sockets()?, bincode::config::standard())
         .map(|bytes| BASE64_URL_SAFE.encode(bytes))?;
 
     env_vars.push(CString::new(format!("{SHARED_SOCKETS_ENV_VAR}={encoded}"))?);
@@ -62,16 +67,12 @@ unsafe fn environ() -> *const *const c_char {
 #[cfg(not(target_os = "macos"))]
 #[hook_fn]
 unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_char) -> c_int {
-    let encoded = bincode::encode_to_vec(shared_sockets(), bincode::config::standard())
-        .map(|bytes| BASE64_URL_SAFE.encode(bytes))
-        .unwrap_or_default();
-
-    // `encoded` is emtpy if the encoding failed, so we don't set the env var.
-    if !encoded.is_empty() {
-        std::env::set_var(SHARED_SOCKETS_ENV_VAR, encoded);
+    let envp = environ();
+    if let Detour::Success(envp) = prepare_execve_envp(envp.checked_into()) {
+        FN_EXECVE(path, argv, envp.leak())
+    } else {
+        FN_EXECVE(path, argv, envp)
     }
-
-    FN_EXECVE(path, argv, environ())
 }
 
 /// Hook for `libc::execve`.
@@ -84,11 +85,6 @@ pub(crate) unsafe extern "C" fn execve_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    use crate::{common::CheckedInto, detour::DetourGuard};
-
-    let _guard = DetourGuard::new();
-
-    // Hopefully `envp` is a properly null-terminated list.
     if let Detour::Success(envp) = prepare_execve_envp(envp.checked_into()) {
         FN_EXECVE(path, argv, envp.leak())
     } else {
