@@ -22,11 +22,19 @@ pub struct ExperimentalConfig {
     #[config(default = false)]
     pub readlink: bool,
 
-    /// # _experimental_ trust_any_certificate {#experimental-trust_any_certificate}
+    /// ## _experimental_ trust_any_certificate {#experimental-trust_any_certificate}
     ///
     /// Enables trusting any certificate on macOS, useful for <https://github.com/golang/go/issues/51991#issuecomment-2059588252>
     #[config(default = false)]
     pub trust_any_certificate: bool,
+
+    /// ## _experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}
+    ///
+    /// Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application
+    /// shares sockets with child commands (e.g Python web servers with reload),
+    /// but the feature is not stable and may cause other issues.
+    #[config(default = true)]
+    pub enable_exec_hooks_linux: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -34,5 +42,6 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("tcp_ping4_mock", self.tcp_ping4_mock);
         analytics.add("readlink", self.readlink);
         analytics.add("trust_any_certificate", self.trust_any_certificate);
+        analytics.add("enable_exec_hooks_linux", self.enable_exec_hooks_linux);
     }
 }

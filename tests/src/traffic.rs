@@ -1,8 +1,12 @@
 mod steal;
 
 #[cfg(test)]
-mod traffic {
-    use std::{net::UdpSocket, path::PathBuf, time::Duration};
+mod traffic_tests {
+    use std::{
+        net::UdpSocket,
+        path::{Path, PathBuf},
+        time::Duration,
+    };
 
     use futures::Future;
     use futures_util::{stream::TryStreamExt, AsyncBufReadExt};
@@ -189,7 +193,11 @@ mod traffic {
         .await;
         let res = process.wait().await;
         assert!(res.success()); // The test does not fail, because UDP does not report dropped datagrams.
-        let stripped_target = internal_service.target.split('/').collect::<Vec<&str>>()[1];
+        let stripped_target = internal_service
+            .target
+            .split('/')
+            .nth(1)
+            .expect("malformed target");
         let logs = pod_api.logs(stripped_target, &lp).await;
         assert_eq!(logs.unwrap(), ""); // Assert that the target service did not get the message.
 
@@ -232,7 +240,7 @@ mod traffic {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn outgoing_traffic_filter_udp_with_connect(
-        config_dir: &std::path::PathBuf,
+        config_dir: &Path,
         #[future] udp_logger_service: KubeService,
         #[future] service: KubeService,
         #[future] kube_client: Client,
@@ -262,7 +270,7 @@ mod traffic {
         ];
 
         // Make connections on port `31415` go through local.
-        let mut config_path = config_dir.clone();
+        let mut config_path = config_dir.to_path_buf();
         config_path.push("outgoing_filter_local.json");
 
         // Meta-test: verify that the application cannot reach the internal service without
@@ -278,13 +286,17 @@ mod traffic {
         .await;
         let res = process.wait().await;
         assert!(!res.success()); // Should fail because local process cannot reach service.
-        let stripped_target = internal_service.target.split('/').collect::<Vec<&str>>()[1];
+        let stripped_target = internal_service
+            .target
+            .split('/')
+            .nth(1)
+            .expect("malformed target");
         let logs = pod_api.logs(stripped_target, &lp).await;
         assert_eq!(logs.unwrap(), "");
 
         // Create remote filter file with service name so we can test DNS outgoing filter.
         let service_name = internal_service.name.clone();
-        let mut filter_config_path = config_dir.clone();
+        let mut filter_config_path = config_dir.to_path_buf();
         let remote_config_filter = format!("outgoing_filter_remote_{service_name}.json");
         filter_config_path.push(remote_config_filter);
         let config_path = filter_config_path.clone();

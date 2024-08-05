@@ -346,6 +346,7 @@ mod test {
                 container_id: "container".to_string(),
                 container_runtime: ContainerRuntime::Docker,
                 container_name: "foo".to_string(),
+                guessed_container: false,
             },
         )
         .as_update();

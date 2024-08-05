@@ -132,7 +132,7 @@ pub async fn two_clients_steal_same_target_pod_deployment(
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub async fn two_clients_steal_with_http_filter(
-    config_dir: &std::path::PathBuf,
+    config_dir: &std::path::Path,
     #[future] service: KubeService,
     #[future] kube_client: Client,
     #[values(Application::NodeHTTP)] application: Application,
@@ -141,7 +141,7 @@ pub async fn two_clients_steal_with_http_filter(
     let kube_client = kube_client.await;
     let url = get_service_url(kube_client.clone(), &service).await;
 
-    let mut config_path = config_dir.clone();
+    let mut config_path = config_dir.to_path_buf();
     config_path.push("http_filter_header.json");
 
     let flags = vec!["--steal", "--fs-mode=local"];
@@ -159,7 +159,7 @@ pub async fn two_clients_steal_with_http_filter(
         .wait_for_line(Duration::from_secs(40), "daemon subscribed")
         .await;
 
-    let mut config_path = config_dir.clone();
+    let mut config_path = config_dir.to_path_buf();
     config_path.push("http_filter_header_no.json");
 
     let mut client_b = application

@@ -3,7 +3,7 @@
 #![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
@@ -13,11 +13,8 @@ use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
-use k8s_openapi::{
-    api::{apps::v1::Deployment, core::v1::Pod},
-    Metadata, NamespaceResourceScope,
-};
-use kube::{api::ListParams, Client};
+use kube::Client;
+use kube_resource::KubeResourceSeeker;
 use miette::JSONReportHandler;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, NullReporter, Reporter,
@@ -34,15 +31,11 @@ use mirrord_config::{
     target::TargetDisplay,
     LayerConfig, LayerFileConfig,
 };
-use mirrord_kube::api::{
-    container::SKIP_NAMES,
-    kubernetes::{create_kube_config, get_k8s_resource_api, rollout::Rollout},
-};
+use mirrord_kube::api::{container::SKIP_NAMES, kubernetes::create_kube_config};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
 use operator::operator_command;
 use semver::Version;
-use serde::de::DeserializeOwned;
 use serde_json::json;
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
@@ -56,6 +49,7 @@ mod execution;
 mod extension;
 mod extract;
 mod internal_proxy;
+mod kube_resource;
 mod operator;
 mod teams;
 mod util;
@@ -437,96 +431,6 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     execution_result
 }
 
-/// Returns a list of (pod name, [container names]) pairs, filtering out mesh side cars
-/// as well as any pods which are not ready or have crashed.
-async fn get_kube_pods(
-    namespace: Option<&str>,
-    client: &kube::Client,
-) -> HashMap<String, Vec<String>> {
-    let pods = get_kube_resources::<Pod>(namespace, client, Some("status.phase=Running"))
-        .await
-        .into_iter()
-        .filter(|pod| {
-            pod.status
-                .as_ref()
-                .and_then(|status| status.conditions.as_ref())
-                .map(|conditions| {
-                    // filter out pods without the Ready condition
-                    conditions
-                        .iter()
-                        .any(|condition| condition.type_ == "Ready" && condition.status == "True")
-                })
-                .unwrap_or(false)
-        });
-
-    // convert pods to (name, container names) pairs
-    pods.filter_map(|pod| {
-        let name = pod.metadata.name.clone()?;
-        let containers = pod
-            .spec
-            .as_ref()?
-            .containers
-            .iter()
-            .filter(|&container| (!SKIP_NAMES.contains(container.name.as_str())))
-            .map(|container| container.name.clone())
-            .collect();
-        Some((name, containers))
-    })
-    .collect()
-}
-
-async fn get_kube_deployments(
-    namespace: Option<&str>,
-    client: &kube::Client,
-) -> impl Iterator<Item = String> {
-    get_kube_resources::<Deployment>(namespace, client, None)
-        .await
-        .into_iter()
-        .filter(|deployment| {
-            deployment
-                .status
-                .as_ref()
-                .map(|status| status.available_replicas >= Some(1))
-                .unwrap_or(false)
-        })
-        .filter_map(|deployment| deployment.metadata.name)
-}
-
-async fn get_kube_rollouts(
-    namespace: Option<&str>,
-    client: &kube::Client,
-) -> impl Iterator<Item = String> {
-    get_kube_resources::<Rollout>(namespace, client, None)
-        .await
-        .into_iter()
-        .filter_map(|rollout| rollout.metadata().name.clone())
-}
-
-async fn get_kube_resources<K>(
-    namespace: Option<&str>,
-    client: &kube::Client,
-    field_selector: Option<&str>,
-) -> Vec<K>
-where
-    K: kube::Resource<Scope = NamespaceResourceScope>,
-    <K as kube::Resource>::DynamicType: Default,
-    K: Clone + DeserializeOwned + std::fmt::Debug,
-{
-    // Set up filters on the K8s resources returned - in this case, excluding the agent resources
-    // and then applying any provided field-based filter conditions.
-    let params = ListParams {
-        label_selector: Some("app!=mirrord".to_string()),
-        field_selector: field_selector.map(ToString::to_string),
-        ..Default::default()
-    };
-
-    get_k8s_resource_api(client, namespace)
-        .list(&params)
-        .await
-        .map(|resources| resources.items)
-        .unwrap_or_default()
-}
-
 async fn list_pods(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<Vec<String>> {
     let client = create_kube_config(
         layer_config.accept_invalid_certificates,
@@ -542,11 +446,12 @@ async fn list_pods(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<
         .as_deref()
         .or(layer_config.target.namespace.as_deref());
 
-    let (pods, deployments, rollouts) = futures::join!(
-        get_kube_pods(namespace, &client),
-        get_kube_deployments(namespace, &client),
-        get_kube_rollouts(namespace, &client)
-    );
+    let (pods, deployments, rollouts) = KubeResourceSeeker {
+        client: &client,
+        namespace,
+    }
+    .all_open_source()
+    .await;
 
     Ok(pods
         .iter()
@@ -567,14 +472,19 @@ async fn list_pods(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<
 
 /// Lists all possible target paths.
 /// Tries to use operator if available, otherwise falls back to k8s API (if operator isn't
-/// explicitly true). Example: ```[
+/// explicitly true). Example:
+/// ```
+/// [
 ///  "pod/metalbear-deployment-85c754c75f-982p5",
 ///  "pod/nginx-deployment-66b6c48dd5-dc9wk",
 ///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
 ///  "deployment/nginx-deployment"
 ///  "deployment/nginx-deployment/container/nginx"
 ///  "rollout/nginx-rollout"
-/// ]```
+///  "statefulset/nginx-statefulset"
+///  "statefulset/nginx-statefulset/container/nginx"
+/// ]
+/// ```
 async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     let mut layer_config = if let Some(config) = &args.config_file {
         let mut cfg_context = ConfigContext::default();

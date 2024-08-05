@@ -1,6 +1,6 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
-use std::{assert_matches::assert_matches, net::SocketAddr, path::PathBuf, time::Duration};
+use std::{assert_matches::assert_matches, net::SocketAddr, path::Path, time::Duration};
 
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse, LookupRecord},
@@ -22,10 +22,10 @@ pub use common::*;
 #[timeout(Duration::from_secs(60))]
 async fn test_issue2283(
     #[values(Application::NodeIssue2283)] application: Application,
-    dylib_path: &PathBuf,
-    config_dir: &PathBuf,
+    dylib_path: &Path,
+    config_dir: &Path,
 ) {
-    let mut config_path = config_dir.clone();
+    let mut config_path = config_dir.to_path_buf();
     config_path.push("outgoing_filter_local_not_existing_host.json");
 
     let (mut test_process, mut intproxy) = application

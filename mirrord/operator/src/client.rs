@@ -420,7 +420,7 @@ where
         P: Progress,
     {
         let Some(days_until_expiration) =
-            DateTime::from_naive_date(self.operator.spec.license.expire_at).days_until_expiration()
+            self.operator.spec.license.expire_at.days_until_expiration()
         else {
             let no_license_message = "No valid license found for mirrord for Teams. Visit https://app.metalbear.co to purchase or renew your license";
             progress.warning(no_license_message);

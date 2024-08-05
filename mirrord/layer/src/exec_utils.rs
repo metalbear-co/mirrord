@@ -1,11 +1,8 @@
 #![cfg(target_os = "macos")]
-
 use std::{
     env,
     ffi::{c_void, CStr, CString},
-    marker::PhantomData,
     path::PathBuf,
-    ptr,
     sync::OnceLock,
 };
 
@@ -25,6 +22,7 @@ use crate::{
         Detour::{Bypass, Error, Success},
     },
     error::HookError,
+    exec_hooks::{hooks, *},
     hooks::HookManager,
     replace,
 };
@@ -36,14 +34,13 @@ const MAX_ARGC: usize = 256;
 
 pub(crate) static PATCH_BINARIES: OnceLock<Vec<String>> = OnceLock::new();
 
-pub(crate) unsafe fn enable_execve_hook(
+pub(crate) unsafe fn enable_macos_hooks(
     hook_manager: &mut HookManager,
     patch_binaries: Vec<String>,
 ) {
     PATCH_BINARIES
         .set(patch_binaries)
         .expect("couldn't set patch_binaries");
-    replace!(hook_manager, "execve", execve_detour, FnExecve, FN_EXECVE);
     replace!(
         hook_manager,
         "posix_spawn",
@@ -91,42 +88,6 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
     }
 }
 
-/// Hold a vector of new CStrings to use instead of the original argv.
-#[derive(Default)]
-struct Argv(Vec<CString>);
-
-/// This must be memory-same as just a `*const c_char`.
-#[repr(C)]
-struct StringPtr<'a> {
-    ptr: *const c_char,
-    _phantom: PhantomData<&'a ()>,
-}
-
-impl Argv {
-    /// Get a null-pointer [`StringPtr`].
-    fn null_string_ptr() -> StringPtr<'static> {
-        StringPtr {
-            ptr: ptr::null(),
-            _phantom: Default::default(),
-        }
-    }
-
-    /// Get a vector of pointers of which the data buffer is memory-same as a null-terminated array
-    /// of pointers to null-terminated strings.
-    fn null_vec(&self) -> Vec<StringPtr> {
-        let mut vec: Vec<StringPtr> = self
-            .0
-            .iter()
-            .map(|c_string| StringPtr {
-                ptr: c_string.as_ptr(),
-                _phantom: Default::default(),
-            })
-            .collect();
-        vec.push(Self::null_string_ptr());
-        vec
-    }
-}
-
 /// Check if the arguments to the new executable contain paths to mirrord's temp dir.
 /// If they do, create a new array with the original paths instead of the patched paths.
 fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
@@ -166,7 +127,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
             // without consuming the original data.
             .to_owned();
 
-        c_string_vec.0.push(CString::new(stripped)?)
+        c_string_vec.push(CString::new(stripped)?)
     }
     Success(c_string_vec)
 }
@@ -179,7 +140,7 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
     for arg in envp_arr.iter() {
         let Detour::Success(arg_str): Detour<&str> = arg.checked_into() else {
             tracing::debug!("Failed to convert envp argument to string. Skipping.");
-            unsafe { c_string_vec.0.push(CStr::from_ptr(*arg).to_owned()) };
+            c_string_vec.push(unsafe { CStr::from_ptr(*arg).to_owned() });
             continue;
         };
 
@@ -187,12 +148,12 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
             found_dyld = true;
         }
 
-        c_string_vec.0.push(CString::new(arg_str)?)
+        c_string_vec.push(CString::new(arg_str)?)
     }
 
     if !found_dyld {
         for (key, value) in crate::setup().env_backup() {
-            c_string_vec.0.push(CString::new(format!("{key}={value}"))?);
+            c_string_vec.push(CString::new(format!("{key}={value}"))?);
         }
     }
     Success(c_string_vec)
@@ -202,7 +163,8 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
 /// in any of the arguments, remove it and leave only the original path of the file. If for example
 /// `argv[1]` is `"/tmp/mirrord-bin/bin/bash"`, create a new `argv` where `argv[1]` is
 /// `"/bin/bash"`.
-unsafe fn patch_sip_for_new_process(
+#[tracing::instrument(level = "trace", skip_all, ret)]
+pub(crate) unsafe fn patch_sip_for_new_process(
     path: *const c_char,
     argv: *const *const c_char,
     envp: *const *const c_char,
@@ -231,44 +193,8 @@ unsafe fn patch_sip_for_new_process(
     Success((path_c_string, argv_vec, envp_vec))
 }
 
-/// Hook for `libc::execve`.
-///
-/// We change 3 arguments and then call the original functions:
-/// 1. The executable path - we check it for SIP, create a patched binary and use the path to the
-///    new path instead of the original path. If there is no SIP, we use a new string with the same
-///    path.
-/// 2. argv - we strip mirrord's temporary directory from the start of arguments. So if argv[1] is
-///    "/var/folders/1337/mirrord-bin/opt/homebrew/bin/npx" Switch it to "/opt/homebrew/bin/npx"
-///    Also here we create a new array with pointers to new strings, even if there are no changes
-///    needed (except for the case of an error).
-/// 3. envp - We found out that Turbopack (Vercel) spawns a clean "Node" instance without env,
-///    basically stripping all of the important mirrord env.
-///    https://github.com/metalbear-co/mirrord/issues/2500
-///    We restore the `DYLD_INSERT_LIBRARIES` environment variable and all env vars starting with `MIRRORD_` if the dyld var can't be found in `envp`.
-/// If there is an error in the detour, we don't exit or anything, we just call the original libc
-/// function with the original passed arguments.
-#[hook_guard_fn]
-pub(crate) unsafe extern "C" fn execve_detour(
-    path: *const c_char,
-    argv: *const *const c_char,
-    envp: *const *const c_char,
-) -> c_int {
-    match patch_sip_for_new_process(path, argv, envp) {
-        Success((new_path, new_argv, new_envp)) => {
-            let new_argv = new_argv.null_vec();
-            let new_envp = new_envp.null_vec();
-            FN_EXECVE(
-                new_path.as_ptr(),
-                new_argv.as_ptr() as *const *const c_char,
-                new_envp.as_ptr() as *const *const c_char,
-            )
-        }
-        _ => FN_EXECVE(path, argv, envp),
-    }
-}
-
 /// Hook for `libc::posix_spawn`.
-/// Same as [`execve_detour`], with all the extra arguments present here being passed untouched.
+/// Same as `execve_detour`, with all the extra arguments present here being passed untouched.
 // TODO: do we also need to hook posix_spawnp?
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn posix_spawn_detour(
@@ -280,18 +206,25 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
     envp: *const *const c_char,
 ) -> c_int {
     match patch_sip_for_new_process(path, argv, envp) {
-        Success((new_path, new_argv, new_envp)) => {
-            let new_argv = new_argv.null_vec();
-            let new_envp = new_envp.null_vec();
-
-            FN_POSIX_SPAWN(
-                pid,
-                new_path.as_ptr(),
-                file_actions,
-                attrp,
-                new_argv.as_ptr() as *const *const c_char,
-                new_envp.as_ptr() as *const *const c_char,
-            )
+        Detour::Success((path, argv, envp)) => {
+            match hooks::prepare_execve_envp(Detour::Success(envp.clone())) {
+                Detour::Success(envp) => FN_POSIX_SPAWN(
+                    pid,
+                    path.into_raw().cast_const(),
+                    file_actions,
+                    attrp,
+                    argv.leak(),
+                    envp.leak(),
+                ),
+                _ => FN_POSIX_SPAWN(
+                    pid,
+                    path.into_raw().cast_const(),
+                    file_actions,
+                    attrp,
+                    argv.leak(),
+                    envp.leak(),
+                ),
+            }
         }
         _ => FN_POSIX_SPAWN(pid, path, file_actions, attrp, argv, envp),
     }

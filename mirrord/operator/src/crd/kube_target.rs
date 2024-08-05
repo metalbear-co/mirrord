@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn kube_target_unknown() {
-        let new = serde_json::from_str::<TargetSpec>(&r#"{"target": "Bolesław the Great"}"#)
+        let new = serde_json::from_str::<TargetSpec>(r#"{"target": "Bolesław the Great"}"#)
             .expect("Deserialization of unknown!");
 
         assert!(matches!(
@@ -162,7 +162,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn bonkers_kube_target_fails() {
-        serde_json::from_str::<TargetSpec>(&r#"{"king": "Sigismund II"}"#)
+        serde_json::from_str::<TargetSpec>(r#"{"king": "Sigismund II"}"#)
             .expect("Kings are not deserializible!");
     }
 }
