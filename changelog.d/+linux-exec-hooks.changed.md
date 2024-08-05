@@ -1,1 +1,0 @@
-Disabled exec hooks on Linux by default. Added `experimental.enable_exec_hooks_linux` switch to the mirrord config.

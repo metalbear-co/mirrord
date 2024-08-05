@@ -1,1 +1,0 @@
-Pinned `towncrier` version to `23.11.0` due to breaking update.

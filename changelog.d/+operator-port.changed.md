@@ -1,1 +1,0 @@
-Change operator port from 3000 to 443 to work without any FW exceptions
