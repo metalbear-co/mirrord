@@ -32,7 +32,7 @@ configuration file containing all fields.
 
 ```json
 {
-  "target": "{{ get_env(name="TARGET", default="pod/fallback") }}",
+  "target": "{{ get_env(name='TARGET', default='pod/fallback') }}",
   "feature": {
     "env": true,
     "fs": "read",
@@ -656,7 +656,7 @@ Specify map of patterns that if matched will replace the path according to speci
 Example:
 ```json
 {
-  "^/home/(?<user>\\S+)/dev/tomcat": "/etc/tomcat"
+  "^/home/(?<user>\\S+)/dev/tomcat": "/etc/tomcat",
   "^/home/(?<user>\\S+)/dev/config/(?<app>\\S+)": "/mnt/configs/${user}-$app"
 }
 ```

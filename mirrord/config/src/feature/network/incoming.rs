@@ -58,7 +58,7 @@ use http_filter::*;
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
-///         "ignore_ports": [9999, 10000]
+///         "ignore_ports": [9999, 10000],
 ///         "listen_ports": [[80, 8111]]
 ///       }
 ///     }

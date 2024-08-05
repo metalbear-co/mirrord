@@ -66,7 +66,7 @@ use crate::{
 ///
 /// ```json
 /// {
-///   "target": "{{ get_env(name="TARGET", default="pod/fallback") }}",
+///   "target": "{{ get_env(name='TARGET', default='pod/fallback') }}",
 ///   "feature": {
 ///     "env": true,
 ///     "fs": "read",
