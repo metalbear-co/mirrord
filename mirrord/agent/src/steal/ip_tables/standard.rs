@@ -12,7 +12,7 @@ use crate::{
 };
 
 pub(crate) struct StandardRedirect<IPT: IPTables> {
-    prerouteing: PreroutingRedirect<IPT>,
+    prerouting: PreroutingRedirect<IPT>,
     output: OutputRedirect<false, IPT>,
 }
 
@@ -21,23 +21,17 @@ where
     IPT: IPTables,
 {
     pub fn create(ipt: Arc<IPT>, pod_ips: Option<&str>) -> Result<Self> {
-        let prerouteing = PreroutingRedirect::create(ipt.clone())?;
+        let prerouting = PreroutingRedirect::create(ipt.clone())?;
         let output = OutputRedirect::create(ipt, IPTABLE_STANDARD.to_string(), pod_ips)?;
 
-        Ok(StandardRedirect {
-            prerouteing,
-            output,
-        })
+        Ok(StandardRedirect { prerouting, output })
     }
 
     pub fn load(ipt: Arc<IPT>) -> Result<Self> {
-        let prerouteing = PreroutingRedirect::load(ipt.clone())?;
+        let prerouting = PreroutingRedirect::load(ipt.clone())?;
         let output = OutputRedirect::load(ipt, IPTABLE_STANDARD.to_string())?;
 
-        Ok(StandardRedirect {
-            prerouteing,
-            output,
-        })
+        Ok(StandardRedirect { prerouting, output })
     }
 }
 
@@ -49,21 +43,21 @@ where
     IPT: IPTables + Send + Sync,
 {
     async fn mount_entrypoint(&self) -> Result<()> {
-        self.prerouteing.mount_entrypoint().await?;
+        self.prerouting.mount_entrypoint().await?;
         self.output.mount_entrypoint().await?;
 
         Ok(())
     }
 
     async fn unmount_entrypoint(&self) -> Result<()> {
-        self.prerouteing.unmount_entrypoint().await?;
+        self.prerouting.unmount_entrypoint().await?;
         self.output.unmount_entrypoint().await?;
 
         Ok(())
     }
 
     async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.prerouteing
+        self.prerouting
             .add_redirect(redirected_port, target_port)
             .await?;
         self.output
@@ -74,7 +68,7 @@ where
     }
 
     async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.prerouteing
+        self.prerouting
             .remove_redirect(redirected_port, target_port)
             .await?;
         self.output
