@@ -247,9 +247,9 @@ impl KubernetesAPI {
 
                 if matches!(mesh, MeshVendor::IstioAmbient) && !privileged {
                     progress.warning(
-                        "mirrord has detected that there is an ambient istio service mesh but\
-                         agent will not be created with a privileged SecurtyContext,\
-                         please set `agent.privileged = true` otherwise agent will not be able to start.",
+                        "mirrord detected an ambient Istio service mesh but\
+                         the agent is not configured to run in a privileged SecurityContext.\
+                         Please set `agent.privileged = true`, otherwise the agent will not be able to start.",
                     );
                 }
             }
