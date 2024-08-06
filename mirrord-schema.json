@@ -769,7 +769,7 @@
       "additionalProperties": false
     },
     "ExternalProxyFileConfig": {
-      "description": "Configuration for the external proxy mirrord spawns for mirrord container support, this proxy is used to allow intproxy running in sidecar to connect to agent\n\nThis is seldom used, but if you get `ConnectionRefused` errors, you might want to increase the timeouts a bit.\n\n```json { \"external_proxy\": { \"start_idle_timeout\": 30, \"idle_timeout\": 5 } } ```",
+      "description": "Configuration for the external proxy mirrord spawns when using the `mirrord container` command. This proxy is used to allow the internal proxy running in sidecar to connect to the mirrord agent.\n\nIf you get `ConnectionRefused` errors, increasing the timeouts a bit might solve the issue.\n\n```json { \"external_proxy\": { \"start_idle_timeout\": 30, \"idle_timeout\": 5 } } ```",
       "type": "object",
       "properties": {
         "client_tls_certificate": {
@@ -787,7 +787,8 @@
           ]
         },
         "connect_tcp": {
-          "description": "```json { \"exyernal_proxy\": { \"connect_tcp\": \"10.10.0.100:7777\" } } ```",
+          "title": "external_proxy.connect_tcp {#external_proxy-connect_tcp}",
+          "description": "```json { \"external_proxy\": { \"connect_tcp\": \"10.10.0.100:7777\" } } ```",
           "type": [
             "string",
             "null"
@@ -803,7 +804,7 @@
         },
         "log_level": {
           "title": "external_proxy.log_level {#external_proxy-log_level}",
-          "description": "Set the log level for the external proxy. RUST_LOG convention (i.e `mirrord=trace`) will only be used if log_destination is set",
+          "description": "Sets the log level for the external proxy.\n\nFollows the `RUST_LOG` convention (i.e `mirrord=trace`), and will only be used if `external_proxy.log_destination` is set",
           "type": [
             "string",
             "null"
@@ -811,7 +812,7 @@
         },
         "start_idle_timeout": {
           "title": "external_proxy.start_idle_timeout {#external_proxy-start_idle_timeout}",
-          "description": "How much time to wait for the first connection to the proxy in seconds.\n\nCommon cases would be running with dlv or any other debugger, which sets a breakpoint on process execution, delaying the layer startup and connection to proxy.\n\n```json { \"external_proxy\": { \"start_idle_timeout\": 60 } } ```",
+          "description": "How much time to wait for the first connection to the external proxy in seconds.\n\nCommon cases would be running with dlv or any other debugger, which sets a breakpoint on process execution, delaying the layer startup and connection to the external proxy.\n\n```json { \"external_proxy\": { \"start_idle_timeout\": 60 } } ```",
           "type": [
             "integer",
             "null"
@@ -1213,7 +1214,7 @@
       "properties": {
         "detach_io": {
           "title": "internal_proxy.detach_io {#internal_proxy-detach_io}",
-          "description": "This makes the process not to receive signals from the \"mirrord\" process or it's parent terminal, this prevents unwanted side effects.",
+          "description": "This makes the process not receive signals from the `mirrord` process or its parent terminal, preventing unwanted side effects.",
           "type": [
             "boolean",
             "null"

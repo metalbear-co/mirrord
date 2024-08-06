@@ -1,4 +1,4 @@
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, net::SocketAddr, time::Duration};
 
 use mirrord_analytics::Reporter;
 use mirrord_config::LayerConfig;
@@ -87,6 +87,39 @@ where
     Ok(Some(connection))
 }
 
+async fn try_using_external_proxy(
+    config: &LayerConfig,
+    proxy_addr: SocketAddr,
+) -> Result<AgentConnection> {
+    let socket = TcpSocket::new_v4().map_err(ExternalProxyError::Io)?;
+
+    let stream = socket
+        .connect(proxy_addr)
+        .await
+        .map_err(ExternalProxyError::Io)?;
+
+    let (sender, receiver) =
+        if let (Some(client_tls_certificate), Some(client_tls_key), Some(tls_certificate)) = (
+            config.external_proxy.client_tls_certificate.as_ref(),
+            config.external_proxy.client_tls_key.as_ref(),
+            config.external_proxy.tls_certificate.as_ref(),
+        ) {
+            wrap_connection_with_tls(
+                stream,
+                proxy_addr.ip(),
+                tls_certificate,
+                client_tls_certificate,
+                client_tls_key,
+            )
+            .await
+            .map_err(ExternalProxyError::from)?
+        } else {
+            wrap_raw_connection(stream)
+        };
+
+    Ok(AgentConnection { sender, receiver })
+}
+
 /// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
 ///    with the target using the mirrord-operator.
 /// 2. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], creates a
@@ -105,36 +138,9 @@ where
     P: Progress + Send + Sync,
 {
     if let Some(proxy_addr) = config.external_proxy.connect_tcp {
-        let socket = TcpSocket::new_v4().map_err(ExternalProxyError::Io)?;
+        let connection = try_using_external_proxy(config, proxy_addr).await?;
 
-        let stream = socket
-            .connect(proxy_addr)
-            .await
-            .map_err(ExternalProxyError::Io)?;
-
-        let (sender, receiver) =
-            if let (Some(client_tls_certificate), Some(client_tls_key), Some(tls_certificate)) = (
-                config.external_proxy.client_tls_certificate.as_ref(),
-                config.external_proxy.client_tls_key.as_ref(),
-                config.external_proxy.tls_certificate.as_ref(),
-            ) {
-                wrap_connection_with_tls(
-                    stream,
-                    proxy_addr.ip(),
-                    tls_certificate,
-                    client_tls_certificate,
-                    client_tls_key,
-                )
-                .await
-                .map_err(ExternalProxyError::from)?
-            } else {
-                wrap_raw_connection(stream)
-            };
-
-        return Ok((
-            AgentConnectInfo::ExternalProxy(proxy_addr),
-            AgentConnection { sender, receiver },
-        ));
+        return Ok((AgentConnectInfo::ExternalProxy(proxy_addr), connection));
     }
 
     if let Some(connection) = try_connect_using_operator(config, progress, analytics).await? {

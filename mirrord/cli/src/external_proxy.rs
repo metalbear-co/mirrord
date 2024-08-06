@@ -1,7 +1,7 @@
 //!
 //! External proxy to pipe communication from intproxy to agent
 //!
-//! ```
+//! ```text
 //!                    ┌────────────────┐         
 //!                k8s │ mirrord agent  │         
 //!                    └─────┬────▲─────┘         
@@ -93,7 +93,7 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
     let mut analytics = AnalyticsReporter::new(config.telemetry, watch);
     (&config).collect_analytics(analytics.get_mut());
 
-    let tls_acceptor = create_extenral_proxy_tls_acceptor(&config).await?;
+    let tls_acceptor = create_external_proxy_tls_acceptor(&config).await?;
     let listener = create_listen_socket(SocketAddr::new(
         local_ip().unwrap_or_else(|_| Ipv4Addr::UNSPECIFIED.into()),
         0,
@@ -165,7 +165,7 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
     Ok(())
 }
 
-async fn create_extenral_proxy_tls_acceptor(
+async fn create_external_proxy_tls_acceptor(
     config: &LayerConfig,
 ) -> Result<tokio_rustls::TlsAcceptor, ExternalProxyError> {
     let (Some(client_tls_certificate), Some(tls_certificate), Some(tls_key)) = (
