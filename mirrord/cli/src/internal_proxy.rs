@@ -103,9 +103,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
     print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
 
     if config.internal_proxy.detach_io {
-        unsafe {
-            detach_io().map_err(InternalProxyError::SetSid)?;
-        }
+        unsafe { detach_io() }.map_err(InternalProxyError::SetSid)?;
     }
 
     let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);

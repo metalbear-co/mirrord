@@ -94,7 +94,7 @@ impl Display for FsMode {
 }
 
 #[derive(Args, Debug)]
-/// Parameters for the `mirrord exec` (and `mirrord container`?) commands.
+/// Parameters to override any values from mirrord-config as part of `exec` or `container` commands.
 pub(super) struct ExecParams {
     /// Target name to mirror.    
     /// Target can either be a deployment or a pod.

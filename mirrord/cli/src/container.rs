@@ -59,7 +59,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<String, Contai
                 .flatten()
                 .unwrap_or_else(|| "stdout and stderr were empty".to_owned());
 
-            ContainerError::UnseccesfulCommandOutput(format_command(command), message)
+            ContainerError::UnsuccesfulCommandOutput(format_command(command), message)
         })
 }
 
@@ -101,7 +101,7 @@ fn create_self_signed_certificate(
     Ok((certificate, private_key))
 }
 
-/// Create a "sidecar" container that is running `mirrord intproy` that connects to `mirrord
+/// Create a "sidecar" container that is running `mirrord intproxy` that connects to `mirrord
 /// extproxy` running on user machine to be used by execution container (via mounting on same
 /// network)
 #[tracing::instrument(level = Level::TRACE, ret)]
@@ -133,7 +133,7 @@ async fn create_sidecar_intproxy(
     let sidecar_container_id =
         exec_and_get_first_line(Command::new(&runtime_binary).args(&sidecar_args[1..])).await?;
 
-    // After spawning sidecard with -d flag it prints container_id, now we need the address of
+    // After spawning sidecar with -d flag it prints container_id, now we need the address of
     // intproxy running in sidecar to be used by mirrord-layer in execution container
     let intproxy_address: SocketAddr =
         exec_and_get_first_line(Command::new(runtime_binary).args(["logs", &sidecar_container_id]))

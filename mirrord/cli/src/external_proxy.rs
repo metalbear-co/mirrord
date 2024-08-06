@@ -1,3 +1,24 @@
+//!
+//! External proxy to pipe communication from intproxy to agent
+//!
+//! ```
+//!                    ┌────────────────┐         
+//!                k8s │ mirrord agent  │         
+//!                    └─────┬────▲─────┘         
+//!                          │    │               
+//!                          │    │               
+//!                    ┌─────▼────┴─────┐         
+//!     container host │ external proxy │         
+//!                    └─────┬────▲─────┘         
+//!                          │    │               
+//!                          │    │               
+//!                    ┌─────▼────┴─────┐◄──────┐
+//!  sidecar container │ internal proxy │       │
+//!                    └──┬─────────────┴──┐    │
+//!         run container │ mirrord-layer  ├────┘
+//!                       └────────────────┘      
+//! ```
+
 use std::{
     fs::{File, OpenOptions},
     io,
@@ -81,9 +102,7 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
     .map_err(ExternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(ExternalProxyError::ListenerSetup)?;
 
-    unsafe {
-        detach_io().map_err(ExternalProxyError::SetSid)?;
-    }
+    unsafe { detach_io() }.map_err(ExternalProxyError::SetSid)?;
 
     let cancellation_token = CancellationToken::new();
     let connections = Arc::new(AtomicUsize::new(0));

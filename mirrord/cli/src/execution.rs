@@ -29,6 +29,8 @@ use crate::{
     Result,
 };
 
+/// Alias to "LD_PRELOAD" enviromnent variable used to mount mirrord-layer on linux targets and as
+/// part of the `mirrord container` command.
 pub(crate) const LINUX_INJECTION_ENV_VAR: &str = "LD_PRELOAD";
 
 #[cfg(target_os = "linux")]
@@ -295,9 +297,6 @@ impl MirrordExecution {
         let mut proxy_command =
             Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
 
-        // Set timeout when running from extension to be 30 seconds
-        // since it might need to compile, build until it runs the actual process
-        // and layer connects
         proxy_command
             .arg("extproxy")
             .stdout(std::process::Stdio::piped())

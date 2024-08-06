@@ -63,7 +63,7 @@ pub(crate) enum ContainerError {
 
     #[error("Comand failed to execute command [{0}]: {1}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
-    UnseccesfulCommandOutput(String, String),
+    UnsuccesfulCommandOutput(String, String),
 
     #[error("Failed get running proxy socket addr: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
