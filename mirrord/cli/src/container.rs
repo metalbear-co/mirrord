@@ -63,7 +63,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<String, Contai
         })
 }
 
-/// Create a temfile with a json serialized [`LayerConfig`] to be loaded by container and external
+/// Create a temp file with a json serialized [`LayerConfig`] to be loaded by container and external
 /// proxy
 #[tracing::instrument(level = Level::TRACE, ret)]
 fn create_composed_config(config: &LayerConfig) -> Result<NamedTempFile, ContainerError> {

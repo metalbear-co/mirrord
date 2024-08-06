@@ -9,11 +9,11 @@ use serde::Serialize;
 
 use crate::config::source::MirrordConfigSource;
 
-/// Configuration for the external proxy mirrord spawns for mirrord container support, this proxy is
-/// used to allow intproxy running in sidecar to connect to agent
+/// Configuration for the external proxy mirrord spawns when using the `mirrord container` command.
 ///
-/// This is seldom used, but if you get `ConnectionRefused` errors, you might
-/// want to increase the timeouts a bit.
+// This proxy is used to allow the internal proxy running in sidecar to connect to the mirrord agent.
+///
+/// If you get `ConnectionRefused` errors, increasing the timeouts a bit might solve the issue.
 ///
 /// ```json
 /// {
@@ -27,9 +27,10 @@ use crate::config::source::MirrordConfigSource;
 #[config(map_to = "ExternalProxyFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct ExternalProxyConfig {
+    /// ### external_proxy.connect_tcp {#external_proxy-connect_tcp}
     /// ```json
     /// {
-    ///   "exyernal_proxy": {
+    ///   "external_proxy": {
     ///     "connect_tcp": "10.10.0.100:7777"
     ///   }
     /// }
@@ -55,10 +56,10 @@ pub struct ExternalProxyConfig {
 
     /// ### external_proxy.start_idle_timeout {#external_proxy-start_idle_timeout}
     ///
-    /// How much time to wait for the first connection to the proxy in seconds.
+    /// How much time to wait for the first connection to the external proxy in seconds.
     ///
     /// Common cases would be running with dlv or any other debugger, which sets a breakpoint
-    /// on process execution, delaying the layer startup and connection to proxy.
+    /// on process execution, delaying the layer startup and connection to the external proxy.
     ///
     /// ```json
     /// {
@@ -71,9 +72,10 @@ pub struct ExternalProxyConfig {
     pub start_idle_timeout: u64,
 
     /// ### external_proxy.log_level {#external_proxy-log_level}
-    /// Set the log level for the external proxy.
-    /// RUST_LOG convention (i.e `mirrord=trace`)
-    /// will only be used if log_destination is set
+    /// Sets the log level for the external proxy.
+    ///
+    /// Follows the `RUST_LOG` convention (i.e `mirrord=trace`), and
+    /// will only be used if `external_proxy.log_destination` is set
     pub log_level: Option<String>,
 
     /// ### external_proxy.log_destination {#external_proxy-log_destination}
