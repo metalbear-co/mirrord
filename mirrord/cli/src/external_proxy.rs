@@ -83,10 +83,13 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
         }
     }
 
-    let agent_connect_info = std::env::var(AGENT_CONNECT_INFO_ENV_KEY).ok().map(|var| {
-    serde_json::from_str(&var)
+    let agent_connect_info = std::env::var(AGENT_CONNECT_INFO_ENV_KEY)
+        .ok()
+        .map(|var| {
+            serde_json::from_str(&var)
                 .map_err(|e| ExternalProxyError::DeseralizeConnectInfo(var, e))
-    }).transpose()?;
+        })
+        .transpose()?;
     let mut analytics = AnalyticsReporter::new(config.telemetry, watch);
     (&config).collect_analytics(analytics.get_mut());
 

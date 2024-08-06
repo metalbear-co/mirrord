@@ -10,8 +10,8 @@ use serde::Serialize;
 use crate::config::source::MirrordConfigSource;
 
 /// Configuration for the external proxy mirrord spawns when using the `mirrord container` command.
-///
-// This proxy is used to allow the internal proxy running in sidecar to connect to the mirrord agent.
+/// This proxy is used to allow the internal proxy running in sidecar to connect to the mirrord
+/// agent.
 ///
 /// If you get `ConnectionRefused` errors, increasing the timeouts a bit might solve the issue.
 ///
@@ -74,8 +74,8 @@ pub struct ExternalProxyConfig {
     /// ### external_proxy.log_level {#external_proxy-log_level}
     /// Sets the log level for the external proxy.
     ///
-    /// Follows the `RUST_LOG` convention (i.e `mirrord=trace`), and
-    /// will only be used if `external_proxy.log_destination` is set
+    /// Follows the `RUST_LOG` convention (i.e `mirrord=trace`), and will only be used if
+    /// `external_proxy.log_destination` is set
     pub log_level: Option<String>,
 
     /// ### external_proxy.log_destination {#external_proxy-log_destination}
