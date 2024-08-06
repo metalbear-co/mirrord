@@ -487,6 +487,16 @@ pub struct SqsSessionError {
     pub reason: String,
 }
 
+impl Display for SqsSessionError {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        // Write strictly the first element into the supplied output
+        // stream: `f`. Returns `fmt::Result` which indicates whether the
+        // operation succeeded or failed. Note that `write!` uses syntax which
+        // is very similar to `println!`.
+        write!(f, "{}", self.reason)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename = "SQSSessionStatus")]
 pub enum SqsSessionStatus {
