@@ -458,15 +458,6 @@ pub struct MirrordWorkloadQueueRegistrySpec {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub enum SqsSessionStartError {
-    /// SQS Splitter could not split queues with the given config.
-    SplitterError(String),
-    InvalidTarget,
-    #[serde(other)]
-    Unknown,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub enum SqsSessionCleanupError {
     #[serde(other)]
     Unknown,
@@ -485,14 +476,23 @@ pub struct SqsSplitDetails {
     env_updates: BTreeMap<String, QueueNameUpdate>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(rename = "SQSSessionStatus", rename_all = "camelCase")]
+/// Representation of Sqs errors for the status of SQS session resources.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SqsSessionError {
+    status_code: u16,
+
+    /// Human-readable explanation of what went wrong.
+    reason: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename = "SQSSessionStatus")]
 pub enum SqsSessionStatus {
-    #[default]
-    Starting,
+    Starting(),
     Ready(SqsSplitDetails),
-    StartError(SqsSessionStartError),
-    CleanupError(SqsSessionCleanupError, Option<SqsSplitDetails>),
+    StartError(SqsSessionError),
+    CleanupError(SqsSessionError, Option<SqsSplitDetails>),
 }
 
 /// The [`kube::runtime::wait::Condition`] trait is auto-implemented for this function.
@@ -500,7 +500,7 @@ pub enum SqsSessionStatus {
 pub fn is_session_ready(session: Option<&MirrordSqsSession>) -> bool {
     session
         .and_then(|session| session.status.as_ref())
-        .map(|status| matches!(status, SqsSessionStatus::Starting).not())
+        .map(|status| matches!(status, SqsSessionStatus::Starting(..)).not())
         .unwrap_or_default()
 }
 
