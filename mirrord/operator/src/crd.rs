@@ -481,10 +481,10 @@ pub struct SqsSplitDetails {
 #[serde(rename_all = "camelCase")]
 pub struct SqsSessionError {
     /// HTTP code for operator response.
-    status_code: u16,
+    pub status_code: u16,
 
     /// Human-readable explanation of what went wrong.
-    reason: String,
+    pub reason: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
