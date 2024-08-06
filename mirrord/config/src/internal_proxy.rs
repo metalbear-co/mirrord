@@ -68,8 +68,8 @@ pub struct InternalProxyConfig {
 
     /// ### internal_proxy.detach_io {#internal_proxy-detach_io}
     ///
-    /// This makes the process not to receive signals from the "mirrord" process or it's parent
-    /// terminal, this prevents unwanted side effects.
+    /// This makes the process not receive signals from the `mirrord` process or its parent
+    /// terminal, preventing unwanted side effects.
     #[config(default = true, env = "MIRRORD_INTPROXY_DETACH_IO")]
     pub detach_io: bool,
 }
