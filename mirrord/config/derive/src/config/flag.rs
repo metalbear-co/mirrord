@@ -111,7 +111,7 @@ impl ConfigFlags {
                     Meta::NameValue(meta)
                         if mode == ConfigFlagsType::Field && meta.path.is_ident("env") =>
                     {
-                        flags.env = lit_in_meta_name_value(&meta).map(EnvFlag);
+                        flags.env = Some(EnvFlag(meta.value));
                     }
                     Meta::Path(path)
                         if mode == ConfigFlagsType::Field && path.is_ident("default") =>
@@ -196,7 +196,7 @@ impl ConfigFlags {
 }
 
 #[derive(Debug)]
-pub struct EnvFlag(pub Lit);
+pub struct EnvFlag(pub Expr);
 
 impl ToTokens for EnvFlag {
     fn to_tokens(&self, tokens: &mut TokenStream) {

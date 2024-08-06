@@ -5,7 +5,9 @@ use std::{
 };
 
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
-use mirrord_config::{config::ConfigError, LayerConfig};
+use mirrord_config::{
+    config::ConfigError, internal_proxy::MIRRORD_INTPROXY_CONNECT_TCP_ENV, LayerConfig,
+};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel};
@@ -28,6 +30,9 @@ use crate::{
     util::remove_proxy_env,
     Result,
 };
+
+/// Env variable mirrord-layer uses to connect to intproxy
+pub static MIRRORD_CONNECT_TCP_ENV: &str = "MIRRORD_CONNECT_TCP";
 
 /// Alias to "LD_PRELOAD" enviromnent variable used to mount mirrord-layer on linux targets and as
 /// part of the `mirrord container` command.
@@ -221,7 +226,7 @@ impl MirrordExecution {
 
         // Provide details for layer to connect to agent via internal proxy
         env_vars.insert(
-            "MIRRORD_CONNECT_TCP".to_string(),
+            MIRRORD_CONNECT_TCP_ENV.to_string(),
             format!("127.0.0.1:{}", address.port()),
         );
 
@@ -338,7 +343,7 @@ impl MirrordExecution {
 
         // Provide details for layer to connect to agent via internal proxy
         env_vars.insert(
-            "MIRRORD_EXTERNAL_CONNECT_TCP".to_string(),
+            MIRRORD_INTPROXY_CONNECT_TCP_ENV.to_string(),
             address.to_string(),
         );
         env_vars.insert(

@@ -28,7 +28,7 @@ use mirrord_intproxy::{
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use nix::sys::resource::{setrlimit, Resource};
 use tokio::net::TcpListener;
-use tracing::warn;
+use tracing::{warn, Level};
 use tracing_subscriber::EnvFilter;
 
 use crate::{
@@ -116,6 +116,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
 }
 
 /// Creates a connection with the agent and handles one round of ping pong.
+#[tracing::instrument(level = Level::TRACE)]
 pub(crate) async fn connect_and_ping(
     config: &LayerConfig,
     connect_info: Option<AgentConnectInfo>,

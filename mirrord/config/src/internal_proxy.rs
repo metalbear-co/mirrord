@@ -1,8 +1,13 @@
+use std::{net::SocketAddr, path::PathBuf};
+
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::config::source::MirrordConfigSource;
+
+pub static MIRRORD_INTPROXY_CONNECT_TCP_ENV: &str = "MIRRORD_INTPROXY_CONNECT_TCP";
+pub static MIRRORD_INTPROXY_DETACH_IO_ENV: &str = "MIRRORD_INTPROXY_DETACH_IO";
 
 /// Configuration for the internal proxy mirrord spawns for each local mirrord session
 /// that local layers use to connect to the remote agent
@@ -22,6 +27,34 @@ use crate::config::source::MirrordConfigSource;
 #[config(map_to = "InternalProxyFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct InternalProxyConfig {
+    /// ### internal_proxy.connect_tcp {#internal_proxy-connect_tcp}
+    ///
+    ///
+    ///
+    /// ```json
+    /// {
+    ///   "internal_proxy": {
+    ///     "connect_tcp": "10.10.0.100:7777"
+    ///   }
+    /// }
+    /// ```
+    #[config(env = MIRRORD_INTPROXY_CONNECT_TCP_ENV)]
+    pub connect_tcp: Option<SocketAddr>,
+
+    /// ### internal_proxy.client_tls_certificate {#internal_proxy-client_tls_certificate}
+    ///
+    /// Certificate to use as tls client credentials for connection to `connect_tcp`.
+    /// (self-signed one will be generated automaticaly if not specified)
+    #[config(env = "MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE")]
+    pub client_tls_certificate: Option<PathBuf>,
+
+    /// ### internal_proxy.client_tls_key {#internal_proxy-client_tls_key}
+    ///
+    /// Private Key to use as tls client credentials for connection to `connect_tcp`.
+    /// (self-signed one will be generated automaticaly if not specified)
+    #[config(env = "MIRRORD_INTPROXY_CLIENT_TLS_KEY")]
+    pub client_tls_key: Option<PathBuf>,
+
     /// ### internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}
     ///
     /// How much time to wait for the first connection to the proxy in seconds.
@@ -70,6 +103,6 @@ pub struct InternalProxyConfig {
     ///
     /// This makes the process not receive signals from the `mirrord` process or its parent
     /// terminal, preventing unwanted side effects.
-    #[config(default = true, env = "MIRRORD_INTPROXY_DETACH_IO")]
+    #[config(default = true, env = MIRRORD_INTPROXY_DETACH_IO_ENV)]
     pub detach_io: bool,
 }

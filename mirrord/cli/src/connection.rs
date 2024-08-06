@@ -17,6 +17,8 @@ use tracing::Level;
 
 use crate::{error::ExternalProxyError, CliError, Result};
 
+pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
+
 pub(crate) struct AgentConnection {
     pub sender: mpsc::Sender<ClientMessage>,
     pub receiver: mpsc::Receiver<DaemonMessage>,
@@ -92,6 +94,8 @@ async fn try_using_external_proxy(
     proxy_addr: SocketAddr,
 ) -> Result<AgentConnection> {
     let socket = TcpSocket::new_v4().map_err(ExternalProxyError::Io)?;
+    socket.set_keepalive(true).map_err(ExternalProxyError::Io)?;
+    socket.set_nodelay(true).map_err(ExternalProxyError::Io)?;
 
     let stream = socket
         .connect(proxy_addr)
@@ -100,8 +104,8 @@ async fn try_using_external_proxy(
 
     let (sender, receiver) =
         if let (Some(client_tls_certificate), Some(client_tls_key), Some(tls_certificate)) = (
-            config.external_proxy.client_tls_certificate.as_ref(),
-            config.external_proxy.client_tls_key.as_ref(),
+            config.internal_proxy.client_tls_certificate.as_ref(),
+            config.internal_proxy.client_tls_key.as_ref(),
             config.external_proxy.tls_certificate.as_ref(),
         ) {
             wrap_connection_with_tls(
@@ -137,7 +141,7 @@ pub(crate) async fn create_and_connect<P, R: Reporter>(
 where
     P: Progress + Send + Sync,
 {
-    if let Some(proxy_addr) = config.external_proxy.connect_tcp {
+    if let Some(proxy_addr) = config.internal_proxy.connect_tcp {
         let connection = try_using_external_proxy(config, proxy_addr).await?;
 
         return Ok((AgentConnectInfo::ExternalProxy(proxy_addr), connection));
@@ -216,5 +220,3 @@ where
         AgentConnection { sender, receiver },
     ))
 }
-
-pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";

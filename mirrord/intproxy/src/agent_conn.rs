@@ -125,12 +125,15 @@ impl AgentConnection {
 
             Some(AgentConnectInfo::ExternalProxy(proxy_addr)) => {
                 let socket = TcpSocket::new_v4()?;
+                socket.set_keepalive(true)?;
+                socket.set_nodelay(true)?;
+
                 let stream = socket.connect(proxy_addr).await?;
 
                 if let (Some(tls_certificate), Some(client_tls_certificate), Some(client_tls_key)) = (
                     config.external_proxy.tls_certificate.as_ref(),
-                    config.external_proxy.client_tls_certificate.as_ref(),
-                    config.external_proxy.client_tls_key.as_ref(),
+                    config.internal_proxy.client_tls_certificate.as_ref(),
+                    config.internal_proxy.client_tls_key.as_ref(),
                 ) {
                     wrap_connection_with_tls(
                         stream,

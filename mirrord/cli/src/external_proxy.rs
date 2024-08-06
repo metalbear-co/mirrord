@@ -169,7 +169,7 @@ async fn create_external_proxy_tls_acceptor(
     config: &LayerConfig,
 ) -> Result<tokio_rustls::TlsAcceptor, ExternalProxyError> {
     let (Some(client_tls_certificate), Some(tls_certificate), Some(tls_key)) = (
-        config.external_proxy.client_tls_certificate.as_ref(),
+        config.internal_proxy.client_tls_certificate.as_ref(),
         config.external_proxy.tls_certificate.as_ref(),
         config.external_proxy.tls_key.as_ref(),
     ) else {

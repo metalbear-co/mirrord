@@ -1,6 +1,7 @@
 use std::{
     io::{BufRead, BufReader, Cursor, Write},
     net::SocketAddr,
+    path::Path,
 };
 
 use exec::execvp;
@@ -17,14 +18,11 @@ use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     container::command_builder::RuntimeCommandBuilder,
     error::{ContainerError, Result},
-    execution::{MirrordExecution, LINUX_INJECTION_ENV_VAR},
+    execution::{MirrordExecution, LINUX_INJECTION_ENV_VAR, MIRRORD_CONNECT_TCP_ENV},
     util::MIRRORD_CONSOLE_ADDR_ENV,
 };
 
 mod command_builder;
-
-/// Env variable mirrord-layer uses to connect to intproxy
-static MIRRORD_CONNECT_TCP_ENV_VAR: &str = "MIRRORD_CONNECT_TCP";
 
 /// Format [`Command`] to look like the executated command (currently without env because we don't
 /// use it in these scenarios)
@@ -160,18 +158,18 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
         progress.warning(warning);
     }
 
-    let _internal_proxy_tls_guards = if config.external_proxy.client_tls_certificate.is_none()
-        || config.external_proxy.client_tls_key.is_none()
+    let _internal_proxy_tls_guards = if config.internal_proxy.client_tls_certificate.is_none()
+        || config.internal_proxy.client_tls_key.is_none()
     {
         let (internal_proxy_cert, internal_proxy_key) =
             create_self_signed_certificate(vec!["intproxy".to_owned()])?;
 
         config
-            .external_proxy
+            .internal_proxy
             .client_tls_certificate
             .replace(internal_proxy_cert.path().to_path_buf());
         config
-            .external_proxy
+            .internal_proxy
             .client_tls_key
             .replace(internal_proxy_key.path().to_path_buf());
 
@@ -217,7 +215,7 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     let mut execution_info_env_without_connection_info = Vec::new();
 
     for (key, value) in &execution_info.environment {
-        if key == MIRRORD_CONNECT_TCP_ENV_VAR || key == AGENT_CONNECT_INFO_ENV_KEY {
+        if key == MIRRORD_CONNECT_TCP_ENV || key == AGENT_CONNECT_INFO_ENV_KEY {
             connection_info.push((key.as_str(), value.as_str()));
         } else {
             execution_info_env_without_connection_info.push((key.as_str(), value.as_str()))
@@ -248,11 +246,27 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     runtime_command.add_env(MIRRORD_CONFIG_FILE_ENV, "/tmp/mirrord-config.json");
     runtime_command.add_volume(composed_config_file.path(), "/tmp/mirrord-config.json");
 
-    for (env, path) in config.external_proxy.as_tls_envs() {
+    let mut load_env_and_mount_pem = |env: &str, path: &Path| {
         let container_path = format!("/tmp/{}.pem", env.to_lowercase());
 
         runtime_command.add_env(env, &container_path);
         runtime_command.add_volume(path, container_path);
+    };
+
+    if let Some(path) = config.internal_proxy.client_tls_certificate.as_ref() {
+        load_env_and_mount_pem("MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE", path)
+    }
+
+    if let Some(path) = config.internal_proxy.client_tls_key.as_ref() {
+        load_env_and_mount_pem("MIRRORD_INTPROXY_CLIENT_TLS_KEY", path)
+    }
+
+    if let Some(path) = config.external_proxy.tls_certificate.as_ref() {
+        load_env_and_mount_pem("MIRRORD_EXTERNAL_TLS_CERTIFICATE", path)
+    }
+
+    if let Some(path) = config.external_proxy.tls_key.as_ref() {
+        load_env_and_mount_pem("MIRRORD_EXTERNAL_TLS_KEY", path)
     }
 
     runtime_command.add_envs(execution_info_env_without_connection_info);
@@ -265,7 +279,7 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
 
     runtime_command.add_env(LINUX_INJECTION_ENV_VAR, config.container.cli_image_lib_path);
     runtime_command.add_env(
-        MIRRORD_CONNECT_TCP_ENV_VAR,
+        MIRRORD_CONNECT_TCP_ENV,
         sidecar_intproxy_address.to_string(),
     );
 

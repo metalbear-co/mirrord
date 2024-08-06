@@ -1,7 +1,4 @@
-use std::{
-    net::SocketAddr,
-    path::{Path, PathBuf},
-};
+use std::path::PathBuf;
 
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -27,30 +24,17 @@ use crate::config::source::MirrordConfigSource;
 #[config(map_to = "ExternalProxyFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct ExternalProxyConfig {
-    /// ### external_proxy.connect_tcp {#external_proxy-connect_tcp}
-    /// ```json
-    /// {
-    ///   "external_proxy": {
-    ///     "connect_tcp": "10.10.0.100:7777"
-    ///   }
-    /// }
-    /// ```
-    #[config(env = "MIRRORD_EXTERNAL_CONNECT_TCP")]
-    pub connect_tcp: Option<SocketAddr>,
-
-    /// ### external_proxy.client_tls_certificate {#external_proxy-client_tls_certificate}
-    #[config(env = "MIRRORD_EXTERNAL_CLIENT_TLS_CERTIFICATE")]
-    pub client_tls_certificate: Option<PathBuf>,
-
-    /// ### external_proxy.client_tls_key {#external_proxy-client_tls_key}
-    #[config(env = "MIRRORD_EXTERNAL_CLIENT_TLS_KEY")]
-    pub client_tls_key: Option<PathBuf>,
-
     /// ### external_proxy.tls_certificate {#external_proxy-tls_certificate}
+    ///
+    /// Certificate path to be used for wrapping external proxy tcp listener with a tcp acceptor
+    /// (self-signed one will be generated automaticaly if not specified)
     #[config(env = "MIRRORD_EXTERNAL_TLS_CERTIFICATE")]
     pub tls_certificate: Option<PathBuf>,
 
     /// ### external_proxy.tls_key {#external_proxy-tls_key}
+    ///
+    /// Private Key path to be used for wrapping external proxy tcp listener with a tcp acceptor
+    /// (self-signed one will be generated automaticaly if not specified)
     #[config(env = "MIRRORD_EXTERNAL_TLS_KEY")]
     pub tls_key: Option<PathBuf>,
 
@@ -81,32 +65,4 @@ pub struct ExternalProxyConfig {
     /// ### external_proxy.log_destination {#external_proxy-log_destination}
     /// Set the log file destination for the external proxy.
     pub log_destination: Option<String>,
-}
-
-fn env_iter<'a>(
-    env: &'static str,
-    value: Option<&'a Path>,
-) -> impl Iterator<Item = (&'static str, &'a Path)> {
-    value.into_iter().map(move |path| (env, path))
-}
-
-impl ExternalProxyConfig {
-    pub fn as_tls_envs(&self) -> impl Iterator<Item = (&'static str, &Path)> {
-        env_iter(
-            "MIRRORD_EXTERNAL_CLIENT_TLS_CERTIFICATE",
-            self.client_tls_certificate.as_deref(),
-        )
-        .chain(env_iter(
-            "MIRRORD_EXTERNAL_CLIENT_TLS_KEY",
-            self.client_tls_key.as_deref(),
-        ))
-        .chain(env_iter(
-            "MIRRORD_EXTERNAL_TLS_CERTIFICATE",
-            self.tls_certificate.as_deref(),
-        ))
-        .chain(env_iter(
-            "MIRRORD_EXTERNAL_TLS_KEY",
-            self.tls_key.as_deref(),
-        ))
-    }
 }
