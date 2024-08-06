@@ -125,13 +125,10 @@ async fn create_sidecar_intproxy(
 
     let (runtime_binary, sidecar_args) = sidecar_command
         .with_command(sidecar_container_command)
-        .into_execvp_args();
+        .into_command_args();
 
-    // We skip first index of sidecar_args because `RuntimeCommandBuilder::into_execvp_args` adds
-    // the binary as first arg for `execvp`
-    #[allow(clippy::indexing_slicing)]
     let sidecar_container_id =
-        exec_and_get_first_line(Command::new(&runtime_binary).args(&sidecar_args[1..])).await?;
+        exec_and_get_first_line(Command::new(&runtime_binary).args(sidecar_args)).await?;
 
     // After spawning sidecar with -d flag it prints container_id, now we need the address of
     // intproxy running in sidecar to be used by mirrord-layer in execution container

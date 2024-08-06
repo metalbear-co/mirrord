@@ -114,7 +114,8 @@ impl RuntimeCommandBuilder {
 }
 
 impl RuntimeCommandBuilder<WithCommand> {
-    pub fn into_execvp_args(self) -> (String, Vec<String>) {
+    /// Return completed command command with updated arguments
+    pub fn into_command_args(self) -> (String, impl Iterator<Item = String>) {
         let RuntimeCommandBuilder {
             runtime,
             extra_args,
@@ -127,11 +128,17 @@ impl RuntimeCommandBuilder<WithCommand> {
 
         (
             runtime.to_string(),
-            std::iter::once(runtime.to_string())
-                .chain(std::iter::once(runtime_command))
+            std::iter::once(runtime_command)
                 .chain(extra_args)
-                .chain(runtime_args)
-                .collect(),
+                .chain(runtime_args),
         )
+    }
+
+    /// Same as [`RuntimeCommandBuilder::<WithCommand>::into_command_args`] execvp expects first arg
+    /// to be binary so we pass the same value as runtime as first element
+    pub fn into_execvp_args(self) -> (String, impl Iterator<Item = String>) {
+        let (runtime, args) = self.into_command_args();
+
+        (runtime.clone(), std::iter::once(runtime).chain(args))
     }
 }
