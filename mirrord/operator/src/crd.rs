@@ -467,13 +467,13 @@ pub enum SqsSessionCleanupError {
 #[serde(rename = "SQSSplitDetails", rename_all = "camelCase")]
 pub struct SqsSplitDetails {
     /// Queue ID -> old and new queue names.
-    queue_names: BTreeMap<QueueId, QueueNameUpdate>,
+    pub queue_names: BTreeMap<QueueId, QueueNameUpdate>,
 
     // A bit redundant, because the registry resource status has the mapping from env var name
     // to queue id, and `queue_names` has the mapping from queue id to name update, but, saving
     // it here in the form that is useful to reader, for simplicity and readability.
     /// Env var name -> old and new queue names.
-    env_updates: BTreeMap<String, QueueNameUpdate>,
+    pub env_updates: BTreeMap<String, QueueNameUpdate>,
 }
 
 /// Representation of Sqs errors for the status of SQS session resources.
