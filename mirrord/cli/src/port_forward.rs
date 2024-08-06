@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    io::Bytes,
     net::SocketAddr,
     time::{Duration, Instant},
 };
@@ -8,7 +9,7 @@ use futures::future::Either;
 use mirrord_protocol::{
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
-        LayerClose, LayerConnect, SocketAddress,
+        LayerClose, LayerConnect, LayerWrite, SocketAddress,
     },
     ClientMessage, ConnectionId, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS,
 };
@@ -32,6 +33,7 @@ pub struct PortForwarder {
     // accepts connections from the user app in the form of a stream
     listeners: StreamMap<SocketAddr, TcpListenerStream>,
     // the reading half of the stream received by a listener for receiving data to send to the
+    // agent
     rx_connections: StreamMap<SocketAddr, OwnedReadHalf>,
     // the writing half of the stream received by a listener for sending data back to the user app
     tx_connections: HashMap<SocketAddr, OwnedWriteHalf>,
@@ -139,11 +141,11 @@ impl PortForwarder {
                                         match res {
                                             Ok(connection) => {
                                                 let SocketAddress::Ip(local_address) = connection.local_address else {
-                                                    return Err(PortForwardError::ConnectionError("Unexpectedly received Unix address for socket during setup".into()));
+                                                    return Err(PortForwardError::ConnectionError
+                                                        ("Unexpectedly received Unix address for socket during setup".into())
+                                                    );
                                                 };
                                                 self.sockets_ids_map.insert(connection.connection_id, local_address);
-                                                // TODO: new connection made successfully, spawn new task to proxy data
-                                                // tokio::spawn();
                                             },
                                             Err(error) => return Err(PortForwardError::ConnectionError(format!("{error}"))),
                                         }
@@ -213,7 +215,11 @@ impl PortForwarder {
                         self.sockets_ids_map.remove(Either::Right(socket));
                     },
                     None => break Ok(()), // all streams ended
-                }
+                },
+
+                // message = self.rx_connections.next() => match message {
+                    // TODO: ReadHalf does not allow .next()
+                // }
             }
         }
     }
