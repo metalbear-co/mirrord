@@ -1,4 +1,8 @@
-use std::{collections::HashMap, net::SocketAddr};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
 
 use futures::future::Either;
 use mirrord_protocol::{
@@ -33,6 +37,9 @@ pub struct PortForwarder {
     tx_connections: HashMap<SocketAddr, OwnedWriteHalf>,
     // bijective map for storing connection_ids and sockets
     sockets_ids_map: BiMap,
+    // true if Ping has been sent to agent
+    waiting_for_pong: bool,
+    ping_pong_timeout: Instant,
 }
 
 impl PortForwarder {
@@ -69,6 +76,8 @@ impl PortForwarder {
                 connection_ids: HashMap::new(),
                 sockets: HashMap::new(),
             },
+            waiting_for_pong: false,
+            ping_pong_timeout: Instant::now(),
         })
     }
 
@@ -111,6 +120,16 @@ impl PortForwarder {
 
         loop {
             select! {
+                _ = tokio::time::sleep_until(self.ping_pong_timeout.into()) => {
+                    if self.waiting_for_pong {
+                        // no pong received before timeout
+                        break Err(PortForwardError::AgentError("Agent failed to respond to Ping".into()));
+                    }
+                    let _ = self.agent_connection.sender.send(ClientMessage::Ping).await;
+                    self.waiting_for_pong = true;
+                    self.ping_pong_timeout = Instant::now() + Duration::from_secs(30);
+                },
+
                 message = self.agent_connection.receiver.recv() => match message {
                     Some(message) => {
                         match message {
@@ -123,12 +142,13 @@ impl PortForwarder {
                                                     return Err(PortForwardError::ConnectionError("Unexpectedly received Unix address for socket during setup".into()));
                                                 };
                                                 self.sockets_ids_map.insert(connection.connection_id, local_address);
-                                                // tokio::spawn(); // TODO: new connection made successfully, spawn new task to proxy data
+                                                // TODO: new connection made successfully, spawn new task to proxy data
+                                                // tokio::spawn();
                                             },
-                                            Err(error) => return Err(PortForwardError::ConnectionError("{error}".into())), // FIX: string format
+                                            Err(error) => return Err(PortForwardError::ConnectionError(format!("{error}"))),
                                         }
                                     },
-                                    DaemonTcpOutgoing::Read(res) => todo!(), // TODO: response from remote socket? can this happen?
+                                    DaemonTcpOutgoing::Read(res) => todo!(), // TODO: :)
                                     DaemonTcpOutgoing::Close(connection_id) => {
                                         if let Some(Either::Right(socket)) = self.sockets_ids_map.get(Either::Left(connection_id)) {
                                             self.sockets_ids_map.remove(Either::Right(socket));
@@ -144,12 +164,18 @@ impl PortForwarder {
                                     LogLevel::Error => tracing::error!(log_message.message),
                                 }
                             },
-                            DaemonMessage::Pong => todo!(), // TODO: ?
+                            DaemonMessage::Pong => {
+                                if !self.waiting_for_pong {
+                                    // message not expected
+                                    break Err(PortForwardError::AgentError("Unexpected message from Agent: DaemonMessage::Pong".into()));
+                                }
+                                self.waiting_for_pong = false;
+                            },
                             DaemonMessage::Close(error) => {
                                 break Err(PortForwardError::AgentError(error));
                             },
                             other@_ => {
-                                break Err(PortForwardError::AgentError("Unexpected message from Agent: {other}".into())); // FIX: string format
+                                break Err(PortForwardError::AgentError(format!("Unexpected message from Agent: {other:?}")));
                             },
                         }
                     },
