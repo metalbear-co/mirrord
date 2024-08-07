@@ -368,7 +368,14 @@ pub enum SplitQueue {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // Deployment -> deployment in yaml.
 pub enum QueueConsumer {
+    /// The name of the deployment and an optional container.
+    /// If a container is not specified, the workload queue registry will apply to every run that
+    /// targets any of the workload's containers.
     Deployment(String, Option<String>),
+
+    /// The name of the rollout and an optional container.
+    /// If a container is not specified, the workload queue registry will apply to every run that
+    /// targets any of the workload's containers.
     Rollout(String, Option<String>),
 }
 
@@ -377,6 +384,28 @@ impl QueueConsumer {
         match self {
             QueueConsumer::Deployment(dep, container) => ("deployment", dep, container.as_deref()),
             QueueConsumer::Rollout(roll, container) => ("rollout", roll, container.as_deref()),
+        }
+    }
+
+    /// For self that is the queue consumer of a run, test if a given registry object is the correct
+    /// registry for this run.
+    pub fn registry_matches(&self, registry: &MirrordWorkloadQueueRegistry) -> bool {
+        match (self, &registry.spec.consumer) {
+            (
+                QueueConsumer::Deployment(name, container),
+                QueueConsumer::Deployment(registry_consumer_name, registry_consumer_container),
+            )
+            | (
+                QueueConsumer::Rollout(name, container),
+                QueueConsumer::Rollout(registry_consumer_name, registry_consumer_container),
+            ) => {
+                name == registry_consumer_name
+                    && (container == registry_consumer_container
+                        // If registry does not specify a container, it applies to all runs with
+                        // this target, regardless of what container they are targeting.
+                        || registry_consumer_container.is_none())
+            }
+            _ => false,
         }
     }
 }
