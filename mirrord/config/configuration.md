@@ -382,30 +382,102 @@ IP:PORT to connect to instead of using k8s api, for testing purposes.
 }
 ```
 
-# experimental {#root-experimental}
+## container {#root-container}
+
+`mirrord container` command specific config.
+
+### container.cli_image {#container-cli_image}
+
+Tag of the `mirrord-cli` image you want to use.
+
+Defaults to `"ghcr.io/metalbear-co/mirrord-cli:<cli version>"`.
+
+### container.cli_image_lib_path {#container-cli_image}
+
+Path of the mirrord-layer lib inside the specified mirrord-cli image.
+
+Defaults to `"/opt/mirrord/lib/libmirrord_layer.so"`.
+
+## experimental {#root-experimental}
 
 mirrord Experimental features.
 This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 
-## _experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}
+### _experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}
 
 Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application
 shares sockets with child commands (e.g Python web servers with reload),
 but the feature is not stable and may cause other issues.
 
-## _experimental_ readlink {#experimental-readlink}
+### _experimental_ readlink {#experimental-readlink}
 
 Enables the `readlink` hook.
 
-## _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
+### _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
 
 <https://github.com/metalbear-co/mirrord/issues/2421#issuecomment-2093200904>
 
-## _experimental_ trust_any_certificate {#experimental-trust_any_certificate}
+### _experimental_ trust_any_certificate {#experimental-trust_any_certificate}
 
 Enables trusting any certificate on macOS, useful for <https://github.com/golang/go/issues/51991#issuecomment-2059588252>
 
-# feature {#root-feature}
+## external_proxy {#root-external_proxy}
+
+Configuration for the external proxy mirrord spawns when using the `mirrord container` command.
+This proxy is used to allow the internal proxy running in sidecar to connect to the mirrord
+agent.
+
+If you get `ConnectionRefused` errors, increasing the timeouts a bit might solve the issue.
+
+```json
+{
+  "external_proxy": {
+    "start_idle_timeout": 30,
+    "idle_timeout": 5
+  }
+}
+```
+
+### external_proxy.idle_timeout {#external_proxy-idle_timeout}
+
+How much time to wait while we don't have any active connections before exiting.
+
+Common cases would be running a chain of processes that skip using the layer
+and don't connect to the proxy.
+
+```json
+{
+  "external_proxy": {
+    "idle_timeout": 30
+  }
+}
+```
+
+### external_proxy.log_destination {#external_proxy-log_destination}
+Set the log file destination for the external proxy.
+
+### external_proxy.log_level {#external_proxy-log_level}
+Sets the log level for the external proxy.
+
+Follows the `RUST_LOG` convention (i.e `mirrord=trace`), and will only be used if
+`external_proxy.log_destination` is set
+
+### external_proxy.start_idle_timeout {#external_proxy-start_idle_timeout}
+
+How much time to wait for the first connection to the external proxy in seconds.
+
+Common cases would be running with dlv or any other debugger, which sets a breakpoint
+on process execution, delaying the layer startup and connection to the external proxy.
+
+```json
+{
+  "external_proxy": {
+    "start_idle_timeout": 60
+  }
+}
+```
+
+## feature {#root-feature}
 
 Controls mirrord features.
 
@@ -1124,7 +1196,7 @@ of regexes specified here. If there is a match, mirrord will connect your applic
 the target unix socket address on the target pod. Otherwise, it will leave the connection
 to happen locally on your machine.
 
-# internal_proxy {#root-internal_proxy}
+## internal_proxy {#root-internal_proxy}
 
 Configuration for the internal proxy mirrord spawns for each local mirrord session
 that local layers use to connect to the remote agent
@@ -1186,7 +1258,7 @@ Will use current context if not specified.
 
 ```json
 {
- "kube_context": "mycluster"
+  "kube_context": "mycluster"
 }
 ```
 
@@ -1197,7 +1269,7 @@ the in-cluster config.
 
 ```json
 {
- "kubeconfig": "~/bear/kube-config"
+  "kubeconfig": "~/bear/kube-config"
 }
 ```
 
@@ -1219,7 +1291,7 @@ while `/usr/bin/bash` would apply only for that binary).
 
 ```json
 {
- "sip_binaries": "bash;python"
+  "sip_binaries": "bash;python"
 }
 ```
 

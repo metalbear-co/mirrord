@@ -527,11 +527,12 @@
       ]
     },
     "ContainerFileConfig": {
+      "description": "`mirrord container` command specific config.",
       "type": "object",
       "properties": {
         "cli_image": {
           "title": "container.cli_image {#container-cli_image}",
-          "description": "Tag of the `mirrord-cli` image you want to use.",
+          "description": "Tag of the `mirrord-cli` image you want to use.\n\nDefaults to `\"ghcr.io/metalbear-co/mirrord-cli:<cli version>\"`.",
           "type": [
             "string",
             "null"
@@ -539,7 +540,7 @@
         },
         "cli_image_lib_path": {
           "title": "container.cli_image_lib_path {#container-cli_image}",
-          "description": "Path of the mirrord lib.",
+          "description": "Path of the mirrord-layer lib inside the specified mirrord-cli image.\n\nDefaults to `\"/opt/mirrord/lib/libmirrord_layer.so\"`.",
           "type": [
             "string",
             "null"
@@ -1222,8 +1223,7 @@
           ]
         },
         "detach_io": {
-          "title": "internal_proxy.detach_io {#internal_proxy-detach_io}",
-          "description": "This makes the process not receive signals from the `mirrord` process or its parent terminal, preventing unwanted side effects.",
+          "description": "<!--${internal}-->\n\nThis makes the process not receive signals from the `mirrord` process or its parent terminal, preventing unwanted side effects.",
           "type": [
             "boolean",
             "null"

@@ -234,7 +234,7 @@ pub struct LayerConfig {
     ///
     /// ```json
     /// {
-    ///  "kubeconfig": "~/bear/kube-config"
+    ///   "kubeconfig": "~/bear/kube-config"
     /// }
     /// ```
     #[config(env = "MIRRORD_KUBECONFIG")]
@@ -252,7 +252,7 @@ pub struct LayerConfig {
     ///
     /// ```json
     /// {
-    ///  "sip_binaries": "bash;python"
+    ///   "sip_binaries": "bash;python"
     /// }
     /// ```
     pub sip_binaries: Option<VecOrSingle<String>>,
@@ -269,7 +269,7 @@ pub struct LayerConfig {
     #[config(nested)]
     pub container: ContainerConfig,
 
-    /// # feature {#root-feature}
+    /// ## feature {#root-feature}
     #[config(nested)]
     pub feature: FeatureConfig,
 
@@ -288,17 +288,17 @@ pub struct LayerConfig {
     ///
     /// ```json
     /// {
-    ///  "kube_context": "mycluster"
+    ///   "kube_context": "mycluster"
     /// }
     /// ```
     #[config(env = "MIRRORD_KUBE_CONTEXT")]
     pub kube_context: Option<String>,
 
-    /// # internal_proxy {#root-internal_proxy}
+    /// ## internal_proxy {#root-internal_proxy}
     #[config(nested)]
     pub internal_proxy: InternalProxyConfig,
 
-    /// # external_proxy {#root-external_proxy}
+    /// ## external_proxy {#root-external_proxy}
     #[config(nested)]
     pub external_proxy: ExternalProxyConfig,
 
@@ -312,7 +312,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_PROXY", default = true)]
     pub use_proxy: bool,
 
-    /// # experimental {#root-experimental}
+    /// ## experimental {#root-experimental}
     #[config(nested)]
     pub experimental: ExperimentalConfig,
 }

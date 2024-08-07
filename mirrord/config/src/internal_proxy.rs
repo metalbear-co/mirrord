@@ -47,7 +47,7 @@ pub struct InternalProxyConfig {
     #[config(env = "MIRRORD_INTPROXY_CLIENT_TLS_KEY")]
     pub client_tls_key: Option<PathBuf>,
 
-    /// ## internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}
+    /// ### internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}
     ///
     /// How much time to wait for the first connection to the proxy in seconds.
     ///
@@ -64,7 +64,7 @@ pub struct InternalProxyConfig {
     #[config(default = 60)]
     pub start_idle_timeout: u64,
 
-    /// ## internal_proxy.idle_timeout {#internal_proxy-idle_timeout}
+    /// ### internal_proxy.idle_timeout {#internal_proxy-idle_timeout}
     ///
     /// How much time to wait while we don't have any active connections before exiting.
     ///
@@ -81,17 +81,17 @@ pub struct InternalProxyConfig {
     #[config(default = 5)]
     pub idle_timeout: u64,
 
-    /// ## internal_proxy.log_level {#internal_proxy-log_level}
+    /// ### internal_proxy.log_level {#internal_proxy-log_level}
     /// Set the log level for the internal proxy.
     /// RUST_LOG convention (i.e `mirrord=trace`)
     /// will only be used if log_destination is set
     pub log_level: Option<String>,
 
-    /// ## internal_proxy.log_destination {#internal_proxy-log_destination}
+    /// ### internal_proxy.log_destination {#internal_proxy-log_destination}
     /// Set the log file destination for the internal proxy.
     pub log_destination: Option<String>,
 
-    /// ## internal_proxy.detach_io {#internal_proxy-detach_io}
+    /// <!--${internal}-->
     ///
     /// This makes the process not receive signals from the `mirrord` process or its parent
     /// terminal, preventing unwanted side effects.
