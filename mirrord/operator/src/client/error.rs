@@ -4,7 +4,7 @@ pub use http::Error as HttpError;
 use mirrord_kube::error::KubeApiError;
 use thiserror::Error;
 
-use crate::crd::kube_target::UnknownTargetType;
+use crate::crd::{kube_target::UnknownTargetType, NewOperatorFeature};
 
 /// Operations performed on the operator via [`kube`] API.
 #[derive(Debug)]
@@ -50,7 +50,7 @@ pub enum OperatorApiError {
 
     #[error("mirrord operator {operator_version} does not support feature {feature}")]
     UnsupportedFeature {
-        feature: String,
+        feature: NewOperatorFeature,
         operator_version: String,
     },
 

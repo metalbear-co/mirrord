@@ -256,7 +256,7 @@ impl From<OperatorApiError> for CliError {
                 feature,
                 operator_version,
             } => Self::FeatureNotSupportedInOperatorError {
-                feature,
+                feature: feature.to_string(),
                 operator_version,
             },
             OperatorApiError::CreateKubeClient(e) => Self::CreateKubeApiFailed(e),
