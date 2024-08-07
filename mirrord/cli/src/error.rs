@@ -95,10 +95,6 @@ pub(crate) enum ExternalProxyError {
 
     #[error(transparent)]
     #[diagnostic(help("{GENERAL_BUG}"))]
-    Io(std::io::Error),
-
-    #[error(transparent)]
-    #[diagnostic(help("{GENERAL_BUG}"))]
     Tls(#[from] ConnectionTlsError),
 
     #[error(

@@ -1,8 +1,8 @@
-use std::{collections::HashSet, net::SocketAddr, time::Duration};
+use std::{collections::HashSet, time::Duration};
 
 use mirrord_analytics::Reporter;
 use mirrord_config::LayerConfig;
-use mirrord_intproxy::agent_conn::{wrap_connection_with_tls, AgentConnectInfo};
+use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
     api::{kubernetes::KubernetesAPI, wrap_raw_connection},
     error::KubeApiError,
@@ -12,10 +12,10 @@ use mirrord_progress::{
     messages::MULTIPOD_WARNING, IdeAction, IdeMessage, NotificationLevel, Progress,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-use tokio::{net::TcpSocket, sync::mpsc};
+use tokio::sync::mpsc;
 use tracing::Level;
 
-use crate::{error::ExternalProxyError, CliError, Result};
+use crate::{CliError, Result};
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
 
@@ -89,41 +89,6 @@ where
     Ok(Some(connection))
 }
 
-async fn try_using_external_proxy(
-    config: &LayerConfig,
-    proxy_addr: SocketAddr,
-) -> Result<AgentConnection> {
-    let socket = TcpSocket::new_v4().map_err(ExternalProxyError::Io)?;
-    socket.set_keepalive(true).map_err(ExternalProxyError::Io)?;
-    socket.set_nodelay(true).map_err(ExternalProxyError::Io)?;
-
-    let stream = socket
-        .connect(proxy_addr)
-        .await
-        .map_err(ExternalProxyError::Io)?;
-
-    let (sender, receiver) =
-        if let (Some(client_tls_certificate), Some(client_tls_key), Some(tls_certificate)) = (
-            config.internal_proxy.client_tls_certificate.as_ref(),
-            config.internal_proxy.client_tls_key.as_ref(),
-            config.external_proxy.tls_certificate.as_ref(),
-        ) {
-            wrap_connection_with_tls(
-                stream,
-                proxy_addr.ip(),
-                tls_certificate,
-                client_tls_certificate,
-                client_tls_key,
-            )
-            .await
-            .map_err(ExternalProxyError::from)?
-        } else {
-            wrap_raw_connection(stream)
-        };
-
-    Ok(AgentConnection { sender, receiver })
-}
-
 /// 1. If mirrord-operator is explicitly enabled in the given [`LayerConfig`], makes a connection
 ///    with the target using the mirrord-operator.
 /// 2. If mirrord-operator is explicitly disabled in the given [`LayerConfig`], creates a
@@ -141,12 +106,6 @@ pub(crate) async fn create_and_connect<P, R: Reporter>(
 where
     P: Progress + Send + Sync,
 {
-    if let Some(proxy_addr) = config.internal_proxy.connect_tcp {
-        let connection = try_using_external_proxy(config, proxy_addr).await?;
-
-        return Ok((AgentConnectInfo::ExternalProxy(proxy_addr), connection));
-    }
-
     if let Some(connection) = try_connect_using_operator(config, progress, analytics).await? {
         return Ok((
             AgentConnectInfo::Operator(connection.session),

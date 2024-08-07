@@ -772,27 +772,15 @@
       "description": "Configuration for the external proxy mirrord spawns when using the `mirrord container` command. This proxy is used to allow the internal proxy running in sidecar to connect to the mirrord agent.\n\nIf you get `ConnectionRefused` errors, increasing the timeouts a bit might solve the issue.\n\n```json { \"external_proxy\": { \"start_idle_timeout\": 30, \"idle_timeout\": 5 } } ```",
       "type": "object",
       "properties": {
-        "client_tls_certificate": {
-          "title": "external_proxy.client_tls_certificate {#external_proxy-client_tls_certificate}",
+        "idle_timeout": {
+          "title": "external_proxy.idle_timeout {#external_proxy-idle_timeout}",
+          "description": "How much time to wait while we don't have any active connections before exiting.\n\nCommon cases would be running a chain of processes that skip using the layer and don't connect to the proxy.\n\n```json { \"external_proxy\": { \"idle_timeout\": 30 } } ```",
           "type": [
-            "string",
+            "integer",
             "null"
-          ]
-        },
-        "client_tls_key": {
-          "title": "external_proxy.client_tls_key {#external_proxy-client_tls_key}",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "connect_tcp": {
-          "title": "external_proxy.connect_tcp {#external_proxy-connect_tcp}",
-          "description": "```json { \"external_proxy\": { \"connect_tcp\": \"10.10.0.100:7777\" } } ```",
-          "type": [
-            "string",
-            "null"
-          ]
+          ],
+          "format": "uint64",
+          "minimum": 0.0
         },
         "log_destination": {
           "title": "external_proxy.log_destination {#external_proxy-log_destination}",
@@ -822,6 +810,7 @@
         },
         "tls_certificate": {
           "title": "external_proxy.tls_certificate {#external_proxy-tls_certificate}",
+          "description": "Certificate path to be used for wrapping external proxy tcp listener with a tcp acceptor (self-signed one will be generated automaticaly if not specified)",
           "type": [
             "string",
             "null"
@@ -829,6 +818,7 @@
         },
         "tls_key": {
           "title": "external_proxy.tls_key {#external_proxy-tls_key}",
+          "description": "Private Key path to be used for wrapping external proxy tcp listener with a tcp acceptor (self-signed one will be generated automaticaly if not specified)",
           "type": [
             "string",
             "null"
@@ -1212,6 +1202,30 @@
       "description": "Configuration for the internal proxy mirrord spawns for each local mirrord session that local layers use to connect to the remote agent\n\nThis is seldom used, but if you get `ConnectionRefused` errors, you might want to increase the timeouts a bit.\n\n```json { \"internal_proxy\": { \"start_idle_timeout\": 30, \"idle_timeout\": 5 } } ```",
       "type": "object",
       "properties": {
+        "client_tls_certificate": {
+          "title": "internal_proxy.client_tls_certificate {#internal_proxy-client_tls_certificate}",
+          "description": "Certificate to use as tls client credentials for connection to `connect_tcp`. (self-signed one will be generated automaticaly if not specified)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "client_tls_key": {
+          "title": "internal_proxy.client_tls_key {#internal_proxy-client_tls_key}",
+          "description": "Private Key to use as tls client credentials for connection to `connect_tcp`. (self-signed one will be generated automaticaly if not specified)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "connect_tcp": {
+          "title": "internal_proxy.connect_tcp {#internal_proxy-connect_tcp}",
+          "description": "```json { \"internal_proxy\": { \"connect_tcp\": \"10.10.0.100:7777\" } } ```",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "detach_io": {
           "title": "internal_proxy.detach_io {#internal_proxy-detach_io}",
           "description": "This makes the process not receive signals from the `mirrord` process or its parent terminal, preventing unwanted side effects.",

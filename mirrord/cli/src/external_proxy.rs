@@ -39,7 +39,7 @@ use mirrord_intproxy::agent_conn::{AgentConnection, ConnectionTlsError};
 use mirrord_protocol::DaemonCodec;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::server::TlsStream;
-use tokio_util::{codec::Framed, sync::CancellationToken};
+use tokio_util::sync::CancellationToken;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
@@ -105,6 +105,7 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
 
     let cancellation_token = CancellationToken::new();
     let connections = Arc::new(AtomicUsize::new(0));
+    let idle_timeout = config.external_proxy.idle_timeout;
 
     let mut initial_connection_timeout = Box::pin(tokio::time::sleep(Duration::from_secs(
         config.external_proxy.start_idle_timeout,
@@ -114,31 +115,22 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
         tokio::select! {
             conn = listener.accept() => {
                 if let Ok((stream, peer_addr)) = conn {
-
                     tracing::debug!(?peer_addr, "new connection");
 
                     let tls_acceptor = tls_acceptor.clone();
                     let connections = connections.clone();
                     let cancellation_token = cancellation_token.clone();
+                    let connection_cancelation_token = cancellation_token.child_token();
 
-                    let agent_conn =
-                        connect_and_ping(&config, agent_connect_info.clone(), &mut analytics).await?;
-
+                    let agent_conn = connect_and_ping(&config, agent_connect_info.clone(), &mut analytics).await.inspect_err(|_| cancellation_token.cancel())?;
+                    connections.fetch_add(1, Ordering::Relaxed);
 
                     let fut = async move {
                         let stream = tls_acceptor.accept(stream).await?;
 
-                        connections.fetch_add(1, Ordering::Relaxed);
-
-                        handle_connection(stream, agent_conn).await;
+                        handle_connection(stream, peer_addr, agent_conn, connection_cancelation_token).await;
 
                         tracing::debug!(?peer_addr, "closed connection");
-
-                        if connections.fetch_sub(1, Ordering::Relaxed) == 1 {
-                            cancellation_token.cancel();
-
-                            tracing::debug!(?peer_addr, "final connection, closing listener");
-                        }
 
                         Ok::<(), std::io::Error>(())
                     };
@@ -147,6 +139,15 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
                         if let Err(error) = fut.await {
                             tracing::error!(%error, "error handling proxy connection");
                         }
+
+                        // Simple patch to allow idle_timeout by wating the timout period on each request before maybe calling the cancellation_token if no connections left
+                        tokio::time::sleep(Duration::from_secs(idle_timeout)).await;
+
+                        if connections.fetch_sub(1, Ordering::Relaxed) == 1 {
+                            cancellation_token.cancel();
+
+                            tracing::debug!(?peer_addr, "final connection, closing listener");
+                        }
                     });
                 } else {
                     break;
@@ -154,9 +155,14 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
             }
 
             _ = initial_connection_timeout.as_mut(), if connections.load(Ordering::Relaxed) == 0 => {
+                tracing::debug!("closing listener due to initial connection timeout");
+
                 break;
             }
+
             _ = cancellation_token.cancelled() => {
+                tracing::debug!("closing listener due to cancellation_token");
+
                 break;
             }
         }
@@ -220,8 +226,13 @@ async fn create_external_proxy_tls_acceptor(
 }
 
 #[tracing::instrument(level = Level::TRACE, skip(agent_conn))]
-async fn handle_connection(stream: TlsStream<TcpStream>, mut agent_conn: AgentConnection) {
-    let mut stream = Framed::new(stream, DaemonCodec::default());
+async fn handle_connection(
+    stream: TlsStream<TcpStream>,
+    peer_addr: SocketAddr,
+    mut agent_conn: AgentConnection,
+    cancellation_token: CancellationToken,
+) {
+    let mut stream = actix_codec::Framed::new(stream, DaemonCodec::default());
 
     loop {
         tokio::select! {
@@ -229,13 +240,13 @@ async fn handle_connection(stream: TlsStream<TcpStream>, mut agent_conn: AgentCo
                 match client_message {
                     Some(Ok(client_message)) => {
                         if let Err(error) = agent_conn.agent_tx.send(client_message).await {
-                            tracing::error!(%error, "unable to send message to agent");
+                            tracing::error!(?peer_addr, %error, "unable to send message to agent");
 
                             break;
                         }
                     }
                     Some(Err(error)) => {
-                        tracing::error!(%error, "unable to recive message from intproxy");
+                        tracing::error!(?peer_addr, %error, "unable to recive message from intproxy");
 
                         break;
                     }
@@ -247,13 +258,18 @@ async fn handle_connection(stream: TlsStream<TcpStream>, mut agent_conn: AgentCo
             daemon_message = agent_conn.agent_rx.recv() => {
                 if let Some(daemon_message) = daemon_message {
                     if let Err(error) = stream.send(daemon_message).await {
-                        tracing::error!(%error, "unable to send message to intproxy");
+                        tracing::error!(?peer_addr, %error, "unable to send message to intproxy");
 
                         break;
                     }
                 } else {
                     break;
                 }
+            }
+            _ = cancellation_token.cancelled() => {
+                tracing::debug!(?peer_addr, "closing connection due to cancellation_token");
+
+                break;
             }
         }
     }

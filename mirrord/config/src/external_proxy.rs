@@ -55,6 +55,23 @@ pub struct ExternalProxyConfig {
     #[config(default = 60)]
     pub start_idle_timeout: u64,
 
+    /// ### external_proxy.idle_timeout {#external_proxy-idle_timeout}
+    ///
+    /// How much time to wait while we don't have any active connections before exiting.
+    ///
+    /// Common cases would be running a chain of processes that skip using the layer
+    /// and don't connect to the proxy.
+    ///
+    /// ```json
+    /// {
+    ///   "external_proxy": {
+    ///     "idle_timeout": 30
+    ///   }
+    /// }
+    /// ```
+    #[config(default = 5)]
+    pub idle_timeout: u64,
+
     /// ### external_proxy.log_level {#external_proxy-log_level}
     /// Sets the log level for the external proxy.
     ///
