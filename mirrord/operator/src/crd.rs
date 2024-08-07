@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::{Display, Formatter},
-    ops::Not,
 };
 
 use kube::CustomResource;
@@ -351,17 +350,28 @@ pub enum QueueNameSource {
     EnvVar(String),
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")] // name_source -> nameSource in yaml.
+pub struct SqsQueueDetails {
+    /// Where the application gets the queue name from. Will be used to read messages from that
+    /// queue and distribute them to the output queues. When running with mirrord and splitting
+    /// this queue, applications will get a modified name from that source.
+    name_source: QueueNameSource,
+
+    /// These tags will be set for all temporary SQS queues created by mirrord for queues defined
+    /// in this MirrordWorkloadQueueRegistry, alongside with the original tags of the respective
+    /// original queue. In case of a collision, the temporary queue will get the value from the
+    /// tag passed in here.
+    pub tags: Option<HashMap<String, String>>,
+}
+
 /// The details of a queue that should be split.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "queueType")]
 pub enum SplitQueue {
     /// Amazon SQS
-    ///
-    /// Where the application gets the queue name from. Will be used to read messages from that
-    /// queue and distribute them to the output queues. When running with mirrord and splitting
-    /// this queue, applications will get a modified name from that source.
     #[serde(rename = "SQS")]
-    Sqs(QueueNameSource),
+    Sqs(SqsQueueDetails),
 }
 
 /// A workload that is a consumer of a queue that is being split.
@@ -491,12 +501,6 @@ pub struct MirrordWorkloadQueueRegistrySpec {
 
     /// The resource (deployment or Argo rollout) that reads from the queues.
     pub consumer: QueueConsumer,
-
-    /// These tags will be set for all temporary SQS queues created by mirrord for queues defined
-    /// in this MirrordWorkloadQueueRegistry, alongside with the original tags of the respective
-    /// original queue. In case of a collision, the temporary queue will get the value from the
-    /// tag passed in here.
-    pub tags: Option<HashMap<String, String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -603,6 +607,6 @@ pub struct MirrordSqsSessionSpec {
 
     /// The id of the mirrord exec session, from the operator.
     // The Kubernetes API can't deal with 64 bit numbers (with most significant bit set)
-    // so we save that field as a string even though its source is a u64
+    // so we save that field as a (HEX) string even though its source is a u64
     pub session_id: String,
 }
