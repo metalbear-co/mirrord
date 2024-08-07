@@ -69,8 +69,8 @@ pub type MessageAttributeName = String;
 pub type AttributeValuePattern = String;
 
 /// A filter is a mapping between message attribute names and regexes they should match.
-/// The local application will only receive messages that match ALL the patterns.
-/// This means, only messages that have all the `MessageAttributeName`s in the filter,
+/// The local application will only receive messages that match **all** of the given patterns.
+/// This means, only messages that have **all** the `MessageAttributeName`s in the filter,
 /// with values of those attributes matching the respective `AttributeValuePattern`.
 pub type SqsMessageFilter = BTreeMap<MessageAttributeName, AttributeValuePattern>;
 
