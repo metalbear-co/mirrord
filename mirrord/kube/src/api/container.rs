@@ -1,6 +1,6 @@
 use std::{collections::HashSet, sync::LazyLock};
 
-use k8s_openapi::api::core::v1::ContainerStatus;
+use k8s_openapi::api::core::v1::{ContainerStatus, Pod};
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
 use mirrord_protocol::MeshVendor;
@@ -104,6 +104,38 @@ where
         P: Progress + Send + Sync;
 }
 
+#[tracing::instrument(level = "trace", ret)]
+pub fn check_mesh_vendor(pod: &Pod) -> Option<MeshVendor> {
+    const ISTIO: [&str; 2] = ["istio-proxy", "istio-init"];
+    const LINKERD: [&str; 2] = ["linkerd-proxy", "linkerd-init"];
+    const KUMA: [&str; 2] = ["kuma-sidecar", "kuma-init"];
+
+    if pod
+        .metadata
+        .annotations
+        .as_ref()
+        .and_then(|annotations| annotations.get("ambient.istio.io/redirection"))
+        .map(|annotation| annotation == "enabled")
+        .unwrap_or_default()
+    {
+        return Some(MeshVendor::IstioAmbient);
+    }
+
+    let container_statuses = pod.status.as_ref()?.container_statuses.as_ref()?;
+
+    container_statuses.iter().find_map(|status| {
+        if ISTIO.contains(&status.name.as_str()) {
+            Some(MeshVendor::Istio)
+        } else if LINKERD.contains(&status.name.as_str()) {
+            Some(MeshVendor::Linkerd)
+        } else if KUMA.contains(&status.name.as_str()) {
+            Some(MeshVendor::Kuma)
+        } else {
+            None
+        }
+    })
+}
+
 /// Choose container logic:
 ///
 /// 1. Try to find based on given name
@@ -115,23 +147,7 @@ where
 pub fn choose_container<'a>(
     container_name: Option<&str>,
     container_statuses: &'a [ContainerStatus],
-) -> (Option<&'a ContainerStatus>, Option<MeshVendor>, bool) {
-    const ISTIO: [&str; 2] = ["istio-proxy", "istio-init"];
-    const LINKERD: [&str; 2] = ["linkerd-proxy", "linkerd-init"];
-    const KUMA: [&str; 2] = ["kuma-sidecar", "kuma-init"];
-
-    let mesh = container_statuses.iter().find_map(|status| {
-        if ISTIO.contains(&status.name.as_str()) {
-            Some(MeshVendor::Istio)
-        } else if LINKERD.contains(&status.name.as_str()) {
-            Some(MeshVendor::Linkerd)
-        } else if KUMA.contains(&status.name.as_str()) {
-            Some(MeshVendor::Kuma)
-        } else {
-            None
-        }
-    });
-
+) -> (Option<&'a ContainerStatus>, bool) {
     let mut picked_from_many = false;
 
     let container = if let Some(name) = container_name {
@@ -155,5 +171,5 @@ pub fn choose_container<'a>(
     };
 
     // container_counter is only incremented if there is no specified container name.
-    (container, mesh, picked_from_many)
+    (container, picked_from_many)
 }

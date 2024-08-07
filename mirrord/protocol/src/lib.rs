@@ -66,6 +66,7 @@ pub enum MeshVendor {
     Linkerd,
     Istio,
     Kuma,
+    IstioAmbient,
 }
 
 impl fmt::Display for MeshVendor {
@@ -74,6 +75,7 @@ impl fmt::Display for MeshVendor {
             MeshVendor::Linkerd => write!(f, "linkerd"),
             MeshVendor::Istio => write!(f, "istio"),
             MeshVendor::Kuma => write!(f, "kuma"),
+            MeshVendor::IstioAmbient => write!(f, "istio-ambient"),
         }
     }
 }
@@ -86,6 +88,7 @@ impl FromStr for MeshVendor {
             "linkerd" => Ok(Self::Linkerd),
             "istio" => Ok(Self::Istio),
             "kuma" => Ok(Self::Kuma),
+            "istio-ambient" => Ok(Self::IstioAmbient),
             invalid => Err(MeshVendorParseError(invalid.into())),
         }
     }

@@ -11,6 +11,7 @@ use crate::{
         IPTABLE_MESH,
     },
 };
+pub mod istio;
 
 static MULTIPORT_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"-p tcp -m multiport --dports ([\d:,]+)").unwrap());
@@ -19,8 +20,8 @@ static TCP_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"-p tcp -m tcp --dport ([\d:,]+)").unwrap());
 
 pub(crate) struct MeshRedirect<IPT: IPTables> {
-    prerouteing: PreroutingRedirect<IPT>,
-    output: OutputRedirect<IPT>,
+    prerouting: PreroutingRedirect<IPT>,
+    output: OutputRedirect<false, IPT>,
 }
 
 impl<IPT> MeshRedirect<IPT>
@@ -28,28 +29,22 @@ where
     IPT: IPTables,
 {
     pub fn create(ipt: Arc<IPT>, vendor: MeshVendor, pod_ips: Option<&str>) -> Result<Self> {
-        let prerouteing = PreroutingRedirect::create(ipt.clone())?;
+        let prerouting = PreroutingRedirect::create(ipt.clone())?;
 
         for port in Self::get_skip_ports(&ipt, &vendor)? {
-            prerouteing.add_rule(&format!("-m multiport -p tcp ! --dports {port} -j RETURN"))?;
+            prerouting.add_rule(&format!("-m multiport -p tcp ! --dports {port} -j RETURN"))?;
         }
 
         let output = OutputRedirect::create(ipt, IPTABLE_MESH.to_string(), pod_ips)?;
 
-        Ok(MeshRedirect {
-            prerouteing,
-            output,
-        })
+        Ok(MeshRedirect { prerouting, output })
     }
 
     pub fn load(ipt: Arc<IPT>, _vendor: MeshVendor) -> Result<Self> {
-        let prerouteing = PreroutingRedirect::load(ipt.clone())?;
+        let prerouting = PreroutingRedirect::load(ipt.clone())?;
         let output = OutputRedirect::load(ipt, IPTABLE_MESH.to_string())?;
 
-        Ok(MeshRedirect {
-            prerouteing,
-            output,
-        })
+        Ok(MeshRedirect { prerouting, output })
     }
 
     fn get_skip_ports(ipt: &IPT, vendor: &MeshVendor) -> Result<Vec<String>> {
@@ -79,21 +74,21 @@ where
     IPT: IPTables + Send + Sync,
 {
     async fn mount_entrypoint(&self) -> Result<()> {
-        self.prerouteing.mount_entrypoint().await?;
+        self.prerouting.mount_entrypoint().await?;
         self.output.mount_entrypoint().await?;
 
         Ok(())
     }
 
     async fn unmount_entrypoint(&self) -> Result<()> {
-        self.prerouteing.unmount_entrypoint().await?;
+        self.prerouting.unmount_entrypoint().await?;
         self.output.unmount_entrypoint().await?;
 
         Ok(())
     }
 
     async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.prerouteing
+        self.prerouting
             .add_redirect(redirected_port, target_port)
             .await?;
         self.output
@@ -104,7 +99,7 @@ where
     }
 
     async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.prerouteing
+        self.prerouting
             .remove_redirect(redirected_port, target_port)
             .await?;
         self.output
@@ -126,7 +121,7 @@ impl MeshVendorExt for MeshVendor {
     fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Option<Self>> {
         let output = ipt.list_rules("OUTPUT")?;
 
-        Ok(output.iter().find_map(|rule| {
+        let nat_result = output.iter().find_map(|rule| {
             if rule.contains("-j PROXY_INIT_OUTPUT") {
                 Some(MeshVendor::Linkerd)
             } else if rule.contains("-j ISTIO_OUTPUT") {
@@ -136,13 +131,30 @@ impl MeshVendorExt for MeshVendor {
             } else {
                 None
             }
-        }))
+        });
+
+        match &nat_result {
+            Some(MeshVendor::Istio) => {
+                let is_ambient = ipt
+                    .with_table("mangle")
+                    .list_rules("OUTPUT")?
+                    .iter()
+                    .any(|rule| rule.contains("-j ISTIO_OUTPUT"));
+
+                Ok(Some(if is_ambient {
+                    MeshVendor::IstioAmbient
+                } else {
+                    MeshVendor::Istio
+                }))
+            }
+            _ => Ok(nat_result),
+        }
     }
 
     fn input_chain(&self) -> &str {
         match self {
             MeshVendor::Linkerd => "PROXY_INIT_REDIRECT",
-            MeshVendor::Istio => "ISTIO_INBOUND",
+            MeshVendor::Istio | MeshVendor::IstioAmbient => "ISTIO_INBOUND",
             MeshVendor::Kuma => "KUMA_MESH_INBOUND",
         }
     }
@@ -150,7 +162,7 @@ impl MeshVendorExt for MeshVendor {
     fn skip_ports_regex(&self) -> &Regex {
         match self {
             MeshVendor::Linkerd => &MULTIPORT_SKIP_PORTS_LOOKUP_REGEX,
-            MeshVendor::Istio => &TCP_SKIP_PORTS_LOOKUP_REGEX,
+            MeshVendor::Istio | MeshVendor::IstioAmbient => &TCP_SKIP_PORTS_LOOKUP_REGEX,
             MeshVendor::Kuma => &TCP_SKIP_PORTS_LOOKUP_REGEX,
         }
     }

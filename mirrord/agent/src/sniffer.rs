@@ -9,7 +9,7 @@ use std::{
 };
 
 use futures::{stream::FuturesUnordered, StreamExt};
-use mirrord_protocol::{MeshVendor, Port};
+use mirrord_protocol::Port;
 use pnet::packet::tcp::TcpFlags;
 use tcp_capture::TcpCapture;
 use tokio::{
@@ -188,9 +188,9 @@ impl TcpConnectionSniffer<RawSocketTcpCapture> {
     pub async fn new(
         command_rx: Receiver<SnifferCommand>,
         network_interface: Option<String>,
-        mesh: Option<MeshVendor>,
+        is_mesh: bool,
     ) -> Result<Self, AgentError> {
-        let tcp_capture = RawSocketTcpCapture::new(network_interface, mesh).await?;
+        let tcp_capture = RawSocketTcpCapture::new(network_interface, is_mesh).await?;
 
         Ok(Self {
             command_rx,
