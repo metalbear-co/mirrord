@@ -77,7 +77,6 @@ pub type SqsMessageFilter = BTreeMap<MessageAttributeName, AttributeValuePattern
 /// More queue types might be added in the future.
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
 #[serde(tag = "queue_type", content = "message_filter")]
-#[non_exhaustive]
 pub enum QueueFilter {
     /// Amazon Simple Queue Service.
     #[serde(rename = "SQS")]
