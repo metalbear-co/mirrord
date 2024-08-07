@@ -28,12 +28,15 @@ mirrord-protocol = { path = "../protocol" }
 mirrord-console = { path = "../console", features = ["async-logger"] }
 mirrord-analytics = { path = "../analytics" }
 mirrord-intproxy = { path = "../intproxy" }
+mirrord-vpn = { path = "../vpn" }
 
 actix-codec.workspace = true
 clap.workspace = true
+tun2 = { version = "2", features = ["async"] }
 tracing.workspace = true
 rand.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 serde.workspace = true
 tracing-subscriber.workspace = true
 futures.workspace = true
@@ -58,6 +61,7 @@ drain.workspace = true
 clap_complete = "4.4.1"
 tracing-appender = "0.2"
 rustls.workspace = true
+humansize = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

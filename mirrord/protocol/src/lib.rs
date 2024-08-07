@@ -11,6 +11,7 @@ pub mod file;
 pub mod outgoing;
 pub mod pause;
 pub mod tcp;
+pub mod vpn;
 
 use core::fmt;
 use std::{collections::HashSet, ops::Deref, str::FromStr, sync::LazyLock};
