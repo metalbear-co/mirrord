@@ -368,23 +368,27 @@ pub enum SplitQueue {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")] // Deployment -> deployment in yaml.
 pub enum QueueConsumer {
-    Deployment(String),
-    Rollout(String),
+    Deployment(String, Option<String>),
+    Rollout(String, Option<String>),
 }
 
 impl QueueConsumer {
-    pub fn get_type_and_name(&self) -> (&str, &str) {
+    pub fn get_type_name_container(&self) -> (&str, &str, Option<&str>) {
         match self {
-            QueueConsumer::Deployment(dep) => ("deployment", dep),
-            QueueConsumer::Rollout(roll) => ("rollout", roll),
+            QueueConsumer::Deployment(dep, container) => ("deployment", dep, container.as_deref()),
+            QueueConsumer::Rollout(roll, container) => ("rollout", roll, container.as_deref()),
         }
     }
 }
 
 impl Display for QueueConsumer {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let (type_, name) = self.get_type_and_name();
-        write!(f, "{}/{}", type_, name)
+        let (type_, name, container) = self.get_type_name_container();
+        if let Some(container) = container {
+            write!(f, "{}/{}/container/{container}", type_, name)
+        } else {
+            write!(f, "{}/{}", type_, name)
+        }
     }
 }
 
