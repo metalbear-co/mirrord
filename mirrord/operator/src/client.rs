@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt};
+use std::fmt;
 
 use base64::{engine::general_purpose, Engine};
 use chrono::{DateTime, Utc};
@@ -16,10 +16,7 @@ use mirrord_auth::{
     credentials::LicenseValidity,
 };
 use mirrord_config::{
-    feature::{
-        network::incoming::ConcurrentSteal,
-        split_queues::{QueueFilter, QueueId},
-    },
+    feature::{network::incoming::ConcurrentSteal, split_queues::SplitQueuesConfig},
     target::Target,
     LayerConfig,
 };
@@ -663,12 +660,7 @@ impl OperatorApi<PreparedClientCert> {
             let scale_down = config.feature.copy_target.scale_down;
             let namespace = self.target_namespace(config);
             let copied = self
-                .copy_target(
-                    target,
-                    scale_down,
-                    namespace,
-                    config.feature.split_queues.0.clone(),
-                )
+                .copy_target(target, scale_down, namespace, &config.feature.split_queues)
                 .await?;
 
             copy_subtask.success(Some("target copied"));
@@ -734,7 +726,7 @@ impl OperatorApi<PreparedClientCert> {
         target: Target,
         scale_down: bool,
         namespace: &str,
-        split_queues: Option<BTreeMap<QueueId, QueueFilter>>,
+        split_queues: &SplitQueuesConfig,
     ) -> OperatorApiResult<CopyTargetCrd> {
         let name = TargetCrd::urlfied_name(&target);
 
@@ -744,7 +736,7 @@ impl OperatorApi<PreparedClientCert> {
                 target,
                 idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
                 scale_down,
-                split_queues,
+                split_queues: split_queues.clone(),
             },
         );
 

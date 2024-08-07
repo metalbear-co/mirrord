@@ -7,7 +7,7 @@ use kube::CustomResource;
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
-    feature::split_queues::{QueueFilter, SqsMessageFilter},
+    feature::split_queues::{SplitQueuesConfig, SqsMessageFilter},
     target::{Target, TargetConfig},
 };
 use schemars::JsonSchema;
@@ -302,7 +302,7 @@ pub struct CopyTargetSpec {
     /// Ignored if [`Target`] is not [`Target::Deployment`].
     pub scale_down: bool,
     /// Split queues client side configuration.
-    pub split_queues: Option<BTreeMap<QueueId, QueueFilter>>,
+    pub split_queues: SplitQueuesConfig,
 }
 
 /// Features and operations that can be blocked by a `MirrordPolicy`.

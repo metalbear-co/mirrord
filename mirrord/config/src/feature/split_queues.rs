@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ops::Not,
+};
 
 use mirrord_analytics::{Analytics, CollectAnalytics};
 use schemars::JsonSchema;
@@ -29,7 +32,7 @@ pub type QueueId = String;
 ///   }
 /// }
 /// ```
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]
 pub struct SplitQueuesConfig(pub Option<BTreeMap<QueueId, QueueFilter>>);
 
 impl SplitQueuesConfig {
@@ -39,14 +42,22 @@ impl SplitQueuesConfig {
 
     /// Out of the whole queue splitting config, get only the sqs queues.
     pub fn get_sqs_filter(&self) -> Option<HashMap<String, SqsMessageFilter>> {
-        self.0.as_ref().map(BTreeMap::iter).map(|filters| {
-            filters
-                // When there are more variants of QueueFilter, change this to a `filter_map`.
-                .map(|(queue_id, queue_filter)| match queue_filter {
-                    QueueFilter::Sqs(filter_mapping) => (queue_id.clone(), filter_mapping.clone()),
-                })
-                .collect()
-        })
+        self.0
+            .as_ref()
+            .map(BTreeMap::iter)
+            .map(|filters| {
+                filters
+                    // When there are more variants of QueueFilter, change this to a `filter_map`.
+                    .map(|(queue_id, queue_filter)| match queue_filter {
+                        QueueFilter::Sqs(filter_mapping) => {
+                            (queue_id.clone(), filter_mapping.clone())
+                        }
+                    })
+                    .collect()
+            })
+            .and_then(|filters_map: HashMap<String, SqsMessageFilter>| {
+                filters_map.is_empty().not().then_some(filters_map)
+            })
     }
 }
 
