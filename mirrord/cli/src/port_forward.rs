@@ -15,6 +15,7 @@ use mirrord_protocol::{
 };
 use thiserror::Error;
 use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpListener,
@@ -39,8 +40,8 @@ pub struct PortForwarder {
     listeners: StreamMap<SocketAddr, TcpListenerStream>,
     // oneshot channels for sending connection IDs to tasks
     oneshots: VecDeque<oneshot::Sender<ConnectionId>>,
-    // identifies tasks by their corresponding connection ID
-    tasks: HashMap<ConnectionId, Sender<Vec<u8>>>,
+    // identifies tasks by their corresponding local socket address
+    tasks: HashMap<SocketAddr, Sender<Vec<u8>>>,
 
     // transmit internal messages from tasks to main loop
     internal_msg_tx: Sender<PortForwardMessage>,
@@ -189,7 +190,48 @@ impl PortForwarder {
                 // stream coming from the user app
                 message = self.listeners.next() => match message {
                     Some((socket, Ok(stream))) => {
-                        // TODO: spawn task for this socket + stream
+                        let task_internal_tx = self.internal_msg_tx.clone();
+                        let Some(remote_socket) = self.mappings.get(&socket).cloned() else {
+                            return Err(PortForwardError::SocketMappingNotFound(socket))
+                        };
+                        let (response_tx, mut response_rx) = mpsc::channel(16);
+                        self.tasks.insert(socket, response_tx);
+                        tokio::spawn(async move {
+                            let (mut read, mut write) = stream.into_split();
+                            let mut buffer = [];
+                            let _ = read.read(&mut buffer).await;
+                            let (oneshot_tx, oneshot_rx) = oneshot::channel::<ConnectionId>();
+                            let _ = task_internal_tx.send(PortForwardMessage::Connect(remote_socket, oneshot_tx)).await;
+                            let Ok(connection_id) = oneshot_rx.blocking_recv() else {
+                                return Err(PortForwardError::InternalMessageError(format!("Error while trying to receive connection ID for socket address {socket}")));
+                            };
+                            let _ = task_internal_tx.send(PortForwardMessage::Send(connection_id, buffer.into())).await;
+                            let mut read_stream = ReaderStream::new(read);
+
+                            loop {
+                                select! {
+                                    message = read_stream.next() => match message {
+                                        Some(Ok(message)) => {
+                                            let _ = task_internal_tx.send(PortForwardMessage::Send(connection_id, message.into())).await;
+                                        },
+                                        Some(Err(error)) => {
+                                            break Err(PortForwardError::TcpListenerError(error));
+                                        },
+                                        None => {
+                                            let _ = task_internal_tx.send(PortForwardMessage::Close(connection_id)).await;
+                                            break Ok(());
+                                        },
+                                    },
+
+                                    message = response_rx.recv() => match message {
+                                        Some(message) => {
+                                            let _ = write.write(message.as_ref());
+                                        },
+                                        None => break Ok(()),
+                                    }
+                                }
+                            }
+                        });
                     },
                     Some((socket, Err(error))) => {
                         // error from TcpStream
@@ -214,7 +256,7 @@ pub enum PortForwardError {
     #[error("Multiple port forwarding mappings found for local address `{0}`")]
     PortMapSetupError(SocketAddr),
 
-    #[error("Failed to bind TcpListener with error: `{0}`")]
+    #[error("TcpListener operation failed with error: `{0}`")]
     TcpListenerError(std::io::Error),
 
     #[error("No destination address found for local address `{0}`")]
@@ -222,6 +264,9 @@ pub enum PortForwardError {
 
     #[error("Failed to establish connection with remote process: `{0}`")]
     ConnectionError(String),
+
+    #[error("Failed to send or receive messages between PortForward and peripheral tasks with error: `{0}`")]
+    InternalMessageError(String),
 }
 
 impl From<PortForwardError> for CliError {
