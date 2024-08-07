@@ -471,9 +471,10 @@ pub struct WorkloadQueueRegistryStatus {
     pub sqs_details: Option<ActiveSqsSplits>,
 }
 
-/// Defines a Custom Resource that holds a central configuration for splitting a queue. mirrord
-/// users specify a splitter by name in their configuration. mirrord then starts splitting according
-/// to the spec and the user's filter.
+/// Defines a Custom Resource that holds a central configuration for splitting queues for a
+/// QueueConsumer (a target workload for which queues should be split).
+///
+/// This means there should be 1 such resource per queue splitting target.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "queues.mirrord.metalbear.co",
