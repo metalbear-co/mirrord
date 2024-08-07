@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
+use serde::Serialize;
 
 use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigContext, Result},
@@ -31,7 +32,7 @@ use crate::{
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Clone, Debug)]
+#[derive(MirrordConfig, Clone, Debug, Serialize)]
 #[config(map_to = "EnvFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct EnvConfig {

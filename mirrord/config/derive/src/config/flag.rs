@@ -111,7 +111,7 @@ impl ConfigFlags {
                     Meta::NameValue(meta)
                         if mode == ConfigFlagsType::Field && meta.path.is_ident("env") =>
                     {
-                        flags.env = lit_in_meta_name_value(&meta).map(EnvFlag);
+                        flags.env = Some(EnvFlag(meta.value));
                     }
                     Meta::Path(path)
                         if mode == ConfigFlagsType::Field && path.is_ident("default") =>
@@ -121,7 +121,11 @@ impl ConfigFlags {
                     Meta::NameValue(meta)
                         if mode == ConfigFlagsType::Field && meta.path.is_ident("default") =>
                     {
-                        flags.default = lit_in_meta_name_value(&meta).map(DefaultFlag::Value);
+                        flags.default = Some(
+                            lit_in_meta_name_value(&meta)
+                                .map(DefaultFlag::Value)
+                                .unwrap_or_else(|| DefaultFlag::Expr(meta.value)),
+                        );
                     }
                     Meta::NameValue(meta)
                         if mode == ConfigFlagsType::Field && meta.path.is_ident("rename") =>
@@ -192,7 +196,7 @@ impl ConfigFlags {
 }
 
 #[derive(Debug)]
-pub struct EnvFlag(pub Lit);
+pub struct EnvFlag(pub Expr);
 
 impl ToTokens for EnvFlag {
     fn to_tokens(&self, tokens: &mut TokenStream) {
@@ -204,8 +208,10 @@ impl ToTokens for EnvFlag {
 
 #[derive(Debug)]
 pub enum DefaultFlag {
-    // When default has value
+    // When default has literal value
     Value(Lit),
+    // When default has value but it's not a literal
+    Expr(Expr),
     // Just a flag
     Flag,
 }
@@ -221,6 +227,7 @@ impl ToTokens for DefaultFlag {
                 };
                 tokens.extend(output);
             }
+            DefaultFlag::Expr(expr) => tokens.extend(quote! { .unwrap_or_else(|| #expr .into())}),
             DefaultFlag::Flag => {
                 tokens.extend(quote! { .unwrap_or_default() });
             }

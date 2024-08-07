@@ -67,7 +67,7 @@ impl fmt::Display for LinuxCapability {
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Clone, Debug)]
+#[derive(MirrordConfig, Clone, Debug, Serialize)]
 #[config(map_to = "AgentFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct AgentConfig {
@@ -331,6 +331,7 @@ pub struct AgentConfig {
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
     #[cfg(all(debug_assertions, not(test)))] // not(test) so that it's not included in the schema json.
+    #[serde(skip_serializing)]
     #[config(env = "MIRRORD_AGENT_TEST_ERROR", default = false, unstable)]
     pub test_error: bool,
 }
@@ -454,7 +455,7 @@ impl AgentFileConfig {
     }
 }
 
-#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize)]
 #[config(derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct AgentDnsConfig {

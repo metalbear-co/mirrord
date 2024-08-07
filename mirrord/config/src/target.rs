@@ -116,6 +116,7 @@ pub struct TargetConfig {
     /// - `container/{sample-container}`;
     /// - `containername/{sample-container}`.
     /// - `job/{sample-job}` (only when [`copy_target`](#feature-copy_target) is enabled).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<Target>,
 
     /// ### target.namespace {#target-namespace}
@@ -123,6 +124,7 @@ pub struct TargetConfig {
     /// Namespace where the target lives.
     ///
     /// Defaults to `"default"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
 }
 

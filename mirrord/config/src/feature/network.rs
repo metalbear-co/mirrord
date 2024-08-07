@@ -2,6 +2,7 @@ use dns::{DnsConfig, DnsFileConfig};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
+use serde::Serialize;
 
 use self::{incoming::*, outgoing::*};
 use crate::{
@@ -51,7 +52,7 @@ pub mod outgoing;
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize)]
 #[config(map_to = "NetworkFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct NetworkConfig {
