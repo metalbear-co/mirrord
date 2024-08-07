@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     io::Bytes,
     net::SocketAddr,
     time::{Duration, Instant},
@@ -20,8 +20,13 @@ use tokio::{
         TcpListener,
     },
     select,
+    sync::{
+        mpsc::{self, Receiver, Sender},
+        oneshot,
+    },
 };
 use tokio_stream::{wrappers::TcpListenerStream, StreamExt, StreamMap};
+use tokio_util::io::ReaderStream;
 
 use crate::{connection::AgentConnection, CliError, PortMapping};
 
@@ -32,16 +37,24 @@ pub struct PortForwarder {
     mappings: HashMap<SocketAddr, SocketAddr>,
     // accepts connections from the user app in the form of a stream
     listeners: StreamMap<SocketAddr, TcpListenerStream>,
-    // the reading half of the stream received by a listener for receiving data to send to the
-    // agent
-    rx_connections: StreamMap<SocketAddr, OwnedReadHalf>,
-    // the writing half of the stream received by a listener for sending data back to the user app
-    tx_connections: HashMap<SocketAddr, OwnedWriteHalf>,
-    // bijective map for storing connection_ids and sockets
-    sockets_ids_map: BiMap,
+    // oneshot channels for sending connection IDs to tasks
+    oneshots: VecDeque<oneshot::Sender<ConnectionId>>,
+    // identifies tasks by their corresponding connection ID
+    tasks: HashMap<ConnectionId, Sender<Vec<u8>>>,
+
+    // transmit internal messages from tasks to main loop
+    internal_msg_tx: Sender<PortForwardMessage>,
+    internal_msg_rx: Receiver<PortForwardMessage>,
+
     // true if Ping has been sent to agent
     waiting_for_pong: bool,
     ping_pong_timeout: Instant,
+}
+
+enum PortForwardMessage {
+    Connect(SocketAddr, oneshot::Sender<ConnectionId>),
+    Send(ConnectionId, Vec<u8>),
+    Close(ConnectionId),
 }
 
 impl PortForwarder {
@@ -68,16 +81,16 @@ impl PortForwarder {
             }
         }
 
+        let (internal_msg_tx, internal_msg_rx) = mpsc::channel(16);
+
         Ok(Self {
             agent_connection,
             mappings,
             listeners,
-            rx_connections: StreamMap::new(),
-            tx_connections: HashMap::new(),
-            sockets_ids_map: BiMap {
-                connection_ids: HashMap::new(),
-                sockets: HashMap::new(),
-            },
+            oneshots: VecDeque::new(),
+            tasks: HashMap::new(),
+            internal_msg_tx,
+            internal_msg_rx,
             waiting_for_pong: false,
             ping_pong_timeout: Instant::now(),
         })
@@ -138,25 +151,11 @@ impl PortForwarder {
                             DaemonMessage::TcpOutgoing(message) => {
                                 match message {
                                     DaemonTcpOutgoing::Connect(res) => {
-                                        match res {
-                                            Ok(connection) => {
-                                                let SocketAddress::Ip(local_address) = connection.local_address else {
-                                                    return Err(PortForwardError::ConnectionError
-                                                        ("Unexpectedly received Unix address for socket during setup".into())
-                                                    );
-                                                };
-                                                self.sockets_ids_map.insert(connection.connection_id, local_address);
-                                            },
-                                            Err(error) => return Err(PortForwardError::ConnectionError(format!("{error}"))),
-                                        }
-                                    },
-                                    DaemonTcpOutgoing::Read(res) => todo!(), // TODO: :)
+                                        // TODO: transmit connection id
+                                        },
+                                    DaemonTcpOutgoing::Read(res) => todo!(), // TODO: send data to corresponding task
                                     DaemonTcpOutgoing::Close(connection_id) => {
-                                        if let Some(Either::Right(socket)) = self.sockets_ids_map.get(Either::Left(connection_id)) {
-                                            self.sockets_ids_map.remove(Either::Right(socket));
-                                            self.rx_connections.remove(&socket);
-                                            self.tx_connections.remove(&socket);
-                                        }
+                                        // TODO: remove from tasks hashmap, kill task
                                     },
                                 }
                             },
@@ -190,109 +189,16 @@ impl PortForwarder {
                 // stream coming from the user app
                 message = self.listeners.next() => match message {
                     Some((socket, Ok(stream))) => {
-                        // split the stream and add to rx/ tx
-                        let (read, write) = stream.into_split();
-                        self.rx_connections.insert(socket, read);
-                        self.tx_connections.insert(socket, write);
-                        // get destination socket from mappings
-                        let destination =  match self.mappings.get(&socket) {
-                            Some(address) => address,
-                            None => return Err(PortForwardError::SocketMappingNotFound(socket)),
-                        };
-                        let dest_socket = SocketAddress::Ip(*destination);
-                        let Ok(_) = self.agent_connection.sender.send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect{remote_address: dest_socket}))).await else {
-                            return Err(PortForwardError::AgentSetupError("Failed to send connection request to agent".into()));
-                        };
+                        // TODO: spawn task for this socket + stream
                     },
                     Some((socket, Err(error))) => {
                         // error from TcpStream
                         tracing::error!("Error occured while listening to local socket {socket}: {error}");
-                        self.rx_connections.remove(&socket);
-                        self.tx_connections.remove(&socket);
-                        if let Some(Either::Left(connection_id)) = self.sockets_ids_map.get(Either::Right(socket)) {
-                            let _ = self.agent_connection.sender.send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(LayerClose{ connection_id }))).await;
-                        }
-                        self.sockets_ids_map.remove(Either::Right(socket));
+                        // TODO: remove from listeners
                     },
-                    None => break Ok(()), // all streams ended
-                },
-
-                // message = self.rx_connections.next() => match message {
-                    // TODO: ReadHalf does not allow .next()
-                // }
+                    None => break Ok(()),
+                }
             }
-        }
-    }
-}
-
-pub struct BiMap {
-    // connection IDs for successful connections
-    connection_ids: HashMap<SocketAddr, ConnectionId>,
-    // connection IDs for successful connections
-    sockets: HashMap<ConnectionId, SocketAddr>,
-}
-
-impl BiMap {
-    fn socket(&self, connection_id: ConnectionId) -> Option<&SocketAddr> {
-        self.sockets.get(&connection_id)
-    }
-
-    fn connection_id(&self, socket: SocketAddr) -> Option<&ConnectionId> {
-        self.connection_ids.get(&socket)
-    }
-
-    /// retrieve a value from the BiMap given either value
-    /// returns Some() if value was present, otherwise returns None
-    pub fn get(
-        &self,
-        item: Either<ConnectionId, SocketAddr>,
-    ) -> Option<Either<ConnectionId, SocketAddr>> {
-        match item {
-            Either::Left(connection_id) => self.socket(connection_id).cloned().map(Either::Right),
-            Either::Right(socket) => self.connection_id(socket).cloned().map(Either::Left),
-        }
-    }
-
-    /// insert a pair of values into the BiMap, returning None if successful
-    /// if value(s) already present for either item, Some() is returned and contains the existing
-    /// value(s)
-    pub fn insert(
-        &mut self,
-        connection_id: ConnectionId,
-        socket: SocketAddr,
-    ) -> Option<(Option<SocketAddr>, Option<ConnectionId>)> {
-        let res_s = self.sockets.insert(connection_id, socket);
-        let res_c = self.connection_ids.insert(socket, connection_id);
-        match (res_s, res_c) {
-            (None, None) => return None,
-            _ => return Some((res_s, res_c)),
-        }
-    }
-
-    /// remove a pair of values from the BiMap given either value
-    /// returns Some() if both values were present, otherwise returns None
-    /// note that if None is returned but one value was present, it has been removed
-    pub fn remove(&mut self, item: Either<ConnectionId, SocketAddr>) -> Option<()> {
-        let (connection_id, socket) = match item {
-            Either::Left(connection_id) => {
-                (Some(connection_id), self.socket(connection_id).cloned())
-            }
-            Either::Right(socket) => (self.connection_id(socket).cloned(), Some(socket)),
-        };
-
-        let res_s = if let Some(inner) = connection_id {
-            self.sockets.remove(&inner)
-        } else {
-            None
-        };
-        let res_c = if let Some(inner) = socket {
-            self.connection_ids.remove(&inner)
-        } else {
-            None
-        };
-        match (res_s, res_c) {
-            (Some(_), Some(_)) => return Some(()),
-            _ => return None,
         }
     }
 }
