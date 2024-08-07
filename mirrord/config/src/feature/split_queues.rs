@@ -30,7 +30,7 @@ pub type QueueId = String;
 /// }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Default)]
-pub struct SplitQueuesConfig(Option<BTreeMap<QueueId, QueueFilter>>);
+pub struct SplitQueuesConfig(pub Option<BTreeMap<QueueId, QueueFilter>>);
 
 impl SplitQueuesConfig {
     pub fn is_set(&self) -> bool {

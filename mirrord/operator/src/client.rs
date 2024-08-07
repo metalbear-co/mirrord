@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    fmt,
-};
+use std::{collections::BTreeMap, fmt};
 
 use base64::{engine::general_purpose, Engine};
 use chrono::{DateTime, Utc};
@@ -18,7 +15,14 @@ use mirrord_auth::{
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::LicenseValidity,
 };
-use mirrord_config::{feature::network::incoming::ConcurrentSteal, target::Target, LayerConfig};
+use mirrord_config::{
+    feature::{
+        network::incoming::ConcurrentSteal,
+        split_queues::{QueueFilter, QueueId},
+    },
+    target::Target,
+    LayerConfig,
+};
 use mirrord_kube::{api::kubernetes::create_kube_config, error::KubeApiError};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
@@ -663,7 +667,7 @@ impl OperatorApi<PreparedClientCert> {
                     target,
                     scale_down,
                     namespace,
-                    config.feature.split_queues.get_sqs_filter(),
+                    config.feature.split_queues.0.clone(),
                 )
                 .await?;
 
@@ -730,7 +734,7 @@ impl OperatorApi<PreparedClientCert> {
         target: Target,
         scale_down: bool,
         namespace: &str,
-        sqs_filter: Option<HashMap<String, BTreeMap<String, String>>>,
+        split_queues: Option<BTreeMap<QueueId, QueueFilter>>,
     ) -> OperatorApiResult<CopyTargetCrd> {
         let name = TargetCrd::urlfied_name(&target);
 
@@ -740,7 +744,7 @@ impl OperatorApi<PreparedClientCert> {
                 target,
                 idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
                 scale_down,
-                sqs_filter,
+                split_queues,
             },
         );
 
