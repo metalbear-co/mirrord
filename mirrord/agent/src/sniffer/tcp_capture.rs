@@ -1,6 +1,5 @@
 use std::{io, net::SocketAddr};
 
-use mirrord_protocol::MeshVendor;
 use nix::sys::socket::SockaddrStorage;
 use pnet::packet::{
     ethernet::{EtherTypes, EthernetPacket},
@@ -37,13 +36,10 @@ impl RawSocketTcpCapture {
     ///
     /// Returned instance initially uses a BPF filter that drops every packet.
     #[tracing::instrument(level = Level::DEBUG, err)]
-    pub async fn new(
-        network_interface: Option<String>,
-        mesh: Option<MeshVendor>,
-    ) -> Result<Self, AgentError> {
+    pub async fn new(network_interface: Option<String>, is_mesh: bool) -> Result<Self, AgentError> {
         // Priority is whatever the user set as an option to mirrord, then we check if we're in a
         // mesh to use `lo` interface, otherwise we try to get the appropriate interface.
-        let interface = match network_interface.or_else(|| mesh.map(|_| "lo".to_string())) {
+        let interface = match network_interface.or_else(|| is_mesh.then(|| "lo".to_string())) {
             Some(interface) => interface,
             None => Self::resolve_interface()
                 .await?

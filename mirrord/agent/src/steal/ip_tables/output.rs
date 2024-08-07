@@ -10,11 +10,11 @@ use crate::{
     steal::ip_tables::{chain::IPTableChain, IPTables, Redirect},
 };
 
-pub(crate) struct OutputRedirect<IPT: IPTables> {
+pub(crate) struct OutputRedirect<const USE_INSERT: bool, IPT: IPTables> {
     pub(crate) managed: IPTableChain<IPT>,
 }
 
-impl<IPT> OutputRedirect<IPT>
+impl<const USE_INSERT: bool, IPT> OutputRedirect<USE_INSERT, IPT>
 where
     IPT: IPTables,
 {
@@ -49,15 +49,23 @@ where
 /// This wrapper adds a new rule to the NAT OUTPUT chain to redirect "localhost" traffic as well
 /// Note: OUTPUT chain is only traversed for packets produced by local applications
 #[async_trait]
-impl<IPT> Redirect for OutputRedirect<IPT>
+impl<const USE_INSERT: bool, IPT> Redirect for OutputRedirect<USE_INSERT, IPT>
 where
     IPT: IPTables + Send + Sync,
 {
     async fn mount_entrypoint(&self) -> Result<()> {
-        self.managed.inner().add_rule(
-            Self::ENTRYPOINT,
-            &format!("-j {}", self.managed.chain_name()),
-        )?;
+        if USE_INSERT {
+            self.managed.inner().insert_rule(
+                Self::ENTRYPOINT,
+                &format!("-j {}", self.managed.chain_name()),
+                1,
+            )?;
+        } else {
+            self.managed.inner().add_rule(
+                Self::ENTRYPOINT,
+                &format!("-j {}", self.managed.chain_name()),
+            )?;
+        }
 
         Ok(())
     }

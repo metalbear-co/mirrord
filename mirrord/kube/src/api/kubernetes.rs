@@ -11,11 +11,11 @@ use kube::{
 };
 use mirrord_config::{
     agent::AgentConfig,
-    feature::network::incoming::IncomingMode,
     target::{Target, TargetConfig},
     LayerConfig,
 };
 use mirrord_progress::Progress;
+use mirrord_protocol::MeshVendor;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, trace};
 
@@ -227,18 +227,20 @@ impl KubernetesAPI {
             progress.warning(format!("Target has multiple containers, mirrord picked \"{container_name}\". To target a different one, include it in the target path.").as_str());
         }
 
-        let incoming_mode = config.map(|config| config.feature.network.incoming.mode);
-        let is_mesh = runtime_data
-            .as_ref()
-            .map(|data| data.mesh.is_some())
-            .unwrap_or_default();
-        if matches!(incoming_mode, Some(IncomingMode::Mirror)) && is_mesh {
-            progress.warning(
-                "mirrord has detected that you might be running on a cluster with a \
-                 service mesh and `network.incoming.mode = \"mirror\"`, which is currently \
-                 unsupported. You can set `network.incoming.mode` to \"steal\" (check out the\
-                 `http_filter` configuration value if you only want to steal some of the traffic).",
-            );
+        if let Some(mesh) = runtime_data.as_ref().and_then(|data| data.mesh.as_ref()) {
+            progress.info(&format!("service mesh detected: {mesh}"));
+
+            let privileged = config
+                .map(|config| config.agent.privileged)
+                .unwrap_or_default();
+
+            if matches!(mesh, MeshVendor::IstioAmbient) && !privileged {
+                progress.warning(
+                    "mirrord detected an ambient Istio service mesh but\
+                     the agent is not configured to run in a privileged SecurityContext.\
+                     Please set `agent.privileged = true`, otherwise the agent will not be able to start.",
+                );
+            }
         }
 
         info!(?params, "Spawning new agent");
