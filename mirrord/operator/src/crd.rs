@@ -356,7 +356,7 @@ pub struct SqsQueueDetails {
     /// Where the application gets the queue name from. Will be used to read messages from that
     /// queue and distribute them to the output queues. When running with mirrord and splitting
     /// this queue, applications will get a modified name from that source.
-    name_source: QueueNameSource,
+    pub name_source: QueueNameSource,
 
     /// These tags will be set for all temporary SQS queues created by mirrord for queues defined
     /// in this MirrordWorkloadQueueRegistry, alongside with the original tags of the respective
