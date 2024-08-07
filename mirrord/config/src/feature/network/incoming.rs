@@ -162,6 +162,7 @@ impl MirrordToggleableConfig for IncomingFileConfig {
     }
 }
 
+// Change to manual deserializtion to prevent usless untagged enum errors
 impl<'de> Deserialize<'de> for IncomingFileConfig {
     fn deserialize<D>(deserializer: D) -> Result<IncomingFileConfig, D::Error>
     where
@@ -171,13 +172,15 @@ impl<'de> Deserialize<'de> for IncomingFileConfig {
     }
 }
 
+/// [`Visitor`] for [`IncomingFileConfig`] that searches for bool or string for
+/// `IncomingFileConfig::Simple` and map for `IncomingAdvancedFileConfig` directly
 struct IncomingFileConfigVisitor;
 
 impl<'de> de::Visitor<'de> for IncomingFileConfigVisitor {
     type Value = IncomingFileConfig;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("bool or map")
+        formatter.write_str("bool or string or map")
     }
 
     fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>

@@ -1,10 +1,7 @@
 use std::{collections::HashSet, fmt, hash::Hash, marker::PhantomData, ops::Deref, str::FromStr};
 
 use schemars::JsonSchema;
-use serde::{
-    de::{self, EnumAccess, MapAccess, SeqAccess, Visitor},
-    Deserialize, Deserializer, Serialize,
-};
+use serde::{de, Deserialize, Deserializer, Serialize};
 
 use crate::config::{ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result};
 
@@ -51,6 +48,8 @@ where
     type Generator = T::Generator;
 }
 
+// We manualy deserialize ToggleableConfig to properly propogate deserialzation errors and not via
+// untagged enum usless error
 impl<'de, T> Deserialize<'de> for ToggleableConfig<T>
 where
     T: Deserialize<'de>,
@@ -63,16 +62,17 @@ where
     }
 }
 
+/// [`Visitor`] for [`ToggleableConfig`] that searches for bool or calls the inner type deserialize
 struct ToggleableConfigVisitor<T>(PhantomData<T>);
 
-impl<'de, T> Visitor<'de> for ToggleableConfigVisitor<T>
+impl<'de, T> de::Visitor<'de> for ToggleableConfigVisitor<T>
 where
     T: Deserialize<'de>,
 {
     type Value = ToggleableConfig<T>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("bool or map")
+        write!(formatter, "bool or nested config")
     }
 
     fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
@@ -121,7 +121,7 @@ where
 
     fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
     where
-        A: SeqAccess<'de>,
+        A: de::SeqAccess<'de>,
     {
         Deserialize::deserialize(de::value::SeqAccessDeserializer::new(seq))
             .map(ToggleableConfig::Config)
@@ -129,7 +129,7 @@ where
 
     fn visit_map<M>(self, map: M) -> Result<Self::Value, M::Error>
     where
-        M: MapAccess<'de>,
+        M: de::MapAccess<'de>,
     {
         Deserialize::deserialize(de::value::MapAccessDeserializer::new(map))
             .map(ToggleableConfig::Config)
@@ -137,7 +137,7 @@ where
 
     fn visit_enum<A>(self, data: A) -> Result<Self::Value, A::Error>
     where
-        A: EnumAccess<'de>,
+        A: de::EnumAccess<'de>,
     {
         Deserialize::deserialize(de::value::EnumAccessDeserializer::new(data))
             .map(ToggleableConfig::Config)
@@ -208,7 +208,7 @@ where
     // impl.
     struct StringOrStruct<T>(PhantomData<fn() -> T>);
 
-    impl<'de, T> Visitor<'de> for StringOrStruct<T>
+    impl<'de, T> de::Visitor<'de> for StringOrStruct<T>
     where
         T: Deserialize<'de> + FromStr<Err = ConfigError>,
     {
@@ -236,7 +236,7 @@ where
 
         fn visit_map<M>(self, map: M) -> Result<Self::Value, M::Error>
         where
-            M: MapAccess<'de>,
+            M: de::MapAccess<'de>,
         {
             // `MapAccessDeserializer` is a wrapper that turns a `MapAccess`
             // into a `Deserializer`, allowing it to be used as the input to T's
