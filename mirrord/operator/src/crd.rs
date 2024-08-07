@@ -387,6 +387,14 @@ impl QueueConsumer {
         }
     }
 
+    pub fn container(&self) -> Option<&str> {
+        match self {
+            QueueConsumer::Deployment(.., container) | QueueConsumer::Rollout(.., container) => {
+                container.as_deref()
+            }
+        }
+    }
+
     /// For self that is the queue consumer of a run, test if a given registry object is the correct
     /// registry for this run.
     pub fn registry_matches(&self, registry: &MirrordWorkloadQueueRegistry) -> bool {
