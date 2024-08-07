@@ -551,6 +551,18 @@ pub enum SqsSessionStatus {
     CleanupError(SqsSessionError, Option<SqsSplitDetails>),
 }
 
+impl SqsSessionStatus {
+    pub fn get_split_details(&self) -> Option<&SqsSplitDetails> {
+        match self {
+            SqsSessionStatus::RegisteringFilters(details) | SqsSessionStatus::Ready(details) => {
+                Some(details)
+            }
+            SqsSessionStatus::CleanupError(.., details) => details.as_ref(),
+            _ => None,
+        }
+    }
+}
+
 /// The [`kube::runtime::wait::Condition`] trait is auto-implemented for this function.
 /// To be used in [`kube::runtime::wait::await_condition`].
 pub fn is_session_ready(session: Option<&MirrordSqsSession>) -> bool {
