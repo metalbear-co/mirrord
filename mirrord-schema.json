@@ -809,16 +809,14 @@
           "minimum": 0.0
         },
         "tls_certificate": {
-          "title": "external_proxy.tls_certificate {#external_proxy-tls_certificate}",
-          "description": "Certificate path to be used for wrapping external proxy tcp listener with a tcp acceptor (self-signed one will be generated automaticaly if not specified)",
+          "description": "<!--${internal}-->\n\nCertificate path to be used for wrapping external proxy tcp listener with a tcp acceptor (self-signed one will be generated automaticaly if not specified)",
           "type": [
             "string",
             "null"
           ]
         },
         "tls_key": {
-          "title": "external_proxy.tls_key {#external_proxy-tls_key}",
-          "description": "Private Key path to be used for wrapping external proxy tcp listener with a tcp acceptor (self-signed one will be generated automaticaly if not specified)",
+          "description": "<!--${internal}-->\n\nPrivate Key path to be used for wrapping external proxy tcp listener with a tcp acceptor (self-signed one will be generated automaticaly if not specified)",
           "type": [
             "string",
             "null"
@@ -1203,24 +1201,21 @@
       "type": "object",
       "properties": {
         "client_tls_certificate": {
-          "title": "internal_proxy.client_tls_certificate {#internal_proxy-client_tls_certificate}",
-          "description": "Certificate to use as tls client credentials for connection to `connect_tcp`. (self-signed one will be generated automaticaly if not specified)",
+          "description": "<!--${internal}-->\n\nCertificate to use as tls client credentials for connection to `connect_tcp`. (self-signed one will be generated automaticaly if not specified)",
           "type": [
             "string",
             "null"
           ]
         },
         "client_tls_key": {
-          "title": "internal_proxy.client_tls_key {#internal_proxy-client_tls_key}",
-          "description": "Private Key to use as tls client credentials for connection to `connect_tcp`. (self-signed one will be generated automaticaly if not specified)",
+          "description": "<!--${internal}-->\n\nPrivate Key to use as tls client credentials for connection to `connect_tcp`. (self-signed one will be generated automaticaly if not specified)",
           "type": [
             "string",
             "null"
           ]
         },
         "connect_tcp": {
-          "title": "internal_proxy.connect_tcp {#internal_proxy-connect_tcp}",
-          "description": "```json { \"internal_proxy\": { \"connect_tcp\": \"10.10.0.100:7777\" } } ```",
+          "description": "<!--${internal}-->\n\nAddress of external proxy to be used in `mirrord container`",
           "type": [
             "string",
             "null"
