@@ -11,19 +11,8 @@ use std::{
 
 use faccess::{AccessMode, PathExt};
 use libc::DT_DIR;
-use mirrord_protocol::{
-    file::{
-        AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, DirEntryInternal,
-        FdOpenDirRequest, GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest,
-        OpenFileResponse, OpenOptionsInternal, OpenRelativeFileRequest, ReadDirRequest,
-        ReadDirResponse, ReadFileRequest, ReadFileResponse, ReadLimitedFileRequest,
-        ReadLinkFileRequest, ReadLinkFileResponse, SeekFileRequest, SeekFileResponse,
-        WriteFileRequest, WriteFileResponse, WriteLimitedFileRequest, XstatFsRequest,
-        XstatFsResponse, XstatRequest, XstatResponse,
-    },
-    FileRequest, FileResponse, RemoteResult, ResponseError,
-};
-use tracing::{error, trace};
+use mirrord_protocol::{file::*, FileRequest, FileResponse, RemoteResult, ResponseError};
+use tracing::{error, trace, Level};
 
 use crate::{error::Result, util::IndexAllocator};
 
@@ -203,14 +192,19 @@ impl FileManager {
                 let xstat_result = self.xstatfs(fd);
                 Some(FileResponse::XstatFs(xstat_result))
             }
+
+            // dir operations
             FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd }) => {
                 let open_dir_result = self.fdopen_dir(remote_fd);
                 Some(FileResponse::OpenDir(open_dir_result))
             }
-
             FileRequest::ReadDir(ReadDirRequest { remote_fd }) => {
                 let read_dir_result = self.read_dir(remote_fd);
                 Some(FileResponse::ReadDir(read_dir_result))
+            }
+            FileRequest::ReadDirBatch(ReadDirBatchRequest { remote_fd }) => {
+                let read_dir_result = self.read_dir_batch(remote_fd);
+                Some(FileResponse::ReadDirBatch(read_dir_result))
             }
             FileRequest::CloseDir(CloseDirRequest { remote_fd }) => {
                 self.close_dir(remote_fd);
@@ -723,6 +717,17 @@ impl FileManager {
         } else {
             ReadDirResponse { direntry: None }
         };
+
+        Ok(result)
+    }
+
+    #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
+    pub(crate) fn read_dir_batch(&mut self, fd: u64) -> RemoteResult<ReadDirBatchResponse> {
+        let result = self
+            .get_dir_stream(fd)?
+            .map(DirEntryInternal::try_from)
+            .try_collect::<Vec<_>>()
+            .map(|dir_entries| ReadDirBatchResponse { fd, dir_entries })?;
 
         Ok(result)
     }

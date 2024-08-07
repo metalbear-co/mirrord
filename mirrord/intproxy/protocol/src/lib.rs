@@ -11,14 +11,7 @@ use std::{
 use bincode::{Decode, Encode};
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
-    file::{
-        AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
-        GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest, OpenFileResponse,
-        OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
-        ReadFileResponse, ReadLimitedFileRequest, ReadLinkFileRequest, ReadLinkFileResponse,
-        SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
-        WriteLimitedFileRequest, XstatFsRequest, XstatFsResponse, XstatRequest, XstatResponse,
-    },
+    file::*,
     outgoing::SocketAddress,
     tcp::StealType,
     FileRequest, FileResponse, GetEnvVarsRequest, Port, RemoteResult,
@@ -370,6 +363,13 @@ impl_request!(
     res = RemoteResult<ReadDirResponse>,
     req_path = LayerToProxyMessage::File => FileRequest::ReadDir,
     res_path = ProxyToLayerMessage::File => FileResponse::ReadDir,
+);
+
+impl_request!(
+    req = ReadDirBatchRequest,
+    res = RemoteResult<ReadDirBatchResponse>,
+    req_path = LayerToProxyMessage::File => FileRequest::ReadDirBatch,
+    res_path = ProxyToLayerMessage::File => FileResponse::ReadDirBatch,
 );
 
 impl_request!(
