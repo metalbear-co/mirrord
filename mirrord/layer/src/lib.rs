@@ -371,7 +371,7 @@ fn layer_start(mut config: LayerConfig) {
             NewSessionRequest::New(process_info),
             PROXY_CONNECTION_TIMEOUT,
         )
-        .expect("failed to initialize proxy connection");
+        .unwrap_or_else(|_| panic!("failed to initialize proxy connection at {address}"));
         PROXY_CONNECTION
             .set(new_connection)
             .expect("setting PROXY_CONNECTION singleton")

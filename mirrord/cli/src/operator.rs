@@ -22,7 +22,7 @@ use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{row, Table};
 use serde::Deserialize;
 use tokio::fs;
-use tracing::warn;
+use tracing::{warn, Level};
 
 use self::session::SessionCommandHandler;
 use crate::{
@@ -118,7 +118,7 @@ async fn operator_setup(
     Ok(())
 }
 
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = Level::TRACE, ret)]
 async fn get_status_api(config: Option<&Path>) -> Result<Api<MirrordOperatorCrd>> {
     let layer_config = if let Some(config) = config {
         let mut cfg_context = ConfigContext::default();
@@ -143,7 +143,7 @@ async fn get_status_api(config: Option<&Path>) -> Result<Api<MirrordOperatorCrd>
     Ok(Api::all(client))
 }
 
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = Level::TRACE, ret)]
 async fn operator_status(config: Option<&Path>) -> Result<()> {
     let mut progress = ProgressTracker::from_env("Operator Status");
 

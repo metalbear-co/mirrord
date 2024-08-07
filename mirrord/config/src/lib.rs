@@ -9,7 +9,9 @@
 //! including if you only made documentation changes.
 pub mod agent;
 pub mod config;
+pub mod container;
 pub mod experimental;
+pub mod external_proxy;
 pub mod feature;
 pub mod internal_proxy;
 pub mod target;
@@ -23,14 +25,19 @@ use feature::network::outgoing::OutgoingFilterConfig;
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
+use serde::Serialize;
 use target::Target;
 use tera::Tera;
 use tracing::warn;
 
 use crate::{
-    agent::AgentConfig, config::source::MirrordConfigSource, feature::FeatureConfig,
+    agent::AgentConfig, config::source::MirrordConfigSource, container::ContainerConfig,
+    external_proxy::ExternalProxyConfig, feature::FeatureConfig,
     internal_proxy::InternalProxyConfig, target::TargetConfig, util::VecOrSingle,
 };
+
+/// Env variable to load config from file (json, yaml and toml supported).
+pub static MIRRORD_CONFIG_FILE_ENV: &str = "MIRRORD_CONFIG_FILE";
 
 /// mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
@@ -158,7 +165,7 @@ use crate::{
 /// ```
 ///
 /// # Options {#root-options}
-#[derive(MirrordConfig, Clone, Debug)]
+#[derive(MirrordConfig, Clone, Debug, Serialize)]
 #[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct LayerConfig {
@@ -200,7 +207,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true)]
     pub skip_build_tools: bool,
 
-    /// ## connect_tcp {#root-connect_tpc}
+    /// ## connect_tcp {#root-connect_tcp}
     ///
     /// IP:PORT to connect to instead of using k8s api, for testing purposes.
     ///
@@ -227,7 +234,7 @@ pub struct LayerConfig {
     ///
     /// ```json
     /// {
-    ///  "kubeconfig": "~/bear/kube-config"
+    ///   "kubeconfig": "~/bear/kube-config"
     /// }
     /// ```
     #[config(env = "MIRRORD_KUBECONFIG")]
@@ -245,7 +252,7 @@ pub struct LayerConfig {
     ///
     /// ```json
     /// {
-    ///  "sip_binaries": "bash;python"
+    ///   "sip_binaries": "bash;python"
     /// }
     /// ```
     pub sip_binaries: Option<VecOrSingle<String>>,
@@ -258,7 +265,11 @@ pub struct LayerConfig {
     #[config(nested)]
     pub agent: AgentConfig,
 
-    /// # feature {#root-feature}
+    /// ## container {#root-container}
+    #[config(nested)]
+    pub container: ContainerConfig,
+
+    /// ## feature {#root-feature}
     #[config(nested)]
     pub feature: FeatureConfig,
 
@@ -277,15 +288,19 @@ pub struct LayerConfig {
     ///
     /// ```json
     /// {
-    ///  "kube_context": "mycluster"
+    ///   "kube_context": "mycluster"
     /// }
     /// ```
     #[config(env = "MIRRORD_KUBE_CONTEXT")]
     pub kube_context: Option<String>,
 
-    /// # internal_proxy {#root-internal_proxy}
+    /// ## internal_proxy {#root-internal_proxy}
     #[config(nested)]
     pub internal_proxy: InternalProxyConfig,
+
+    /// ## external_proxy {#root-external_proxy}
+    #[config(nested)]
+    pub external_proxy: ExternalProxyConfig,
 
     /// ## use_proxy {#root-use_proxy}
     ///
@@ -297,7 +312,7 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_PROXY", default = true)]
     pub use_proxy: bool,
 
-    /// # experimental {#root-experimental}
+    /// ## experimental {#root-experimental}
     #[config(nested)]
     pub experimental: ExperimentalConfig,
 }
@@ -308,7 +323,7 @@ impl LayerConfig {
     /// To be used from CLI to verify config and print warnings
     pub fn from_env_with_warnings() -> Result<(Self, ConfigContext), ConfigError> {
         let mut cfg_context = ConfigContext::default();
-        if let Ok(path) = std::env::var("MIRRORD_CONFIG_FILE") {
+        if let Ok(path) = std::env::var(MIRRORD_CONFIG_FILE_ENV) {
             LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
         } else {
             LayerFileConfig::default().generate_config(&mut cfg_context)
@@ -787,9 +802,11 @@ mod tests {
                 hostname: None,
             }),
             connect_tcp: None,
+            container: None,
             operator: None,
             sip_binaries: None,
             kube_context: None,
+            external_proxy: None,
             internal_proxy: None,
             use_proxy: None,
             experimental: None,

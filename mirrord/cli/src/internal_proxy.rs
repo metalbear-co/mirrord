@@ -13,8 +13,8 @@
 use std::{
     env,
     fs::OpenOptions,
-    io::{self, Write},
-    net::{Ipv4Addr, SocketAddrV4},
+    io,
+    net::{Ipv4Addr, SocketAddr},
     time::Duration,
 };
 
@@ -26,77 +26,31 @@ use mirrord_intproxy::{
     IntProxy,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
-use nix::{
-    libc,
-    sys::resource::{setrlimit, Resource},
-};
+use nix::sys::resource::{setrlimit, Resource};
 use tokio::net::TcpListener;
-use tracing::warn;
+use tracing::{warn, Level};
 use tracing_subscriber::EnvFilter;
 
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{InternalProxyError, Result},
+    util::{create_listen_socket, detach_io},
 };
 
-unsafe fn redirect_fd_to_dev_null(fd: libc::c_int) {
-    let devnull_fd = libc::open(b"/dev/null\0" as *const [u8; 10] as _, libc::O_RDWR);
-    libc::dup2(devnull_fd, fd);
-    libc::close(devnull_fd);
-}
-
-unsafe fn detach_io() -> Result<(), InternalProxyError> {
-    // Create a new session for the proxy process, detaching from the original terminal.
-    // This makes the process not to receive signals from the "mirrord" process or it's parent
-    // terminal fixes some side effects such as https://github.com/metalbear-co/mirrord/issues/1232
-    nix::unistd::setsid().map_err(InternalProxyError::SetSid)?;
-
-    // flush before redirection
-    {
-        // best effort
-        let _ = std::io::stdout().lock().flush();
-    }
-    for fd in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
-        redirect_fd_to_dev_null(fd);
-    }
-    Ok(())
-}
-
-/// Print the port for the caller (mirrord cli execution flow) so it can pass it
+/// Print the address for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.
-fn print_port(listener: &TcpListener) -> io::Result<()> {
-    let port = listener.local_addr()?.port();
-    println!("{port}\n");
+fn print_addr(listener: &TcpListener) -> io::Result<()> {
+    let addr = listener.local_addr()?;
+    println!("{addr}\n");
     Ok(())
-}
-
-/// Creates a listening socket using socket2
-/// to control the backlog and manage scenarios where
-/// the proxy is under heavy load.
-/// <https://github.com/metalbear-co/mirrord/issues/1716#issuecomment-1663736500>
-/// in macOS backlog is documented to be hardcoded limited to 128.
-fn create_listen_socket() -> io::Result<TcpListener> {
-    let socket = socket2::Socket::new(
-        socket2::Domain::IPV4,
-        socket2::Type::STREAM,
-        Some(socket2::Protocol::TCP),
-    )?;
-
-    socket.bind(&socket2::SockAddr::from(SocketAddrV4::new(
-        Ipv4Addr::LOCALHOST,
-        0,
-    )))?;
-    socket.listen(1024)?;
-    socket.set_nonblocking(true)?;
-
-    // socket2 -> std -> tokio
-    TcpListener::from_std(socket.into())
 }
 
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
 pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError> {
     let config = LayerConfig::from_env()?;
+
+    tracing::info!(?config, "internal_proxy starting");
 
     if let Some(log_destination) = config.internal_proxy.log_destination.as_ref() {
         let output_file = OpenOptions::new()
@@ -137,18 +91,19 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
 
     // The agent is spawned and our parent process already established a connection.
     // However, the parent process (`exec` or `ext` command) is free to exec/exit as soon as it
-    // reads the TPC listener port from our stdout. We open our own connection with the agent
+    // reads the TCP listener address from our stdout. We open our own connection with the agent
     // **before** this happens to ensure that the agent does not prematurely exit.
     // We also perform initial ping pong round to ensure that k8s runtime actually made connection
     // with the agent (it's a must, because port forwarding may be done lazily).
     let agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
 
-    // Let it assign port for us then print it for the user.
-    let listener = create_listen_socket().map_err(InternalProxyError::ListenerSetup)?;
-    print_port(&listener).map_err(InternalProxyError::ListenerSetup)?;
+    // Let it assign address for us then print it for the user.
+    let listener = create_listen_socket(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
+        .map_err(InternalProxyError::ListenerSetup)?;
+    print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
 
-    unsafe {
-        detach_io()?;
+    if config.internal_proxy.detach_io {
+        unsafe { detach_io() }.map_err(InternalProxyError::SetSid)?;
     }
 
     let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);
@@ -161,7 +116,8 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
 }
 
 /// Creates a connection with the agent and handles one round of ping pong.
-async fn connect_and_ping(
+#[tracing::instrument(level = Level::TRACE)]
+pub(crate) async fn connect_and_ping(
     config: &LayerConfig,
     connect_info: Option<AgentConnectInfo>,
     analytics: &mut AnalyticsReporter,

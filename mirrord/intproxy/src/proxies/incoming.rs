@@ -27,7 +27,7 @@ use tokio::{
     sync::mpsc::{self, Sender},
 };
 use tokio_stream::{StreamMap, StreamNotifyClose};
-use tracing::debug;
+use tracing::{debug, Level};
 
 use self::{
     interceptor::{Interceptor, InterceptorError, MessageOut},
@@ -51,6 +51,7 @@ mod subscriptions;
 /// # Exception
 ///
 /// If the given `addr` is unspecified, this function binds to localhost.
+#[tracing::instrument(level = Level::TRACE, ret)]
 fn bind_similar(addr: SocketAddr) -> io::Result<TcpSocket> {
     match addr.ip() {
         IpAddr::V4(Ipv4Addr::UNSPECIFIED) => {

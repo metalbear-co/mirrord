@@ -3,7 +3,7 @@ use std::ops::Deref;
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::filter::AddressFilter;
 use crate::{
@@ -63,7 +63,7 @@ use crate::{
 /// ```
 ///
 /// Valid values follow this pattern: `[name|address|subnet/mask][:port]`.
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum DnsFilterConfig {
     /// DNS queries matching what is specified here will go through the remote pod, everything else
@@ -87,7 +87,7 @@ pub enum DnsFilterConfig {
 /// [`fs`](#feature-fs) feature, and setting `read_only: ["/etc/resolv.conf"]`.
 /// - DNS filter currently works only with frameworks that use `getaddrinfo`/`gethostbyname`
 ///   functions.
-#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize)]
 #[config(map_to = "DnsFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct DnsConfig {
