@@ -542,6 +542,10 @@ impl Display for SqsSessionError {
 #[serde(rename = "SQSSessionStatus")]
 pub enum SqsSessionStatus {
     Starting(),
+    /// SQS operator sets this status before it starts registering filters, so that if anything
+    /// fails during the registration of filters, we have all the queues we need to delete on
+    /// cleanup.
+    RegisteringFilters(SqsSplitDetails),
     Ready(SqsSplitDetails),
     StartError(SqsSessionError),
     CleanupError(SqsSessionError, Option<SqsSplitDetails>),
@@ -552,7 +556,14 @@ pub enum SqsSessionStatus {
 pub fn is_session_ready(session: Option<&MirrordSqsSession>) -> bool {
     session
         .and_then(|session| session.status.as_ref())
-        .map(|status| matches!(status, SqsSessionStatus::Starting(..)).not())
+        .map(|status| {
+            matches!(
+                status,
+                SqsSessionStatus::Ready(..)
+                    | SqsSessionStatus::StartError(..)
+                    | SqsSessionStatus::CleanupError(..)
+            )
+        })
         .unwrap_or_default()
 }
 
