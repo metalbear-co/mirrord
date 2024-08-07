@@ -104,7 +104,7 @@ pub struct FeatureConfig {
     /// If you don't specify any filter for a queue that is however declared in the
     /// `MirrordWorkloadQueueRegistry` of the target you're using, a match-nothing filter
     /// will be used, and your local application will not receive any messages from that queue.
-    #[config(nested)]
+    #[config(nested, unstable)]
     pub split_queues: SplitQueuesConfig,
 }
 
