@@ -62,7 +62,8 @@ where
     }
 }
 
-/// [`Visitor`] for [`ToggleableConfig`] that searches for bool or calls the inner type deserialize
+/// [`Visitor`](de::Visitor) for [`ToggleableConfig`] that searches for bool or calls the inner type
+/// deserialize
 struct ToggleableConfigVisitor<T>(PhantomData<T>);
 
 impl<'de, T> de::Visitor<'de> for ToggleableConfigVisitor<T>

@@ -172,7 +172,7 @@ impl<'de> Deserialize<'de> for IncomingFileConfig {
     }
 }
 
-/// [`Visitor`] for [`IncomingFileConfig`] that searches for bool or string for
+/// [`Visitor`](de::Visitor) for [`IncomingFileConfig`] that searches for bool or string for
 /// `IncomingFileConfig::Simple` and map for `IncomingAdvancedFileConfig` directly
 struct IncomingFileConfigVisitor;
 
