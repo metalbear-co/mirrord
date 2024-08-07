@@ -1292,6 +1292,7 @@
       "description": "More queue types might be added in the future.",
       "oneOf": [
         {
+          "description": "Amazon Simple Queue Service.",
           "type": "object",
           "required": [
             "message_filter",
