@@ -11,7 +11,7 @@ jobs:
   build_binaries_aarch64-unknown-linux-gnu:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           rustflags: ""
@@ -25,7 +25,7 @@ jobs:
         env:
           MIRRORD_LAYER_FILE: ../../../target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
         run: RUSTFLAGS="$RUSTFLAGS -A dead_code" cross build --release -p mirrord --target=aarch64-unknown-linux-gnu
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: aarch64-unknown-linux-gnu
           path: |
@@ -35,7 +35,7 @@ jobs:
   build_binaries_x86_64-unknown-linux-gnu:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           rustflags: ""
@@ -44,7 +44,7 @@ jobs:
           tool: cross
       - name: build mirrord-layer and cli
         run: cross build --release -p mirrord -p mirrord-layer --target=x86_64-unknown-linux-gnu
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: x86_64-unknown-linux-gnu
           path: |
@@ -54,7 +54,7 @@ jobs:
   build_binaries_macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: rm rust-toolchain.toml
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -62,7 +62,7 @@ jobs:
           toolchain: nightly-2024-04-15
           rustflags: ""
       - name: Import Code-Signing Certificates
-        uses: Apple-Actions/import-codesign-certs@8f3fb608891dd2244cdab3d69cd68c0d37a7fe93
+        uses: Apple-Actions/import-codesign-certs@v3
         with:
           # The certificates in a PKCS12 file encoded as a base64 string
           p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
@@ -121,7 +121,7 @@ jobs:
         run: gon -log-level=debug -log-json .github/workflows/universal_cli_sign.json
       - name: adjust directory layout for upload
         run: cp -rf /tmp/target .
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: universal-apple-darwin
           path: |
@@ -136,14 +136,14 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Set up QEMU
         id: qemu
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -155,7 +155,7 @@ jobs:
 
       - name: Build and push (test)
         if: github.event_name == 'workflow_dispatch'
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: mirrord/agent/Dockerfile
@@ -166,7 +166,7 @@ jobs:
 
       - name: Build and push (final/release)
         if: github.event_name != 'workflow_dispatch'
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: mirrord/agent/Dockerfile
@@ -192,8 +192,8 @@ jobs:
       deployments: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
-      - uses: actions/download-artifact@v3
+        uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
           path: /tmp/artifacts
       - uses: montudor/action-zip@v1
@@ -213,7 +213,7 @@ jobs:
           shasum -a 256 mirrord_mac_universal.zip > mirrord_mac_universal.shasum256
         working-directory: /tmp/artifacts/universal-apple-darwin
       # used for the homebrew formula
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: shasum
           path: |
@@ -250,10 +250,10 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name != 'workflow_dispatch'
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           path: /tmp/artifacts
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Get release version and hashes
         run: |
           echo "version=$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)" >> $GITHUB_ENV
@@ -261,7 +261,7 @@ jobs:
           echo "sha256_linux_aarch64=$(cat /tmp/artifacts/shasum/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
           echo "sha256_linux_x86_64=$(cat /tmp/artifacts/shasum/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
       - name: Checkout into homebrew-mirrord
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: metalbear-co/homebrew-mirrord
           path: ./
@@ -288,7 +288,7 @@ jobs:
     if: github.event_name != 'workflow_dispatch'
     steps:
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           # Get complete history
           fetch-depth: 0
