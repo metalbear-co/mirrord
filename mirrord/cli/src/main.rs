@@ -327,7 +327,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
 
     let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
-    let mut analytics = AnalyticsReporter::only_error(config.telemetry, watch);
+    let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
     (&config).collect_analytics(analytics.get_mut());
 
     config.verify(&mut context)?;

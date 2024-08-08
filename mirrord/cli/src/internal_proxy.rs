@@ -34,6 +34,7 @@ use tracing_subscriber::EnvFilter;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{InternalProxyError, Result},
+    execution::MIRRORD_EXECUTION_KIND_ENV,
     util::{create_listen_socket, detach_io},
 };
 
@@ -86,10 +87,16 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
         }
         Err(..) => None,
     };
+
+    let execution_kind = std::env::var(MIRRORD_EXECUTION_KIND_ENV)
+        .ok()
+        .and_then(|execution_kind| execution_kind.parse().ok())
+        .unwrap_or_default();
+
     let mut analytics = if config.internal_proxy.container_mode {
-        AnalyticsReporter::only_error(config.telemetry, watch)
+        AnalyticsReporter::only_error(config.telemetry, execution_kind, watch)
     } else {
-        AnalyticsReporter::new(config.telemetry, watch)
+        AnalyticsReporter::new(config.telemetry, execution_kind, watch)
     };
     (&config).collect_analytics(analytics.get_mut());
 

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Instant};
+use std::{collections::HashMap, fmt, str::FromStr, time::Instant};
 
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,45 @@ pub enum AnalyticsError {
     #[default]
     Unknown,
 }
+
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionKind {
+    Container,
+    #[default]
+    Exec,
+}
+
+impl fmt::Display for ExecutionKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExecutionKind::Container => write!(f, "container"),
+            ExecutionKind::Exec => write!(f, "exec"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct BadExecutionKindVariant;
+
+impl FromStr for ExecutionKind {
+    type Err = BadExecutionKindVariant;
+
+    fn from_str(kind: &str) -> Result<Self, Self::Err> {
+        match kind {
+            "container" => Ok(ExecutionKind::Container),
+            "exec" => Ok(ExecutionKind::Exec),
+            _ => Err(BadExecutionKindVariant),
+        }
+    }
+}
+impl fmt::Display for BadExecutionKindVariant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid ExecutionKind variant, not container/exec")
+    }
+}
+
+impl std::error::Error for BadExecutionKindVariant {}
 
 /// Struct to store analytics data.
 /// Example usage that would output the following json
@@ -155,11 +194,12 @@ pub struct AnalyticsReporter {
     error: Option<AnalyticsError>,
     start_instant: Instant,
     operator_properties: Option<AnalyticsOperatorProperties>,
+    execution_kind: ExecutionKind,
     watch: drain::Watch,
 }
 
 impl AnalyticsReporter {
-    pub fn new(enabled: bool, watch: drain::Watch) -> Self {
+    pub fn new(enabled: bool, execution_kind: ExecutionKind, watch: drain::Watch) -> Self {
         AnalyticsReporter {
             analytics: Analytics::default(),
             error_only_send: false,
@@ -167,11 +207,12 @@ impl AnalyticsReporter {
             error: None,
             operator_properties: None,
             start_instant: Instant::now(),
+            execution_kind,
             watch,
         }
     }
 
-    pub fn only_error(enabled: bool, watch: drain::Watch) -> Self {
+    pub fn only_error(enabled: bool, execution_kind: ExecutionKind, watch: drain::Watch) -> Self {
         AnalyticsReporter {
             analytics: Analytics::default(),
             error_only_send: true,
@@ -179,6 +220,7 @@ impl AnalyticsReporter {
             error: None,
             operator_properties: None,
             start_instant: Instant::now(),
+            execution_kind,
             watch,
         }
     }
@@ -199,6 +241,7 @@ impl AnalyticsReporter {
             operator_properties: self.operator_properties.clone(),
             platform: std::env::consts::OS,
             version: CURRENT_VERSION,
+            execution_kind: self.execution_kind,
         }
     }
 }
@@ -278,6 +321,7 @@ struct AnalyticsReport {
     #[serde(flatten)]
     operator_properties: Option<AnalyticsOperatorProperties>,
     error: Option<AnalyticsError>,
+    execution_kind: ExecutionKind,
 }
 
 /// Actualy send `Analytics` & `AnalyticsOperatorProperties` to analytics.metalbear.co

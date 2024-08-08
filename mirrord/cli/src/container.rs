@@ -6,7 +6,9 @@ use std::{
 
 use exec::execvp;
 use local_ip_address::local_ip;
-use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
+use mirrord_analytics::{
+    AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
+};
 use mirrord_config::{
     external_proxy::{MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV, MIRRORD_EXTERNAL_TLS_KEY_ENV},
     internal_proxy::{
@@ -25,9 +27,14 @@ use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     container::command_builder::RuntimeCommandBuilder,
     error::{ContainerError, Result},
-    execution::{MirrordExecution, LINUX_INJECTION_ENV_VAR, MIRRORD_CONNECT_TCP_ENV},
+    execution::{
+        MirrordExecution, LINUX_INJECTION_ENV_VAR, MIRRORD_CONNECT_TCP_ENV,
+        MIRRORD_EXECUTION_KIND_ENV,
+    },
     util::MIRRORD_CONSOLE_ADDR_ENV,
 };
+
+static CONTAINER_EXECUTION_KIND: ExecutionKind = ExecutionKind::Container;
 
 mod command_builder;
 
@@ -155,9 +162,15 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
         std::env::set_var(name, value);
     }
 
+    std::env::set_var(
+        MIRRORD_EXECUTION_KIND_ENV,
+        CONTAINER_EXECUTION_KIND.to_string(),
+    );
+
     let (mut config, mut context) = LayerConfig::from_env_with_warnings()?;
 
-    let mut analytics = AnalyticsReporter::only_error(config.telemetry, watch);
+    let mut analytics =
+        AnalyticsReporter::only_error(config.telemetry, CONTAINER_EXECUTION_KIND, watch);
     (&config).collect_analytics(analytics.get_mut());
 
     config.verify(&mut context)?;
@@ -249,6 +262,10 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     }
 
     runtime_command.add_env(MIRRORD_PROGRESS_ENV, "off");
+    runtime_command.add_env(
+        MIRRORD_EXECUTION_KIND_ENV,
+        CONTAINER_EXECUTION_KIND.to_string(),
+    );
 
     runtime_command.add_env(MIRRORD_CONFIG_FILE_ENV, "/tmp/mirrord-config.json");
     runtime_command.add_volume(composed_config_file.path(), "/tmp/mirrord-config.json");
