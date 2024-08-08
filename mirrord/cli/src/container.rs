@@ -164,7 +164,7 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
 
     std::env::set_var(
         MIRRORD_EXECUTION_KIND_ENV,
-        CONTAINER_EXECUTION_KIND.to_string(),
+        (CONTAINER_EXECUTION_KIND as u32).to_string(),
     );
 
     let (mut config, mut context) = LayerConfig::from_env_with_warnings()?;
@@ -264,7 +264,7 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     runtime_command.add_env(MIRRORD_PROGRESS_ENV, "off");
     runtime_command.add_env(
         MIRRORD_EXECUTION_KIND_ENV,
-        CONTAINER_EXECUTION_KIND.to_string(),
+        (CONTAINER_EXECUTION_KIND as u32).to_string(),
     );
 
     runtime_command.add_env(MIRRORD_CONFIG_FILE_ENV, "/tmp/mirrord-config.json");
