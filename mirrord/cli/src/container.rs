@@ -7,7 +7,14 @@ use std::{
 use exec::execvp;
 use local_ip_address::local_ip;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, CollectAnalytics, Reporter};
-use mirrord_config::{LayerConfig, MIRRORD_CONFIG_FILE_ENV};
+use mirrord_config::{
+    external_proxy::{MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV, MIRRORD_EXTERNAL_TLS_KEY_ENV},
+    internal_proxy::{
+        MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE_ENV, MIRRORD_INTPROXY_CLIENT_TLS_KEY_ENV,
+        MIRRORD_INTPROXY_CONTAINER_MODE_ENV,
+    },
+    LayerConfig, MIRRORD_CONFIG_FILE_ENV,
+};
 use mirrord_progress::{Progress, ProgressTracker, MIRRORD_PROGRESS_ENV};
 use tempfile::NamedTempFile;
 use tokio::process::Command;
@@ -110,7 +117,7 @@ async fn create_sidecar_intproxy(
 ) -> Result<(String, SocketAddr), ContainerError> {
     let mut sidecar_command = base_command.clone();
 
-    sidecar_command.add_env("MIRRORD_INTPROXY_DETACH_IO", "false");
+    sidecar_command.add_env(MIRRORD_INTPROXY_CONTAINER_MODE_ENV, "true");
     sidecar_command.add_envs(connection_info);
 
     let sidecar_container_command = ContainerCommand::run([
@@ -254,19 +261,19 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     };
 
     if let Some(path) = config.internal_proxy.client_tls_certificate.as_ref() {
-        load_env_and_mount_pem("MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE", path)
+        load_env_and_mount_pem(MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE_ENV, path)
     }
 
     if let Some(path) = config.internal_proxy.client_tls_key.as_ref() {
-        load_env_and_mount_pem("MIRRORD_INTPROXY_CLIENT_TLS_KEY", path)
+        load_env_and_mount_pem(MIRRORD_INTPROXY_CLIENT_TLS_KEY_ENV, path)
     }
 
     if let Some(path) = config.external_proxy.tls_certificate.as_ref() {
-        load_env_and_mount_pem("MIRRORD_EXTERNAL_TLS_CERTIFICATE", path)
+        load_env_and_mount_pem(MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV, path)
     }
 
     if let Some(path) = config.external_proxy.tls_key.as_ref() {
-        load_env_and_mount_pem("MIRRORD_EXTERNAL_TLS_KEY", path)
+        load_env_and_mount_pem(MIRRORD_EXTERNAL_TLS_KEY_ENV, path)
     }
 
     runtime_command.add_envs(execution_info_env_without_connection_info);
