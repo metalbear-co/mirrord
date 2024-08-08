@@ -46,6 +46,7 @@ use tracing_subscriber::EnvFilter;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{ExternalProxyError, Result},
+    execution::MIRRORD_EXECUTION_KIND_ENV,
     internal_proxy::connect_and_ping,
     util::{create_listen_socket, detach_io},
 };
@@ -90,7 +91,13 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
                 .map_err(|e| ExternalProxyError::DeseralizeConnectInfo(var, e))
         })
         .transpose()?;
-    let mut analytics = AnalyticsReporter::new(config.telemetry, watch);
+
+    let execution_kind = std::env::var(MIRRORD_EXECUTION_KIND_ENV)
+        .ok()
+        .and_then(|execution_kind| execution_kind.parse().ok())
+        .unwrap_or_default();
+
+    let mut analytics = AnalyticsReporter::new(config.telemetry, execution_kind, watch);
     (&config).collect_analytics(analytics.get_mut());
 
     let tls_acceptor = create_external_proxy_tls_acceptor(&config).await?;
