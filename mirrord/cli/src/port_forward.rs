@@ -1,11 +1,9 @@
 use std::{
     collections::{HashMap, VecDeque},
-    io::Bytes,
     net::SocketAddr,
     time::{Duration, Instant},
 };
 
-use futures::future::Either;
 use mirrord_protocol::{
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -16,10 +14,7 @@ use mirrord_protocol::{
 use thiserror::Error;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpListener,
-    },
+    net::TcpListener,
     select,
     sync::{
         mpsc::{self, Receiver, Sender},
@@ -40,6 +35,8 @@ pub struct PortForwarder {
     listeners: StreamMap<SocketAddr, TcpListenerStream>,
     // oneshot channels for sending connection IDs to tasks
     oneshots: VecDeque<oneshot::Sender<ConnectionId>>,
+    // identifies socket addresses by their corresponding connection ID
+    sockets: HashMap<ConnectionId, SocketAddr>,
     // identifies tasks by their corresponding local socket address
     // for sending data from the remote socket to the local address
     tasks: HashMap<SocketAddr, Sender<Vec<u8>>>,
@@ -90,6 +87,7 @@ impl PortForwarder {
             mappings,
             listeners,
             oneshots: VecDeque::new(),
+            sockets: HashMap::new(),
             tasks: HashMap::new(),
             internal_msg_tx,
             internal_msg_rx,
@@ -153,11 +151,45 @@ impl PortForwarder {
                             DaemonMessage::TcpOutgoing(message) => {
                                 match message {
                                     DaemonTcpOutgoing::Connect(res) => {
-                                        // TODO: transmit connection id back to task with self.oneshots
-                                        },
-                                    DaemonTcpOutgoing::Read(res) => todo!(), // TODO: send data to corresponding task with self.tasks
+                                        match res {
+                                            Ok(res) => {
+                                                let SocketAddress::Ip(socket) = res.local_address else {
+                                                    break Err(PortForwardError::ConnectionError
+                                                        ("Unexpectedly received Unix address for socket during setup".into())
+                                                    );
+                                                };
+                                                let Some(channel) = self.oneshots.pop_front() else {
+                                                    break Err(PortForwardError::ReadyTaskNotFound(socket, res.connection_id));
+                                                };
+                                                self.sockets.insert(res.connection_id, socket);
+                                                let _ = channel.send(res.connection_id);
+                                            },
+                                            Err(error) => break Err(PortForwardError::AgentError(format!("Problem receiving DaemonTcpOutgoing::Connect {error}"))),
+                                        }
+                                    },
+                                    DaemonTcpOutgoing::Read(res) => {
+                                        match res {
+                                            Ok(res) => {
+                                                let Some(&socket) = self.sockets.get(&res.connection_id) else {
+                                                    break Err(PortForwardError::SocketFromIdNotFound(res.connection_id));
+                                                };
+                                                let Some(sender) = self.tasks.get(&socket) else {
+                                                    break Err(PortForwardError::SenderNotFound(socket, res.connection_id));
+                                                };
+                                                let _ = sender.send(res.bytes);
+                                            },
+                                            Err(error) => break Err(PortForwardError::AgentError(format!("Problem receiving DaemonTcpOutgoing::Connect {error}"))),
+                                        }
+                                    },
                                     DaemonTcpOutgoing::Close(connection_id) => {
-                                        // TODO: remove from tasks hashmap, kill task by sending None on self.tasks
+                                        let Some(socket) = self.sockets.remove(&connection_id) else {
+                                            break Err(PortForwardError::SocketFromIdNotFound(connection_id));
+                                        };
+                                        let Some(sender) = self.tasks.remove(&socket) else {
+                                            break Err(PortForwardError::SenderNotFound(socket, connection_id));
+                                        };
+                                        drop(sender);
+                                        tracing::trace!("Connection closed for socket {socket}, connection {connection_id}");
                                     },
                                 }
                             },
@@ -294,6 +326,15 @@ pub enum PortForwardError {
 
     #[error("No destination address found for local address `{0}`")]
     SocketMappingNotFound(SocketAddr),
+
+    #[error("No socket found for connection ID `{0}`")]
+    SocketFromIdNotFound(ConnectionId),
+
+    #[error("No task for socket {0} ready to receive connection ID: `{1}`")]
+    ReadyTaskNotFound(SocketAddr, ConnectionId),
+
+    #[error("No sender for socket {0} and connection ID: `{1}`")]
+    SenderNotFound(SocketAddr, ConnectionId),
 
     #[error("Failed to establish connection with remote process: `{0}`")]
     ConnectionError(String),
