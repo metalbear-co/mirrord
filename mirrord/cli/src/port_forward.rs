@@ -41,6 +41,7 @@ pub struct PortForwarder {
     // oneshot channels for sending connection IDs to tasks
     oneshots: VecDeque<oneshot::Sender<ConnectionId>>,
     // identifies tasks by their corresponding local socket address
+    // for sending data from the remote socket to the local address
     tasks: HashMap<SocketAddr, Sender<Vec<u8>>>,
 
     // transmit internal messages from tasks to main loop
@@ -55,7 +56,7 @@ pub struct PortForwarder {
 enum PortForwardMessage {
     Connect(SocketAddr, oneshot::Sender<ConnectionId>),
     Send(ConnectionId, Vec<u8>),
-    Close(ConnectionId),
+    Close(SocketAddr, ConnectionId),
 }
 
 impl PortForwarder {
@@ -152,11 +153,11 @@ impl PortForwarder {
                             DaemonMessage::TcpOutgoing(message) => {
                                 match message {
                                     DaemonTcpOutgoing::Connect(res) => {
-                                        // TODO: transmit connection id
+                                        // TODO: transmit connection id back to task with self.oneshots
                                         },
-                                    DaemonTcpOutgoing::Read(res) => todo!(), // TODO: send data to corresponding task
+                                    DaemonTcpOutgoing::Read(res) => todo!(), // TODO: send data to corresponding task with self.tasks
                                     DaemonTcpOutgoing::Close(connection_id) => {
-                                        // TODO: remove from tasks hashmap, kill task
+                                        // TODO: remove from tasks hashmap, kill task by sending None on self.tasks
                                     },
                                 }
                             },
@@ -218,7 +219,7 @@ impl PortForwarder {
                                             break Err(PortForwardError::TcpListenerError(error));
                                         },
                                         None => {
-                                            let _ = task_internal_tx.send(PortForwardMessage::Close(connection_id)).await;
+                                            let _ = task_internal_tx.send(PortForwardMessage::Close(socket, connection_id)).await;
                                             break Ok(());
                                         },
                                     },
@@ -227,7 +228,7 @@ impl PortForwarder {
                                         Some(message) => {
                                             let _ = write.write(message.as_ref());
                                         },
-                                        None => break Ok(()),
+                                        None => break Ok(()), // PortForwarder received DaemonTcpOutgoing::Close
                                     }
                                 }
                             }
@@ -236,10 +237,42 @@ impl PortForwarder {
                     Some((socket, Err(error))) => {
                         // error from TcpStream
                         tracing::error!("Error occured while listening to local socket {socket}: {error}");
-                        // TODO: remove from listeners
+                        self.listeners.remove(&socket);
                     },
                     None => break Ok(()),
-                }
+                },
+
+                message = self.internal_msg_rx.recv() => match message {
+                    Some(PortForwardMessage::Connect(remote_socket, oneshot)) => {
+                        let remote_address = SocketAddress::Ip(remote_socket);
+                        self.oneshots.push_back(oneshot);
+                        let Ok(_) = self.agent_connection.sender.send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(
+                            LayerConnect { remote_address }
+                        ))).await else {
+                            break Err(PortForwardError::AgentError("Failed to send ClientMessage to agent".into()));
+                        };
+                    },
+                    Some(PortForwardMessage::Send(connection_id, bytes)) => {
+                        let Ok(_) = self.agent_connection.sender.send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(
+                            LayerWrite { connection_id, bytes }
+                        ))).await else {
+                            break Err(PortForwardError::AgentError("Failed to send ClientMessage to agent".into()));
+                        };
+                    },
+                    Some(PortForwardMessage::Close(socket, connection_id)) => {
+                        // end of listener TCP stream in task
+                        let Ok(_) = self.agent_connection.sender.send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(
+                            LayerClose { connection_id }
+                        ))).await else {
+                            break Err(PortForwardError::AgentError("Failed to send ClientMessage to agent".into()));
+                        };
+                        self.listeners.remove(&socket);
+                        self.tasks.remove(&socket);
+                    },
+                    None => {
+                        tracing::trace!("PortForwardMessage Sender disconnected while sending");
+                    },
+                },
             }
         }
     }
