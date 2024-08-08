@@ -4,6 +4,7 @@ use std::{
     fs::{read_link, DirEntry, File, OpenOptions, ReadDir},
     io::{self, prelude::*, BufReader, SeekFrom},
     iter::{Enumerate, Map, Peekable},
+    ops::Not,
     os::unix::{fs::MetadataExt, prelude::FileExt},
     path::{Path, PathBuf},
     vec::IntoIter,
@@ -202,8 +203,8 @@ impl FileManager {
                 let read_dir_result = self.read_dir(remote_fd);
                 Some(FileResponse::ReadDir(read_dir_result))
             }
-            FileRequest::ReadDirBatch(ReadDirBatchRequest { remote_fd }) => {
-                let read_dir_result = self.read_dir_batch(remote_fd);
+            FileRequest::ReadDirBatch(ReadDirBatchRequest { remote_fd, amount }) => {
+                let read_dir_result = self.read_dir_batch(remote_fd, amount);
                 Some(FileResponse::ReadDirBatch(read_dir_result))
             }
             FileRequest::CloseDir(CloseDirRequest { remote_fd }) => {
@@ -721,13 +722,21 @@ impl FileManager {
         Ok(result)
     }
 
-    #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
-    pub(crate) fn read_dir_batch(&mut self, fd: u64) -> RemoteResult<ReadDirBatchResponse> {
+    #[tracing::instrument(level = Level::DEBUG, skip(self), err(level = Level::ERROR), ret)]
+    pub(crate) fn read_dir_batch(
+        &mut self,
+        fd: u64,
+        amount: usize,
+    ) -> RemoteResult<ReadDirBatchResponse> {
         let result = self
             .get_dir_stream(fd)?
+            .take(amount)
             .map(DirEntryInternal::try_from)
             .try_collect::<Vec<_>>()
-            .map(|dir_entries| ReadDirBatchResponse { fd, dir_entries })?;
+            .map(|dir_entries| ReadDirBatchResponse {
+                fd,
+                dir_entries: dir_entries.is_empty().not().then_some(dir_entries),
+            })?;
 
         Ok(result)
     }
