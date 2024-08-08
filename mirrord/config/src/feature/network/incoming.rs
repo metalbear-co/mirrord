@@ -3,7 +3,7 @@ use std::{collections::HashSet, fmt, str::FromStr};
 use bimap::BiMap;
 use mirrord_analytics::{AnalyticValue, Analytics, CollectAnalytics};
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{de, ser, ser::SerializeSeq as _, Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
@@ -65,9 +65,8 @@ use http_filter::*;
 ///   }
 /// }
 /// ```
-#[derive(Deserialize, Clone, Debug, JsonSchema)]
+#[derive(Clone, Debug, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-#[serde(untagged, deny_unknown_fields, rename_all = "lowercase")]
 pub enum IncomingFileConfig {
     Simple(Option<IncomingMode>),
     Advanced(Box<IncomingAdvancedFileConfig>),
@@ -163,6 +162,64 @@ impl MirrordToggleableConfig for IncomingFileConfig {
     }
 }
 
+// Change to manual deserializtion to prevent usless untagged enum errors
+impl<'de> Deserialize<'de> for IncomingFileConfig {
+    fn deserialize<D>(deserializer: D) -> Result<IncomingFileConfig, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(IncomingFileConfigVisitor)
+    }
+}
+
+/// [`Visitor`](de::Visitor) for [`IncomingFileConfig`] that searches for bool or string for
+/// `IncomingFileConfig::Simple` and map for `IncomingAdvancedFileConfig` directly
+struct IncomingFileConfigVisitor;
+
+impl<'de> de::Visitor<'de> for IncomingFileConfigVisitor {
+    type Value = IncomingFileConfig;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("bool or string or map")
+    }
+
+    fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let mode = if value {
+            IncomingMode::default()
+        } else {
+            IncomingMode::Off
+        };
+        Ok(IncomingFileConfig::Simple(Some(mode)))
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Deserialize::deserialize(de::value::StrDeserializer::new(value))
+            .map(IncomingFileConfig::Simple)
+    }
+
+    fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Deserialize::deserialize(de::value::StringDeserializer::new(value))
+            .map(IncomingFileConfig::Simple)
+    }
+
+    fn visit_map<M>(self, map: M) -> Result<Self::Value, M::Error>
+    where
+        M: de::MapAccess<'de>,
+    {
+        Deserialize::deserialize(de::value::MapAccessDeserializer::new(map))
+            .map(IncomingFileConfig::Advanced)
+    }
+}
+
 /// ## incoming (advanced setup)
 ///
 /// Advanced user configuration for network incoming traffic.
@@ -236,6 +293,19 @@ pub struct IncomingAdvancedFileConfig {
     pub ports: Option<Vec<u16>>,
 }
 
+fn serialize_bi_map<S>(map: &BiMap<u16, u16>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: ser::Serializer,
+{
+    let mut seq = serializer.serialize_seq(Some(map.len()))?;
+
+    for (key, value) in map {
+        seq.serialize_element(&[key, value])?;
+    }
+
+    seq.end()
+}
+
 /// Controls the incoming TCP traffic feature.
 ///
 /// See the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more
@@ -304,7 +374,7 @@ pub struct IncomingAdvancedFileConfig {
 ///   }
 /// }
 /// ```
-#[derive(Default, PartialEq, Eq, Clone, Debug)]
+#[derive(Default, PartialEq, Eq, Clone, Debug, Serialize)]
 pub struct IncomingConfig {
     /// #### feature.network.incoming.port_mapping {#feature-network-incoming-port_mapping}
     ///
@@ -313,6 +383,7 @@ pub struct IncomingConfig {
     /// This is useful when you want to mirror/steal a port to a different port on the remote
     /// machine. For example, your local process listens on port `9333` and the container listens
     /// on port `80`. You'd use `[[9333, 80]]`
+    #[serde(serialize_with = "serialize_bi_map")]
     pub port_mapping: BiMap<u16, u16>,
 
     /// #### feature.network.incoming.ignore_localhost {#feature-network-incoming-ignore_localhost}
@@ -350,6 +421,7 @@ pub struct IncomingConfig {
     /// you probably can't listen on `80` without sudo, so you can use `[[80, 4480]]`
     /// then access it on `4480` while getting traffic from remote `80`.
     /// The value of `port_mapping` doesn't affect this.
+    #[serde(serialize_with = "serialize_bi_map")]
     pub listen_ports: BiMap<u16, u16>,
 
     /// #### feature.network.incoming.on_concurrent_steal {#feature-network-incoming-on_concurrent_steal}
@@ -390,7 +462,7 @@ impl IncomingConfig {
 /// 2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming
 /// data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and
 /// steals the traffic on the port if it is HTTP;
-#[derive(Deserialize, PartialEq, Eq, Clone, Copy, Debug, JsonSchema, Default)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Copy, Debug, JsonSchema, Default)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum IncomingMode {
     /// <!--${internal}-->

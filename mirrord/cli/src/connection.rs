@@ -13,8 +13,11 @@ use mirrord_progress::{
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
+use tracing::Level;
 
 use crate::{CliError, Result};
+
+pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
 
 pub(crate) struct AgentConnection {
     pub sender: mpsc::Sender<ClientMessage>,
@@ -94,7 +97,7 @@ where
 ///    mirrord-operator is not found or its license is invalid.
 ///
 /// Here is where we start interactions with the kubernetes API.
-#[tracing::instrument(level = "trace", skip_all)]
+#[tracing::instrument(level = Level::TRACE, skip_all)]
 pub(crate) async fn create_and_connect<P, R: Reporter>(
     config: &LayerConfig,
     progress: &mut P,
@@ -176,5 +179,3 @@ where
         AgentConnection { sender, receiver },
     ))
 }
-
-pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";

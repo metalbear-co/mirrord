@@ -1,10 +1,13 @@
 use std::{
     collections::{HashMap, HashSet},
+    net::SocketAddr,
     time::Duration,
 };
 
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
-use mirrord_config::{config::ConfigError, LayerConfig};
+use mirrord_config::{
+    config::ConfigError, internal_proxy::MIRRORD_INTPROXY_CONNECT_TCP_ENV, LayerConfig,
+};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel};
@@ -18,7 +21,7 @@ use tokio::{
     sync::mpsc::{self, UnboundedReceiver},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, trace, warn, Level};
 
 use crate::{
     connection::{create_and_connect, AgentConnection, AGENT_CONNECT_INFO_ENV_KEY},
@@ -28,11 +31,18 @@ use crate::{
     Result,
 };
 
+/// Env variable mirrord-layer uses to connect to intproxy
+pub static MIRRORD_CONNECT_TCP_ENV: &str = "MIRRORD_CONNECT_TCP";
+
+/// Alias to "LD_PRELOAD" enviromnent variable used to mount mirrord-layer on linux targets and as
+/// part of the `mirrord container` command.
+pub(crate) const LINUX_INJECTION_ENV_VAR: &str = "LD_PRELOAD";
+
 #[cfg(target_os = "linux")]
-const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
+pub(crate) const INJECTION_ENV_VAR: &str = LINUX_INJECTION_ENV_VAR;
 
 #[cfg(target_os = "macos")]
-const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
+pub(crate) const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 
 /// Struct for holding the execution information
 /// What agent to connect to, what environment variables to set
@@ -130,7 +140,7 @@ where
 impl MirrordExecution {
     /// Starts the internal proxy (`intproxy`), and mirrord-layer, even if a bogus binary
     /// was passed by the user.
-    #[tracing::instrument(level = "trace", skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     pub(crate) async fn start<P>(
         config: &LayerConfig,
         // We only need the executable on macos, for SIP handling.
@@ -195,7 +205,7 @@ impl MirrordExecution {
 
         let stdout = proxy_process.stdout.take().expect("stdout was piped");
 
-        let port: u16 = BufReader::new(stdout)
+        let address: SocketAddr = BufReader::new(stdout)
             .lines()
             .next_line()
             .await
@@ -216,8 +226,8 @@ impl MirrordExecution {
 
         // Provide details for layer to connect to agent via internal proxy
         env_vars.insert(
-            "MIRRORD_CONNECT_TCP".to_string(),
-            format!("127.0.0.1:{port}"),
+            MIRRORD_CONNECT_TCP_ENV.to_string(),
+            format!("127.0.0.1:{}", address.port()),
         );
 
         // Fix <https://github.com/metalbear-co/mirrord/issues/1745>
@@ -251,6 +261,100 @@ impl MirrordExecution {
             environment: env_vars,
             child: proxy_process,
             patched_path,
+            env_to_unset: config
+                .feature
+                .env
+                .unset
+                .clone()
+                .map(|unset| unset.to_vec())
+                .unwrap_or_default(),
+            uses_operator: matches!(connect_info, AgentConnectInfo::Operator(..)),
+        })
+    }
+
+    /// Starts the external proxy (`extproxy`) so sidecar intproxy can connect via this to agent
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
+    pub(crate) async fn start_external<P>(
+        config: &LayerConfig,
+        progress: &mut P,
+        analytics: &mut AnalyticsReporter,
+    ) -> Result<Self>
+    where
+        P: Progress + Send + Sync,
+    {
+        if !config.use_proxy {
+            remove_proxy_env();
+        }
+
+        let (connect_info, mut connection) = create_and_connect(config, progress, analytics)
+            .await
+            .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+
+        let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
+            Default::default()
+        } else {
+            Self::fetch_env_vars(config, &mut connection)
+                .await
+                .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
+        };
+
+        // stderr is inherited so we can see logs/errors.
+        let mut proxy_command =
+            Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
+
+        proxy_command
+            .arg("extproxy")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .stdin(std::process::Stdio::null());
+
+        proxy_command.env(
+            AGENT_CONNECT_INFO_ENV_KEY,
+            serde_json::to_string(&connect_info)?,
+        );
+
+        let mut proxy_process = proxy_command.spawn().map_err(|e| {
+            CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
+        })?;
+
+        let stderr = proxy_process.stderr.take().expect("stderr was piped");
+        let _stderr_guard = watch_stderr(stderr, progress).await;
+
+        let stdout = proxy_process.stdout.take().expect("stdout was piped");
+
+        let address: SocketAddr = BufReader::new(stdout)
+            .lines()
+            .next_line()
+            .await
+            .map_err(|e| {
+                CliError::InternalProxySpawnError(format!("failed to read proxy stdout: {e}"))
+            })?
+            .ok_or_else(|| {
+                CliError::InternalProxySpawnError(
+                    "proxy did not print port number to stdout".to_string(),
+                )
+            })?
+            .parse()
+            .map_err(|e| {
+                CliError::InternalProxySpawnError(format!(
+                    "failed to parse port number printed by proxy: {e}"
+                ))
+            })?;
+
+        // Provide details for layer to connect to agent via internal proxy
+        env_vars.insert(
+            MIRRORD_INTPROXY_CONNECT_TCP_ENV.to_string(),
+            address.to_string(),
+        );
+        env_vars.insert(
+            AGENT_CONNECT_INFO_ENV_KEY.to_string(),
+            serde_json::to_string(&AgentConnectInfo::ExternalProxy(address))?,
+        );
+
+        Ok(Self {
+            environment: env_vars,
+            child: proxy_process,
+            patched_path: None,
             env_to_unset: config
                 .feature
                 .env
@@ -315,7 +419,7 @@ impl MirrordExecution {
     }
 
     /// Retrieve remote environment from the connected agent.
-    #[tracing::instrument(level = "trace", skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn get_remote_env(
         connection: &mut AgentConnection,
         env_vars_filter: HashSet<String>,

@@ -3,7 +3,7 @@ use std::ops::Deref;
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::filter::ProtocolAndAddressFilter;
 use crate::{
@@ -53,7 +53,7 @@ use crate::{
 /// ```
 ///
 /// Valid values follow this pattern: `[protocol]://[name|address|subnet/mask]:[port]`.
-#[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum OutgoingFilterConfig {
     /// Traffic that matches what's specified here will go through the remote pod, everything else
@@ -89,7 +89,7 @@ pub enum OutgoingFilterConfig {
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug)]
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize)]
 #[config(map_to = "OutgoingFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct OutgoingConfig {
