@@ -19,7 +19,6 @@ workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-mirrord-auth = { path = "../auth" }
 mirrord-operator = { path = "../operator", features = ["client", "license-fetch", "setup"] }
 mirrord-progress = { path = "../progress" }
 mirrord-kube = { path = "../kube" }
@@ -32,16 +31,13 @@ mirrord-intproxy = { path = "../intproxy" }
 actix-codec.workspace = true
 clap.workspace = true
 tracing.workspace = true
-rand.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 tracing-subscriber.workspace = true
 futures.workspace = true
 which.workspace = true
 semver.workspace = true
-regex = "1.6.0"
 exec.workspace = true
-anyhow.workspace = true
 reqwest.workspace = true
 const-random = "0.1.15"
 tokio = { workspace = true, features = ["rt", "net", "macros", "process"]}
@@ -49,14 +45,12 @@ kube.workspace = true
 k8s-openapi.workspace = true
 miette = { version = "7", features = ["fancy"] }
 thiserror.workspace = true
-prettytable-rs = "0.10"
 humantime = "2"
 nix = {workspace = true, features = ["process", "resource"]}
 tokio-util.workspace = true
 socket2.workspace = true
 drain.workspace = true
 clap_complete = "4.4.1"
-tracing-appender = "0.2"
 rustls.workspace = true
 local-ip-address = "0.6"
 tempfile = "3"

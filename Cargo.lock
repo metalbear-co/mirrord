@@ -1275,7 +1275,7 @@ version = "0.15.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e1f83fc076bd6dd27517eacdf25fef6c4dfe5f1d7448bafaaf3a26f13b5e4eb"
 dependencies = [
- "encode_unicode 0.3.6",
+ "encode_unicode",
  "lazy_static",
  "libc",
  "unicode-width",
@@ -1306,26 +1306,6 @@ dependencies = [
  "getrandom",
  "once_cell",
  "tiny-keccak",
-]
-
-[[package]]
-name = "const_format"
-version = "0.2.32"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3a214c7af3d04997541b18d432afaff4c455e79e2029079647e72fc2bd27673"
-dependencies = [
- "const_format_proc_macros",
-]
-
-[[package]]
-name = "const_format_proc_macros"
-version = "0.2.32"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7f6ff08fd20f4f299298a28e2dfa8a8ba1036e6cd2460ac1de7b425d76f2500"
-dependencies = [
- "proc-macro2",
- "quote",
- "unicode-xid",
 ]
 
 [[package]]
@@ -1421,15 +1401,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossbeam-channel"
-version = "0.5.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33480d6946193aa8033910124896ca395333cae7e2d1113d1fef6c3272217df2"
-dependencies = [
- "crossbeam-utils",
-]
-
-[[package]]
 name = "crossbeam-deque"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1506,27 +1477,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd98742e4fdca832d40cab219dc2e3048de17d873248f83f17df47c1bea70956"
 dependencies = [
  "cty",
- "memchr",
-]
-
-[[package]]
-name = "csv"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac574ff4d437a7b5ad237ef331c17ccca63c46479e5b5453eb8e10bb99a759fe"
-dependencies = [
- "csv-core",
- "itoa",
- "ryu",
- "serde",
-]
-
-[[package]]
-name = "csv-core"
-version = "0.1.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5efa2b3d7902f4b634a20cae3c9c4e6209dc4779feb6863329607560143efa70"
-dependencies = [
  "memchr",
 ]
 
@@ -1772,16 +1722,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dirs-next"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b98cf8ebf19c3d1b223e151f99a4f9f0690dca41414773390fc824184ac833e1"
-dependencies = [
- "cfg-if",
- "dirs-sys-next",
-]
-
-[[package]]
 name = "dirs-sys"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1791,17 +1731,6 @@ dependencies = [
  "option-ext",
  "redox_users",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "dirs-sys-next"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ebda144c4fe02d1f7ea1a7d9641b6fc6b580adcfa024ae48797ecdeb6825b4d"
-dependencies = [
- "libc",
- "redox_users",
- "winapi",
 ]
 
 [[package]]
@@ -1818,9 +1747,6 @@ dependencies = [
 [[package]]
 name = "dns_resolve"
 version = "0.1.0"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "doc-comment"
@@ -1898,12 +1824,6 @@ name = "encode_unicode"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a357d28ed41a50f9c765dbfe56cbc04a64e53e5fc58ba79fbc34c10ef3df831f"
-
-[[package]]
-name = "encode_unicode"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
 [[package]]
 name = "encoding_rs"
@@ -3109,7 +3029,6 @@ version = "3.112.1"
 dependencies = [
  "actix-web",
  "env_logger 0.11.5",
- "hyper 1.4.1",
  "tokio",
  "tracing",
 ]
@@ -3166,15 +3085,6 @@ name = "itertools"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
 dependencies = [
  "either",
 ]
@@ -3573,7 +3483,6 @@ dependencies = [
  "clap",
  "glob",
  "rand",
- "regex",
  "syn 2.0.72",
  "thiserror",
  "tracing",
@@ -3711,7 +3620,6 @@ name = "mirrord"
 version = "3.112.1"
 dependencies = [
  "actix-codec",
- "anyhow",
  "clap",
  "clap_complete",
  "const-random",
@@ -3724,7 +3632,6 @@ dependencies = [
  "local-ip-address",
  "miette",
  "mirrord-analytics",
- "mirrord-auth",
  "mirrord-config",
  "mirrord-console",
  "mirrord-intproxy",
@@ -3735,10 +3642,7 @@ dependencies = [
  "mirrord-protocol",
  "mirrord-sip",
  "nix 0.29.0",
- "prettytable-rs",
- "rand",
  "rcgen",
- "regex",
  "reqwest 0.12.5",
  "rustls 0.23.12",
  "rustls-pemfile 2.1.3",
@@ -3752,7 +3656,6 @@ dependencies = [
  "tokio-rustls 0.26.0",
  "tokio-util",
  "tracing",
- "tracing-appender",
  "tracing-subscriber",
  "which 6.0.2",
 ]
@@ -3768,7 +3671,6 @@ dependencies = [
  "clap",
  "containerd-client",
  "dashmap",
- "drain",
  "enum_dispatch",
  "envy",
  "faccess",
@@ -3788,7 +3690,6 @@ dependencies = [
  "nix 0.29.0",
  "num-traits",
  "oci-spec",
- "once_cell",
  "pnet",
  "rand",
  "rawsocket",
@@ -3799,7 +3700,6 @@ dependencies = [
  "semver 1.0.23",
  "serde",
  "serde_json",
- "socket2",
  "streammap-ext",
  "test_bin",
  "thiserror",
@@ -3967,12 +3867,9 @@ name = "mirrord-layer"
 version = "3.112.1"
 dependencies = [
  "actix-codec",
- "anyhow",
  "base64 0.22.1",
- "bimap",
  "bincode",
  "bytemuck",
- "bytes",
  "chrono",
  "ctor",
  "errno 0.3.9",
@@ -3982,10 +3879,8 @@ dependencies = [
  "frida-gum",
  "futures",
  "hashbrown 0.14.5",
- "hickory-resolver",
  "http-body 1.0.1",
  "hyper 1.4.1",
- "itertools 0.13.0",
  "k8s-openapi",
  "libc",
  "mirrord-config",
@@ -3998,14 +3893,11 @@ dependencies = [
  "nix 0.29.0",
  "null-terminated",
  "num-traits",
- "os_info",
  "rand",
  "regex",
  "rstest",
- "serde",
  "serde_json",
  "socket2",
- "streammap-ext",
  "syscalls",
  "test-cdylib",
  "tests",
@@ -4015,7 +3907,6 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
- "urlencoding",
 ]
 
 [[package]]
@@ -4041,11 +3932,8 @@ dependencies = [
 name = "mirrord-operator"
 version = "3.112.1"
 dependencies = [
- "actix-codec",
- "async-trait",
  "base64 0.22.1",
  "bincode",
- "bytes",
  "chrono",
  "futures",
  "http 1.1.0",
@@ -4113,7 +4001,6 @@ name = "mirrord-sip"
 version = "3.112.1"
 dependencies = [
  "apple-codesign",
- "memchr",
  "object 0.36.2",
  "once_cell",
  "tempfile",
@@ -4451,17 +4338,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68f19d67e5a2795c94e73e0bb1cc1a7edeb2e28efd39e2e1c9b7a40c1108b11c"
 dependencies = [
  "num-traits",
-]
-
-[[package]]
-name = "os_info"
-version = "3.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae99c7fa6dd38c7cafe1ec085e804f8f555a2f8659b0dbe03f1f9963a9b51092"
-dependencies = [
- "log",
- "serde",
- "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4917,20 +4793,6 @@ checksum = "5f12335488a2f3b0a83b14edad48dca9879ce89b2edd10e80237e4e852dd645e"
 dependencies = [
  "proc-macro2",
  "syn 2.0.72",
-]
-
-[[package]]
-name = "prettytable-rs"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eea25e07510aa6ab6547308ebe3c036016d162b8da920dbb079e3ba8acf3d95a"
-dependencies = [
- "csv",
- "encode_unicode 1.0.0",
- "is-terminal",
- "lazy_static",
- "term",
- "unicode-width",
 ]
 
 [[package]]
@@ -5737,7 +5599,6 @@ name = "sample-rust"
 version = "0.1.0"
 dependencies = [
  "libc",
- "reqwest 0.12.5",
 ]
 
 [[package]]
@@ -6402,17 +6263,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "term"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c59df8ac95d96ff9bede18eb7300b0fda5e5d8d90960e76f8e14ae765eedbf1f"
-dependencies = [
- "dirs-next",
- "rustversion",
- "winapi",
-]
-
-[[package]]
 name = "termcolor"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6461,7 +6311,6 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "chrono",
- "const_format",
  "fancy-regex",
  "futures",
  "futures-util",
@@ -6482,7 +6331,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite 0.23.1",
- "tokio-util",
  "wsl",
 ]
 
@@ -6873,18 +6721,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tracing-appender"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3566e8ce28cc0a3fe42519fc80e6b4c943cc4c8cef275620eb8dac2d3d4e06cf"
-dependencies = [
- "crossbeam-channel",
- "thiserror",
- "time",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "tracing-attributes"
 version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7160,12 +6996,6 @@ dependencies = [
  "percent-encoding",
  "serde",
 ]
-
-[[package]]
-name = "urlencoding"
-version = "2.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "utf"
