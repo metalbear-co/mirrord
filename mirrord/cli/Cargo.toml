@@ -50,6 +50,7 @@ nix = {workspace = true, features = ["process", "resource"]}
 tokio-util.workspace = true
 socket2.workspace = true
 drain.workspace = true
+prettytable-rs = "0.10"
 clap_complete = "4.4.1"
 rustls.workspace = true
 local-ip-address = "0.6"
