@@ -7,7 +7,10 @@ use serde::Serialize;
 use crate::config::source::MirrordConfigSource;
 
 pub static MIRRORD_INTPROXY_CONNECT_TCP_ENV: &str = "MIRRORD_INTPROXY_CONNECT_TCP";
-pub static MIRRORD_INTPROXY_DETACH_IO_ENV: &str = "MIRRORD_INTPROXY_DETACH_IO";
+pub static MIRRORD_INTPROXY_CONTAINER_MODE_ENV: &str = "MIRRORD_INTPROXY_CONTAINER_MODE";
+pub static MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE_ENV: &str =
+    "MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE";
+pub static MIRRORD_INTPROXY_CLIENT_TLS_KEY_ENV: &str = "MIRRORD_INTPROXY_CLIENT_TLS_KEY";
 
 /// Configuration for the internal proxy mirrord spawns for each local mirrord session
 /// that local layers use to connect to the remote agent
@@ -37,14 +40,14 @@ pub struct InternalProxyConfig {
     ///
     /// Certificate to use as tls client credentials for connection to `connect_tcp`.
     /// (self-signed one will be generated automaticaly if not specified)
-    #[config(env = "MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE")]
+    #[config(env = MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE_ENV)]
     pub client_tls_certificate: Option<PathBuf>,
 
     /// <!--${internal}-->
     ///
     /// Private Key to use as tls client credentials for connection to `connect_tcp`.
     /// (self-signed one will be generated automaticaly if not specified)
-    #[config(env = "MIRRORD_INTPROXY_CLIENT_TLS_KEY")]
+    #[config(env = MIRRORD_INTPROXY_CLIENT_TLS_KEY_ENV)]
     pub client_tls_key: Option<PathBuf>,
 
     /// ### internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}
@@ -93,8 +96,7 @@ pub struct InternalProxyConfig {
 
     /// <!--${internal}-->
     ///
-    /// This makes the process not receive signals from the `mirrord` process or its parent
-    /// terminal, preventing unwanted side effects.
-    #[config(default = true, env = MIRRORD_INTPROXY_DETACH_IO_ENV)]
-    pub detach_io: bool,
+    /// This informs the intproxy that it's running inside a continer and should not detach io
+    #[config(default = false, env = MIRRORD_INTPROXY_CONTAINER_MODE_ENV)]
+    pub container_mode: bool,
 }
