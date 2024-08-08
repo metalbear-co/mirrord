@@ -86,7 +86,11 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
         }
         Err(..) => None,
     };
-    let mut analytics = AnalyticsReporter::new(config.telemetry, watch);
+    let mut analytics = if config.internal_proxy.container_mode {
+        AnalyticsReporter::only_error(config.telemetry, watch)
+    } else {
+        AnalyticsReporter::new(config.telemetry, watch)
+    };
     (&config).collect_analytics(analytics.get_mut());
 
     // The agent is spawned and our parent process already established a connection.
@@ -102,7 +106,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
         .map_err(InternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
 
-    if config.internal_proxy.detach_io {
+    if !config.internal_proxy.container_mode {
         unsafe { detach_io() }.map_err(InternalProxyError::SetSid)?;
     }
 

@@ -6,6 +6,9 @@ use serde::Serialize;
 
 use crate::config::source::MirrordConfigSource;
 
+pub static MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV: &str = "MIRRORD_EXTERNAL_TLS_CERTIFICATE";
+pub static MIRRORD_EXTERNAL_TLS_KEY_ENV: &str = "MIRRORD_EXTERNAL_TLS_KEY";
+
 /// Configuration for the external proxy mirrord spawns when using the `mirrord container` command.
 /// This proxy is used to allow the internal proxy running in sidecar to connect to the mirrord
 /// agent.
@@ -28,14 +31,14 @@ pub struct ExternalProxyConfig {
     ///
     /// Certificate path to be used for wrapping external proxy tcp listener with a tcp acceptor
     /// (self-signed one will be generated automaticaly if not specified)
-    #[config(env = "MIRRORD_EXTERNAL_TLS_CERTIFICATE")]
+    #[config(env = MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV)]
     pub tls_certificate: Option<PathBuf>,
 
     /// <!--${internal}-->
     ///
     /// Private Key path to be used for wrapping external proxy tcp listener with a tcp acceptor
     /// (self-signed one will be generated automaticaly if not specified)
-    #[config(env = "MIRRORD_EXTERNAL_TLS_KEY")]
+    #[config(env = MIRRORD_EXTERNAL_TLS_KEY_ENV)]
     pub tls_key: Option<PathBuf>,
 
     /// ### external_proxy.start_idle_timeout {#external_proxy-start_idle_timeout}
