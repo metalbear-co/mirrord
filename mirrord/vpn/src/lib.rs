@@ -9,3 +9,4 @@ pub mod macos;
 pub mod config;
 pub mod packet;
 pub mod socket;
+pub mod tunnel;

@@ -1,10 +1,3 @@
-use std::{
-    sync::atomic::{AtomicUsize, Ordering},
-    time::Duration,
-};
-
-use futures::{SinkExt, StreamExt};
-use humansize::{format_size, DECIMAL};
 use k8s_openapi::api::core::v1::ConfigMap;
 use mirrord_analytics::{AnalyticsError, NullReporter, Reporter};
 use mirrord_config::LayerConfig;
@@ -14,7 +7,7 @@ use mirrord_protocol::{
     vpn::{ClientVpn, ServerVpn},
     ClientMessage, DaemonMessage,
 };
-use mirrord_vpn::config::VpnConfig;
+use mirrord_vpn::{config::VpnConfig, tunnel::VpnTunnel};
 use tokio::signal;
 
 use crate::{
@@ -151,9 +144,7 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
 
     let mut sub_progress = progress.subtask("create tun socket");
 
-    let (mut write_stream, read_stream) = mirrord_vpn::socket::create_vpn_socket(&network).split();
-    let read_stream = read_stream.fuse();
-    tokio::pin!(read_stream);
+    let vpn_socket = mirrord_vpn::socket::create_vpn_socket(&network);
 
     sub_progress.success(None);
 
@@ -216,73 +207,13 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
         (subnet_guard, resolve_guard)
     };
 
-    let packets_sent = AtomicUsize::default();
-    let bytes_sent = AtomicUsize::default();
-
-    let packets_recived = AtomicUsize::default();
-    let bytes_recived = AtomicUsize::default();
-
-    let mut statistic_interval = tokio::time::interval(Duration::from_secs(10));
-
     progress.success(None);
 
-    let _ = connection
-        .sender
-        .send(ClientMessage::Vpn(ClientVpn::OpenSocket))
-        .await;
+    let vpn_tunnel = VpnTunnel::new(connection.sender, connection.receiver, vpn_socket);
 
-    'main: loop {
-        tokio::select! {
-            packet = read_stream.next() => {
-                let packet = packet.unwrap().unwrap();
-                let packet_length = packet.len();
-                if connection
-                    .sender
-                    .send(mirrord_protocol::ClientMessage::Vpn(ClientVpn::Packet(
-                        packet,
-                    )))
-                    .await
-                    .is_err()
-                {
-                    break 'main;
-                }
-
-                bytes_sent.fetch_add(packet_length, Ordering::Relaxed);
-                packets_sent.fetch_add(1, Ordering::Relaxed);
-            }
-            message = connection.receiver.recv() => {
-                if let Some(message) = message {
-                    match message {
-                        DaemonMessage::Vpn(ServerVpn::Packet(packet)) => {
-                            let packet_length = packet.len();
-                            if let Err(err) = write_stream.send(packet).await {
-                                tracing::warn!(%err, "Unable to pipe back packet")
-                            }
-
-                            bytes_recived.fetch_add(packet_length, Ordering::Relaxed);
-                            packets_recived.fetch_add(1, Ordering::Relaxed);
-                        }
-                        _ => unimplemented!("Unexpected response from agent"),
-                    }
-                } else {
-                    break 'main;
-                }
-            }
-
-            _ = statistic_interval.tick() => {
-                tracing::debug!(
-                    bytes_sent = %format_size(bytes_sent.load(Ordering::Relaxed), DECIMAL),
-                    packets_sent = %packets_sent.load(Ordering::Relaxed),
-                    bytes_recived = %format_size(bytes_recived.load(Ordering::Relaxed), DECIMAL),
-                    packets_recived = %packets_recived.load(Ordering::Relaxed),
-                    "stats"
-                );
-            }
-
-            _ = signal::ctrl_c() => {
-                break 'main;
-            }
-        }
+    tokio::select! {
+        _ = vpn_tunnel.start() => {}
+        _ = signal::ctrl_c() => {}
     }
 
     #[cfg(not(target_os = "macos"))]
