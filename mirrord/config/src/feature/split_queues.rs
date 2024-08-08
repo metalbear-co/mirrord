@@ -48,10 +48,11 @@ impl SplitQueuesConfig {
             .map(|filters| {
                 filters
                     // When there are more variants of QueueFilter, change this to a `filter_map`.
-                    .map(|(queue_id, queue_filter)| match queue_filter {
+                    .filter_map(|(queue_id, queue_filter)| match queue_filter {
                         QueueFilter::Sqs(filter_mapping) => {
-                            (queue_id.clone(), filter_mapping.clone())
+                            Some((queue_id.clone(), filter_mapping.clone()))
                         }
+                        _ => None,
                     })
                     .collect()
             })
@@ -92,6 +93,10 @@ pub enum QueueFilter {
     /// Amazon Simple Queue Service.
     #[serde(rename = "SQS")]
     Sqs(SqsMessageFilter),
+    /// When a newer client sends a new filter kind to an older operator, that does not yet know
+    /// about that filter type, this is what that filter will be deserialized to.
+    #[serde(other)]
+    Unknown,
 }
 
 impl CollectAnalytics for &SplitQueuesConfig {
