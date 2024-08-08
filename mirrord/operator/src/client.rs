@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, ops::Not};
 
 use base64::{engine::general_purpose, Engine};
 use chrono::{DateTime, Utc};
@@ -653,6 +653,9 @@ impl OperatorApi<PreparedClientCert> {
             // use copy_target for splitting queues
             || config.feature.split_queues.is_set()
         {
+            if config.feature.copy_target.enabled.not() {
+                tracing::info!("Creating a copy-target for queue-splitting (even thought copy_target was not explicitly set).")
+            }
             let mut copy_subtask = progress.subtask("copying target");
 
             // We do not validate the `target` here, it's up to the operator.
