@@ -458,6 +458,8 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
 }
 
 async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()> {
+    tracing::warn!("Port forwarding is currently an unstable feature and subject to change. See https://github.com/metalbear-co/mirrord/issues/2640 for more info.");
+
     let mut progress = ProgressTracker::from_env("mirrord port-forward");
     if !args.disable_version_check {
         prompt_outdated_version(&progress).await;

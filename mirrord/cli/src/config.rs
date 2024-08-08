@@ -67,7 +67,7 @@ pub(super) enum Commands {
     #[command(hide = true, name = "intproxy")]
     InternalProxy,
 
-    /// Port forwarding
+    /// Port forwarding - UNSTABLE FEATURE
     #[command(hide = true, name = "portforward")]
     PortForward(Box<PortForwardArgs>),
 
