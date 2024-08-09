@@ -10,8 +10,9 @@ use mirrord_protocol::{
         CloseDirRequest, CloseFileRequest, DirEntryInternal, OpenDirResponse, OpenFileResponse,
         ReadDirBatchRequest, ReadDirBatchResponse, ReadDirRequest, ReadDirResponse,
     },
-    ClientMessage, FileRequest, FileResponse, GetEnvVarsRequest, RemoteResult,
+    ClientMessage, FileRequest, FileResponse, GetEnvVarsRequest, RemoteResult, VERSION,
 };
+use semver::Version;
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
@@ -30,6 +31,7 @@ pub enum SimpleProxyMessage {
     LayerClosed(LayerClosed),
     GetEnvReq(MessageId, LayerId, GetEnvVarsRequest),
     GetEnvRes(RemoteResult<HashMap<String, String>>),
+    ProtocolVersion(Version),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -42,14 +44,16 @@ pub(crate) enum RemoteFd {
 pub(crate) enum FileResource {
     File,
     Dir {
-        cursor: Option<IntoIter<DirEntryInternal>>,
+        dirs_iter: Option<IntoIter<DirEntryInternal>>,
     },
 }
 
 impl FileResource {
     fn next_dir(&mut self) -> Option<DirEntryInternal> {
         match self {
-            FileResource::Dir { cursor } => cursor.as_mut().and_then(|entry| entry.next()),
+            FileResource::Dir { dirs_iter: cursor } => {
+                cursor.as_mut().and_then(|entry| entry.next())
+            }
             _ => None,
         }
     }
@@ -75,8 +79,13 @@ impl BackgroundTask for SimpleProxy {
     type MessageOut = ProxyMessage;
 
     async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), RequestQueueEmpty> {
+        let mut protocol_version = VERSION.clone();
+
         while let Some(msg) = message_bus.recv().await {
             match msg {
+                SimpleProxyMessage::ProtocolVersion(new_protocol_version) => {
+                    protocol_version = new_protocol_version;
+                }
                 SimpleProxyMessage::FileReq(
                     _,
                     layer_id,
@@ -128,14 +137,17 @@ impl BackgroundTask for SimpleProxy {
                             .await;
                     } else {
                         self.file_reqs.insert(message_id, layer_id);
+                        let request = if protocol_version >= Version::new(1, 9, 0) {
+                            FileRequest::ReadDirBatch(ReadDirBatchRequest {
+                                remote_fd,
+                                amount: 128,
+                            })
+                        } else {
+                            FileRequest::ReadDir(ReadDirRequest { remote_fd })
+                        };
                         // Convert it into a `ReadDirBatch` for the agent.
                         message_bus
-                            .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(
-                                FileRequest::ReadDirBatch(ReadDirBatchRequest {
-                                    remote_fd,
-                                    amount: 128,
-                                }),
-                            )))
+                            .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(request)))
                             .await;
                     }
                 }
@@ -167,7 +179,7 @@ impl BackgroundTask for SimpleProxy {
                     self.remote_fds.add(
                         layer_id,
                         RemoteFd::Dir(fd),
-                        FileResource::Dir { cursor: None },
+                        FileResource::Dir { dirs_iter: None },
                     );
 
                     message_bus
@@ -183,7 +195,6 @@ impl BackgroundTask for SimpleProxy {
                 SimpleProxyMessage::FileRes(FileResponse::ReadDirBatch(Ok(
                     ReadDirBatchResponse { fd, dir_entries },
                 ))) => {
-                    tracing::info!(fd, ?dir_entries, "we received something from the agent");
                     let (message_id, layer_id) = self.file_reqs.get()?;
 
                     let mut entries_iter = dir_entries.map(|dirs| dirs.into_iter());
@@ -203,15 +214,10 @@ impl BackgroundTask for SimpleProxy {
                         })
                         .await;
 
-                    if let Some(dirs) = entries_iter.as_mut() {
-                        tracing::info!(?dirs, "lets pop the first dir and save the rest");
-                    }
-
-                    if let Some(FileResource::Dir { cursor }) =
+                    if let Some(FileResource::Dir { dirs_iter }) =
                         self.remote_fds.get_mut(&layer_id, &RemoteFd::Dir(fd))
                     {
-                        tracing::info!(?cursor, "setting the response");
-                        *cursor = entries_iter;
+                        *dirs_iter = entries_iter;
                     }
                 }
                 SimpleProxyMessage::FileRes(res) => {

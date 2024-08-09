@@ -708,7 +708,7 @@ impl FileManager {
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self), err(level = Level::ERROR))]
     pub(crate) fn read_dir(&mut self, fd: u64) -> RemoteResult<ReadDirResponse> {
         let dir_stream = self.get_dir_stream(fd)?;
         let result = if let Some(offset_entry_pair) = dir_stream.next() {
