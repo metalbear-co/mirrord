@@ -1,3 +1,4 @@
+#![feature(map_try_insert)]
 #![warn(clippy::indexing_slicing)]
 
 use std::{collections::HashMap, time::Duration};

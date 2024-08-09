@@ -83,7 +83,8 @@ impl BackgroundTask for SimpleProxy {
         let mut protocol_version = VERSION.clone();
 
         while let Some(msg) = message_bus.recv().await {
-            tracing::debug!(?msg, "new message in message_bus");
+            tracing::trace!(?msg, "new message in message_bus");
+
             match msg {
                 SimpleProxyMessage::ProtocolVersion(new_protocol_version) => {
                     protocol_version = new_protocol_version;
@@ -286,7 +287,7 @@ impl BackgroundTask for SimpleProxy {
             }
         }
 
-        tracing::debug!("message bus closed, exiting");
+        tracing::trace!("message bus closed, exiting");
         Ok(())
     }
 }
