@@ -13,14 +13,7 @@ use semver::VersionReq;
 
 use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
-    file::{
-        AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
-        GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest, OpenFileResponse,
-        OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
-        ReadFileResponse, ReadLimitedFileRequest, ReadLinkFileRequest, ReadLinkFileResponse,
-        SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
-        WriteLimitedFileRequest, XstatFsRequest, XstatFsResponse, XstatRequest, XstatResponse,
-    },
+    file::*,
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
@@ -79,6 +72,7 @@ pub enum FileRequest {
     XstatFs(XstatFsRequest),
     FdOpenDir(FdOpenDirRequest),
     ReadDir(ReadDirRequest),
+    ReadDirBatch(ReadDirBatchRequest),
     CloseDir(CloseDirRequest),
     GetDEnts64(GetDEnts64Request),
     ReadLink(ReadLinkFileRequest),
@@ -121,6 +115,7 @@ pub enum FileResponse {
     Xstat(RemoteResult<XstatResponse>),
     XstatFs(RemoteResult<XstatFsResponse>),
     ReadDir(RemoteResult<ReadDirResponse>),
+    ReadDirBatch(RemoteResult<ReadDirBatchResponse>),
     OpenDir(RemoteResult<OpenDirResponse>),
     GetDEnts64(RemoteResult<GetDEnts64Response>),
     ReadLink(RemoteResult<ReadLinkFileResponse>),

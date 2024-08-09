@@ -8,6 +8,7 @@ use std::{
 };
 
 use mirrord_protocol::file::{CloseDirRequest, DirEntryInternal, ReadDirRequest, ReadDirResponse};
+use tracing::Level;
 
 use super::{DirStreamFd, LocalFd, RemoteFd, OPEN_FILES};
 use crate::{
@@ -210,6 +211,7 @@ impl OpenDir {
         }
     }
 
+    #[tracing::instrument(level = Level::DEBUG, skip(self), ret)]
     fn read_r(&self) -> Detour<Option<DirEntryInternal>> {
         if self.closed {
             // This thread got this struct from `OpenDirs` before `close` removed it.
