@@ -50,6 +50,7 @@ pub struct PortForwarder {
     ping_pong_timeout: Instant,
 }
 
+/// Used by tasks for individual forwarding connections to send instructions to main loop
 enum PortForwardMessage {
     Connect(SocketAddr, oneshot::Sender<ConnectionId>),
     Send(ConnectionId, Vec<u8>),
@@ -464,5 +465,155 @@ mod test {
         // ensure portforwarder closes when agent ends
         drop(daemon_msg_tx);
         join_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_multiple_mappings_forwarding() {
+        let remote_destination_1 = "152.37.40.40:1018".parse().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_destination_1 = listener.local_addr().unwrap();
+        drop(listener);
+
+        let remote_destination_2 = "152.37.40.40:2028".parse().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_destination_2 = listener.local_addr().unwrap();
+        drop(listener);
+
+        let (daemon_msg_tx, daemon_msg_rx) = mpsc::channel::<DaemonMessage>(12);
+        let (client_msg_tx, mut client_msg_rx) = mpsc::channel::<ClientMessage>(12);
+
+        let agent_connection = AgentConnection {
+            sender: client_msg_tx,
+            receiver: daemon_msg_rx,
+        };
+        let parsed_mappings = vec![
+            PortMapping {
+                local: local_destination_1,
+                remote: remote_destination_1,
+            },
+            PortMapping {
+                local: local_destination_2,
+                remote: remote_destination_2,
+            },
+        ];
+
+        let mut port_forwarder = PortForwarder::new(agent_connection, parsed_mappings)
+            .await
+            .unwrap();
+        tokio::spawn(async move { port_forwarder.run().await.unwrap() });
+
+        // send data to each socket
+        let mut stream_1 = TcpStream::connect(local_destination_1).await.unwrap();
+        let mut stream_2 = TcpStream::connect(local_destination_2).await.unwrap();
+
+        // expect handshake procedure
+        let expected = Some(ClientMessage::SwitchProtocolVersion(
+            mirrord_protocol::VERSION.clone(),
+        ));
+        assert_eq!(client_msg_rx.recv().await, expected);
+        daemon_msg_tx
+            .send(DaemonMessage::SwitchProtocolVersionResponse(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await
+            .unwrap();
+        let expected = Some(ClientMessage::ReadyForLogs);
+        assert_eq!(client_msg_rx.recv().await, expected);
+
+        // expect each Connect on client_msg_rx with correct mappings
+        let remote_address_1 = SocketAddress::Ip(remote_destination_1);
+        let local_address_1 = SocketAddress::Ip(local_destination_1);
+        let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
+            remote_address: remote_address_1.clone(),
+        }));
+        let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
+            ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
+            other @ _ => other,
+        };
+        assert_eq!(message, expected);
+
+        let remote_address_2 = SocketAddress::Ip(remote_destination_2);
+        let local_address_2 = SocketAddress::Ip(local_destination_2);
+        let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
+            remote_address: remote_address_2.clone(),
+        }));
+        let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
+            ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
+            other @ _ => other,
+        };
+        assert_eq!(message, expected);
+
+        // reply with successful on each daemon_msg_tx
+        daemon_msg_tx
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
+                DaemonConnect {
+                    connection_id: 1,
+                    remote_address: remote_address_1,
+                    local_address: local_address_1,
+                },
+            ))))
+            .await
+            .unwrap();
+        daemon_msg_tx
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
+                DaemonConnect {
+                    connection_id: 2,
+                    remote_address: remote_address_2,
+                    local_address: local_address_2,
+                },
+            ))))
+            .await
+            .unwrap();
+
+        // expect data to be received
+        stream_1.write(b"data-from-1").await.unwrap();
+        let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
+            connection_id: 1,
+            bytes: b"data-from-1".to_vec(),
+        }));
+        let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
+            ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
+            other @ _ => other,
+        };
+        assert_eq!(message, expected);
+
+        stream_2.write(b"data-from-2").await.unwrap();
+        let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
+            connection_id: 2,
+            bytes: b"data-from-2".to_vec(),
+        }));
+        let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
+            ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
+            other @ _ => other,
+        };
+        assert_eq!(message, expected);
+
+        // send each data response from agent on daemon_msg_tx
+        daemon_msg_tx
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
+                DaemonRead {
+                    connection_id: 1,
+                    bytes: b"reply-to-1".to_vec(),
+                },
+            ))))
+            .await
+            .unwrap();
+        daemon_msg_tx
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
+                DaemonRead {
+                    connection_id: 2,
+                    bytes: b"reply-to-2".to_vec(),
+                },
+            ))))
+            .await
+            .unwrap();
+
+        // check data arrives at each local addr
+        let mut buf = [0; 10];
+        stream_1.read(&mut buf).await.unwrap();
+        assert_eq!(buf, b"reply-to-1".as_ref());
+        let mut buf = [0; 10];
+        stream_2.read(&mut buf).await.unwrap();
+        assert_eq!(buf, b"reply-to-2".as_ref());
     }
 }
