@@ -80,13 +80,13 @@ impl BackgroundTask for SimpleProxy {
     type MessageOut = ProxyMessage;
 
     async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), RequestQueueEmpty> {
-        // let mut protocol_version = VERSION.clone();
+        let mut protocol_version = VERSION.clone();
 
         while let Some(msg) = message_bus.recv().await {
             tracing::debug!(?msg, "new message in message_bus");
             match msg {
                 SimpleProxyMessage::ProtocolVersion(new_protocol_version) => {
-                    // protocol_version = new_protocol_version;
+                    protocol_version = new_protocol_version;
                 }
                 SimpleProxyMessage::FileReq(
                     _,
@@ -139,7 +139,7 @@ impl BackgroundTask for SimpleProxy {
                             .await;
                     } else {
                         self.file_reqs.insert(message_id, layer_id);
-                        let protocol_version = Version::new(0, 0, 0);
+                        // let protocol_version = Version::new(0, 0, 0);
                         let request = if protocol_version >= Version::new(1, 9, 0) {
                             FileRequest::ReadDirBatch(ReadDirBatchRequest {
                                 remote_fd,
