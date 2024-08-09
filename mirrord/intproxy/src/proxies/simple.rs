@@ -3,7 +3,6 @@
 
 use std::{collections::HashMap, vec::IntoIter};
 
-use futures::future::OptionFuture;
 use mirrord_intproxy_protocol::{LayerId, MessageId, ProxyToLayerMessage};
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
@@ -54,13 +53,6 @@ impl FileResource {
             _ => None,
         }
     }
-
-    fn is_eof(&self) -> bool {
-        match self {
-            FileResource::File => false,
-            FileResource::Dir { eof, .. } => *eof,
-        }
-    }
 }
 
 /// For passing messages between the layer and the agent without custom internal logic.
@@ -75,27 +67,6 @@ pub struct SimpleProxy {
     addr_info_reqs: RequestQueue,
     /// For [`GetEnvVarsRequest`]s.
     get_env_reqs: RequestQueue,
-}
-
-impl SimpleProxy {
-    async fn make_remote_request(
-        &mut self,
-        message_bus: &mut MessageBus<Self>,
-        message_id: u64,
-        layer_id: LayerId,
-        remote_fd: u64,
-    ) {
-        self.file_reqs.insert(message_id, layer_id);
-        // Convert it into a `ReadDirBatch` for the agent.
-        message_bus
-            .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(
-                FileRequest::ReadDirBatch(ReadDirBatchRequest {
-                    remote_fd,
-                    amount: 128,
-                }),
-            )))
-            .await;
-    }
 }
 
 impl BackgroundTask for SimpleProxy {
@@ -139,75 +110,33 @@ impl BackgroundTask for SimpleProxy {
                     layer_id,
                     FileRequest::ReadDir(ReadDirRequest { remote_fd }),
                 ) => {
-                    match self
+                    if let Some(dir) = self
                         .remote_fds
                         .get_mut(&layer_id, &RemoteFd::Dir(remote_fd))
+                        .and_then(FileResource::next_dir)
                     {
-                        Some(FileResource::Dir {
-                            cursor: Some(dirs), ..
-                        }) => {
-                            tracing::info!(?dirs, "let's see if we have a next");
-                            let direntry = dirs.next();
-
-                            if direntry.is_some() {
-                                tracing::info!(?direntry, "yeah we do, return it back to user");
-                                message_bus
-                                    .send(ToLayer {
-                                        message_id,
-                                        message: ProxyToLayerMessage::File(FileResponse::ReadDir(
-                                            Ok(ReadDirResponse { direntry }),
-                                        )),
-                                        layer_id,
-                                    })
-                                    .await;
-                            } else {
-                                tracing::info!("nope, let's go for the agent");
-                                self.file_reqs.insert(message_id, layer_id);
-                                // Convert it into a `ReadDirBatch` for the agent.
-                                message_bus
-                                    .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(
-                                        FileRequest::ReadDirBatch(ReadDirBatchRequest {
-                                            remote_fd,
-                                            amount: 128,
-                                        }),
-                                    )))
-                                    .await;
-                            }
-                        }
-                        Some(FileResource::Dir {
-                            cursor: None,
-                            eof: true,
-                        }) => {
-                            tracing::info!("we have nothing on cursor, and it's an eof");
-                            message_bus
-                                .send(ToLayer {
-                                    message_id,
-                                    message: ProxyToLayerMessage::File(FileResponse::ReadDir(Ok(
-                                        ReadDirResponse { direntry: None },
-                                    ))),
-                                    layer_id,
-                                })
-                                .await;
-                        }
-                        Some(FileResource::Dir {
-                            cursor: None,
-                            eof: false,
-                        }) => {
-                            tracing::info!("we have nothing on cursor, but this is our first call");
-                            self.file_reqs.insert(message_id, layer_id);
-                            // Convert it into a `ReadDirBatch` for the agent.
-                            message_bus
-                                .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(
-                                    FileRequest::ReadDirBatch(ReadDirBatchRequest {
-                                        remote_fd,
-                                        amount: 128,
-                                    }),
-                                )))
-                                .await;
-                        }
-                        _ => {
-                            tracing::info!("Kaboom");
-                        }
+                        message_bus
+                            .send(ToLayer {
+                                message_id,
+                                message: ProxyToLayerMessage::File(FileResponse::ReadDir(Ok(
+                                    ReadDirResponse {
+                                        direntry: Some(dir),
+                                    },
+                                ))),
+                                layer_id,
+                            })
+                            .await;
+                    } else {
+                        self.file_reqs.insert(message_id, layer_id);
+                        // Convert it into a `ReadDirBatch` for the agent.
+                        message_bus
+                            .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(
+                                FileRequest::ReadDirBatch(ReadDirBatchRequest {
+                                    remote_fd,
+                                    amount: 128,
+                                }),
+                            )))
+                            .await;
                     }
                 }
                 SimpleProxyMessage::FileReq(message_id, session_id, req) => {
@@ -238,10 +167,7 @@ impl BackgroundTask for SimpleProxy {
                     self.remote_fds.add(
                         layer_id,
                         RemoteFd::Dir(fd),
-                        FileResource::Dir {
-                            cursor: None,
-                            eof: false,
-                        },
+                        FileResource::Dir { cursor: None },
                     );
 
                     message_bus
@@ -262,45 +188,30 @@ impl BackgroundTask for SimpleProxy {
 
                     let mut entries_iter = dir_entries.map(|dirs| dirs.into_iter());
 
-                    // TODO(alex) [high]: Here is an issue: if we get `None` from the agent, then
-                    // we don't reply to the layer! So we need to check if `entries_iter` is some,
-                    // and if it's none, return to the layer `None`. Do we even need the eof
-                    // thing then? We could keep sending the message to the agent, until it
-                    // sends `None` back to us, in which case we come here and return `None` to the
-                    // user, while also unsetting `cursor = None`.
+                    let direntry = match entries_iter.as_mut() {
+                        Some(dirs) => dirs.next(),
+                        None => None,
+                    };
+
+                    message_bus
+                        .send(ToLayer {
+                            message_id,
+                            message: ProxyToLayerMessage::File(FileResponse::ReadDir(Ok(
+                                ReadDirResponse { direntry },
+                            ))),
+                            layer_id,
+                        })
+                        .await;
+
                     if let Some(dirs) = entries_iter.as_mut() {
                         tracing::info!(?dirs, "lets pop the first dir and save the rest");
-                        message_bus
-                            .send(ToLayer {
-                                message_id,
-                                message: ProxyToLayerMessage::File(FileResponse::ReadDir(Ok(
-                                    ReadDirResponse {
-                                        direntry: dirs.next(),
-                                    },
-                                ))),
-                                layer_id,
-                            })
-                            .await;
                     }
 
-                    if let Some(FileResource::Dir { cursor, eof }) =
+                    if let Some(FileResource::Dir { cursor }) =
                         self.remote_fds.get_mut(&layer_id, &RemoteFd::Dir(fd))
                     {
-                        tracing::info!(?cursor, eof, "setting the response");
-                        *eof = entries_iter.is_none();
+                        tracing::info!(?cursor, "setting the response");
                         *cursor = entries_iter;
-
-                        tracing::info!(?cursor, eof, "it's been set");
-                    } else {
-                        message_bus
-                            .send(ToLayer {
-                                message_id,
-                                message: ProxyToLayerMessage::File(FileResponse::ReadDir(Ok(
-                                    ReadDirResponse { direntry: None },
-                                ))),
-                                layer_id,
-                            })
-                            .await;
                     }
                 }
                 SimpleProxyMessage::FileRes(res) => {
