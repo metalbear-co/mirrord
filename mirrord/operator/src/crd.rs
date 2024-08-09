@@ -376,65 +376,61 @@ pub enum SplitQueue {
 
 /// A workload that is a consumer of a queue that is being split.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")] // Deployment -> deployment in yaml.
-pub enum QueueConsumer {
-    /// The name of the deployment and an optional container.
+#[serde(tag = "type")]
+pub struct QueueConsumer {
+    pub name: String,
     /// If a container is not specified, the workload queue registry will apply to every run that
     /// targets any of the workload's containers.
-    Deployment(String, Option<String>),
+    pub container: Option<String>,
+    pub workload_type: QueueConsumerType,
+}
 
-    /// The name of the rollout and an optional container.
-    /// If a container is not specified, the workload queue registry will apply to every run that
-    /// targets any of the workload's containers.
-    Rollout(String, Option<String>),
+/// A workload that is a consumer of a queue that is being split.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub enum QueueConsumerType {
+    Deployment,
+
+    Rollout,
+
+    // TODO: verify this is not part of the generated schema, should be de-only
+    #[serde(other)]
+    Unsupported,
+}
+
+impl Display for QueueConsumerType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            QueueConsumerType::Deployment => write!(f, "deployment"),
+            QueueConsumerType::Rollout => write!(f, "rollout"),
+            QueueConsumerType::Unsupported => write!(f, "unsupported"),
+        }
+    }
 }
 
 impl QueueConsumer {
-    pub fn get_type_name_container(&self) -> (&str, &str, Option<&str>) {
-        match self {
-            QueueConsumer::Deployment(dep, container) => ("deployment", dep, container.as_deref()),
-            QueueConsumer::Rollout(roll, container) => ("rollout", roll, container.as_deref()),
-        }
-    }
-
-    pub fn container(&self) -> Option<&str> {
-        match self {
-            QueueConsumer::Deployment(.., container) | QueueConsumer::Rollout(.., container) => {
-                container.as_deref()
-            }
-        }
-    }
-
     /// For self that is the queue consumer of a run, test if a given registry object is the correct
     /// registry for this run.
     pub fn registry_matches(&self, registry: &MirrordWorkloadQueueRegistry) -> bool {
-        match (self, &registry.spec.consumer) {
-            (
-                QueueConsumer::Deployment(name, container),
-                QueueConsumer::Deployment(registry_consumer_name, registry_consumer_container),
-            )
-            | (
-                QueueConsumer::Rollout(name, container),
-                QueueConsumer::Rollout(registry_consumer_name, registry_consumer_container),
-            ) => {
-                name == registry_consumer_name
-                    && (container == registry_consumer_container
-                        // If registry does not specify a container, it applies to all runs with
-                        // this target, regardless of what container they are targeting.
-                        || registry_consumer_container.is_none())
-            }
-            _ => false,
-        }
+        let registry_consumer = &registry.spec.consumer;
+        self.workload_type == registry_consumer.workload_type
+            && self.name == registry_consumer.name
+            && (self.container == registry_consumer.container
+            // If registry does not specify a container, it applies to all runs with
+            // this target, regardless of what container they are targeting.
+            || registry_consumer.container.is_none())
     }
 }
 
 impl Display for QueueConsumer {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let (type_, name, container) = self.get_type_name_container();
-        if let Some(container) = container {
-            write!(f, "{}/{}/container/{container}", type_, name)
+        if let Some(ref container) = self.container {
+            write!(
+                f,
+                "{}/{}/container/{container}",
+                self.workload_type, self.name
+            )
         } else {
-            write!(f, "{}/{}", type_, name)
+            write!(f, "{}/{}", self.workload_type, self.name)
         }
     }
 }
