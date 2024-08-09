@@ -257,7 +257,8 @@ pub enum NewOperatorFeature {
     SessionManagement,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
-    #[serde(other)]
+    #[schemars(skip)]
+    #[serde(other, skip_serializing)]
     Unknown,
 }
 
@@ -392,8 +393,8 @@ pub enum QueueConsumerType {
 
     Rollout,
 
-    // TODO: verify this is not part of the generated schema, should be de-only
-    #[serde(other)]
+    #[schemars(skip)]
+    #[serde(other, skip_serializing)]
     Unsupported,
 }
 
@@ -499,12 +500,6 @@ pub struct MirrordWorkloadQueueRegistrySpec {
     pub consumer: QueueConsumer,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub enum SqsSessionCleanupError {
-    #[serde(other)]
-    Unknown,
-}
-
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename = "SQSSplitDetails", rename_all = "camelCase")]
 pub struct SqsSplitDetails {
@@ -549,7 +544,10 @@ pub enum SqsSessionStatus {
     RegisteringFilters(SqsSplitDetails),
     Ready(SqsSplitDetails),
     StartError(SqsSessionError),
-    CleanupError(SqsSessionError, Option<SqsSplitDetails>),
+    CleanupError {
+        error: SqsSessionError,
+        details: Option<SqsSplitDetails>,
+    },
 }
 
 impl SqsSessionStatus {
@@ -558,7 +556,7 @@ impl SqsSessionStatus {
             SqsSessionStatus::RegisteringFilters(details) | SqsSessionStatus::Ready(details) => {
                 Some(details)
             }
-            SqsSessionStatus::CleanupError(.., details) => details.as_ref(),
+            SqsSessionStatus::CleanupError { details, .. } => details.as_ref(),
             _ => None,
         }
     }
@@ -574,7 +572,7 @@ pub fn is_session_ready(session: Option<&MirrordSqsSession>) -> bool {
                 status,
                 SqsSessionStatus::Ready(..)
                     | SqsSessionStatus::StartError(..)
-                    | SqsSessionStatus::CleanupError(..)
+                    | SqsSessionStatus::CleanupError { .. }
             )
         })
         .unwrap_or_default()

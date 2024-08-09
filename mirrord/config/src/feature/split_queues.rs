@@ -95,7 +95,8 @@ pub enum QueueFilter {
     Sqs(SqsMessageFilter),
     /// When a newer client sends a new filter kind to an older operator, that does not yet know
     /// about that filter type, this is what that filter will be deserialized to.
-    #[serde(other)]
+    #[schemars(skip)]
+    #[serde(other, skip_serializing)]
     Unknown,
 }
 
