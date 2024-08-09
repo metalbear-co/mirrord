@@ -537,7 +537,9 @@ impl Display for SqsSessionError {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename = "SQSSessionStatus")]
 pub enum SqsSessionStatus {
-    Starting(),
+    Starting {
+        start_time_millis: u128,
+    },
     /// SQS operator sets this status before it starts registering filters, so that if anything
     /// fails during the registration of filters, we have all the queues we need to delete on
     /// cleanup.
