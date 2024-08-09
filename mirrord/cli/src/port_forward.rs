@@ -13,7 +13,7 @@ use mirrord_protocol::{
 };
 use thiserror::Error;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncWriteExt,
     net::TcpListener,
     select,
     sync::{
@@ -176,9 +176,11 @@ impl PortForwarder {
                                                 let Some(sender) = self.tasks.get(&socket) else {
                                                     break Err(PortForwardError::SenderNotFound(socket, res.connection_id));
                                                 };
-                                                let _ = sender.send(res.bytes);
+                                                let Ok(_) = sender.send(res.bytes).await else {
+                                                    break Err(PortForwardError::InternalMessageError("Failed to send data from remote to task".into()))
+                                                };
                                             },
-                                            Err(error) => break Err(PortForwardError::AgentError(format!("Problem receiving DaemonTcpOutgoing::Connect {error}"))),
+                                            Err(error) => break Err(PortForwardError::AgentError(format!("Problem receiving DaemonTcpOutgoing::Read {error}"))),
                                         }
                                     },
                                     DaemonTcpOutgoing::Close(connection_id) => {
@@ -230,16 +232,13 @@ impl PortForwarder {
                         let (response_tx, mut response_rx) = mpsc::channel(16);
                         self.tasks.insert(socket, response_tx);
                         tokio::spawn(async move {
-                            let (mut read, mut write) = stream.into_split();
-                            let mut buffer = [];
-                            let _ = read.read(&mut buffer).await;
+                            let (read, mut write) = stream.into_split();
+                            let mut read_stream = ReaderStream::new(read);
                             let (oneshot_tx, oneshot_rx) = oneshot::channel::<ConnectionId>();
                             let _ = task_internal_tx.send(PortForwardMessage::Connect(remote_socket, oneshot_tx)).await;
-                            let Ok(connection_id) = oneshot_rx.blocking_recv() else {
+                            let Ok(connection_id) = oneshot_rx.await else {
                                 return Err(PortForwardError::InternalMessageError(format!("Error while trying to receive connection ID for socket address {socket}")));
                             };
-                            let _ = task_internal_tx.send(PortForwardMessage::Send(connection_id, buffer.into())).await;
-                            let mut read_stream = ReaderStream::new(read);
 
                             loop {
                                 select! {
@@ -258,7 +257,10 @@ impl PortForwarder {
 
                                     message = response_rx.recv() => match message {
                                         Some(message) => {
-                                            let _ = write.write(message.as_ref());
+                                            match write.write(message.as_ref()).await {
+                                                Ok(_) => continue,
+                                                Err(error) => break Err(PortForwardError::InternalMessageError(format!("Failed to write data to local port in task: {error}"))),
+                                            }
                                         },
                                         None => break Ok(()), // PortForwarder received DaemonTcpOutgoing::Close
                                     }
@@ -346,5 +348,121 @@ pub enum PortForwardError {
 impl From<PortForwardError> for CliError {
     fn from(value: PortForwardError) -> Self {
         CliError::PortForwardingError(value)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use mirrord_protocol::{
+        outgoing::{
+            tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
+            DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
+        },
+        ClientMessage, DaemonMessage,
+    };
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
+        sync::mpsc,
+    };
+
+    use crate::{connection::AgentConnection, port_forward::PortForwarder, PortMapping};
+
+    #[tokio::test]
+    async fn test_port_forwarding() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_destination = listener.local_addr().unwrap();
+        drop(listener);
+
+        let (daemon_msg_tx, daemon_msg_rx) = mpsc::channel::<DaemonMessage>(12);
+        let (client_msg_tx, mut client_msg_rx) = mpsc::channel::<ClientMessage>(12);
+
+        let agent_connection = AgentConnection {
+            sender: client_msg_tx,
+            receiver: daemon_msg_rx,
+        };
+        let parsed_mappings = vec![PortMapping {
+            local: local_destination,
+            remote: "152.37.40.40:3038".parse().unwrap(),
+        }];
+
+        let mut port_forwarder = PortForwarder::new(agent_connection, parsed_mappings)
+            .await
+            .unwrap();
+        let join_handle = tokio::spawn(async move { port_forwarder.run().await.unwrap() });
+
+        // send data to socket
+        let mut stream = TcpStream::connect(local_destination).await.unwrap();
+        stream.write(b"data-my-beloved").await.unwrap();
+
+        // expect handshake procedure
+        let expected = Some(ClientMessage::SwitchProtocolVersion(
+            mirrord_protocol::VERSION.clone(),
+        ));
+        assert_eq!(client_msg_rx.recv().await, expected);
+        daemon_msg_tx
+            .send(DaemonMessage::SwitchProtocolVersionResponse(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await
+            .unwrap();
+        let expected = Some(ClientMessage::ReadyForLogs);
+        assert_eq!(client_msg_rx.recv().await, expected);
+
+        // expect Connect on client_msg_rx
+        let remote_address = SocketAddress::Ip("152.37.40.40:3038".parse().unwrap());
+        let local_address = SocketAddress::Ip(local_destination);
+        let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
+            remote_address: remote_address.clone(),
+        }));
+        let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
+            ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
+            other @ _ => other,
+        };
+        assert_eq!(message, expected);
+
+        // reply with successful on daemon_msg_tx
+        daemon_msg_tx
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
+                DaemonConnect {
+                    connection_id: 1,
+                    remote_address,
+                    local_address,
+                },
+            ))))
+            .await
+            .unwrap();
+
+        // expect data sent first to be received first
+        stream.write(b"data-my-beloathed").await.unwrap();
+        let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
+            connection_id: 1,
+            bytes: b"data-my-beloveddata-my-beloathed".to_vec(),
+        }));
+        let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
+            ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
+            other @ _ => other,
+        };
+        assert_eq!(message, expected);
+
+        // send response data from agent on daemon_msg_tx
+        daemon_msg_tx
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Read(Ok(
+                DaemonRead {
+                    connection_id: 1,
+                    bytes: b"reply-my-beloved".to_vec(),
+                },
+            ))))
+            .await
+            .unwrap();
+
+        // check data arrives at local
+        let mut buf = [0; 16];
+        stream.read(&mut buf).await.unwrap();
+        assert_eq!(buf, b"reply-my-beloved".as_ref());
+
+        // ensure portforwarder closes when agent ends
+        drop(daemon_msg_tx);
+        join_handle.await.unwrap();
     }
 }
