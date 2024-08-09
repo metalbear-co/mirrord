@@ -94,7 +94,6 @@ use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use proxy_connection::ProxyConnection;
 use setup::LayerSetup;
 use socket::SOCKETS;
-use tracing::Level;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
