@@ -34,6 +34,9 @@ use crate::{
 /// Env variable mirrord-layer uses to connect to intproxy
 pub static MIRRORD_CONNECT_TCP_ENV: &str = "MIRRORD_CONNECT_TCP";
 
+/// Env variable for saving the exeution kind for analytics
+pub static MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
+
 /// Alias to "LD_PRELOAD" enviromnent variable used to mount mirrord-layer on linux targets and as
 /// part of the `mirrord container` command.
 pub(crate) const LINUX_INJECTION_ENV_VAR: &str = "LD_PRELOAD";

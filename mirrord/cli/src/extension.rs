@@ -59,7 +59,7 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch)
     }
     let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
-    let mut analytics = AnalyticsReporter::only_error(config.telemetry, watch);
+    let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
 
     config.verify(&mut context)?;
     for warning in context.get_warnings() {
