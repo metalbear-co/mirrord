@@ -22,6 +22,7 @@ use crate::{
     ProxyMessage,
 };
 
+#[derive(Debug)]
 pub enum SimpleProxyMessage {
     FileReq(MessageId, LayerId, FileRequest),
     FileRes(FileResponse),
@@ -79,12 +80,13 @@ impl BackgroundTask for SimpleProxy {
     type MessageOut = ProxyMessage;
 
     async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), RequestQueueEmpty> {
-        let mut protocol_version = VERSION.clone();
+        // let mut protocol_version = VERSION.clone();
 
         while let Some(msg) = message_bus.recv().await {
+            tracing::debug!(?msg, "new message in message_bus");
             match msg {
                 SimpleProxyMessage::ProtocolVersion(new_protocol_version) => {
-                    protocol_version = new_protocol_version;
+                    // protocol_version = new_protocol_version;
                 }
                 SimpleProxyMessage::FileReq(
                     _,
@@ -137,6 +139,7 @@ impl BackgroundTask for SimpleProxy {
                             .await;
                     } else {
                         self.file_reqs.insert(message_id, layer_id);
+                        let protocol_version = Version::new(0, 0, 0);
                         let request = if protocol_version >= Version::new(1, 9, 0) {
                             FileRequest::ReadDirBatch(ReadDirBatchRequest {
                                 remote_fd,
@@ -145,6 +148,7 @@ impl BackgroundTask for SimpleProxy {
                         } else {
                             FileRequest::ReadDir(ReadDirRequest { remote_fd })
                         };
+
                         // Convert it into a `ReadDirBatch` for the agent.
                         message_bus
                             .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(request)))
@@ -282,7 +286,7 @@ impl BackgroundTask for SimpleProxy {
             }
         }
 
-        tracing::trace!("message bus closed, exiting");
+        tracing::debug!("message bus closed, exiting");
         Ok(())
     }
 }

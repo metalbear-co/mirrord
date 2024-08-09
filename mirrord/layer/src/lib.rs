@@ -94,6 +94,7 @@ use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use proxy_connection::ProxyConnection;
 use setup::LayerSetup;
 use socket::SOCKETS;
+use tracing::Level;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -483,7 +484,7 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
 /// - `enabled_remote_dns`: replaces [`libc::getaddrinfo`] and [`libc::freeaddrinfo`] when this is
 ///   `true`, see [`NetworkConfig`](mirrord_config::feature::network::NetworkConfig), and
 ///   [`hooks::enable_socket_hooks`](socket::hooks::enable_socket_hooks).
-#[mirrord_layer_macro::instrument(level = "trace")]
+// #[mirrord_layer_macro::instrument(level = Level::TRACE)]
 fn enable_hooks(state: &LayerSetup) {
     let enabled_file_ops = state.fs_config().is_active();
     let enabled_remote_dns = state.remote_dns_enabled();

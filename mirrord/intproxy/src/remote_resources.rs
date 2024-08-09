@@ -4,6 +4,7 @@ use std::{
 };
 
 use mirrord_intproxy_protocol::LayerId;
+use tracing::Level;
 
 use crate::proxies::simple::FileResource;
 
@@ -33,6 +34,7 @@ where
     ///
     /// Can be used when the layer closes the resource, e.g. with
     /// [`CloseFileRequest`](mirrord_protocol::file::CloseFileRequest).
+    #[tracing::instrument(level = Level::INFO, skip(self, resource), ret)]
     pub(crate) fn remove(&mut self, layer_id: LayerId, resource: T) -> bool {
         let removed = match self.by_layer.entry(layer_id) {
             Entry::Occupied(mut e) => {
@@ -66,6 +68,7 @@ where
     /// id `dst`.
     ///
     /// Can be used when the layer forks.
+    #[tracing::instrument(level = Level::INFO, skip(self))]
     pub(crate) fn clone_all(&mut self, src: LayerId, dst: LayerId) {
         let Some(resources) = self.by_layer.get(&src).cloned() else {
             return;
@@ -82,6 +85,7 @@ where
     /// Returns an [`Iterator`] over resources that should be closed on the agent size.
     ///
     /// Can be used when the layer closes the connection.
+    #[tracing::instrument(level = Level::INFO, skip(self))]
     pub(crate) fn remove_all(&mut self, layer_id: LayerId) -> impl '_ + Iterator<Item = T> {
         let resources = self.by_layer.remove(&layer_id).unwrap_or_default();
 
@@ -109,6 +113,7 @@ where
     ///
     /// Used when the layer opens a resource, e.g. with
     /// [`OpenFileRequest`](mirrord_protocol::file::OpenFileRequest).
+    #[tracing::instrument(level = Level::INFO, skip(self, resource))]
     pub(crate) fn add(&mut self, layer_id: LayerId, resource: T) {
         let added = self
             .by_layer
@@ -130,6 +135,7 @@ where
     ///
     /// Used when the layer opens a resource, e.g. with
     /// [`OpenFileRequest`](mirrord_protocol::file::OpenFileRequest).
+    #[tracing::instrument(level = Level::INFO, skip(self, resource, file))]
     pub(crate) fn add(&mut self, layer_id: LayerId, resource: T, file: FileResource) {
         let added = self
             .by_layer
@@ -137,11 +143,12 @@ where
             .or_default()
             .insert(resource.clone(), file);
 
-        if added.is_some() {
+        if added.is_none() {
             *self.counts.entry(resource).or_default() += 1;
         }
     }
 
+    #[tracing::instrument(level = Level::INFO, skip(self, resource_key))]
     pub(crate) fn get_mut(
         &mut self,
         layer_id: &LayerId,
