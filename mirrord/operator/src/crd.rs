@@ -537,6 +537,10 @@ impl Display for SqsSessionError {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename = "SQSSessionStatus")]
 pub enum SqsSessionStatus {
+    // kube-rs does not allow mixing unit variants with tuple/struct variants, so this variant
+    // has to be a tuple/struct too. If we leave the tuple empty, k8s complains about an object
+    // without any items, and kube-rs does not support internally tagged enums, so we actually
+    // have to put something in there, even if we don't actually care about that info.
     Starting {
         start_time_millis: u128,
     },
