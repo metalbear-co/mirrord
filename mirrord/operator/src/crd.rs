@@ -542,7 +542,7 @@ pub enum SqsSessionStatus {
     // without any items, and kube-rs does not support internally tagged enums, so we actually
     // have to put something in there, even if we don't actually care about that info.
     Starting {
-        start_time_millis: u128,
+        start_time_utc: String,
     },
     /// SQS operator sets this status before it starts registering filters, so that if anything
     /// fails during the registration of filters, we have all the queues we need to delete on
