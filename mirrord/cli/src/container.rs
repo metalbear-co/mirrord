@@ -157,12 +157,12 @@ async fn create_sidecar_intproxy(
 /// This spawns: "agent" - "external proxy" - "intproxy sidecar" - "execution container"
 pub(crate) async fn container_command(
     runtime_args: RuntimeArgs,
-    params: ExecParams,
+    exec_params: ExecParams,
     watch: drain::Watch,
 ) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord container");
 
-    for (name, value) in params.as_env_vars()? {
+    for (name, value) in exec_params.as_env_vars()? {
         std::env::set_var(name, value);
     }
 
