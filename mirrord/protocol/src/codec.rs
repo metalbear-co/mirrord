@@ -72,10 +72,10 @@ pub enum FileRequest {
     XstatFs(XstatFsRequest),
     FdOpenDir(FdOpenDirRequest),
     ReadDir(ReadDirRequest),
-    ReadDirBatch(ReadDirBatchRequest),
     CloseDir(CloseDirRequest),
     GetDEnts64(GetDEnts64Request),
     ReadLink(ReadLinkFileRequest),
+    ReadDirBatch(ReadDirBatchRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
