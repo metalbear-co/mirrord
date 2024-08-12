@@ -10,9 +10,10 @@ use mirrord_protocol::{
         CloseDirRequest, CloseFileRequest, DirEntryInternal, OpenDirResponse, OpenFileResponse,
         ReadDirBatchRequest, ReadDirBatchResponse, ReadDirRequest, ReadDirResponse,
     },
-    ClientMessage, FileRequest, FileResponse, GetEnvVarsRequest, RemoteResult, VERSION,
+    ClientMessage, FileRequest, FileResponse, GetEnvVarsRequest, RemoteResult, ResponseError,
 };
 use semver::Version;
+use thiserror::Error;
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
@@ -49,14 +50,81 @@ pub(crate) enum FileResource {
     },
 }
 
-impl FileResource {
-    fn next_dir(&mut self) -> Option<DirEntryInternal> {
-        match self {
-            FileResource::Dir { dirs_iter: cursor } => {
-                cursor.as_mut().and_then(|entry| entry.next())
-            }
-            _ => None,
+#[derive(Error, Debug)]
+enum FileError {
+    #[error("Resource `{0}` not found!")]
+    MissingResource(u64),
+
+    #[error("Dir operation called on file `{0}`!")]
+    DirOnFile(u64),
+}
+
+impl From<FileError> for ResponseError {
+    fn from(file_fail: FileError) -> Self {
+        match file_fail {
+            FileError::MissingResource(remote_fd) => ResponseError::NotFound(remote_fd),
+            FileError::DirOnFile(remote_fd) => ResponseError::NotDirectory(remote_fd),
         }
+    }
+}
+
+impl FileResource {
+    fn next_dir(&mut self, remote_fd: u64) -> Result<Option<DirEntryInternal>, FileError> {
+        match self {
+            FileResource::Dir { dirs_iter } => dirs_iter
+                .as_mut()
+                .and_then(|entry| entry.next())
+                .map(Ok)
+                .transpose(),
+            FileResource::File => Err(FileError::DirOnFile(remote_fd)),
+        }
+    }
+
+    async fn handle_readdir(
+        layer_id: LayerId,
+        remote_fd: u64,
+        message_id: u64,
+        protocol_version: Option<&Version>,
+        remote_fds: &mut RemoteResources<RemoteFd, FileResource>,
+        message_bus: &mut MessageBus<SimpleProxy>,
+        queue: &mut RequestQueue,
+    ) -> Result<(), FileError> {
+        let resource = remote_fds
+            .get_mut(&layer_id, &RemoteFd::Dir(remote_fd))
+            .ok_or(FileError::MissingResource(remote_fd))?;
+
+        if let Some(dir) = resource.next_dir(remote_fd)? {
+            message_bus
+                .send(ToLayer {
+                    message_id,
+                    message: ProxyToLayerMessage::File(FileResponse::ReadDir(Ok(
+                        ReadDirResponse {
+                            direntry: Some(dir),
+                        },
+                    ))),
+                    layer_id,
+                })
+                .await;
+        } else {
+            queue.insert(message_id, layer_id);
+
+            let request =
+                if protocol_version.is_some_and(|version| *version >= Version::new(1, 9, 0)) {
+                    FileRequest::ReadDirBatch(ReadDirBatchRequest {
+                        remote_fd,
+                        amount: 128,
+                    })
+                } else {
+                    FileRequest::ReadDir(ReadDirRequest { remote_fd })
+                };
+
+            // Convert it into a `ReadDirBatch` for the agent.
+            message_bus
+                .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(request)))
+                .await;
+        }
+
+        Ok(())
     }
 }
 
@@ -80,14 +148,14 @@ impl BackgroundTask for SimpleProxy {
     type MessageOut = ProxyMessage;
 
     async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), RequestQueueEmpty> {
-        let mut protocol_version = VERSION.clone();
+        let mut protocol_version = None;
 
         while let Some(msg) = message_bus.recv().await {
             tracing::trace!(?msg, "new message in message_bus");
 
             match msg {
                 SimpleProxyMessage::ProtocolVersion(new_protocol_version) => {
-                    protocol_version = new_protocol_version;
+                    protocol_version = Some(new_protocol_version);
                 }
                 SimpleProxyMessage::FileReq(
                     _,
@@ -122,37 +190,26 @@ impl BackgroundTask for SimpleProxy {
                     layer_id,
                     FileRequest::ReadDir(ReadDirRequest { remote_fd }),
                 ) => {
-                    if let Some(dir) = self
-                        .remote_fds
-                        .get_mut(&layer_id, &RemoteFd::Dir(remote_fd))
-                        .and_then(FileResource::next_dir)
+                    if let Err(fail) = FileResource::handle_readdir(
+                        layer_id,
+                        remote_fd,
+                        message_id,
+                        protocol_version.as_ref(),
+                        &mut self.remote_fds,
+                        message_bus,
+                        &mut self.file_reqs,
+                    )
+                    .await
                     {
+                        // Send local failure to layer.
                         message_bus
                             .send(ToLayer {
                                 message_id,
-                                message: ProxyToLayerMessage::File(FileResponse::ReadDir(Ok(
-                                    ReadDirResponse {
-                                        direntry: Some(dir),
-                                    },
+                                message: ProxyToLayerMessage::File(FileResponse::ReadDir(Err(
+                                    fail.into(),
                                 ))),
                                 layer_id,
                             })
-                            .await;
-                    } else {
-                        self.file_reqs.insert(message_id, layer_id);
-                        // let protocol_version = Version::new(0, 0, 0);
-                        let request = if protocol_version >= Version::new(1, 9, 0) {
-                            FileRequest::ReadDirBatch(ReadDirBatchRequest {
-                                remote_fd,
-                                amount: 128,
-                            })
-                        } else {
-                            FileRequest::ReadDir(ReadDirRequest { remote_fd })
-                        };
-
-                        // Convert it into a `ReadDirBatch` for the agent.
-                        message_bus
-                            .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(request)))
                             .await;
                     }
                 }

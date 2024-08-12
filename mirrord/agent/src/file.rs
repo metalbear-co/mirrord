@@ -708,7 +708,7 @@ impl FileManager {
         }
     }
 
-    #[tracing::instrument(level = "debug", skip(self), err(level = Level::ERROR))]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
     pub(crate) fn read_dir(&mut self, fd: u64) -> RemoteResult<ReadDirResponse> {
         let dir_stream = self.get_dir_stream(fd)?;
         let result = if let Some(offset_entry_pair) = dir_stream.next() {
@@ -722,7 +722,7 @@ impl FileManager {
         Ok(result)
     }
 
-    #[tracing::instrument(level = Level::DEBUG, skip(self), err(level = Level::ERROR), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
     pub(crate) fn read_dir_batch(
         &mut self,
         fd: u64,

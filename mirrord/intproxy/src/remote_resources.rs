@@ -61,11 +61,8 @@ where
                 false
             }
             Entry::Vacant(..) => {
-                tracing::error!(
-                    "RemoteResources out of sync! Removing {resource:?} failed for {layer_id:?}!"
-                );
                 panic!(
-                    "RemoteResources out of sync! Removing {resource:?} failed for {layer_id:?}!"
+                    "`remove` -> RemoteResources out of sync! Removing {resource:?} failed for {layer_id:?}!"
                 )
             }
         }
@@ -108,7 +105,7 @@ where
                     false
                 }
                 Entry::Vacant(..) => {
-                    panic!("RemoteResources out of sync!")
+                    panic!("`remove_all` -> RemoteResources out of sync!")
                 }
             })
     }

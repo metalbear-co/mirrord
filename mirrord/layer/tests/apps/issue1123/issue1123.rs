@@ -1,4 +1,3 @@
-// TODO(alex) [high]: Remote resource out of sync, is this the `None`?
 use std::net::{SocketAddr, TcpListener};
 
 /// Test that double binding on the same address:port combination fails the second time around.

@@ -14,4 +14,4 @@
 # cat is a SIPed binary on mac.
 cat /very_interesting_file
 # sleep so we get close request (else bash might exit before we have time to close it)
-sleep 10
+sleep 1
