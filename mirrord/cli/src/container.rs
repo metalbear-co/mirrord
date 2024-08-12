@@ -23,7 +23,7 @@ use tokio::process::Command;
 use tracing::Level;
 
 use crate::{
-    config::{ContainerArgs, ContainerCommand},
+    config::{ContainerCommand, ExecParams, RuntimeArgs},
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     container::command_builder::RuntimeCommandBuilder,
     error::{ContainerError, Result},
@@ -155,10 +155,14 @@ async fn create_sidecar_intproxy(
 
 /// Main entry point for the `mirrord container` command.
 /// This spawns: "agent" - "external proxy" - "intproxy sidecar" - "execution container"
-pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) -> Result<()> {
+pub(crate) async fn container_command(
+    runtime_args: RuntimeArgs,
+    exec_params: ExecParams,
+    watch: drain::Watch,
+) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord container");
 
-    for (name, value) in args.params.as_env_vars()? {
+    for (name, value) in exec_params.as_env_vars()? {
         std::env::set_var(name, value);
     }
 
@@ -244,7 +248,7 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
 
     sub_progress.success(None);
 
-    let mut runtime_command = RuntimeCommandBuilder::new(args.runtime);
+    let mut runtime_command = RuntimeCommandBuilder::new(runtime_args.runtime);
 
     if let Ok(console_addr) = std::env::var(MIRRORD_CONSOLE_ADDR_ENV) {
         if console_addr
@@ -308,7 +312,7 @@ pub(crate) async fn container_command(args: ContainerArgs, watch: drain::Watch) 
     );
 
     let (binary, binary_args) = runtime_command
-        .with_command(args.command)
+        .with_command(runtime_args.command)
         .into_execvp_args();
 
     let err = execvp(binary, binary_args);

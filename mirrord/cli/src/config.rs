@@ -9,7 +9,7 @@ use mirrord_operator::setup::OperatorNamespace;
 
 use crate::error::CliError;
 
-#[derive(Parser)]
+#[derive(Debug, Parser)]
 #[command(
     author,
     version,
@@ -23,7 +23,7 @@ pub(super) struct Cli {
     pub(super) commands: Commands,
 }
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 pub(super) enum Commands {
     /// Create and run a new container from an image with mirrord loaded
     Container(Box<ContainerArgs>),
@@ -461,7 +461,7 @@ pub(super) enum DiagnoseCommand {
     },
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 /// Runtimes supported by the `mirrord container` command.
 pub(super) enum ContainerRuntime {
     Docker,
@@ -486,6 +486,24 @@ pub(super) struct ContainerArgs {
     /// Parameters to be passed to mirrord.
     pub params: ExecParams,
 
+    /// Container command to be executed
+    #[arg(trailing_var_arg = true)]
+    pub exec: Vec<String>,
+}
+
+impl ContainerArgs {
+    pub fn into_parts(self) -> (RuntimeArgs, ExecParams) {
+        let ContainerArgs { params, exec } = self;
+
+        let runtime_args =
+            RuntimeArgs::parse_from(std::iter::once("mirrord container --".into()).chain(exec));
+
+        (runtime_args, params)
+    }
+}
+
+#[derive(Parser, Debug)]
+pub struct RuntimeArgs {
     /// Which kind of container runtime to use.
     #[arg(value_enum)]
     pub runtime: ContainerRuntime,
@@ -495,13 +513,13 @@ pub(super) struct ContainerArgs {
     pub command: ContainerCommand,
 }
 
-/// Commands for using mirrord with container runtimes.
+/// Supported command for using mirrord with container runtimes.
 #[derive(Subcommand, Debug, Clone)]
 pub(super) enum ContainerCommand {
     /// Execute a `<RUNTIME> run` command with mirrord loaded.
     Run {
         /// Arguments that will be propogated to underlying `<RUNTIME> run` command.
-        #[arg(raw = true)]
+        #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
         runtime_args: Vec<String>,
     },
 }
@@ -511,5 +529,46 @@ impl ContainerCommand {
         ContainerCommand::Run {
             runtime_args: runtime_args.into_iter().map(T::into).collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_args_parsing() {
+        let command = "mirrord container -t deploy/test podman run -it --rm debian";
+        let result = Cli::parse_from(command.split(' '));
+
+        let Commands::Container(continaer) = result.commands else {
+            panic!("cli command didn't parse into container command, got: {result:#?}")
+        };
+
+        let (runtime_args, _) = continaer.into_parts();
+
+        assert_eq!(runtime_args.runtime, ContainerRuntime::Podman);
+
+        let ContainerCommand::Run { runtime_args } = runtime_args.command;
+
+        assert_eq!(runtime_args, vec!["-it", "--rm", "debian"]);
+    }
+
+    #[test]
+    fn runtime_args_parsing_with_seperator() {
+        let command = "mirrord container -t deploy/test -- podman run -it --rm debian";
+        let result = Cli::parse_from(command.split(' '));
+
+        let Commands::Container(continaer) = result.commands else {
+            panic!("cli command didn't parse into container command, got: {result:#?}")
+        };
+
+        let (runtime_args, _) = continaer.into_parts();
+
+        assert_eq!(runtime_args.runtime, ContainerRuntime::Podman);
+
+        let ContainerCommand::Run { runtime_args } = runtime_args.command;
+
+        assert_eq!(runtime_args, vec!["-it", "--rm", "debian"]);
     }
 }
