@@ -35,7 +35,7 @@ pub enum SimpleProxyMessage {
     ProtocolVersion(Version),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum RemoteFd {
     File(u64),
     Dir(u64),

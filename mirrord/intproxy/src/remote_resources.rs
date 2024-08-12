@@ -26,7 +26,7 @@ impl<T, Resource> Default for RemoteResources<T, Resource> {
 
 impl<T, Resource> RemoteResources<T, Resource>
 where
-    T: Clone + PartialEq + Eq + Hash,
+    T: Clone + PartialEq + Eq + Hash + core::fmt::Debug,
     Resource: Clone,
 {
     /// Removes the given resource from the layer instance with the given [`LayerId`].
@@ -51,7 +51,7 @@ where
             return false;
         }
 
-        match self.counts.entry(resource) {
+        match self.counts.entry(resource.clone()) {
             Entry::Occupied(e) if *e.get() == 1 => {
                 e.remove();
                 true
@@ -60,7 +60,14 @@ where
                 *e.get_mut() -= 1;
                 false
             }
-            Entry::Vacant(..) => panic!("RemoteResources out of sync"),
+            Entry::Vacant(..) => {
+                tracing::error!(
+                    "RemoteResources out of sync! Removing {resource:?} failed for {layer_id:?}!"
+                );
+                panic!(
+                    "RemoteResources out of sync! Removing {resource:?} failed for {layer_id:?}!"
+                )
+            }
         }
     }
 
@@ -100,7 +107,9 @@ where
                     *e.get_mut() -= 1;
                     false
                 }
-                Entry::Vacant(..) => panic!("RemoteResources out of sync"),
+                Entry::Vacant(..) => {
+                    panic!("RemoteResources out of sync!")
+                }
             })
     }
 }
@@ -119,9 +128,10 @@ where
             .by_layer
             .entry(layer_id)
             .or_default()
-            .insert(resource.clone(), ());
+            .try_insert(resource.clone(), ())
+            .is_ok();
 
-        if added.is_some() {
+        if added {
             *self.counts.entry(resource).or_default() += 1;
         }
     }
