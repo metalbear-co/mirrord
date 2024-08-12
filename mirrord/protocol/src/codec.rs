@@ -115,10 +115,10 @@ pub enum FileResponse {
     Xstat(RemoteResult<XstatResponse>),
     XstatFs(RemoteResult<XstatFsResponse>),
     ReadDir(RemoteResult<ReadDirResponse>),
-    ReadDirBatch(RemoteResult<ReadDirBatchResponse>),
     OpenDir(RemoteResult<OpenDirResponse>),
     GetDEnts64(RemoteResult<GetDEnts64Response>),
     ReadLink(RemoteResult<ReadLinkFileResponse>),
+    ReadDirBatch(RemoteResult<ReadDirBatchResponse>),
 }
 
 /// `-agent` --> `-layer` messages.
