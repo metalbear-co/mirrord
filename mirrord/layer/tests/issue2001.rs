@@ -56,7 +56,10 @@ async fn test_issue2001(
 
     assert_eq!(
         intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 11 })),
+        ClientMessage::FileRequest(FileRequest::ReadDirBatch(ReadDirBatchRequest {
+            remote_fd: 11,
+            amount: 128
+        })),
     );
 
     intproxy
