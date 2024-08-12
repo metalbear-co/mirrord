@@ -16,7 +16,7 @@ use semver::VersionReq;
 
 /// Minimal mirrord-protocol version that allows [`ReadDirBatchRequest`].
 pub static READDIR_BATCH_VERSION: LazyLock<VersionReq> =
-    LazyLock::new(|| ">=1.9.0".parse().expect("Bad Identifier"));
+    LazyLock::new(|| ">=1.8.2".parse().expect("Bad Identifier"));
 
 /// Internal version of Metadata across operating system (macOS, Linux)
 /// Only mutual attributes
