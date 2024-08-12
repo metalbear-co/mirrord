@@ -1222,8 +1222,8 @@
             "null"
           ]
         },
-        "detach_io": {
-          "description": "<!--${internal}-->\n\nThis makes the process not receive signals from the `mirrord` process or its parent terminal, preventing unwanted side effects.",
+        "container_mode": {
+          "description": "<!--${internal}-->\n\nThis informs the intproxy that it's running inside a continer and should not detach io",
           "type": [
             "boolean",
             "null"

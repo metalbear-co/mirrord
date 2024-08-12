@@ -34,6 +34,7 @@ use tracing_subscriber::EnvFilter;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{InternalProxyError, Result},
+    execution::MIRRORD_EXECUTION_KIND_ENV,
     util::{create_listen_socket, detach_io},
 };
 
@@ -86,7 +87,17 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
         }
         Err(..) => None,
     };
-    let mut analytics = AnalyticsReporter::new(config.telemetry, watch);
+
+    let execution_kind = std::env::var(MIRRORD_EXECUTION_KIND_ENV)
+        .ok()
+        .and_then(|execution_kind| execution_kind.parse().ok())
+        .unwrap_or_default();
+
+    let mut analytics = if config.internal_proxy.container_mode {
+        AnalyticsReporter::only_error(config.telemetry, execution_kind, watch)
+    } else {
+        AnalyticsReporter::new(config.telemetry, execution_kind, watch)
+    };
     (&config).collect_analytics(analytics.get_mut());
 
     // The agent is spawned and our parent process already established a connection.
@@ -102,7 +113,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
         .map_err(InternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
 
-    if config.internal_proxy.detach_io {
+    if !config.internal_proxy.container_mode {
         unsafe { detach_io() }.map_err(InternalProxyError::SetSid)?;
     }
 

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Instant};
+use std::{collections::HashMap, str::FromStr, time::Instant};
 
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,33 @@ pub enum AnalyticsError {
 
     #[default]
     Unknown,
+}
+
+#[derive(Default, Debug, Clone, Copy)]
+#[repr(u32)]
+pub enum ExecutionKind {
+    Container = 1,
+    #[default]
+    Exec = 2,
+    Other = 0,
+}
+
+impl From<u32> for ExecutionKind {
+    fn from(kind: u32) -> Self {
+        match kind {
+            1 => ExecutionKind::Container,
+            2 => ExecutionKind::Exec,
+            _ => ExecutionKind::Other,
+        }
+    }
+}
+
+impl FromStr for ExecutionKind {
+    type Err = <u32 as FromStr>::Err;
+
+    fn from_str(value: &str) -> std::result::Result<Self, <Self as std::str::FromStr>::Err> {
+        value.parse::<u32>().map(ExecutionKind::from)
+    }
 }
 
 /// Struct to store analytics data.
@@ -159,9 +186,12 @@ pub struct AnalyticsReporter {
 }
 
 impl AnalyticsReporter {
-    pub fn new(enabled: bool, watch: drain::Watch) -> Self {
+    pub fn new(enabled: bool, execution_kind: ExecutionKind, watch: drain::Watch) -> Self {
+        let mut analytics = Analytics::default();
+        analytics.add("execution_kind", execution_kind as u32);
+
         AnalyticsReporter {
-            analytics: Analytics::default(),
+            analytics,
             error_only_send: false,
             enabled,
             error: None,
@@ -171,16 +201,10 @@ impl AnalyticsReporter {
         }
     }
 
-    pub fn only_error(enabled: bool, watch: drain::Watch) -> Self {
-        AnalyticsReporter {
-            analytics: Analytics::default(),
-            error_only_send: true,
-            enabled,
-            error: None,
-            operator_properties: None,
-            start_instant: Instant::now(),
-            watch,
-        }
+    pub fn only_error(enabled: bool, execution_kind: ExecutionKind, watch: drain::Watch) -> Self {
+        let mut reporter = AnalyticsReporter::new(enabled, execution_kind, watch);
+        reporter.error_only_send = true;
+        reporter
     }
 
     fn as_report(&self) -> AnalyticsReport {

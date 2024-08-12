@@ -328,7 +328,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
 
     let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
-    let mut analytics = AnalyticsReporter::only_error(config.telemetry, watch);
+    let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
     (&config).collect_analytics(analytics.get_mut());
 
     config.verify(&mut context)?;
@@ -502,7 +502,10 @@ fn main() -> miette::Result<()> {
             }
             Commands::Teams => teams::navigate_to_intro().await,
             Commands::Diagnose(args) => diagnose_command(*args).await?,
-            Commands::Container(args) => container_command(*args, watch).await?,
+            Commands::Container(args) => {
+                let (runtime_args, exec_params) = args.into_parts();
+                container_command(runtime_args, exec_params, watch).await?
+            }
             Commands::ExternalProxy => external_proxy::proxy(watch).await?,
             Commands::Vpn(args) => vpn::vpn_command(*args).await?,
         };
