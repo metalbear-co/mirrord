@@ -483,7 +483,6 @@ mod test {
 
         // expect Connect on client_msg_rx
         let remote_address = SocketAddress::Ip("152.37.40.40:3038".parse().unwrap());
-        let local_address = SocketAddress::Ip(local_destination);
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
             remote_address: remote_address.clone(),
         }));
@@ -498,8 +497,8 @@ mod test {
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
                 DaemonConnect {
                     connection_id: 1,
-                    remote_address,
-                    local_address,
+                    remote_address: remote_address.clone(),
+                    local_address: remote_address,
                 },
             ))))
             .await
@@ -573,9 +572,8 @@ mod test {
             .unwrap();
         tokio::spawn(async move { port_forwarder.run().await.unwrap() });
 
-        // send data to each socket
+        // send data to first socket
         let mut stream_1 = TcpStream::connect(local_destination_1).await.unwrap();
-        let mut stream_2 = TcpStream::connect(local_destination_2).await.unwrap();
 
         // expect handshake procedure
         let expected = Some(ClientMessage::SwitchProtocolVersion(
@@ -593,7 +591,6 @@ mod test {
 
         // expect each Connect on client_msg_rx with correct mappings
         let remote_address_1 = SocketAddress::Ip(remote_destination_1);
-        let local_address_1 = SocketAddress::Ip(local_destination_1);
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
             remote_address: remote_address_1.clone(),
         }));
@@ -603,8 +600,10 @@ mod test {
         };
         assert_eq!(message, expected);
 
+        // send data to second socket
+        let mut stream_2 = TcpStream::connect(local_destination_2).await.unwrap();
+
         let remote_address_2 = SocketAddress::Ip(remote_destination_2);
-        let local_address_2 = SocketAddress::Ip(local_destination_2);
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
             remote_address: remote_address_2.clone(),
         }));
@@ -619,8 +618,8 @@ mod test {
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
                 DaemonConnect {
                     connection_id: 1,
-                    remote_address: remote_address_1,
-                    local_address: local_address_1,
+                    remote_address: remote_address_1.clone(),
+                    local_address: remote_address_1,
                 },
             ))))
             .await
@@ -629,8 +628,8 @@ mod test {
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
                 DaemonConnect {
                     connection_id: 2,
-                    remote_address: remote_address_2,
-                    local_address: local_address_2,
+                    remote_address: remote_address_2.clone(),
+                    local_address: remote_address_2,
                 },
             ))))
             .await
