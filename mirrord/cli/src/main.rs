@@ -19,7 +19,7 @@ use kube::Client;
 use kube_resource::KubeResourceSeeker;
 use miette::JSONReportHandler;
 use mirrord_analytics::{
-    AnalyticsError, AnalyticsReporter, CollectAnalytics, NullReporter, Reporter,
+    AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, NullReporter, Reporter,
 };
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
@@ -522,7 +522,8 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
 
     let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
-    let mut analytics = AnalyticsReporter::only_error(config.telemetry, watch);
+    let mut analytics =
+        AnalyticsReporter::only_error(config.telemetry, ExecutionKind::PortForward, watch);
     (&config).collect_analytics(analytics.get_mut());
 
     config.verify(&mut context)?;
