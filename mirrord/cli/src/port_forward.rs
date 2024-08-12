@@ -14,7 +14,7 @@ use mirrord_protocol::{
 use thiserror::Error;
 use tokio::{
     io::AsyncWriteExt,
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     select,
     sync::{
         mpsc::{self, Receiver, Sender},
@@ -35,9 +35,9 @@ pub struct PortForwarder {
     listeners: StreamMap<SocketAddr, TcpListenerStream>,
     // oneshot channels for sending connection IDs to tasks
     oneshots: VecDeque<oneshot::Sender<ConnectionId>>,
-    // identifies socket addresses by their corresponding connection ID
+    // identifies remote socket addresses by their corresponding connection ID
     sockets: HashMap<ConnectionId, SocketAddr>,
-    // identifies tasks by their corresponding local socket address
+    // identifies tasks by their corresponding remote socket address
     // for sending data from the remote socket to the local address
     tasks: HashMap<SocketAddr, Sender<Vec<u8>>>,
 
@@ -133,6 +133,7 @@ impl PortForwarder {
                 ))
             }
         }
+        tracing::trace!("Port forwarding setup complete");
 
         loop {
             select! {
@@ -147,169 +148,239 @@ impl PortForwarder {
                 },
 
                 message = self.agent_connection.receiver.recv() => match message {
-                    Some(message) => {
-                        match message {
-                            DaemonMessage::TcpOutgoing(message) => {
-                                match message {
-                                    DaemonTcpOutgoing::Connect(res) => {
-                                        match res {
-                                            Ok(res) => {
-                                                let SocketAddress::Ip(socket) = res.local_address else {
-                                                    break Err(PortForwardError::ConnectionError
-                                                        ("Unexpectedly received Unix address for socket during setup".into())
-                                                    );
-                                                };
-                                                let Some(channel) = self.oneshots.pop_front() else {
-                                                    break Err(PortForwardError::ReadyTaskNotFound(socket, res.connection_id));
-                                                };
-                                                self.sockets.insert(res.connection_id, socket);
-                                                let _ = channel.send(res.connection_id);
-                                            },
-                                            Err(error) => break Err(PortForwardError::AgentError(format!("Problem receiving DaemonTcpOutgoing::Connect {error}"))),
-                                        }
-                                    },
-                                    DaemonTcpOutgoing::Read(res) => {
-                                        match res {
-                                            Ok(res) => {
-                                                let Some(&socket) = self.sockets.get(&res.connection_id) else {
-                                                    break Err(PortForwardError::SocketFromIdNotFound(res.connection_id));
-                                                };
-                                                let Some(sender) = self.tasks.get(&socket) else {
-                                                    break Err(PortForwardError::SenderNotFound(socket, res.connection_id));
-                                                };
-                                                let Ok(_) = sender.send(res.bytes).await else {
-                                                    break Err(PortForwardError::InternalMessageError("Failed to send data from remote to task".into()))
-                                                };
-                                            },
-                                            Err(error) => break Err(PortForwardError::AgentError(format!("Problem receiving DaemonTcpOutgoing::Read {error}"))),
-                                        }
-                                    },
-                                    DaemonTcpOutgoing::Close(connection_id) => {
-                                        let Some(socket) = self.sockets.remove(&connection_id) else {
-                                            break Err(PortForwardError::SocketFromIdNotFound(connection_id));
-                                        };
-                                        let Some(sender) = self.tasks.remove(&socket) else {
-                                            break Err(PortForwardError::SenderNotFound(socket, connection_id));
-                                        };
-                                        drop(sender);
-                                        tracing::trace!("Connection closed for socket {socket}, connection {connection_id}");
-                                    },
-                                }
-                            },
-                            DaemonMessage::LogMessage(log_message) => {
-                                match log_message.level {
-                                    LogLevel::Warn => tracing::warn!(log_message.message),
-                                    LogLevel::Error => tracing::error!(log_message.message),
-                                }
-                            },
-                            DaemonMessage::Pong => {
-                                if !self.waiting_for_pong {
-                                    // message not expected
-                                    break Err(PortForwardError::AgentError("Unexpected message from Agent: DaemonMessage::Pong".into()));
-                                }
-                                self.waiting_for_pong = false;
-                            },
-                            DaemonMessage::Close(error) => {
-                                break Err(PortForwardError::AgentError(error));
-                            },
-                            other@_ => {
-                                break Err(PortForwardError::AgentError(format!("Unexpected message from Agent: {other:?}")));
-                            },
-                        }
-                    },
+                    Some(message) => self.handle_msg_from_agent(message).await?,
                     None => {
                         tracing::trace!("None message received, connection ended with agent");
-                        break Ok(());
+                        break Ok(())
                     },
                 },
 
                 // stream coming from the user app
                 message = self.listeners.next() => match message {
-                    Some((socket, Ok(stream))) => {
-                        let task_internal_tx = self.internal_msg_tx.clone();
-                        let Some(remote_socket) = self.mappings.get(&socket).cloned() else {
-                            return Err(PortForwardError::SocketMappingNotFound(socket))
-                        };
-                        let (response_tx, mut response_rx) = mpsc::channel(16);
-                        self.tasks.insert(socket, response_tx);
-                        tokio::spawn(async move {
-                            let (read, mut write) = stream.into_split();
-                            let mut read_stream = ReaderStream::new(read);
-                            let (oneshot_tx, oneshot_rx) = oneshot::channel::<ConnectionId>();
-                            let _ = task_internal_tx.send(PortForwardMessage::Connect(remote_socket, oneshot_tx)).await;
-                            let Ok(connection_id) = oneshot_rx.await else {
-                                return Err(PortForwardError::InternalMessageError(format!("Error while trying to receive connection ID for socket address {socket}")));
-                            };
-
-                            loop {
-                                select! {
-                                    message = read_stream.next() => match message {
-                                        Some(Ok(message)) => {
-                                            let _ = task_internal_tx.send(PortForwardMessage::Send(connection_id, message.into())).await;
-                                        },
-                                        Some(Err(error)) => {
-                                            break Err(PortForwardError::TcpListenerError(error));
-                                        },
-                                        None => {
-                                            let _ = task_internal_tx.send(PortForwardMessage::Close(socket, connection_id)).await;
-                                            break Ok(());
-                                        },
-                                    },
-
-                                    message = response_rx.recv() => match message {
-                                        Some(message) => {
-                                            match write.write(message.as_ref()).await {
-                                                Ok(_) => continue,
-                                                Err(error) => break Err(PortForwardError::InternalMessageError(format!("Failed to write data to local port in task: {error}"))),
-                                            }
-                                        },
-                                        None => break Ok(()), // PortForwarder received DaemonTcpOutgoing::Close
-                                    }
-                                }
-                            }
-                        });
-                    },
-                    Some((socket, Err(error))) => {
-                        // error from TcpStream
-                        tracing::error!("Error occured while listening to local socket {socket}: {error}");
-                        self.listeners.remove(&socket);
-                    },
+                    Some(message) => self.handle_listener_stream(message)?,
                     None => break Ok(()),
                 },
 
                 message = self.internal_msg_rx.recv() => match message {
-                    Some(PortForwardMessage::Connect(remote_socket, oneshot)) => {
-                        let remote_address = SocketAddress::Ip(remote_socket);
-                        self.oneshots.push_back(oneshot);
-                        let Ok(_) = self.agent_connection.sender.send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(
-                            LayerConnect { remote_address }
-                        ))).await else {
-                            break Err(PortForwardError::AgentError("Failed to send ClientMessage to agent".into()));
-                        };
-                    },
-                    Some(PortForwardMessage::Send(connection_id, bytes)) => {
-                        let Ok(_) = self.agent_connection.sender.send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(
-                            LayerWrite { connection_id, bytes }
-                        ))).await else {
-                            break Err(PortForwardError::AgentError("Failed to send ClientMessage to agent".into()));
-                        };
-                    },
-                    Some(PortForwardMessage::Close(socket, connection_id)) => {
-                        // end of listener TCP stream in task
-                        let Ok(_) = self.agent_connection.sender.send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(
-                            LayerClose { connection_id }
-                        ))).await else {
-                            break Err(PortForwardError::AgentError("Failed to send ClientMessage to agent".into()));
-                        };
-                        self.listeners.remove(&socket);
-                        self.tasks.remove(&socket);
-                    },
+                    Some(message) => self.handle_msg_from_task(message).await?,
                     None => {
                         tracing::trace!("PortForwardMessage Sender disconnected while sending");
                     },
                 },
             }
         }
+    }
+
+    async fn handle_msg_from_agent(
+        &mut self,
+        message: DaemonMessage,
+    ) -> Result<(), PortForwardError> {
+        match message {
+            DaemonMessage::TcpOutgoing(message) => match message {
+                DaemonTcpOutgoing::Connect(res) => match res {
+                    Ok(res) => {
+                        let SocketAddress::Ip(remote_socket) = res.remote_address else {
+                            return Err(PortForwardError::ConnectionError(
+                                "Unexpectedly received Unix address for socket during setup".into(),
+                            ));
+                        };
+                        let Some(channel) = self.oneshots.pop_front() else {
+                            return Err(PortForwardError::ReadyTaskNotFound(
+                                remote_socket,
+                                res.connection_id,
+                            ));
+                        };
+                        self.sockets.insert(res.connection_id, remote_socket);
+                        let _ = channel.send(res.connection_id);
+                        tracing::trace!("Successful connection to remote address {remote_socket}, connection ID is {}", res.connection_id);
+                    }
+                    Err(error) => {
+                        return Err(PortForwardError::AgentError(format!(
+                            "Problem receiving DaemonTcpOutgoing::Connect {error}"
+                        )))
+                    }
+                },
+                DaemonTcpOutgoing::Read(res) => match res {
+                    Ok(res) => {
+                        let Some(&remote_socket) = self.sockets.get(&res.connection_id) else {
+                            return Err(PortForwardError::SocketFromIdNotFound(res.connection_id));
+                        };
+                        let Some(sender) = self.tasks.get(&remote_socket) else {
+                            return Err(PortForwardError::SenderNotFound(
+                                remote_socket,
+                                res.connection_id,
+                            ));
+                        };
+                        let Ok(_) = sender.send(res.bytes).await else {
+                            return Err(PortForwardError::InternalMessageError(
+                                "Failed to send data from remote to task".into(),
+                            ));
+                        };
+                    }
+                    Err(error) => {
+                        return Err(PortForwardError::AgentError(format!(
+                            "Problem receiving DaemonTcpOutgoing::Read {error}"
+                        )))
+                    }
+                },
+                DaemonTcpOutgoing::Close(connection_id) => {
+                    let Some(remote_socket) = self.sockets.remove(&connection_id) else {
+                        return Err(PortForwardError::SocketFromIdNotFound(connection_id));
+                    };
+                    let Some(sender) = self.tasks.remove(&remote_socket) else {
+                        return Err(PortForwardError::SenderNotFound(
+                            remote_socket,
+                            connection_id,
+                        ));
+                    };
+                    drop(sender);
+                    tracing::trace!(
+                        "Connection closed for remote socket {remote_socket}, connection {connection_id}"
+                    );
+                }
+            },
+            DaemonMessage::LogMessage(log_message) => match log_message.level {
+                LogLevel::Warn => tracing::warn!(log_message.message),
+                LogLevel::Error => tracing::error!(log_message.message),
+            },
+            DaemonMessage::Pong => {
+                if !self.waiting_for_pong {
+                    // message not expected
+                    return Err(PortForwardError::AgentError(
+                        "Unexpected message from Agent: DaemonMessage::Pong".into(),
+                    ));
+                }
+                self.waiting_for_pong = false;
+            }
+            DaemonMessage::Close(error) => {
+                return Err(PortForwardError::AgentError(error));
+            }
+            other @ _ => {
+                return Err(PortForwardError::AgentError(format!(
+                    "Unexpected message from Agent: {other:?}"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_listener_stream(
+        &mut self,
+        message: (SocketAddr, Result<TcpStream, std::io::Error>),
+    ) -> Result<(), PortForwardError> {
+        match message {
+            (socket, Ok(stream)) => {
+                let task_internal_tx = self.internal_msg_tx.clone();
+                let Some(remote_socket) = self.mappings.get(&socket).cloned() else {
+                    return Err(PortForwardError::SocketMappingNotFound(socket));
+                };
+                let (response_tx, mut response_rx) = mpsc::channel(16);
+                self.tasks.insert(remote_socket, response_tx);
+                tokio::spawn(async move {
+                    let (read, mut write) = stream.into_split();
+                    let mut read_stream = ReaderStream::new(read);
+                    let (oneshot_tx, oneshot_rx) = oneshot::channel::<ConnectionId>();
+                    let _ = task_internal_tx
+                        .send(PortForwardMessage::Connect(remote_socket, oneshot_tx))
+                        .await;
+                    let Ok(connection_id) = oneshot_rx.await else {
+                        return Err(PortForwardError::InternalMessageError(format!("Error while trying to receive connection ID for socket address {socket}")));
+                    };
+
+                    loop {
+                        select! {
+                            message = read_stream.next() => match message {
+                                Some(Ok(message)) => {
+                                    let _ = task_internal_tx.send(PortForwardMessage::Send(connection_id, message.into())).await;
+                                },
+                                Some(Err(error)) => {
+                                    break Err(PortForwardError::TcpListenerError(error));
+                                },
+                                None => {
+                                    let _ = task_internal_tx.send(PortForwardMessage::Close(remote_socket, connection_id)).await;
+                                    break Ok(());
+                                },
+                            },
+
+                            message = response_rx.recv() => match message {
+                                Some(message) => {
+                                    match write.write(message.as_ref()).await {
+                                        Ok(_) => continue,
+                                        Err(error) => break Err(PortForwardError::InternalMessageError(format!("Failed to write data to local port in task: {error}"))),
+                                    }
+                                },
+                                None => break Ok(()), // PortForwarder received DaemonTcpOutgoing::Close
+                            }
+                        }
+                    }
+                });
+            }
+            (socket, Err(error)) => {
+                // error from TcpStream
+                tracing::error!("Error occured while listening to local socket {socket}: {error}");
+                self.listeners.remove(&socket);
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_msg_from_task(
+        &mut self,
+        message: PortForwardMessage,
+    ) -> Result<(), PortForwardError> {
+        match message {
+            PortForwardMessage::Connect(remote_socket, oneshot) => {
+                let remote_address = SocketAddress::Ip(remote_socket);
+                self.oneshots.push_back(oneshot);
+                let Ok(_) = self
+                    .agent_connection
+                    .sender
+                    .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(
+                        LayerConnect { remote_address },
+                    )))
+                    .await
+                else {
+                    return Err(PortForwardError::AgentError(
+                        "Failed to send ClientMessage to agent".into(),
+                    ));
+                };
+            }
+            PortForwardMessage::Send(connection_id, bytes) => {
+                let Ok(_) = self
+                    .agent_connection
+                    .sender
+                    .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(
+                        LayerWrite {
+                            connection_id,
+                            bytes,
+                        },
+                    )))
+                    .await
+                else {
+                    return Err(PortForwardError::AgentError(
+                        "Failed to send ClientMessage to agent".into(),
+                    ));
+                };
+            }
+            PortForwardMessage::Close(socket, connection_id) => {
+                // end of listener TCP stream in task
+                let Ok(_) = self
+                    .agent_connection
+                    .sender
+                    .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(
+                        LayerClose { connection_id },
+                    )))
+                    .await
+                else {
+                    return Err(PortForwardError::AgentError(
+                        "Failed to send ClientMessage to agent".into(),
+                    ));
+                };
+                self.tasks.remove(&socket);
+            }
+        }
+        Ok(())
     }
 }
 
