@@ -4,7 +4,6 @@ use std::{
     fs::{read_link, DirEntry, File, OpenOptions, ReadDir},
     io::{self, prelude::*, BufReader, SeekFrom},
     iter::{Enumerate, Map, Peekable},
-    ops::Not,
     os::unix::{fs::MetadataExt, prelude::FileExt},
     path::{Path, PathBuf},
     vec::IntoIter,
@@ -733,10 +732,7 @@ impl FileManager {
             .take(amount)
             .map(DirEntryInternal::try_from)
             .try_collect::<Vec<_>>()
-            .map(|dir_entries| ReadDirBatchResponse {
-                fd,
-                dir_entries: dir_entries.is_empty().not().then_some(dir_entries),
-            })?;
+            .map(|dir_entries| ReadDirBatchResponse { fd, dir_entries })?;
 
         Ok(result)
     }

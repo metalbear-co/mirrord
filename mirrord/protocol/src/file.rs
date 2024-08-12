@@ -406,7 +406,7 @@ pub struct ReadDirResponse {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadDirBatchResponse {
     pub fd: u64,
-    pub dir_entries: Option<Vec<DirEntryInternal>>,
+    pub dir_entries: Vec<DirEntryInternal>,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

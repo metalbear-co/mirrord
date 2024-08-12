@@ -365,6 +365,8 @@ impl_request!(
     res_path = ProxyToLayerMessage::File => FileResponse::ReadDir,
 );
 
+// The `req = ReadDirBatchRequest` is a lie, the layer doesn't use this message, it'll use
+// the regular `ReadDirRequest`, but we're doing it like this here to keep things simple.
 impl_request!(
     req = ReadDirBatchRequest,
     res = RemoteResult<ReadDirBatchResponse>,

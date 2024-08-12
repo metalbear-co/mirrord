@@ -47,7 +47,7 @@ pub(crate) enum RemoteFd {
 pub(crate) enum FileResource {
     File,
     Dir {
-        dirs_iter: Option<IntoIter<DirEntryInternal>>,
+        dirs_iter: IntoIter<DirEntryInternal>,
     },
 }
 
@@ -72,11 +72,7 @@ impl From<FileError> for ResponseError {
 impl FileResource {
     fn next_dir(&mut self, remote_fd: u64) -> Result<Option<DirEntryInternal>, FileError> {
         match self {
-            FileResource::Dir { dirs_iter } => dirs_iter
-                .as_mut()
-                .and_then(|entry| entry.next())
-                .map(Ok)
-                .transpose(),
+            FileResource::Dir { dirs_iter } => dirs_iter.next().map(Ok).transpose(),
             FileResource::File => Err(FileError::DirOnFile(remote_fd)),
         }
     }
@@ -242,7 +238,9 @@ impl BackgroundTask for SimpleProxy {
                     self.remote_fds.add(
                         layer_id,
                         RemoteFd::Dir(fd),
-                        FileResource::Dir { dirs_iter: None },
+                        FileResource::Dir {
+                            dirs_iter: IntoIter::default(),
+                        },
                     );
 
                     message_bus
@@ -260,12 +258,8 @@ impl BackgroundTask for SimpleProxy {
                 ))) => {
                     let (message_id, layer_id) = self.file_reqs.get()?;
 
-                    let mut entries_iter = dir_entries.map(|dirs| dirs.into_iter());
-
-                    let direntry = match entries_iter.as_mut() {
-                        Some(dirs) => dirs.next(),
-                        None => None,
-                    };
+                    let mut entries_iter = dir_entries.into_iter();
+                    let direntry = entries_iter.next();
 
                     message_bus
                         .send(ToLayer {
