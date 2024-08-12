@@ -452,14 +452,6 @@ impl OperatorRole {
                     verbs: vec!["patch".to_owned()],
                     ..Default::default()
                 },
-                // For mirrord (not SQS) controller to patch copy pod to use other SQS queue.
-                // For SQS queue splitting, but needed by the mirrord operator.
-                PolicyRule {
-                    api_groups: Some(vec!["".to_owned()]),
-                    resources: Some(vec!["pods".to_owned()]),
-                    verbs: vec!["patch".to_owned()],
-                    ..Default::default()
-                },
                 PolicyRule {
                     api_groups: Some(vec!["apps".to_owned(), "argoproj.io".to_owned()]),
                     resources: Some(vec![
