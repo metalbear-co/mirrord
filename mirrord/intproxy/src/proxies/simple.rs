@@ -9,6 +9,7 @@ use mirrord_protocol::{
     file::{
         CloseDirRequest, CloseFileRequest, DirEntryInternal, OpenDirResponse, OpenFileResponse,
         ReadDirBatchRequest, ReadDirBatchResponse, ReadDirRequest, ReadDirResponse,
+        READDIR_BATCH_VERSION,
     },
     ClientMessage, FileRequest, FileResponse, GetEnvVarsRequest, RemoteResult, ResponseError,
 };
@@ -109,7 +110,7 @@ impl FileResource {
             queue.insert(message_id, layer_id);
 
             let request =
-                if protocol_version.is_some_and(|version| *version >= Version::new(1, 9, 0)) {
+                if protocol_version.is_some_and(|version| READDIR_BATCH_VERSION.matches(version)) {
                     FileRequest::ReadDirBatch(ReadDirBatchRequest {
                         remote_fd,
                         amount: 128,

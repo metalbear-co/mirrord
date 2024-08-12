@@ -5,11 +5,18 @@ use std::fs::DirEntry;
 use std::io;
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::DirEntryExt;
-use std::{fs::Metadata, io::SeekFrom, os::unix::prelude::MetadataExt, path::PathBuf};
+use std::{
+    fs::Metadata, io::SeekFrom, os::unix::prelude::MetadataExt, path::PathBuf, sync::LazyLock,
+};
 
 use bincode::{Decode, Encode};
 #[cfg(target_os = "linux")]
 use nix::sys::statfs::Statfs;
+use semver::VersionReq;
+
+/// Minimal mirrord-protocol version that allows [`ReadDirBatchRequest`].
+pub static READDIR_BATCH_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.9.0".parse().expect("Bad Identifier"));
 
 /// Internal version of Metadata across operating system (macOS, Linux)
 /// Only mutual attributes
