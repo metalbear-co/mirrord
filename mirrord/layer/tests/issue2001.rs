@@ -84,11 +84,6 @@ async fn test_issue2001(
         ))))
         .await;
 
-    assert_eq!(
-        intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 11 })),
-    );
-
     test_process.wait_assert_success().await;
     test_process
         .assert_stdout_contains("test issue 2001: START")

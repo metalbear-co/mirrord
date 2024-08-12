@@ -383,18 +383,30 @@ async fn go_dir(
 
     assert_eq!(
         intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 2 }))
+        ClientMessage::FileRequest(FileRequest::ReadDirBatch(ReadDirBatchRequestRequest {
+            remote_fd: 2,
+            amount: 128
+        }))
     );
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
-            ReadDirResponse {
-                direntry: Some(DirEntryInternal {
-                    name: "a".to_string(),
-                    inode: 1,
-                    position: 1,
-                    file_type: libc::DT_REG,
-                }),
+        .send(DaemonMessage::File(FileResponse::ReadDirBatch(Ok(
+            ReadDirBatchResponse {
+                fd: 2,
+                dir_entries: vec![
+                    DirEntryInternal {
+                        name: "a".to_string(),
+                        inode: 1,
+                        position: 1,
+                        file_type: libc::DT_REG,
+                    },
+                    DirEntryInternal {
+                        name: "b".to_string(),
+                        inode: 2,
+                        position: 2,
+                        file_type: libc::DT_REG,
+                    },
+                ],
             },
         ))))
         .await;
@@ -405,26 +417,11 @@ async fn go_dir(
     );
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
-            ReadDirResponse {
-                direntry: Some(DirEntryInternal {
-                    name: "b".to_string(),
-                    inode: 2,
-                    position: 2,
-                    file_type: libc::DT_REG,
-                }),
+        .send(DaemonMessage::File(FileResponse::ReadDirBatch(Ok(
+            ReadDirBatchResponse {
+                fd: 2,
+                dir_entries: Vec::new(),
             },
-        ))))
-        .await;
-
-    assert_eq!(
-        intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 2 }))
-    );
-
-    intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
-            ReadDirResponse { direntry: None },
         ))))
         .await;
 
