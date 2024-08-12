@@ -3895,6 +3895,7 @@ dependencies = [
  "semver 1.0.23",
  "serde",
  "serde_json",
+ "socket2",
  "streammap-ext",
  "test_bin",
  "thiserror",

@@ -5,9 +5,9 @@ use mirrord_kube::api::kubernetes::create_kube_config;
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{
     vpn::{ClientVpn, ServerVpn},
-    ClientMessage, DaemonMessage,
+    ClientMessage, DaemonMessage, LogLevel,
 };
-use mirrord_vpn::{config::VpnConfig, tunnel::VpnTunnel};
+use mirrord_vpn::{agent::VpnAgent, config::VpnConfig, tunnel::VpnTunnel};
 use tokio::signal;
 
 use crate::{
@@ -16,15 +16,23 @@ use crate::{
     error::{CliError, Result},
 };
 
-async fn agent_request<T>(
+async fn make_agent_request<T>(
     connection: &mut AgentConnection,
     request: ClientMessage,
-    mapper: impl Fn(DaemonMessage) -> Option<T>,
+    response_filter: impl Fn(DaemonMessage) -> Option<T>,
 ) -> Option<T> {
     tracing::debug!(client_message = ?request, "out");
     connection.sender.send(request).await.ok()?;
 
-    connection.receiver.recv().await.and_then(mapper)
+    loop {
+        match connection.receiver.recv().await? {
+            DaemonMessage::LogMessage(message) => match message.level {
+                LogLevel::Error => tracing::error!("Agent log: {}", message.message),
+                LogLevel::Warn => tracing::warn!("Agent log: {}", message.message),
+            },
+            message => break response_filter(message),
+        }
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -42,7 +50,7 @@ async fn agent_fetch_file<const B: u64>(
         },
     });
 
-    let Some(FileResponse::Open(response)) = agent_request(
+    let Some(FileResponse::Open(response)) = make_agent_request(
         connection,
         ClientMessage::FileRequest(request),
         get_file_response,
@@ -59,7 +67,7 @@ async fn agent_fetch_file<const B: u64>(
         buffer_size: B,
     });
 
-    let Some(FileResponse::Read(response)) = agent_request(
+    let Some(FileResponse::Read(response)) = make_agent_request(
         connection,
         ClientMessage::FileRequest(request),
         get_file_response,
@@ -130,7 +138,7 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
 
     sub_progress.success(None);
 
-    let Some(ServerVpn::NetworkConfiguration(network)) = agent_request(
+    let Some(ServerVpn::NetworkConfiguration(network)) = make_agent_request(
         &mut connection,
         ClientMessage::Vpn(ClientVpn::GetNetworkConfiguration),
         get_server_vpn,
@@ -209,7 +217,8 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
 
     progress.success(None);
 
-    let vpn_tunnel = VpnTunnel::new(connection.sender, connection.receiver, vpn_socket);
+    let vpn_agnet = VpnAgent::new(connection.sender, connection.receiver);
+    let vpn_tunnel = VpnTunnel::new(vpn_agnet, vpn_socket);
 
     tokio::select! {
         _ = vpn_tunnel.start() => {}
