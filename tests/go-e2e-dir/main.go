@@ -1,4 +1,3 @@
-// TODO(alex) [high]: Change the integration to readdirbatchrequest
 package main
 
 import (
