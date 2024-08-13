@@ -354,11 +354,16 @@ impl BackgroundTask for SimpleProxy {
 #[cfg(test)]
 mod tests {
 
+    use mirrord_intproxy_protocol::LayerId;
+    use mirrord_protocol::{file::ReadDirRequest, FileRequest};
+    use semver::Version;
+
     use super::SimpleProxy;
     use crate::{
-        background_tasks::{BackgroundTask, BackgroundTasks, MessageBus},
+        background_tasks::BackgroundTasks,
         error::IntProxyError,
         main_tasks::{MainTaskId, ProxyMessage},
+        proxies::simple::SimpleProxyMessage,
     };
 
     #[tokio::test]
@@ -368,6 +373,22 @@ mod tests {
 
         let simple_proxy =
             background_tasks.register(SimpleProxy::default(), MainTaskId::SimpleProxy, 32);
+
+        simple_proxy
+            .send(SimpleProxyMessage::ProtocolVersion(Version::new(0, 1, 0)))
+            .await;
+        let (_, back_to_layer) = background_tasks.next().await.unzip();
+        assert!(back_to_layer.is_none());
+
+        simple_proxy
+            .send(SimpleProxyMessage::FileReq(
+                0xbad,
+                LayerId(0xa55),
+                FileRequest::ReadDir(ReadDirRequest { remote_fd: 0xdad }),
+            ))
+            .await;
+        let (_, back_to_layer) = background_tasks.next().await.unzip();
+        assert!(back_to_layer.is_some());
 
         // TODO(alex) [high]: Call send with protocol version switch, then with
         // readdirbatch message?
