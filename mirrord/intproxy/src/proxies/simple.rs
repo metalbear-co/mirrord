@@ -351,55 +351,195 @@ impl BackgroundTask for SimpleProxy {
     }
 }
 
-/*
 #[cfg(test)]
 mod tests {
 
-    use mirrord_intproxy_protocol::LayerId;
-    use mirrord_protocol::{file::ReadDirRequest, FileRequest};
+    use mirrord_intproxy_protocol::{LayerId, ProxyToLayerMessage};
+    use mirrord_protocol::{
+        file::{
+            FdOpenDirRequest, OpenDirResponse, ReadDirBatchRequest, ReadDirBatchResponse,
+            ReadDirRequest, ReadDirResponse,
+        },
+        ClientMessage, FileRequest, FileResponse,
+    };
     use semver::Version;
 
     use super::SimpleProxy;
     use crate::{
-        background_tasks::BackgroundTasks,
+        background_tasks::{BackgroundTasks, TaskSender, TaskUpdate},
         error::IntProxyError,
-        main_tasks::{MainTaskId, ProxyMessage},
+        main_tasks::{MainTaskId, ProxyMessage, ToLayer},
         proxies::simple::SimpleProxyMessage,
     };
 
-    #[tokio::test]
-    async fn checks_protocol_version_for_readdir() {
-        let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
+    /// Sets up a [`TaskSender`] and [`BackgroundTasks`] for a functioning [`SimpleProxy`].
+    ///
+    /// - `protocol_version`: allows specifying the version of the protocol to use for
+    /// testing out potential mismatches in messages.
+    async fn setup_proxy(
+        protocol_version: Version,
+    ) -> (
+        TaskSender<SimpleProxy>,
+        BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+    ) {
+        let mut tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
             Default::default();
 
-        let simple_proxy =
-            background_tasks.register(SimpleProxy::default(), MainTaskId::SimpleProxy, 32);
+        let proxy = tasks.register(SimpleProxy::default(), MainTaskId::SimpleProxy, 32);
 
-        simple_proxy
-            .send(SimpleProxyMessage::ProtocolVersion(Version::new(0, 1, 0)))
+        proxy
+            .send(SimpleProxyMessage::ProtocolVersion(protocol_version))
             .await;
-        // let (_, back_to_layer) = background_tasks.next().await.unzip();
-        assert!(false, "bobo");
 
-        simple_proxy
+        (proxy, tasks)
+    }
+
+    /// Convenience for opening a dir.
+    async fn prepare_dir(
+        proxy: &TaskSender<SimpleProxy>,
+        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+    ) {
+        let request = FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 0xdad });
+        proxy
+            .send(SimpleProxyMessage::FileReq(0xbad, LayerId(0xa55), request))
+            .await;
+        let (_, update) = tasks.next().await.unzip();
+
+        assert!(
+            matches!(
+                update,
+                Some(TaskUpdate::Message(ProxyMessage::ToAgent(
+                    ClientMessage::FileRequest(FileRequest::FdOpenDir(FdOpenDirRequest { .. }),)
+                )))
+            ),
+            "Mismatched message for `FdOpenDirRequest` {update:?}!"
+        );
+
+        let response = FileResponse::OpenDir(Ok(OpenDirResponse { fd: 0xdad }));
+        proxy.send(SimpleProxyMessage::FileRes(response)).await;
+        let (_, update) = tasks.next().await.unzip();
+
+        assert!(
+            matches!(
+                update,
+                Some(TaskUpdate::Message(ProxyMessage::ToLayer(ToLayer {
+                    message_id: 0xbad,
+                    layer_id: LayerId(0xa55),
+                    message: ProxyToLayerMessage::File(FileResponse::OpenDir(Ok(
+                        OpenDirResponse { .. }
+                    )))
+                })))
+            ),
+            "Mismatched message for `OpenDirResponse` {update:?}!"
+        );
+    }
+
+    #[tokio::test]
+    async fn old_protocol_uses_read_dir_request() {
+        let (proxy, mut tasks) = setup_proxy(Version::new(0, 1, 0)).await;
+
+        prepare_dir(&proxy, &mut tasks).await;
+
+        let readdir_request = FileRequest::ReadDir(ReadDirRequest { remote_fd: 0xdad });
+        proxy
             .send(SimpleProxyMessage::FileReq(
                 0xbad,
                 LayerId(0xa55),
-                FileRequest::ReadDir(ReadDirRequest { remote_fd: 0xdad }),
+                readdir_request,
             ))
             .await;
-        let (_, back_to_layer) = background_tasks.next().await.unzip();
-        assert!(false, "bibi");
+        let (_, update) = tasks.next().await.unzip();
 
-        drop(simple_proxy);
-        let results = background_tasks.results().await;
-        for (_, _) in results {
-            assert!(false, "baba");
+        assert!(
+            matches!(
+                update,
+                Some(TaskUpdate::Message(ProxyMessage::ToAgent(
+                    ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { .. }))
+                )))
+            ),
+            "Mismatched message for `ReadDirRequest` {update:?}!"
+        );
+
+        let readdir_response = FileResponse::ReadDir(Ok(ReadDirResponse { direntry: None }));
+        proxy
+            .send(SimpleProxyMessage::FileRes(readdir_response))
+            .await;
+        let (_, update) = tasks.next().await.unzip();
+
+        assert!(
+            matches!(
+                update,
+                Some(TaskUpdate::Message(ProxyMessage::ToLayer(ToLayer {
+                    message_id: 0xbad,
+                    layer_id: LayerId(0xa55),
+                    message: ProxyToLayerMessage::File(FileResponse::ReadDir(Ok(
+                        ReadDirResponse { .. }
+                    )))
+                })))
+            ),
+            "Mismatched message for `ReadDirResponse` {update:?}!"
+        );
+
+        drop(proxy);
+        let results = tasks.results().await;
+        for (_, result) in results {
+            assert!(result.is_ok(), "{result:?}");
         }
+    }
 
-        // TODO(alex) [high]: Call send with protocol version switch, then with
-        // readdirbatch message?
-        // Have another test that does it without the protocol version.
+    #[tokio::test]
+    async fn new_protocol_uses_read_dir_batch_request() {
+        let (proxy, mut tasks) = setup_proxy(Version::new(1, 8, 3)).await;
+
+        prepare_dir(&proxy, &mut tasks).await;
+
+        let request = FileRequest::ReadDirBatch(ReadDirBatchRequest {
+            remote_fd: 0xdad,
+            amount: 0xca7,
+        });
+        proxy
+            .send(SimpleProxyMessage::FileReq(0xbad, LayerId(0xa55), request))
+            .await;
+        let (_, update) = tasks.next().await.unzip();
+
+        assert!(
+            matches!(
+                update,
+                Some(TaskUpdate::Message(ProxyMessage::ToAgent(
+                    ClientMessage::FileRequest(FileRequest::ReadDirBatch(ReadDirBatchRequest {
+                        remote_fd: 0xdad,
+                        amount: 0xca7
+                    }))
+                )))
+            ),
+            "Mismatched message for `ReadDirBatchRequest` {update:?}!"
+        );
+
+        let response = FileResponse::ReadDirBatch(Ok(ReadDirBatchResponse {
+            fd: 0xdad,
+            dir_entries: Vec::new(),
+        }));
+        proxy.send(SimpleProxyMessage::FileRes(response)).await;
+        let (_, update) = tasks.next().await.unzip();
+
+        assert!(
+            matches!(
+                update,
+                Some(TaskUpdate::Message(ProxyMessage::ToLayer(ToLayer {
+                    message_id: 0xbad,
+                    layer_id: LayerId(0xa55),
+                    message: ProxyToLayerMessage::File(FileResponse::ReadDir(Ok(
+                        ReadDirResponse { .. }
+                    )))
+                })))
+            ),
+            "Mismatched message for `ReadDirBatchResponse` {update:?}!"
+        );
+
+        drop(proxy);
+        let results = tasks.results().await;
+        for (_, result) in results {
+            assert!(result.is_ok(), "{result:?}");
+        }
     }
 }
-*/
