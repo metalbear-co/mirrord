@@ -413,6 +413,14 @@ async fn go_dir(
 
     assert_eq!(
         intproxy.recv().await,
+        ClientMessage::FileRequest(FileRequest::ReadDirBatch(ReadDirBatchRequest {
+            remote_fd: 2,
+            amount: 128
+        }))
+    );
+
+    assert_eq!(
+        intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: 2 }))
     );
 

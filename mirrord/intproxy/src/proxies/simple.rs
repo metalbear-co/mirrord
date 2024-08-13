@@ -353,6 +353,24 @@ impl BackgroundTask for SimpleProxy {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn checks_protocol_version_for_readdir() {}
+
+    use super::SimpleProxy;
+    use crate::{
+        background_tasks::{BackgroundTask, BackgroundTasks, MessageBus},
+        error::IntProxyError,
+        main_tasks::{MainTaskId, ProxyMessage},
+    };
+
+    #[tokio::test]
+    async fn checks_protocol_version_for_readdir() {
+        let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
+            Default::default();
+
+        let simple_proxy =
+            background_tasks.register(SimpleProxy::default(), MainTaskId::SimpleProxy, 32);
+
+        // TODO(alex) [high]: Call send with protocol version switch, then with
+        // readdirbatch message?
+        // Have another test that does it without the protocol version.
+    }
 }
