@@ -332,7 +332,7 @@ pub(crate) enum CliError {
 
     #[error("An error occurred in the port-forwarding process: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
-    PortForwardingError(PortForwardError),
+    PortForwardingError(#[from] PortForwardError),
 }
 
 impl From<OperatorApiError> for CliError {

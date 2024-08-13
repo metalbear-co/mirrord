@@ -68,7 +68,7 @@ pub(super) enum Commands {
     InternalProxy,
 
     /// Port forwarding - UNSTABLE FEATURE
-    #[command(hide = true, name = "portforward")]
+    #[command(name = "port-forward")]
     PortForward(Box<PortForwardArgs>),
 
     /// Verify config file without starting mirrord.
@@ -388,87 +388,47 @@ impl FromStr for PortMapping {
     type Err = PortMappingParseErr;
 
     fn from_str(string: &str) -> Result<Self, Self::Err> {
+        fn parse_port(string: &str, original: &str) -> Result<u16, PortMappingParseErr> {
+            match string.parse::<u16>() {
+                Ok(0) => Err(PortMappingParseErr::PortZeroInvalid(string.to_string())),
+                Ok(port) => Ok(port),
+                Err(_error) => Err(PortMappingParseErr::PortParseErr(
+                    string.to_string(),
+                    original.to_string(),
+                )),
+            }
+        }
+
+        fn parse_ip(string: &str, original: &str) -> Result<Ipv4Addr, PortMappingParseErr> {
+            match string.parse::<Ipv4Addr>() {
+                Ok(ip) => Ok(ip),
+                Err(_error) => Err(PortMappingParseErr::IpParseErr(
+                    string.to_string(),
+                    original.to_string(),
+                )),
+            }
+        }
+
         // expected format = local_port:dest_server:remote_port
         // alternatively,  = dest_server:remote_port
         let vec: Vec<&str> = string.split(':').collect();
-        let (local_port, remote_ip, remote_port) = match vec.len() {
-            3 => {
-                // local port included
-                let local_port = match vec.first().unwrap().parse::<u16>() {
-                    Ok(0) => return Err(PortMappingParseErr::PortZeroInvalid(string.into())),
-                    Ok(port) => port,
-                    Err(_error) => {
-                        return Err(PortMappingParseErr::PortParseErr(
-                            vec.first().unwrap().to_string(),
-                        ))
-                    }
-                };
-                let remote_port = match vec.get(2).unwrap().parse::<u16>() {
-                    Ok(0) => return Err(PortMappingParseErr::PortZeroInvalid(string.into())),
-                    Ok(port) => port,
-                    Err(_error) => {
-                        return Err(PortMappingParseErr::PortParseErr(
-                            vec.get(2).unwrap().to_string(),
-                        ))
-                    }
-                };
-                let ip_parts: Vec<u8> = vec
-                    .get(1)
-                    .unwrap()
-                    .split('.')
-                    .filter_map(|s| s.parse::<u8>().ok())
-                    .collect();
-                let remote_ip = match ip_parts.len() {
-                    4 => Ipv4Addr::new(
-                        *ip_parts.first().unwrap(),
-                        *ip_parts.get(1).unwrap(),
-                        *ip_parts.get(2).unwrap(),
-                        *ip_parts.get(3).unwrap(),
-                    ),
-                    _ => {
-                        return Err(PortMappingParseErr::IpParseErr(
-                            vec.get(1).unwrap().to_string(),
-                        ))
-                    }
-                };
+        let (local_port, remote_ip, remote_port) = match vec.as_slice() {
+            [local_port, remote_ip, remote_port] => {
+                let local_port = parse_port(local_port, string)?;
+                let remote_port = parse_port(remote_port, string)?;
+                let remote_ip = parse_ip(remote_ip, string)?;
                 (local_port, remote_ip, remote_port)
             }
-            2 => {
-                // local port excluded, default to same as remote port
-                let remote_port = match vec.get(1).unwrap().parse::<u16>() {
-                    Ok(0) => return Err(PortMappingParseErr::PortZeroInvalid(string.into())),
-                    Ok(port) => port,
-                    Err(_error) => {
-                        return Err(PortMappingParseErr::PortParseErr(
-                            vec.first().unwrap().to_string(),
-                        ))
-                    }
-                };
-                let ip_parts: Vec<u8> = vec
-                    .first()
-                    .unwrap()
-                    .split('.')
-                    .filter_map(|s| s.parse::<u8>().ok())
-                    .collect();
-                let remote_ip = match ip_parts.len() {
-                    4 => Ipv4Addr::new(
-                        *ip_parts.get(1).unwrap(),
-                        *ip_parts.get(2).unwrap(),
-                        *ip_parts.first().unwrap(),
-                        *ip_parts.get(3).unwrap(),
-                    ),
-                    _ => {
-                        return Err(PortMappingParseErr::IpParseErr(
-                            vec.get(1).unwrap().to_string(),
-                        ))
-                    }
-                };
+            [remote_ip, remote_port] => {
+                let remote_port = parse_port(remote_port, string)?;
+                let remote_ip = parse_ip(remote_ip, string)?;
                 (remote_port, remote_ip, remote_port)
             }
-            num => {
-                return Err(PortMappingParseErr::NumSubArgs(num, string.into()));
+            _ => {
+                return Err(PortMappingParseErr::InvalidFormat(string.to_string()));
             }
         };
+
         Ok(Self {
             local: SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), local_port),
             remote: SocketAddr::new(IpAddr::V4(remote_ip), remote_port),
@@ -478,16 +438,16 @@ impl FromStr for PortMapping {
 
 #[derive(Error, Debug, PartialEq)]
 pub enum PortMappingParseErr {
-    #[error("Incorrect number of sub-arguments found for port forwarding: expected 2 or 3, found {0} in argument `{1}`")]
-    NumSubArgs(usize, String),
+    #[error("Invalid format of argument `{0}`, expected `[local-port]:remote-ipv4:remote-port`")]
+    InvalidFormat(String),
 
-    #[error("Failed to parse `{0}` into port (u16)")]
-    PortParseErr(String),
+    #[error("Failed to parse port `{0}` in argument: `{1}`")]
+    PortParseErr(String, String),
 
-    #[error("Failed to parse `{0}` into IP address (u8.u8.u8.u8)")]
-    IpParseErr(String),
+    #[error("Failed to parse IPv4 address `{0}` in argument `{1}`")]
+    IpParseErr(String, String),
 
-    #[error("Failed to set port for port forwarding while parsing `{0}`: `0` is not a valid port address")]
+    #[error("Port `0` is not allowed in argument `{0}`")]
     PortZeroInvalid(String),
 }
 
