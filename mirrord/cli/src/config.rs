@@ -387,52 +387,86 @@ pub struct PortMapping {
 impl FromStr for PortMapping {
     type Err = PortMappingParseErr;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(string: &str) -> Result<Self, Self::Err> {
         // expected format = local_port:dest_server:remote_port
         // alternatively,  = dest_server:remote_port
-        let vec: Vec<&str> = s.split(":").collect();
+        let vec: Vec<&str> = string.split(':').collect();
         let (local_port, remote_ip, remote_port) = match vec.len() {
             3 => {
                 // local port included
-                let local_port = match vec[0].parse::<u16>() {
-                    Ok(0) => return Err(PortMappingParseErr::PortZeroInvalid(s.into())),
+                let local_port = match vec.first().unwrap().parse::<u16>() {
+                    Ok(0) => return Err(PortMappingParseErr::PortZeroInvalid(string.into())),
                     Ok(port) => port,
-                    Err(_error) => return Err(PortMappingParseErr::PortParseErr(vec[0].into())),
+                    Err(_error) => {
+                        return Err(PortMappingParseErr::PortParseErr(
+                            vec.first().unwrap().to_string(),
+                        ))
+                    }
                 };
-                let remote_port = match vec[2].parse::<u16>() {
-                    Ok(0) => return Err(PortMappingParseErr::PortZeroInvalid(s.into())),
+                let remote_port = match vec.get(2).unwrap().parse::<u16>() {
+                    Ok(0) => return Err(PortMappingParseErr::PortZeroInvalid(string.into())),
                     Ok(port) => port,
-                    Err(_error) => return Err(PortMappingParseErr::PortParseErr(vec[2].into())),
+                    Err(_error) => {
+                        return Err(PortMappingParseErr::PortParseErr(
+                            vec.get(2).unwrap().to_string(),
+                        ))
+                    }
                 };
-                let ip_parts: Vec<u8> = vec[1]
-                    .split(".")
+                let ip_parts: Vec<u8> = vec
+                    .get(1)
+                    .unwrap()
+                    .split('.')
                     .filter_map(|s| s.parse::<u8>().ok())
                     .collect();
                 let remote_ip = match ip_parts.len() {
-                    4 => Ipv4Addr::new(ip_parts[0], ip_parts[1], ip_parts[2], ip_parts[3]),
-                    _ => return Err(PortMappingParseErr::IpParseErr(vec[1].into())),
+                    4 => Ipv4Addr::new(
+                        *ip_parts.first().unwrap(),
+                        *ip_parts.get(1).unwrap(),
+                        *ip_parts.get(2).unwrap(),
+                        *ip_parts.get(3).unwrap(),
+                    ),
+                    _ => {
+                        return Err(PortMappingParseErr::IpParseErr(
+                            vec.get(1).unwrap().to_string(),
+                        ))
+                    }
                 };
                 (local_port, remote_ip, remote_port)
             }
             2 => {
                 // local port excluded, default to same as remote port
-                let remote_port = match vec[1].parse::<u16>() {
-                    Ok(0) => return Err(PortMappingParseErr::PortZeroInvalid(s.into())),
+                let remote_port = match vec.get(1).unwrap().parse::<u16>() {
+                    Ok(0) => return Err(PortMappingParseErr::PortZeroInvalid(string.into())),
                     Ok(port) => port,
-                    Err(_error) => return Err(PortMappingParseErr::PortParseErr(vec[0].into())),
+                    Err(_error) => {
+                        return Err(PortMappingParseErr::PortParseErr(
+                            vec.first().unwrap().to_string(),
+                        ))
+                    }
                 };
-                let ip_parts: Vec<u8> = vec[0]
-                    .split(".")
+                let ip_parts: Vec<u8> = vec
+                    .first()
+                    .unwrap()
+                    .split('.')
                     .filter_map(|s| s.parse::<u8>().ok())
                     .collect();
                 let remote_ip = match ip_parts.len() {
-                    4 => Ipv4Addr::new(ip_parts[0], ip_parts[1], ip_parts[2], ip_parts[3]),
-                    _ => return Err(PortMappingParseErr::IpParseErr(vec[1].into())),
+                    4 => Ipv4Addr::new(
+                        *ip_parts.get(1).unwrap(),
+                        *ip_parts.get(2).unwrap(),
+                        *ip_parts.first().unwrap(),
+                        *ip_parts.get(3).unwrap(),
+                    ),
+                    _ => {
+                        return Err(PortMappingParseErr::IpParseErr(
+                            vec.get(1).unwrap().to_string(),
+                        ))
+                    }
                 };
-                (remote_port.clone(), remote_ip, remote_port)
+                (remote_port, remote_ip, remote_port)
             }
-            num @ _ => {
-                return Err(PortMappingParseErr::NumSubArgs(num, s.into()));
+            num => {
+                return Err(PortMappingParseErr::NumSubArgs(num, string.into()));
             }
         };
         Ok(Self {

@@ -255,7 +255,7 @@ impl PortForwarder {
             DaemonMessage::Close(error) => {
                 return Err(PortForwardError::AgentError(error));
             }
-            other @ _ => {
+            other => {
                 return Err(PortForwardError::AgentError(format!(
                     "Unexpected message from Agent: {other:?}"
                 )));
@@ -465,7 +465,7 @@ mod test {
 
         // send data to socket
         let mut stream = TcpStream::connect(local_destination).await.unwrap();
-        stream.write(b"data-my-beloved").await.unwrap();
+        stream.write_all(b"data-my-beloved").await.unwrap();
 
         // expect handshake procedure
         let expected = Some(ClientMessage::SwitchProtocolVersion(
@@ -488,7 +488,7 @@ mod test {
         }));
         let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
             ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
-            other @ _ => other,
+            other => other,
         };
         assert_eq!(message, expected);
 
@@ -505,14 +505,14 @@ mod test {
             .unwrap();
 
         // expect data sent first to be received first
-        stream.write(b"data-my-beloathed").await.unwrap();
+        stream.write_all(b"data-my-beloathed").await.unwrap();
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
             connection_id: 1,
             bytes: b"data-my-beloveddata-my-beloathed".to_vec(),
         }));
         let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
             ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
-            other @ _ => other,
+            other => other,
         };
         assert_eq!(message, expected);
 
@@ -529,7 +529,7 @@ mod test {
 
         // check data arrives at local
         let mut buf = [0; 16];
-        stream.read(&mut buf).await.unwrap();
+        stream.read_exact(&mut buf).await.unwrap();
         assert_eq!(buf, b"reply-my-beloved".as_ref());
 
         // ensure portforwarder closes when agent ends
@@ -596,7 +596,7 @@ mod test {
         }));
         let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
             ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
-            other @ _ => other,
+            other => other,
         };
         assert_eq!(message, expected);
 
@@ -609,7 +609,7 @@ mod test {
         }));
         let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
             ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
-            other @ _ => other,
+            other => other,
         };
         assert_eq!(message, expected);
 
@@ -636,25 +636,25 @@ mod test {
             .unwrap();
 
         // expect data to be received
-        stream_1.write(b"data-from-1").await.unwrap();
+        stream_1.write_all(b"data-from-1").await.unwrap();
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
             connection_id: 1,
             bytes: b"data-from-1".to_vec(),
         }));
         let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
             ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
-            other @ _ => other,
+            other => other,
         };
         assert_eq!(message, expected);
 
-        stream_2.write(b"data-from-2").await.unwrap();
+        stream_2.write_all(b"data-from-2").await.unwrap();
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
             connection_id: 2,
             bytes: b"data-from-2".to_vec(),
         }));
         let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
             ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
-            other @ _ => other,
+            other => other,
         };
         assert_eq!(message, expected);
 
@@ -680,10 +680,10 @@ mod test {
 
         // check data arrives at each local addr
         let mut buf = [0; 10];
-        stream_1.read(&mut buf).await.unwrap();
+        stream_1.read_exact(&mut buf).await.unwrap();
         assert_eq!(buf, b"reply-to-1".as_ref());
         let mut buf = [0; 10];
-        stream_2.read(&mut buf).await.unwrap();
+        stream_2.read_exact(&mut buf).await.unwrap();
         assert_eq!(buf, b"reply-to-2".as_ref());
     }
 }
