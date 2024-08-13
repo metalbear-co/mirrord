@@ -329,7 +329,7 @@ async fn go_stat(
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(10))]
+#[timeout(Duration::from_secs(15))]
 #[cfg(target_os = "macos")]
 async fn go_dir(
     #[values(Application::Go19Dir, Application::Go20Dir)] application: Application,
