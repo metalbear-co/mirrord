@@ -392,9 +392,12 @@ pub struct ReadDirRequest {
     pub remote_fd: u64,
 }
 
+/// `readdir` message that requests an iterable with `amount` items from the agent.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadDirBatchRequest {
+    /// The fd of the dir in the agent.
     pub remote_fd: u64,
+    /// Max amount to take from the agent's iterator of dirs.
     pub amount: usize,
 }
 
@@ -403,9 +406,14 @@ pub struct ReadDirResponse {
     pub direntry: Option<DirEntryInternal>,
 }
 
+/// `readdir` response with the list of items (length depends on the [`ReadDirBatchRequest`]'s
+/// `amount`), and the `remote_fd` of the dir (for convenience).
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadDirBatchResponse {
+    /// Remote fd of the dir.
     pub fd: u64,
+    /// The list of [`DirEntryInternal`] where `length` is, at max, the `amount` we took
+    /// from the agent's read dir iterator.
     pub dir_entries: Vec<DirEntryInternal>,
 }
 

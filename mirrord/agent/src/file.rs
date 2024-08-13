@@ -721,6 +721,9 @@ impl FileManager {
         Ok(result)
     }
 
+    /// Instead of returning just 1 [`DirEntryInternal`] from a `readdir` call (which in
+    /// Rust means advancing the [`read_dir`](std::fs::read_dir) iterator), we return
+    /// an iterator with (at most) `amount` items.
     #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
     pub(crate) fn read_dir_batch(
         &mut self,

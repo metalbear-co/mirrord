@@ -93,6 +93,12 @@ pub struct SimpleProxy {
 }
 
 impl SimpleProxy {
+    /// `readdir` works by keeping an iterator of all the `dir`s, and a call to it is
+    /// equivalent to doing `iterator.next()`.
+    ///
+    /// For efficiency, whenever we receive a `readdir` request from the layer, we try to
+    /// read more than just `next()` from the agent, while returning just the next `direntry`
+    /// back to layer.
     async fn handle_readdir(
         &mut self,
         layer_id: LayerId,
