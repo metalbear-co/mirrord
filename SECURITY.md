@@ -1,6 +1,6 @@
 # Security
 
-**Contact:** hi@metalbear.co
+**Contact:** security@metalbear.co
 
 Keeping mirrord secure is a top concern for us. Nevertheless, despite our best efforts to fortify it, vulnerabilities may still be present.
 
@@ -14,7 +14,7 @@ If you come across a vulnerability, please inform us promptly so we can resolve 
 
 **Reporting Instructions:**
 
-1. Email your findings to **hi@metalbear.co**.
+1. Email your findings to **security@metalbear.co**.
 
 2. Please do not exploit the vulnerability or issue you've found.
 
