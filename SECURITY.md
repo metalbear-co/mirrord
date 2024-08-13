@@ -12,26 +12,6 @@ If you come across a vulnerability, please inform us promptly so we can resolve 
 
 - Any security issues that might put at risk the confidentiality, integrity, or accessibility of our systems or data.
 
-**Out of Scope Vulnerabilities:**
-
-- Clickjacking on pages with no sensitive actions.
-
-- Unauthenticated/logout/login CSRF.
-
-- Attacks requiring MITM or physical access to a user's device.
-
-- Any activity that could lead to the disruption of our service (DoS).
-
-- Content spoofing and text injection issues without showing an attack vector or the ability to modify HTML/CSS.
-
-- Email spoofing.
-
-- Missing DNSSEC, CAA, CSP headers.
-
-- Lack of Secure or HTTP-only flags on non-sensitive cookies.
-
-- Deadlinks.
-
 **Reporting Instructions:**
 
 1. Email your findings to **hi@metalbear.co**.
