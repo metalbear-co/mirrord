@@ -501,7 +501,10 @@ fn main() -> miette::Result<()> {
             }
             Commands::Teams => teams::navigate_to_intro().await,
             Commands::Diagnose(args) => diagnose_command(*args).await?,
-            Commands::Container(args) => container_command(*args, watch).await?,
+            Commands::Container(args) => {
+                let (runtime_args, exec_params) = args.into_parts();
+                container_command(runtime_args, exec_params, watch).await?
+            }
             Commands::ExternalProxy => external_proxy::proxy(watch).await?,
         };
 

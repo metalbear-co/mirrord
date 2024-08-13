@@ -195,11 +195,26 @@ impl<'de> de::Visitor<'de> for IncomingFileConfigVisitor {
         Ok(IncomingFileConfig::Simple(Some(mode)))
     }
 
+    fn visit_none<E>(self) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(IncomingFileConfig::Simple(None))
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        Option::deserialize(deserializer).map(IncomingFileConfig::Simple)
+    }
+
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
     where
         E: de::Error,
     {
         Deserialize::deserialize(de::value::StrDeserializer::new(value))
+            .map(Some)
             .map(IncomingFileConfig::Simple)
     }
 
@@ -208,6 +223,7 @@ impl<'de> de::Visitor<'de> for IncomingFileConfigVisitor {
         E: de::Error,
     {
         Deserialize::deserialize(de::value::StringDeserializer::new(value))
+            .map(Some)
             .map(IncomingFileConfig::Simple)
     }
 
