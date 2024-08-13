@@ -76,17 +76,33 @@ impl FileResource {
             FileResource::File => Err(FileError::DirOnFile(remote_fd)),
         }
     }
+}
 
+/// For passing messages between the layer and the agent without custom internal logic.
+/// Run as a [`BackgroundTask`].
+#[derive(Default)]
+pub struct SimpleProxy {
+    /// Remote descriptors for open files and directories. Allows tracking across layer forks.
+    remote_fds: RemoteResources<RemoteFd, FileResource>,
+    /// For [`FileRequest`]s.
+    file_reqs: RequestQueue,
+    /// For [`GetAddrInfoRequest`]s.
+    addr_info_reqs: RequestQueue,
+    /// For [`GetEnvVarsRequest`]s.
+    get_env_reqs: RequestQueue,
+}
+
+impl SimpleProxy {
     async fn handle_readdir(
+        &mut self,
         layer_id: LayerId,
         remote_fd: u64,
         message_id: u64,
         protocol_version: Option<&Version>,
-        remote_fds: &mut RemoteResources<RemoteFd, FileResource>,
         message_bus: &mut MessageBus<SimpleProxy>,
-        queue: &mut RequestQueue,
     ) -> Result<(), FileError> {
-        let resource = remote_fds
+        let resource = self
+            .remote_fds
             .get_mut(&layer_id, &RemoteFd::Dir(remote_fd))
             .ok_or(FileError::MissingResource(remote_fd))?;
 
@@ -103,7 +119,7 @@ impl FileResource {
                 })
                 .await;
         } else {
-            queue.insert(message_id, layer_id);
+            self.file_reqs.insert(message_id, layer_id);
 
             let request =
                 if protocol_version.is_some_and(|version| READDIR_BATCH_VERSION.matches(version)) {
@@ -123,20 +139,6 @@ impl FileResource {
 
         Ok(())
     }
-}
-
-/// For passing messages between the layer and the agent without custom internal logic.
-/// Run as a [`BackgroundTask`].
-#[derive(Default)]
-pub struct SimpleProxy {
-    /// Remote descriptors for open files and directories. Allows tracking across layer forks.
-    remote_fds: RemoteResources<RemoteFd, FileResource>,
-    /// For [`FileRequest`]s.
-    file_reqs: RequestQueue,
-    /// For [`GetAddrInfoRequest`]s.
-    addr_info_reqs: RequestQueue,
-    /// For [`GetEnvVarsRequest`]s.
-    get_env_reqs: RequestQueue,
 }
 
 impl BackgroundTask for SimpleProxy {
@@ -187,16 +189,15 @@ impl BackgroundTask for SimpleProxy {
                     layer_id,
                     FileRequest::ReadDir(ReadDirRequest { remote_fd }),
                 ) => {
-                    if let Err(fail) = FileResource::handle_readdir(
-                        layer_id,
-                        remote_fd,
-                        message_id,
-                        protocol_version.as_ref(),
-                        &mut self.remote_fds,
-                        message_bus,
-                        &mut self.file_reqs,
-                    )
-                    .await
+                    if let Err(fail) = self
+                        .handle_readdir(
+                            layer_id,
+                            remote_fd,
+                            message_id,
+                            protocol_version.as_ref(),
+                            message_bus,
+                        )
+                        .await
                     {
                         // Send local failure to layer.
                         message_bus
