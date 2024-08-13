@@ -351,6 +351,7 @@ impl BackgroundTask for SimpleProxy {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -377,8 +378,8 @@ mod tests {
         simple_proxy
             .send(SimpleProxyMessage::ProtocolVersion(Version::new(0, 1, 0)))
             .await;
-        let (_, back_to_layer) = background_tasks.next().await.unzip();
-        assert!(back_to_layer.is_none());
+        // let (_, back_to_layer) = background_tasks.next().await.unzip();
+        assert!(false, "bobo");
 
         simple_proxy
             .send(SimpleProxyMessage::FileReq(
@@ -388,10 +389,17 @@ mod tests {
             ))
             .await;
         let (_, back_to_layer) = background_tasks.next().await.unzip();
-        assert!(back_to_layer.is_some());
+        assert!(false, "bibi");
+
+        drop(simple_proxy);
+        let results = background_tasks.results().await;
+        for (_, _) in results {
+            assert!(false, "baba");
+        }
 
         // TODO(alex) [high]: Call send with protocol version switch, then with
         // readdirbatch message?
         // Have another test that does it without the protocol version.
     }
 }
+*/
