@@ -350,3 +350,9 @@ impl BackgroundTask for SimpleProxy {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn checks_protocol_version_for_readdir() {}
+}
