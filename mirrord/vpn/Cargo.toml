@@ -26,6 +26,7 @@ ipnet = "2.9"
 paste = "1"
 pnet_packet = "0.35"
 serde_yaml.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "process"] }
 tracing.workspace = true
 tun2 = { version = "2", features = ["async"] }

@@ -1,17 +1,20 @@
 use std::{fmt, net::IpAddr, path::PathBuf, sync::LazyLock};
 
 use ipnet::IpNet;
+use mirrord_protocol::vpn::NetworkConfiguration;
 use tokio::{fs, io, process::Command};
+
+use crate::{config::VpnConfig, error::VpnError};
 
 static BASE_RESOLVE_PATH: LazyLock<PathBuf> = LazyLock::new(|| PathBuf::from("/etc/resolver"));
 
 #[derive(Debug, Default)]
 pub struct ResolveFile {
-    pub port: u16,
-    pub domain: String,
-    pub nameservers: Vec<String>,
-    pub search: Vec<String>,
-    pub options: Vec<String>,
+    port: u16,
+    domain: String,
+    nameservers: Vec<String>,
+    search: Vec<String>,
+    options: Vec<String>,
 }
 
 impl ResolveFile {
@@ -131,4 +134,25 @@ impl RouteCommandGuard<'_> {
 
         Ok(())
     }
+}
+
+pub async fn mount_macos<'a>(
+    vpn_config: &'a VpnConfig,
+    network: &'a NetworkConfiguration,
+) -> Result<(RouteCommandGuard<'a>, ResolveFileGuard), VpnError> {
+    let subnet_guard = create_subnet_route(&vpn_config.service_subnet, &network.gateway)
+        .await
+        .map_err(VpnError::SetupIO)?;
+
+    let resolve_guard = ResolveFile {
+        port: 53,
+        domain: vpn_config.dns_domain.clone(),
+        nameservers: vpn_config.dns_nameservers.clone(),
+        ..Default::default()
+    }
+    .inject()
+    .await
+    .map_err(VpnError::SetupIO)?;
+
+    Ok((subnet_guard, resolve_guard))
 }

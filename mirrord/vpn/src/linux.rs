@@ -1,7 +1,15 @@
 use std::{
     ffi::OsStr,
+    io,
     path::{Path, PathBuf},
 };
+
+use mirrord_protocol::{
+    file::*, vpn::NetworkConfiguration, ClientMessage, DaemonMessage, FileRequest, FileResponse,
+};
+use tokio::process::Command;
+
+use crate::{agent::VpnAgent, config::VpnConfig, error::VpnError};
 
 pub struct ResolvOverride {
     path: PathBuf,
@@ -9,7 +17,7 @@ pub struct ResolvOverride {
 }
 
 impl ResolvOverride {
-    pub async fn accuire_override<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
+    pub async fn accuire_override<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let path = PathBuf::from(path.as_ref());
         let original_file = {
             let mut path = path.clone();
@@ -30,13 +38,13 @@ impl ResolvOverride {
         })
     }
 
-    pub async fn update_resolv(&self, bytes: &[u8]) -> std::io::Result<()> {
+    pub async fn update_resolv(&self, bytes: &[u8]) -> io::Result<()> {
         tokio::fs::write(&self.path, bytes).await?;
 
         Ok(())
     }
 
-    pub async fn unmount(self) -> std::io::Result<()> {
+    pub async fn unmount(self) -> io::Result<()> {
         let ResolvOverride {
             path,
             original_file,
@@ -47,4 +55,90 @@ impl ResolvOverride {
 
         Ok(())
     }
+}
+
+fn get_file_response(message: DaemonMessage) -> Option<FileResponse> {
+    match message {
+        DaemonMessage::File(response) => Some(response),
+        _ => None,
+    }
+}
+
+async fn agent_fetch_file<const B: u64>(
+    agent: &mut VpnAgent,
+    path: PathBuf,
+) -> Result<Vec<u8>, VpnError> {
+    let request = FileRequest::Open(OpenFileRequest {
+        path,
+        open_options: OpenOptionsInternal {
+            read: true,
+            ..Default::default()
+        },
+    });
+
+    let Some(FileResponse::Open(response)) = agent
+        .send_and_get_response(ClientMessage::FileRequest(request), get_file_response)
+        .await?
+    else {
+        return Err(VpnError::AgentUnexpcetedResponse.into());
+    };
+
+    let OpenFileResponse { fd } = response?;
+
+    let request = FileRequest::Read(ReadFileRequest {
+        remote_fd: fd,
+        buffer_size: B,
+    });
+
+    let Some(FileResponse::Read(response)) = agent
+        .send_and_get_response(ClientMessage::FileRequest(request), get_file_response)
+        .await?
+    else {
+        return Err(VpnError::AgentUnexpcetedResponse.into());
+    };
+
+    let ReadFileResponse { bytes, .. } = response?;
+
+    let request = FileRequest::Close(CloseFileRequest { fd });
+    agent.send(ClientMessage::FileRequest(request)).await?;
+
+    Ok(bytes)
+}
+
+pub async fn mount_linux<'a>(
+    vpn_config: &'a VpnConfig,
+    network: &'a NetworkConfiguration,
+    vpn_agnet: &mut VpnAgent,
+) -> Result<ResolvOverride, VpnError> {
+    let remote_resolv = agent_fetch_file::<10000>(vpn_agnet, "/etc/resolv.conf".into()).await?;
+
+    let resolv_override = ResolvOverride::accuire_override("/etc/resolv.conf")
+        .await
+        .map_err(VpnError::SetupIO)?;
+
+    let mount_result = try {
+        resolv_override.update_resolv(&remote_resolv).await?;
+
+        Command::new("ip")
+            .args([
+                "route".to_owned(),
+                "add".to_owned(),
+                vpn_config.service_subnet.to_string(),
+                "via".to_owned(),
+                network.gateway.to_string(),
+            ])
+            .output()
+            .await
+            .inspect_err(|error| tracing::error!(%error, "could not bind service_subnet"))?;
+
+        Ok::<_, io::Error>(())
+    };
+
+    if let Err(err) = mount_result {
+        let _ = resolv_override.unmount().await;
+
+        return Err(VpnError::SetupIO(err));
+    }
+
+    Ok(resolv_override)
 }

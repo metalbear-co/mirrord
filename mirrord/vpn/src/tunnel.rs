@@ -1,10 +1,9 @@
 use std::{io, time::Duration};
 
 use futures::{Sink, SinkExt, Stream, StreamExt};
-use mirrord_protocol::{vpn::ServerVpn, ClientMessage, DaemonMessage};
-use tokio::sync::mpsc;
+use mirrord_protocol::{vpn::ServerVpn, DaemonMessage};
 
-use crate::agent::VpnAgent;
+use crate::{agent::VpnAgent, error::VpnError};
 
 pub struct VpnTunnel<S> {
     agent: VpnAgent,
@@ -19,7 +18,7 @@ where
         VpnTunnel { agent, stream }
     }
 
-    pub async fn start(self) -> Result<(), mpsc::error::SendError<ClientMessage>> {
+    pub async fn start(self) -> Result<(), VpnError> {
         let VpnTunnel { mut agent, stream } = self;
         tokio::pin!(stream);
 

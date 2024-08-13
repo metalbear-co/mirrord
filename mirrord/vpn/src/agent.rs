@@ -3,9 +3,11 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use mirrord_protocol::{vpn::ClientVpn, ClientMessage, DaemonMessage, LogLevel};
 use tokio::sync::{mpsc, oneshot};
+
+use crate::error::VpnError;
 
 pub struct VpnAgent {
     tx: mpsc::Sender<ClientMessage>,
@@ -19,30 +21,42 @@ impl VpnAgent {
         VpnAgent { tx, rx, pong: None }
     }
 
-    pub async fn ping(
-        &mut self,
-    ) -> Result<oneshot::Receiver<()>, mpsc::error::SendError<ClientMessage>> {
+    pub async fn ping(&mut self) -> Result<oneshot::Receiver<()>, VpnError> {
         let (tx, rx) = oneshot::channel();
         self.pong = Some(tx);
 
-        self.tx.send(ClientMessage::Ping).await?;
+        self.send(ClientMessage::Ping).await?;
 
         Ok(rx)
     }
 
-    pub async fn open_socket(&self) -> Result<(), mpsc::error::SendError<ClientMessage>> {
-        self.tx
-            .send(ClientMessage::Vpn(ClientVpn::OpenSocket))
+    pub async fn open_socket(&self) -> Result<(), VpnError> {
+        self.send(ClientMessage::Vpn(ClientVpn::OpenSocket)).await
+    }
+
+    pub async fn send_packet(&self, packet: Vec<u8>) -> Result<(), VpnError> {
+        self.send(ClientMessage::Vpn(ClientVpn::Packet(packet)))
             .await
     }
 
-    pub async fn send_packet(
-        &self,
-        packet: Vec<u8>,
-    ) -> Result<(), mpsc::error::SendError<ClientMessage>> {
+    pub async fn send(&self, request: ClientMessage) -> Result<(), VpnError> {
         self.tx
-            .send(ClientMessage::Vpn(ClientVpn::Packet(packet)))
+            .send(request)
             .await
+            .map_err(VpnError::ClientMessageDropped)
+    }
+
+    pub async fn send_and_get_response<T>(
+        &mut self,
+        request: ClientMessage,
+        response_filter: impl Fn(DaemonMessage) -> Option<T>,
+    ) -> Result<Option<T>, VpnError> {
+        self.tx.send(request).await?;
+
+        self.next()
+            .await
+            .map(response_filter)
+            .ok_or_else(|| VpnError::AgentNoResponse)
     }
 }
 

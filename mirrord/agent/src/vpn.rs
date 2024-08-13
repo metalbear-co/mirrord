@@ -270,7 +270,7 @@ impl VpnTask {
 
         tracing::debug!(socket_init = %self.socket.is_some(), "begin loop");
 
-        let mut buffer = [0u8; 1500 * 5];
+        let mut buffer = [0u8; 1024 * 64];
         loop {
             select! {
                 biased;

@@ -60,7 +60,7 @@ tempfile = "3"
 rcgen = "0.13"
 rustls-pemfile = "2"
 tokio-rustls = "0.26"
-humansize = "2"
+
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
