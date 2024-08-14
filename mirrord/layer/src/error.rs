@@ -242,7 +242,7 @@ impl From<HookError> for i64 {
             HookError::LockError => libc::EINVAL,
             HookError::BincodeEncode(_) => libc::EINVAL,
             HookError::ResponseError(response_fail) => match response_fail {
-                ResponseError::AllocationFailure(_) => libc::ENOMEM,
+                ResponseError::IdsExhausted(_) => libc::ENOMEM,
                 ResponseError::NotFound(_) => libc::ENOENT,
                 ResponseError::NotDirectory(_) => libc::ENOTDIR,
                 ResponseError::NotFile(_) => libc::EISDIR,
