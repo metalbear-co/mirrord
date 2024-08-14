@@ -2,7 +2,7 @@ use std::process::ExitStatus;
 
 use mirrord_protocol::{
     outgoing::{
-        tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
+        tcp::LayerTcpOutgoing,
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
         LayerConnect,
     },
@@ -45,9 +45,6 @@ pub(crate) enum AgentError {
 
     #[error("UdpOutgoingTrafficRequest sender failed with `{0}`")]
     SendUdpOutgoingTrafficRequest(#[from] tokio::sync::mpsc::error::SendError<LayerUdpOutgoing>),
-
-    #[error("ConnectRequest sender failed with `{0}`")]
-    SendOutgoingTrafficResponse(#[from] tokio::sync::mpsc::error::SendError<DaemonTcpOutgoing>),
 
     #[error("UdpConnectRequest sender failed with `{0}`")]
     SendUdpOutgoingTrafficResponse(#[from] tokio::sync::mpsc::error::SendError<DaemonUdpOutgoing>),

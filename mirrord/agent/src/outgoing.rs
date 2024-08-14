@@ -15,6 +15,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::io::ReaderStream;
+use tracing::Level;
 
 use crate::{
     error::Result,
@@ -53,7 +54,7 @@ impl TcpOutgoingApi {
     /// # Params
     ///
     /// * `pid` - process id of the agent's target container
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = Level::TRACE)]
     pub(crate) fn new(pid: Option<u64>) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
@@ -79,8 +80,8 @@ impl TcpOutgoingApi {
     }
 
     /// Sends the [`LayerTcpOutgoing`] message to the background task.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) async fn layer_message(&mut self, message: LayerTcpOutgoing) -> Result<()> {
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    pub(crate) async fn send_to_task(&mut self, message: LayerTcpOutgoing) -> Result<()> {
         if self.layer_tx.send(message).await.is_ok() {
             Ok(())
         } else {
@@ -89,7 +90,7 @@ impl TcpOutgoingApi {
     }
 
     /// Receives a [`DaemonTcpOutgoing`] message from the background task.
-    pub(crate) async fn daemon_message(&mut self) -> Result<DaemonTcpOutgoing> {
+    pub(crate) async fn recv_from_task(&mut self) -> Result<DaemonTcpOutgoing> {
         match self.daemon_rx.recv().await {
             Some(msg) => Ok(msg),
             None => Err(self.task_status.unwrap_err().await),
@@ -148,45 +149,51 @@ impl TcpOutgoingTask {
     }
 
     /// Runs this task as long as the channels connecting it with [`TcpOutgoingApi`] are open.
+    /// This routine never fails and returns [`Result`] only due to [`WatchedTask`] constraints.
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     async fn run(mut self) -> Result<()> {
         loop {
-            select! {
+            let channel_closed = select! {
                 biased;
 
                 message = self.layer_rx.recv() => match message {
                     // We have a message from the layer to be handled.
-                    Some(message) => self.handle_layer_msg(message).await?,
-                    // Our channel with the layer is closed, this task is no longer needed.
-                    None => {
-                        tracing::trace!("TcpOutgoingTask -> Channel with the layer is closed, exiting.");
-                        break Ok(());
+                    Some(message) => {
+                        self.handle_layer_msg(message).await.is_err()
                     },
+                    // Our channel with the layer is closed, this task is no longer needed.
+                    None => true,
                 },
 
                 // We have data coming from one of our peers.
                 Some((connection_id, remote_read)) = self.readers.next() => {
-                    self.handle_connection_read(connection_id, remote_read).await?;
+                    self.handle_connection_read(connection_id, remote_read.transpose()).await.is_err()
                 },
+            };
+
+            if channel_closed {
+                tracing::trace!("Client channel closed, exiting");
+                break Ok(());
             }
         }
     }
 
+    /// Returns [`Err`] only when the client has disconnected.
     #[tracing::instrument(
-        level = "trace",
+        level = Level::TRACE,
         skip(read),
-        fields(read = ?read.as_ref().map(|res| res.as_ref().map(|bytes| bytes.len()))),
-        ret,
-        err(Debug)
+        fields(read = ?read.as_ref().map(|data| data.as_ref().map(Bytes::len).unwrap_or_default()))
+        err(level = Level::TRACE)
     )]
     async fn handle_connection_read(
         &mut self,
         connection_id: ConnectionId,
-        read: Option<io::Result<Bytes>>,
+        read: io::Result<Option<Bytes>>,
     ) -> Result<(), SendError<DaemonTcpOutgoing>> {
         match read {
             // New bytes came in from a peer connection.
             // We pass them to the layer.
-            Some(Ok(read)) => {
+            Ok(Some(read)) => {
                 let message = DaemonTcpOutgoing::Read(Ok(DaemonRead {
                     connection_id,
                     bytes: read.to_vec(),
@@ -199,7 +206,7 @@ impl TcpOutgoingTask {
             // We remove both io halves and inform the layer that the connection is closed.
             // We remove the reader, because otherwise the `StreamMap` will produce an extra `None`
             // item from the related stream.
-            Some(Err(error)) => {
+            Err(error) => {
                 tracing::trace!(
                     ?error,
                     connection_id,
@@ -216,7 +223,7 @@ impl TcpOutgoingTask {
             // EOF occurred in one of peer connections.
             // We send 0-sized read to the layer to inform about the shutdown condition.
             // Reader removal is handled internally by the `StreamMap`.
-            None => {
+            Ok(None) => {
                 tracing::trace!(
                     connection_id,
                     "Peer connection shutdown, sending 0-sized read message.",
@@ -248,7 +255,8 @@ impl TcpOutgoingTask {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", ret, err(Debug))]
+    /// Returns [`Err`] only when the client has disconnected.
+    #[tracing::instrument(level = Level::TRACE, ret)]
     async fn handle_layer_msg(
         &mut self,
         message: LayerTcpOutgoing,
@@ -263,12 +271,6 @@ impl TcpOutgoingTask {
                 )
                 .await
                 .unwrap_or_else(|_elapsed| {
-                    tracing::warn!(
-                        %remote_address,
-                        connect_timeout_ms = Self::CONNECT_TIMEOUT.as_millis(),
-                        "Connect attempt timed out."
-                    );
-
                     Err(ResponseError::Remote(RemoteError::ConnectTimedOut(
                         remote_address.clone(),
                     )))
@@ -292,9 +294,13 @@ impl TcpOutgoingTask {
                     })
                 });
 
+                tracing::trace!(
+                    result = ?daemon_connect,
+                    "Connection attempt finished.",
+                );
                 self.daemon_tx
                     .send(DaemonTcpOutgoing::Connect(daemon_connect))
-                    .await?
+                    .await
             }
 
             // This message handles two cases:
@@ -327,29 +333,33 @@ impl TcpOutgoingTask {
                     Ok(()) if bytes.is_empty() => {
                         self.writers.remove(&connection_id);
 
-                        if !self.readers.contains_key(&connection_id) {
+                        if self.readers.contains_key(&connection_id) {
+                            Ok(())
+                        } else {
                             tracing::trace!(
                                 connection_id,
-                                "Peer connection is shut down as well, sending close message.",
+                                "Peer connection is shut down as well, sending close message to the client.",
                             );
-
                             self.daemon_tx
                                 .send(DaemonTcpOutgoing::Close(connection_id))
-                                .await?;
+                                .await
                         }
                     }
 
-                    Ok(()) => {}
+                    Ok(()) => Ok(()),
 
                     Err(error) => {
-                        tracing::trace!(connection_id, ?error, "Failed to handle layer write.",);
-
                         self.writers.remove(&connection_id);
                         self.readers.remove(&connection_id);
 
+                        tracing::trace!(
+                            connection_id,
+                            ?error,
+                            "Failed to handle layer write, sending close message to the client.",
+                        );
                         self.daemon_tx
                             .send(DaemonTcpOutgoing::Close(connection_id))
-                            .await?
+                            .await
                     }
                 }
             }
@@ -359,9 +369,9 @@ impl TcpOutgoingTask {
             LayerTcpOutgoing::Close(LayerClose { connection_id }) => {
                 self.writers.remove(&connection_id);
                 self.readers.remove(&connection_id);
+
+                Ok(())
             }
         }
-
-        Ok(())
     }
 }

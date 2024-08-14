@@ -361,7 +361,7 @@ impl ClientConnectionHandler {
                     Ok(message) => self.respond(DaemonMessage::TcpSteal(message)).await?,
                     Err(e) => break e,
                 },
-                message = self.tcp_outgoing_api.daemon_message() => match message {
+                message = self.tcp_outgoing_api.recv_from_task() => match message {
                     Ok(message) => self.respond(DaemonMessage::TcpOutgoing(message)).await?,
                     Err(e) => break e,
                 },
@@ -409,7 +409,7 @@ impl ClientConnectionHandler {
                 }
             }
             ClientMessage::TcpOutgoing(layer_message) => {
-                self.tcp_outgoing_api.layer_message(layer_message).await?
+                self.tcp_outgoing_api.send_to_task(layer_message).await?
             }
             ClientMessage::UdpOutgoing(layer_message) => {
                 self.udp_outgoing_api.layer_message(layer_message).await?
