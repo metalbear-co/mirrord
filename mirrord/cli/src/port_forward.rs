@@ -599,11 +599,9 @@ mod test {
             .await
             .unwrap();
 
-        // expect data sent first to be received first
-        stream.write_all(b"data-my-beloathed").await.unwrap();
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
             connection_id: 1,
-            bytes: b"data-my-beloveddata-my-beloathed".to_vec(),
+            bytes: b"data-my-beloved".to_vec(),
         }));
         let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
             ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
@@ -680,7 +678,9 @@ mod test {
         let expected = Some(ClientMessage::ReadyForLogs);
         assert_eq!(client_msg_rx.recv().await, expected);
 
-        // expect each Connect on client_msg_rx with correct mappings
+        // expect each Connect on client_msg_rx with correct mappings when data has been written
+        // (lazy)
+        stream_1.write_all(b"data-from-1").await.unwrap();
         let remote_address_1 = SocketAddress::Ip(remote_destination_1);
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
             remote_address: remote_address_1.clone(),
@@ -693,8 +693,9 @@ mod test {
 
         // send data to second socket
         let mut stream_2 = TcpStream::connect(local_destination_2).await.unwrap();
-
         let remote_address_2 = SocketAddress::Ip(remote_destination_2);
+        stream_2.write_all(b"data-from-2").await.unwrap();
+
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
             remote_address: remote_address_2.clone(),
         }));
@@ -727,7 +728,6 @@ mod test {
             .unwrap();
 
         // expect data to be received
-        stream_1.write_all(b"data-from-1").await.unwrap();
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
             connection_id: 1,
             bytes: b"data-from-1".to_vec(),
@@ -738,7 +738,6 @@ mod test {
         };
         assert_eq!(message, expected);
 
-        stream_2.write_all(b"data-from-2").await.unwrap();
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite {
             connection_id: 2,
             bytes: b"data-from-2".to_vec(),
