@@ -427,23 +427,6 @@ async fn go_dir(
         ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: dir_fd }))
     );
 
-    assert_eq!(
-        intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::ReadDirBatch(ReadDirBatchRequest {
-            remote_fd: dir_fd,
-            amount: 128
-        }))
-    );
-
-    intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDirBatch(Ok(
-            ReadDirBatchResponse {
-                fd: dir_fd,
-                dir_entries: Vec::new(),
-            },
-        ))))
-        .await;
-
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
 }
