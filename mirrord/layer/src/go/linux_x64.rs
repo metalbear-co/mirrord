@@ -513,6 +513,7 @@ fn post_go1_19(hook_manager: &mut HookManager) {
         "runtime/internal/syscall.Syscall6",
         go_syscall_new_detour
     );
+    hook_symbol!(hook_manager, "syscall.Syscall6", go_syscall_new_detour);
 }
 
 /// Note: We only hook "RawSyscall", "Syscall6", and "Syscall" because for our usecase,
