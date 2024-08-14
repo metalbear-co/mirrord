@@ -9,7 +9,7 @@ use mirrord_protocol::{
     },
     RequestId,
 };
-use tokio::sync::mpsc::{self, OwnedPermit, Receiver, Sender};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::*;
@@ -31,9 +31,6 @@ pub(crate) struct TcpStealerApi {
     ///
     /// The agent controls the stealer task through this.
     command_tx: Sender<StealerCommand>,
-
-    /// Permit used to send the final [`Command::ClientClose`] in [`Drop::drop`].
-    close_permit: Option<OwnedPermit<StealerCommand>>,
 
     /// Channel that receives [`DaemonTcp`] messages from the stealer worker thread.
     ///
@@ -66,16 +63,9 @@ impl TcpStealerApi {
             })
             .await?;
 
-        let close_permit = command_tx
-            .clone()
-            .reserve_owned()
-            .await
-            .map_err(|_| AgentError::ReserveStealerCommand)?;
-
         Ok(Self {
             client_id,
             command_tx,
-            close_permit: Some(close_permit),
             daemon_rx,
             task_status,
             response_body_txs: HashMap::new(),
@@ -245,17 +235,5 @@ impl TcpStealerApi {
                 }
             },
         }
-    }
-}
-
-impl Drop for TcpStealerApi {
-    fn drop(&mut self) {
-        self.close_permit
-            .take()
-            .expect("permit is consumed only here")
-            .send(StealerCommand {
-                client_id: self.client_id,
-                command: Command::ClientClose,
-            });
     }
 }

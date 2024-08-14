@@ -10,6 +10,7 @@ use mirrord_protocol::{
     FileRequest, FileResponse,
 };
 use thiserror::Error;
+use tokio::sync::mpsc;
 
 use crate::{
     client_connection::TlsSetupError, namespace::NamespaceError, sniffer::messages::SnifferCommand,
@@ -24,11 +25,8 @@ pub(crate) enum AgentError {
     #[error("SnifferCommand sender failed with `{0}`")]
     SendSnifferCommand(#[from] tokio::sync::mpsc::error::SendError<SnifferCommand>),
 
-    #[error("StealerCommand sender failed with `{0}`")]
-    SendStealerCommand(#[from] tokio::sync::mpsc::error::SendError<StealerCommand>),
-
-    #[error("TcpStealerApi failed to reserve channel slot for sending the closing message")]
-    ReserveStealerCommand,
+    #[error("TCP stealer task is dead")]
+    TcpStealerTaskDead,
 
     #[error("FileRequest sender failed with `{0}`")]
     SendFileRequest(#[from] tokio::sync::mpsc::error::SendError<(u32, FileRequest)>),
@@ -138,6 +136,12 @@ pub(crate) enum AgentError {
 
     #[error("Exhausted possible identifiers for incoming connections.")]
     ExhaustedConnectionId,
+}
+
+impl From<mpsc::error::SendError<StealerCommand>> for AgentError {
+    fn from(_: mpsc::error::SendError<StealerCommand>) -> Self {
+        Self::TcpStealerTaskDead
+    }
 }
 
 pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;

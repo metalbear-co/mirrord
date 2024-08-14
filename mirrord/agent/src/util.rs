@@ -3,10 +3,13 @@ use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     future::Future,
     hash::Hash,
+    pin::Pin,
+    task::{Context, Poll},
     thread::JoinHandle,
 };
 
 use num_traits::{CheckedAdd, Num};
+use tokio::sync::mpsc;
 use tracing::error;
 
 use crate::{
@@ -209,6 +212,31 @@ pub(crate) fn enter_namespace(pid: Option<u64>, namespace: &str) -> Result<(), A
         })?)
     } else {
         Ok(())
+    }
+}
+
+/// [`Future`] that resolves to [`ClientId`] when the client drops their [`mpsc::Receiver`].
+pub(crate) struct ChannelClosedFuture<T> {
+    tx: mpsc::Sender<T>,
+    client_id: ClientId,
+}
+
+impl<T> ChannelClosedFuture<T> {
+    pub(crate) fn new(tx: mpsc::Sender<T>, client_id: ClientId) -> Self {
+        Self { tx, client_id }
+    }
+}
+
+impl<T> Future for ChannelClosedFuture<T> {
+    type Output = ClientId;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let client_id = self.client_id;
+
+        let future = std::pin::pin!(self.get_mut().tx.closed());
+        std::task::ready!(future.poll(cx));
+
+        Poll::Ready(client_id)
     }
 }
 
