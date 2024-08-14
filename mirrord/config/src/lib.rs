@@ -596,6 +596,35 @@ mod tests {
             }
         }
 
+        fn issue_2647(&self) -> &'static str {
+            match self {
+                ConfigType::Json => {
+                    r#"
+                    {
+                        "feature": {
+                            "network": {
+                                "incoming": "steal"
+                            }
+                        }
+                    }
+                    "#
+                }
+                ConfigType::Toml => {
+                    r#"
+                    [feature.network]
+                    incoming = "steal"
+                    "#
+                }
+                ConfigType::Yaml => {
+                    r#"
+                    feature:
+                        network:
+                            incoming: steal
+                    "#
+                }
+            }
+        }
+
         fn full(&self) -> &'static str {
             match self {
                 ConfigType::Json => {
@@ -724,6 +753,29 @@ mod tests {
         let config = config_type.parse(input);
 
         assert_eq!(config, LayerFileConfig::default());
+    }
+
+    #[rstest]
+    fn issue_2647(
+        #[values(ConfigType::Json, ConfigType::Toml, ConfigType::Yaml)] config_type: ConfigType,
+    ) {
+        let input = config_type.issue_2647();
+        let config = config_type.parse(input);
+
+        let expect = LayerFileConfig {
+            feature: Some(FeatureFileConfig {
+                network: Some(ToggleableConfig::Config(NetworkFileConfig {
+                    incoming: Some(ToggleableConfig::Config(IncomingFileConfig::Simple(Some(
+                        IncomingMode::Steal,
+                    )))),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(config, expect);
     }
 
     #[rstest]
