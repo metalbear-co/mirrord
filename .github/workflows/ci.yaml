@@ -581,6 +581,7 @@ jobs:
         intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
         test_agent_image,
+        test_cli_image,
         macos_tests,
         integration_tests,
         e2e,
