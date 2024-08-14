@@ -377,14 +377,14 @@ async fn go_dir(
 
     intproxy
         .send(DaemonMessage::File(FileResponse::OpenDir(Ok(
-            OpenDirResponse { fd: 2 },
+            OpenDirResponse { fd: 1 },
         ))))
         .await;
 
     assert_eq!(
         intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::ReadDirBatch(ReadDirBatchRequest {
-            remote_fd: 2,
+            remote_fd: 1,
             amount: 128
         }))
     );
@@ -392,7 +392,7 @@ async fn go_dir(
     intproxy
         .send(DaemonMessage::File(FileResponse::ReadDirBatch(Ok(
             ReadDirBatchResponse {
-                fd: 2,
+                fd: 1,
                 dir_entries: vec![
                     DirEntryInternal {
                         name: "a".to_string(),
@@ -414,7 +414,7 @@ async fn go_dir(
     assert_eq!(
         intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::ReadDirBatch(ReadDirBatchRequest {
-            remote_fd: 2,
+            remote_fd: 1,
             amount: 128
         }))
     );
@@ -426,7 +426,7 @@ async fn go_dir(
 
     assert_eq!(
         intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: 2 }))
+        ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: 1 }))
     );
 
     test_process.wait_assert_success().await;
