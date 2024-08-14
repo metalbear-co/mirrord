@@ -17,7 +17,10 @@ use serde::de::DeserializeOwned;
 use thiserror::Error;
 
 use crate::{
-    api::{container::choose_container, kubernetes::get_k8s_resource_api},
+    api::{
+        container::{check_mesh_vendor, choose_container},
+        kubernetes::get_k8s_resource_api,
+    },
     error::{KubeApiError, Result},
 };
 
@@ -71,6 +74,9 @@ pub struct RuntimeData {
     pub container_id: String,
     pub container_runtime: ContainerRuntime,
     pub container_name: String,
+    /// True when no container was specified by the user, but there are multiple containers,
+    /// so mirrord chose one of them for the user.
+    pub guessed_container: bool,
 
     /// Used to check if we're running with a mesh/sidecar in `detect_mesh_mirror_mode`.
     pub mesh: Option<MeshVendor>,
@@ -126,8 +132,19 @@ impl RuntimeData {
             .and_then(|status| status.container_statuses.as_ref())
             .ok_or_else(|| KubeApiError::missing_field(pod, ".status.containerStatuses"))?;
 
-        let (chosen_container, mesh) =
+        if container_name.is_none() && container_statuses.len() > 1 {
+            tracing::trace!(
+                "Target has multiple containers and no container name was specified.\
+                Now filtering out mesh containers etc."
+            );
+        }
+
+        let (chosen_container, guessed_container) =
             choose_container(container_name, container_statuses.as_ref());
+
+        if guessed_container {
+            tracing::warn!("mirrord picked first eligible container out of many");
+        }
 
         let chosen_status = chosen_container.ok_or_else(|| match container_name {
             Some(name) => KubeApiError::invalid_state(
@@ -165,6 +182,8 @@ impl RuntimeData {
             }
         };
 
+        let mesh = check_mesh_vendor(pod);
+
         Ok(RuntimeData {
             pod_ips,
             pod_name,
@@ -173,6 +192,7 @@ impl RuntimeData {
             container_id,
             container_runtime,
             container_name,
+            guessed_container,
             mesh,
         })
     }

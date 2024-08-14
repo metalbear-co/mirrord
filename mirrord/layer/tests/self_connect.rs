@@ -1,7 +1,7 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::PathBuf, time::Duration};
+use std::{path::Path, time::Duration};
 
 use rstest::rstest;
 
@@ -15,7 +15,7 @@ use mirrord_protocol::tcp::LayerTcp;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn self_connect(dylib_path: &PathBuf) {
+async fn self_connect(dylib_path: &Path) {
     let application = Application::PythonSelfConnect;
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer_and_port(dylib_path, vec![("MIRRORD_FILE_MODE", "local")], None)

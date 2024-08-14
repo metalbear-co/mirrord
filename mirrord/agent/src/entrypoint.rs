@@ -39,7 +39,8 @@ use crate::{
     sniffer::{api::TcpSnifferApi, messages::SnifferCommand, TcpConnectionSniffer},
     steal::{
         ip_tables::{
-            new_iptables, IPTablesWrapper, SafeIpTables, IPTABLE_MESH, IPTABLE_MESH_ENV,
+            new_iptables, IPTablesWrapper, SafeIpTables, IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL,
+            IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV, IPTABLE_MESH, IPTABLE_MESH_ENV,
             IPTABLE_PREROUTING, IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD, IPTABLE_STANDARD_ENV,
         },
         StealerCommand, TcpConnectionStealer, TcpStealerApi,
@@ -505,20 +506,18 @@ async fn start_agent(args: Args) -> Result<()> {
         (None, None)
     } else {
         let cancellation_token = cancellation_token.clone();
-
-        let mesh = args.mode.mesh();
+        let is_mesh = args.is_mesh();
 
         let watched_task = WatchedTask::new(
             TcpConnectionSniffer::<RawSocketTcpCapture>::TASK_NAME,
-            TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface, mesh).and_then(
-                |sniffer| async move {
+            TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface, is_mesh)
+                .and_then(|sniffer| async move {
                     let res = sniffer.start(cancellation_token).await;
                     if let Err(err) = res.as_ref() {
                         error!("Sniffer failed: {err}");
                     }
                     Ok(())
-                },
-            ),
+                }),
         );
         let status = watched_task.status();
         let task = run_thread_in_namespace(
@@ -738,6 +737,10 @@ async fn start_iptable_guard(args: Args) -> Result<()> {
     std::env::set_var(IPTABLE_PREROUTING_ENV, IPTABLE_PREROUTING.as_str());
     std::env::set_var(IPTABLE_MESH_ENV, IPTABLE_MESH.as_str());
     std::env::set_var(IPTABLE_STANDARD_ENV, IPTABLE_STANDARD.as_str());
+    std::env::set_var(
+        IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV,
+        IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL.as_str(),
+    );
 
     let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())?;
 
@@ -800,7 +803,8 @@ pub async fn main() -> Result<()> {
 
     let agent_result = if args.mode.is_targetless()
         || (std::env::var(IPTABLE_PREROUTING_ENV).is_ok()
-            && std::env::var(IPTABLE_MESH_ENV).is_ok())
+            && std::env::var(IPTABLE_MESH_ENV).is_ok()
+            && std::env::var(IPTABLE_STANDARD_ENV).is_ok())
     {
         start_agent(args).await
     } else {

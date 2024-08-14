@@ -1,7 +1,7 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::{net::SocketAddr, path::Path, time::Duration};
 
 use mirrord_protocol::{
     outgoing::{
@@ -29,7 +29,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
-async fn outgoing_udp(dylib_path: &PathBuf) {
+async fn outgoing_udp(dylib_path: &Path) {
     let (mut test_process, mut intproxy) = Application::RustOutgoingUdp
         .start_process_with_layer(dylib_path, vec![], None)
         .await;
@@ -88,9 +88,9 @@ async fn outgoing_udp(dylib_path: &PathBuf) {
 /// 2. Connects to the remote peer
 /// 3. Sends some data
 /// 4. Expects the peer to send the same data back
-async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &PathBuf, config_dir: &PathBuf) {
+async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &Path, config_dir: &Path) {
     let config = with_config.map(|config| {
-        let mut config_path = config_dir.clone();
+        let mut config_path = config_dir.to_path_buf();
         config_path.push(config);
         config_path
     });
@@ -154,8 +154,8 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &PathBuf, con
 #[timeout(Duration::from_secs(10))]
 async fn outgoing_tcp(
     #[values(None, Some("outgoing_filter.json"))] with_config: Option<&str>,
-    dylib_path: &PathBuf,
-    config_dir: &PathBuf,
+    dylib_path: &Path,
+    config_dir: &Path,
 ) {
     outgoing_tcp_logic(with_config, dylib_path, config_dir).await;
 }
@@ -177,8 +177,8 @@ async fn outgoing_tcp_from_the_local_app_broken(
         Some("outgoing_filter_remote_incomplete.json")
     )]
     with_config: Option<&str>,
-    dylib_path: &PathBuf,
-    config_dir: &PathBuf,
+    dylib_path: &Path,
+    config_dir: &Path,
 ) {
     outgoing_tcp_logic(with_config, dylib_path, config_dir).await;
 }
@@ -188,7 +188,7 @@ async fn outgoing_tcp_from_the_local_app_broken(
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
-async fn outgoing_tcp_bound_socket(dylib_path: &PathBuf) {
+async fn outgoing_tcp_bound_socket(dylib_path: &Path) {
     let (mut test_process, mut intproxy) = Application::RustIssue2438
         .start_process_with_layer(dylib_path, vec![], None)
         .await;

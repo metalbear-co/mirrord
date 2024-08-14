@@ -68,6 +68,9 @@ pub enum ConfigError {
 
     #[error("Template rendering failed with: `{0}`! Please check your config file!")]
     TemplateRenderingFailed(String),
+
+    #[error("Target type requires the mirrord-operator, but operator usage was explicitly disabled. Consider enabling mirrord-operator in your mirrord config.")]
+    TargetRequiresOperator,
 }
 
 impl From<tera::Error> for ConfigError {

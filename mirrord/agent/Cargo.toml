@@ -50,7 +50,6 @@ libc.workspace = true
 faccess = "0.2"
 bytes = "1.2"
 regex = "1"
-socket2.workspace = true
 wildmatch = "2"
 enum_dispatch.workspace = true
 http-body-util = { workspace = true }
@@ -65,9 +64,7 @@ tonic = "0.11"
 tower = "0.4"
 http = "1"
 k8s-cri = "0.8"
-once_cell.workspace = true
 semver.workspace = true
-drain.workspace = true
 tokio-rustls = "0.26"
 x509-parser = "0.16"
 rustls.workspace = true

@@ -3,21 +3,19 @@
 #![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
+use container::container_command;
 use diagnose::diagnose_command;
 use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
-use k8s_openapi::{
-    api::{apps::v1::Deployment, core::v1::Pod},
-    Metadata, NamespaceResourceScope,
-};
-use kube::{api::ListParams, Client};
+use kube::Client;
+use kube_resource::KubeResourceSeeker;
 use miette::JSONReportHandler;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, NullReporter, Reporter,
@@ -32,17 +30,13 @@ use mirrord_config::{
         },
     },
     target::TargetDisplay,
-    LayerConfig, LayerFileConfig,
+    LayerConfig, LayerFileConfig, MIRRORD_CONFIG_FILE_ENV,
 };
-use mirrord_kube::api::{
-    container::SKIP_NAMES,
-    kubernetes::{create_kube_config, get_k8s_resource_api, rollout::Rollout},
-};
+use mirrord_kube::api::{container::SKIP_NAMES, kubernetes::create_kube_config};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
 use operator::operator_command;
 use semver::Version;
-use serde::de::DeserializeOwned;
 use serde_json::json;
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
@@ -50,12 +44,15 @@ use which::which;
 
 mod config;
 mod connection;
+mod container;
 mod diagnose;
 mod error;
 mod execution;
 mod extension;
+mod external_proxy;
 mod extract;
 mod internal_proxy;
+mod kube_resource;
 mod operator;
 mod teams;
 mod util;
@@ -163,7 +160,7 @@ fn print_config<P>(
     } else {
         "mirrord will run without a target"
     };
-    let config_info = if let Ok(path) = std::env::var("MIRRORD_CONFIG_FILE") {
+    let config_info = if let Ok(path) = std::env::var(MIRRORD_CONFIG_FILE_ENV) {
         &format!("a configuration file was loaded from: {} ", path)[..]
     } else {
         "no configuration file was loaded"
@@ -312,7 +309,7 @@ fn print_config<P>(
 
 async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord exec");
-    if !args.disable_version_check {
+    if !args.params.disable_version_check {
         prompt_outdated_version(&progress).await;
     }
     info!(
@@ -320,106 +317,17 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
         args.binary, args.binary_args
     );
 
-    if !(args.no_tcp_outgoing || args.no_udp_outgoing) && args.no_remote_dns {
+    if !(args.params.no_tcp_outgoing || args.params.no_udp_outgoing) && args.params.no_remote_dns {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
 
-    if let Some(target) = &args.target {
-        std::env::set_var("MIRRORD_IMPERSONATED_TARGET", target);
-    }
-
-    if args.no_telemetry {
-        std::env::set_var("MIRRORD_TELEMETRY", "false");
-    }
-
-    if let Some(skip_processes) = &args.skip_processes {
-        std::env::set_var("MIRRORD_SKIP_PROCESSES", skip_processes.clone());
-    }
-
-    if let Some(namespace) = &args.target_namespace {
-        std::env::set_var("MIRRORD_TARGET_NAMESPACE", namespace.clone());
-    }
-
-    if let Some(namespace) = &args.agent_namespace {
-        std::env::set_var("MIRRORD_AGENT_NAMESPACE", namespace.clone());
-    }
-
-    if let Some(log_level) = &args.agent_log_level {
-        std::env::set_var("MIRRORD_AGENT_RUST_LOG", log_level.clone());
-    }
-
-    if let Some(image) = &args.agent_image {
-        std::env::set_var("MIRRORD_AGENT_IMAGE", image.clone());
-    }
-
-    if let Some(agent_ttl) = &args.agent_ttl {
-        std::env::set_var("MIRRORD_AGENT_TTL", agent_ttl.to_string());
-    }
-    if let Some(agent_startup_timeout) = &args.agent_startup_timeout {
-        std::env::set_var(
-            "MIRRORD_AGENT_STARTUP_TIMEOUT",
-            agent_startup_timeout.to_string(),
-        );
-    }
-
-    if let Some(fs_mode) = args.fs_mode {
-        std::env::set_var("MIRRORD_FILE_MODE", fs_mode.to_string());
-    }
-
-    if let Some(override_env_vars_exclude) = &args.override_env_vars_exclude {
-        std::env::set_var(
-            "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE",
-            override_env_vars_exclude,
-        );
-    }
-
-    if let Some(override_env_vars_include) = &args.override_env_vars_include {
-        std::env::set_var(
-            "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE",
-            override_env_vars_include,
-        );
-    }
-
-    if args.no_remote_dns {
-        std::env::set_var("MIRRORD_REMOTE_DNS", "false");
-    }
-
-    if args.accept_invalid_certificates {
-        std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
-        warn!("Accepting invalid certificates");
-    }
-
-    if args.ephemeral_container {
-        std::env::set_var("MIRRORD_EPHEMERAL_CONTAINER", "true");
-    };
-
-    if args.tcp_steal {
-        std::env::set_var("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", "true");
-    };
-
-    if args.no_outgoing || args.no_tcp_outgoing {
-        std::env::set_var("MIRRORD_TCP_OUTGOING", "false");
-    }
-
-    if args.no_outgoing || args.no_udp_outgoing {
-        std::env::set_var("MIRRORD_UDP_OUTGOING", "false");
-    }
-
-    if let Some(context) = &args.context {
-        std::env::set_var("MIRRORD_KUBE_CONTEXT", context);
-    }
-
-    if let Some(config_file) = &args.config_file {
-        // Set canoncialized path to config file, in case forks/children are in different
-        // working directories.
-        let full_path = std::fs::canonicalize(config_file)
-            .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.clone(), e))?;
-        std::env::set_var("MIRRORD_CONFIG_FILE", full_path);
+    for (name, value) in args.params.as_env_vars()? {
+        std::env::set_var(name, value);
     }
 
     let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
-    let mut analytics = AnalyticsReporter::only_error(config.telemetry, watch);
+    let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
     (&config).collect_analytics(analytics.get_mut());
 
     config.verify(&mut context)?;
@@ -434,96 +342,6 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     }
 
     execution_result
-}
-
-/// Returns a list of (pod name, [container names]) pairs, filtering out mesh side cars
-/// as well as any pods which are not ready or have crashed.
-async fn get_kube_pods(
-    namespace: Option<&str>,
-    client: &kube::Client,
-) -> HashMap<String, Vec<String>> {
-    let pods = get_kube_resources::<Pod>(namespace, client, Some("status.phase=Running"))
-        .await
-        .into_iter()
-        .filter(|pod| {
-            pod.status
-                .as_ref()
-                .and_then(|status| status.conditions.as_ref())
-                .map(|conditions| {
-                    // filter out pods without the Ready condition
-                    conditions
-                        .iter()
-                        .any(|condition| condition.type_ == "Ready" && condition.status == "True")
-                })
-                .unwrap_or(false)
-        });
-
-    // convert pods to (name, container names) pairs
-    pods.filter_map(|pod| {
-        let name = pod.metadata.name.clone()?;
-        let containers = pod
-            .spec
-            .as_ref()?
-            .containers
-            .iter()
-            .filter(|&container| (!SKIP_NAMES.contains(container.name.as_str())))
-            .map(|container| container.name.clone())
-            .collect();
-        Some((name, containers))
-    })
-    .collect()
-}
-
-async fn get_kube_deployments(
-    namespace: Option<&str>,
-    client: &kube::Client,
-) -> impl Iterator<Item = String> {
-    get_kube_resources::<Deployment>(namespace, client, None)
-        .await
-        .into_iter()
-        .filter(|deployment| {
-            deployment
-                .status
-                .as_ref()
-                .map(|status| status.available_replicas >= Some(1))
-                .unwrap_or(false)
-        })
-        .filter_map(|deployment| deployment.metadata.name)
-}
-
-async fn get_kube_rollouts(
-    namespace: Option<&str>,
-    client: &kube::Client,
-) -> impl Iterator<Item = String> {
-    get_kube_resources::<Rollout>(namespace, client, None)
-        .await
-        .into_iter()
-        .filter_map(|rollout| rollout.metadata().name.clone())
-}
-
-async fn get_kube_resources<K>(
-    namespace: Option<&str>,
-    client: &kube::Client,
-    field_selector: Option<&str>,
-) -> Vec<K>
-where
-    K: kube::Resource<Scope = NamespaceResourceScope>,
-    <K as kube::Resource>::DynamicType: Default,
-    K: Clone + DeserializeOwned + std::fmt::Debug,
-{
-    // Set up filters on the K8s resources returned - in this case, excluding the agent resources
-    // and then applying any provided field-based filter conditions.
-    let params = ListParams {
-        label_selector: Some("app!=mirrord".to_string()),
-        field_selector: field_selector.map(ToString::to_string),
-        ..Default::default()
-    };
-
-    get_k8s_resource_api(client, namespace)
-        .list(&params)
-        .await
-        .map(|resources| resources.items)
-        .unwrap_or_default()
 }
 
 async fn list_pods(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<Vec<String>> {
@@ -541,11 +359,12 @@ async fn list_pods(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<
         .as_deref()
         .or(layer_config.target.namespace.as_deref());
 
-    let (pods, deployments, rollouts) = futures::join!(
-        get_kube_pods(namespace, &client),
-        get_kube_deployments(namespace, &client),
-        get_kube_rollouts(namespace, &client)
-    );
+    let (pods, deployments, rollouts) = KubeResourceSeeker {
+        client: &client,
+        namespace,
+    }
+    .all_open_source()
+    .await;
 
     Ok(pods
         .iter()
@@ -566,14 +385,19 @@ async fn list_pods(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<
 
 /// Lists all possible target paths.
 /// Tries to use operator if available, otherwise falls back to k8s API (if operator isn't
-/// explicitly true). Example: ```[
+/// explicitly true). Example:
+/// ```
+/// [
 ///  "pod/metalbear-deployment-85c754c75f-982p5",
 ///  "pod/nginx-deployment-66b6c48dd5-dc9wk",
 ///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
 ///  "deployment/nginx-deployment"
 ///  "deployment/nginx-deployment/container/nginx"
 ///  "rollout/nginx-rollout"
-/// ]```
+///  "statefulset/nginx-statefulset"
+///  "statefulset/nginx-statefulset/container/nginx"
+/// ]
+/// ```
 async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     let mut layer_config = if let Some(config) = &args.config_file {
         let mut cfg_context = ConfigContext::default();
@@ -677,6 +501,11 @@ fn main() -> miette::Result<()> {
             }
             Commands::Teams => teams::navigate_to_intro().await,
             Commands::Diagnose(args) => diagnose_command(*args).await?,
+            Commands::Container(args) => {
+                let (runtime_args, exec_params) = args.into_parts();
+                container_command(runtime_args, exec_params, watch).await?
+            }
+            Commands::ExternalProxy => external_proxy::proxy(watch).await?,
         };
 
         Ok(())

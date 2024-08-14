@@ -1,7 +1,7 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::PathBuf, time::Duration, vec};
+use std::{path::Path, time::Duration, vec};
 
 use rstest::rstest;
 
@@ -18,7 +18,7 @@ use mirrord_protocol::{
 #[timeout(Duration::from_secs(60))]
 async fn test_dns_resolve(
     #[values(Application::RustDnsResolve)] application: Application,
-    dylib_path: &PathBuf,
+    dylib_path: &Path,
 ) {
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![("MIRRORD_REMOTE_DNS", "true")], None)

@@ -41,6 +41,25 @@ pub struct Args {
     /// If not given, the agent will not use TLS.
     #[arg(long, env = AGENT_OPERATOR_CERT_ENV)]
     pub operator_tls_cert_pem: Option<String>,
+
+    /// Which kind of mesh the remote pod is in, see [`MeshVendor`].
+    #[arg(
+        long,
+        default_value_t = false,
+        hide = true,
+        env = "MIRRORD_AGENT_IN_SERVICE_MESH"
+    )]
+    pub is_mesh: bool,
+}
+
+impl Args {
+    pub fn is_mesh(&self) -> bool {
+        self.is_mesh
+            || matches!(
+                self.mode,
+                Mode::Targeted { mesh: Some(_), .. } | Mode::Ephemeral { mesh: Some(_) }
+            )
+    }
 }
 
 #[derive(Clone, Debug, Default, Subcommand)]
@@ -79,16 +98,6 @@ pub enum Mode {
 impl Mode {
     pub fn is_targetless(&self) -> bool {
         matches!(self, Mode::Targetless)
-    }
-
-    // TODO(alex): Remove this when `mesh` option is removed from `cli::Mode`, and put into
-    // `cli::Args`.
-    /// Digs into `Mode` subcomand to get the `MeshVendor`.
-    pub(super) fn mesh(&self) -> Option<MeshVendor> {
-        match *self {
-            Mode::Targeted { mesh, .. } | Mode::Ephemeral { mesh, .. } => mesh,
-            _ => None,
-        }
     }
 }
 

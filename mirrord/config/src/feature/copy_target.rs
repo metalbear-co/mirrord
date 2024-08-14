@@ -6,7 +6,7 @@
 
 use mirrord_analytics::CollectAnalytics;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig, Result};
 
@@ -15,7 +15,10 @@ use crate::config::{ConfigContext, FromMirrordConfig, MirrordConfig, Result};
 #[serde(untagged, deny_unknown_fields)]
 pub enum CopyTargetFileConfig {
     Simple(bool),
-    Advanced { scale_down: Option<bool> },
+    Advanced {
+        enabled: Option<bool>,
+        scale_down: Option<bool>,
+    },
 }
 
 impl Default for CopyTargetFileConfig {
@@ -33,8 +36,11 @@ impl MirrordConfig for CopyTargetFileConfig {
                 enabled,
                 scale_down: false,
             },
-            Self::Advanced { scale_down } => Self::Generated {
-                enabled: true,
+            Self::Advanced {
+                enabled,
+                scale_down,
+            } => Self::Generated {
+                enabled: enabled.unwrap_or(true),
                 scale_down: scale_down.unwrap_or_default(),
             },
         };
@@ -67,7 +73,7 @@ impl FromMirrordConfig for CopyTargetConfig {
 ///   }
 /// }
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct CopyTargetConfig {
     pub enabled: bool,
 

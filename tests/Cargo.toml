@@ -21,7 +21,6 @@ mirrord-operator = { path = "../mirrord/operator" }
 serde = "1"
 futures.workspace = true
 rstest = "0.21"
-tokio-util = "0.7"
 rand = "0.8"
 futures-util = "0.3"
 wsl = "0.1"
@@ -33,7 +32,6 @@ fancy-regex.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 http-body-util.workspace = true
-const_format = "0.2"
 rustls.workspace = true
 
 [features]

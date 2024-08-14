@@ -1,12 +1,15 @@
 #![deny(missing_docs)]
 
-use std::{fmt::Display, path::PathBuf};
+use std::{collections::HashMap, ffi::OsString, fmt::Display, path::PathBuf};
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
+use mirrord_config::MIRRORD_CONFIG_FILE_ENV;
 use mirrord_operator::setup::OperatorNamespace;
 
-#[derive(Parser)]
+use crate::error::CliError;
+
+#[derive(Debug, Parser)]
 #[command(
     author,
     version,
@@ -20,8 +23,11 @@ pub(super) struct Cli {
     pub(super) commands: Commands,
 }
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 pub(super) enum Commands {
+    /// Create and run a new container from an image with mirrord loaded
+    Container(Box<ContainerArgs>),
+
     /// Execute a binary using mirrord, mirror remote traffic to it, provide it access to remote
     /// resources (network, files) and environment variables.
     Exec(Box<ExecArgs>),
@@ -32,6 +38,7 @@ pub(super) enum Commands {
 
     #[command(hide = true)]
     Extract { path: String },
+
     /// Operator commands eg. setup
     Operator(Box<OperatorArgs>),
 
@@ -42,6 +49,10 @@ pub(super) enum Commands {
     /// Extension execution - used by extension to execute binaries.
     #[command(hide = true, name = "ext")]
     ExtensionExec(Box<ExtensionExecArgs>),
+
+    /// External Proxy - used for intproxy when it's running with `mirrord container` command.
+    #[command(hide = true, name = "extproxy")]
+    ExternalProxy,
 
     /// Internal proxy - used to aggregate connections from multiple layers
     #[command(hide = true, name = "intproxy")]
@@ -83,8 +94,8 @@ impl Display for FsMode {
 }
 
 #[derive(Args, Debug)]
-#[command(group(ArgGroup::new("exec")))]
-pub(super) struct ExecArgs {
+/// Parameters to override any values from mirrord-config as part of `exec` or `container` commands.
+pub(super) struct ExecParams {
     /// Target name to mirror.    
     /// Target can either be a deployment or a pod.
     /// Valid formats: deployment/name, pod/name, pod/name/container/name
@@ -123,9 +134,6 @@ pub(super) struct ExecArgs {
     #[arg(long)]
     pub no_remote_dns: bool,
 
-    /// Binary to execute and connect with the remote pod.
-    pub binary: String,
-
     /// mirrord will not load into these processes, they will run completely locally.
     #[arg(long)]
     pub skip_processes: Option<String>,
@@ -141,9 +149,6 @@ pub(super) struct ExecArgs {
     /// Accept/reject invalid certificates.
     #[arg(short = 'c', long)]
     pub accept_invalid_certificates: bool,
-
-    /// Arguments to pass to the binary.
-    pub(super) binary_args: Vec<String>,
 
     /// Use an Ephemeral Container to mirror traffic.
     #[arg(short, long)]
@@ -180,6 +185,122 @@ pub(super) struct ExecArgs {
     /// Kube context to use from Kubeconfig
     #[arg(long)]
     pub context: Option<String>,
+}
+
+impl ExecParams {
+    pub fn as_env_vars(&self) -> Result<HashMap<String, OsString>, CliError> {
+        let mut envs: HashMap<String, OsString> = HashMap::new();
+
+        if let Some(target) = &self.target {
+            envs.insert("MIRRORD_IMPERSONATED_TARGET".into(), target.into());
+        }
+
+        if self.no_telemetry {
+            envs.insert("MIRRORD_TELEMETRY".into(), "false".into());
+        }
+
+        if let Some(skip_processes) = &self.skip_processes {
+            envs.insert("MIRRORD_SKIP_PROCESSES".into(), skip_processes.into());
+        }
+
+        if let Some(namespace) = &self.target_namespace {
+            envs.insert("MIRRORD_TARGET_NAMESPACE".into(), namespace.into());
+        }
+
+        if let Some(namespace) = &self.agent_namespace {
+            envs.insert("MIRRORD_AGENT_NAMESPACE".into(), namespace.into());
+        }
+
+        if let Some(log_level) = &self.agent_log_level {
+            envs.insert("MIRRORD_AGENT_RUST_LOG".into(), log_level.into());
+        }
+
+        if let Some(image) = &self.agent_image {
+            envs.insert("MIRRORD_AGENT_IMAGE".into(), image.into());
+        }
+
+        if let Some(agent_ttl) = &self.agent_ttl {
+            envs.insert("MIRRORD_AGENT_TTL".into(), agent_ttl.to_string().into());
+        }
+        if let Some(agent_startup_timeout) = &self.agent_startup_timeout {
+            envs.insert(
+                "MIRRORD_AGENT_STARTUP_TIMEOUT".into(),
+                agent_startup_timeout.to_string().into(),
+            );
+        }
+
+        if let Some(fs_mode) = self.fs_mode {
+            envs.insert("MIRRORD_FILE_MODE".into(), fs_mode.to_string().into());
+        }
+
+        if let Some(override_env_vars_exclude) = &self.override_env_vars_exclude {
+            envs.insert(
+                "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE".into(),
+                override_env_vars_exclude.into(),
+            );
+        }
+
+        if let Some(override_env_vars_include) = &self.override_env_vars_include {
+            envs.insert(
+                "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE".into(),
+                override_env_vars_include.into(),
+            );
+        }
+
+        if self.no_remote_dns {
+            envs.insert("MIRRORD_REMOTE_DNS".into(), "false".into());
+        }
+
+        if self.accept_invalid_certificates {
+            envs.insert("MIRRORD_ACCEPT_INVALID_CERTIFICATES".into(), "true".into());
+            tracing::warn!("Accepting invalid certificates");
+        }
+
+        if self.ephemeral_container {
+            envs.insert("MIRRORD_EPHEMERAL_CONTAINER".into(), "true".into());
+        };
+
+        if self.tcp_steal {
+            envs.insert("MIRRORD_AGENT_TCP_STEAL_TRAFFIC".into(), "true".into());
+        };
+
+        if self.no_outgoing || self.no_tcp_outgoing {
+            envs.insert("MIRRORD_TCP_OUTGOING".into(), "false".into());
+        }
+
+        if self.no_outgoing || self.no_udp_outgoing {
+            envs.insert("MIRRORD_UDP_OUTGOING".into(), "false".into());
+        }
+
+        if let Some(context) = &self.context {
+            envs.insert("MIRRORD_KUBE_CONTEXT".into(), context.into());
+        }
+
+        if let Some(config_file) = &self.config_file {
+            // Set canoncialized path to config file, in case forks/children are in different
+            // working directories.
+            let full_path = std::fs::canonicalize(config_file)
+                .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.clone(), e))?;
+            envs.insert(
+                MIRRORD_CONFIG_FILE_ENV.into(),
+                full_path.as_os_str().to_owned(),
+            );
+        }
+
+        Ok(envs)
+    }
+}
+
+#[derive(Args, Debug)]
+pub(super) struct ExecArgs {
+    #[clap(flatten)]
+    pub params: ExecParams,
+
+    /// Binary to execute and connect with the remote pod.
+    pub binary: String,
+
+    /// Arguments to pass to the binary.
+    pub(super) binary_args: Vec<String>,
 }
 
 #[derive(Args, Debug)]
@@ -338,4 +459,116 @@ pub(super) enum DiagnoseCommand {
         #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
         config_file: Option<PathBuf>,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+/// Runtimes supported by the `mirrord container` command.
+pub(super) enum ContainerRuntime {
+    Docker,
+    Podman,
+    Nerdctl,
+}
+
+impl std::fmt::Display for ContainerRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContainerRuntime::Docker => write!(f, "docker"),
+            ContainerRuntime::Podman => write!(f, "podman"),
+            ContainerRuntime::Nerdctl => write!(f, "nerdctl"),
+        }
+    }
+}
+
+#[derive(Args, Debug)]
+/// Args for the `mirrord container` command.
+pub(super) struct ContainerArgs {
+    #[clap(flatten)]
+    /// Parameters to be passed to mirrord.
+    pub params: ExecParams,
+
+    /// Container command to be executed
+    #[arg(trailing_var_arg = true)]
+    pub exec: Vec<String>,
+}
+
+impl ContainerArgs {
+    pub fn into_parts(self) -> (RuntimeArgs, ExecParams) {
+        let ContainerArgs { params, exec } = self;
+
+        let runtime_args =
+            RuntimeArgs::parse_from(std::iter::once("mirrord container --".into()).chain(exec));
+
+        (runtime_args, params)
+    }
+}
+
+#[derive(Parser, Debug)]
+pub struct RuntimeArgs {
+    /// Which kind of container runtime to use.
+    #[arg(value_enum)]
+    pub runtime: ContainerRuntime,
+
+    #[command(subcommand)]
+    /// Command to use with `mirrord container`.
+    pub command: ContainerCommand,
+}
+
+/// Supported command for using mirrord with container runtimes.
+#[derive(Subcommand, Debug, Clone)]
+pub(super) enum ContainerCommand {
+    /// Execute a `<RUNTIME> run` command with mirrord loaded.
+    Run {
+        /// Arguments that will be propogated to underlying `<RUNTIME> run` command.
+        #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
+        runtime_args: Vec<String>,
+    },
+}
+
+impl ContainerCommand {
+    pub fn run<T: Into<String>>(runtime_args: impl IntoIterator<Item = T>) -> Self {
+        ContainerCommand::Run {
+            runtime_args: runtime_args.into_iter().map(T::into).collect(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_args_parsing() {
+        let command = "mirrord container -t deploy/test podman run -it --rm debian";
+        let result = Cli::parse_from(command.split(' '));
+
+        let Commands::Container(continaer) = result.commands else {
+            panic!("cli command didn't parse into container command, got: {result:#?}")
+        };
+
+        let (runtime_args, _) = continaer.into_parts();
+
+        assert_eq!(runtime_args.runtime, ContainerRuntime::Podman);
+
+        let ContainerCommand::Run { runtime_args } = runtime_args.command;
+
+        assert_eq!(runtime_args, vec!["-it", "--rm", "debian"]);
+    }
+
+    #[test]
+    fn runtime_args_parsing_with_seperator() {
+        let command = "mirrord container -t deploy/test -- podman run -it --rm debian";
+        let result = Cli::parse_from(command.split(' '));
+
+        let Commands::Container(continaer) = result.commands else {
+            panic!("cli command didn't parse into container command, got: {result:#?}")
+        };
+
+        let (runtime_args, _) = continaer.into_parts();
+
+        assert_eq!(runtime_args.runtime, ContainerRuntime::Podman);
+
+        let ContainerCommand::Run { runtime_args } = runtime_args.command;
+
+        assert_eq!(runtime_args, vec!["-it", "--rm", "debian"]);
+    }
 }

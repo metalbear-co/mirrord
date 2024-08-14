@@ -4,9 +4,10 @@ use k8s_openapi::{
     api::{
         apps::v1::{Deployment, DeploymentSpec},
         core::v1::{
-            Container, ContainerPort, EnvVar, HTTPGetAction, Namespace, PodSpec, PodTemplateSpec,
-            Probe, ResourceRequirements, Secret, SecretVolumeSource, SecurityContext, Service,
-            ServiceAccount, ServicePort, ServiceSpec, Volume, VolumeMount,
+            Container, ContainerPort, EnvVar, HTTPGetAction, Namespace, PodSecurityContext,
+            PodSpec, PodTemplateSpec, Probe, ResourceRequirements, Secret, SecretVolumeSource,
+            SecurityContext, Service, ServiceAccount, ServicePort, ServiceSpec, Sysctl, Volume,
+            VolumeMount,
         },
         rbac::v1::{
             ClusterRole, ClusterRoleBinding, PolicyRule, Role, RoleBinding, RoleRef, Subject,
@@ -28,7 +29,9 @@ use thiserror::Error;
 use crate::crd::{MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd};
 
 static OPERATOR_NAME: &str = "mirrord-operator";
-static OPERATOR_PORT: i32 = 3000;
+/// 443 is standard port for APIService, do not change this value
+/// (will require users to add FW rules)
+static OPERATOR_PORT: i32 = 443;
 static OPERATOR_ROLE_NAME: &str = "mirrord-operator";
 static OPERATOR_ROLE_BINDING_NAME: &str = "mirrord-operator";
 static OPERATOR_CLIENT_CA_ROLE_NAME: &str = "mirrord-operator-apiserver-authentication";
@@ -335,6 +338,13 @@ impl OperatorDeployment {
         };
 
         let pod_spec = PodSpec {
+            security_context: Some(PodSecurityContext {
+                sysctls: Some(vec![Sysctl {
+                    name: "net.ipv4.ip_unprivileged_port_start".to_owned(),
+                    value: "443".to_owned(),
+                }]),
+                ..Default::default()
+            }),
             containers: vec![container],
             service_account_name: Some(sa.name().to_owned()),
             volumes: Some(volumes),

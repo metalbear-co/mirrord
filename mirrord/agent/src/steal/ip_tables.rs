@@ -12,7 +12,7 @@ use crate::{
     error::{AgentError, Result},
     steal::ip_tables::{
         flush_connections::FlushConnections,
-        mesh::{MeshRedirect, MeshVendorExt},
+        mesh::{istio::AmbientRedirect, MeshRedirect, MeshVendorExt},
         prerouting::PreroutingRedirect,
         redirect::Redirect,
         standard::StandardRedirect,
@@ -97,8 +97,17 @@ pub static IPTABLE_INPUT: LazyLock<String> = LazyLock::new(|| {
     })
 });
 
+pub static IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV: &str = "IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL";
+pub static IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL: LazyLock<String> = LazyLock::new(|| {
+    std::env::var(IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV).unwrap_or_else(|_| {
+        std::fs::read_to_string("/proc/sys/net/ipv4/conf/all/route_localnet")
+            .unwrap_or_else(|_| "0".to_string())
+    })
+});
+
 const IPTABLES_TABLE_NAME: &str = "nat";
 
+#[cfg_attr(test, allow(clippy::indexing_slicing))] // `mockall::automock` violates our clippy rules
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait IPTables {
     fn with_table(&self, table_name: &'static str) -> Self
@@ -216,6 +225,7 @@ impl IPTables for IPTablesWrapper {
 
 #[enum_dispatch(Redirect)]
 pub(crate) enum Redirects<IPT: IPTables + Send + Sync> {
+    Ambient(AmbientRedirect<IPT>),
     Standard(StandardRedirect<IPT>),
     Mesh(MeshRedirect<IPT>),
     FlushConnections(FlushConnections<IPT, Redirects<IPT>>),
@@ -244,7 +254,12 @@ where
         let ipt = Arc::new(ipt);
 
         let mut redirect = if let Some(vendor) = MeshVendor::detect(ipt.as_ref())? {
-            Redirects::Mesh(MeshRedirect::create(ipt.clone(), vendor, pod_ips)?)
+            match &vendor {
+                MeshVendor::IstioAmbient => {
+                    Redirects::Ambient(AmbientRedirect::create(ipt.clone(), pod_ips)?)
+                }
+                _ => Redirects::Mesh(MeshRedirect::create(ipt.clone(), vendor, pod_ips)?),
+            }
         } else {
             match StandardRedirect::create(ipt.clone(), pod_ips) {
                 Err(err) => {
@@ -270,7 +285,10 @@ where
         let ipt = Arc::new(ipt);
 
         let mut redirect = if let Some(vendor) = MeshVendor::detect(ipt.as_ref())? {
-            Redirects::Mesh(MeshRedirect::load(ipt.clone(), vendor)?)
+            match &vendor {
+                MeshVendor::IstioAmbient => Redirects::Ambient(AmbientRedirect::load(ipt.clone())?),
+                _ => Redirects::Mesh(MeshRedirect::load(ipt.clone(), vendor)?),
+            }
         } else {
             match StandardRedirect::load(ipt.clone()) {
                 Err(err) => {

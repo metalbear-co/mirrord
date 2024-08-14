@@ -55,11 +55,8 @@ mirrord-kube = { path = "../kube", optional = true }
 mirrord-progress = { path = "../progress", optional = true }
 mirrord-protocol = { path = "../protocol", optional = true }
 
-async-trait = "0.1"
-actix-codec = { workspace = true, optional = true }
 base64 = { workspace = true, optional = true }
 bincode = { version = "2.0.0-rc.2", features = ["serde"], optional = true }
-bytes = { workspace = true, optional = true }
 chrono = { version = "0.4", features = ["clock", "serde"] }
 http = { version = "1", optional = true }
 http-body-util = { workspace = true, optional = true }

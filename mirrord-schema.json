@@ -24,11 +24,22 @@
       ]
     },
     "connect_tcp": {
-      "title": "connect_tcp {#root-connect_tpc}",
+      "title": "connect_tcp {#root-connect_tcp}",
       "description": "IP:PORT to connect to instead of using k8s api, for testing purposes.\n\n```json { \"connect_tcp\": \"10.10.0.100:7777\" } ```",
       "type": [
         "string",
         "null"
+      ]
+    },
+    "container": {
+      "title": "container {#root-container}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ContainerFileConfig"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "experimental": {
@@ -36,6 +47,17 @@
       "anyOf": [
         {
           "$ref": "#/definitions/ExperimentalFileConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "external_proxy": {
+      "title": "external_proxy {#root-external_proxy}",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ExternalProxyFileConfig"
         },
         {
           "type": "null"
@@ -151,7 +173,7 @@
   "additionalProperties": false,
   "definitions": {
     "AdvancedFsUserConfig": {
-      "description": "Allows the user to specify the default behavior for file operations:\n\n1. `\"read\"` - Read from the remote file system (default) 2. `\"write\"` - Read/Write from the remote file system. 3. `\"local\"` - Read from the local file system. 4. `\"localwithoverrides\"` - perform fs operation locally, unless the path matches a pre-defined or user-specified exception.\n\n> Note: by default, some paths are read locally or remotely, regardless of the selected FS mode. > This is described in further detail below.\n\nBesides the default behavior, the user can specify behavior for specific regex patterns. Case insensitive.\n\n1. `\"read_write\"` - List of patterns that should be read/write remotely. 2. `\"read_only\"` - List of patterns that should be read only remotely. 3. `\"local\"` - List of patterns that should be read locally. 4. `\"not_found\"` - List of patters that should never be read nor written. These files should be treated as non-existent.\n\nThe logic for choosing the behavior is as follows:\n\n1. Check if one of the patterns match the file path, do the corresponding action. There's no specified order if two lists match the same path, we will use the first one (and we do not guarantee what is first).\n\n**Warning**: Specifying the same path in two lists is unsupported and can lead to undefined behaviour.\n\n2. There are pre-defined exceptions to the set FS mode. 1. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs) are read locally by default. 2. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_remote_by_default.rs) are read remotely by default when the mode is `localwithoverrides`. 3. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/not_found_by_default.rs) under the running user's home directory will not be found by the application when the mode is not `local`.\n\nIn order to override that default setting for a path, or a pattern, include it the appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even though it is covered by [the set of patterns that are read locally by default](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs), add `\"^/etc/.\"` to the `read_only` set.\n\n3. If none of the above match, use the default behavior (mode).\n\nFor more information, check the file operations [technical reference](https://mirrord.dev/docs/reference/fileops/).\n\n```json { \"feature\": { \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\\\.json\" , \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ], \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ], \"not_found\": [ \"\\\\.config/gcloud\" ] } } } ```",
+      "description": "Allows the user to specify the default behavior for file operations:\n\n1. `\"read\"` - Read from the remote file system (default) 2. `\"write\"` - Read/Write from the remote file system. 3. `\"local\"` - Read from the local file system. 4. `\"localwithoverrides\"` - perform fs operation locally, unless the path matches a pre-defined or user-specified exception.\n\n> Note: by default, some paths are read locally or remotely, regardless of the selected FS mode. > This is described in further detail below.\n\nBesides the default behavior, the user can specify behavior for specific regex patterns. Case insensitive.\n\n1. `\"read_write\"` - List of patterns that should be read/write remotely. 2. `\"read_only\"` - List of patterns that should be read only remotely. 3. `\"local\"` - List of patterns that should be read locally. 4. `\"not_found\"` - List of patters that should never be read nor written. These files should be treated as non-existent. 4. `\"mapping\"` - Map of patterns and their corresponding replacers. The replacement happens before any specific behavior as defined above or mode (uses [`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace))\n\nThe logic for choosing the behavior is as follows:\n\n1. Check agains \"mapping\" if path needs to be replaced, if matched then continue to next step with new path after replacements otherwise continue as usual. 2. Check if one of the patterns match the file path, do the corresponding action. There's no specified order if two lists match the same path, we will use the first one (and we do not guarantee what is first).\n\n**Warning**: Specifying the same path in two lists is unsupported and can lead to undefined behaviour.\n\n3. There are pre-defined exceptions to the set FS mode. 1. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs) are read locally by default. 2. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_remote_by_default.rs) are read remotely by default when the mode is `localwithoverrides`. 3. Paths that match [the patterns defined here](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/not_found_by_default.rs) under the running user's home directory will not be found by the application when the mode is not `local`.\n\nIn order to override that default setting for a path, or a pattern, include it the appropriate pattern set from above. E.g. in order to read files under `/etc/` remotely even though it is covered by [the set of patterns that are read locally by default](https://github.com/metalbear-co/mirrord/tree/latest/mirrord/layer/src/file/filter/read_local_by_default.rs), add `\"^/etc/.\"` to the `read_only` set.\n\n4. If none of the above match, use the default behavior (mode).\n\nFor more information, check the file operations [technical reference](https://mirrord.dev/docs/reference/fileops/).\n\n```json { \"feature\": { \"fs\": { \"mode\": \"write\", \"read_write\": \".+\\\\.json\" , \"read_only\": [ \".+\\\\.yaml\", \".+important-file\\\\.txt\" ], \"local\": [ \".+\\\\.js\", \".+\\\\.mjs\" ], \"not_found\": [ \"\\\\.config/gcloud\" ] } } } ```",
       "type": "object",
       "properties": {
         "local": {
@@ -165,6 +187,17 @@
               "type": "null"
             }
           ]
+        },
+        "mapping": {
+          "title": "feature.fs.mapping {#feature-fs-mapping}",
+          "description": "Specify map of patterns that if matched will replace the path according to specification.\n\n*Capture groups are allowed.*\n\nExample: ```json { \"^/home/(?<user>\\\\S+)/dev/tomcat\": \"/etc/tomcat\" \"^/home/(?<user>\\\\S+)/dev/config/(?<app>\\\\S+)\": \"/mnt/configs/${user}-$app\" } ``` Will do the next replacements for any io operaton\n\n`/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml` `/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "mode": {
           "title": "feature.fs.mode {#feature-fs-mode}",
@@ -493,6 +526,29 @@
         }
       ]
     },
+    "ContainerFileConfig": {
+      "description": "`mirrord container` command specific config.",
+      "type": "object",
+      "properties": {
+        "cli_image": {
+          "title": "container.cli_image {#container-cli_image}",
+          "description": "Tag of the `mirrord-cli` image you want to use.\n\nDefaults to `\"ghcr.io/metalbear-co/mirrord-cli:<cli version>\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cli_image_lib_path": {
+          "title": "container.cli_image_lib_path {#container-cli_image}",
+          "description": "Path of the mirrord-layer lib inside the specified mirrord-cli image.\n\nDefaults to `\"/opt/mirrord/lib/libmirrord_layer.so\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "CopyTargetFileConfig": {
       "anyOf": [
         {
@@ -501,6 +557,12 @@
         {
           "type": "object",
           "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "scale_down": {
               "type": [
                 "boolean",
@@ -672,6 +734,14 @@
       "description": "mirrord Experimental features. This shouldn't be used unless someone from MetalBear/mirrord tells you to.",
       "type": "object",
       "properties": {
+        "enable_exec_hooks_linux": {
+          "title": "_experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}",
+          "description": "Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application shares sockets with child commands (e.g Python web servers with reload), but the feature is not stable and may cause other issues.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "readlink": {
           "title": "_experimental_ readlink {#experimental-readlink}",
           "description": "Enables the `readlink` hook.",
@@ -693,6 +763,63 @@
           "description": "Enables trusting any certificate on macOS, useful for <https://github.com/golang/go/issues/51991#issuecomment-2059588252>",
           "type": [
             "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExternalProxyFileConfig": {
+      "description": "Configuration for the external proxy mirrord spawns when using the `mirrord container` command. This proxy is used to allow the internal proxy running in sidecar to connect to the mirrord agent.\n\nIf you get `ConnectionRefused` errors, increasing the timeouts a bit might solve the issue.\n\n```json { \"external_proxy\": { \"start_idle_timeout\": 30, \"idle_timeout\": 5 } } ```",
+      "type": "object",
+      "properties": {
+        "idle_timeout": {
+          "title": "external_proxy.idle_timeout {#external_proxy-idle_timeout}",
+          "description": "How much time to wait while we don't have any active connections before exiting.\n\nCommon cases would be running a chain of processes that skip using the layer and don't connect to the proxy.\n\n```json { \"external_proxy\": { \"idle_timeout\": 30 } } ```",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "log_destination": {
+          "title": "external_proxy.log_destination {#external_proxy-log_destination}",
+          "description": "Set the log file destination for the external proxy.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "log_level": {
+          "title": "external_proxy.log_level {#external_proxy-log_level}",
+          "description": "Sets the log level for the external proxy.\n\nFollows the `RUST_LOG` convention (i.e `mirrord=trace`), and will only be used if `external_proxy.log_destination` is set",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "start_idle_timeout": {
+          "title": "external_proxy.start_idle_timeout {#external_proxy-start_idle_timeout}",
+          "description": "How much time to wait for the first connection to the external proxy in seconds.\n\nCommon cases would be running with dlv or any other debugger, which sets a breakpoint on process execution, delaying the layer startup and connection to the external proxy.\n\n```json { \"external_proxy\": { \"start_idle_timeout\": 60 } } ```",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tls_certificate": {
+          "description": "<!--${internal}-->\n\nCertificate path to be used for wrapping external proxy tcp listener with a tcp acceptor (self-signed one will be generated automaticaly if not specified)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tls_key": {
+          "description": "<!--${internal}-->\n\nPrivate Key path to be used for wrapping external proxy tcp listener with a tcp acceptor (self-signed one will be generated automaticaly if not specified)",
+          "type": [
+            "string",
             "null"
           ]
         }
@@ -1022,19 +1149,37 @@
     "IncomingFileConfig": {
       "title": "incoming (network)",
       "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it to the local process, see [`steal`](##steal);\n\n### Minimal `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": \"steal\" } } } ```\n\n### Advanced `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] \"listen_ports\": [[80, 8111]] } } } } ```",
-      "anyOf": [
+      "oneOf": [
         {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/IncomingMode"
-            },
-            {
-              "type": "null"
+          "type": "object",
+          "required": [
+            "Simple"
+          ],
+          "properties": {
+            "Simple": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/IncomingMode"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
-          ]
+          },
+          "additionalProperties": false
         },
         {
-          "$ref": "#/definitions/IncomingAdvancedFileConfig"
+          "type": "object",
+          "required": [
+            "Advanced"
+          ],
+          "properties": {
+            "Advanced": {
+              "$ref": "#/definitions/IncomingAdvancedFileConfig"
+            }
+          },
+          "additionalProperties": false
         }
       ]
     },
@@ -1068,6 +1213,34 @@
       "description": "Configuration for the internal proxy mirrord spawns for each local mirrord session that local layers use to connect to the remote agent\n\nThis is seldom used, but if you get `ConnectionRefused` errors, you might want to increase the timeouts a bit.\n\n```json { \"internal_proxy\": { \"start_idle_timeout\": 30, \"idle_timeout\": 5 } } ```",
       "type": "object",
       "properties": {
+        "client_tls_certificate": {
+          "description": "<!--${internal}-->\n\nCertificate to use as tls client credentials for connection to `connect_tcp`. (self-signed one will be generated automaticaly if not specified)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "client_tls_key": {
+          "description": "<!--${internal}-->\n\nPrivate Key to use as tls client credentials for connection to `connect_tcp`. (self-signed one will be generated automaticaly if not specified)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "connect_tcp": {
+          "description": "<!--${internal}-->\n\nAddress of external proxy to be used in `mirrord container`",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "container_mode": {
+          "description": "<!--${internal}-->\n\nThis informs the intproxy that it's running inside a continer and should not detach io",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "idle_timeout": {
           "title": "internal_proxy.idle_timeout {#internal_proxy-idle_timeout}",
           "description": "How much time to wait while we don't have any active connections before exiting.\n\nCommon cases would be running a chain of processes that skip using the layer and don't connect to the proxy.\n\n```json { \"internal_proxy\": { \"idle_timeout\": 30 } } ```",
@@ -1364,7 +1537,7 @@
       "additionalProperties": false
     },
     "Target": {
-      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `podname/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`. - `job/{sample-job}`; - `cronjob/{sample-cronjob}`; - `statefulset/{sample-statefulset}`;",
+      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`. - `job/{sample-job}`; - `cronjob/{sample-cronjob}`; - `statefulset/{sample-statefulset}`;",
       "anyOf": [
         {
           "description": "<!--${internal}--> Mirror a deployment.",
