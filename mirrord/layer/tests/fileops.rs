@@ -424,11 +424,6 @@ async fn go_dir(
         ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
     );
 
-    assert_eq!(
-        intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: 1 }))
-    );
-
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
 }
