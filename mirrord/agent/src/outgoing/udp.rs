@@ -133,7 +133,7 @@ impl UdpOutgoingApi {
                                     .and_then(|mirror_socket| {
                                         let connection_id = connection_ids
                                             .next()
-                                            .ok_or_else(|| ResponseError::AllocationFailure("UdpOutgoing::connect".into()))?;
+                                            .ok_or_else(|| ResponseError::IdsExhausted("connect".into()))?;
 
                                         debug!("interceptor_task -> mirror_socket {:#?}", mirror_socket);
                                         let peer_address = mirror_socket.peer_addr()?;

@@ -261,7 +261,7 @@ impl FileManager {
         let fd = self
             .fds_iter
             .next()
-            .ok_or_else(|| ResponseError::AllocationFailure("FileManager::open".to_string()))?;
+            .ok_or_else(|| ResponseError::IdsExhausted("open".to_string()))?;
 
         let metadata = file.metadata()?;
 
@@ -294,7 +294,7 @@ impl FileManager {
             let file = OpenOptions::from(open_options).open(&path)?;
 
             let fd = self.fds_iter.next().ok_or_else(|| {
-                ResponseError::AllocationFailure("FileManager::open_relative".to_string())
+                ResponseError::IdsExhausted("FileManager::open_relative".to_string())
             })?;
 
             let metadata = file.metadata()?;
@@ -637,9 +637,10 @@ impl FileManager {
             _ => Err(ResponseError::NotDirectory(fd)),
         }?;
 
-        let fd = self.fds_iter.next().ok_or_else(|| {
-            ResponseError::AllocationFailure("FileManager::fdopen_dir".to_string())
-        })?;
+        let fd = self
+            .fds_iter
+            .next()
+            .ok_or_else(|| ResponseError::IdsExhausted("fdopen_dir".to_string()))?;
 
         let dir_stream = path.read_dir()?.enumerate();
         self.dir_streams.insert(fd, dir_stream);

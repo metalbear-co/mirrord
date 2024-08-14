@@ -29,8 +29,8 @@ pub struct MeshVendorParseError(pub String);
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 pub enum ResponseError {
-    #[error("Index allocator is full, operation `{0}` failed!")]
-    AllocationFailure(String),
+    #[error("File/connection ids exhausted, operation `{0}` failed!")]
+    IdsExhausted(String),
 
     #[error("Failed to find resource `{0}`!")]
     NotFound(u64),
