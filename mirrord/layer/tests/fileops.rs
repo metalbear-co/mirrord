@@ -343,7 +343,8 @@ async fn go_stat(
 #[timeout(Duration::from_secs(10))]
 #[cfg(target_os = "macos")]
 async fn go_dir(
-    #[values(Application::Go19Dir, Application::Go20Dir)] application: Application,
+    #[values(Application::Go21Dir, Application::Go22Dir, Application::Go23Dir)]
+    application: Application,
     dylib_path: &Path,
 ) {
     let (mut test_process, mut intproxy) = application
