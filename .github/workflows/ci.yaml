@@ -67,6 +67,7 @@ jobs:
       markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
+      dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -109,6 +110,13 @@ jobs:
         with:
           files: |
             mirrord/protocol/Cargo.toml
+      - name: get dockerfile changes
+        id: changed-dockerfile
+        uses: tj-actions/changed-files@v44
+        with:
+          files: |
+            mirrord/agent/Dockerfile
+            mirrord/cli/Dockerfile
       - name: verify protocol bump
         run: |
           if [ "${{ steps.changed-protocol.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-protocol-toml.outputs.any_changed }}" != "true" ]; then
@@ -125,6 +133,7 @@ jobs:
           echo ${{ steps.changed-ci.outputs.all_changed_files }};
           echo ${{ steps.changed-protocol.outputs.any_changed }};
           echo ${{ steps.changed-protocol-toml.outputs.any_changed }};
+          echo ${{ steps.changed-dockerfile.outputs.any_changed }};
   lint:
     runs-on: ubuntu-latest
     needs: changed_files
@@ -200,7 +209,7 @@ jobs:
   test_agent_image:
     runs-on: ubuntu-latest
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v2
@@ -222,12 +231,12 @@ jobs:
   test_cli_image:
     runs-on: ubuntu-latest
     needs: changed_files
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' }}
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v2
       - name: build and export
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           tags: cli_image
@@ -572,6 +581,7 @@ jobs:
         intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
         test_agent_image,
+        test_cli_image,
         macos_tests,
         integration_tests,
         e2e,
@@ -589,6 +599,7 @@ jobs:
           CI_SUCCESS: ${{ (needs.changed_files.result == 'success') &&
             (needs.towncrier_check.result == 'success') &&
             (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
+            (needs.test_cli_image.result == 'success' || needs.test_cli_image.result == 'skipped') &&
             (needs.macos_tests.result == 'success' || needs.macos_tests.result == 'skipped') &&
             (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped') &&
             (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&

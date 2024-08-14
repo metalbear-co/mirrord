@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:5411527b77fe5a87712a4fd98d0bfdab52eca117 as chef
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:5411527b77fe5a87712a4fd98d0bfdab52eca117 AS chef
 ARG TARGETARCH
 WORKDIR /build
 
@@ -25,7 +25,7 @@ RUN cargo +nightly-2024-04-15 zigbuild -p mirrord -p mirrord-layer -Z bindeps --
 RUN cp /build/target/$(cat /.platform)/release/mirrord /mirrord
 RUN cp /build/target/$(cat /.platform)/release/libmirrord_layer.so /libmirrord_layer.so
 
-FROM --platform=$BUILDPLATFORM debian as runtime
+FROM debian AS runtime
 
 RUN mkdir -p /opt/mirrord/bin && mkdir -p /opt/mirrord/lib && mkdir -p /opt/mirrord/tls
 COPY --from=builder /mirrord /opt/mirrord/bin/mirrord
