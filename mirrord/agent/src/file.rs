@@ -4,6 +4,7 @@ use std::{
     fs::{read_link, DirEntry, File, OpenOptions, ReadDir},
     io::{self, prelude::*, BufReader, SeekFrom},
     iter::{Enumerate, Map, Peekable},
+    ops::RangeInclusive,
     os::unix::{fs::MetadataExt, prelude::FileExt},
     path::{Path, PathBuf},
     vec::IntoIter,
@@ -25,7 +26,7 @@ use mirrord_protocol::{
 };
 use tracing::{error, trace};
 
-use crate::{error::Result, util::IndexAllocator};
+use crate::error::Result;
 
 #[derive(Debug)]
 pub enum RemoteFile {
@@ -52,13 +53,25 @@ type GetDEnts64Stream = Peekable<
     >,
 >;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct FileManager {
     root_path: PathBuf,
     open_files: HashMap<u64, RemoteFile>,
     dir_streams: HashMap<u64, Enumerate<ReadDir>>,
     getdents_streams: HashMap<u64, GetDEnts64Stream>,
-    index_allocator: IndexAllocator<u64, 100>,
+    fds_iter: RangeInclusive<u64>,
+}
+
+impl Default for FileManager {
+    fn default() -> Self {
+        Self {
+            root_path: Default::default(),
+            open_files: Default::default(),
+            dir_streams: Default::default(),
+            getdents_streams: Default::default(),
+            fds_iter: (0..=u64::MAX),
+        }
+    }
 }
 
 pub fn get_root_path_from_optional_pid(pid: Option<u64>) -> PathBuf {
@@ -246,9 +259,9 @@ impl FileManager {
         let file = OpenOptions::from(open_options).open(&path)?;
 
         let fd = self
-            .index_allocator
-            .next_index()
-            .ok_or_else(|| ResponseError::AllocationFailure("FileManager::open".to_string()))?;
+            .fds_iter
+            .next()
+            .ok_or_else(|| ResponseError::IdsExhausted("open".to_string()))?;
 
         let metadata = file.metadata()?;
 
@@ -280,8 +293,8 @@ impl FileManager {
 
             let file = OpenOptions::from(open_options).open(&path)?;
 
-            let fd = self.index_allocator.next_index().ok_or_else(|| {
-                ResponseError::AllocationFailure("FileManager::open_relative".to_string())
+            let fd = self.fds_iter.next().ok_or_else(|| {
+                ResponseError::IdsExhausted("FileManager::open_relative".to_string())
             })?;
 
             let metadata = file.metadata()?;
@@ -501,8 +514,6 @@ impl FileManager {
 
         if self.open_files.remove(&fd).is_none() {
             error!("FileManager::close -> fd {:#?} not found", fd);
-        } else {
-            self.index_allocator.free_index(fd);
         }
     }
 
@@ -511,8 +522,6 @@ impl FileManager {
 
         if self.dir_streams.remove(&fd).is_none() && self.getdents_streams.remove(&fd).is_none() {
             error!("FileManager::close_dir -> fd {:#?} not found", fd);
-        } else {
-            self.index_allocator.free_index(fd);
         }
     }
 
@@ -628,9 +637,10 @@ impl FileManager {
             _ => Err(ResponseError::NotDirectory(fd)),
         }?;
 
-        let fd = self.index_allocator.next_index().ok_or_else(|| {
-            ResponseError::AllocationFailure("FileManager::fdopen_dir".to_string())
-        })?;
+        let fd = self
+            .fds_iter
+            .next()
+            .ok_or_else(|| ResponseError::IdsExhausted("fdopen_dir".to_string()))?;
 
         let dir_stream = path.read_dir()?.enumerate();
         self.dir_streams.insert(fd, dir_stream);

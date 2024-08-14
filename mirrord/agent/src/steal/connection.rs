@@ -4,6 +4,7 @@ use std::{
 };
 
 use fancy_regex::Regex;
+use futures::{stream::FuturesUnordered, StreamExt};
 use http::Request;
 use http_body_util::BodyExt;
 use hyper::{
@@ -41,7 +42,7 @@ use crate::{
         subscriptions::{IpTablesRedirector, PortSubscriptions},
         Command, StealerCommand,
     },
-    util::ClientId,
+    util::{ChannelClosedFuture, ClientId},
 };
 
 /// A stolen HTTP request that matched a client's filter.
@@ -283,6 +284,9 @@ pub(crate) struct TcpConnectionStealer {
     /// Connected [`Client`]s (layer instances).
     clients: HashMap<ClientId, Client>,
 
+    /// [`Future`](std::future::Future)s that resolve when stealer clients close.
+    clients_closed: FuturesUnordered<ChannelClosedFuture<StealerCommand>>,
+
     /// Set of active connections stolen by [`Self::port_subscriptions`].
     connections: StolenConnections,
 }
@@ -309,6 +313,7 @@ impl TcpConnectionStealer {
             port_subscriptions,
             command_rx,
             clients: HashMap::with_capacity(8),
+            clients_closed: Default::default(),
             connections: StolenConnections::with_capacity(8),
         })
     }
@@ -339,6 +344,10 @@ impl TcpConnectionStealer {
                     self.handle_command(command)
                         .await
                         .inspect_err(|error| tracing::error!(?error, "Failed handling command"))?;
+                },
+
+                Some(client_id) = self.clients_closed.next() => {
+                    self.close_client(client_id).await?;
                 },
 
                 accept = self.port_subscriptions.next_connection() => match accept {
@@ -649,8 +658,6 @@ impl TcpConnectionStealer {
             Command::PortUnsubscribe(port) => {
                 self.port_subscriptions.remove(client_id, port).await?;
             }
-
-            Command::ClientClose => self.close_client(client_id).await?,
 
             Command::ResponseData(TcpData {
                 connection_id,

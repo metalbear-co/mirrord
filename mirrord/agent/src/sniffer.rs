@@ -1,11 +1,8 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt,
-    future::Future,
     hash::{Hash, Hasher},
     net::Ipv4Addr,
-    pin::Pin,
-    task::{Context, Poll},
 };
 
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -29,35 +26,12 @@ use self::{
 use crate::{
     error::AgentError,
     http::HttpVersion,
-    util::{ClientId, Subscriptions},
+    util::{ChannelClosedFuture, ClientId, Subscriptions},
 };
 
 pub(crate) mod api;
 pub(crate) mod messages;
 pub(crate) mod tcp_capture;
-
-/// [`Future`] that resolves to [`ClientId`] when the [`TcpConnectionSniffer`] client drops their
-/// [`TcpSnifferApi`](api::TcpSnifferApi).
-struct ClientClosed {
-    /// [`Sender`] used by [`TcpConnectionSniffer`] to send data to the client.
-    /// Here used only to poll [`Sender::closed`].
-    client_tx: Sender<SniffedConnection>,
-    /// Id of the client.
-    client_id: ClientId,
-}
-
-impl Future for ClientClosed {
-    type Output = ClientId;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let client_id = self.client_id;
-
-        let future = std::pin::pin!(self.get_mut().client_tx.closed());
-        std::task::ready!(future.poll(cx));
-
-        Poll::Ready(client_id)
-    }
-}
 
 #[derive(Debug, Eq, Copy, Clone)]
 pub(crate) struct TcpSessionIdentifier {
@@ -164,7 +138,7 @@ pub(crate) struct TcpConnectionSniffer<T> {
     sessions: TCPSessionMap,
 
     client_txs: HashMap<ClientId, Sender<SniffedConnection>>,
-    clients_closed: FuturesUnordered<ClientClosed>,
+    clients_closed: FuturesUnordered<ChannelClosedFuture<SniffedConnection>>,
 }
 
 impl<T> fmt::Debug for TcpConnectionSniffer<T> {
@@ -251,10 +225,8 @@ where
     #[tracing::instrument(level = Level::TRACE, skip(sender))]
     fn handle_new_client(&mut self, client_id: ClientId, sender: Sender<SniffedConnection>) {
         self.client_txs.insert(client_id, sender.clone());
-        self.clients_closed.push(ClientClosed {
-            client_tx: sender.clone(),
-            client_id,
-        });
+        self.clients_closed
+            .push(ChannelClosedFuture::new(sender.clone(), client_id));
     }
 
     /// Removes the client with `client_id`, and also unsubscribes its port.
