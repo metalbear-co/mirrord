@@ -11,3 +11,9 @@ pub const MULTIPOD_WARNING: (&str, &str) = (
         You can get started with mirrord for Teams at this link: \
         https://mirrord.dev/docs/overview/teams/",
 );
+
+pub const EXEC_DOCKER_BINARY: (&str, &str) = (
+    "exec_docker_binary",
+    "`mirrord exec docker` detected! \
+    Please use `mirrord container [options] exec` instead.",
+);

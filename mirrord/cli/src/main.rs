@@ -34,7 +34,9 @@ use mirrord_config::{
 };
 use mirrord_kube::api::{container::SKIP_NAMES, kubernetes::create_kube_config};
 use mirrord_operator::client::OperatorApi;
-use mirrord_progress::{Progress, ProgressTracker};
+use mirrord_progress::{
+    messages::EXEC_DOCKER_BINARY, IdeMessage, NotificationLevel, Progress, ProgressTracker,
+};
 use operator::operator_command;
 use semver::Version;
 use serde_json::json;
@@ -73,6 +75,16 @@ where
     P: Progress + Send + Sync,
 {
     let mut sub_progress = progress.subtask("preparing to launch process");
+
+    if args.binary.contains("docker") {
+        sub_progress.warning(EXEC_DOCKER_BINARY.1);
+        sub_progress.ide(serde_json::to_value(IdeMessage {
+            id: EXEC_DOCKER_BINARY.0.to_string(),
+            level: NotificationLevel::Warning,
+            text: EXEC_DOCKER_BINARY.1.to_string(),
+            actions: Default::default(),
+        })?);
+    }
 
     #[cfg(target_os = "macos")]
     let execution_info =
