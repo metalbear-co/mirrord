@@ -121,7 +121,8 @@ impl AsyncRawSocket {
 }
 
 async fn create_raw_socket() -> Result<AsyncRawSocket> {
-    let index = nix::net::if_::if_nametoindex("eth0")?;
+    let index = nix::net::if_::if_nametoindex("eth0")
+        .map_err(|err| AgentError::VpnError(err.to_string()))?;
 
     let socket = Socket::new(
         Domain::PACKET,
@@ -150,7 +151,8 @@ async fn resolve_interface() -> Result<(IpAddr, IpAddr, IpAddr)> {
     let raw_local_address = SockaddrStorage::from(local_address);
 
     // Try to find an interface that matches the local ip we have.
-    let usable_interface = nix::ifaddrs::getifaddrs()?
+    let usable_interface = nix::ifaddrs::getifaddrs()
+        .map_err(|err| AgentError::VpnError(err.to_string()))?
         .find(|iface| {
             iface
                 .address
