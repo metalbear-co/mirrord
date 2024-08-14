@@ -35,9 +35,11 @@ fn get_rw_test_file_env_vars() -> Vec<(&'static str, &'static str)> {
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
-async fn self_open(dylib_path: &Path) {
-    let application = Application::Go19SelfOpen;
-
+async fn self_open(
+    #[values(Application::Go21Dir, Application::Go22Dir, Application::Go23Dir)]
+    application: Application,
+    dylib_path: &Path,
+) {
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![], None)
         .await;
@@ -273,7 +275,12 @@ async fn node_close(
 #[timeout(Duration::from_secs(60))]
 #[cfg(target_os = "linux")]
 async fn go_stat(
-    #[values(Application::Go19FileOps, Application::Go20FileOps)] application: Application,
+    #[values(
+        Application::Go21FileOps,
+        Application::Go22FileOps,
+        Application::Go23FileOps
+    )]
+    application: Application,
     dylib_path: &Path,
 ) {
     // add rw override for the specific path
@@ -444,7 +451,8 @@ async fn go_dir(
 #[timeout(Duration::from_secs(10))]
 #[cfg(target_os = "linux")]
 async fn go_dir_on_linux(
-    #[values(Application::Go19Dir, Application::Go20Dir)] application: Application,
+    #[values(Application::Go21Dir, Application::Go22Dir, Application::Go23Dir)]
+    application: Application,
     dylib_path: &Path,
 ) {
     let (mut test_process, mut intproxy) = application
@@ -534,7 +542,12 @@ async fn go_dir_on_linux(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn go_dir_bypass(
-    #[values(Application::Go19DirBypass, Application::Go20DirBypass)] application: Application,
+    #[values(
+        Application::Go21DirBypass,
+        Application::Go22DirBypass,
+        Application::Go23DirBypass
+    )]
+    application: Application,
     dylib_path: &Path,
 ) {
     let tmp_dir = temp_dir().join("go_dir_bypass_test");
@@ -572,7 +585,7 @@ async fn go_dir_bypass(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn read_go(
-    #[values(Application::Go19Read, Application::Go20Read, Application::Go21Read)]
+    #[values(Application::Go21Read, Application::Go22Read, Application::Go23Read)]
     application: Application,
     dylib_path: &Path,
 ) {
@@ -612,7 +625,7 @@ async fn read_go(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn write_go(
-    #[values(Application::Go19Write, Application::Go20Write, Application::Go21Write)]
+    #[values(Application::Go21Write, Application::Go22Write, Application::Go23Write)]
     application: Application,
     dylib_path: &Path,
 ) {
@@ -639,7 +652,7 @@ async fn write_go(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn lseek_go(
-    #[values(Application::Go19LSeek, Application::Go20LSeek, Application::Go21LSeek)]
+    #[values(Application::Go21LSeek, Application::Go22LSeek, Application::Go23LSeek)]
     application: Application,
     dylib_path: &Path,
 ) {
@@ -669,9 +682,9 @@ async fn lseek_go(
 #[timeout(Duration::from_secs(10))]
 async fn faccessat_go(
     #[values(
-        Application::Go19FAccessAt,
-        Application::Go20FAccessAt,
-        Application::Go21FAccessAt
+        Application::Go21FAccessAt,
+        Application::Go22FAccessAt,
+        Application::Go23FAccessAt
     )]
     application: Application,
     dylib_path: &Path,
