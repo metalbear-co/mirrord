@@ -1,0 +1,1 @@
+Some agent code housekeeping, including improved tracing and errors and removal of index allocator.

@@ -37,11 +37,6 @@ enum Command {
     /// The agent stops stealing traffic from this [`Port`].
     PortUnsubscribe(Port),
 
-    /// Part of the [`Drop`] implementation of [`TcpStealerApi`].
-    ///
-    /// Closes a layer connection, and unsubscribes its ports.
-    ClientClose,
-
     /// Unsubscribes the layer from the connection.
     ///
     /// The agent stops sending incoming traffic.
