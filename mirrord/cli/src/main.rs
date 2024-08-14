@@ -465,16 +465,12 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
         prompt_outdated_version(&progress).await;
     }
 
-    if let Some(target) = &args.target {
-        std::env::set_var("MIRRORD_IMPERSONATED_TARGET", target);
+    for (name, value) in args.target.as_env_vars()? {
+        std::env::set_var(name, value);
     }
 
     if args.no_telemetry {
         std::env::set_var("MIRRORD_TELEMETRY", "false");
-    }
-
-    if let Some(namespace) = &args.target_namespace {
-        std::env::set_var("MIRRORD_TARGET_NAMESPACE", namespace.clone());
     }
 
     if let Some(namespace) = &args.agent_namespace {

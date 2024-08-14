@@ -109,15 +109,9 @@ impl Display for FsMode {
 #[derive(Args, Debug)]
 /// Parameters to override any values from mirrord-config as part of `exec` or `container` commands.
 pub(super) struct ExecParams {
-    /// Target name to mirror.    
-    /// Target can either be a deployment or a pod.
-    /// Valid formats: deployment/name, pod/name, pod/name/container/name
-    #[arg(short = 't', long)]
-    pub target: Option<String>,
-
-    /// Namespace of the pod to mirror. Defaults to "default".
-    #[arg(short = 'n', long)]
-    pub target_namespace: Option<String>,
+    /// Parameters for the target
+    #[clap(flatten)]
+    pub target: TargetParams,
 
     /// Namespace to place agent in.
     #[arg(short = 'a', long)]
@@ -204,7 +198,7 @@ impl ExecParams {
     pub fn as_env_vars(&self) -> Result<HashMap<String, OsString>, CliError> {
         let mut envs: HashMap<String, OsString> = HashMap::new();
 
-        if let Some(target) = &self.target {
+        if let Some(target) = &self.target.target {
             envs.insert("MIRRORD_IMPERSONATED_TARGET".into(), target.into());
         }
 
@@ -216,7 +210,7 @@ impl ExecParams {
             envs.insert("MIRRORD_SKIP_PROCESSES".into(), skip_processes.into());
         }
 
-        if let Some(namespace) = &self.target_namespace {
+        if let Some(namespace) = &self.target.target_namespace {
             envs.insert("MIRRORD_TARGET_NAMESPACE".into(), namespace.into());
         }
 
@@ -317,8 +311,7 @@ pub(super) struct ExecArgs {
 }
 
 #[derive(Args, Debug)]
-#[command(group(ArgGroup::new("port-forward")))]
-pub(super) struct PortForwardArgs {
+pub(super) struct TargetParams {
     /// Target name to mirror.    
     /// Target can either be a deployment or a pod.
     /// Valid formats: deployment/name, pod/name, pod/name/container/name
@@ -328,8 +321,31 @@ pub(super) struct PortForwardArgs {
     /// Namespace of the pod to mirror. Defaults to "default".
     #[arg(short = 'n', long)]
     pub target_namespace: Option<String>,
+}
 
-    /// Namespace to place agent in.
+impl TargetParams {
+    pub fn as_env_vars(&self) -> Result<HashMap<String, OsString>, CliError> {
+        let mut envs: HashMap<String, OsString> = HashMap::new();
+
+        if let Some(target) = &self.target {
+            envs.insert("MIRRORD_IMPERSONATED_TARGET".into(), target.into());
+        }
+        if let Some(namespace) = &self.target_namespace {
+            envs.insert("MIRRORD_TARGET_NAMESPACE".into(), namespace.into());
+        }
+
+        Ok(envs)
+    }
+}
+
+#[derive(Args, Debug)]
+#[command(group(ArgGroup::new("port-forward")))]
+pub(super) struct PortForwardArgs {
+    /// Parameters for the target
+    #[clap(flatten)]
+    pub target: TargetParams,
+
+    /// Namespace to place agent in
     #[arg(short = 'a', long)]
     pub agent_namespace: Option<String>,
 
@@ -349,20 +365,20 @@ pub(super) struct PortForwardArgs {
     #[arg(long)]
     pub agent_startup_timeout: Option<u16>,
 
-    /// Accept/reject invalid certificates.
+    /// Accept/reject invalid certificates
     #[arg(short = 'c', long)]
     pub accept_invalid_certificates: bool,
 
-    /// Use an Ephemeral Container to mirror traffic.
+    /// Use an Ephemeral Container to mirror traffic
     #[arg(short, long)]
     pub ephemeral_container: bool,
 
-    /// Disable telemetry. See <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>
+    /// Disable telemetry - see <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>
     #[arg(long)]
     pub no_telemetry: bool,
 
     #[arg(long)]
-    /// Disable version check on startup.
+    /// Disable version check on startup
     pub disable_version_check: bool,
 
     /// Load config from config file
