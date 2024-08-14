@@ -10,7 +10,6 @@ use containerd_client::{
     with_namespace,
 };
 use enum_dispatch::enum_dispatch;
-use error::Result;
 use oci_spec::runtime::Spec;
 use tokio::net::UnixStream;
 use tonic::transport::{Endpoint, Uri};
@@ -21,7 +20,7 @@ use crate::{env::parse_raw_env, runtime::crio::CriOContainer};
 mod crio;
 mod error;
 
-pub(crate) use error::ContainerRuntimeError;
+pub(crate) use error::{ContainerRuntimeError, ContainerRuntimeResult};
 
 const CONTAINERD_DEFAULT_SOCK_PATH: &str = "/host/run/containerd/containerd.sock";
 const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/host/run/dockershim.sock";
@@ -57,7 +56,7 @@ impl ContainerInfo {
 #[enum_dispatch]
 pub(crate) trait ContainerRuntime {
     /// Get information about the container (pid, env).
-    async fn get_info(&self) -> Result<ContainerInfo>;
+    async fn get_info(&self) -> ContainerRuntimeResult<ContainerInfo>;
 }
 
 #[enum_dispatch(ContainerRuntime)]
@@ -73,7 +72,7 @@ pub(crate) enum Container {
 pub(crate) async fn get_container(
     container_id: String,
     container_runtime: &str,
-) -> Result<Container> {
+) -> ContainerRuntimeResult<Container> {
     match container_runtime {
         "docker" => Ok(Container::Docker(
             DockerContainer::from_id(container_id).await?,
@@ -91,7 +90,7 @@ pub(crate) struct DockerContainer {
 }
 
 impl DockerContainer {
-    async fn from_id(container_id: String) -> Result<Self> {
+    async fn from_id(container_id: String) -> ContainerRuntimeResult<Self> {
         let client = match Docker::connect_with_unix(
             "unix:///host/run/docker.sock",
             10,
@@ -114,7 +113,7 @@ impl DockerContainer {
 }
 
 impl ContainerRuntime for DockerContainer {
-    async fn get_info(&self) -> Result<ContainerInfo> {
+    async fn get_info(&self) -> ContainerRuntimeResult<ContainerInfo> {
         let inspect_options = Some(InspectContainerOptions { size: false });
         let inspect_response = self
             .client
@@ -147,7 +146,7 @@ pub(crate) struct ContainerdContainer {
     container_id: String,
 }
 
-async fn connect(path: impl AsRef<std::path::Path>) -> Result<Channel> {
+async fn connect(path: impl AsRef<std::path::Path>) -> ContainerRuntimeResult<Channel> {
     let path = path.as_ref().to_path_buf();
 
     Endpoint::try_from("http://localhost")
@@ -163,7 +162,7 @@ async fn connect(path: impl AsRef<std::path::Path>) -> Result<Channel> {
 async fn connect_and_find_container(
     container_id: String,
     sock_path: impl AsRef<std::path::Path>,
-) -> Result<Channel> {
+) -> ContainerRuntimeResult<Channel> {
     let channel = connect(sock_path).await?;
     let mut client = TasksClient::new(channel.clone());
     let request = GetRequest {
@@ -187,7 +186,7 @@ impl ContainerdContainer {
     /// This is useful since we might have more than one
     /// containerd socket to use and we need to find the one
     /// that manages our target container
-    async fn get_channel(&self) -> Result<Channel> {
+    async fn get_channel(&self) -> ContainerRuntimeResult<Channel> {
         for sock_path in CONTAINERD_SOCK_PATHS {
             if let Ok(channel) =
                 connect_and_find_container(self.container_id.clone(), sock_path).await
@@ -202,19 +201,19 @@ impl ContainerdContainer {
         ))
     }
 
-    async fn get_task_client(&self) -> Result<TasksClient<Channel>> {
+    async fn get_task_client(&self) -> ContainerRuntimeResult<TasksClient<Channel>> {
         let channel = self.get_channel().await?;
         Ok(TasksClient::new(channel))
     }
 
-    async fn get_container_client(&self) -> Result<ContainersClient<Channel>> {
+    async fn get_container_client(&self) -> ContainerRuntimeResult<ContainersClient<Channel>> {
         let channel = self.get_channel().await?;
         Ok(ContainersClient::new(channel))
     }
 }
 
 impl ContainerRuntime for ContainerdContainer {
-    async fn get_info(&self) -> Result<ContainerInfo> {
+    async fn get_info(&self) -> ContainerRuntimeResult<ContainerInfo> {
         let mut client = self.get_task_client().await?;
         let container_id = self.container_id.to_string();
         let request = GetRequest {
@@ -269,7 +268,7 @@ pub(crate) struct EphemeralContainer;
 impl ContainerRuntime for EphemeralContainer {
     /// When running on ephemeral, root pid is always 1 and env is the current process' env. (we
     /// copy it from the k8s spec)
-    async fn get_info(&self) -> Result<ContainerInfo> {
+    async fn get_info(&self) -> ContainerRuntimeResult<ContainerInfo> {
         Ok(ContainerInfo::new(1, std::env::vars().collect()))
     }
 }

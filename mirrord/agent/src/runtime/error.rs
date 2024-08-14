@@ -36,4 +36,4 @@ impl ContainerRuntimeError {
     }
 }
 
-pub(crate) type Result<T, E = ContainerRuntimeError> = core::result::Result<T, E>;
+pub(crate) type ContainerRuntimeResult<T, E = ContainerRuntimeError> = core::result::Result<T, E>;

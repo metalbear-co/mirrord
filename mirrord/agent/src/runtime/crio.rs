@@ -7,7 +7,7 @@ use tower::service_fn;
 use tracing::error;
 
 use super::ContainerRuntimeError;
-use crate::runtime::{error::Result, ContainerInfo, ContainerRuntime};
+use crate::runtime::{error::ContainerRuntimeResult, ContainerInfo, ContainerRuntime};
 
 static CRIO_DEFAULT_SOCK_PATH: &str = "/host/run/crio/crio.sock";
 
@@ -28,7 +28,7 @@ impl CriOContainer {
 }
 
 impl ContainerRuntime for CriOContainer {
-    async fn get_info(&self) -> Result<ContainerInfo> {
+    async fn get_info(&self) -> ContainerRuntimeResult<ContainerInfo> {
         let channel = Endpoint::try_from("http://localhost")
             .map_err(ContainerRuntimeError::crio)?
             .connect_with_connector(service_fn(move |_: Uri| {
