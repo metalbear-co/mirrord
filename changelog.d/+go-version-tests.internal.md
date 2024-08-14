@@ -1,0 +1,1 @@
+Updated Go versions used in CI to 1.21, 1.22 and 1.23.
