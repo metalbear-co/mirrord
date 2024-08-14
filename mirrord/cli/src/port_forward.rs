@@ -4,6 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use futures::StreamExt;
 use mirrord_protocol::{
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -21,7 +22,7 @@ use tokio::{
         oneshot,
     },
 };
-use tokio_stream::{wrappers::TcpListenerStream, StreamExt, StreamMap};
+use tokio_stream::{wrappers::TcpListenerStream, StreamMap};
 use tokio_util::io::ReaderStream;
 use tracing::Level;
 
@@ -145,7 +146,7 @@ impl PortForwarder {
 
                 // stream coming from the user app
                 message = self.listeners.next() => match message {
-                    Some(message) => self.handle_listener_stream(message)?,
+                    Some(message) => self.handle_listener_stream(message).await?,
                     None => unreachable!("created listener sockets are never closed"),
                 },
 
@@ -235,35 +236,26 @@ impl PortForwarder {
                         // ignore unknown connection IDs
                         return Ok(());
                     };
-                    let Some(sender) = self.tasks.remove(&remote_socket) else {
-                        return Err(PortForwardError::SenderNotFound(
-                            remote_socket,
-                            connection_id,
-                        ));
+                    let Some(_sender) = self.tasks.remove(&remote_socket) else {
+                        unreachable!("sender is always created before this point")
                     };
-                    drop(sender);
                     tracing::trace!(
                         "connection closed for remote socket {remote_socket}, connection {connection_id}"
                     );
                 }
             },
             DaemonMessage::LogMessage(log_message) => match log_message.level {
-                LogLevel::Warn => tracing::warn!(log_message.message),
-                LogLevel::Error => tracing::error!(log_message.message),
+                LogLevel::Warn => tracing::warn!("agent log: {}", log_message.message),
+                LogLevel::Error => tracing::error!("agent log: {}", log_message.message),
             },
-            DaemonMessage::Pong => {
-                if !self.waiting_for_pong {
-                    // message not expected
-                    return Err(PortForwardError::AgentError(
-                        "unexpected message from agent: DaemonMessage::Pong".into(),
-                    ));
-                }
-                self.waiting_for_pong = false;
-            }
             DaemonMessage::Close(error) => {
                 return Err(PortForwardError::AgentError(error));
             }
+            DaemonMessage::Pong if self.waiting_for_pong => {
+                self.waiting_for_pong = false;
+            }
             other => {
+                // includes unexepcted DaemonMessage::Pong
                 return Err(PortForwardError::AgentError(format!(
                     "unexpected message from agent: {other:?}"
                 )));
@@ -274,63 +266,105 @@ impl PortForwarder {
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    fn handle_listener_stream(
+    async fn handle_listener_stream(
         &mut self,
         message: (SocketAddr, Result<TcpStream, std::io::Error>),
     ) -> Result<(), PortForwardError> {
-        match message {
-            (socket, Ok(stream)) => {
-                let task_internal_tx = self.internal_msg_tx.clone();
-                let Some(remote_socket) = self.mappings.get(&socket).cloned() else {
-                    return Err(PortForwardError::SocketMappingNotFound(socket));
-                };
-                let (response_tx, mut response_rx) = mpsc::channel(16);
-                self.tasks.insert(remote_socket, response_tx);
-                tokio::spawn(async move {
-                    let (read, mut write) = stream.into_split();
-                    let mut read_stream = ReaderStream::new(read);
-                    let (oneshot_tx, oneshot_rx) = oneshot::channel::<ConnectionId>();
-                    let _ = task_internal_tx
-                        .send(PortForwardMessage::Connect(remote_socket, oneshot_tx))
-                        .await;
-                    let Ok(connection_id) = oneshot_rx.await else {
-                        return Err(PortForwardError::InternalMessageError(format!("error while trying to receive connection ID for socket address {socket}")));
-                    };
-
-                    loop {
-                        select! {
-                            message = read_stream.next() => match message {
-                                Some(Ok(message)) => {
-                                    let _ = task_internal_tx.send(PortForwardMessage::Send(connection_id, message.into())).await;
-                                },
-                                Some(Err(error)) => {
-                                    break Err(PortForwardError::TcpListenerError(error));
-                                },
-                                None => {
-                                    let _ = task_internal_tx.send(PortForwardMessage::Close(remote_socket, connection_id)).await;
-                                    break Ok(());
-                                },
-                            },
-
-                            message = response_rx.recv() => match message {
-                                Some(message) => {
-                                    match write.write(message.as_ref()).await {
-                                        Ok(_) => continue,
-                                        Err(error) => break Err(PortForwardError::InternalMessageError(format!("failed to write data to local port in task: {error}"))),
-                                    }
-                                },
-                                None => break Ok(()), // PortForwarder received DaemonTcpOutgoing::Close
-                            }
-                        }
-                    }
-                });
-            }
-            (socket, Err(error)) => {
+        let socket = message.0;
+        let stream = match message.1 {
+            Ok(stream) => stream,
+            Err(error) => {
                 // error from TcpStream
                 tracing::error!("error occured while listening to local socket {socket}: {error}");
                 self.listeners.remove(&socket);
+                return Ok(());
             }
-        }
+        };
+
+        let task_internal_tx = self.internal_msg_tx.clone();
+        let Some(remote_socket) = self.mappings.get(&socket).cloned() else {
+            unreachable!("mappings are always created before this point")
+        };
+        let (response_tx, mut response_rx) = mpsc::channel(256);
+        self.tasks.insert(remote_socket, response_tx);
+
+        tokio::spawn(async move {
+            let (read, mut write) = stream.into_split();
+            let mut read_stream = ReaderStream::with_capacity(read, 64000);
+            let (oneshot_tx, oneshot_rx) = oneshot::channel::<ConnectionId>();
+
+            // lazy connection: wait until data starts
+            let first = match read_stream.next().await {
+                Some(Ok(data)) => data,
+                Some(Err(error)) => return Err(PortForwardError::TcpListenerError(error)),
+                None => {
+                    // stream ended without sending data
+                    return Ok(());
+                }
+            };
+
+            let _ = task_internal_tx
+                .send(PortForwardMessage::Connect(remote_socket, oneshot_tx))
+                .await;
+            let Ok(connection_id) = oneshot_rx.await else {
+                return Err(PortForwardError::InternalMessageError(format!(
+                    "error while trying to receive connection ID for socket address {socket}"
+                )));
+            };
+            match task_internal_tx
+                .send(PortForwardMessage::Send(connection_id, first.into()))
+                .await
+            {
+                Ok(_) => (),
+                Err(error) => {
+                    return Err(PortForwardError::InternalMessageError(format!(
+                        "failed to send data to main loop: {error}"
+                    )))
+                }
+            };
+
+            loop {
+                select! {
+                    message = read_stream.next() => match message {
+                        Some(Ok(message)) => {
+                            match task_internal_tx
+                                .send(PortForwardMessage::Send(connection_id, message.into()))
+                                .await
+                            {
+                                Ok(_) => (),
+                                Err(error) => {
+                                    break Err(PortForwardError::InternalMessageError(format!(
+                                        "failed to send data to main loop: {error}"
+                                    )))
+                                }
+                            };
+                        },
+                        Some(Err(error)) => {
+                            tracing::error!("tcp listener error: {error}");
+                            break Ok(());
+                        },
+                        None => {
+                            let _ = task_internal_tx.send(PortForwardMessage::Close(remote_socket, connection_id)).await;
+                            break Ok(());
+                        },
+                    },
+
+                    message = response_rx.recv() => match message {
+                        Some(message) => {
+                            match write.write_all(message.as_ref()).await {
+                                Ok(_) => continue,
+                                Err(error) => {
+                                    tracing::error!("failed to write remote response to local destination: {error}");
+                                    break Ok(());
+                                },
+                            }
+                        },
+                        None => break Ok(()), // PortForwarder received DaemonTcpOutgoing::Close
+                    }
+                }
+            }
+        });
+
         Ok(())
     }
 
@@ -416,9 +450,6 @@ pub enum PortForwardError {
     #[error("no task for socket {0} ready to receive connection ID: `{1}`")]
     ReadyTaskNotFound(SocketAddr, ConnectionId),
 
-    #[error("no sender for socket {0} and connection ID: `{1}`")]
-    SenderNotFound(SocketAddr, ConnectionId),
-
     #[error("failed to establish connection with remote process: `{0}`")]
     ConnectionError(String),
 
@@ -470,7 +501,7 @@ mod test {
         let mut port_forwarder = PortForwarder::new(agent_connection, parsed_mappings)
             .await
             .unwrap();
-        let join_handle = tokio::spawn(async move { port_forwarder.run().await.unwrap() });
+        tokio::spawn(async move { port_forwarder.run().await.unwrap() });
 
         // send data to socket
         let mut stream = TcpStream::connect(local_destination).await.unwrap();
