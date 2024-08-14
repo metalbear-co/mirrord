@@ -350,7 +350,7 @@ async fn go_dir(
         intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
             path: None,
-            fd: Some(1),
+            fd: Some(fd),
             follow_symlink: true
         }))
     );
@@ -372,19 +372,20 @@ async fn go_dir(
 
     assert_eq!(
         intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 1 }))
+        ClientMessage::FileRequest(FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: fd }))
     );
 
+    let dir_fd = 2;
     intproxy
         .send(DaemonMessage::File(FileResponse::OpenDir(Ok(
-            OpenDirResponse { fd: 1 },
+            OpenDirResponse { fd: dir_fd },
         ))))
         .await;
 
     assert_eq!(
         intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::ReadDirBatch(ReadDirBatchRequest {
-            remote_fd: 1,
+            remote_fd: dir_fd,
             amount: 128
         }))
     );
@@ -392,7 +393,7 @@ async fn go_dir(
     intproxy
         .send(DaemonMessage::File(FileResponse::ReadDirBatch(Ok(
             ReadDirBatchResponse {
-                fd: 1,
+                fd: dir_fd,
                 dir_entries: vec![
                     DirEntryInternal {
                         name: "a".to_string(),
@@ -414,16 +415,34 @@ async fn go_dir(
     assert_eq!(
         intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::ReadDirBatch(ReadDirBatchRequest {
-            remote_fd: 1,
+            remote_fd: dir_fd,
             amount: 128
         }))
     );
 
     assert_eq!(
         intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 1 }))
+        ClientMessage::FileRequest(FileRequest::ReadDirBatch(ReadDirBatchRequest {
+            remote_fd: dir_fd,
+            amount: 128
+        }))
     );
 
+    intproxy
+        .send(DaemonMessage::File(FileResponse::ReadDirBatch(Ok(
+            ReadDirBatchResponse {
+                fd: dir_fd,
+                dir_entries: Vec::new(),
+            },
+        ))))
+        .await;
+
+    assert_eq!(
+        intproxy.recv().await,
+        ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: dir_fd }))
+    );
+
+    intproxy.expect_file_close(fd).await;
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
 }
