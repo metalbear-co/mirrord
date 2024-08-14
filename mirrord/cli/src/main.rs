@@ -74,10 +74,6 @@ where
 {
     let mut sub_progress = progress.subtask("preparing to launch process");
 
-    if args.binary.contains("docker") {
-        sub_progress.warning(EXEC_DOCKER_BINARY.1);
-    }
-
     #[cfg(target_os = "macos")]
     let execution_info =
         MirrordExecution::start(&config, Some(&args.binary), &mut sub_progress, analytics).await?;
@@ -320,6 +316,10 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
         "Launching {:?} with arguments {:?}",
         args.binary, args.binary_args
     );
+
+    if args.binary.contains("docker") {
+        progress.warning(EXEC_DOCKER_BINARY.1);
+    }
 
     if !(args.params.no_tcp_outgoing || args.params.no_udp_outgoing) && args.params.no_remote_dns {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
