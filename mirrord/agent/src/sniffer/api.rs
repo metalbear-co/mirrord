@@ -1,3 +1,5 @@
+use std::ops::RangeInclusive;
+
 use futures::{stream::FuturesUnordered, StreamExt};
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
@@ -30,8 +32,8 @@ pub(crate) struct TcpSnifferApi {
     task_status: TaskStatus,
     /// Currently sniffed connections.
     connections: StreamMap<ConnectionId, StreamNotifyClose<BroadcastStream<Vec<u8>>>>,
-    /// Id for the next sniffed connection.
-    next_connection_id: Option<ConnectionId>,
+    /// Ids for sniffed connections.
+    connection_ids_iter: RangeInclusive<ConnectionId>,
     /// [`LayerTcp::PortSubscribe`] requests in progress.
     subscriptions_in_progress: FuturesUnordered<oneshot::Receiver<Port>>,
 }
@@ -70,7 +72,7 @@ impl TcpSnifferApi {
             receiver,
             task_status,
             connections: Default::default(),
-            next_connection_id: Some(0),
+            connection_ids_iter: (0..=ConnectionId::MAX),
             subscriptions_in_progress: Default::default(),
         })
     }
@@ -96,8 +98,7 @@ impl TcpSnifferApi {
         tokio::select! {
             conn = self.receiver.recv() => match conn {
                 Some(conn) => {
-                    let id = self.next_connection_id.ok_or(AgentError::ExhaustedConnectionId)?;
-                    self.next_connection_id = id.checked_add(1);
+                    let id = self.connection_ids_iter.next().ok_or(AgentError::ExhaustedConnectionId)?;
 
                     self.connections.insert(id, StreamNotifyClose::new(BroadcastStream::new(conn.data)));
 

@@ -1,6 +1,6 @@
 use std::{
     clone::Clone,
-    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    collections::{hash_map::Entry, HashMap, HashSet},
     future::Future,
     hash::Hash,
     pin::Pin,
@@ -8,7 +8,6 @@ use std::{
     thread::JoinHandle,
 };
 
-use num_traits::{CheckedAdd, Num};
 use tokio::sync::mpsc;
 use tracing::error;
 
@@ -94,59 +93,6 @@ where
     #[allow(dead_code)] // we might want it later on
     pub fn remove_topic(&mut self, topic: T) {
         self.inner.remove(&topic);
-    }
-}
-
-/// `IndexAllocator` is a helper struct that allocates unique indices for a given type.
-/// It keeps tracked of the indices that were freed, and reuses them when possible.
-/// You can provide a buffer of indices using the second generic `N` to avoid re-using indices
-/// too fast.
-/// TODO: Consider just having a simple IndexAllocator that keeps track of last index and increases
-/// by 1 as it'd be hard to exhaust u64. (which is usually T)
-#[derive(Debug)]
-pub struct IndexAllocator<T, const N: usize>
-where
-    T: Num,
-{
-    index: T,
-    vacant_indices: VecDeque<T>,
-}
-
-impl<T, const N: usize> IndexAllocator<T, N>
-where
-    T: Num + CheckedAdd + Clone,
-{
-    /// Returns the next available index, returns None if not available (reached max)
-    pub fn next_index(&mut self) -> Option<T> {
-        if self.vacant_indices.len() > N
-            && let Some(i) = self.vacant_indices.pop_front()
-        {
-            return Some(i);
-        }
-        match self.index.checked_add(&T::one()) {
-            Some(new_index) => {
-                let res = self.index.clone();
-                self.index = new_index;
-                Some(res)
-            }
-            None => None,
-        }
-    }
-
-    pub fn free_index(&mut self, index: T) {
-        self.vacant_indices.push_back(index)
-    }
-}
-
-impl<T, const N: usize> Default for IndexAllocator<T, N>
-where
-    T: Num,
-{
-    fn default() -> Self {
-        Self {
-            index: T::zero(),
-            vacant_indices: Default::default(),
-        }
     }
 }
 
@@ -316,49 +262,5 @@ mod subscription_tests {
         assert_eq!(subscriptions.get_client_topics(3), Vec::<u16>::new());
         subscriptions.remove_topic(1);
         assert_eq!(subscriptions.get_subscribed_topics(), Vec::<u16>::new());
-    }
-}
-
-#[cfg(test)]
-mod indexallocator_tests {
-    use super::IndexAllocator;
-
-    #[test]
-    fn sanity() {
-        let mut index_allocator: IndexAllocator<u32, 0> = Default::default();
-        let index = index_allocator.next_index().unwrap();
-        assert_eq!(0, index);
-        let index = index_allocator.next_index().unwrap();
-        assert_eq!(1, index);
-        index_allocator.free_index(0);
-        let index = index_allocator.next_index().unwrap();
-        assert_eq!(0, index);
-    }
-
-    #[test]
-    fn sanity_buffer() {
-        let mut index_allocator: IndexAllocator<u32, 2> = Default::default();
-        let index = index_allocator.next_index().unwrap();
-        assert_eq!(0, index);
-        let index = index_allocator.next_index().unwrap();
-        assert_eq!(1, index);
-        index_allocator.free_index(0);
-        let index = index_allocator.next_index().unwrap();
-        assert_eq!(2, index);
-        let index = index_allocator.next_index().unwrap();
-        assert_eq!(3, index);
-        index_allocator.free_index(1);
-        index_allocator.free_index(2);
-        let index = index_allocator.next_index().unwrap();
-        assert_eq!(0, index);
-    }
-
-    #[test]
-    fn check_max() {
-        let mut index_allocator: IndexAllocator<u8, 0> = Default::default();
-        for _ in 0..=u8::MAX - 1 {
-            index_allocator.next_index().unwrap();
-        }
-        assert!(index_allocator.next_index().is_none());
     }
 }

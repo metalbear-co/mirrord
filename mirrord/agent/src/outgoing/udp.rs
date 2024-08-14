@@ -24,7 +24,7 @@ use tracing::{debug, trace, warn};
 
 use crate::{
     error::Result,
-    util::{run_thread_in_namespace, IndexAllocator},
+    util::run_thread_in_namespace,
     watched_task::{TaskStatus, WatchedTask},
 };
 
@@ -102,7 +102,7 @@ impl UdpOutgoingApi {
         mut layer_rx: Receiver<Layer>,
         daemon_tx: Sender<Daemon>,
     ) -> Result<()> {
-        let mut allocator = IndexAllocator::<ConnectionId, 100>::default();
+        let mut connection_ids = 0..=ConnectionId::MAX;
 
         // TODO: Right now we're manually keeping these 2 maps in sync (aviram suggested using
         // `Weak` for `writers`).
@@ -131,10 +131,9 @@ impl UdpOutgoingApi {
                             let daemon_connect = connect(remote_address.clone().try_into()?)
                                     .await
                                     .and_then(|mirror_socket| {
-                                        let connection_id = allocator
-                                            .next_index()
-                                            .ok_or_else(|| ResponseError::AllocationFailure("interceptor_task".to_string()))
-                                            .unwrap() as ConnectionId;
+                                        let connection_id = connection_ids
+                                            .next()
+                                            .ok_or_else(|| ResponseError::AllocationFailure("UdpOutgoing::connect".into()))?;
 
                                         debug!("interceptor_task -> mirror_socket {:#?}", mirror_socket);
                                         let peer_address = mirror_socket.peer_addr()?;
