@@ -10,18 +10,18 @@ use containerd_client::{
     with_namespace,
 };
 use enum_dispatch::enum_dispatch;
+use error::Result;
 use oci_spec::runtime::Spec;
 use tokio::net::UnixStream;
 use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
 
-use crate::{
-    env::parse_raw_env,
-    error::{AgentError, Result},
-    runtime::crio::CriOContainer,
-};
+use crate::{env::parse_raw_env, runtime::crio::CriOContainer};
 
 mod crio;
+mod error;
+
+pub(crate) use error::ContainerRuntimeError;
 
 const CONTAINERD_DEFAULT_SOCK_PATH: &str = "/host/run/containerd/containerd.sock";
 const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/host/run/dockershim.sock";
@@ -72,17 +72,15 @@ pub(crate) enum Container {
 /// get a container object according to args.
 pub(crate) async fn get_container(
     container_id: String,
-    container_runtime: Option<&str>,
+    container_runtime: &str,
 ) -> Result<Container> {
     match container_runtime {
-        Some("docker") => Ok(Container::Docker(
+        "docker" => Ok(Container::Docker(
             DockerContainer::from_id(container_id).await?,
         )),
-        Some("containerd") => Ok(Container::Containerd(ContainerdContainer { container_id })),
-        Some("cri-o") => Ok(Container::CriO(CriOContainer::from_id(container_id))),
-        _ => Err(AgentError::NotFound(format!(
-            "Unknown runtime {container_runtime:?}"
-        ))),
+        "containerd" => Ok(Container::Containerd(ContainerdContainer { container_id })),
+        "cri-o" => Ok(Container::CriO(CriOContainer::from_id(container_id))),
+        other => Err(ContainerRuntimeError::unknown_runtime(other)),
     }
 }
 
@@ -104,7 +102,8 @@ impl DockerContainer {
                 "unix:///host/var/run/docker.sock",
                 10,
                 API_DEFAULT_VERSION,
-            )?,
+            )
+            .map_err(ContainerRuntimeError::docker)?,
         };
 
         Ok(DockerContainer {
@@ -120,18 +119,23 @@ impl ContainerRuntime for DockerContainer {
         let inspect_response = self
             .client
             .inspect_container(&self.container_id, inspect_options)
-            .await?;
+            .await
+            .map_err(ContainerRuntimeError::docker)?;
 
         let pid = inspect_response
             .state
             .and_then(|state| state.pid)
             .and_then(|pid| if pid > 0 { Some(pid as u64) } else { None })
-            .ok_or_else(|| AgentError::NotFound("No pid found!".to_string()))?;
+            .ok_or_else(|| {
+                ContainerRuntimeError::docker("pid not found in the runtime response")
+            })?;
 
         let raw_env = inspect_response
             .config
             .and_then(|config| config.env)
-            .ok_or_else(|| AgentError::NotFound("No env found!".to_string()))?;
+            .ok_or_else(|| {
+                ContainerRuntimeError::docker("env not found in the runtime response")
+            })?;
         let env_vars = parse_raw_env(&raw_env);
 
         Ok(ContainerInfo::new(pid, env_vars))
@@ -146,10 +150,11 @@ pub(crate) struct ContainerdContainer {
 async fn connect(path: impl AsRef<std::path::Path>) -> Result<Channel> {
     let path = path.as_ref().to_path_buf();
 
-    Endpoint::try_from("http://localhost")?
+    Endpoint::try_from("http://localhost")
+        .map_err(ContainerRuntimeError::containerd)?
         .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(path.clone())))
         .await
-        .map_err(AgentError::from)
+        .map_err(ContainerRuntimeError::containerd)
 }
 
 /// Connects to the given containerd socket
@@ -166,7 +171,10 @@ async fn connect_and_find_container(
         ..Default::default()
     };
     let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
-    client.get(request).await?;
+    client
+        .get(request)
+        .await
+        .map_err(ContainerRuntimeError::containerd)?;
     Ok(channel)
 }
 
@@ -187,7 +195,11 @@ impl ContainerdContainer {
                 return Ok(channel);
             }
         }
-        Err(AgentError::ContainerdSocketNotFound)
+        Err(ContainerRuntimeError::containerd(
+            r#"Couldn't find containerd socket to use, please open a bug report
+            providing information on how you installed k8s and if you know where
+            the containerd socket is"#,
+        ))
     }
 
     async fn get_task_client(&self) -> Result<TasksClient<Channel>> {
@@ -212,10 +224,15 @@ impl ContainerRuntime for ContainerdContainer {
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
         let pid = client
             .get(request)
-            .await?
+            .await
+            .map_err(ContainerRuntimeError::containerd)?
             .into_inner()
             .process
-            .ok_or_else(|| AgentError::NotFound("No pid found!".to_string()))?
+            .ok_or_else(|| {
+                ContainerRuntimeError::containerd(
+                    "process description not found in runtime response",
+                )
+            })?
             .pid;
 
         let mut client = self.get_container_client().await?;
@@ -226,15 +243,21 @@ impl ContainerRuntime for ContainerdContainer {
 
         let spec: Spec = client
             .get(request)
-            .await?
+            .await
+            .map_err(ContainerRuntimeError::containerd)?
             .into_inner()
             .container
             .and_then(|c| c.spec)
-            .ok_or_else(|| AgentError::NotFound("Spec wasn't found".to_string()))
-            .map(|s| serde_json::from_slice(&s.value))??;
+            .ok_or_else(|| {
+                ContainerRuntimeError::containerd("container spec not found in runtime response")
+            })
+            .and_then(|s| {
+                serde_json::from_slice(&s.value).map_err(ContainerRuntimeError::containerd)
+            })?;
 
-        let env_vars = extract_env_from_containerd_spec(&spec)
-            .ok_or_else(|| AgentError::NotFound("No env vars found!".to_string()))?;
+        let env_vars = extract_env_from_containerd_spec(&spec).ok_or_else(|| {
+            ContainerRuntimeError::containerd("env not found in container runtime response")
+        })?;
 
         Ok(ContainerInfo::new(pid as u64, env_vars))
     }

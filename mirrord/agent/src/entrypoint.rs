@@ -87,8 +87,7 @@ impl State {
                 container_runtime,
                 ..
             } => {
-                let container =
-                    get_container(container_id.clone(), Some(container_runtime)).await?;
+                let container = get_container(container_id.clone(), container_runtime).await?;
 
                 let container_handle = ContainerHandle::new(container).await?;
                 let pid = container_handle.pid().to_string();
@@ -438,7 +437,7 @@ impl ClientConnectionHandler {
                     sniffer_api.handle_client_message(message).await?
                 } else {
                     warn!("received tcp sniffer request while not available");
-                    Err(AgentError::SnifferApiError)?
+                    Err(AgentError::SnifferNotRunning)?
                 }
             }
             ClientMessage::TcpSteal(message) => {
@@ -446,7 +445,7 @@ impl ClientConnectionHandler {
                     tcp_stealer_api.handle_client_message(message).await?
                 } else {
                     warn!("received tcp steal request while not available");
-                    Err(AgentError::SnifferApiError)?
+                    Err(AgentError::StealerNotRunning)?
                 }
             }
             ClientMessage::Close => {
@@ -610,9 +609,9 @@ async fn start_agent(args: Args) -> Result<()> {
             Err(error)?
         }
 
-        Err(error) => {
+        Err(..) => {
             error!("start_agent -> Failed to accept first connection: timeout");
-            Err(error)?
+            Err(AgentError::FirstConnectionTimeout)?
         }
     }
 
