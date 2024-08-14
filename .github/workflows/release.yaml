@@ -300,8 +300,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          name: shasum
           path: /tmp/artifacts
-          pattern: '+(*-unknown-linux-gnu|*-apple-darwin|shasum)'
       - uses: actions/checkout@v4
       - name: Get release version and hashes
         run: |
