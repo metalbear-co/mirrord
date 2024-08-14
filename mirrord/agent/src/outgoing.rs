@@ -90,6 +90,7 @@ impl TcpOutgoingApi {
     }
 
     /// Receives a [`DaemonTcpOutgoing`] message from the background task.
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     pub(crate) async fn recv_from_task(&mut self) -> Result<DaemonTcpOutgoing> {
         match self.daemon_rx.recv().await {
             Some(msg) => Ok(msg),
