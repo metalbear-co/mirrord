@@ -36,7 +36,11 @@ fn get_rw_test_file_env_vars() -> Vec<(&'static str, &'static str)> {
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
 async fn self_open(
-    #[values(Application::Go21Dir, Application::Go22Dir, Application::Go23Dir)]
+    #[values(
+        Application::Go21SelfOpen,
+        Application::Go22SelfOpen,
+        Application::Go23SelfOpen
+    )]
     application: Application,
     dylib_path: &Path,
 ) {
