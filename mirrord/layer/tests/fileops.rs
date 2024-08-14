@@ -360,30 +360,6 @@ async fn go_dir(
 
     assert_eq!(
         intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
-            path: None,
-            fd: Some(1),
-            follow_symlink: true
-        }))
-    );
-
-    let metadata = MetadataInternal {
-        device_id: 0,
-        size: 0,
-        user_id: 2,
-        blocks: 3,
-        mode: libc::S_IFDIR as u32,
-        ..Default::default()
-    };
-
-    intproxy
-        .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-            XstatResponse { metadata },
-        ))))
-        .await;
-
-    assert_eq!(
-        intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 1 }))
     );
 
