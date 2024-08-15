@@ -318,7 +318,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     );
 
     if args.binary.contains("docker") {
-        progress.warning(EXEC_DOCKER_BINARY.1);
+        progress.warning(EXEC_DOCKER_BINARY);
     }
 
     if !(args.params.no_tcp_outgoing || args.params.no_udp_outgoing) && args.params.no_remote_dns {
