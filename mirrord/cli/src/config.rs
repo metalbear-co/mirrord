@@ -13,7 +13,6 @@ use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 use mirrord_config::MIRRORD_CONFIG_FILE_ENV;
 use mirrord_operator::setup::OperatorNamespace;
-use rstest::rstest;
 use thiserror::Error;
 
 use crate::error::CliError;
@@ -454,10 +453,10 @@ impl FromStr for PortMapping {
 
 #[derive(Error, Debug, PartialEq)]
 pub enum PortMappingParseErr {
-    #[error("Invalid format of argument `{0}`, expected `[local-port]:remote-ipv4:remote-port`")]
+    #[error("Invalid format of argument `{0}`, expected `[local-port:]remote-ipv4:remote-port`")]
     InvalidFormat(String),
 
-    #[error("Failed to parse port `{0}` in argument: `{1}`")]
+    #[error("Failed to parse port `{0}` in argument `{1}`")]
     PortParseErr(String, String),
 
     #[error("Failed to parse IPv4 address `{0}` in argument `{1}`")]
@@ -467,32 +466,41 @@ pub enum PortMappingParseErr {
     PortZeroInvalid(String),
 }
 
-#[rstest]
-#[case("3030:152.37.110.132:3038", "127.0.0.1:3030", "152.37.110.132:3038")]
-#[case("152.37.110.132:3038", "127.0.0.1:3038", "152.37.110.132:3038")]
-fn parse_valid_mapping(
-    #[case] input: &str,
-    #[case] expected_local: &str,
-    #[case] expected_remote: &str,
-) {
-    let expected = PortMapping {
-        local: expected_local.parse().unwrap(),
-        remote: expected_remote.parse().unwrap(),
-    };
-    assert_eq!(PortMapping::from_str(input).unwrap(), expected);
-}
+#[cfg(test)]
+mod test {
+    use std::str::FromStr;
 
-#[rstest]
-#[case("3030:152.37.110.132:3038:2027")]
-#[case("152.37.110.132:3030:3038")]
-#[case("3030:152.37.110.132:0")]
-#[case("3o3o:152.37.11o.132:3o38")]
-#[case("3030:152110.132:3038")]
-#[case("30303030:152.37.110.132:3038")]
-#[case("")]
-#[should_panic]
-fn parse_invalid_mapping(#[case] input: &str) {
-    PortMapping::from_str(input).unwrap();
+    use rstest::rstest;
+
+    use super::PortMapping;
+
+    #[rstest]
+    #[case("3030:152.37.110.132:3038", "127.0.0.1:3030", "152.37.110.132:3038")]
+    #[case("152.37.110.132:3038", "127.0.0.1:3038", "152.37.110.132:3038")]
+    fn parse_valid_mapping(
+        #[case] input: &str,
+        #[case] expected_local: &str,
+        #[case] expected_remote: &str,
+    ) {
+        let expected = PortMapping {
+            local: expected_local.parse().unwrap(),
+            remote: expected_remote.parse().unwrap(),
+        };
+        assert_eq!(PortMapping::from_str(input).unwrap(), expected);
+    }
+
+    #[rstest]
+    #[case("3030:152.37.110.132:3038:2027")]
+    #[case("152.37.110.132:3030:3038")]
+    #[case("3030:152.37.110.132:0")]
+    #[case("3o3o:152.37.11o.132:3o38")]
+    #[case("3030:152110.132:3038")]
+    #[case("30303030:152.37.110.132:3038")]
+    #[case("")]
+    #[should_panic]
+    fn parse_invalid_mapping(#[case] input: &str) {
+        PortMapping::from_str(input).unwrap();
+    }
 }
 
 #[derive(Args, Debug)]

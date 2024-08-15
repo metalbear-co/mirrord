@@ -458,9 +458,8 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
 }
 
 async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()> {
-    tracing::warn!("Port forwarding is currently an unstable feature and subject to change. See https://github.com/metalbear-co/mirrord/issues/2640 for more info.");
-
     let mut progress = ProgressTracker::from_env("mirrord port-forward");
+    progress.warning("Port forwarding is currently an unstable feature and subject to change. See https://github.com/metalbear-co/mirrord/issues/2640 for more info.");
     if !args.disable_version_check {
         prompt_outdated_version(&progress).await;
     }
@@ -509,11 +508,7 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
     }
 
     if let Some(config_file) = &args.config_file {
-        // Set canoncialized path to config file, in case forks/children are in different
-        // working directories.
-        let full_path = std::fs::canonicalize(config_file)
-            .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.clone(), e))?;
-        std::env::set_var("MIRRORD_CONFIG_FILE", full_path);
+        std::env::set_var("MIRRORD_CONFIG_FILE", config_file);
     }
 
     let (config, mut context) = LayerConfig::from_env_with_warnings()?;
