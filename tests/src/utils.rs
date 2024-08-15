@@ -12,7 +12,6 @@ use std::{
 };
 
 use chrono::{Timelike, Utc};
-// use const_format::formatcp;
 use fancy_regex::Regex;
 use futures::FutureExt;
 use futures_util::{future::BoxFuture, stream::TryStreamExt};
@@ -90,9 +89,9 @@ pub enum Application {
     PythonFastApiHTTP,
     NodeHTTP,
     NodeHTTP2,
-    Go19HTTP,
-    Go20HTTP,
     Go21HTTP,
+    Go22HTTP,
+    Go23HTTP,
     CurlToKubeApi,
     PythonCloseSocket,
     PythonCloseSocketKeepConnection,
@@ -105,16 +104,16 @@ pub enum FileOps {
     Python,
     #[cfg(target_os = "linux")]
     Rust,
-    GoDir19,
-    GoDir20,
     GoDir21,
+    GoDir22,
+    GoDir23,
 }
 
 #[derive(Debug)]
 pub enum EnvApp {
-    Go19,
-    Go20,
     Go21,
+    Go22,
+    Go23,
     Bash,
     BashInclude,
     BashExclude,
@@ -328,9 +327,9 @@ impl Application {
             Application::NodeHTTP2 => {
                 vec!["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
             }
-            Application::Go19HTTP => vec!["go-e2e/19.go_test_app"],
-            Application::Go20HTTP => vec!["go-e2e/20.go_test_app"],
             Application::Go21HTTP => vec!["go-e2e/21.go_test_app"],
+            Application::Go22HTTP => vec!["go-e2e/22.go_test_app"],
+            Application::Go23HTTP => vec!["go-e2e/23.go_test_app"],
             Application::CurlToKubeApi => {
                 vec!["curl", "https://kubernetes/api", "--insecure"]
             }
@@ -376,9 +375,9 @@ impl FileOps {
             }
             #[cfg(target_os = "linux")]
             FileOps::Rust => vec!["../target/debug/rust-e2e-fileops"],
-            FileOps::GoDir19 => vec!["go-e2e-dir/19.go_test_app"],
-            FileOps::GoDir20 => vec!["go-e2e-dir/20.go_test_app"],
             FileOps::GoDir21 => vec!["go-e2e-dir/21.go_test_app"],
+            FileOps::GoDir22 => vec!["go-e2e-dir/22.go_test_app"],
+            FileOps::GoDir23 => vec!["go-e2e-dir/23.go_test_app"],
         }
     }
 
@@ -393,9 +392,9 @@ impl FileOps {
 impl EnvApp {
     pub fn command(&self) -> Vec<&str> {
         match self {
-            Self::Go19 => vec!["go-e2e-env/19.go_test_app"],
-            Self::Go20 => vec!["go-e2e-env/20.go_test_app"],
             Self::Go21 => vec!["go-e2e-env/21.go_test_app"],
+            Self::Go22 => vec!["go-e2e-env/22.go_test_app"],
+            Self::Go23 => vec!["go-e2e-env/23.go_test_app"],
             Self::Bash => vec!["bash", "bash-e2e/env.sh"],
             Self::BashInclude => vec!["bash", "bash-e2e/env.sh", "include"],
             Self::BashExclude => vec!["bash", "bash-e2e/env.sh", "exclude"],
@@ -414,7 +413,7 @@ impl EnvApp {
         match self {
             Self::BashInclude | Self::NodeInclude => Some(vec!["-s", "MIRRORD_FAKE_VAR_FIRST"]),
             Self::BashExclude | Self::NodeExclude => Some(vec!["-x", "MIRRORD_FAKE_VAR_FIRST"]),
-            Self::Go19 | Self::Go20 | Self::Go21 | Self::Bash => None,
+            Self::Go21 | Self::Go22 | Self::Go23 | Self::Bash => None,
         }
     }
 }

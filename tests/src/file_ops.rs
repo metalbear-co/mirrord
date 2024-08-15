@@ -170,7 +170,7 @@ mod file_ops_tests {
         #[future]
         #[notrace]
         service: KubeService,
-        #[values(FileOps::GoDir19, FileOps::GoDir20, FileOps::GoDir21)] ops: FileOps,
+        #[values(FileOps::GoDir21, FileOps::GoDir22, FileOps::GoDir23)] ops: FileOps,
     ) {
         let service = service.await;
         let command = ops.command();
