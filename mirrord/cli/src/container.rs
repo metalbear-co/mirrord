@@ -162,6 +162,8 @@ pub(crate) async fn container_command(
 ) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord container");
 
+    progress.warning("mirrord container is currently an unstable feature");
+
     for (name, value) in exec_params.as_env_vars()? {
         std::env::set_var(name, value);
     }
