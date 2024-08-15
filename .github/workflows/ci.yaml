@@ -468,7 +468,7 @@ jobs:
       - run: npm install express # For http mirroring test with node.
       - run: cargo build --target=x86_64-apple-darwin -p mirrord-layer # Build layer lib. The tests load it into the apps.
       - name: mirrord layer tests
-        run: cargo test --target=x86_64-apple-darwin -p mirrord-layer --test go_dir
+        run: cargo test --target=x86_64-apple-darwin -p mirrord-layer go_dir
       - name: save intproxy logs
         continue-on-error: true
         if: ${{ always() }}
