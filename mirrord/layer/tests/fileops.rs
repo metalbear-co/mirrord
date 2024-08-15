@@ -347,6 +347,8 @@ async fn go_dir(
     application: Application,
     dylib_path: &Path,
 ) {
+    let expect_xstat = matches!(application, Application::Go21Dir | Application::Go23Dir);
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
@@ -357,6 +359,32 @@ async fn go_dir(
 
     let fd = 1;
     intproxy.expect_file_open_for_reading("/tmp/foo", fd).await;
+
+    if expect_xstat {
+        assert_eq!(
+            intproxy.recv().await,
+            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+                path: None,
+                fd: Some(1),
+                follow_symlink: true
+            }))
+        );
+
+        let metadata = MetadataInternal {
+            device_id: 0,
+            size: 0,
+            user_id: 2,
+            blocks: 3,
+            mode: libc::S_IFDIR as u32,
+            ..Default::default()
+        };
+
+        intproxy
+            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                XstatResponse { metadata },
+            ))))
+            .await;
+    }
 
     assert_eq!(
         intproxy.recv().await,
