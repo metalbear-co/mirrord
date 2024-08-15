@@ -8,6 +8,7 @@ use std::{env, fs};
 use std::{
     env::temp_dir,
     path::{Path, PathBuf},
+    str::FromStr,
     time::Duration,
 };
 
@@ -288,7 +289,6 @@ async fn go_stat(
     dylib_path: &Path,
 ) {
     // add rw override for the specific path
-    use std::str::FromStr;
 
     let path: PathBuf = PathBuf::from_str(&application.get_executable().await).unwrap();
     let intproxy_log = format!(
