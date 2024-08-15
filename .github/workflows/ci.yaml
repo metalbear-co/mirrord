@@ -473,7 +473,7 @@ jobs:
         with:
           # Name of the artifact to upload.
           name: intproxy_logs
-          path: **/intproxy_logs/*
+          path: /**/intproxy_logs/*
 
   e2e:
     runs-on: ubuntu-latest
