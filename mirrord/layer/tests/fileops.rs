@@ -360,10 +360,10 @@ async fn go_dir(
 ) {
     use tracing_subscriber::{layer::SubscriberExt, registry, util::SubscriberInitExt, EnvFilter};
 
-    registry()
+    let _ = registry()
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
         .with(EnvFilter::new("mirrord=trace"))
-        .init();
+        .try_init();
 
     let path: PathBuf = PathBuf::from_str(&application.get_executable().await).unwrap();
     let intproxy_log = format!(
