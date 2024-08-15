@@ -361,7 +361,7 @@ async fn go_dir(
     let mut message = intproxy.recv().await;
     if matches!(message, ClientMessage::FileRequest(FileRequest::Xstat(..))) {
         assert_eq!(
-            intproxy.recv().await,
+            message,
             ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
                 path: None,
                 fd: Some(1),
