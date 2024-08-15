@@ -288,10 +288,18 @@ async fn go_stat(
     dylib_path: &Path,
 ) {
     // add rw override for the specific path
+    use std::str::FromStr;
+
+    let path: PathBuf = PathBuf::from_str(&application.get_executable().await).unwrap();
+    let intproxy_log = path.file_name().unwrap().to_string_lossy();
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
-            vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt")],
+            vec![
+                ("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt"),
+                ("MIRRORD_INTPROXY_LOG_DESTINATION", &intproxy_log),
+            ],
             None,
         )
         .await;
@@ -334,6 +342,7 @@ async fn go_stat(
             XstatResponse { metadata },
         ))))
         .await;
+
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
 }
@@ -347,10 +356,17 @@ async fn go_dir(
     application: Application,
     dylib_path: &Path,
 ) {
+    let path: PathBuf = PathBuf::from_str(&application.get_executable().await).unwrap();
+    let intproxy_log = path.file_name().unwrap().to_string_lossy();
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
-            vec![("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo")],
+            vec![
+                ("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo"),
+                ("MIRRORD_INTPROXY_LOG_LEVEL", "mirrord=trace"),
+                ("MIRRORD_INTPROXY_LOG_DESTINATION", &intproxy_log),
+            ],
             None,
         )
         .await;
@@ -437,12 +453,12 @@ async fn go_dir(
         }))
     );
 
-    intproxy.expect_file_close(fd).await;
-
     assert_eq!(
         intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: dir_fd }))
     );
+
+    intproxy.expect_file_close(fd).await;
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;

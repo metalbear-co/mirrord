@@ -11,6 +11,8 @@ pub static MIRRORD_INTPROXY_CONTAINER_MODE_ENV: &str = "MIRRORD_INTPROXY_CONTAIN
 pub static MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE_ENV: &str =
     "MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE";
 pub static MIRRORD_INTPROXY_CLIENT_TLS_KEY_ENV: &str = "MIRRORD_INTPROXY_CLIENT_TLS_KEY";
+pub static MIRRORD_INTPROXY_LOG_LEVEL: &str = "MIRRORD_INTPROXY_LOG_LEVEL";
+pub static MIRRORD_INTPROXY_LOG_DESTINATION: &str = "MIRRORD_INTPROXY_LOG_DESTINATION";
 
 /// Configuration for the internal proxy mirrord spawns for each local mirrord session
 /// that local layers use to connect to the remote agent
@@ -88,10 +90,12 @@ pub struct InternalProxyConfig {
     /// Set the log level for the internal proxy.
     /// RUST_LOG convention (i.e `mirrord=trace`)
     /// will only be used if log_destination is set
+    #[config(env = MIRRORD_INTPROXY_LOG_LEVEL)]
     pub log_level: Option<String>,
 
     /// ### internal_proxy.log_destination {#internal_proxy-log_destination}
     /// Set the log file destination for the internal proxy.
+    #[config(env = MIRRORD_INTPROXY_LOG_DESTINATION)]
     pub log_destination: Option<String>,
 
     /// <!--${internal}-->
