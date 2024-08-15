@@ -403,23 +403,6 @@ mod traffic_tests {
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn go19_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
-        let command = vec!["go-e2e-outgoing/19.go_test_app"];
-        test_go(service, command).await;
-    }
-
-    #[cfg_attr(not(feature = "job"), ignore)]
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(60))]
-    pub async fn go20_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
-        let command = vec!["go-e2e-outgoing/20.go_test_app"];
-        test_go(service, command).await;
-    }
-
-    #[cfg_attr(not(feature = "job"), ignore)]
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn go21_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
         let command = vec!["go-e2e-outgoing/21.go_test_app"];
         test_go(service, command).await;
@@ -429,17 +412,16 @@ mod traffic_tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(60))]
-    pub async fn go19_dns_lookup(#[future] service: KubeService) {
-        let command = vec!["go-e2e-dns/19.go_test_app"];
+    pub async fn go22_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
+        let command = vec!["go-e2e-outgoing/22.go_test_app"];
         test_go(service, command).await;
     }
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(60))]
-    pub async fn go20_dns_lookup(#[future] service: KubeService) {
-        let command = vec!["go-e2e-dns/20.go_test_app"];
+    pub async fn go23_outgoing_traffic_single_request_enabled(#[future] service: KubeService) {
+        let command = vec!["go-e2e-outgoing/23.go_test_app"];
         test_go(service, command).await;
     }
 
@@ -449,6 +431,24 @@ mod traffic_tests {
     #[timeout(Duration::from_secs(60))]
     pub async fn go21_dns_lookup(#[future] service: KubeService) {
         let command = vec!["go-e2e-dns/21.go_test_app"];
+        test_go(service, command).await;
+    }
+
+    #[cfg_attr(not(feature = "job"), ignore)]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(60))]
+    pub async fn go22_dns_lookup(#[future] service: KubeService) {
+        let command = vec!["go-e2e-dns/22.go_test_app"];
+        test_go(service, command).await;
+    }
+
+    #[cfg_attr(not(feature = "job"), ignore)]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(60))]
+    pub async fn go23_dns_lookup(#[future] service: KubeService) {
+        let command = vec!["go-e2e-dns/23.go_test_app"];
         test_go(service, command).await;
     }
 
