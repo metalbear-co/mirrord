@@ -1,1 +1,0 @@
-Fixed symbol hooks for Go 1.23.

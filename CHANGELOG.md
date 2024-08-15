@@ -8,6 +8,30 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.113.1](https://github.com/metalbear-co/mirrord/tree/3.113.1) - 2024-08-15
+
+
+### Fixed
+
+- Fix small error in shared sockets that resulted in it adding the shared
+  socket env several times.
+  [#864](https://github.com/metalbear-co/mirrord/issues/864)
+- Specify that `mirrord container` is an unstable feature.
+  [#2641](https://github.com/metalbear-co/mirrord/issues/2641)
+- Fix IncomingConfig json schema regression.
+  [#2662](https://github.com/metalbear-co/mirrord/issues/2662)
+- Fix `arm64` version of `mirrord-cli` container image and add github cache for
+  container builds.
+- Fixed symbol hooks for Go 1.23.
+
+
+### Internal
+
+- Updated Go versions used in CI to 1.21, 1.22 and 1.23.
+  [#2660](https://github.com/metalbear-co/mirrord/issues/2660)
+- Some agent code housekeeping, including improved tracing and errors and
+  removal of index allocator.
+
 ## [3.113.0](https://github.com/metalbear-co/mirrord/tree/3.113.0) - 2024-08-14
 
 
