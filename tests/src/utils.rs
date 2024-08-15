@@ -828,7 +828,7 @@ fn stateful_set_from_json(name: &str, image: &str) -> StatefulSet {
     .expect("Failed creating `statefulset` from json spec!")
 }
 
-// #[cfg(feature = "operator")]
+#[cfg(feature = "operator")]
 fn cron_job_from_json(name: &str, image: &str) -> CronJob {
     serde_json::from_value(json!({
         "apiVersion": "apps/v1",
