@@ -28,21 +28,27 @@ impl FileRemapper {
     }
 
     #[tracing::instrument(level = "trace", skip(self), ret)]
+    fn replace_path_str<'p>(&self, mapping_index: usize, path_str: &'p str) -> Cow<'p, str> {
+        let (pattern, value) = self
+            .mapping
+            .get(mapping_index)
+            .expect("RegexSet matches returned an impossible index");
+
+        pattern.replace(path_str, value)
+    }
+
+    // Don't instrument trace this or `change_path` because it spams a lot
     pub fn change_path_str<'p>(&self, path_str: &'p str) -> Cow<'p, str> {
         let matches = self.filter.matches(path_str);
 
         if let Some(index) = matches.iter().next() {
-            let (pattern, value) = self
-                .mapping
-                .get(index)
-                .expect("RegexSet matches returned an impossible index");
-
-            pattern.replace(path_str, value)
+            self.replace_path_str(index, path_str)
         } else {
             Cow::Borrowed(path_str)
         }
     }
 
+    // Don't instrument trace this or `change_path_str` because it spams a lot
     pub fn change_path(&self, path: PathBuf) -> PathBuf {
         let path_str = path.to_str().unwrap_or_default();
 

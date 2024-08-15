@@ -1,7 +1,6 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 #![allow(non_snake_case)]
-#![cfg(not(target_os = "macos"))]
 
 use std::{path::Path, time::Duration};
 
