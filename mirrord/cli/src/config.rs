@@ -25,7 +25,7 @@ pub(super) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(super) enum Commands {
-    /// Create and run a new container from an image with mirrord loaded
+    /// Unstable: Create and run a new container from an image with mirrord loaded
     Container(Box<ContainerArgs>),
 
     /// Execute a binary using mirrord, mirror remote traffic to it, provide it access to remote
