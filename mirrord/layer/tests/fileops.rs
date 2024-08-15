@@ -291,7 +291,7 @@ async fn go_stat(
 ) {
     registry()
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-        .with(EnvFilter::from_default_env())
+        .with(EnvFilter::new("mirrord=trace"))
         .init();
 
     let path: PathBuf = PathBuf::from_str(&application.get_executable().await).unwrap();
@@ -366,7 +366,7 @@ async fn go_dir(
 ) {
     registry()
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-        .with(EnvFilter::from_default_env())
+        .with(EnvFilter::new("mirrord=trace"))
         .init();
 
     let path: PathBuf = PathBuf::from_str(&application.get_executable().await).unwrap();
