@@ -21,7 +21,6 @@ use nix::{
     unistd::Pid,
 };
 use rstest::rstest;
-use tracing_subscriber::{layer::SubscriberExt, registry, util::SubscriberInitExt, EnvFilter};
 
 mod common;
 pub use common::*;
@@ -359,6 +358,8 @@ async fn go_dir(
     application: Application,
     dylib_path: &Path,
 ) {
+    use tracing_subscriber::{layer::SubscriberExt, registry, util::SubscriberInitExt, EnvFilter};
+
     registry()
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
         .with(EnvFilter::new("mirrord=trace"))
