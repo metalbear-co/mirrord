@@ -44,7 +44,7 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
     let encoded = bincode::encode_to_vec(shared_sockets()?, bincode::config::standard())
         .map(|bytes| BASE64_URL_SAFE.encode(bytes))?;
 
-    env_vars.insert(SHARED_SOCKETS_ENV_VAR, &encoded)?;
+    env_vars.insert_env(SHARED_SOCKETS_ENV_VAR, &encoded)?;
 
     Detour::Success(env_vars)
 }

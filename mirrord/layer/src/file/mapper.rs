@@ -37,6 +37,7 @@ impl FileRemapper {
         pattern.replace(path_str, value)
     }
 
+    // Don't instrument trace this or `change_path` because it spams a lot
     pub fn change_path_str<'p>(&self, path_str: &'p str) -> Cow<'p, str> {
         let matches = self.filter.matches(path_str);
 
@@ -47,6 +48,7 @@ impl FileRemapper {
         }
     }
 
+    // Don't instrument trace this or `change_path_str` because it spams a lot
     pub fn change_path(&self, path: PathBuf) -> PathBuf {
         let path_str = path.to_str().unwrap_or_default();
 

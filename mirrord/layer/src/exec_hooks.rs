@@ -33,18 +33,19 @@ impl Argv {
         self.0.push(item);
     }
 
-    pub(crate) fn insert(&mut self, key: &str, value: &str) -> Result<(), std::ffi::NulError> {
-        let Argv(vars) = self;
+    /// Insert or replace env variable.
+    pub(crate) fn insert_env(&mut self, key: &str, value: &str) -> Result<(), std::ffi::NulError> {
+        let Argv(argv) = self;
         let formatted = CString::new(format!("{key}={value}"))?;
 
-        if let Some(value_index) = vars.iter().position(|var| {
+        if let Some(value_index) = argv.iter().position(|var| {
             var.to_str()
                 .map(|str_var| str_var.starts_with(&format!("{key}=")))
                 .unwrap_or_default()
         }) {
-            let var = vars
+            let var = argv
                 .get_mut(value_index)
-                .expect("env_vars should contain the found index");
+                .expect("argv should contain the found index");
 
             if formatted.count_bytes() < var.count_bytes() {
                 tracing::warn!(
@@ -56,7 +57,7 @@ impl Argv {
 
             *var = formatted;
         } else {
-            vars.push(formatted);
+            argv.push(formatted);
         }
 
         Ok(())
