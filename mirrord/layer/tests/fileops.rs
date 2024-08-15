@@ -21,6 +21,7 @@ use nix::{
     unistd::Pid,
 };
 use rstest::rstest;
+use tracing_subscriber::{layer::SubscriberExt, registry, util::SubscriberInitExt, EnvFilter};
 
 mod common;
 pub use common::*;
@@ -288,7 +289,10 @@ async fn go_stat(
     application: Application,
     dylib_path: &Path,
 ) {
-    // add rw override for the specific path
+    registry()
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .with(EnvFilter::from_default_env())
+        .init();
 
     let path: PathBuf = PathBuf::from_str(&application.get_executable().await).unwrap();
     let intproxy_log = format!(
@@ -296,6 +300,7 @@ async fn go_stat(
         path.file_name().unwrap().to_string_lossy()
     );
 
+    // add rw override for the specific path
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
@@ -359,6 +364,11 @@ async fn go_dir(
     application: Application,
     dylib_path: &Path,
 ) {
+    registry()
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .with(EnvFilter::from_default_env())
+        .init();
+
     let path: PathBuf = PathBuf::from_str(&application.get_executable().await).unwrap();
     let intproxy_log = format!(
         "tmp/intproxy_logs/{}",
