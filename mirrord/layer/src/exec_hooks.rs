@@ -32,6 +32,35 @@ impl Argv {
     pub(crate) fn push(&mut self, item: CString) {
         self.0.push(item);
     }
+
+    pub(crate) fn insert(&mut self, key: &str, value: &str) -> Result<(), std::ffi::NulError> {
+        let Argv(vars) = self;
+        let formatted = CString::new(format!("{key}={value}"))?;
+
+        if let Some(value_index) = vars.iter().position(|var| {
+            var.to_str()
+                .map(|str_var| str_var.starts_with(&format!("{key}=")))
+                .unwrap_or_default()
+        }) {
+            let var = vars
+                .get_mut(value_index)
+                .expect("env_vars should contain the found index");
+
+            if formatted.count_bytes() < var.count_bytes() {
+                tracing::warn!(
+                    shared_sockets = ?var,
+                    next_shared_sockets = ?formatted,
+                    "replacing shared sockets with shorter variant"
+                );
+            }
+
+            *var = formatted;
+        } else {
+            vars.push(formatted);
+        }
+
+        Ok(())
+    }
 }
 
 impl FromIterator<CString> for Argv {
