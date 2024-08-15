@@ -289,11 +289,6 @@ async fn go_stat(
     application: Application,
     dylib_path: &Path,
 ) {
-    registry()
-        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-        .with(EnvFilter::new("mirrord=trace"))
-        .init();
-
     let path: PathBuf = PathBuf::from_str(&application.get_executable().await).unwrap();
     let intproxy_log = format!(
         "/tmp/intproxy_logs/{}",
