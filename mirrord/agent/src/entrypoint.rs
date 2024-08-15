@@ -87,8 +87,7 @@ impl State {
                 container_runtime,
                 ..
             } => {
-                let container =
-                    get_container(container_id.clone(), Some(container_runtime)).await?;
+                let container = get_container(container_id.clone(), container_runtime).await?;
 
                 let container_handle = ContainerHandle::new(container).await?;
                 let pid = container_handle.pid().to_string();
@@ -361,7 +360,7 @@ impl ClientConnectionHandler {
                     Ok(message) => self.respond(DaemonMessage::TcpSteal(message)).await?,
                     Err(e) => break e,
                 },
-                message = self.tcp_outgoing_api.daemon_message() => match message {
+                message = self.tcp_outgoing_api.recv_from_task() => match message {
                     Ok(message) => self.respond(DaemonMessage::TcpOutgoing(message)).await?,
                     Err(e) => break e,
                 },
@@ -409,7 +408,7 @@ impl ClientConnectionHandler {
                 }
             }
             ClientMessage::TcpOutgoing(layer_message) => {
-                self.tcp_outgoing_api.layer_message(layer_message).await?
+                self.tcp_outgoing_api.send_to_task(layer_message).await?
             }
             ClientMessage::UdpOutgoing(layer_message) => {
                 self.udp_outgoing_api.layer_message(layer_message).await?
@@ -438,7 +437,7 @@ impl ClientConnectionHandler {
                     sniffer_api.handle_client_message(message).await?
                 } else {
                     warn!("received tcp sniffer request while not available");
-                    Err(AgentError::SnifferApiError)?
+                    Err(AgentError::SnifferNotRunning)?
                 }
             }
             ClientMessage::TcpSteal(message) => {
@@ -446,7 +445,7 @@ impl ClientConnectionHandler {
                     tcp_stealer_api.handle_client_message(message).await?
                 } else {
                     warn!("received tcp steal request while not available");
-                    Err(AgentError::SnifferApiError)?
+                    Err(AgentError::StealerNotRunning)?
                 }
             }
             ClientMessage::Close => {
@@ -610,9 +609,9 @@ async fn start_agent(args: Args) -> Result<()> {
             Err(error)?
         }
 
-        Err(error) => {
+        Err(..) => {
             error!("start_agent -> Failed to accept first connection: timeout");
-            Err(error)?
+            Err(AgentError::FirstConnectionTimeout)?
         }
     }
 

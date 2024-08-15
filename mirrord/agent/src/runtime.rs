@@ -15,13 +15,12 @@ use tokio::net::UnixStream;
 use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
 
-use crate::{
-    env::parse_raw_env,
-    error::{AgentError, Result},
-    runtime::crio::CriOContainer,
-};
+use crate::{env::parse_raw_env, runtime::crio::CriOContainer};
 
 mod crio;
+mod error;
+
+pub(crate) use error::{ContainerRuntimeError, ContainerRuntimeResult};
 
 const CONTAINERD_DEFAULT_SOCK_PATH: &str = "/host/run/containerd/containerd.sock";
 const CONTAINERD_ALTERNATIVE_SOCK_PATH: &str = "/host/run/dockershim.sock";
@@ -57,7 +56,7 @@ impl ContainerInfo {
 #[enum_dispatch]
 pub(crate) trait ContainerRuntime {
     /// Get information about the container (pid, env).
-    async fn get_info(&self) -> Result<ContainerInfo>;
+    async fn get_info(&self) -> ContainerRuntimeResult<ContainerInfo>;
 }
 
 #[enum_dispatch(ContainerRuntime)]
@@ -72,17 +71,15 @@ pub(crate) enum Container {
 /// get a container object according to args.
 pub(crate) async fn get_container(
     container_id: String,
-    container_runtime: Option<&str>,
-) -> Result<Container> {
+    container_runtime: &str,
+) -> ContainerRuntimeResult<Container> {
     match container_runtime {
-        Some("docker") => Ok(Container::Docker(
+        "docker" => Ok(Container::Docker(
             DockerContainer::from_id(container_id).await?,
         )),
-        Some("containerd") => Ok(Container::Containerd(ContainerdContainer { container_id })),
-        Some("cri-o") => Ok(Container::CriO(CriOContainer::from_id(container_id))),
-        _ => Err(AgentError::NotFound(format!(
-            "Unknown runtime {container_runtime:?}"
-        ))),
+        "containerd" => Ok(Container::Containerd(ContainerdContainer { container_id })),
+        "cri-o" => Ok(Container::CriO(CriOContainer::from_id(container_id))),
+        other => Err(ContainerRuntimeError::unknown_runtime(other)),
     }
 }
 
@@ -93,7 +90,7 @@ pub(crate) struct DockerContainer {
 }
 
 impl DockerContainer {
-    async fn from_id(container_id: String) -> Result<Self> {
+    async fn from_id(container_id: String) -> ContainerRuntimeResult<Self> {
         let client = match Docker::connect_with_unix(
             "unix:///host/run/docker.sock",
             10,
@@ -104,7 +101,8 @@ impl DockerContainer {
                 "unix:///host/var/run/docker.sock",
                 10,
                 API_DEFAULT_VERSION,
-            )?,
+            )
+            .map_err(ContainerRuntimeError::docker)?,
         };
 
         Ok(DockerContainer {
@@ -115,23 +113,28 @@ impl DockerContainer {
 }
 
 impl ContainerRuntime for DockerContainer {
-    async fn get_info(&self) -> Result<ContainerInfo> {
+    async fn get_info(&self) -> ContainerRuntimeResult<ContainerInfo> {
         let inspect_options = Some(InspectContainerOptions { size: false });
         let inspect_response = self
             .client
             .inspect_container(&self.container_id, inspect_options)
-            .await?;
+            .await
+            .map_err(ContainerRuntimeError::docker)?;
 
         let pid = inspect_response
             .state
             .and_then(|state| state.pid)
             .and_then(|pid| if pid > 0 { Some(pid as u64) } else { None })
-            .ok_or_else(|| AgentError::NotFound("No pid found!".to_string()))?;
+            .ok_or_else(|| {
+                ContainerRuntimeError::docker("pid not found in the runtime response")
+            })?;
 
         let raw_env = inspect_response
             .config
             .and_then(|config| config.env)
-            .ok_or_else(|| AgentError::NotFound("No env found!".to_string()))?;
+            .ok_or_else(|| {
+                ContainerRuntimeError::docker("env not found in the runtime response")
+            })?;
         let env_vars = parse_raw_env(&raw_env);
 
         Ok(ContainerInfo::new(pid, env_vars))
@@ -143,13 +146,14 @@ pub(crate) struct ContainerdContainer {
     container_id: String,
 }
 
-async fn connect(path: impl AsRef<std::path::Path>) -> Result<Channel> {
+async fn connect(path: impl AsRef<std::path::Path>) -> ContainerRuntimeResult<Channel> {
     let path = path.as_ref().to_path_buf();
 
-    Endpoint::try_from("http://localhost")?
+    Endpoint::try_from("http://localhost")
+        .map_err(ContainerRuntimeError::containerd)?
         .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(path.clone())))
         .await
-        .map_err(AgentError::from)
+        .map_err(ContainerRuntimeError::containerd)
 }
 
 /// Connects to the given containerd socket
@@ -158,7 +162,7 @@ async fn connect(path: impl AsRef<std::path::Path>) -> Result<Channel> {
 async fn connect_and_find_container(
     container_id: String,
     sock_path: impl AsRef<std::path::Path>,
-) -> Result<Channel> {
+) -> ContainerRuntimeResult<Channel> {
     let channel = connect(sock_path).await?;
     let mut client = TasksClient::new(channel.clone());
     let request = GetRequest {
@@ -166,7 +170,10 @@ async fn connect_and_find_container(
         ..Default::default()
     };
     let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
-    client.get(request).await?;
+    client
+        .get(request)
+        .await
+        .map_err(ContainerRuntimeError::containerd)?;
     Ok(channel)
 }
 
@@ -179,7 +186,7 @@ impl ContainerdContainer {
     /// This is useful since we might have more than one
     /// containerd socket to use and we need to find the one
     /// that manages our target container
-    async fn get_channel(&self) -> Result<Channel> {
+    async fn get_channel(&self) -> ContainerRuntimeResult<Channel> {
         for sock_path in CONTAINERD_SOCK_PATHS {
             if let Ok(channel) =
                 connect_and_find_container(self.container_id.clone(), sock_path).await
@@ -187,22 +194,26 @@ impl ContainerdContainer {
                 return Ok(channel);
             }
         }
-        Err(AgentError::ContainerdSocketNotFound)
+        Err(ContainerRuntimeError::containerd(
+            r#"Couldn't find containerd socket to use, please open a bug report
+            providing information on how you installed k8s and if you know where
+            the containerd socket is"#,
+        ))
     }
 
-    async fn get_task_client(&self) -> Result<TasksClient<Channel>> {
+    async fn get_task_client(&self) -> ContainerRuntimeResult<TasksClient<Channel>> {
         let channel = self.get_channel().await?;
         Ok(TasksClient::new(channel))
     }
 
-    async fn get_container_client(&self) -> Result<ContainersClient<Channel>> {
+    async fn get_container_client(&self) -> ContainerRuntimeResult<ContainersClient<Channel>> {
         let channel = self.get_channel().await?;
         Ok(ContainersClient::new(channel))
     }
 }
 
 impl ContainerRuntime for ContainerdContainer {
-    async fn get_info(&self) -> Result<ContainerInfo> {
+    async fn get_info(&self) -> ContainerRuntimeResult<ContainerInfo> {
         let mut client = self.get_task_client().await?;
         let container_id = self.container_id.to_string();
         let request = GetRequest {
@@ -212,10 +223,15 @@ impl ContainerRuntime for ContainerdContainer {
         let request = with_namespace!(request, DEFAULT_CONTAINERD_NAMESPACE);
         let pid = client
             .get(request)
-            .await?
+            .await
+            .map_err(ContainerRuntimeError::containerd)?
             .into_inner()
             .process
-            .ok_or_else(|| AgentError::NotFound("No pid found!".to_string()))?
+            .ok_or_else(|| {
+                ContainerRuntimeError::containerd(
+                    "process description not found in runtime response",
+                )
+            })?
             .pid;
 
         let mut client = self.get_container_client().await?;
@@ -226,15 +242,21 @@ impl ContainerRuntime for ContainerdContainer {
 
         let spec: Spec = client
             .get(request)
-            .await?
+            .await
+            .map_err(ContainerRuntimeError::containerd)?
             .into_inner()
             .container
             .and_then(|c| c.spec)
-            .ok_or_else(|| AgentError::NotFound("Spec wasn't found".to_string()))
-            .map(|s| serde_json::from_slice(&s.value))??;
+            .ok_or_else(|| {
+                ContainerRuntimeError::containerd("container spec not found in runtime response")
+            })
+            .and_then(|s| {
+                serde_json::from_slice(&s.value).map_err(ContainerRuntimeError::containerd)
+            })?;
 
-        let env_vars = extract_env_from_containerd_spec(&spec)
-            .ok_or_else(|| AgentError::NotFound("No env vars found!".to_string()))?;
+        let env_vars = extract_env_from_containerd_spec(&spec).ok_or_else(|| {
+            ContainerRuntimeError::containerd("env not found in container runtime response")
+        })?;
 
         Ok(ContainerInfo::new(pid as u64, env_vars))
     }
@@ -246,7 +268,7 @@ pub(crate) struct EphemeralContainer;
 impl ContainerRuntime for EphemeralContainer {
     /// When running on ephemeral, root pid is always 1 and env is the current process' env. (we
     /// copy it from the k8s spec)
-    async fn get_info(&self) -> Result<ContainerInfo> {
+    async fn get_info(&self) -> ContainerRuntimeResult<ContainerInfo> {
         Ok(ContainerInfo::new(1, std::env::vars().collect()))
     }
 }

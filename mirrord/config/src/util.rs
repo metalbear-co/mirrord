@@ -14,7 +14,7 @@ pub trait MirrordToggleableConfig: MirrordConfig + Default {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, JsonSchema)]
-#[serde(untagged, deny_unknown_fields)]
+#[schemars(untagged, deny_unknown_fields)]
 pub enum ToggleableConfig<T> {
     Enabled(bool),
     Config(T),
