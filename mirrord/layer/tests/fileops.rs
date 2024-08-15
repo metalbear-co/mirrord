@@ -292,7 +292,7 @@ async fn go_stat(
 
     let path: PathBuf = PathBuf::from_str(&application.get_executable().await).unwrap();
     let intproxy_log = format!(
-        "intproxy_logs/{}",
+        "/tmp/intproxy_logs/{}",
         path.file_name().unwrap().to_string_lossy()
     );
 
@@ -361,7 +361,7 @@ async fn go_dir(
 ) {
     let path: PathBuf = PathBuf::from_str(&application.get_executable().await).unwrap();
     let intproxy_log = format!(
-        "intproxy_logs/{}",
+        "tmp/intproxy_logs/{}",
         path.file_name().unwrap().to_string_lossy()
     );
 
