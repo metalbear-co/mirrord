@@ -828,6 +828,64 @@ fn stateful_set_from_json(name: &str, image: &str) -> StatefulSet {
     .expect("Failed creating `statefulset` from json spec!")
 }
 
+// #[cfg(feature = "operator")]
+fn cron_job_from_json(name: &str, image: &str) -> CronJob {
+    serde_json::from_value(json!({
+        "apiVersion": "apps/v1",
+        "kind": "CronJob",
+        "metadata": {
+            "name": name,
+            "labels": {
+                "app": name,
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                "test-label-for-statefulsets": format!("statefulset-{name}")
+            }
+        },
+        "spec": {
+            "schedule": "* * * * *",
+            "concurrencyPolicy": "Forbid",
+            "jobTemplate": {
+                "metadata": {
+                    "labels": {
+                        "app": &name,
+                        "test-label-for-pods": format!("pod-{name}"),
+                        format!("test-label-for-pods-{name}"): &name
+                    }
+                },
+                "spec": {
+                    "restartPolicy": "OnFailure",
+                    "containers": [
+                        {
+                            "name": &CONTAINER_NAME,
+                            "image": image,
+                            "ports": [
+                                {
+                                    "containerPort": 80
+                                }
+                            ],
+                            "env": [
+                                {
+                                  "name": "MIRRORD_FAKE_VAR_FIRST",
+                                  "value": "mirrord.is.running"
+                                },
+                                {
+                                  "name": "MIRRORD_FAKE_VAR_SECOND",
+                                  "value": "7777"
+                                },
+                                {
+                                    "name": "MIRRORD_FAKE_VAR_THIRD",
+                                    "value": "foo=bar"
+                                }
+                            ],
+                        }
+                    ]
+                }
+                        }
+        }
+    }))
+    .expect("Failed creating `statefulset` from json spec!")
+}
+
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
 /// This behavior can be changed, see `FORCE_CLEANUP_ENV_NAME`.
@@ -1056,8 +1114,9 @@ pub async fn service_for_mirrord_ls(
     }
 }
 
+#[cfg(feature = "operator")]
 #[fixture]
-pub async fn service_for_mirrord_ls_operator(
+pub async fn service_for_mirrord_ls(
     #[default("default")] namespace: &str,
     #[default("NodePort")] service_type: &str,
     #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
@@ -1161,16 +1220,16 @@ pub async fn service_for_mirrord_ls_operator(
     watch_resource_exists(&stateful_set_api, &name).await;
 
     // // `CronJob`
-    // let cron_job = cron_job_from_json(&name, image);
-    // let pod_guard = ResourceGuard::create(
-    //     cron_job_api.clone(),
-    //     name.to_string(),
-    //     &cron_job,
-    //     delete_after_fail,
-    // )
-    // .await
-    // .unwrap();
-    // watch_resource_exists(&cron_job_api, &name).await;
+    let cron_job = cron_job_from_json(&name, image);
+    let pod_guard = ResourceGuard::create(
+        cron_job_api.clone(),
+        name.to_string(),
+        &cron_job,
+        delete_after_fail,
+    )
+    .await
+    .unwrap();
+    watch_resource_exists(&cron_job_api, &name).await;
 
     // // `Job`
     // let job = job_from_json(&name, image);
