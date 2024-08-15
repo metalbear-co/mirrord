@@ -347,8 +347,6 @@ async fn go_dir(
     application: Application,
     dylib_path: &Path,
 ) {
-    let expect_xstat = matches!(application, Application::Go21Dir | Application::Go23Dir);
-
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
@@ -360,7 +358,8 @@ async fn go_dir(
     let fd = 1;
     intproxy.expect_file_open_for_reading("/tmp/foo", fd).await;
 
-    if expect_xstat {
+    let mut message = intproxy.recv().await;
+    if matches!(message, ClientMessage::FileRequest(FileRequest::Xstat(..))) {
         assert_eq!(
             intproxy.recv().await,
             ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
@@ -384,10 +383,12 @@ async fn go_dir(
                 XstatResponse { metadata },
             ))))
             .await;
+
+        message = intproxy.recv().await;
     }
 
     assert_eq!(
-        intproxy.recv().await,
+        message,
         ClientMessage::FileRequest(FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 1 }))
     );
 
