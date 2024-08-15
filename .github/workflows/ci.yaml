@@ -288,28 +288,28 @@ jobs:
       # don't use "cache" for other Gos since it will try to overwrite and have bad results.
       - uses: actions/setup-go@v4
         with:
-          go-version: "1.19"
+          go-version: "1.21"
           cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           go version
       - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 19
-      - uses: actions/setup-go@v4
-        with:
-          go-version: "1.20"
-          cache: false
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 20
-      - uses: actions/setup-go@v4
-        with:
-          go-version: "1.21"
-          cache: false
-      - run: |
-          go version
-      - run: | # Build Go test apps.
           ./scripts/build_go_apps.sh 21
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "1.22"
+          cache: false
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 22
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "1.23"
+          cache: false
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 23
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
@@ -400,29 +400,29 @@ jobs:
           rustc issue2058.rs --out-dir target
       - uses: actions/setup-go@v4
         with:
-          go-version: "1.19"
+          go-version: "1.21"
           cache-dependency-path: tests/go-e2e/go.sum
       - run: |
           go version
       # don't use "cache" for other Gos since it will try to overwrite and have bad results.
       - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 19
-      - uses: actions/setup-go@v4
-        with:
-          go-version: "1.20"
-          cache: false
-      - run: |
-          go version
-      - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 20
-      - uses: actions/setup-go@v4
-        with:
-          go-version: "1.21"
-          cache: false
-      - run: |
-          go version
-      - run: | # Build Go test apps.
           ./scripts/build_go_apps.sh 21
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "1.22"
+          cache: false
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 22
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "1.23"
+          cache: false
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 23
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
@@ -483,7 +483,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install Rust.
-      - uses: metalbear-co/ci/e2e-setup-action@main
+      - uses: metalbear-co/ci/e2e-setup-action@update-go-in-e2e
         with:
           container-runtime: ${{matrix.container-runtime}}
       - name: download image

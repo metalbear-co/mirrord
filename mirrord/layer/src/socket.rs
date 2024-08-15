@@ -56,12 +56,23 @@ pub(crate) const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
 pub(crate) static SOCKETS: LazyLock<Mutex<HashMap<RawFd, Arc<UserSocket>>>> = LazyLock::new(|| {
     std::env::var(SHARED_SOCKETS_ENV_VAR)
         .ok()
-        .and_then(|encoded| BASE64_URL_SAFE.decode(encoded.into_bytes()).ok())
+        .and_then(|encoded| {
+            BASE64_URL_SAFE
+                .decode(encoded.into_bytes())
+                .inspect_err(|error| {
+                    tracing::warn!(
+                        ?error,
+                        "failed decoding base64 value from {SHARED_SOCKETS_ENV_VAR}"
+                    )
+                })
+                .ok()
+        })
         .and_then(|decoded| {
             bincode::decode_from_slice::<Vec<(i32, UserSocket)>, _>(
                 &decoded,
                 bincode::config::standard(),
             )
+            .inspect_err(|error| tracing::warn!(?error, "failed parsing shared sockets env value"))
             .ok()
         })
         .map(|(fds_and_sockets, _)| {
