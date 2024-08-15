@@ -291,7 +291,10 @@ async fn go_stat(
     use std::str::FromStr;
 
     let path: PathBuf = PathBuf::from_str(&application.get_executable().await).unwrap();
-    let intproxy_log = path.file_name().unwrap().to_string_lossy();
+    let intproxy_log = format!(
+        "intproxy_logs/{}",
+        path.file_name().unwrap().to_string_lossy()
+    );
 
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
@@ -357,7 +360,10 @@ async fn go_dir(
     dylib_path: &Path,
 ) {
     let path: PathBuf = PathBuf::from_str(&application.get_executable().await).unwrap();
-    let intproxy_log = path.file_name().unwrap().to_string_lossy();
+    let intproxy_log = format!(
+        "intproxy_logs/{}",
+        path.file_name().unwrap().to_string_lossy()
+    );
 
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
