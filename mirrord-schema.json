@@ -882,6 +882,18 @@
               "type": "null"
             }
           ]
+        },
+        "split_queues": {
+          "title": "feature.split_queues {#feature-split_queues}",
+          "description": "Define filters to split queues by, and make your local application consume only messages that match those filters. If you don't specify any filter for a queue that is however declared in the `MirrordWorkloadQueueRegistry` of the target you're using, a match-nothing filter will be used, and your local application will not receive any messages from that queue.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SplitQueuesConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -1431,6 +1443,33 @@
         }
       ]
     },
+    "QueueFilter": {
+      "description": "More queue types might be added in the future.",
+      "oneOf": [
+        {
+          "description": "Amazon Simple Queue Service.",
+          "type": "object",
+          "required": [
+            "message_filter",
+            "queue_type"
+          ],
+          "properties": {
+            "message_filter": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "enum": [
+                "SQS"
+              ]
+            }
+          }
+        }
+      ]
+    },
     "RolloutTarget": {
       "description": "<!--${internal}--> Mirror the rollout specified by [`RolloutTarget::rollout`].",
       "type": "object",
@@ -1450,6 +1489,16 @@
         }
       },
       "additionalProperties": false
+    },
+    "SplitQueuesConfig": {
+      "description": "```json { \"feature\": { \"split_queues\": { \"first-queue\": { \"queue_type\": \"SQS\", \"message_filter\": { \"wows\": \"so wows\", \"coolz\": \"^very .*\" } }, \"second-queue\": { \"queue_type\": \"SQS\", \"message_filter\": { \"who\": \"*you$\" } }, } } } ```",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/QueueFilter"
+      }
     },
     "StatefulSetTarget": {
       "type": "object",
