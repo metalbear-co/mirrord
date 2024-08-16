@@ -384,7 +384,7 @@ IP:PORT to connect to instead of using k8s api, for testing purposes.
 
 ## container {#root-container}
 
-`mirrord container` command specific config.
+Unstable: `mirrord container` command specific config.
 
 ### container.cli_image {#container-cli_image}
 

@@ -266,7 +266,7 @@ pub struct LayerConfig {
     pub agent: AgentConfig,
 
     /// ## container {#root-container}
-    #[config(nested)]
+    #[config(nested, unstable)]
     pub container: ContainerConfig,
 
     /// ## feature {#root-feature}

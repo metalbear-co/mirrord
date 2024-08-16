@@ -29,9 +29,9 @@ mod http_tests {
         kube_client: Client,
         #[values(
             Application::NodeHTTP,
-            Application::Go19HTTP,
-            Application::Go20HTTP,
             Application::Go21HTTP,
+            Application::Go22HTTP,
+            Application::Go23HTTP,
             Application::PythonFlaskHTTP,
             Application::PythonFastApiHTTP
         )]

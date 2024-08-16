@@ -527,7 +527,7 @@
       ]
     },
     "ContainerFileConfig": {
-      "description": "`mirrord container` command specific config.",
+      "description": "Unstable: `mirrord container` command specific config.",
       "type": "object",
       "properties": {
         "cli_image": {

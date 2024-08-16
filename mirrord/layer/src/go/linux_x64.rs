@@ -506,11 +506,20 @@ fn pre_go1_19(hook_manager: &mut HookManager) {
     hook_symbol!(hook_manager, "syscall.Syscall.abi0", go_syscall_detour);
 }
 
-/// Hooks for when hooking a post go 1.19 binary
+/// Hooks for when hooking a go binary between 1.19 and 1.23
 fn post_go1_19(hook_manager: &mut HookManager) {
     hook_symbol!(
         hook_manager,
         "runtime/internal/syscall.Syscall6",
+        go_syscall_new_detour
+    );
+}
+
+/// Hooks for when hooking a post go 1.23 binary
+fn post_go1_23(hook_manager: &mut HookManager) {
+    hook_symbol!(
+        hook_manager,
+        "internal/runtime/syscall.Syscall6",
         go_syscall_new_detour
     );
 }
@@ -532,7 +541,10 @@ pub(crate) fn enable_hooks(hook_manager: &mut HookManager) {
             ))
         };
         let version_parsed: f32 = version.parse().unwrap();
-        if version_parsed >= 1.19 {
+        if version_parsed >= 1.23 {
+            trace!("found version >= 1.23");
+            post_go1_23(hook_manager);
+        } else if version_parsed >= 1.19 {
             trace!("found version >= 1.19");
             post_go1_19(hook_manager);
         } else {
