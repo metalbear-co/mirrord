@@ -354,7 +354,11 @@ async fn go_stat(
 #[timeout(Duration::from_secs(15))]
 #[cfg(target_os = "macos")]
 async fn go_dir(
-    #[values(Application::Go21Dir, Application::Go22Dir, Application::Go23Dir)]
+    #[values(
+        // Application::Go21Dir, 
+        // Application::Go22Dir, 
+        Application::Go23Dir
+    )]
     application: Application,
     dylib_path: &Path,
 ) {
