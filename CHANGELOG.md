@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.114.0](https://github.com/metalbear-co/mirrord/tree/3.114.0) - 2024-08-16
+
+
+### Added
+
+- Add port forwarding feature which can be used to proxy data from a local port
+  to a remote one -
+  if the local port is not specified, it will default to the same as the remote
+  ```
+  mirrord port-forward [options] -L [local_port:]remote_ip:remote_port
+  ```
+  [#567](https://github.com/metalbear-co/mirrord/issues/567)
+- Client side support for the upcoming SQS queue splitting support in *mirrord
+  for Teams*. [#2066](https://github.com/metalbear-co/mirrord/issues/2066)
+
 ## [3.113.1](https://github.com/metalbear-co/mirrord/tree/3.113.1) - 2024-08-15
 
 

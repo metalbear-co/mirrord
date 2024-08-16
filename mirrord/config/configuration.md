@@ -1196,6 +1196,36 @@ of regexes specified here. If there is a match, mirrord will connect your applic
 the target unix socket address on the target pod. Otherwise, it will leave the connection
 to happen locally on your machine.
 
+## feature.split_queues {#feature-split_queues}
+
+Define filters to split queues by, and make your local application consume only messages
+that match those filters.
+If you don't specify any filter for a queue that is however declared in the
+`MirrordWorkloadQueueRegistry` of the target you're using, a match-nothing filter
+will be used, and your local application will not receive any messages from that queue.
+
+```json
+{
+  "feature": {
+    "split_queues": {
+      "first-queue": {
+        "queue_type": "SQS",
+        "message_filter": {
+          "wows": "so wows",
+          "coolz": "^very .*"
+        }
+      },
+      "second-queue": {
+        "queue_type": "SQS",
+        "message_filter": {
+          "who": "*you$"
+        }
+      },
+    }
+  }
+}
+```
+
 ## internal_proxy {#root-internal_proxy}
 
 Configuration for the internal proxy mirrord spawns for each local mirrord session
