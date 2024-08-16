@@ -15,6 +15,12 @@ use chrono::{Timelike, Utc};
 use fancy_regex::Regex;
 use futures::FutureExt;
 use futures_util::{future::BoxFuture, stream::TryStreamExt};
+#[cfg(not(feature = "operator"))]
+use k8s_openapi::api::{
+    apps::v1::Deployment,
+    core::v1::{Namespace, Pod, Service},
+};
+#[cfg(feature = "operator")]
 use k8s_openapi::api::{
     apps::v1::{Deployment, StatefulSet},
     batch::v1::{CronJob, Job},
