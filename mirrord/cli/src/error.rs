@@ -10,6 +10,8 @@ use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOpera
 use reqwest::StatusCode;
 use thiserror::Error;
 
+use crate::port_forward::PortForwardError;
+
 pub(crate) type Result<T, E = CliError> = core::result::Result<T, E>;
 
 const GENERAL_HELP: &str = r#"
@@ -327,6 +329,10 @@ pub(crate) enum CliError {
     #[error("mirrord returned a target resource of unknown type: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     OperatorReturnedUnknownTargetType(String),
+
+    #[error("An error occurred in the port-forwarding process: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    PortForwardingError(#[from] PortForwardError),
 }
 
 impl From<OperatorApiError> for CliError {
@@ -336,7 +342,7 @@ impl From<OperatorApiError> for CliError {
                 feature,
                 operator_version,
             } => Self::FeatureNotSupportedInOperatorError {
-                feature,
+                feature: feature.to_string(),
                 operator_version,
             },
             OperatorApiError::CreateKubeClient(e) => Self::CreateKubeApiFailed(e),

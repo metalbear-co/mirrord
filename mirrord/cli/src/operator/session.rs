@@ -6,7 +6,7 @@ use mirrord_operator::{
         error::{OperatorApiError, OperatorOperation},
         MaybeClientCert, OperatorApi,
     },
-    crd::SessionCrd,
+    crd::{NewOperatorFeature, SessionCrd},
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use tracing::Level;
@@ -99,7 +99,7 @@ impl SessionCommandHandler {
                 if code == 404 && reason.contains("parse") =>
             {
                 OperatorApiError::UnsupportedFeature {
-                    feature: "session management".to_string(),
+                    feature: NewOperatorFeature::SessionManagement,
                     operator_version: operator_api.operator().spec.operator_version.clone(),
                 }
             }
@@ -135,16 +135,16 @@ impl SessionCommandHandler {
                 )));
                 progress.success(Some("Session operation is completed."));
 
-                Ok(())
-            }
-        })
-        .transpose()?
-        // We might've gotten a `SessionCrd` instead of a `Status` (we have a `Left(T)`),
-        // meaning that the operation has started, but it might not be finished yet.
-        .unwrap_or_else(|| {
-            sub_progress.success(Some(&format!("No issues found when executing `{command}`, but the operation status could not be determined at this time.")));
-            progress.success(Some(&format!("`{command}` is done, but the operation might be pending.")));
-        });
+                    Ok(())
+                }
+            })
+            .transpose()?
+            // We might've gotten a `SessionCrd` instead of a `Status` (we have a `Left(T)`),
+            // meaning that the operation has started, but it might not be finished yet.
+            .unwrap_or_else(|| {
+                sub_progress.success(Some(&format!("No issues found when executing `{command}`, but the operation status could not be determined at this time.")));
+                progress.success(Some(&format!("`{command}` is done, but the operation might be pending.")));
+            });
 
         Ok(())
     }
