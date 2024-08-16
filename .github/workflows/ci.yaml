@@ -483,7 +483,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install Rust.
-      - uses: metalbear-co/ci/e2e-setup-action@update-go-in-e2e
+      - uses: metalbear-co/ci/e2e-setup-action@main
         with:
           container-runtime: ${{matrix.container-runtime}}
       - name: download image
