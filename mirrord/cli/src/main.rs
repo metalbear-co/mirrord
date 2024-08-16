@@ -8,6 +8,7 @@ use std::time::Duration;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
+use connection::create_and_connect;
 use container::container_command;
 use diagnose::diagnose_command;
 use exec::execvp;
@@ -18,7 +19,7 @@ use kube::Client;
 use kube_resource::KubeResourceSeeker;
 use miette::JSONReportHandler;
 use mirrord_analytics::{
-    AnalyticsError, AnalyticsReporter, CollectAnalytics, NullReporter, Reporter,
+    AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, NullReporter, Reporter,
 };
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
@@ -36,6 +37,7 @@ use mirrord_kube::api::{container::SKIP_NAMES, kubernetes::create_kube_config};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
 use operator::operator_command;
+use port_forward::PortForwarder;
 use semver::Version;
 use serde_json::json;
 use tracing::{error, info, warn};
@@ -54,6 +56,7 @@ mod extract;
 mod internal_proxy;
 mod kube_resource;
 mod operator;
+pub mod port_forward;
 mod teams;
 mod util;
 mod verify_config;
@@ -454,6 +457,77 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     Ok(())
 }
 
+async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()> {
+    let mut progress = ProgressTracker::from_env("mirrord port-forward");
+    progress.warning("Port forwarding is currently an unstable feature and subject to change. See https://github.com/metalbear-co/mirrord/issues/2640 for more info.");
+    if !args.disable_version_check {
+        prompt_outdated_version(&progress).await;
+    }
+
+    for (name, value) in args.target.as_env_vars()? {
+        std::env::set_var(name, value);
+    }
+
+    if args.no_telemetry {
+        std::env::set_var("MIRRORD_TELEMETRY", "false");
+    }
+
+    if let Some(namespace) = &args.agent_namespace {
+        std::env::set_var("MIRRORD_AGENT_NAMESPACE", namespace.clone());
+    }
+
+    if let Some(log_level) = &args.agent_log_level {
+        std::env::set_var("MIRRORD_AGENT_RUST_LOG", log_level.clone());
+    }
+
+    if let Some(image) = &args.agent_image {
+        std::env::set_var("MIRRORD_AGENT_IMAGE", image.clone());
+    }
+
+    if let Some(agent_ttl) = &args.agent_ttl {
+        std::env::set_var("MIRRORD_AGENT_TTL", agent_ttl.to_string());
+    }
+    if let Some(agent_startup_timeout) = &args.agent_startup_timeout {
+        std::env::set_var(
+            "MIRRORD_AGENT_STARTUP_TIMEOUT",
+            agent_startup_timeout.to_string(),
+        );
+    }
+
+    if args.accept_invalid_certificates {
+        std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
+        warn!("Accepting invalid certificates");
+    }
+
+    if args.ephemeral_container {
+        std::env::set_var("MIRRORD_EPHEMERAL_CONTAINER", "true");
+    };
+
+    if let Some(context) = &args.context {
+        std::env::set_var("MIRRORD_KUBE_CONTEXT", context);
+    }
+
+    if let Some(config_file) = &args.config_file {
+        std::env::set_var("MIRRORD_CONFIG_FILE", config_file);
+    }
+
+    let (config, mut context) = LayerConfig::from_env_with_warnings()?;
+
+    let mut analytics = AnalyticsReporter::new(config.telemetry, ExecutionKind::PortForward, watch);
+    (&config).collect_analytics(analytics.get_mut());
+
+    config.verify(&mut context)?;
+    for warning in context.get_warnings() {
+        progress.warning(warning);
+    }
+
+    let (_connection_info, connection) =
+        create_and_connect(&config, &mut progress, &mut analytics).await?;
+    let mut port_forward = PortForwarder::new(connection, args.port_mappings.clone()).await?;
+    port_forward.run().await?;
+    Ok(())
+}
+
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> miette::Result<()> {
@@ -506,6 +580,7 @@ fn main() -> miette::Result<()> {
                 container_command(runtime_args, exec_params, watch).await?
             }
             Commands::ExternalProxy => external_proxy::proxy(watch).await?,
+            Commands::PortForward(args) => port_forward(&args, watch).await?,
         };
 
         Ok(())
