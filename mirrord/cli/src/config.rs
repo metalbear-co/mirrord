@@ -339,7 +339,10 @@ pub(super) enum OperatorCommand {
 
         /// AWS role ARN for the operator's service account.
         /// Necessary for enabling SQS queue splitting.
-        /// For successfully running an SQS queue splitting operator the given IAM role must
+        /// For successfully running an SQS queue splitting operator the given IAM role must be
+        /// able to create, read from, write to, and delete SQS queues.
+        /// If the queue messages are encrypted using KMS, the operator also needs the
+        /// `kms:Encrypt`, `kms:Decrypt` and `kms:GenerateDataKey` permissions.
         #[arg(long, visible_alias = "arn")]
         aws_role_arn: Option<String>,
 
