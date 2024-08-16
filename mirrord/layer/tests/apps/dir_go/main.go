@@ -14,8 +14,6 @@ func main() {
 		fmt.Printf("Reading dir error: %s\n", err)
 		os.Exit(-1)
 	}
-	defer dir.Close()
-
 	fmt.Printf("DirEntries: %s\n", dir)
 	if len(dir) != 2 {
 		os.Exit(-1)
