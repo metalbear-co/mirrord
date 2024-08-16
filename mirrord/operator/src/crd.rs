@@ -377,7 +377,6 @@ pub enum SplitQueue {
 
 /// A workload that is a consumer of a queue that is being split.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(tag = "type")]
 pub struct QueueConsumer {
     pub name: String,
     /// If a container is not specified, the workload queue registry will apply to every run that
