@@ -59,6 +59,8 @@ async fn operator_setup(
     namespace: OperatorNamespace,
     license_key: Option<String>,
     license_path: Option<PathBuf>,
+    aws_role_arn: Option<String>,
+    sqs_splitting: bool,
 ) -> Result<(), OperatorSetupError> {
     if !accept_tos {
         eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
@@ -101,6 +103,8 @@ async fn operator_setup(
             license,
             namespace,
             image,
+            aws_role_arn,
+            sqs_splitting,
         });
 
         match file {
@@ -299,9 +303,19 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             namespace,
             license_key,
             license_path,
-        } => operator_setup(accept_tos, file, namespace, license_key, license_path)
-            .await
-            .map_err(CliError::from),
+            aws_role_arn,
+            sqs_splitting,
+        } => operator_setup(
+            accept_tos,
+            file,
+            namespace,
+            license_key,
+            license_path,
+            aws_role_arn,
+            sqs_splitting,
+        )
+        .await
+        .map_err(CliError::from),
         OperatorCommand::Status { config_file } => operator_status(config_file.as_deref()).await,
         OperatorCommand::Session(session_command) => {
             SessionCommandHandler::new(session_command)

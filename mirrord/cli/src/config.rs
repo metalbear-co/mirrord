@@ -336,6 +336,23 @@ pub(super) enum OperatorCommand {
         /// will be able to access)
         #[arg(short, long, default_value = "mirrord")]
         namespace: OperatorNamespace,
+
+        /// AWS role ARN for the operator's service account.
+        /// Necessary for enabling SQS queue splitting.
+        /// For successfully running an SQS queue splitting operator the given IAM role must
+        #[arg(long, visible_alias = "arn")]
+        aws_role_arn: Option<String>,
+
+        /// Enable SQS queue splitting.
+        /// When set, some extra CRDs will be installed on the cluster, and the operator will run
+        /// an SQS splitting component.
+        #[arg(
+            long,
+            visible_alias = "sqs",
+            default_value_t = false,
+            requires = "aws_role_arn"
+        )]
+        sqs_splitting: bool,
     },
     /// Print operator status
     Status {
