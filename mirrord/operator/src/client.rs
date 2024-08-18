@@ -739,7 +739,7 @@ impl OperatorApi<PreparedClientCert> {
                 target,
                 idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
                 scale_down,
-                split_queues: split_queues.clone(),
+                split_queues: Some(split_queues.clone()),
             },
         );
 
