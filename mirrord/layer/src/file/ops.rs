@@ -203,11 +203,14 @@ pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
     // usize == ptr size
     // we don't return a pointer to an address that contains DIR
 
+    tracing::debug!("Locking OPEN_FILES");
     let remote_file_fd = OPEN_FILES
-        .lock()?
+        .lock()
+        .inspect_err(|fail| tracing::error!("Fail! {fail}"))?
         .get(&fd)
         .ok_or(Bypass::LocalFdNotFound(fd))?
         .fd;
+    tracing::debug!("Preparing the request fd {fd} remote {remote_file_fd}");
 
     let open_dir_request = FdOpenDirRequest {
         remote_fd: remote_file_fd,
