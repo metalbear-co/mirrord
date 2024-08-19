@@ -15,7 +15,6 @@ use mirrord_protocol::{
 };
 use semver::Version;
 use thiserror::Error;
-use tracing::Instrument;
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
