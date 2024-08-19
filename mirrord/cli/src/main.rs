@@ -537,7 +537,12 @@ fn main() -> miette::Result<()> {
 
     let cli = Cli::parse();
 
-    let rt = tokio::runtime::Builder::new_current_thread()
+    let mut rt_builder = match cli.commands {
+        Commands::Vpn(_) => tokio::runtime::Builder::new_multi_thread(),
+        _ => tokio::runtime::Builder::new_current_thread(),
+    };
+
+    let rt = rt_builder
         .enable_all()
         .build()
         .map_err(CliError::RuntimeError)?;

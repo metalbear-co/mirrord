@@ -1,13 +1,24 @@
 use std::{
     pin::Pin,
+    sync::LazyLock,
     task::{ready, Context, Poll},
 };
 
 use futures::{Stream, StreamExt};
-use mirrord_protocol::{vpn::ClientVpn, ClientMessage, DaemonMessage, LogLevel};
+use mirrord_protocol::{
+    vpn::{ClientVpn, NetworkConfiguration, ServerVpn},
+    ClientMessage, DaemonMessage, LogLevel,
+};
+use semver::VersionReq;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::error::VpnError;
+
+pub static MINIMAL_PROTOCOL_VERSION: LazyLock<VersionReq> = LazyLock::new(|| {
+    ">=1.9.2"
+        .parse()
+        .expect("MINIMAL_PROTOCOL_VERSION should be valid")
+});
 
 pub struct VpnAgent {
     tx: mpsc::Sender<ClientMessage>,
@@ -17,7 +28,36 @@ pub struct VpnAgent {
 }
 
 impl VpnAgent {
-    pub fn new(tx: mpsc::Sender<ClientMessage>, rx: mpsc::Receiver<DaemonMessage>) -> Self {
+    pub async fn try_create(
+        tx: mpsc::Sender<ClientMessage>,
+        rx: mpsc::Receiver<DaemonMessage>,
+    ) -> Result<Self, VpnError> {
+        let mut vpn_agnet = VpnAgent::new(tx, rx);
+
+        let Some(agent_protocol_version) = vpn_agnet
+            .send_and_get_response(
+                ClientMessage::SwitchProtocolVersion(mirrord_protocol::VERSION.clone()),
+                |message| match message {
+                    DaemonMessage::SwitchProtocolVersionResponse(response) => Some(response),
+                    _ => None,
+                },
+            )
+            .await
+            .map_err(VpnError::from)?
+        else {
+            return Err(VpnError::AgentUnexpcetedResponse);
+        };
+
+        if !MINIMAL_PROTOCOL_VERSION.matches(&agent_protocol_version) {
+            return Err(VpnError::AgentProtocolVersionMissmatch(
+                agent_protocol_version,
+            ));
+        }
+
+        Ok(vpn_agnet)
+    }
+
+    fn new(tx: mpsc::Sender<ClientMessage>, rx: mpsc::Receiver<DaemonMessage>) -> Self {
         VpnAgent { tx, rx, pong: None }
     }
 
@@ -28,6 +68,24 @@ impl VpnAgent {
         self.send(ClientMessage::Ping).await?;
 
         Ok(rx)
+    }
+
+    pub async fn get_network_configuration(&mut self) -> Result<NetworkConfiguration, VpnError> {
+        let response = self
+            .send_and_get_response(
+                ClientMessage::Vpn(ClientVpn::GetNetworkConfiguration),
+                |message| match message {
+                    DaemonMessage::Vpn(response) => Some(response),
+                    _ => None,
+                },
+            )
+            .await
+            .map_err(VpnError::from)?;
+
+        match response {
+            Some(ServerVpn::NetworkConfiguration(network)) => Ok(network),
+            _ => Err(VpnError::AgentUnexpcetedResponse),
+        }
     }
 
     pub async fn open_socket(&self) -> Result<(), VpnError> {

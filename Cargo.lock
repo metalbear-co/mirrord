@@ -4104,6 +4104,7 @@ dependencies = [
  "mirrord-protocol",
  "paste",
  "pnet_packet",
+ "semver 1.0.23",
  "serde_yaml",
  "thiserror",
  "tokio",

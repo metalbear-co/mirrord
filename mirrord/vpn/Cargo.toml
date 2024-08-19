@@ -25,6 +25,7 @@ kube.workspace = true
 ipnet = "2.9"
 paste = "1"
 pnet_packet = "0.35"
+semver.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "process"] }

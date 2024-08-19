@@ -46,7 +46,7 @@ semver.workspace = true
 exec.workspace = true
 reqwest.workspace = true
 const-random = "0.1.15"
-tokio = { workspace = true, features = ["rt", "net", "macros", "process"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "macros", "process"] }
 kube.workspace = true
 k8s-openapi.workspace = true
 miette = { version = "7", features = ["fancy"] }

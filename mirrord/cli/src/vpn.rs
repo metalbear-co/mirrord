@@ -3,11 +3,7 @@ use mirrord_analytics::{AnalyticsError, NullReporter, Reporter};
 use mirrord_config::{LayerConfig, MIRRORD_CONFIG_FILE_ENV};
 use mirrord_kube::api::kubernetes::create_kube_config;
 use mirrord_progress::{Progress, ProgressTracker};
-use mirrord_protocol::{
-    vpn::{ClientVpn, ServerVpn},
-    ClientMessage, DaemonMessage,
-};
-use mirrord_vpn::{agent::VpnAgent, config::VpnConfig, error::VpnError, tunnel::VpnTunnel};
+use mirrord_vpn::{agent::VpnAgent, config::VpnConfig, tunnel::VpnTunnel};
 use tokio::signal;
 
 use crate::{
@@ -65,21 +61,9 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
 
     sub_progress.success(None);
 
-    let mut vpn_agnet = VpnAgent::new(connection.sender, connection.receiver);
+    let mut vpn_agnet = VpnAgent::try_create(connection.sender, connection.receiver).await?;
 
-    let Some(ServerVpn::NetworkConfiguration(network)) = vpn_agnet
-        .send_and_get_response(
-            ClientMessage::Vpn(ClientVpn::GetNetworkConfiguration),
-            |message| match message {
-                DaemonMessage::Vpn(response) => Some(response),
-                _ => None,
-            },
-        )
-        .await
-        .map_err(VpnError::from)?
-    else {
-        return Err(VpnError::AgentUnexpcetedResponse.into());
-    };
+    let network = vpn_agnet.get_network_configuration().await?;
 
     tracing::debug!(?network, "loaded vpn network configuration");
 
