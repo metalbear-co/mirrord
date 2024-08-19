@@ -44,6 +44,8 @@ async fn self_open(
     application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing(std::thread::current().name().unwrap_or("self_open")).unwrap();
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![], None)
         .await;
@@ -63,6 +65,13 @@ async fn self_open(
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
 async fn read_from_mirrord_bin(dylib_path: &Path) {
+    let _tracing = init_tracing(
+        std::thread::current()
+            .name()
+            .unwrap_or("read_from_mirrord_bin"),
+    )
+    .unwrap();
+
     let contents = "please don't flake";
     let temp_dir = env::temp_dir();
     let file_path = temp_dir.join("mirrord-test-read-from-mirrord-bin");
@@ -353,6 +362,8 @@ async fn go_dir(
     application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing(std::thread::current().name().unwrap_or("go_dir")).unwrap();
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
@@ -471,6 +482,9 @@ async fn go_dir_on_linux(
     application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing =
+        init_tracing(std::thread::current().name().unwrap_or("go_dir_on_linux")).unwrap();
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
@@ -566,6 +580,8 @@ async fn go_dir_bypass(
     application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing(std::thread::current().name().unwrap_or("go_dir_bypass")).unwrap();
+
     let tmp_dir = temp_dir().join("go_dir_bypass_test");
     std::fs::create_dir_all(tmp_dir.clone()).unwrap();
     std::fs::write(tmp_dir.join("a"), "").unwrap();
@@ -605,6 +621,8 @@ async fn read_go(
     application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing(std::thread::current().name().unwrap_or("read_go")).unwrap();
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![("MIRRORD_FILE_MODE", "read")], None)
         .await;
@@ -645,6 +663,8 @@ async fn write_go(
     application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing(std::thread::current().name().unwrap_or("write_go")).unwrap();
+
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
@@ -672,6 +692,8 @@ async fn lseek_go(
     application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing(std::thread::current().name().unwrap_or("lseek_go")).unwrap();
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
@@ -705,6 +727,8 @@ async fn faccessat_go(
     application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing(std::thread::current().name().unwrap_or("faccessat_go")).unwrap();
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;

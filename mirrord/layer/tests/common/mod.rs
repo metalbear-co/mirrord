@@ -31,7 +31,7 @@ use tokio::{
     process::Command,
 };
 use tracing::subscriber::DefaultGuard;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
 pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
@@ -47,6 +47,10 @@ pub fn init_tracing(test_name: &str) -> Result<DefaultGuard, Box<dyn std::error:
         .with_env_filter(EnvFilter::new("mirrord=trace"))
         .with_writer(Arc::new(file))
         .without_time()
+        .with_ansi(false)
+        .with_file(true)
+        .with_line_number(true)
+        .with_span_events(FmtSpan::ACTIVE)
         .pretty()
         .finish();
 
