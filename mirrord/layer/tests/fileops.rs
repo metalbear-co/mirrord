@@ -468,8 +468,18 @@ async fn go_dir(
             amount: 128
         }))
     );
-    // intproxy.recv().await;
-    // intproxy.recv().await;
+
+    intproxy
+        .send(DaemonMessage::File(FileResponse::ReadDirBatch(Ok(
+            ReadDirBatchResponse {
+                fd: dir_fd,
+                dir_entries: Vec::new(),
+            },
+        ))))
+        .await;
+
+    intproxy.recv().await;
+    intproxy.recv().await;
 
     // intproxy.expect_file_close(fd).await;
     // assert_eq!(
