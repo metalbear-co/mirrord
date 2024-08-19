@@ -468,8 +468,8 @@ async fn go_dir(
             amount: 128
         }))
     );
-    intproxy.recv().await;
-    intproxy.recv().await;
+    // intproxy.recv().await;
+    // intproxy.recv().await;
 
     // intproxy.expect_file_close(fd).await;
     // assert_eq!(
