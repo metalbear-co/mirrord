@@ -303,7 +303,7 @@ pub struct CopyTargetSpec {
     /// Ignored if [`Target`] is not [`Target::Deployment`].
     pub scale_down: bool,
     /// Split queues client side configuration.
-    pub split_queues: SplitQueuesConfig,
+    pub split_queues: Option<SplitQueuesConfig>,
 }
 
 /// Features and operations that can be blocked by a `MirrordPolicy`.
