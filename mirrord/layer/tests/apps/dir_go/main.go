@@ -8,7 +8,7 @@ import (
 )
 import "time"
 
-func stuff() {
+func main() {
 	dir, err := os.ReadDir("/tmp/foo")
 	if err != nil {
 		fmt.Printf("Reading dir error: %s\n", err)
@@ -23,10 +23,5 @@ func stuff() {
 	}
 	// let close requests be sent for test
 	time.Sleep(1 * time.Second)
-}
-
-func main() {
-	stuff()
-	time.Sleep(3 * time.Second)
 	os.Exit(0)
 }

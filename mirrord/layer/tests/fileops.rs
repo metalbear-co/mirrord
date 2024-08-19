@@ -288,20 +288,11 @@ async fn go_stat(
     application: Application,
     dylib_path: &Path,
 ) {
-    let path: PathBuf = PathBuf::from_str(&application.get_executable().await).unwrap();
-    let intproxy_log = format!(
-        "/tmp/intproxy_logs/{}",
-        path.file_name().unwrap().to_string_lossy()
-    );
-
     // add rw override for the specific path
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
-            vec![
-                ("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt"),
-                ("MIRRORD_INTPROXY_LOG_DESTINATION", &intproxy_log),
-            ],
+            vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/test_file.txt")],
             None,
         )
         .await;
@@ -358,27 +349,10 @@ async fn go_dir(
     application: Application,
     dylib_path: &Path,
 ) {
-    use tracing_subscriber::{layer::SubscriberExt, registry, util::SubscriberInitExt, EnvFilter};
-
-    let _ = registry()
-        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-        .with(EnvFilter::new("mirrord=trace"))
-        .try_init();
-
-    let path: PathBuf = PathBuf::from_str(&application.get_executable().await).unwrap();
-    let intproxy_log = format!(
-        "tmp/intproxy_logs/{}",
-        path.file_name().unwrap().to_string_lossy()
-    );
-
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
-            vec![
-                ("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo"),
-                ("MIRRORD_INTPROXY_LOG_LEVEL", "mirrord=trace"),
-                ("MIRRORD_INTPROXY_LOG_DESTINATION", &intproxy_log),
-            ],
+            vec![("MIRRORD_FILE_READ_ONLY_PATTERN", "/tmp/foo")],
             None,
         )
         .await;
