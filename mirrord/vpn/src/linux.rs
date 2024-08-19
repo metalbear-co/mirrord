@@ -51,8 +51,8 @@ impl ResolvOverride {
             original_file,
         } = self;
 
-        std::fs::copy(&original_file, &path)?;
-        std::fs::remove_file(&original_file)?;
+        std::fs::copy(original_file, path)?;
+        std::fs::remove_file(original_file)?;
 
         Ok(())
     }
