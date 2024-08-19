@@ -8,7 +8,6 @@ use std::{env, fs};
 use std::{
     env::temp_dir,
     path::{Path, PathBuf},
-    str::FromStr,
     time::Duration,
 };
 
