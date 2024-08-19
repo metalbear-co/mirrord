@@ -351,14 +351,10 @@ async fn go_stat(
 
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(15))]
+#[timeout(Duration::from_secs(10))]
 #[cfg(target_os = "macos")]
 async fn go_dir(
-    #[values(
-        // Application::Go21Dir, 
-        // Application::Go22Dir, 
-        Application::Go23Dir
-    )]
+    #[values(Application::Go21Dir, Application::Go22Dir, Application::Go23Dir)]
     application: Application,
     dylib_path: &Path,
 ) {
@@ -478,14 +474,11 @@ async fn go_dir(
         ))))
         .await;
 
-    intproxy.recv().await;
-    intproxy.recv().await;
-
-    // intproxy.expect_file_close(fd).await;
-    // assert_eq!(
-    //     intproxy.recv().await,
-    //     ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: dir_fd }))
-    // );
+    intproxy.expect_file_close(fd).await;
+    assert_eq!(
+        intproxy.recv().await,
+        ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: dir_fd }))
+    );
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
