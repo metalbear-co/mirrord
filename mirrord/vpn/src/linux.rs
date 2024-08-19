@@ -11,6 +11,7 @@ use tokio::process::Command;
 
 use crate::{agent::VpnAgent, config::VpnConfig, error::VpnError};
 
+#[derive(Debug)]
 pub struct ResolvOverride {
     path: PathBuf,
     original_file: PathBuf,
