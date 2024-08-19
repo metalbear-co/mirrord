@@ -136,10 +136,20 @@ impl RouteCommandGuard<'_> {
     }
 }
 
+pub struct CombinedGuard<'a>(RouteCommandGuard<'a>, ResolveFileGuard);
+
+impl CombinedGuard<'_> {
+    pub async fn unmount(&self) {
+        let CombinedGuard(subnet_guard, resolve_guard) = self;
+
+        let _ = tokio::join!(subnet_guard.unmount(), resolve_guard.unmount());
+    }
+}
+
 pub async fn mount_macos<'a>(
     vpn_config: &'a VpnConfig,
     network: &'a NetworkConfiguration,
-) -> Result<(RouteCommandGuard<'a>, ResolveFileGuard), VpnError> {
+) -> Result<CombinedGuard<'a>, VpnError> {
     let subnet_guard = create_subnet_route(&vpn_config.service_subnet, &network.gateway)
         .await
         .map_err(VpnError::SetupIO)?;
@@ -154,5 +164,5 @@ pub async fn mount_macos<'a>(
     .await
     .map_err(VpnError::SetupIO)?;
 
-    Ok((subnet_guard, resolve_guard))
+    Ok(CombinedGuard(subnet_guard, resolve_guard))
 }

@@ -1,6 +1,6 @@
 use k8s_openapi::api::core::v1::ConfigMap;
 use mirrord_analytics::{AnalyticsError, NullReporter, Reporter};
-use mirrord_config::LayerConfig;
+use mirrord_config::{LayerConfig, MIRRORD_CONFIG_FILE_ENV};
 use mirrord_kube::api::kubernetes::create_kube_config;
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{
@@ -22,10 +22,16 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
 
     let mut analytics = NullReporter::default();
 
+    if let Some(config_path) = args.config_file {
+        std::env::set_var(MIRRORD_CONFIG_FILE_ENV, config_path);
+    }
+
+    if let Some(namespace) = args.namespace {
+        std::env::set_var(MIRRORD_CONFIG_FILE_ENV, namespace);
+    }
+
     let mut config = LayerConfig::from_env()?;
     config.agent.privileged = true;
-    config.target.path = None;
-    config.target.namespace = args.namespace;
 
     let client = create_kube_config(
         config.accept_invalid_certificates,
@@ -100,17 +106,10 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
     }
 
     #[cfg(not(target_os = "macos"))]
-    {
-        let _ = linux_guard.unmount().await;
-    }
+    let _ = linux_guard.unmount().await;
 
     #[cfg(target_os = "macos")]
-    {
-        let (subnet_guard, resolve_guard) = macos_guard;
-
-        let _ = subnet_guard.unmount().await;
-        let _ = resolve_guard.unmount().await;
-    }
+    let _ = macos_guard.unmount().await;
 
     Ok(())
 }

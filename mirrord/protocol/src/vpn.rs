@@ -23,7 +23,7 @@ impl fmt::Debug for ClientVpn {
             ClientVpn::OpenSocket => f.debug_tuple("OpenSocket").finish(),
             ClientVpn::Packet(packet) => f
                 .debug_tuple("Packet")
-                .field(&format!("<bytes {}>", packet.len()))
+                .field(&format!("{} bytes", packet.len()))
                 .finish(),
         }
     }
@@ -45,7 +45,7 @@ impl fmt::Debug for ServerVpn {
                 .finish(),
             ServerVpn::Packet(packet) => f
                 .debug_tuple("Packet")
-                .field(&format!("<bytes {}>", packet.len()))
+                .field(&format!("{} bytes", packet.len()))
                 .finish(),
         }
     }

@@ -3,7 +3,6 @@
 use std::{
     collections::HashMap,
     ffi::OsString,
-    fmt::Display,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
     str::FromStr,
@@ -98,8 +97,8 @@ pub enum FsMode {
     LocalWithOverrides,
 }
 
-impl Display for FsMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for FsMode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
             FsMode::Local => "local",
             FsMode::LocalWithOverrides => "localwithoverrides",
@@ -470,43 +469,6 @@ pub enum PortMappingParseErr {
     PortZeroInvalid(String),
 }
 
-#[cfg(test)]
-mod test {
-    use std::str::FromStr;
-
-    use rstest::rstest;
-
-    use super::PortMapping;
-
-    #[rstest]
-    #[case("3030:152.37.110.132:3038", "127.0.0.1:3030", "152.37.110.132:3038")]
-    #[case("152.37.110.132:3038", "127.0.0.1:3038", "152.37.110.132:3038")]
-    fn parse_valid_mapping(
-        #[case] input: &str,
-        #[case] expected_local: &str,
-        #[case] expected_remote: &str,
-    ) {
-        let expected = PortMapping {
-            local: expected_local.parse().unwrap(),
-            remote: expected_remote.parse().unwrap(),
-        };
-        assert_eq!(PortMapping::from_str(input).unwrap(), expected);
-    }
-
-    #[rstest]
-    #[case("3030:152.37.110.132:3038:2027")]
-    #[case("152.37.110.132:3030:3038")]
-    #[case("3030:152.37.110.132:0")]
-    #[case("3o3o:152.37.11o.132:3o38")]
-    #[case("3030:152110.132:3038")]
-    #[case("30303030:152.37.110.132:3038")]
-    #[case("")]
-    #[should_panic]
-    fn parse_invalid_mapping(#[case] input: &str) {
-        PortMapping::from_str(input).unwrap();
-    }
-}
-
 #[derive(Args, Debug)]
 pub(super) struct OperatorArgs {
     #[command(subcommand)]
@@ -597,7 +559,7 @@ pub(crate) enum SessionCommand {
 }
 
 impl core::fmt::Display for SessionCommand {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             SessionCommand::Kill { id } => write!(f, "mirrord operator kill --id {id}"),
             SessionCommand::KillAll => write!(f, "mirrord operator kill-all"),
@@ -762,6 +724,10 @@ pub(super) struct VpnArgs {
     #[arg(short = 'n', long)]
     pub namespace: Option<String>,
 
+    /// Load config from config file
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
+    pub config_file: Option<PathBuf>,
+
     #[cfg(target_os = "macos")]
     /// Path to resolver (macOS)
     #[arg(long, default_value = "/etc/resolver")]
@@ -770,7 +736,37 @@ pub(super) struct VpnArgs {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
+
+    #[rstest]
+    #[case("3030:152.37.110.132:3038", "127.0.0.1:3030", "152.37.110.132:3038")]
+    #[case("152.37.110.132:3038", "127.0.0.1:3038", "152.37.110.132:3038")]
+    fn parse_valid_mapping(
+        #[case] input: &str,
+        #[case] expected_local: &str,
+        #[case] expected_remote: &str,
+    ) {
+        let expected = PortMapping {
+            local: expected_local.parse().unwrap(),
+            remote: expected_remote.parse().unwrap(),
+        };
+        assert_eq!(PortMapping::from_str(input).unwrap(), expected);
+    }
+
+    #[rstest]
+    #[case("3030:152.37.110.132:3038:2027")]
+    #[case("152.37.110.132:3030:3038")]
+    #[case("3030:152.37.110.132:0")]
+    #[case("3o3o:152.37.11o.132:3o38")]
+    #[case("3030:152110.132:3038")]
+    #[case("30303030:152.37.110.132:3038")]
+    #[case("")]
+    #[should_panic]
+    fn parse_invalid_mapping(#[case] input: &str) {
+        PortMapping::from_str(input).unwrap();
+    }
 
     #[test]
     fn runtime_args_parsing() {
