@@ -2,9 +2,11 @@ use std::{
     assert_matches::assert_matches,
     collections::HashMap,
     fmt::Debug,
+    fs::File,
     path::{Path, PathBuf},
     process::Stdio,
     str::FromStr,
+    sync::Arc,
     time::Duration,
 };
 
@@ -28,11 +30,28 @@ use tokio::{
     net::{TcpListener, TcpStream},
     process::Command,
 };
+use tracing::subscriber::DefaultGuard;
+use tracing_subscriber::EnvFilter;
 
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
 pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
 pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
+
+pub fn init_tracing(test_name: &str) -> Result<DefaultGuard, Box<dyn std::error::Error>> {
+    let file = File::create(format!("/tmp/intproxy_logs/{}.log", test_name))?;
+
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::new("mirrord=trace"))
+        .with_writer(Arc::new(file))
+        .without_time()
+        .pretty()
+        .finish();
+
+    // Set the default subscriber for the _current thread_, returning a guard that unsets
+    // the default subscriber when it is dropped.
+    Ok(tracing::subscriber::set_default(subscriber))
+}
 
 pub struct TestIntProxy {
     codec: Framed<TcpStream, DaemonCodec>,

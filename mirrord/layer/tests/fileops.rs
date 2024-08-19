@@ -104,6 +104,8 @@ async fn read_from_mirrord_bin(dylib_path: &Path) {
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn pwrite(#[values(Application::RustFileOps)] application: Application, dylib_path: &Path) {
+    let _tracing = init_tracing(std::thread::current().name().unwrap_or("pwrite")).unwrap();
+
     // add rw override for the specific path
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
@@ -222,6 +224,8 @@ async fn node_close(
     #[values(Application::NodeFileOps)] application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing(std::thread::current().name().unwrap_or("node_close")).unwrap();
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
@@ -287,6 +291,8 @@ async fn go_stat(
     application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing(std::thread::current().name().unwrap_or("go_stat")).unwrap();
+
     // add rw override for the specific path
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
