@@ -44,16 +44,24 @@ impl ResolvOverride {
         Ok(())
     }
 
-    pub async fn unmount(self) -> io::Result<()> {
+    fn unmount(&self) -> io::Result<()> {
         let ResolvOverride {
             path,
             original_file,
         } = self;
 
-        tokio::fs::copy(&original_file, &path).await?;
-        tokio::fs::remove_file(&original_file).await?;
+        std::fs::copy(&original_file, &path)?;
+        std::fs::remove_file(&original_file)?;
 
         Ok(())
+    }
+}
+
+impl Drop for ResolvOverride {
+    fn drop(&mut self) {
+        if let Err(error) = self.unmount() {
+            tracing::warn!(%error, resolv_override = ?self, "unable to remove ResolvOverride")
+        };
     }
 }
 
@@ -116,29 +124,20 @@ pub async fn mount_linux<'a>(
         .await
         .map_err(VpnError::SetupIO)?;
 
-    let mount_result = try {
-        resolv_override.update_resolv(&remote_resolv).await?;
+    resolv_override.update_resolv(&remote_resolv).await?;
 
-        Command::new("ip")
-            .args([
-                "route".to_owned(),
-                "add".to_owned(),
-                vpn_config.service_subnet.to_string(),
-                "via".to_owned(),
-                network.gateway.to_string(),
-            ])
-            .output()
-            .await
-            .inspect_err(|error| tracing::error!(%error, "could not bind service_subnet"))?;
-
-        Ok::<_, io::Error>(())
-    };
-
-    if let Err(err) = mount_result {
-        let _ = resolv_override.unmount().await;
-
-        return Err(VpnError::SetupIO(err));
-    }
+    Command::new("ip")
+        .args([
+            "route".to_owned(),
+            "add".to_owned(),
+            vpn_config.service_subnet.to_string(),
+            "via".to_owned(),
+            network.gateway.to_string(),
+        ])
+        .output()
+        .await
+        .inspect_err(|error| tracing::error!(%error, "could not bind service_subnet"))
+        .map_err(VpnError::SetupIO)?;
 
     Ok(resolv_override)
 }

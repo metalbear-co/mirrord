@@ -42,7 +42,6 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
 
     let configmap_api = kube::Api::<ConfigMap>::namespaced(client, "kube-system");
 
-    // TODO: this may fail but
     let Some(vpn_config) = VpnConfig::from_configmaps(&configmap_api).await else {
         sub_progress.failure(Some(
             "unable to lookup relevant configmaps to create our vpn config",
@@ -74,11 +73,11 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
     sub_progress.success(None);
 
     #[cfg(not(target_os = "macos"))]
-    let linux_guard =
+    let _linux_guard =
         mirrord_vpn::linux::mount_linux(&vpn_config, &network, &mut vpn_agnet).await?;
 
     #[cfg(target_os = "macos")]
-    let macos_guard = mirrord_vpn::macos::mount_macos(&vpn_config, &network).await?;
+    let _macos_guard = mirrord_vpn::macos::mount_macos(&vpn_config, &network)?;
 
     progress.success(None);
 
@@ -88,12 +87,6 @@ pub async fn vpn_command(args: VpnArgs) -> Result<()> {
         _ = vpn_tunnel.start() => {}
         _ = signal::ctrl_c() => {}
     }
-
-    #[cfg(not(target_os = "macos"))]
-    let _ = linux_guard.unmount().await;
-
-    #[cfg(target_os = "macos")]
-    let _ = macos_guard.unmount().await;
 
     Ok(())
 }

@@ -1,8 +1,7 @@
-use std::{fmt, net::IpAddr, path::PathBuf, sync::LazyLock};
+use std::{fmt, fs, io, net::IpAddr, path::PathBuf, process::Command, sync::LazyLock};
 
 use ipnet::IpNet;
 use mirrord_protocol::vpn::NetworkConfiguration;
-use tokio::{fs, io, process::Command};
 
 use crate::{config::VpnConfig, error::VpnError};
 
@@ -18,13 +17,13 @@ pub struct ResolveFile {
 }
 
 impl ResolveFile {
-    pub async fn inject(&self) -> io::Result<ResolveFileGuard> {
+    pub fn inject(&self) -> io::Result<ResolveFileGuard> {
         if !BASE_RESOLVE_PATH.exists() {
-            fs::create_dir_all(&*BASE_RESOLVE_PATH).await?;
+            fs::create_dir_all(&*BASE_RESOLVE_PATH)?;
         }
 
         let path = BASE_RESOLVE_PATH.join(&self.domain);
-        fs::write(&path, self.to_string()).await?;
+        fs::write(&path, self.to_string())?;
 
         Ok(ResolveFileGuard { path })
     }
@@ -70,29 +69,17 @@ pub struct ResolveFileGuard {
     path: PathBuf,
 }
 
-impl ResolveFileGuard {
-    pub async fn unmount(&self) -> io::Result<()> {
-        let ResolveFileGuard { path } = self;
-        tokio::fs::remove_file(path).await?;
-
-        Ok(())
-    }
-}
-
 impl Drop for ResolveFileGuard {
     fn drop(&mut self) {
         let ResolveFileGuard { path } = self;
 
-        if path.exists() {
-            panic!(
-                "ResolveFileGuard was dropped while path '{}' still exists",
-                path.display()
-            );
-        }
+        if let Err(error) = fs::remove_file(&path) {
+            tracing::warn!(path = %path.display(), %error, "unable to remove ResolveFileGuard")
+        };
     }
 }
 
-pub async fn create_subnet_route<'a>(
+pub fn create_subnet_route<'a>(
     subnet: &'a IpNet,
     gateway: &'a IpAddr,
 ) -> io::Result<RouteCommandGuard<'a>> {
@@ -104,8 +91,7 @@ pub async fn create_subnet_route<'a>(
             &subnet.to_string(),
             &gateway.to_string(),
         ])
-        .output()
-        .await?;
+        .output()?;
 
     tracing::debug!(?output, "route mounted");
 
@@ -117,9 +103,9 @@ pub struct RouteCommandGuard<'a> {
     gateway: &'a IpAddr,
 }
 
-impl RouteCommandGuard<'_> {
-    pub async fn unmount(&self) -> io::Result<()> {
-        let output = Command::new("route")
+impl Drop for RouteCommandGuard<'_> {
+    fn drop(&mut self) {
+        let result = Command::new("route")
             .args([
                 "-n",
                 "delete",
@@ -127,31 +113,20 @@ impl RouteCommandGuard<'_> {
                 &self.subnet.to_string(),
                 &self.gateway.to_string(),
             ])
-            .output()
-            .await?;
+            .output();
 
-        tracing::debug!(?output, "route unmounted");
-
-        Ok(())
+        match result {
+            Ok(output) => tracing::debug!(?output, "route unmounted"),
+            Err(error) => tracing::error!(?error, "unable to unmount"),
+        }
     }
 }
 
-pub struct CombinedGuard<'a>(RouteCommandGuard<'a>, ResolveFileGuard);
-
-impl CombinedGuard<'_> {
-    pub async fn unmount(&self) {
-        let CombinedGuard(subnet_guard, resolve_guard) = self;
-
-        let _ = tokio::join!(subnet_guard.unmount(), resolve_guard.unmount());
-    }
-}
-
-pub async fn mount_macos<'a>(
+pub fn mount_macos<'a>(
     vpn_config: &'a VpnConfig,
     network: &'a NetworkConfiguration,
-) -> Result<CombinedGuard<'a>, VpnError> {
+) -> Result<(RouteCommandGuard<'a>, ResolveFileGuard), VpnError> {
     let subnet_guard = create_subnet_route(&vpn_config.service_subnet, &network.gateway)
-        .await
         .map_err(VpnError::SetupIO)?;
 
     let resolve_guard = ResolveFile {
@@ -161,8 +136,7 @@ pub async fn mount_macos<'a>(
         ..Default::default()
     }
     .inject()
-    .await
     .map_err(VpnError::SetupIO)?;
 
-    Ok(CombinedGuard(subnet_guard, resolve_guard))
+    Ok((subnet_guard, resolve_guard))
 }
