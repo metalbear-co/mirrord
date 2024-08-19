@@ -477,6 +477,14 @@ jobs:
       - run: cargo build --target=x86_64-apple-darwin -p mirrord-layer # Build layer lib. The tests load it into the apps.
       - name: mirrord layer tests
         run: cargo test --target=x86_64-apple-darwin -p mirrord-layer
+      - name: save intproxy logs
+        continue-on-error: true
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          # Name of the artifact to upload.
+          name: intproxy_logs
+          path: /tmp/intproxy_logs
 
   e2e:
     runs-on: ubuntu-latest
