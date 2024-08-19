@@ -35,6 +35,7 @@ pub enum ExecutionKind {
     Container = 1,
     #[default]
     Exec = 2,
+    PortForward = 3,
     Other = 0,
 }
 
@@ -43,6 +44,7 @@ impl From<u32> for ExecutionKind {
         match kind {
             1 => ExecutionKind::Container,
             2 => ExecutionKind::Exec,
+            3 => ExecutionKind::PortForward,
             _ => ExecutionKind::Other,
         }
     }

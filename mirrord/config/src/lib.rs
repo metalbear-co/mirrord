@@ -266,7 +266,7 @@ pub struct LayerConfig {
     pub agent: AgentConfig,
 
     /// ## container {#root-container}
-    #[config(nested)]
+    #[config(nested, unstable)]
     pub container: ContainerConfig,
 
     /// ## feature {#root-feature}
@@ -852,6 +852,7 @@ mod tests {
                 })),
                 copy_target: None,
                 hostname: None,
+                split_queues: None,
             }),
             connect_tcp: None,
             container: None,

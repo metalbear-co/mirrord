@@ -22,8 +22,9 @@ async fn mirroring_with_http(
         Application::PythonFlaskHTTP,
         Application::PythonFastApiHTTP,
         Application::NodeHTTP,
-        Application::Go19HTTP,
-        Application::Go20HTTP
+        Application::Go21HTTP,
+        Application::Go22HTTP,
+        Application::Go23HTTP
     )]
     application: Application,
     dylib_path: &Path,

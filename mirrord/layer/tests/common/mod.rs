@@ -622,8 +622,9 @@ impl TestIntProxy {
 /// Various applications used by integration tests.
 #[derive(Debug)]
 pub enum Application {
-    Go19HTTP,
-    Go20HTTP,
+    Go21HTTP,
+    Go22HTTP,
+    Go23HTTP,
     NodeHTTP,
     PythonFastApiHTTP,
     /// Shared sockets [#864](https://github.com/metalbear-co/mirrord/issues/864).
@@ -633,33 +634,38 @@ pub enum Application {
     PythonDontLoad,
     PythonListen,
     RustFileOps,
-    Go19FileOps,
-    Go20FileOps,
+    Go21FileOps,
+    Go22FileOps,
+    Go23FileOps,
     JavaTemurinSip,
     EnvBashCat,
     NodeFileOps,
     NodeSpawn,
-    Go19Dir,
-    Go20Dir,
-    Go19DirBypass,
-    Go20DirBypass,
+    Go21Dir,
+    Go22Dir,
+    Go23Dir,
+    Go21DirBypass,
+    Go22DirBypass,
+    Go23DirBypass,
     Go21Issue834,
-    Go20Issue834,
-    Go19Issue834,
+    Go22Issue834,
+    Go23Issue834,
     BashShebang,
-    Go19Read,
-    Go20Read,
     Go21Read,
-    Go19Write,
-    Go20Write,
+    Go22Read,
+    Go23Read,
     Go21Write,
-    Go19LSeek,
-    Go20LSeek,
+    Go22Write,
+    Go23Write,
     Go21LSeek,
+    Go22LSeek,
+    Go23LSeek,
     Go21FAccessAt,
-    Go19FAccessAt,
-    Go20FAccessAt,
-    Go19SelfOpen,
+    Go22FAccessAt,
+    Go23FAccessAt,
+    Go21SelfOpen,
+    Go22SelfOpen,
+    Go23SelfOpen,
     RustOutgoingUdp,
     RustOutgoingTcp,
     RustIssue1123,
@@ -723,10 +729,12 @@ impl Application {
                 "{}/.sdkman/candidates/java/17.0.6-tem/bin/java",
                 std::env::var("HOME").unwrap(),
             ),
-            Application::Go19HTTP => String::from("tests/apps/app_go/19.go_test_app"),
-            Application::Go20HTTP => String::from("tests/apps/app_go/20.go_test_app"),
-            Application::Go19FileOps => String::from("tests/apps/fileops/go/19.go_test_app"),
-            Application::Go20FileOps => String::from("tests/apps/fileops/go/20.go_test_app"),
+            Application::Go21HTTP => String::from("tests/apps/app_go/21.go_test_app"),
+            Application::Go22HTTP => String::from("tests/apps/app_go/22.go_test_app"),
+            Application::Go23HTTP => String::from("tests/apps/app_go/23.go_test_app"),
+            Application::Go21FileOps => String::from("tests/apps/fileops/go/21.go_test_app"),
+            Application::Go22FileOps => String::from("tests/apps/fileops/go/22.go_test_app"),
+            Application::Go23FileOps => String::from("tests/apps/fileops/go/23.go_test_app"),
             Application::RustFileOps => {
                 format!(
                     "{}/{}",
@@ -736,27 +744,31 @@ impl Application {
             }
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
             Application::NodeFileOps | Application::NodeSpawn => String::from("node"),
-            Application::Go19Dir => String::from("tests/apps/dir_go/19.go_test_app"),
-            Application::Go20Dir => String::from("tests/apps/dir_go/20.go_test_app"),
-            Application::Go20Issue834 => String::from("tests/apps/issue834/20.go_test_app"),
-            Application::Go19Issue834 => String::from("tests/apps/issue834/19.go_test_app"),
+            Application::Go21Dir => String::from("tests/apps/dir_go/21.go_test_app"),
+            Application::Go22Dir => String::from("tests/apps/dir_go/22.go_test_app"),
+            Application::Go23Dir => String::from("tests/apps/dir_go/23.go_test_app"),
             Application::Go21Issue834 => String::from("tests/apps/issue834/21.go_test_app"),
-            Application::Go19DirBypass => String::from("tests/apps/dir_go_bypass/19.go_test_app"),
-            Application::Go20DirBypass => String::from("tests/apps/dir_go_bypass/20.go_test_app"),
+            Application::Go22Issue834 => String::from("tests/apps/issue834/22.go_test_app"),
+            Application::Go23Issue834 => String::from("tests/apps/issue834/23.go_test_app"),
+            Application::Go21DirBypass => String::from("tests/apps/dir_go_bypass/21.go_test_app"),
+            Application::Go22DirBypass => String::from("tests/apps/dir_go_bypass/22.go_test_app"),
+            Application::Go23DirBypass => String::from("tests/apps/dir_go_bypass/23.go_test_app"),
             Application::BashShebang => String::from("tests/apps/nothing.sh"),
             Application::Go21Read => String::from("tests/apps/read_go/21.go_test_app"),
-            Application::Go19Read => String::from("tests/apps/read_go/19.go_test_app"),
-            Application::Go20Read => String::from("tests/apps/read_go/20.go_test_app"),
+            Application::Go22Read => String::from("tests/apps/read_go/22.go_test_app"),
+            Application::Go23Read => String::from("tests/apps/read_go/23.go_test_app"),
             Application::Go21Write => String::from("tests/apps/write_go/21.go_test_app"),
-            Application::Go19Write => String::from("tests/apps/write_go/19.go_test_app"),
-            Application::Go20Write => String::from("tests/apps/write_go/20.go_test_app"),
+            Application::Go22Write => String::from("tests/apps/write_go/22.go_test_app"),
+            Application::Go23Write => String::from("tests/apps/write_go/23.go_test_app"),
             Application::Go21LSeek => String::from("tests/apps/lseek_go/21.go_test_app"),
-            Application::Go19LSeek => String::from("tests/apps/lseek_go/19.go_test_app"),
-            Application::Go20LSeek => String::from("tests/apps/lseek_go/20.go_test_app"),
+            Application::Go22LSeek => String::from("tests/apps/lseek_go/22.go_test_app"),
+            Application::Go23LSeek => String::from("tests/apps/lseek_go/23.go_test_app"),
             Application::Go21FAccessAt => String::from("tests/apps/faccessat_go/21.go_test_app"),
-            Application::Go19FAccessAt => String::from("tests/apps/faccessat_go/19.go_test_app"),
-            Application::Go20FAccessAt => String::from("tests/apps/faccessat_go/20.go_test_app"),
-            Application::Go19SelfOpen => String::from("tests/apps/self_open/19.go_test_app"),
+            Application::Go22FAccessAt => String::from("tests/apps/faccessat_go/22.go_test_app"),
+            Application::Go23FAccessAt => String::from("tests/apps/faccessat_go/23.go_test_app"),
+            Application::Go21SelfOpen => String::from("tests/apps/self_open/21.go_test_app"),
+            Application::Go22SelfOpen => String::from("tests/apps/self_open/22.go_test_app"),
+            Application::Go23SelfOpen => String::from("tests/apps/self_open/23.go_test_app"),
             Application::RustIssue1123 => String::from("tests/apps/issue1123/target/issue1123"),
             Application::RustIssue1054 => String::from("tests/apps/issue1054/target/issue1054"),
             Application::RustIssue1458 => String::from("tests/apps/issue1458/target/issue1458"),
@@ -901,27 +913,30 @@ impl Application {
                 app_path.push("self_connect.py");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
-            Application::Go19HTTP
-            | Application::Go20HTTP
-            | Application::Go19Dir
-            | Application::Go20Dir
-            | Application::Go19FileOps
-            | Application::Go20FileOps
+            Application::Go21HTTP
+            | Application::Go22HTTP
+            | Application::Go23HTTP
+            | Application::Go21Dir
+            | Application::Go22Dir
+            | Application::Go23Dir
+            | Application::Go21FileOps
+            | Application::Go22FileOps
+            | Application::Go23FileOps
             | Application::Go21Issue834
-            | Application::Go20Issue834
-            | Application::Go19Issue834
-            | Application::Go20Read
-            | Application::Go19Read
+            | Application::Go22Issue834
+            | Application::Go23Issue834
             | Application::Go21Read
-            | Application::Go20Write
-            | Application::Go19Write
+            | Application::Go22Read
+            | Application::Go23Read
             | Application::Go21Write
-            | Application::Go20LSeek
-            | Application::Go19LSeek
+            | Application::Go22Write
+            | Application::Go23Write
             | Application::Go21LSeek
-            | Application::Go20FAccessAt
-            | Application::Go19FAccessAt
+            | Application::Go22LSeek
+            | Application::Go23LSeek
             | Application::Go21FAccessAt
+            | Application::Go22FAccessAt
+            | Application::Go23FAccessAt
             | Application::Fork
             | Application::ReadLink
             | Application::Realpath
@@ -939,9 +954,12 @@ impl Application {
             | Application::RustListenPorts
             | Application::EnvBashCat
             | Application::BashShebang
-            | Application::Go19SelfOpen
-            | Application::Go19DirBypass
-            | Application::Go20DirBypass
+            | Application::Go21SelfOpen
+            | Application::Go22SelfOpen
+            | Application::Go23SelfOpen
+            | Application::Go21DirBypass
+            | Application::Go22DirBypass
+            | Application::Go23DirBypass
             | Application::RustIssue2058
             | Application::OpenFile
             | Application::CIssue2055
@@ -962,10 +980,12 @@ impl Application {
 
     pub fn get_app_port(&self) -> u16 {
         match self {
-            Application::Go19HTTP
-            | Application::Go20HTTP
-            | Application::Go19FileOps
-            | Application::Go20FileOps
+            Application::Go21HTTP
+            | Application::Go22HTTP
+            | Application::Go23HTTP
+            | Application::Go21FileOps
+            | Application::Go22FileOps
+            | Application::Go23FileOps
             | Application::NodeHTTP
             | Application::RustIssue1054
             | Application::PythonFlaskHTTP => 80,
@@ -984,26 +1004,30 @@ impl Application {
             | Application::Fork
             | Application::ReadLink
             | Application::Realpath
-            | Application::Go20Issue834
-            | Application::Go19Issue834
             | Application::Go21Issue834
-            | Application::Go20Read
-            | Application::Go19Read
+            | Application::Go22Issue834
+            | Application::Go23Issue834
             | Application::Go21Read
-            | Application::Go20Write
-            | Application::Go19Write
+            | Application::Go22Read
+            | Application::Go23Read
             | Application::Go21Write
-            | Application::Go20LSeek
-            | Application::Go19LSeek
+            | Application::Go22Write
+            | Application::Go23Write
             | Application::Go21LSeek
-            | Application::Go20FAccessAt
-            | Application::Go19FAccessAt
+            | Application::Go22LSeek
+            | Application::Go23LSeek
             | Application::Go21FAccessAt
-            | Application::Go19DirBypass
-            | Application::Go20DirBypass
-            | Application::Go19SelfOpen
-            | Application::Go19Dir
-            | Application::Go20Dir
+            | Application::Go22FAccessAt
+            | Application::Go23FAccessAt
+            | Application::Go21DirBypass
+            | Application::Go22DirBypass
+            | Application::Go23DirBypass
+            | Application::Go21SelfOpen
+            | Application::Go22SelfOpen
+            | Application::Go23SelfOpen
+            | Application::Go21Dir
+            | Application::Go22Dir
+            | Application::Go23Dir
             | Application::RustOutgoingUdp
             | Application::RustOutgoingTcp
             | Application::RustIssue1458
