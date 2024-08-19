@@ -125,7 +125,10 @@ pub async fn mount_linux<'a>(
         .await
         .map_err(VpnError::SetupIO)?;
 
-    resolv_override.update_resolv(&remote_resolv).await?;
+    resolv_override
+        .update_resolv(&remote_resolv)
+        .await
+        .map_err(VpnError::SetupIO)?;
 
     Command::new("ip")
         .args([
