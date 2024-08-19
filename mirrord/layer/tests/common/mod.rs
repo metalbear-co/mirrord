@@ -39,7 +39,7 @@ pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
 pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
 
 pub fn init_tracing(test_name: &str) -> Result<DefaultGuard, Box<dyn std::error::Error>> {
-    let test_name = test_name.trim_matches(':');
+    let test_name = test_name.replace(':', "_");
     let _ = std::fs::create_dir_all("/tmp/intproxy_logs").ok();
     let file = File::create(format!("/tmp/intproxy_logs/{}.log", test_name))?;
 
