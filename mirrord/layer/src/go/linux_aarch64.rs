@@ -113,7 +113,7 @@ fn post_go1_23(hook_manager: &mut HookManager) {
     }
     hook_symbol!(
         hook_manager,
-        "internal/runtime/syscall.Syscall6",
+        "internal/runtime/syscall.Syscall6.abi0",
         go_syscall_new_detour
     );
 }
