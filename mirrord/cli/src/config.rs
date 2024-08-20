@@ -720,7 +720,7 @@ impl ContainerCommand {
 
 #[derive(Args, Debug)]
 pub(super) struct VpnArgs {
-    /// Specify the namespace to vpn into.
+    /// Specify the Kubernetes namespace to vpn into.
     #[arg(short = 'n', long)]
     pub namespace: Option<String>,
 

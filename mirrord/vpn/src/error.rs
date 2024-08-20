@@ -13,12 +13,12 @@ pub enum VpnError {
     #[error("expected an agent response, receiver channel dropped")]
     AgentNoResponse,
 
-    #[error("vpn failed to setup nececery overrides: {0}")]
+    #[error("vpn failed to setup necessary overrides: {0}")]
     SetupIO(std::io::Error),
 
     #[error("unable to send client message to agent, sender channel dropped")]
     ClientMessageDropped(#[from] mpsc::error::SendError<ClientMessage>),
 
-    #[error("mirrord agent protocol-version {0} is unsported expected >=1.9.2 (mirrord agent >=3.114.1)")]
+    #[error("mirrord agent protocol-version {0} is not supported, expected >=1.9.0 (mirrord agent >3.114.1)")]
     AgentProtocolVersionMissmatch(semver::Version),
 }
