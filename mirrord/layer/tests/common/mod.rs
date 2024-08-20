@@ -64,7 +64,7 @@ pub fn init_tracing() -> Result<DefaultGuard, Box<dyn std::error::Error>> {
             let mut logs_file = PathBuf::from_str("/tmp/intproxy_logs")?;
 
             #[cfg(target_os = "macos")]
-            logs_dir.push("macos");
+            logs_file.push("macos");
             #[cfg(not(target_os = "macos"))]
             logs_file.push("linux");
 
