@@ -29,7 +29,7 @@ use rand::{distributions::Alphanumeric, Rng};
 use reqwest::{RequestBuilder, StatusCode};
 use rstest::*;
 use serde::{de::DeserializeOwned, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use tempfile::{tempdir, TempDir};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
@@ -673,7 +673,7 @@ impl Drop for KubeService {
     }
 }
 
-fn deployment_from_json(name: &str, image: &str) -> Deployment {
+fn deployment_from_json(name: &str, image: &str, x: _) -> Deployment {
     serde_json::from_value(json!({
         "apiVersion": "apps/v1",
         "kind": "Deployment",
@@ -941,6 +941,25 @@ fn job_from_json(name: &str, image: &str) -> k8s_openapi::api::batch::v1::Job {
     .expect("Failed creating `job` from json spec!")
 }
 
+fn default_env() -> Value {
+    json!(
+        [
+            {
+              "name": "MIRRORD_FAKE_VAR_FIRST",
+              "value": "mirrord.is.running"
+            },
+            {
+              "name": "MIRRORD_FAKE_VAR_SECOND",
+              "value": "7777"
+            },
+            {
+                "name": "MIRRORD_FAKE_VAR_THIRD",
+                "value": "foo=bar"
+            }
+        ]
+    )
+}
+
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
 /// This behavior can be changed, see `FORCE_CLEANUP_ENV_NAME`.
@@ -954,6 +973,62 @@ pub async fn service(
     #[default("http-echo")] service_name: &str,
     #[default(true)] randomize_name: bool,
     #[future] kube_client: Client,
+) -> KubeService {
+    internal_service(
+        namespace,
+        service_type,
+        image,
+        service_name,
+        randomize_name,
+        kube_client.await,
+        default_env(),
+    )
+}
+
+/// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
+/// when the returned service is dropped, unless it is dropped during panic.
+/// This behavior can be changed, see [`FORCE_CLEANUP_ENV_NAME`].
+/// * `randomize_name` - whether a random suffix should be added to the end of the resource names
+/// * `env` - `Value`, should be `Value::Array` of kubernetes container env var definitions.
+pub async fn service_with_env(
+    namespace: &str,
+    service_type: &str,
+    image: &str,
+    service_name: &str,
+    randomize_name: bool,
+    kube_client: Client,
+    env: Value,
+) -> KubeService {
+    internal_service(
+        namespace,
+        service_type,
+        image,
+        service_name,
+        randomize_name,
+        kube_client.await,
+        env,
+    )
+}
+
+/// Internal function to create a custom [`KubeService`].
+/// We keep this private so that whenever we need more customization of test resources, we can
+/// change this function and how the public ones use it, and add a new public function that exposes
+/// more customization, and we don't need to change all existing usages of public functions/fixtures
+/// in tests.
+///
+/// Create a new [`KubeService`] and related Kubernetes resources. The resources will be
+/// deleted when the returned service is dropped, unless it is dropped during panic.
+/// This behavior can be changed, see [`FORCE_CLEANUP_ENV_NAME`].
+/// * `randomize_name` - whether a random suffix should be added to the end of the resource names
+/// * `env` - `Value`, should be `Value::Array` of kubernetes container env var definitions.
+async fn internal_service(
+    namespace: &str,
+    service_type: &str,
+    image: &str,
+    service_name: &str,
+    randomize_name: bool,
+    kube_client: Client,
+    env: Value,
 ) -> KubeService {
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
 
@@ -1009,7 +1084,7 @@ pub async fn service(
     }
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image);
+    let deployment = deployment_from_json(&name, image, env);
     let pod_guard = ResourceGuard::create(
         deployment_api.clone(),
         name.to_string(),
