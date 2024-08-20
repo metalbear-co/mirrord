@@ -61,8 +61,17 @@ pub fn init_tracing() -> Result<DefaultGuard, Box<dyn std::error::Error>> {
         .map(|name| name.replace(':', "_"))
     {
         Some(test_name) => {
-            let _ = std::fs::create_dir_all("/tmp/intproxy_logs").ok();
-            match File::create(format!("/tmp/intproxy_logs/{}.log", test_name)) {
+            let mut logs_file = PathBuf::from_str("/tmp/intproxy_logs")?;
+
+            #[cfg(target_os = "macos")]
+            logs_dir.push("macos");
+            #[cfg(not(target_os = "macos"))]
+            logs_file.push("linux");
+
+            let _ = std::fs::create_dir_all(&logs_file).ok();
+
+            logs_file.push(&test_name);
+            match File::create(logs_file) {
                 Ok(file) => {
                     let subscriber = subscriber.with_writer(Arc::new(file)).finish();
 
