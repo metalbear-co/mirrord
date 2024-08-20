@@ -362,7 +362,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           # Name of the artifact to upload.
-          name: intproxy_logs
+          name: intproxy_logs_linux
           path: /tmp/intproxy_logs/linux
 
   macos_tests:
@@ -483,7 +483,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           # Name of the artifact to upload.
-          name: intproxy_logs
+          name: intproxy_logs_macos
           path: /tmp/intproxy_logs/macos
 
   e2e:
