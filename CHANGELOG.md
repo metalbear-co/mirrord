@@ -8,6 +8,22 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.114.1](https://github.com/metalbear-co/mirrord/tree/3.114.1) - 2024-08-18
+
+
+### Fixed
+
+- Make splitqueues optional to support old version
+  [#2675](https://github.com/metalbear-co/mirrord/issues/2675)
+
+
+### Internal
+
+- Update kube rs to use mainstream
+  [#2636](https://github.com/metalbear-co/mirrord/issues/2636)
+- Use main CI action for go e2e setup.
+
+
 ## [3.114.0](https://github.com/metalbear-co/mirrord/tree/3.114.0) - 2024-08-16
 
 
