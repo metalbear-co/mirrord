@@ -5,11 +5,18 @@ use std::fs::DirEntry;
 use std::io;
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::DirEntryExt;
-use std::{fs::Metadata, io::SeekFrom, os::unix::prelude::MetadataExt, path::PathBuf};
+use std::{
+    fs::Metadata, io::SeekFrom, os::unix::prelude::MetadataExt, path::PathBuf, sync::LazyLock,
+};
 
 use bincode::{Decode, Encode};
 #[cfg(target_os = "linux")]
 use nix::sys::statfs::Statfs;
+use semver::VersionReq;
+
+/// Minimal mirrord-protocol version that allows [`ReadDirBatchRequest`].
+pub static READDIR_BATCH_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.9.0".parse().expect("Bad Identifier"));
 
 /// Internal version of Metadata across operating system (macOS, Linux)
 /// Only mutual attributes
@@ -385,9 +392,29 @@ pub struct ReadDirRequest {
     pub remote_fd: u64,
 }
 
+/// `readdir` message that requests an iterable with `amount` items from the agent.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReadDirBatchRequest {
+    /// The fd of the dir in the agent.
+    pub remote_fd: u64,
+    /// Max amount to take from the agent's iterator of dirs.
+    pub amount: usize,
+}
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadDirResponse {
     pub direntry: Option<DirEntryInternal>,
+}
+
+/// `readdir` response with the list of items (length depends on the [`ReadDirBatchRequest`]'s
+/// `amount`), and the `remote_fd` of the dir (for convenience).
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ReadDirBatchResponse {
+    /// Remote fd of the dir.
+    pub fd: u64,
+    /// The list of [`DirEntryInternal`] where `length` is, at max, the `amount` we took
+    /// from the agent's read dir iterator.
+    pub dir_entries: Vec<DirEntryInternal>,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

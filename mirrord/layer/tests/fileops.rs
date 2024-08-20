@@ -344,6 +344,7 @@ async fn go_stat(
             XstatResponse { metadata },
         ))))
         .await;
+
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
 }
@@ -376,7 +377,7 @@ async fn go_dir(
             message,
             ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
                 path: None,
-                fd: Some(1),
+                fd: Some(fd),
                 follow_symlink: true
             }))
         );
@@ -404,64 +405,64 @@ async fn go_dir(
         ClientMessage::FileRequest(FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 1 }))
     );
 
+    let dir_fd = 2;
     intproxy
         .send(DaemonMessage::File(FileResponse::OpenDir(Ok(
-            OpenDirResponse { fd: 2 },
+            OpenDirResponse { fd: dir_fd },
         ))))
         .await;
 
     assert_eq!(
         intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 2 }))
+        ClientMessage::FileRequest(FileRequest::ReadDirBatch(ReadDirBatchRequest {
+            remote_fd: dir_fd,
+            amount: 128
+        }))
     );
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
-            ReadDirResponse {
-                direntry: Some(DirEntryInternal {
-                    name: "a".to_string(),
-                    inode: 1,
-                    position: 1,
-                    file_type: libc::DT_REG,
-                }),
+        .send(DaemonMessage::File(FileResponse::ReadDirBatch(Ok(
+            ReadDirBatchResponse {
+                fd: dir_fd,
+                dir_entries: vec![
+                    DirEntryInternal {
+                        name: "a".to_string(),
+                        inode: 1,
+                        position: 1,
+                        file_type: libc::DT_REG,
+                    },
+                    DirEntryInternal {
+                        name: "b".to_string(),
+                        inode: 2,
+                        position: 2,
+                        file_type: libc::DT_REG,
+                    },
+                ],
             },
         ))))
         .await;
 
     assert_eq!(
         intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 2 }))
+        ClientMessage::FileRequest(FileRequest::ReadDirBatch(ReadDirBatchRequest {
+            remote_fd: dir_fd,
+            amount: 128
+        }))
     );
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
-            ReadDirResponse {
-                direntry: Some(DirEntryInternal {
-                    name: "b".to_string(),
-                    inode: 2,
-                    position: 2,
-                    file_type: libc::DT_REG,
-                }),
+        .send(DaemonMessage::File(FileResponse::ReadDirBatch(Ok(
+            ReadDirBatchResponse {
+                fd: dir_fd,
+                dir_entries: Vec::new(),
             },
         ))))
         .await;
 
     assert_eq!(
         intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 2 }))
+        ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: dir_fd }))
     );
-
-    intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
-            ReadDirResponse { direntry: None },
-        ))))
-        .await;
-
-    assert_eq!(
-        intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: 2 }))
-    );
-
     intproxy.expect_file_close(fd).await;
 
     test_process.wait_assert_success().await;

@@ -85,12 +85,14 @@ pub struct InternalProxyConfig {
     pub idle_timeout: u64,
 
     /// ### internal_proxy.log_level {#internal_proxy-log_level}
+    ///
     /// Set the log level for the internal proxy.
-    /// RUST_LOG convention (i.e `mirrord=trace`)
-    /// will only be used if log_destination is set
+    /// RUST_LOG convention (i.e `mirrord=trace`) will only be used if `log_destination`
+    /// is set.
     pub log_level: Option<String>,
 
     /// ### internal_proxy.log_destination {#internal_proxy-log_destination}
+    ///
     /// Set the log file destination for the internal proxy.
     pub log_destination: Option<String>,
 
