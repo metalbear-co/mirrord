@@ -163,24 +163,24 @@ async fn resolve_interface() -> Result<(IpAddr, IpAddr, IpAddr)> {
 
     let ip = usable_interface
         .address
-        .ok_or_else(|| AgentError::VpnError("usable_interface".to_owned()))?
+        .ok_or_else(|| AgentError::VpnError("usable_interface.address".to_owned()))?
         .as_sockaddr_in()
-        .ok_or_else(|| AgentError::VpnError("usable_interface".to_owned()))?
+        .ok_or_else(|| AgentError::VpnError("usable_interface.address.as_sockaddr_in".to_owned()))?
         .ip()
         .into();
     let net_mask = usable_interface
         .netmask
-        .ok_or_else(|| AgentError::VpnError("usable_interface".to_owned()))?
+        .ok_or_else(|| AgentError::VpnError("usable_interface.netmask".to_owned()))?
         .as_sockaddr_in()
-        .ok_or_else(|| AgentError::VpnError("usable_interface".to_owned()))?
+        .ok_or_else(|| AgentError::VpnError("usable_interface.netmask.as_sockaddr_in".to_owned()))?
         .ip()
         .into();
     // extracting gateway is more difficult, ugly patch for now.
     let temp_gateway = usable_interface
         .address
-        .ok_or_else(|| AgentError::VpnError("usable_interface".to_owned()))?
+        .ok_or_else(|| AgentError::VpnError("usable_interface.address".to_owned()))?
         .as_sockaddr_in()
-        .ok_or_else(|| AgentError::VpnError("usable_interface".to_owned()))?
+        .ok_or_else(|| AgentError::VpnError("usable_interface.address.as_sockaddr_in".to_owned()))?
         .ip()
         .octets();
 
@@ -246,7 +246,7 @@ impl VpnTask {
     #[allow(clippy::indexing_slicing)]
     async fn run(mut self) -> Result<()> {
         // so host won't respond with RST to our packets.
-        // need to do it for UDP as well to avoid ICMP unreachable.
+        // TODO: need to do it for UDP as well to avoid ICMP unreachable.
         let output = std::process::Command::new("iptables")
             .args([
                 "-A",
@@ -263,7 +263,7 @@ impl VpnTask {
             .map_err(|err| AgentError::VpnError(err.to_string()))?;
 
         tracing::debug!(?output, "iptables output");
-        let (ip, net_mask, gateway) = resolve_interface().await.unwrap();
+        let (ip, net_mask, gateway) = resolve_interface().await?;
         let network_configuration = NetworkConfiguration {
             ip,
             net_mask,
@@ -279,7 +279,7 @@ impl VpnTask {
 
                 message = self.layer_rx.recv() => match message {
                     // We have a message from the layer to be handled.
-                    Some(message) => self.handle_layer_msg(message, &network_configuration).await.unwrap(),
+                    Some(message) => self.handle_layer_msg(message, &network_configuration).await?,
                     // Our channel with the layer is closed, this task is no longer needed.
                     None => {
                         tracing::trace!("VpnTask -> Channel with the layer is closed, exiting.");
@@ -289,7 +289,7 @@ impl VpnTask {
 
                 // We have data coming from one of our peers.
                 ready = (async { self.socket.as_mut().expect("is checked").readable().await }), if self.socket.is_some() => {
-                    let mut guard = ready.unwrap();
+                    let mut guard = ready?;
                     match guard.try_io(|inner| inner.get_ref().read(&mut buffer)) {
                         Ok(Ok(len)) => {
                             if len > 0 {
