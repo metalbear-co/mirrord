@@ -4,11 +4,11 @@ use tokio::sync::mpsc;
 
 #[derive(Debug, Error)]
 pub enum VpnError {
-    #[error("vpn failed becuase of bad response from agent: {0}")]
+    #[error("vpn failed because of bad response from agent: {0}")]
     AgentErrorResponse(#[from] mirrord_protocol::ResponseError),
 
-    #[error("vpn failed becuase of unexpectec response from agent")]
-    AgentUnexpcetedResponse,
+    #[error("vpn failed because of unexpected response from agent")]
+    AgentUnexpectedResponse,
 
     #[error("expected an agent response, receiver channel dropped")]
     AgentNoResponse,
@@ -20,5 +20,5 @@ pub enum VpnError {
     ClientMessageDropped(#[from] mpsc::error::SendError<ClientMessage>),
 
     #[error("mirrord agent protocol-version {0} is not supported, expected >=1.9.0 (mirrord agent >3.114.1)")]
-    AgentProtocolVersionMissmatch(semver::Version),
+    AgentProtocolVersionMismatch(semver::Version),
 }

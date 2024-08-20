@@ -15,7 +15,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::error::VpnError;
 
 pub static MINIMAL_PROTOCOL_VERSION: LazyLock<VersionReq> = LazyLock::new(|| {
-    ">=1.9.2"
+    ">=1.9.0"
         .parse()
         .expect("MINIMAL_PROTOCOL_VERSION should be valid")
 });
@@ -45,11 +45,11 @@ impl VpnAgent {
             .await
             .map_err(VpnError::from)?
         else {
-            return Err(VpnError::AgentUnexpcetedResponse);
+            return Err(VpnError::AgentUnexpectedResponse);
         };
 
         if !MINIMAL_PROTOCOL_VERSION.matches(&agent_protocol_version) {
-            return Err(VpnError::AgentProtocolVersionMissmatch(
+            return Err(VpnError::AgentProtocolVersionMismatch(
                 agent_protocol_version,
             ));
         }
@@ -84,7 +84,7 @@ impl VpnAgent {
 
         match response {
             Some(ServerVpn::NetworkConfiguration(network)) => Ok(network),
-            _ => Err(VpnError::AgentUnexpcetedResponse),
+            _ => Err(VpnError::AgentUnexpectedResponse),
         }
     }
 

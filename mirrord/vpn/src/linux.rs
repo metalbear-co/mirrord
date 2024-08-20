@@ -89,7 +89,7 @@ async fn agent_fetch_file<const B: u64>(
         .send_and_get_response(ClientMessage::FileRequest(request), get_file_response)
         .await?
     else {
-        return Err(VpnError::AgentUnexpcetedResponse);
+        return Err(VpnError::AgentUnexpectedResponse);
     };
 
     let OpenFileResponse { fd } = response?;
@@ -103,7 +103,7 @@ async fn agent_fetch_file<const B: u64>(
         .send_and_get_response(ClientMessage::FileRequest(request), get_file_response)
         .await?
     else {
-        return Err(VpnError::AgentUnexpcetedResponse);
+        return Err(VpnError::AgentUnexpectedResponse);
     };
 
     let ReadFileResponse { bytes, .. } = response?;
