@@ -159,6 +159,16 @@ And then in order to use that dylib in the tests, run the tests like this:
 MIRRORD_TEST_USE_EXISTING_LIB=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib cargo test -p mirrord-layer
 ```
 
+### Integration Tests logs and you
+
+These tests will try writing the `mirrord-intproxy` logs to a file in `/tmp/intproxy_logs`
+(the dir will be created if it doesn't exist), the file name should be the same as the test name,
+e.g. `/tmp/intproxy_logs/node_close_application_1_Application__NodeFileOps.log`.
+If log file creation fails, then you should see the logs in `stderr`.
+
+When running these in CI, an artifact is produced (scroll to `Artifacts` which is under
+the `Actions` -> `Summary` page) with all the test log files that could be created.
+
 ## Testing mirrord manually with a sample app.
 
 From the root directory of the mirrord repository, create a new testing deployment and service:
