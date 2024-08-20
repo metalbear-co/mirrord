@@ -65,12 +65,7 @@ async fn self_open(
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
 async fn read_from_mirrord_bin(dylib_path: &Path) {
-    let _tracing = init_tracing(
-        std::thread::current()
-            .name()
-            .unwrap_or("read_from_mirrord_bin"),
-    )
-    .unwrap();
+    let _tracing = init_tracing().unwrap();
 
     let contents = "please don't flake";
     let temp_dir = env::temp_dir();
@@ -362,7 +357,7 @@ async fn go_dir(
     application: Application,
     dylib_path: &Path,
 ) {
-    let _tracing = init_tracing(std::thread::current().name().unwrap_or("go_dir")).unwrap();
+    let _tracing = init_tracing().unwrap();
 
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
