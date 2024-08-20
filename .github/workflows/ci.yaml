@@ -363,7 +363,7 @@ jobs:
         with:
           # Name of the artifact to upload.
           name: intproxy_logs
-          path: /tmp/intproxy_logs
+          path: /tmp/intproxy_logs/linux
 
   macos_tests:
     runs-on: macos-13
@@ -484,7 +484,7 @@ jobs:
         with:
           # Name of the artifact to upload.
           name: intproxy_logs
-          path: /tmp/intproxy_logs
+          path: /tmp/intproxy_logs/macos
 
   e2e:
     runs-on: ubuntu-latest
