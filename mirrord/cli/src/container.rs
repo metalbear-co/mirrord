@@ -164,29 +164,29 @@ async fn create_sidecar_intproxy(
 
     // After spawning sidecar with -d flag it prints container_id, now we need the address of
     // intproxy running in sidecar to be used by mirrord-layer in execution container
-    loop {
+    let intproxy_address: SocketAddr = loop {
         let mut command = Command::new(&runtime_binary);
         command.args(["logs", &sidecar_container_id]);
 
         match exec_and_get_first_line(&mut command).await? {
             Some(line) => {
-                let intproxy_address: SocketAddr = line
+                break line
                     .parse()
                     .map_err(ContainerError::UnableParseProxySocketAddr)?;
-
-                break Ok((sidecar_container_id, intproxy_address));
             }
             None => match retry_strategy.next() {
                 Some(backoff_timeout) => tokio::time::sleep(backoff_timeout).await,
                 None => {
-                    break Err(ContainerError::UnsuccesfulCommandOutput(
+                    return Err(ContainerError::UnsuccesfulCommandOutput(
                         format_command(&command),
                         "stdout and stderr were empty and retry max delay exceeded".to_owned(),
-                    ))
+                    ));
                 }
             },
         }
-    }
+    };
+
+    Ok((sidecar_container_id, intproxy_address))
 }
 
 /// Main entry point for the `mirrord container` command.
