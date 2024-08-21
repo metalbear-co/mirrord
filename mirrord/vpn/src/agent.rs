@@ -15,7 +15,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::error::VpnError;
 
 pub static MINIMAL_PROTOCOL_VERSION: LazyLock<VersionReq> = LazyLock::new(|| {
-    ">=1.9.0"
+    ">=1.10.0"
         .parse()
         .expect("MINIMAL_PROTOCOL_VERSION should be valid")
 });
