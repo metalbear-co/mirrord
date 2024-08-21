@@ -96,6 +96,7 @@ pub enum Application {
     PythonCloseSocket,
     PythonCloseSocketKeepConnection,
     RustWebsockets,
+    RustSqs,
 }
 
 #[derive(Debug)]
@@ -334,6 +335,7 @@ impl Application {
                 vec!["curl", "https://kubernetes/api", "--insecure"]
             }
             Application::RustWebsockets => vec!["../target/debug/rust-websockets"],
+            Application::RustSqs => vec!["../target/debug/rust-sqs-printer"],
         }
     }
 
@@ -640,6 +642,12 @@ pub struct KubeService {
     pub target: String,
     guards: Vec<ResourceGuard>,
     namespace_guard: Option<ResourceGuard>,
+}
+
+impl KubeService {
+    pub fn deployment_target(&self) -> String {
+        format!("deployment/{}", self.name)
+    }
 }
 
 impl Drop for KubeService {

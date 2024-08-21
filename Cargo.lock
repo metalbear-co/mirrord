@@ -5896,6 +5896,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-sqs-printer"
+version = "0.1.0"
+dependencies = [
+ "aws-config",
+ "aws-sdk-sqs",
+ "tokio",
+]
+
+[[package]]
 name = "rust-unix-socket-client"
 version = "3.117.0"
 dependencies = [
