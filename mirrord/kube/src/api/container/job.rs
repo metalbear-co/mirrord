@@ -177,6 +177,7 @@ where
             },
             spec: Some(JobSpec {
                 ttl_seconds_after_finished: Some(config.ttl.into()),
+                backoff_limit: Some(0),
                 template: PodTemplateSpec {
                     metadata: Some(pod.metadata),
                     spec: pod.spec,
