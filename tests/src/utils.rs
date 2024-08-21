@@ -1273,7 +1273,7 @@ pub async fn service_for_mirrord_ls(
     .unwrap();
     watch_resource_exists(&stateful_set_api, &name).await;
 
-    // // `CronJob`
+    // `CronJob`
     let cron_job = cron_job_from_json(&name, image);
     let cron_job_guard = ResourceGuard::create(
         cron_job_api.clone(),
