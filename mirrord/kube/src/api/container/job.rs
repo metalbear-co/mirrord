@@ -266,6 +266,7 @@ mod test {
             },
             "spec": {
                 "ttlSecondsAfterFinished": agent.ttl,
+                "backoffLimit": 0,
                 "template": {
                     "metadata": {
                         "annotations": {
@@ -363,6 +364,7 @@ mod test {
                 }
             },
             "spec": {
+                "backoffLimit": 0,
                 "ttlSecondsAfterFinished": agent.ttl,
                 "template": {
                     "metadata": {
