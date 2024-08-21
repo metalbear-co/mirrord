@@ -2081,7 +2081,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "libc",
 ]
@@ -3087,7 +3087,7 @@ checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
 
 [[package]]
 name = "issue1317"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "actix-web",
  "env_logger 0.11.5",
@@ -3097,7 +3097,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "errno 0.3.9",
  "libc",
@@ -3106,7 +3106,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776portnot53"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "libc",
  "socket2",
@@ -3114,14 +3114,14 @@ dependencies = [
 
 [[package]]
 name = "issue1899"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "issue2001"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "libc",
 ]
@@ -3446,7 +3446,7 @@ checksum = "78b3ae25bc7c8c38cec158d1f2757ee79e9b3740fbc7ccf0e59e4b08d793fa89"
 
 [[package]]
 name = "listen_ports"
-version = "3.115.0"
+version = "3.115.1"
 
 [[package]]
 name = "local-channel"
@@ -3674,7 +3674,7 @@ checksum = "c9be0862c1b3f26a88803c4a49de6889c10e608b3ee9344e6ef5b45fb37ad3d1"
 
 [[package]]
 name = "mirrord"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "actix-codec",
  "clap",
@@ -3723,7 +3723,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -3778,7 +3778,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "assert-json-diff",
  "base64 0.22.1",
@@ -3792,7 +3792,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "bcder",
  "chrono",
@@ -3813,7 +3813,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "bimap",
  "bitflags 2.6.0",
@@ -3835,7 +3835,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3845,7 +3845,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "bincode",
  "drain",
@@ -3861,7 +3861,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "bytes",
  "futures",
@@ -3888,7 +3888,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy-protocol"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "bincode",
  "mirrord-protocol",
@@ -3898,7 +3898,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "actix-codec",
  "base64 0.22.1",
@@ -3925,7 +3925,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "actix-codec",
  "base64 0.22.1",
@@ -3972,7 +3972,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3981,7 +3981,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -3991,7 +3991,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -4025,7 +4025,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "enum_dispatch",
  "indicatif",
@@ -4059,7 +4059,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "apple-codesign",
  "object 0.36.3",
@@ -4403,7 +4403,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.115.0"
+version = "3.115.1"
 
 [[package]]
 name = "overload"
@@ -5445,21 +5445,21 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "tokio",
 ]

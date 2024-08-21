@@ -8,6 +8,17 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.115.1](https://github.com/metalbear-co/mirrord/tree/3.115.1) - 2024-08-21
+
+
+### Fixed
+
+- Add retry for checking intproxy logs to get its listening port, Prevents any
+  issues when it takes a bit of time for intproxy to start when running in
+  container mode. [#2687](https://github.com/metalbear-co/mirrord/issues/2687)
+- Fixed `mirrord-agent` not picking up graceful shutdown signal.
+  [#2690](https://github.com/metalbear-co/mirrord/issues/2690)
+
 ## [3.115.0](https://github.com/metalbear-co/mirrord/tree/3.115.0) - 2024-08-21
 
 
