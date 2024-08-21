@@ -56,36 +56,30 @@ async fn test_issue2001(
 
     assert_eq!(
         intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 11 })),
+        ClientMessage::FileRequest(FileRequest::ReadDirBatch(ReadDirBatchRequest {
+            remote_fd: 11,
+            amount: 128
+        })),
     );
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
-            ReadDirResponse {
-                direntry: Some(DirEntryInternal {
-                    inode: 1,
-                    position: 0,
-                    name: "file1".into(),
-                    file_type: libc::DT_REG,
-                }),
-            },
-        ))))
-        .await;
-
-    assert_eq!(
-        intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 11 })),
-    );
-
-    intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
-            ReadDirResponse {
-                direntry: Some(DirEntryInternal {
-                    inode: 2,
-                    position: 1,
-                    name: "file2".into(),
-                    file_type: libc::DT_REG,
-                }),
+        .send(DaemonMessage::File(FileResponse::ReadDirBatch(Ok(
+            ReadDirBatchResponse {
+                fd: 11,
+                dir_entries: vec![
+                    DirEntryInternal {
+                        inode: 1,
+                        position: 0,
+                        name: "file1".into(),
+                        file_type: libc::DT_REG,
+                    },
+                    DirEntryInternal {
+                        inode: 2,
+                        position: 1,
+                        name: "file2".into(),
+                        file_type: libc::DT_REG,
+                    },
+                ],
             },
         ))))
         .await;

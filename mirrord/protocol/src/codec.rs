@@ -13,14 +13,7 @@ use semver::VersionReq;
 
 use crate::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
-    file::{
-        AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
-        GetDEnts64Request, GetDEnts64Response, OpenDirResponse, OpenFileRequest, OpenFileResponse,
-        OpenRelativeFileRequest, ReadDirRequest, ReadDirResponse, ReadFileRequest,
-        ReadFileResponse, ReadLimitedFileRequest, ReadLinkFileRequest, ReadLinkFileResponse,
-        SeekFileRequest, SeekFileResponse, WriteFileRequest, WriteFileResponse,
-        WriteLimitedFileRequest, XstatFsRequest, XstatFsResponse, XstatRequest, XstatResponse,
-    },
+    file::*,
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
@@ -83,6 +76,13 @@ pub enum FileRequest {
     CloseDir(CloseDirRequest),
     GetDEnts64(GetDEnts64Request),
     ReadLink(ReadLinkFileRequest),
+
+    /// `readdir` request.
+    ///
+    /// Unlike other requests that come from the layer -> intproxy, this one is intproxy
+    /// only. [`ReadDirRequest`]s that come from the layer are transformed into this
+    /// batched form when the protocol version supports it. See [`READDIR_BATCH_VERSION`].
+    ReadDirBatch(ReadDirBatchRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -126,6 +126,7 @@ pub enum FileResponse {
     OpenDir(RemoteResult<OpenDirResponse>),
     GetDEnts64(RemoteResult<GetDEnts64Response>),
     ReadLink(RemoteResult<ReadLinkFileResponse>),
+    ReadDirBatch(RemoteResult<ReadDirBatchResponse>),
 }
 
 /// `-agent` --> `-layer` messages.

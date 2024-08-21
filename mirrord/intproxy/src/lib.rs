@@ -1,3 +1,4 @@
+#![feature(map_try_insert)]
 #![warn(clippy::indexing_slicing)]
 
 use std::{collections::HashMap, time::Duration};
@@ -299,6 +300,13 @@ impl IntProxy {
                 if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
                     self.task_txs.agent.send(ClientMessage::ReadyForLogs).await;
                 }
+
+                self.task_txs
+                    .simple
+                    .send(SimpleProxyMessage::ProtocolVersion(
+                        protocol_version.clone(),
+                    ))
+                    .await;
 
                 self.task_txs
                     .incoming

@@ -2,9 +2,12 @@ use std::{
     assert_matches::assert_matches,
     collections::HashMap,
     fmt::Debug,
+    fs::File,
+    io,
     path::{Path, PathBuf},
     process::Stdio,
     str::FromStr,
+    sync::Arc,
     time::Duration,
 };
 
@@ -28,11 +31,69 @@ use tokio::{
     net::{TcpListener, TcpStream},
     process::Command,
 };
+use tracing::subscriber::DefaultGuard;
+use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
 pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
 pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
+
+/// Initializes tracing for the current thread, allowing us to have multiple tracing subscribers
+/// writin logs to different files.
+///
+/// We take advantage of how Rust's thread naming scheme for tests to create the log files,
+/// and if we have no thread name, then we just write the logs to `stderr`.
+pub fn init_tracing() -> Result<DefaultGuard, Box<dyn std::error::Error>> {
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::new("mirrord=trace"))
+        .without_time()
+        .with_ansi(false)
+        .with_file(true)
+        .with_line_number(true)
+        .with_span_events(FmtSpan::ACTIVE)
+        .pretty();
+
+    // Sets the default subscriber for the _current thread_, returning a guard that unsets
+    // the default subscriber when it is dropped.
+    match std::thread::current()
+        .name()
+        .map(|name| name.replace(':', "_"))
+    {
+        Some(test_name) => {
+            let mut logs_file = PathBuf::from_str("/tmp/intproxy_logs")?;
+
+            #[cfg(target_os = "macos")]
+            logs_file.push("macos");
+            #[cfg(not(target_os = "macos"))]
+            logs_file.push("linux");
+
+            let _ = std::fs::create_dir_all(&logs_file).ok();
+
+            logs_file.push(&test_name);
+            match File::create(logs_file) {
+                Ok(file) => {
+                    let subscriber = subscriber.with_writer(Arc::new(file)).finish();
+
+                    // Writes the logs to a file.
+                    Ok(tracing::subscriber::set_default(subscriber))
+                }
+                Err(_) => {
+                    let subscriber = subscriber.with_writer(io::stderr).finish();
+
+                    // File creation failure makes the output go to `stderr`.
+                    Ok(tracing::subscriber::set_default(subscriber))
+                }
+            }
+        }
+        None => {
+            let subscriber = subscriber.with_writer(io::stderr).finish();
+
+            // No thread name makes the output go to `stderr`.
+            Ok(tracing::subscriber::set_default(subscriber))
+        }
+    }
+}
 
 pub struct TestIntProxy {
     codec: Framed<TcpStream, DaemonCodec>,
