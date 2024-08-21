@@ -645,23 +645,25 @@ pub struct KubeService {
     pub name: String,
     pub namespace: String,
     pub target: String,
-    pod_guard: ResourceGuard,
-    service_guard: ResourceGuard,
+    guards: Vec<ResourceGuard>,
     namespace_guard: Option<ResourceGuard>,
 }
 
 impl Drop for KubeService {
     fn drop(&mut self) {
-        let deleters = [
-            self.pod_guard.take_deleter(),
-            self.service_guard.take_deleter(),
+        let mut deleters = self
+            .guards
+            .iter_mut()
+            .map(ResourceGuard::take_deleter)
+            .collect::<Vec<_>>();
+
+        deleters.push(
             self.namespace_guard
                 .as_mut()
                 .and_then(ResourceGuard::take_deleter),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
+        );
+
+        let deleters = deleters.into_iter().flatten().collect::<Vec<_>>();
 
         if deleters.is_empty() {
             return;
@@ -774,7 +776,7 @@ fn service_from_json(name: &str, service_type: &str) -> Service {
 }
 
 #[cfg(feature = "operator")]
-fn stateful_set_from_json(name: &str, image: &str) -> StatefulSet {
+fn stateful_set_from_json(name: &str, image: &str) -> k8s_openapi::api::apps::v1::StatefulSet {
     serde_json::from_value(json!({
         "apiVersion": "apps/v1",
         "kind": "StatefulSet",
@@ -835,7 +837,7 @@ fn stateful_set_from_json(name: &str, image: &str) -> StatefulSet {
 }
 
 #[cfg(feature = "operator")]
-fn cron_job_from_json(name: &str, image: &str) -> CronJob {
+fn cron_job_from_json(name: &str, image: &str) -> k8s_openapi::api::batch::v1::CronJob {
     serde_json::from_value(json!({
         "apiVersion": "apps/v1",
         "kind": "CronJob",
@@ -844,7 +846,7 @@ fn cron_job_from_json(name: &str, image: &str) -> CronJob {
             "labels": {
                 "app": name,
                 TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-                "test-label-for-statefulsets": format!("statefulset-{name}")
+                "test-label-for-cronjobs": format!("cronjob-{name}")
             }
         },
         "spec": {
@@ -864,11 +866,7 @@ fn cron_job_from_json(name: &str, image: &str) -> CronJob {
                         {
                             "name": &CONTAINER_NAME,
                             "image": image,
-                            "ports": [
-                                {
-                                    "containerPort": 80
-                                }
-                            ],
+                            "ports": [{ "containerPort": 80 }],
                             "env": [
                                 {
                                   "name": "MIRRORD_FAKE_VAR_FIRST",
@@ -886,10 +884,64 @@ fn cron_job_from_json(name: &str, image: &str) -> CronJob {
                         }
                     ]
                 }
-                        }
+            }
         }
     }))
-    .expect("Failed creating `statefulset` from json spec!")
+    .expect("Failed creating `cronjob` from json spec!")
+}
+
+#[cfg(feature = "operator")]
+fn job_from_json(name: &str, image: &str) -> k8s_openapi::api::batch::v1::Job {
+    serde_json::from_value(json!({
+        "apiVersion": "apps/v1",
+        "kind": "Job",
+        "metadata": {
+            "name": name,
+            "labels": {
+                "app": name,
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                "test-label-for-jobs": format!("job-{name}")
+            }
+        },
+        "spec": {
+            "ttlSecondsAfterFinished": 10,
+            "backoffLimit": 1,
+            "template": {
+                "metadata": {
+                    "labels": {
+                        "app": &name,
+                        "test-label-for-pods": format!("pod-{name}"),
+                        format!("test-label-for-pods-{name}"): &name
+                    }
+                },
+            },
+            "spec": {
+                "restartPolicy": "OnFailure",
+                "containers": [
+                    {
+                        "name": &CONTAINER_NAME,
+                        "image": image,
+                        "ports": [{ "containerPort": 80 }],
+                        "env": [
+                            {
+                              "name": "MIRRORD_FAKE_VAR_FIRST",
+                              "value": "mirrord.is.running"
+                            },
+                            {
+                              "name": "MIRRORD_FAKE_VAR_SECOND",
+                              "value": "7777"
+                            },
+                            {
+                                "name": "MIRRORD_FAKE_VAR_THIRD",
+                                "value": "foo=bar"
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+    }))
+    .expect("Failed creating `job` from json spec!")
 }
 
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
@@ -1002,8 +1054,7 @@ pub async fn service(
         name,
         namespace: namespace.to_string(),
         target: format!("pod/{target}/container/{CONTAINER_NAME}"),
-        pod_guard,
-        service_guard,
+        guards: vec![pod_guard, service_guard],
         namespace_guard,
     }
 }
@@ -1114,8 +1165,7 @@ pub async fn service_for_mirrord_ls(
         name,
         namespace: namespace.to_string(),
         target: format!("pod/{target}/container/{CONTAINER_NAME}"),
-        pod_guard,
-        service_guard,
+        guards: vec![pod_guard, service_guard],
         namespace_guard,
     }
 }
@@ -1130,6 +1180,11 @@ pub async fn service_for_mirrord_ls(
     #[default(true)] randomize_name: bool,
     #[future] kube_client: Client,
 ) -> KubeService {
+    use k8s_openapi::api::{
+        apps::v1::StatefulSet,
+        batch::v1::{CronJob, Job},
+    };
+
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
 
     let kube_client = kube_client.await;
@@ -1215,7 +1270,7 @@ pub async fn service_for_mirrord_ls(
 
     // `StatefulSet`
     let stateful_set = stateful_set_from_json(&name, image);
-    let pod_guard = ResourceGuard::create(
+    let stateful_set_guard = ResourceGuard::create(
         stateful_set_api.clone(),
         name.to_string(),
         &stateful_set,
@@ -1227,7 +1282,7 @@ pub async fn service_for_mirrord_ls(
 
     // // `CronJob`
     let cron_job = cron_job_from_json(&name, image);
-    let pod_guard = ResourceGuard::create(
+    let cron_job_guard = ResourceGuard::create(
         cron_job_api.clone(),
         name.to_string(),
         &cron_job,
@@ -1237,13 +1292,13 @@ pub async fn service_for_mirrord_ls(
     .unwrap();
     watch_resource_exists(&cron_job_api, &name).await;
 
-    // // `Job`
-    // let job = job_from_json(&name, image);
-    // let pod_guard =
-    //     ResourceGuard::create(job_api.clone(), name.to_string(), &job, delete_after_fail)
-    //         .await
-    //         .unwrap();
-    // watch_resource_exists(&job_api, &name).await;
+    // `Job`
+    let job = job_from_json(&name, image);
+    let job_guard =
+        ResourceGuard::create(job_api.clone(), name.to_string(), &job, delete_after_fail)
+            .await
+            .unwrap();
+    watch_resource_exists(&job_api, &name).await;
 
     let target = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
         .await
@@ -1264,8 +1319,13 @@ pub async fn service_for_mirrord_ls(
         name,
         namespace: namespace.to_string(),
         target: format!("pod/{target}/container/{CONTAINER_NAME}"),
-        pod_guard,
-        service_guard,
+        guards: vec![
+            pod_guard,
+            service_guard,
+            stateful_set_guard,
+            cron_job_guard,
+            job_guard,
+        ],
         namespace_guard,
     }
 }
