@@ -174,15 +174,16 @@ async fn create_sidecar_intproxy(
                     .parse()
                     .map_err(ContainerError::UnableParseProxySocketAddr)?;
             }
-            None => match retry_strategy.next() {
-                Some(backoff_timeout) => tokio::time::sleep(backoff_timeout).await,
-                None => {
-                    return Err(ContainerError::UnsuccesfulCommandOutput(
+            None => {
+                let backoff_timeout = retry_strategy.next().ok_or_else(|| {
+                    ContainerError::UnsuccesfulCommandOutput(
                         format_command(&command),
                         "stdout and stderr were empty and retry max delay exceeded".to_owned(),
-                    ));
-                }
-            },
+                    )
+                })?;
+
+                tokio::time::sleep(backoff_timeout).await
+            }
         }
     };
 
