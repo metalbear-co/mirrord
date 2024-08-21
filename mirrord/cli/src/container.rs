@@ -2,6 +2,7 @@ use std::{
     io::{BufRead, BufReader, Cursor, Write},
     net::SocketAddr,
     path::Path,
+    time::Duration,
 };
 
 use exec::execvp;
@@ -20,6 +21,7 @@ use mirrord_config::{
 use mirrord_progress::{Progress, ProgressTracker, MIRRORD_PROGRESS_ENV};
 use tempfile::NamedTempFile;
 use tokio::process::Command;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::Level;
 
 use crate::{
@@ -52,7 +54,7 @@ fn format_command(command: &Command) -> String {
 
 /// Execute a [`Command`] and read first line from stdout
 #[tracing::instrument(level = Level::TRACE, ret)]
-async fn exec_and_get_first_line(command: &mut Command) -> Result<String, ContainerError> {
+async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>, ContainerError> {
     let result = command
         .output()
         .await
@@ -65,14 +67,19 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<String, Contai
         .next()
         .transpose()
         .map_err(|error| ContainerError::UnableParseCommandStdout(format_command(command), error))?
-        .ok_or_else(|| {
-            let message = (!result.stderr.is_empty())
+        .map(Ok)
+        .or_else(|| {
+            (!result.stderr.is_empty())
                 .then(|| String::from_utf8(result.stderr).ok())
                 .flatten()
-                .unwrap_or_else(|| "stdout and stderr were empty".to_owned());
-
-            ContainerError::UnsuccesfulCommandOutput(format_command(command), message)
+                .map(|message| {
+                    Err(ContainerError::UnsuccesfulCommandOutput(
+                        format_command(command),
+                        message,
+                    ))
+                })
         })
+        .transpose()
 }
 
 /// Create a temp file with a json serialized [`LayerConfig`] to be loaded by container and external
@@ -139,16 +146,46 @@ async fn create_sidecar_intproxy(
         .with_command(sidecar_container_command)
         .into_command_args();
 
-    let sidecar_container_id =
-        exec_and_get_first_line(Command::new(&runtime_binary).args(sidecar_args)).await?;
+    let mut sidecar_container_spawn = Command::new(&runtime_binary);
+    sidecar_container_spawn.args(sidecar_args);
+
+    let sidecar_container_id = exec_and_get_first_line(&mut sidecar_container_spawn)
+        .await?
+        .ok_or_else(|| {
+            ContainerError::UnsuccesfulCommandOutput(
+                format_command(&sidecar_container_spawn),
+                "stdout and stderr were empty".to_owned(),
+            )
+        })?;
+
+    let mut retry_strategy = ExponentialBackoff::from_millis(100)
+        .max_delay(Duration::from_secs(10))
+        .map(jitter);
 
     // After spawning sidecar with -d flag it prints container_id, now we need the address of
     // intproxy running in sidecar to be used by mirrord-layer in execution container
-    let intproxy_address: SocketAddr =
-        exec_and_get_first_line(Command::new(runtime_binary).args(["logs", &sidecar_container_id]))
-            .await?
-            .parse()
-            .map_err(ContainerError::UnableParseProxySocketAddr)?;
+    let intproxy_address: SocketAddr = loop {
+        let mut command = Command::new(&runtime_binary);
+        command.args(["logs", &sidecar_container_id]);
+
+        match exec_and_get_first_line(&mut command).await? {
+            Some(line) => {
+                break line
+                    .parse()
+                    .map_err(ContainerError::UnableParseProxySocketAddr)?;
+            }
+            None => {
+                let backoff_timeout = retry_strategy.next().ok_or_else(|| {
+                    ContainerError::UnsuccesfulCommandOutput(
+                        format_command(&command),
+                        "stdout and stderr were empty and retry max delay exceeded".to_owned(),
+                    )
+                })?;
+
+                tokio::time::sleep(backoff_timeout).await
+            }
+        }
+    };
 
     Ok((sidecar_container_id, intproxy_address))
 }

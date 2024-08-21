@@ -1,1 +1,0 @@
-Use main CI action for go e2e setup.
