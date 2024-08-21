@@ -177,7 +177,7 @@ async fn create_sidecar_intproxy(
                 break Ok((sidecar_container_id, intproxy_address));
             }
             None => match retry_strategy.next() {
-                Some(retry_timeout) => tokio::time::sleep(retry_timeout).await,
+                Some(backoff_timeout) => tokio::time::sleep(backoff_timeout).await,
                 None => {
                     break Err(ContainerError::UnsuccesfulCommandOutput(
                         format_command(&command),
