@@ -8,6 +8,26 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.115.0](https://github.com/metalbear-co/mirrord/tree/3.115.0) - 2024-08-21
+
+
+### Added
+
+- Adds a batching readdir requests, which should improve the performance when
+  traversing large directories. Introduces a new `ReadDirBatched` message to the protocol.
+  [#2611](https://github.com/metalbear-co/mirrord/issues/2611)
+
+
+### Fixed
+
+- Fix hooking on arm64 Go on Linux
+  [#2680](https://github.com/metalbear-co/mirrord/issues/2680)
+
+
+### Internal
+
+- Adds intproxy logs for the integration tests in CI.
+
 ## [3.114.1](https://github.com/metalbear-co/mirrord/tree/3.114.1) - 2024-08-18
 
 
