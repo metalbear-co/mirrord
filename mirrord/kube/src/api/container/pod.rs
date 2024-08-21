@@ -204,6 +204,7 @@ impl ContainerVariant for PodTargetedVariant<'_> {
 
         let update = Pod {
             spec: Some(PodSpec {
+                restart_policy: Some("Never".to_string()),
                 host_pid: Some(true),
                 node_name: Some(runtime_data.node_name.clone()),
                 volumes: Some(vec![
