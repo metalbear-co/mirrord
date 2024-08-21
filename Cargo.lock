@@ -4096,7 +4096,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-vpn"
-version = "3.115.0"
+version = "3.115.1"
 dependencies = [
  "futures",
  "ipnet",
