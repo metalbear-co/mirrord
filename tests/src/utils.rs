@@ -681,7 +681,7 @@ impl Drop for KubeService {
     }
 }
 
-fn deployment_from_json(name: &str, image: &str, x: _) -> Deployment {
+fn deployment_from_json(name: &str, image: &str, env: Value) -> Deployment {
     serde_json::from_value(json!({
         "apiVersion": "apps/v1",
         "kind": "Deployment",
@@ -718,20 +718,7 @@ fn deployment_from_json(name: &str, image: &str, x: _) -> Deployment {
                                     "containerPort": 80
                                 }
                             ],
-                            "env": [
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_FIRST",
-                                  "value": "mirrord.is.running"
-                                },
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_SECOND",
-                                  "value": "7777"
-                                },
-                                {
-                                    "name": "MIRRORD_FAKE_VAR_THIRD",
-                                    "value": "foo=bar"
-                                }
-                            ],
+                            "env": env,
                         }
                     ]
                 }
@@ -991,6 +978,7 @@ pub async fn service(
         kube_client.await,
         default_env(),
     )
+    .await
 }
 
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
@@ -1013,9 +1001,10 @@ pub async fn service_with_env(
         image,
         service_name,
         randomize_name,
-        kube_client.await,
+        kube_client,
         env,
     )
+    .await
 }
 
 /// Internal function to create a custom [`KubeService`].
@@ -1040,7 +1029,6 @@ async fn internal_service(
 ) -> KubeService {
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
 
-    let kube_client = kube_client.await;
     let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
     let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
     let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
@@ -1203,7 +1191,7 @@ pub async fn service_for_mirrord_ls(
     }
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image);
+    let deployment = deployment_from_json(&name, image, default_env());
     let pod_guard = ResourceGuard::create(
         deployment_api.clone(),
         name.to_string(),

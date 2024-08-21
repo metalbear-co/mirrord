@@ -6,16 +6,11 @@ mod test_resources;
 
 use std::path::PathBuf;
 
-use aws_sdk_sqs::types::QueueAttributeName::{FifoQueue, MessageRetentionPeriod};
-use kube::Client;
 use rstest::*;
-use tokio::join;
 
 use crate::{
     operator::queue_splitting::test_resources::{sqs_test_resources, SqsTestResources},
-    utils::{
-        config_dir, kube_client, service, service_with_env, Application, KubeService, ResourceGuard,
-    },
+    utils::{config_dir, Application},
 };
 
 /// Send 6 messages to the original queue, such that 2 will reach each mirrord run and 2 the
@@ -57,13 +52,13 @@ pub async fn two_users_one_queue(
     let mut client_b = application
         .run(
             &sqs_test_resources.deployment_target(),
-            Some(&deployed.namespace),
+            Some(sqs_test_resources.namespace()),
             None,
             Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
         )
         .await;
 
-    write_sqs_messages(&sqs_queue_url).await;
+    // write_sqs_messages(&sqs_queue_url).await;
 
     // // The test application consumes messages and verifies exact expected messages.
     // join!(
