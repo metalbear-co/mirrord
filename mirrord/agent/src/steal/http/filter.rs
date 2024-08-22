@@ -9,6 +9,13 @@ pub enum HttpFilter {
     Header(Regex),
     /// Path based filter.
     Path(Regex),
+    /// Filter composed of multiple filters.
+    Composite {
+        /// If true, all filters must match, otherwise any filter can match.
+        all: bool,
+        /// Filters to use.
+        filters: Vec<HttpFilter>,
+    },
 }
 
 impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
@@ -21,6 +28,9 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
             }
             mirrord_protocol::tcp::HttpFilter::Path(path) => {
                 Ok(Self::Path(Regex::new(&format!("(?i){path}"))?))
+            }
+            mirrord_protocol::tcp::HttpFilter::Composite { all, filters } => {
+                Ok(Self::Composite(all, filters))
             }
         }
     }
@@ -87,6 +97,14 @@ impl HttpFilter {
                         .unwrap_or(false)
                 })
                 .unwrap_or(false),
+
+            Self::Composite { all, filters } => {
+                let f: fn(bool, bool) = match all {
+                    true => |a, n| a.and(n),
+                    false => |a, n| a.or(n),
+                };
+                *filters.iter().map(|f| f.matches(request)).fold(all, f)
+            }
         }
     }
 }

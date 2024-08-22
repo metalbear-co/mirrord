@@ -150,6 +150,13 @@ pub enum HttpFilter {
     Header(Filter),
     /// Filter by path ("/api/v1")
     Path(Filter),
+    /// Filter by multiple filters
+    Composite {
+        /// If true, all filters must match, otherwise any filter can match
+        all: bool,
+        /// Filters to use
+        filters: Vec<HttpFilter>,
+    },
 }
 
 impl Display for HttpFilter {
@@ -157,6 +164,10 @@ impl Display for HttpFilter {
         match self {
             HttpFilter::Header(filter) => write!(f, "header={filter}"),
             HttpFilter::Path(filter) => write!(f, "path={filter}"),
+            HttpFilter::Composite { all, filters } => match all {
+                true => write!(f, "all:{filters:?}"),
+                false => write!(f, "any:{filters:?}"),
+            },
         }
     }
 }
