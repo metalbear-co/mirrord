@@ -64,7 +64,7 @@ pub(crate) enum ContainerError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     UnableParseCommandStdout(String, std::io::Error),
 
-    #[error("Comand failed to execute command [{0}]: {1}")]
+    #[error("Command failed to execute command [{0}]: {1}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     UnsuccesfulCommandOutput(String, String),
 
