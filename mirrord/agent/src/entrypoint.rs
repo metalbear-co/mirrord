@@ -46,6 +46,7 @@ use crate::{
         StealerCommand, TcpConnectionStealer, TcpStealerApi,
     },
     util::{run_thread_in_namespace, ClientId},
+    vpn::VpnApi,
     watched_task::{TaskStatus, WatchedTask},
     *,
 };
@@ -200,6 +201,7 @@ struct ClientConnectionHandler {
     tcp_outgoing_api: TcpOutgoingApi,
     udp_outgoing_api: UdpOutgoingApi,
     dns_api: DnsApi,
+    vpn_api: VpnApi,
     state: State,
     /// Whether the client has sent us [`ClientMessage::ReadyForLogs`].
     ready_for_logs: bool,
@@ -224,6 +226,7 @@ impl ClientConnectionHandler {
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid);
         let udp_outgoing_api = UdpOutgoingApi::new(pid);
+        let vpn_api = VpnApi::new(pid);
 
         let client_handler = Self {
             id,
@@ -234,6 +237,7 @@ impl ClientConnectionHandler {
             tcp_outgoing_api,
             udp_outgoing_api,
             dns_api,
+            vpn_api,
             state,
             ready_for_logs: false,
         };
@@ -372,6 +376,10 @@ impl ClientConnectionHandler {
                     Ok(message) => self.respond(DaemonMessage::GetAddrInfoResponse(message)).await?,
                     Err(e) => break e,
                 },
+                message = self.vpn_api.daemon_message() => match message{
+                    Ok(message) => self.respond(DaemonMessage::Vpn(message)).await?,
+                    Err(e) => break e,
+                },
                 _ = cancellation_token.cancelled() => return Ok(()),
             }
         };
@@ -472,6 +480,9 @@ impl ClientConnectionHandler {
             }
             ClientMessage::ReadyForLogs => {
                 self.ready_for_logs = true;
+            }
+            ClientMessage::Vpn(message) => {
+                self.vpn_api.layer_message(message).await?;
             }
         }
 

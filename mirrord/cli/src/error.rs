@@ -7,6 +7,7 @@ use mirrord_console::error::ConsoleError;
 use mirrord_intproxy::{agent_conn::ConnectionTlsError, error::IntProxyError};
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
+use mirrord_vpn::error::VpnError;
 use reqwest::StatusCode;
 use thiserror::Error;
 
@@ -257,6 +258,11 @@ pub(crate) enum CliError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     InternalProxyError(#[from] InternalProxyError),
+
+    /// Errors produced by `mirrord vpn` command.
+    #[error(transparent)]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    VpnError(#[from] VpnError),
 
     #[error("Getting cli path failed {0:#?}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
