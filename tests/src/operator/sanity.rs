@@ -17,10 +17,9 @@ pub async fn mirrord_ls(#[future] service: KubeService) {
     let stdout = process.get_stdout().await;
     let targets: Vec<String> = serde_json::from_str(&stdout).unwrap();
     let re = Regex::new(r"^(pod|deployment|statefulset|cronjob|job)/.+(/container/.+)?$").unwrap();
-    targets.iter().for_each(|output| {
-        eprintln!("{output}");
-        assert!(re.is_match(output))
-    });
+    targets
+        .iter()
+        .for_each(|output| assert!(re.is_match(output)));
     assert!(targets
         .iter()
         .any(|output| output.starts_with(&format!("pod/{}", service.name))));
