@@ -79,6 +79,10 @@ pub(crate) enum AgentError {
 
     #[error("Timeout on accepting first client connection")]
     FirstConnectionTimeout,
+
+    /// Temporary error for vpn feature
+    #[error("Generic error in vpn: {0}")]
+    VpnError(String),
 }
 
 impl From<mpsc::error::SendError<StealerCommand>> for AgentError {
