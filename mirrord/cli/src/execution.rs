@@ -9,8 +9,12 @@ use mirrord_config::{
     config::ConfigError, internal_proxy::MIRRORD_INTPROXY_CONNECT_TCP_ENV, LayerConfig,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
+use mirrord_kube::api::kubernetes::AgentKubernetesConnectInfo;
 use mirrord_progress::Progress;
-use mirrord_protocol::{ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest, LogLevel};
+use mirrord_protocol::{
+    tcp::COMPOSITE_FILTER_VERSION, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
+    LogLevel,
+};
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
 use serde::Serialize;
@@ -163,6 +167,19 @@ impl MirrordExecution {
         let (connect_info, mut connection) = create_and_connect(config, progress, analytics)
             .await
             .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+
+        if let AgentConnectInfo::DirectKubernetes(AgentKubernetesConnectInfo {
+            agent_version: Some(agent_version),
+            ..
+        }) = &connect_info
+        {
+            let version = agent_version.parse().expect("Bad Identifier");
+            if !COMPOSITE_FILTER_VERSION.matches(&version) {
+                Err(ConfigError::Conflict(
+                        "Cannot use 'any' or 'all' fields with versions of mirrord agent lower than 1.9.1".to_string(),
+                    ))?
+            }
+        }
 
         let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()

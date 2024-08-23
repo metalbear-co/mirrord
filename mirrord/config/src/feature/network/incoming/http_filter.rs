@@ -81,6 +81,24 @@ pub struct HttpFilterConfig {
     #[config(env = "MIRRORD_HTTP_PATH_FILTER")]
     pub path_filter: Option<String>,
 
+    /// #### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http-all-of}
+    ///
+    ///
+    /// Supports a list of regexes validated by the
+    /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
+    ///
+    /// Case-insensitive. Messages must match all of the specified filters.
+    pub all_of: Option<Vec<InnerFilter>>,
+
+    /// #### feature.network.incoming.http_filter.any_of {#feature-network-incoming-http-any-of}
+    ///
+    ///
+    /// Supports a list of regexes validated by the
+    /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
+    ///
+    /// Case-insensitive. Messages can match any of the specified filters.
+    pub any_of: Option<Vec<InnerFilter>>,
+
     /// ##### feature.network.incoming.http_filter.ports {#feature-network-incoming-http_filter-ports}
     ///
     /// Activate the HTTP traffic filter only for these ports.
@@ -101,6 +119,13 @@ impl HttpFilterConfig {
     pub fn get_filtered_ports(&self) -> Option<&[u16]> {
         self.is_filter_set().then(|| &*self.ports.0)
     }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum InnerFilter {
+    Header { header: String },
+    Path { path: String },
 }
 
 /// <!--${internal}-->
@@ -124,6 +149,10 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
             .source_value(context)
             .transpose()?;
 
+        // TODO: make sure env vars should be used to set these
+        let all_of = None;
+        let any_of = None;
+
         let ports = FromEnv::new("MIRRORD_HTTP_FILTER_PORTS")
             .source_value(context)
             .transpose()?
@@ -132,6 +161,8 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
         Ok(Self::Generated {
             header_filter,
             path_filter,
+            all_of,
+            any_of,
             ports,
         })
     }
