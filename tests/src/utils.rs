@@ -203,6 +203,31 @@ impl TestProcess {
         panic!("Timeout waiting for line: {line}");
     }
 
+    /// Wait for the test app to output the given amount of lines.
+    ///
+    /// # Arguments
+    ///
+    /// * `timeout` - how long to wait for process to output enough lines.
+    ///
+    /// # Panics
+    /// If `timeout` has passed and stdout still does not contain `N`.
+    pub async fn await_n_lines<const N: usize>(&self, timeout: Duration) -> Vec<String> {
+        tokio::time::timeout(
+            timeout,
+            async move {
+                loop {
+                    let stdout = self.get_stdout().await;
+                    if stdout.lines().count() >= N {
+                        return stdout.lines().collect();
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+            .await
+            .unwrap(),
+        )
+    }
+
     pub async fn write_to_stdin(&mut self, data: &[u8]) {
         if let Some(ref mut stdin) = self.child.stdin {
             stdin.write(data).await.unwrap();

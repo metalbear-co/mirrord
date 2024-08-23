@@ -1,14 +1,17 @@
 #![cfg(test)]
 #![cfg(feature = "operator")]
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    iter::Cloned,
-};
+use std::collections::{BTreeMap, HashMap};
 
-use aws_sdk_sqs::types::QueueAttributeName::{FifoQueue, MessageRetentionPeriod};
+use aws_sdk_sqs::types::{
+    builders::MessageAttributeValue,
+    QueueAttributeName::{FifoQueue, MessageRetentionPeriod},
+};
 use futures_util::FutureExt;
-use k8s_openapi::api::{apps::v1::Deployment, core::v1::EnvVar};
+use k8s_openapi::api::{
+    apps::v1::Deployment,
+    core::v1::{EnvVar, Service},
+};
 use kube::{
     api::{Patch, PatchParams, PostParams},
     Api, Client, Resource,
@@ -40,8 +43,8 @@ const LOCALSTACK_PATCH_LABEL_NAME: &str = "sqs-e2e-tests-localstack-patch";
 const LOCALSTACK_ENDPOINT_URL: &str = "http://localstack.default.svc.cluster.local:4566";
 
 pub struct QueueInfo {
-    name: String,
-    url: String,
+    pub name: String,
+    pub url: String,
 }
 
 /// K8s resources will be deleted when this is dropped.
@@ -49,8 +52,9 @@ pub struct SqsTestResources {
     k8s_service: KubeService,
     queue1: QueueInfo,
     queue2: QueueInfo,
-    operator_patch_guard: ResourceGuard,
+    sqs_client: aws_sdk_sqs::Client,
     localstack_endpoint_url: String,
+    guards: Vec<ResourceGuard>,
 }
 
 impl SqsTestResources {
@@ -73,23 +77,36 @@ impl SqsTestResources {
     pub fn deployment_target(&self) -> String {
         self.k8s_service.deployment_target()
     }
+
+    pub fn sqs_client(&self) -> aws_sdk_sqs::Client {
+        &self.sqs_client
+    }
+}
+
+async fn get_sqs_client(localstack_url: Option<String>) -> aws_sdk_sqs::Client {
+    println!("Using endpoint URL {endpoint_url}");
+    let mut config = aws_config::from_env();
+    if let Some(endpoint_url) = localstack_url {
+        config = config
+            .endpoint_url(endpoint_url)
+            .region(aws_types::region::Region::new("us-east-1"));
+    }
+    let config = config.load().await;
+    aws_sdk_sqs::Client::new(&config)
 }
 
 /// Create a new SQS fifo queue with a randomized name, return queue name and url.
-async fn sqs_queue(fifo: bool, endpoint_url: &str) -> QueueInfo {
+async fn sqs_queue(
+    fifo: bool,
+    client: &aws_sdk_sqs::Client,
+    guards: &mut Vec<ResourceGuard>,
+) -> QueueInfo {
     let name = format!(
         "MirrordE2ESplitterTests-{}{}",
         crate::utils::random_string(),
         if fifo { ".fifo" } else { "" }
     );
     println!("Creating SQS queue: {name}");
-    println!("Using endpoint URL {endpoint_url}");
-    let config = aws_config::from_env()
-        .endpoint_url(endpoint_url)
-        .region(aws_types::region::Region::new("us-east-1"))
-        .load()
-        .await;
-    let client = aws_sdk_sqs::Client::new(&config);
     let mut builder = client
         .create_queue()
         .queue_name(name.clone())
@@ -99,11 +116,26 @@ async fn sqs_queue(fifo: bool, endpoint_url: &str) -> QueueInfo {
     if fifo {
         builder = builder.attributes(FifoQueue, "true")
     }
-    let queue = builder.send().await.unwrap();
-    QueueInfo {
-        name,
-        url: queue.queue_url.unwrap(),
-    }
+
+    let queue_url = builder.send().await.unwrap().queue_url.unwrap();
+    let url = queue_url.clone();
+    let queue_name = name.clone();
+
+    let deleter = Some(
+        async move {
+            println!("deleting SQS queue {queue_name}");
+            if let Err(err) = client.delete_queue().queue_url(queue_url).send().await {
+                eprintln!("Could not delete SQS queue {queue_name}: {err:?}");
+            }
+        }
+        .boxed(),
+    );
+    guards.push(ResourceGuard {
+        delete_on_fail: true,
+        deleter,
+    });
+
+    QueueInfo { name, url }
 }
 
 /// Create the `MirrordWorkloadQueueRegistry` K8s resource and a resource guard to delete it when
@@ -223,7 +255,7 @@ fn take_env(deployment: Deployment) -> (usize, Vec<EnvVar>) {
 
 /// Patch the deployed operator to use localstack for all AWS API calls.
 /// Return a ResourceGuard that will restore the original env when dropped.
-async fn patch_operator_for_localstack(client: &Client) -> ResourceGuard {
+async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<ResourceGuard>) {
     let deploy_api = Api::<Deployment>::namespaced(client.clone(), "mirrord");
 
     let operator_deploy = deploy_api
@@ -234,11 +266,7 @@ async fn patch_operator_for_localstack(client: &Client) -> ResourceGuard {
     if let Some(label_map) = operator_deploy.meta().labels.as_ref() {
         if label_map.contains_key(LOCALSTACK_PATCH_LABEL_NAME) {
             println!("operator already patched for localstack, not patching.");
-            // noop ResourceGuard
-            return ResourceGuard {
-                delete_on_fail: false,
-                deleter: None,
-            };
+            return;
         }
     };
 
@@ -323,10 +351,10 @@ async fn patch_operator_for_localstack(client: &Client) -> ResourceGuard {
         }
     };
 
-    ResourceGuard {
+    guards.push(ResourceGuard {
         delete_on_fail: true,
         deleter: Some(restore_env.boxed()),
-    }
+    });
 }
 
 async fn localstack_endpoint_external_url(kube_client: &Client) -> String {
@@ -334,19 +362,55 @@ async fn localstack_endpoint_external_url(kube_client: &Client) -> String {
     format!("http://{localstack_host}:31566")
 }
 
+/// Is there a "localstack" service in the "default" namespace.
+async fn localstack_in_default_namespace(kube_client: &Client) -> bool {
+    let service_api = Api::<Service>::namespaced(kube_client.clone(), "default");
+    service_api.get("localstack").await.is_ok()
+}
+
 #[fixture]
 pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResources {
     let kube_client = kube_client.await;
-    let operator_patch_guard = patch_operator_for_localstack(&kube_client).await;
-    let localstack_endpoint_url = localstack_endpoint_external_url(&kube_client).await;
-    let queue1 = sqs_queue(false, &localstack_endpoint_url).await;
-    let queue2 = sqs_queue(true, &localstack_endpoint_url).await;
+    let mut guards = Vec::new();
+    let endpoint_url = if localstack_in_default_namespace(&kube_client).await {
+        patch_operator_for_localstack(&kube_client, &mut guards).await;
+        Some(localstack_endpoint_external_url(&kube_client).await)
+    } else {
+        None
+    };
+    let sqs_client = get_sqs_client(endpoint_url).await;
+    let queue1 = sqs_queue(false, &sqs_client, &mut guards).await;
+    let queue2 = sqs_queue(true, &sqs_client, &mut guards).await;
     let k8s_service = sqs_consumer_service(&kube_client, &queue1, &queue2).await;
     SqsTestResources {
         k8s_service,
         queue1,
         queue2,
-        operator_patch_guard,
+        sqs_client,
         localstack_endpoint_url,
+        guards,
+    }
+}
+
+pub async fn write_sqs_messages(
+    sqs_client: &aws_sdk_sqs::Client,
+    queue: &QueueInfo,
+    message_attribute_name: &str,
+    message_attributes: &[&str],
+    messages: &[&str],
+) {
+    for (body, attr) in messages.iter().zip(message_attributes) {
+        sqs_client
+            .send_message()
+            .queue_url(&queue.url)
+            .message_body(body)
+            .message_attributes(
+                message_attribute_name,
+                MessageAttributeValue::builder()
+                    .string_value(*attr)
+                    .data_type("String")
+                    .build()
+                    .unwrap(),
+            )
     }
 }

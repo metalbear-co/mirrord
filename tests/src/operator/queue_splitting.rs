@@ -2,20 +2,48 @@
 #![cfg(feature = "operator")]
 //! Test queue splitting features with an operator.
 
+use core::time::Duration;
 use std::path::PathBuf;
 
 use rstest::*;
 
 use crate::utils::{
     config_dir,
-    sqs_resources::{sqs_test_resources, SqsTestResources},
-    Application,
+    sqs_resources::{sqs_test_resources, write_sqs_messages, SqsTestResources},
+    Application, TestProcess,
 };
 
-/// Send 6 messages to the original queue, such that 2 will reach each mirrord run and 2 the
-/// deployed app.
-async fn write_sqs_messages(queue_url: &str) {
-    // TODO
+async fn expect_lines<const N: usize>(test_process: &TestProcess) -> Vec<String> {
+    let lines = test_process
+        .await_n_lines::<N>(Duration::from_secs(10))
+        .await;
+    assert_eq!(
+        lines.len(),
+        N,
+        "User received more messages than it was supposed to."
+    );
+    lines
+}
+
+/// Verify that the test process printed all the expected messages, and none other.
+async fn expect_messages<const N: usize>(messages: [&str; N], test_process: &TestProcess) {
+    let lines = expect_lines::<N>(test_process).await;
+    for message in messages.into_iter() {
+        assert!(
+            lines.contains(message.as_ref()),
+            "User a was supposed to receive first message but did not"
+        );
+    }
+}
+
+/// Verify that the test process printed all the expected messages, and none other.
+async fn expect_messages_in_order<const N: usize>(messages: [&str; N], test_process: &TestProcess) {
+    let lines = expect_lines::<N>(test_process).await;
+    assert_eq!(
+        &lines[..],
+        &messages[..],
+        "User did not receive the expected messages in the expected order."
+    )
 }
 
 /// This test creates a new sqs_queue with a random name and credentials from env.
@@ -59,14 +87,30 @@ pub async fn two_users_one_queue(
         )
         .await;
 
-    // write_sqs_messages(&sqs_queue_url).await;
+    write_sqs_messages(
+        sqs_test_resources.sqs_client(),
+        sqs_test_resources.queue1(),
+        "local",
+        &["a", "b", "c", "c", "b", "a"],
+        &["1", "2", "3", "4", "5", "6"],
+    )
+    .await;
 
-    // // The test application consumes messages and verifies exact expected messages.
-    // join!(
-    //     client_a.wait_assert_success(),
-    //     client_b.wait_assert_success()
-    // );
+    expect_messages(["1", "6"], &client_a).await;
+    expect_messages(["2", "5"], &client_b).await;
 
-    // TODO: read output queue and verify that exactly the expected messages were
-    //   consumed and forwarded.
+    write_sqs_messages(
+        sqs_test_resources.sqs_client(),
+        sqs_test_resources.queue2(),
+        "local",
+        &["a", "b", "c", "c", "b", "a"],
+        &["10", "20", "30", "40", "50", "60"],
+    )
+    .await;
+
+    expect_messages_in_order(["10", "60"], &client_a).await;
+    expect_messages_in_order(["20", "50"], &client_b).await;
+
+    client_a.child.kill().await.unwrap();
+    client_b.child.kill().await.unwrap();
 }
