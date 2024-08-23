@@ -2,15 +2,14 @@
 #![cfg(feature = "operator")]
 //! Test queue splitting features with an operator.
 
-mod test_resources;
-
 use std::path::PathBuf;
 
 use rstest::*;
 
-use crate::{
-    operator::queue_splitting::test_resources::{sqs_test_resources, SqsTestResources},
-    utils::{config_dir, Application},
+use crate::utils::{
+    config_dir,
+    sqs_resources::{sqs_test_resources, SqsTestResources},
+    Application,
 };
 
 /// Send 6 messages to the original queue, such that 2 will reach each mirrord run and 2 the
@@ -37,6 +36,7 @@ pub async fn two_users_one_queue(
     let mut config_path = config_dir.clone();
     config_path.push("sqs_queue_splitting_a.json");
 
+    println!("Starting first mirrord client");
     let mut client_a = application
         .run(
             &sqs_test_resources.deployment_target(),
@@ -49,6 +49,7 @@ pub async fn two_users_one_queue(
     let mut config_path = config_dir.clone();
     config_path.push("sqs_queue_splitting_b.json");
 
+    println!("Starting second mirrord client");
     let mut client_b = application
         .run(
             &sqs_test_resources.deployment_target(),
