@@ -22,7 +22,10 @@ use mirrord_operator::{
 };
 use rstest::fixture;
 
-use crate::utils::{kube_client, service_with_env, KubeService, ResourceGuard};
+use crate::utils::{
+    get_pod_or_node_host, get_pod_or_node_host_and_port, kube_client, service_with_env,
+    KubeService, ResourceGuard,
+};
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
 const QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_Q_NAME1";
@@ -47,6 +50,7 @@ pub struct SqsTestResources {
     queue1: QueueInfo,
     queue2: QueueInfo,
     operator_patch_guard: ResourceGuard,
+    localstack_endpoint_url: String,
 }
 
 impl SqsTestResources {
@@ -62,21 +66,26 @@ impl SqsTestResources {
         &self.queue2
     }
 
+    pub fn localstack_endpoint_url(&self) -> &str {
+        &self.localstack_endpoint_url
+    }
+
     pub fn deployment_target(&self) -> String {
         self.k8s_service.deployment_target()
     }
 }
 
 /// Create a new SQS fifo queue with a randomized name, return queue name and url.
-async fn sqs_queue(fifo: bool) -> QueueInfo {
+async fn sqs_queue(fifo: bool, endpoint_url: &str) -> QueueInfo {
     let name = format!(
         "MirrordE2ESplitterTests-{}{}",
         crate::utils::random_string(),
         if fifo { ".fifo" } else { "" }
     );
     println!("Creating SQS queue: {name}");
+    println!("Using endpoint URL {endpoint_url}");
     let config = aws_config::from_env()
-        .endpoint_url("http://192.168.65.3:31566")
+        .endpoint_url(endpoint_url)
         .region(aws_types::region::Region::new("us-east-1"))
         .load()
         .await;
@@ -320,17 +329,24 @@ async fn patch_operator_for_localstack(client: &Client) -> ResourceGuard {
     }
 }
 
+async fn localstack_endpoint_external_url(kube_client: &Client) -> String {
+    let localstack_host = get_pod_or_node_host(kube_client.clone(), "localstack", "default").await;
+    format!("http://{localstack_host}:31566")
+}
+
 #[fixture]
 pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResources {
     let kube_client = kube_client.await;
     let operator_patch_guard = patch_operator_for_localstack(&kube_client).await;
-    let queue1 = sqs_queue(false).await;
-    let queue2 = sqs_queue(true).await;
+    let localstack_endpoint_url = localstack_endpoint_external_url(&kube_client).await;
+    let queue1 = sqs_queue(false, &localstack_endpoint_url).await;
+    let queue2 = sqs_queue(true, &localstack_endpoint_url).await;
     let k8s_service = sqs_consumer_service(&kube_client, &queue1, &queue2).await;
     SqsTestResources {
         k8s_service,
         queue1,
         queue2,
         operator_patch_guard,
+        localstack_endpoint_url,
     }
 }

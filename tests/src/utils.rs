@@ -5,6 +5,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     net::Ipv4Addr,
+    ops::Not,
     path::PathBuf,
     process::{ExitStatus, Stdio},
     sync::{Arc, Once},
@@ -1503,28 +1504,42 @@ pub fn resolve_node_host() -> String {
         "127.0.0.1".to_string()
     }
 }
-
 pub async fn get_service_host_and_port(
     kube_client: Client,
     service: &KubeService,
 ) -> (String, i32) {
-    let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &service.namespace);
+    get_pod_or_node_host_and_port(kube_client, &service.name, &service.namespace).await
+}
+
+async fn get_pod_or_node_host(kube_client: Client, name: &str, namespace: &str) -> String {
+    let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
     let pods = pod_api
-        .list(&ListParams::default().labels(&format!("app={}", service.name)))
+        .list(&ListParams::default().labels(&format!("app={}", name)))
         .await
         .unwrap();
-    let mut host_ip = pods
-        .into_iter()
+    pods.into_iter()
         .next()
         .and_then(|pod| pod.status)
         .and_then(|status| status.host_ip)
-        .unwrap();
-    if host_ip.parse::<Ipv4Addr>().unwrap().is_private() {
-        host_ip = resolve_node_host();
-    }
-    let services_api: Api<Service> = Api::namespaced(kube_client.clone(), &service.namespace);
+        .and_then(|ip| {
+            ip.parse::<Ipv4Addr>()
+                .unwrap()
+                .is_private()
+                .not()
+                .then_some(ip)
+        })
+        .unwrap_or_else(resolve_node_host)
+}
+
+async fn get_pod_or_node_host_and_port(
+    kube_client: Client,
+    name: &str,
+    namespace: &str,
+) -> (String, i32) {
+    let host_ip = get_pod_or_node_host(kube_client.clone(), name, namespace).await;
+    let services_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
     let services = services_api
-        .list(&ListParams::default().labels(&format!("app={}", service.name)))
+        .list(&ListParams::default().labels(&format!("app={}", name)))
         .await
         .unwrap();
     let port = services
