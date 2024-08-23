@@ -24,3 +24,32 @@ pub async fn mirrord_ls(#[future] service: KubeService) {
         .iter()
         .any(|output| output.starts_with(&format!("pod/{}", service.name))));
 }
+
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+pub async fn mirrord_ls_targets(
+    #[future] service: KubeService,
+    #[values(
+        r"^pod/.+(/container/.+)?$",
+        r"^deployment/.+(/container/.+)?$",
+        r"^statefulset/.+(/container/.+)?$",
+        r"^cronjob/.+(/container/.+)?$",
+        r"^job/.+(/container/.+)?$"
+    )]
+    target_string: &str,
+) {
+    let service = service.await;
+    let mut process = run_ls::<true>(None, None).await;
+    let res = process.wait().await;
+    assert!(res.success());
+    let stdout = process.get_stdout().await;
+    let targets: Vec<String> = serde_json::from_str(&stdout).unwrap();
+    let re = Regex::new(target_string).unwrap();
+
+    let has_target = targets.iter().any(|output| re.is_match(output));
+    assert!(has_target);
+
+    assert!(targets
+        .iter()
+        .any(|output| output.starts_with(&format!("pod/{}", service.name))));
+}
