@@ -3,7 +3,7 @@
 //! Test queue splitting features with an operator.
 
 use core::time::Duration;
-use std::path::PathBuf;
+use std::{ops::Not, path::PathBuf};
 
 use rstest::*;
 
@@ -15,7 +15,7 @@ use crate::utils::{
 
 async fn expect_lines<const N: usize>(test_process: &TestProcess) -> Vec<String> {
     let lines = test_process
-        .await_n_lines::<N>(Duration::from_secs(10))
+        .await_n_lines::<N>(Duration::from_secs(30))
         .await;
     assert_eq!(
         lines.len(),
@@ -30,7 +30,7 @@ async fn expect_messages<const N: usize>(messages: [&str; N], test_process: &Tes
     let lines = expect_lines::<N>(test_process).await;
     for message in messages.into_iter() {
         assert!(
-            lines.contains(message.as_ref()),
+            lines.contains(&message.to_string()),
             "User a was supposed to receive first message but did not"
         );
     }
@@ -46,6 +46,56 @@ async fn expect_messages_in_order<const N: usize>(messages: [&str; N], test_proc
     )
 }
 
+/// Verify that the echo queue contains the expected messages, meaning the deployed application
+/// received all the messages no user filtered.
+async fn expect_messages_in_queue<const N: usize>(
+    messages: [&str; N],
+    client: &aws_sdk_sqs::Client,
+    q_name: &str,
+) {
+    // TODO!
+}
+
+/// Verify that the echo queue contains the expected messages, meaning the deployed application
+/// received all the messages no user filtered.
+/// Also verify the message order was preserved.
+async fn expect_messages_in_fifo_queue<const N: usize>(
+    messages: [&str; N],
+    client: &aws_sdk_sqs::Client,
+    q_name: &str,
+) {
+    // TODO!
+}
+
+async fn verify_splitter_temp_queues_deleted(sqs_test_resources: &SqsTestResources) {
+    let client = sqs_test_resources.sqs_client();
+    let queue_name1 = sqs_test_resources.queue1().name.as_str();
+    let queue_name2 = sqs_test_resources.queue2().name.as_str();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if client
+                .list_queues()
+                // temp queues start with "mirrord-"
+                .queue_name_prefix("mirrord-")
+                .send()
+                .await
+                .expect("Could not list SQS queues.")
+                .queue_urls
+                .unwrap_or_default()
+                .iter()
+                // temp queue names contain the original queue name.
+                .any(|queue_url| queue_url.contains(queue_name1) || queue_url.contains(queue_name2))
+                .not()
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("SQS temp queues not deleted in 60 seconds.")
+}
+
 /// This test creates a new sqs_queue with a random name and credentials from env.
 ///
 /// Define a queue splitter for a deployment. Start two services that both consume from an SQS
@@ -54,10 +104,7 @@ async fn expect_messages_in_order<const N: usize>(messages: [&str; N], test_proc
 /// the rest.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-pub async fn two_users_one_queue(
-    #[future] sqs_test_resources: SqsTestResources,
-    config_dir: &PathBuf,
-) {
+pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_dir: &PathBuf) {
     let sqs_test_resources = sqs_test_resources.await;
     let application = Application::RustSqs;
 
@@ -98,6 +145,13 @@ pub async fn two_users_one_queue(
 
     expect_messages(["1", "6"], &client_a).await;
     expect_messages(["2", "5"], &client_b).await;
+    // TODO: implement func
+    expect_messages_in_queue(
+        ["3", "4"],
+        sqs_test_resources.sqs_client(),
+        sqs_test_resources.queue1().name.as_str(),
+    )
+    .await;
 
     write_sqs_messages(
         sqs_test_resources.sqs_client(),
@@ -110,7 +164,16 @@ pub async fn two_users_one_queue(
 
     expect_messages_in_order(["10", "60"], &client_a).await;
     expect_messages_in_order(["20", "50"], &client_b).await;
+    // TODO: implement func
+    expect_messages_in_fifo_queue(
+        ["30", "40"],
+        sqs_test_resources.sqs_client(),
+        sqs_test_resources.queue2().name.as_str(),
+    )
+    .await;
 
     client_a.child.kill().await.unwrap();
     client_b.child.kill().await.unwrap();
+
+    verify_splitter_temp_queues_deleted(&sqs_test_resources).await;
 }

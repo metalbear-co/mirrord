@@ -212,20 +212,20 @@ impl TestProcess {
     /// # Panics
     /// If `timeout` has passed and stdout still does not contain `N`.
     pub async fn await_n_lines<const N: usize>(&self, timeout: Duration) -> Vec<String> {
-        tokio::time::timeout(
-            timeout,
-            async move {
-                loop {
-                    let stdout = self.get_stdout().await;
-                    if stdout.lines().count() >= N {
-                        return stdout.lines().collect();
-                    }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::timeout(timeout, async move {
+            loop {
+                let stdout = self.get_stdout().await;
+                if stdout.lines().count() >= N {
+                    return stdout
+                        .lines()
+                        .map(ToString::to_string)
+                        .collect::<Vec<String>>();
                 }
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            .await
-            .unwrap(),
-        )
+        })
+        .await
+        .expect("Test process output did not produce expected ammount of lines in time.")
     }
 
     pub async fn write_to_stdin(&mut self, data: &[u8]) {

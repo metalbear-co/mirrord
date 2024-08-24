@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use aws_sdk_sqs::types::{
-    builders::MessageAttributeValue,
+    MessageAttributeValue,
     QueueAttributeName::{FifoQueue, MessageRetentionPeriod},
 };
 use futures_util::FutureExt;
@@ -26,8 +26,7 @@ use mirrord_operator::{
 use rstest::fixture;
 
 use crate::utils::{
-    get_pod_or_node_host, get_pod_or_node_host_and_port, kube_client, service_with_env,
-    KubeService, ResourceGuard,
+    get_pod_or_node_host, kube_client, service_with_env, KubeService, ResourceGuard,
 };
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
@@ -53,8 +52,7 @@ pub struct SqsTestResources {
     queue1: QueueInfo,
     queue2: QueueInfo,
     sqs_client: aws_sdk_sqs::Client,
-    localstack_endpoint_url: String,
-    guards: Vec<ResourceGuard>,
+    _guards: Vec<ResourceGuard>,
 }
 
 impl SqsTestResources {
@@ -70,23 +68,19 @@ impl SqsTestResources {
         &self.queue2
     }
 
-    pub fn localstack_endpoint_url(&self) -> &str {
-        &self.localstack_endpoint_url
-    }
-
     pub fn deployment_target(&self) -> String {
         self.k8s_service.deployment_target()
     }
 
-    pub fn sqs_client(&self) -> aws_sdk_sqs::Client {
+    pub fn sqs_client(&self) -> &aws_sdk_sqs::Client {
         &self.sqs_client
     }
 }
 
 async fn get_sqs_client(localstack_url: Option<String>) -> aws_sdk_sqs::Client {
-    println!("Using endpoint URL {endpoint_url}");
     let mut config = aws_config::from_env();
     if let Some(endpoint_url) = localstack_url {
+        println!("Using endpoint URL {endpoint_url}");
         config = config
             .endpoint_url(endpoint_url)
             .region(aws_types::region::Region::new("us-east-1"));
@@ -96,20 +90,39 @@ async fn get_sqs_client(localstack_url: Option<String>) -> aws_sdk_sqs::Client {
 }
 
 /// Create a new SQS fifo queue with a randomized name, return queue name and url.
-async fn sqs_queue(
+/// Also create another SQS queue that has a name that is "Echo" + the name of the first queue.
+/// Create resource guards for both queues that delete the queue on drop, push into guards vec.
+async fn random_name_sqs_queue_with_echo_queue(
     fifo: bool,
     client: &aws_sdk_sqs::Client,
     guards: &mut Vec<ResourceGuard>,
 ) -> QueueInfo {
-    let name = format!(
+    let q_name = format!(
         "MirrordE2ESplitterTests-{}{}",
         crate::utils::random_string(),
         if fifo { ".fifo" } else { "" }
     );
+
+    let echo_q_name = format!("Echo{q_name}");
+    // Create queue and resource guard, don't return queue details of echo queue. The deployed
+    // application derives its name from the other queue.
+    sqs_queue(fifo, client, guards, echo_q_name).await;
+
+    sqs_queue(fifo, client, guards, q_name).await
+}
+
+/// Create a new SQS fifo queue, return queue name and url.
+/// Create resource guard that deletes the queue on drop, push into guards vec.
+async fn sqs_queue(
+    fifo: bool,
+    client: &aws_sdk_sqs::Client,
+    guards: &mut Vec<ResourceGuard>,
+    name: String,
+) -> QueueInfo {
     println!("Creating SQS queue: {name}");
     let mut builder = client
         .create_queue()
-        .queue_name(name.clone())
+        .queue_name(&name)
         .attributes(MessageRetentionPeriod, "3600"); // delete messages after an hour.
 
     // Cannot set FifoQueue to false: https://github.com/aws/aws-cdk/issues/8550
@@ -120,6 +133,7 @@ async fn sqs_queue(
     let queue_url = builder.send().await.unwrap().queue_url.unwrap();
     let url = queue_url.clone();
     let queue_name = name.clone();
+    let client = client.clone();
 
     let deleter = Some(
         async move {
@@ -301,7 +315,7 @@ async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<Resourc
 
     let label_path = jsonptr::Pointer::new(["metadata", "labels", LOCALSTACK_PATCH_LABEL_NAME]);
 
-    let operator_deploy = deploy_api
+    let _operator_deploy = deploy_api
         .patch(
             OPERATOR_NAME,
             &PatchParams::default(),
@@ -373,22 +387,22 @@ pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResourc
     let kube_client = kube_client.await;
     let mut guards = Vec::new();
     let endpoint_url = if localstack_in_default_namespace(&kube_client).await {
+        println!("localstack detected, using localstack for SQS");
         patch_operator_for_localstack(&kube_client, &mut guards).await;
         Some(localstack_endpoint_external_url(&kube_client).await)
     } else {
         None
     };
     let sqs_client = get_sqs_client(endpoint_url).await;
-    let queue1 = sqs_queue(false, &sqs_client, &mut guards).await;
-    let queue2 = sqs_queue(true, &sqs_client, &mut guards).await;
+    let queue1 = random_name_sqs_queue_with_echo_queue(false, &sqs_client, &mut guards).await;
+    let queue2 = random_name_sqs_queue_with_echo_queue(true, &sqs_client, &mut guards).await;
     let k8s_service = sqs_consumer_service(&kube_client, &queue1, &queue2).await;
     SqsTestResources {
         k8s_service,
         queue1,
         queue2,
         sqs_client,
-        localstack_endpoint_url,
-        guards,
+        _guards: guards,
     }
 }
 
@@ -399,11 +413,13 @@ pub async fn write_sqs_messages(
     message_attributes: &[&str],
     messages: &[&str],
 ) {
-    for (body, attr) in messages.iter().zip(message_attributes) {
+    let fifo = queue.name.ends_with(".fifo");
+    let group_id = fifo.then_some("e2e-tests".to_string());
+    for (i, (body, attr)) in messages.iter().zip(message_attributes).enumerate() {
         sqs_client
             .send_message()
             .queue_url(&queue.url)
-            .message_body(body)
+            .message_body(*body)
             .message_attributes(
                 message_attribute_name,
                 MessageAttributeValue::builder()
@@ -412,5 +428,10 @@ pub async fn write_sqs_messages(
                     .build()
                     .unwrap(),
             )
+            .set_message_group_id(group_id.clone())
+            .set_message_deduplication_id(fifo.then_some(i.to_string()))
+            .send()
+            .await
+            .expect("Sending SQS message failed.");
     }
 }
