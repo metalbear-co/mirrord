@@ -153,6 +153,8 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     )
     .await;
 
+    println!("Queue 1 was split correctly!");
+
     write_sqs_messages(
         sqs_test_resources.sqs_client(),
         sqs_test_resources.queue2(),
@@ -172,8 +174,13 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     )
     .await;
 
+    println!("Queue 2 was split correctly!");
+
+    // TODO: verify queue tags.
+
     client_a.child.kill().await.unwrap();
     client_b.child.kill().await.unwrap();
 
     verify_splitter_temp_queues_deleted(&sqs_test_resources).await;
+    println!("All temporary queues were deleted!");
 }

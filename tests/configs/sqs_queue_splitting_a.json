@@ -6,6 +6,12 @@
         "queue_type": "SQS",
         "message_filter": {
           "client": "^a$"
+        },
+        "e2e-test-queue2": {
+          "queue_type": "SQS",
+          "message_filter": {
+            "client": "^a$"
+          }
         }
       }
     }

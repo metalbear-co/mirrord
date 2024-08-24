@@ -1,7 +1,10 @@
 #![cfg(test)]
 #![cfg(feature = "operator")]
 
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    time::Duration,
+};
 
 use aws_sdk_sqs::types::{
     MessageAttributeValue,
@@ -14,6 +17,7 @@ use k8s_openapi::api::{
 };
 use kube::{
     api::{Patch, PatchParams, PostParams},
+    runtime::wait::await_condition,
     Api, Client, Resource,
 };
 use mirrord_operator::{
@@ -26,7 +30,8 @@ use mirrord_operator::{
 use rstest::fixture;
 
 use crate::utils::{
-    get_pod_or_node_host, kube_client, service_with_env, KubeService, ResourceGuard,
+    get_pod_or_node_host, kube_client, service_with_env, watch_resource_exists, KubeService,
+    ResourceGuard,
 };
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
@@ -35,7 +40,7 @@ const QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_Q_NAME1";
 /// Name of the environment variable that holds the name of the second SQS queue to read from.
 const QUEUE_NAME_ENV_VAR2: &str = "SQS_TEST_Q_NAME2";
 
-const QUEUE_SPLITTER_RESOURCE_NAME: &str = "mirrord-e2e-test-queue-splitter";
+const QUEUE_REGISTRY_RESOURCE_NAME: &str = "mirrord-e2e-test-queue-registry";
 
 const LOCALSTACK_PATCH_LABEL_NAME: &str = "sqs-e2e-tests-localstack-patch";
 
@@ -83,6 +88,7 @@ async fn get_sqs_client(localstack_url: Option<String>) -> aws_sdk_sqs::Client {
         println!("Using endpoint URL {endpoint_url}");
         config = config
             .endpoint_url(endpoint_url)
+            .credentials_provider()
             .region(aws_types::region::Region::new("us-east-1"));
     }
     let config = config.load().await;
@@ -152,16 +158,17 @@ async fn sqs_queue(
     QueueInfo { name, url }
 }
 
-/// Create the `MirrordWorkloadQueueRegistry` K8s resource and a resource guard to delete it when
-/// done.
+/// Create the `MirrordWorkloadQueueRegistry` K8s resource.
+/// No ResourceGuard needed, the namespace is guarded.
 pub async fn create_queue_registry_resource(
     kube_client: &Client,
     namespace: &str,
     deployment_name: &str,
 ) {
+    println!("Creating MirrordWorkloadQueueRegistry resource");
     let qr_api: Api<MirrordWorkloadQueueRegistry> = Api::namespaced(kube_client.clone(), namespace);
     let queue_registry = MirrordWorkloadQueueRegistry::new(
-        QUEUE_SPLITTER_RESOURCE_NAME,
+        QUEUE_REGISTRY_RESOURCE_NAME,
         MirrordWorkloadQueueRegistrySpec {
             queues: BTreeMap::from([
                 (
@@ -190,6 +197,7 @@ pub async fn create_queue_registry_resource(
         .create(&PostParams::default(), &queue_registry)
         .await
         .expect("Could not create queue splitter in E2E test.");
+    println!("MirrordWorkloadQueueRegistry resource created at namespace {namespace} with name {QUEUE_REGISTRY_RESOURCE_NAME}");
 }
 
 /// Create a microservice for the sqs test application.
@@ -204,7 +212,7 @@ async fn sqs_consumer_service(
     service_with_env(
         &namespace,
         "ClusterIP",
-        "docker.io/t4lz/sqs-printer:8.14", // TODO
+        "docker.io/t4lz/sqs-forwarder:8.24", // TODO
         "queue-forwarder",
         false,
         kube_client.clone(),
@@ -315,7 +323,7 @@ async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<Resourc
 
     let label_path = jsonptr::Pointer::new(["metadata", "labels", LOCALSTACK_PATCH_LABEL_NAME]);
 
-    let _operator_deploy = deploy_api
+    let operator_deploy = deploy_api
         .patch(
             OPERATOR_NAME,
             &PatchParams::default(),
@@ -338,6 +346,8 @@ async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<Resourc
         container_index.as_str(),
         "name",
     ]);
+
+    let api = deploy_api.clone();
 
     let restore_env = async move {
         println!("Restoring AWS env vars from before SQS tests");
@@ -369,6 +379,46 @@ async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<Resourc
         delete_on_fail: true,
         deleter: Some(restore_env.boxed()),
     });
+
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        await_condition(
+            api,
+            OPERATOR_NAME,
+            get_patch_applied_check(operator_deploy.metadata.generation.unwrap()),
+        ),
+    )
+    .await
+    .expect("Operator patch did not complete in 30 secs.")
+    .expect("failed to await condition");
+    tokio::time::sleep(Duration::from_secs(60)).await // TODO: find better solution.
+}
+
+/// Get a function that checks if a deployment already reached an actual generation same as or later
+/// than the given one.
+///
+/// For example, if the passed `generation` is 3, this function will return a function that takes
+/// an optional deployment, and only returns `true` when the deployment is there (not `None`), and
+/// its observed generation is greater than or equals 3.
+///
+/// Note: it does not require for the `observedGeneration` to be greater or equal the current
+/// `generation`, just the given generation. So if the function returned from the example above
+/// gets a deployment with `observedGeneration` `3` and `generation` `4`, it returns `true`.
+fn get_patch_applied_check(generation: i64) -> impl Fn(Option<&Deployment>) -> bool {
+    move |opt| {
+        opt.and_then(|resource| {
+            resource
+                .status
+                .as_ref()
+                .and_then(|status| status.observed_generation)
+        })
+        .inspect(|observed_generation| println!("checking if operator patch complete"))
+        .map(|observed_generation| observed_generation >= generation)
+        // If there is no deployment, if the deployment has no status, or if the status does not
+        // contain an observed generation, we take it to mean the deployment has not yet reached
+        // the wanted generation.
+        .unwrap_or_default()
+    }
 }
 
 async fn localstack_endpoint_external_url(kube_client: &Client) -> String {
@@ -397,6 +447,7 @@ pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResourc
     let queue1 = random_name_sqs_queue_with_echo_queue(false, &sqs_client, &mut guards).await;
     let queue2 = random_name_sqs_queue_with_echo_queue(true, &sqs_client, &mut guards).await;
     let k8s_service = sqs_consumer_service(&kube_client, &queue1, &queue2).await;
+    create_queue_registry_resource(&kube_client, &k8s_service.namespace, &k8s_service.name).await;
     SqsTestResources {
         k8s_service,
         queue1,

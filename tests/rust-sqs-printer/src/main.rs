@@ -8,13 +8,14 @@ const QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_Q_NAME1";
 const QUEUE_NAME_ENV_VAR2: &str = "SQS_TEST_Q_NAME2";
 
 /// Reads from queue and prints the contents of each message in a new line.
-async fn read_from_queue(read_q_name: String, client: Client) -> Result<(), anyhow::Error> {
+async fn read_from_queue(read_q_name: String, client: Client) {
     println!("Q Name: {read_q_name}");
     let read_q_url = client
         .get_queue_url()
         .queue_name(read_q_name)
         .send()
-        .await?
+        .await
+        .unwrap()
         .queue_url
         .unwrap();
     let receive_message_request = client
@@ -58,7 +59,8 @@ async fn read_from_queue(read_q_name: String, client: Client) -> Result<(), anyh
                         .queue_url(&read_q_url)
                         .receipt_handle(handle)
                         .send()
-                        .await?;
+                        .await
+                        .unwrap();
                 }
             }
         }
@@ -71,9 +73,9 @@ async fn main() {
     let client = Client::new(&sdk_config);
     let read_q_name = std::env::var(QUEUE_NAME_ENV_VAR1).unwrap();
     let q_task_handle = tokio::spawn(read_from_queue(read_q_name.clone(), client.clone()));
-    let read_q_name = std::env::var(QUEUE_NAME_ENV_VAR1).unwrap();
+    let read_q_name = std::env::var(QUEUE_NAME_ENV_VAR2).unwrap();
     let fifo_q_task_handle = tokio::spawn(read_from_queue(read_q_name.clone(), client.clone()));
     let (q_res, fifo_res) = tokio::join!(q_task_handle, fifo_q_task_handle);
-    q_res.unwrap().unwrap();
-    fifo_res.unwrap().unwrap();
+    q_res.unwrap();
+    fifo_res.unwrap();
 }

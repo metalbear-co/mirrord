@@ -2,10 +2,16 @@
   "operator": true,
   "feature": {
     "split_queues": {
-      "e2e-test-queue2": {
+      "e2e-test-queue1": {
         "queue_type": "SQS",
         "message_filter": {
           "client": "^b$"
+        },
+        "e2e-test-queue2": {
+          "queue_type": "SQS",
+          "message_filter": {
+            "client": "^b$"
+          }
         }
       }
     }
