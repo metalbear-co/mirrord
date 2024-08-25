@@ -132,33 +132,6 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
     Success(c_string_vec)
 }
 
-/// Verifies that mirrord environment is passed to child process
-fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
-    let mut c_string_vec = Argv::default();
-
-    let mut found_dyld = false;
-    for arg in envp_arr.iter() {
-        let Detour::Success(arg_str): Detour<&str> = arg.checked_into() else {
-            tracing::debug!("Failed to convert envp argument to string. Skipping.");
-            c_string_vec.push(unsafe { CStr::from_ptr(*arg).to_owned() });
-            continue;
-        };
-
-        if arg_str.split('=').next() == Some("DYLD_INSERT_LIBRARIES") {
-            found_dyld = true;
-        }
-
-        c_string_vec.push(CString::new(arg_str)?)
-    }
-
-    if !found_dyld {
-        for (key, value) in crate::setup().env_backup() {
-            c_string_vec.push(CString::new(format!("{key}={value}"))?);
-        }
-    }
-    Success(c_string_vec)
-}
-
 /// Patch the new executable for SIP if necessary. Also: if mirrord's temporary directory appears
 /// in any of the arguments, remove it and leave only the original path of the file. If for example
 /// `argv[1]` is `"/tmp/mirrord-bin/bin/bash"`, create a new `argv` where `argv[1]` is
@@ -167,8 +140,7 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
 pub(crate) unsafe fn patch_sip_for_new_process(
     path: *const c_char,
     argv: *const *const c_char,
-    envp: *const *const c_char,
-) -> Detour<(CString, Argv, Argv)> {
+) -> Detour<(CString, Argv)> {
     let calling_exe = env::current_exe()
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_default();
@@ -186,11 +158,9 @@ pub(crate) unsafe fn patch_sip_for_new_process(
         .unwrap_or(CString::new(path_str.to_string())?);
 
     let argv_arr = Nul::new_unchecked(argv);
-    let envp_arr = Nul::new_unchecked(envp);
 
     let argv_vec = intercept_tmp_dir(argv_arr)?;
-    let envp_vec = intercept_environment(envp_arr)?;
-    Success((path_c_string, argv_vec, envp_vec))
+    Success((path_c_string, argv_vec))
 }
 
 /// Hook for `libc::posix_spawn`.
@@ -205,9 +175,9 @@ pub(crate) unsafe extern "C" fn posix_spawn_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    match patch_sip_for_new_process(path, argv, envp) {
-        Detour::Success((path, argv, envp)) => {
-            match hooks::prepare_execve_envp(Detour::Success(envp.clone())) {
+    match patch_sip_for_new_process(path, argv) {
+        Detour::Success((path, argv)) => {
+            match hooks::prepare_execve_envp(Detour::Success(envp.checked_into())) {
                 Detour::Success(envp) => FN_POSIX_SPAWN(
                     pid,
                     path.into_raw().cast_const(),

@@ -6,8 +6,7 @@ use mirrord_layer_macro::hook_fn;
 use mirrord_layer_macro::hook_guard_fn;
 
 use super::*;
-#[cfg(not(target_os = "macos"))]
-use crate::common::CheckedInto;
+use crate::common::{CheckedInto, INJECTION_ENV_VAR};
 #[cfg(target_os = "macos")]
 use crate::exec_utils::*;
 use crate::{
@@ -30,17 +29,39 @@ fn shared_sockets() -> Detour<Vec<(i32, UserSocket)>> {
     )
 }
 
+/// Verifies that mirrord environment is passed to child process
+fn intercept_environment(envp_arr: &Argv) -> Detour<Argv> {
+    let mut c_string_vec = Argv::default();
+
+    let mut found_dyld = false;
+    for arg in envp_arr.0.iter() {
+        if arg.to_string_lossy().split('=').next() == Some(INJECTION_ENV_VAR) {
+            found_dyld = true;
+        }
+
+        c_string_vec.push(arg.clone())
+    }
+
+    if !found_dyld {
+        for (key, value) in crate::setup().env_backup() {
+            c_string_vec.push(CString::new(format!("{key}={value}"))?);
+        }
+    }
+    Detour::Success(c_string_vec)
+}
+
 /// Takes an [`Argv`] with the enviroment variables from an `exec` call, extending it with
 /// an encoded version of our [`SOCKETS`].
 ///
 /// The check for [`libc::FD_CLOEXEC`] is performed during the [`SOCKETS`] initialization
 /// by the child process.
 pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
-    let mut env_vars = env_vars.or_bypass(|reason| match reason {
+    let env_vars = env_vars.or_bypass(|reason| match reason {
         Bypass::EmptyOption => Detour::Success(Argv(Vec::new())),
         other => Detour::Bypass(other),
     })?;
 
+    let mut env_vars = intercept_environment(&env_vars)?;
     let encoded = bincode::encode_to_vec(shared_sockets()?, bincode::config::standard())
         .map(|bytes| BASE64_URL_SAFE.encode(bytes))?;
 
@@ -120,15 +141,13 @@ pub(crate) unsafe extern "C" fn execve_detour(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    match patch_sip_for_new_process(path, argv, envp) {
-        Detour::Success((path, argv, envp)) => {
-            match prepare_execve_envp(Detour::Success(envp.clone())) {
-                Detour::Success(envp) => {
-                    FN_EXECVE(path.into_raw().cast_const(), argv.leak(), envp.leak())
-                }
-                _ => FN_EXECVE(path.into_raw().cast_const(), argv.leak(), envp.leak()),
+    match patch_sip_for_new_process(path, argv) {
+        Detour::Success((path, argv)) => match prepare_execve_envp(envp.checked_into()) {
+            Detour::Success(envp) => {
+                FN_EXECVE(path.into_raw().cast_const(), argv.leak(), envp.leak())
             }
-        }
+            _ => FN_EXECVE(path.into_raw().cast_const(), argv.leak(), envp.leak()),
+        },
         _ => FN_EXECVE(path, argv, envp),
     }
 }

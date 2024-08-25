@@ -16,6 +16,12 @@ use crate::{
     PROXY_CONNECTION,
 };
 
+#[cfg(target_os = "linux")]
+pub(crate) const INJECTION_ENV_VAR: &str = "LD_PRELOAD";
+
+#[cfg(target_os = "macos")]
+pub(crate) const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
+
 /// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
 /// Blocks until the proxy responds.
 pub fn make_proxy_request_with_response<T>(request: T) -> HookResult<T::Response>

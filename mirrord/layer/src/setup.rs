@@ -18,9 +18,7 @@ use mirrord_protocol::{
 use regex::RegexSet;
 
 use crate::{
-    debugger_ports::DebuggerPorts,
-    file::{filter::FileFilter, mapper::FileRemapper},
-    socket::{dns_selector::DnsSelector, OutgoingSelector},
+    common::INJECTION_ENV_VAR, debugger_ports::DebuggerPorts, file::{filter::FileFilter, mapper::FileRemapper}, socket::{dns_selector::DnsSelector, OutgoingSelector}
 };
 
 /// Complete layer setup.
@@ -38,8 +36,7 @@ pub struct LayerSetup {
     proxy_address: SocketAddr,
     incoming_mode: IncomingMode,
     local_hostname: bool,
-    // to be used on macOS to restore env on execv
-    #[cfg(target_os = "macos")]
+    /// to be used in cases where mirrord env is lost like in Turbo
     env_backup: Vec<(String, String)>,
 }
 
@@ -72,9 +69,8 @@ impl LayerSetup {
             .expect("failed to parse internal proxy address");
 
         let incoming_mode = IncomingMode::new(&config.feature.network.incoming);
-        #[cfg(target_os = "macos")]
         let env_backup = std::env::vars()
-            .filter(|(k, _)| k.starts_with("MIRRORD_") || k == "DYLD_INSERT_LIBRARIES")
+            .filter(|(k, _)| k.starts_with("MIRRORD_") || k == INJECTION_ENV_VAR)
             .collect();
 
         Self {
@@ -88,7 +84,6 @@ impl LayerSetup {
             proxy_address,
             incoming_mode,
             local_hostname,
-            #[cfg(target_os = "macos")]
             env_backup,
         }
     }
@@ -171,7 +166,6 @@ impl LayerSetup {
         self.local_hostname
     }
 
-    #[cfg(target_os = "macos")]
     pub fn env_backup(&self) -> &Vec<(String, String)> {
         &self.env_backup
     }

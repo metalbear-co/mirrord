@@ -28,8 +28,6 @@ impl Argv {
         list.into_raw_parts().0.cast_const()
     }
 
-    #[cfg(target_os = "macos")]
-    /// Convenience to [`Vec::push`] a new [`CString`].
     pub(crate) fn push(&mut self, item: CString) {
         self.0.push(item);
     }
