@@ -4,13 +4,13 @@
 use regex::Regex;
 use rstest::rstest;
 
-use crate::utils::{run_ls, service, KubeService};
+use crate::utils::{run_ls, service_for_mirrord_ls, KubeService};
 
 /// Tests for the `mirrord ls` command with operator
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-pub async fn mirrord_ls(#[future] service: KubeService) {
-    let service = service.await;
+pub async fn mirrord_ls(#[future] service_for_mirrord_ls: KubeService) {
+    let service = service_for_mirrord_ls.await;
     let mut process = run_ls::<true>(None, None).await;
     let res = process.wait().await;
     assert!(res.success());
@@ -28,7 +28,7 @@ pub async fn mirrord_ls(#[future] service: KubeService) {
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub async fn mirrord_ls_targets(
-    #[future] service: KubeService,
+    #[future] service_for_mirrord_ls: KubeService,
     #[values(
         r"^pod/.+(/container/.+)?$",
         r"^deployment/.+(/container/.+)?$",
@@ -38,7 +38,7 @@ pub async fn mirrord_ls_targets(
     )]
     target_string: &str,
 ) {
-    let service = service.await;
+    let service = service_for_mirrord_ls.await;
     let mut process = run_ls::<true>(None, None).await;
     let res = process.wait().await;
     assert!(res.success());
