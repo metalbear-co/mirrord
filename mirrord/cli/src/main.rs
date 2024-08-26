@@ -60,6 +60,7 @@ pub mod port_forward;
 mod teams;
 mod util;
 mod verify_config;
+mod vpn;
 
 pub(crate) use error::{CliError, Result};
 use verify_config::verify_config;
@@ -585,6 +586,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::ExternalProxy => external_proxy::proxy(watch).await?,
             Commands::PortForward(args) => port_forward(&args, watch).await?,
+            Commands::Vpn(args) => vpn::vpn_command(*args).await?,
         };
 
         Ok(())

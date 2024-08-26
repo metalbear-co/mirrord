@@ -126,6 +126,10 @@ impl ContainerVariant for PodVariant<'_> {
                     env: Some(env),
                     // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                     resources: Some(resources),
+                    security_context: Some(SecurityContext {
+                        privileged: Some(agent.privileged),
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 }],
                 ..Default::default()
@@ -204,6 +208,7 @@ impl ContainerVariant for PodTargetedVariant<'_> {
 
         let update = Pod {
             spec: Some(PodSpec {
+                restart_policy: Some("Never".to_string()),
                 host_pid: Some(true),
                 node_name: Some(runtime_data.node_name.clone()),
                 volumes: Some(vec![

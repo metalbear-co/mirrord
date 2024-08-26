@@ -177,6 +177,7 @@ where
             },
             spec: Some(JobSpec {
                 ttl_seconds_after_finished: Some(config.ttl.into()),
+                backoff_limit: Some(0),
                 template: PodTemplateSpec {
                     metadata: Some(pod.metadata),
                     spec: pod.spec,
@@ -265,6 +266,7 @@ mod test {
             },
             "spec": {
                 "ttlSecondsAfterFinished": agent.ttl,
+                "backoffLimit": 0,
                 "template": {
                     "metadata": {
                         "annotations": {
@@ -286,6 +288,9 @@ mod test {
                                 "name": "mirrord-agent",
                                 "image": agent.image(),
                                 "imagePullPolicy": agent.image_pull_policy,
+                                "securityContext": {
+                                    "privileged": agent.privileged
+                                },
                                 "command": ["./mirrord-agent", "-l", "3000", "targetless"],
                                 "env": [
                                     { "name": "RUST_LOG", "value": agent.log_level },
@@ -362,6 +367,7 @@ mod test {
                 }
             },
             "spec": {
+                "backoffLimit": 0,
                 "ttlSecondsAfterFinished": agent.ttl,
                 "template": {
                     "metadata": {

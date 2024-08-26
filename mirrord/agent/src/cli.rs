@@ -6,7 +6,7 @@ use mirrord_protocol::{MeshVendor, AGENT_NETWORK_INTERFACE_ENV, AGENT_OPERATOR_C
 const DEFAULT_RUNTIME: &str = "containerd";
 
 /// **Heads-up**: Order of arguments passed to this matter, so if you add a new arg after something
-/// like `Targeted`, it won't work, as `Mode` is a `subcomand`. You would need to add the arg in
+/// like `Targeted`, it won't work, as `Mode` is a `subcommand`. You would need to add the arg in
 /// `Mode::Targeted` for it to work (that's why `--mesh` is there and not here).
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]

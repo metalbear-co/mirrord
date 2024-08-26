@@ -70,7 +70,7 @@ reqwest = { workspace = true, default-features = false, features = ["blocking", 
 schemars = { version = "0.8", features = ["chrono"] }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
-serde_yaml = { version = "0.9", optional = true }
+serde_yaml = { workspace = true, optional = true }
 thiserror.workspace = true
 semver.workspace = true
 tokio = { workspace = true, optional = true }

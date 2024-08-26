@@ -38,6 +38,8 @@ mod steal;
 #[cfg(target_os = "linux")]
 mod util;
 #[cfg(target_os = "linux")]
+mod vpn;
+#[cfg(target_os = "linux")]
 mod watched_task;
 
 #[cfg(target_os = "linux")]

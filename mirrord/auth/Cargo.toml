@@ -39,7 +39,7 @@ fs4 = { version = "0.8", features = ["tokio"], optional = true }
 k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive"] }
-serde_yaml = { version = "0.9", optional = true }
+serde_yaml = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["fs"], optional = true  }
 thiserror = "1"
 x509-certificate = "0.23.1"
