@@ -32,8 +32,8 @@ pub async fn mirrord_ls_targets(
     #[values(
         r"^pod/.+(/container/.+)?$",
         r"^deployment/.+(/container/.+)?$",
-        r"^statefulset/.+(/container/.+)?$",
-        r"^cronjob/.+(/container/.+)?$",
+        r"^stateful_set/.+(/container/.+)?$",
+        r"^cron_job/.+(/container/.+)?$",
         r"^job/.+(/container/.+)?$"
     )]
     target_string: &str,
@@ -47,7 +47,7 @@ pub async fn mirrord_ls_targets(
     let re = Regex::new(target_string).unwrap();
 
     let has_target = targets.iter().any(|output| re.is_match(output));
-    assert!(has_target);
+    assert!(has_target, "targets {:?}", targets);
 
     assert!(targets
         .iter()
