@@ -6851,6 +6851,7 @@ name = "tests"
 version = "0.1.0"
 dependencies = [
  "aws-config",
+ "aws-credential-types",
  "aws-sdk-sqs",
  "aws-types",
  "bytes",

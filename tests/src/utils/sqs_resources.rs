@@ -3,9 +3,14 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
+    fmt::{Debug, Formatter},
     time::Duration,
 };
 
+use aws_credential_types::{
+    provider::{future::ProvideCredentials as ProvideCredentialsFuture, ProvideCredentials},
+    Credentials,
+};
 use aws_sdk_sqs::types::{
     MessageAttributeValue,
     QueueAttributeName::{FifoQueue, MessageRetentionPeriod},
@@ -82,13 +87,29 @@ impl SqsTestResources {
     }
 }
 
+#[derive(Debug)]
+struct LocalstackTestCredentialsProvider;
+
+impl ProvideCredentials for LocalstackTestCredentialsProvider {
+    fn provide_credentials<'a>(
+        &'a self,
+    ) -> aws_credential_types::provider::future::ProvideCredentials<'a>
+    where
+        Self: 'a,
+    {
+        ProvideCredentialsFuture::ready(Ok(aws_credential_types::Credentials::new(
+            "test", "test", None, None, "E2E",
+        )))
+    }
+}
+
 async fn get_sqs_client(localstack_url: Option<String>) -> aws_sdk_sqs::Client {
     let mut config = aws_config::from_env();
     if let Some(endpoint_url) = localstack_url {
         println!("Using endpoint URL {endpoint_url}");
         config = config
             .endpoint_url(endpoint_url)
-            .credentials_provider()
+            .credentials_provider(LocalstackTestCredentialsProvider)
             .region(aws_types::region::Region::new("us-east-1"));
     }
     let config = config.load().await;
@@ -212,7 +233,7 @@ async fn sqs_consumer_service(
     service_with_env(
         &namespace,
         "ClusterIP",
-        "docker.io/t4lz/sqs-forwarder:8.24", // TODO
+        "docker.io/t4lz/sqs-forwarder:8.26", // TODO
         "queue-forwarder",
         false,
         kube_client.clone(),
@@ -236,15 +257,15 @@ async fn sqs_consumer_service(
             // All these auth variables must be set to something, but it doesn't matter to what.
             {
               "name": "AWS_SECRET_ACCESS_KEY",
-              "value": "whatever"
+              "value": "test"
             },
             {
               "name": "AWS_ACCESS_KEY_ID",
-              "value": "pineapple"
+              "value": "test"
             },
             {
               "name": "AWS_SECRET_KEY",
-              "value": "boats"
+              "value": "test"
             },
         ]),
     )
@@ -254,9 +275,9 @@ async fn sqs_consumer_service(
 const AWS_ENV: [(&str, &str); 5] = [
     ("AWS_ENDPOINT_URL", LOCALSTACK_ENDPOINT_URL),
     ("AWS_REGION", "us-east-1"),
-    ("AWS_SECRET_ACCESS_KEY", "whatever"),
-    ("AWS_SECRET_ACCESS_KEY_ID", "pineapple"),
-    ("AWS_SECRET_KEY", "boats"),
+    ("AWS_SECRET_ACCESS_KEY", "test"),
+    ("AWS_ACCESS_KEY_ID", "test"),
+    ("AWS_SECRET_KEY", "test"),
 ];
 
 /// Take env from deployment, return container index and env
@@ -391,7 +412,7 @@ async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<Resourc
     .await
     .expect("Operator patch did not complete in 30 secs.")
     .expect("failed to await condition");
-    tokio::time::sleep(Duration::from_secs(60)).await // TODO: find better solution.
+    tokio::time::sleep(Duration::from_secs(20)).await // TODO: find better solution.
 }
 
 /// Get a function that checks if a deployment already reached an actual generation same as or later
