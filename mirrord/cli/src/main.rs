@@ -357,7 +357,7 @@ async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> Resu
     )
     .await
     .and_then(|config| Client::try_from(config).map_err(From::from))
-    .map_err(CliError::CreateKubeApiFailed)?;
+    .map_err(|error| CliError::auth_exec_error_or(error, CliError::CreateKubeApiFailed))?;
 
     let namespace = args
         .namespace
