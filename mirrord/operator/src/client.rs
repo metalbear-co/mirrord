@@ -442,28 +442,18 @@ where
     where
         P: Progress,
     {
-        match Version::parse(&self.operator.spec.operator_version) {
-            Ok(operator_version) => {
-                let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+        let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
 
-                if operator_version > mirrord_version {
-                    let message = format!(
-                        "mirrord binary version {} does not match the operator version {}. Consider updating your mirrord binary.",
-                        mirrord_version,
-                        operator_version
-                    );
-                    progress.warning(&message);
-                    false
-                } else {
-                    true
-                }
-            }
-
-            Err(error) => {
-                tracing::debug!(%error, "failed to parse operator version");
-                progress.warning("Failed to parse operator version.");
-                false
-            }
+        if self.operator.spec.operator_version > mirrord_version {
+            let message = format!(
+                "mirrord binary version {} does not match the operator version {}. Consider updating your mirrord binary.",
+                mirrord_version,
+                self.operator.spec.operator_version
+            );
+            progress.warning(&message);
+            false
+        } else {
+            true
         }
     }
 

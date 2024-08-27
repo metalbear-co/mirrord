@@ -11,6 +11,7 @@ use mirrord_config::{
     target::{Target, TargetConfig},
 };
 use schemars::JsonSchema;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 
 use self::label_selector::LabelSelector;
@@ -95,7 +96,9 @@ pub static OPERATOR_STATUS_NAME: &str = "operator";
     status = "MirrordOperatorStatus"
 )]
 pub struct MirrordOperatorSpec {
-    pub operator_version: String,
+    #[schemars(with = "String")]
+    pub operator_version: Version,
+
     pub default_namespace: String,
     /// Should be removed when we can stop supporting compatibility with versions from before the
     /// `supported_features` field was added.
@@ -128,7 +131,7 @@ pub struct MirrordOperatorSpec {
 
 impl MirrordOperatorSpec {
     pub fn new(
-        operator_version: String,
+        operator_version: Version,
         default_namespace: String,
         supported_features: Vec<NewOperatorFeature>,
         license: LicenseInfoOwned,
@@ -187,7 +190,7 @@ impl MirrordOperatorSpec {
         } else {
             Err(OperatorApiError::UnsupportedFeature {
                 feature,
-                operator_version: self.operator_version.clone(),
+                operator_version: self.operator_version.to_string(),
             })
         }
     }

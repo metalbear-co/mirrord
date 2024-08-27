@@ -3,7 +3,7 @@
 #![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
 
-use std::time::Duration;
+use std::{sync::LazyLock, time::Duration};
 
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
@@ -15,6 +15,7 @@ use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
+use futures::{future::OptionFuture, TryFutureExt};
 use kube::Client;
 use miette::JSONReportHandler;
 use mirrord_analytics::{
@@ -36,7 +37,7 @@ use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
 use operator::operator_command;
 use port_forward::PortForwarder;
-use semver::Version;
+use semver::{Version, VersionReq};
 use serde_json::json;
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
@@ -63,6 +64,9 @@ pub(crate) use error::{CliError, Result};
 use verify_config::verify_config;
 
 use crate::util::remove_proxy_env;
+
+static ALL_TARGETS_SUPPORTED_OPERATOR_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=3.84.0".parse().expect("verion should be valid"));
 
 async fn exec_process<P>(
     config: LayerConfig,
@@ -365,10 +369,25 @@ async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> Resu
         namespace,
     };
 
-    match OperatorApi::try_new(layer_config, &mut NullReporter::default()).await? {
+    let operator_api =
+        OperatorApi::try_new(layer_config, &mut NullReporter::default())
+            .map_ok(|maybe_api| {
+                OptionFuture::from(maybe_api.map(|api| async {
+                    api.prepare_client_cert(&mut NullReporter::default()).await
+                }))
+            })
+            .await?
+            .await;
+
+    match operator_api {
         None if layer_config.operator == Some(true) => Err(CliError::OperatorNotInstalled),
-        Some(_) => seeker.all().await.map_err(CliError::ListTargetsFailed),
-        None => seeker
+        Some(api)
+            if ALL_TARGETS_SUPPORTED_OPERATOR_VERSION
+                .matches(&api.operator().spec.operator_version) =>
+        {
+            seeker.all().await.map_err(CliError::ListTargetsFailed)
+        }
+        _ => seeker
             .all_open_source()
             .await
             .map_err(CliError::ListTargetsFailed),
