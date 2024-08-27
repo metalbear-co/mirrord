@@ -832,7 +832,7 @@ fn stateful_set_from_json(name: &str, image: &str) -> k8s_openapi::api::apps::v1
 #[cfg(feature = "operator")]
 fn cron_job_from_json(name: &str, image: &str) -> k8s_openapi::api::batch::v1::CronJob {
     serde_json::from_value(json!({
-        "apiVersion": "apps/v1",
+        "apiVersion": "batch/v1",
         "kind": "CronJob",
         "metadata": {
             "name": name,
@@ -886,7 +886,7 @@ fn cron_job_from_json(name: &str, image: &str) -> k8s_openapi::api::batch::v1::C
 #[cfg(feature = "operator")]
 fn job_from_json(name: &str, image: &str) -> k8s_openapi::api::batch::v1::Job {
     serde_json::from_value(json!({
-        "apiVersion": "apps/v1",
+        "apiVersion": "batch/v1",
         "kind": "Job",
         "metadata": {
             "name": name,
