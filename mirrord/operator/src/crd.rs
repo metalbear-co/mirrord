@@ -98,7 +98,6 @@ pub static OPERATOR_STATUS_NAME: &str = "operator";
 pub struct MirrordOperatorSpec {
     #[schemars(with = "String")]
     pub operator_version: Version,
-
     pub default_namespace: String,
     /// Should be removed when we can stop supporting compatibility with versions from before the
     /// `supported_features` field was added.
