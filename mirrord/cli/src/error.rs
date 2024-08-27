@@ -351,8 +351,8 @@ pub(crate) enum CliError {
         mirrord failed to execute Kube authentication command.
         This can happen when the command is not specified using absolute path and cannot be found in $PATH in the context where mirrord is invoked.
         Possible fixes:
-        1. Change $PATH to include the authentication command and relaunch the IDE/terminal.
-        2. Specify the command with an absolute path in the kubeconfig.{GENERAL_HELP}
+        1. Change global $PATH to include the authentication command and relaunch the IDE/terminal.
+        2. In the kubeconfig, specify the command with an absolute path.{GENERAL_HELP}
     "))]
     KubeAuthExecFailed(String),
 }
