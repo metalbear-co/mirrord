@@ -27,8 +27,8 @@ pub struct KubeResourceSeeker<'a> {
 }
 
 impl KubeResourceSeeker<'_> {
-    /// Returns all resource types that don't require the operator to operate ie. pods, deployments,
-    /// rollouts
+    /// Returns all resource types that don't require the operator to operate ie. [`Pod`],
+    /// [`Deployment`] and [`Rollout`]
     pub async fn all_open_source(&self) -> Result<Vec<String>> {
         let (pods, deployments, rollouts) = futures::try_join!(
             self.pods(),
@@ -43,7 +43,8 @@ impl KubeResourceSeeker<'_> {
             .collect())
     }
 
-    /// Returns all resource types ie. pods, deployments, rollouts, jobs, cronjobs, statefulsets
+    /// Returns all resource types ie. [`Pod`], [`Deployment`], [`Rollout`], [`Job`], [`CronJob`],
+    /// and [`StatefulSet`]
     pub async fn all(&self) -> Result<Vec<String>> {
         let (pods, deployments, rollouts, jobs, cronjobs, statefulsets) = futures::try_join!(
             self.pods(),
@@ -135,8 +136,8 @@ impl KubeResourceSeeker<'_> {
             .await
     }
 
-    /// Helper to get the list of a resource type ([`Pod`], [`Deployment`], [`Rollout`])
-    /// through the kube api.
+    /// Helper to get the list of a resource type ([`Pod`], [`Deployment`], [`Rollout`], [`Job`],
+    /// [`CronJob`], [`StatefulSet`]) through the kube api.
     fn list_resource<'s, R>(
         &self,
         field_selector: Option<&'s str>,
