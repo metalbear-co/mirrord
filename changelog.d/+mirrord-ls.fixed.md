@@ -1,0 +1,1 @@
+Fixed a bug where `mirrord ls` output would include a list of copied pods (mfT) in case of connectivity issues with the operator.
