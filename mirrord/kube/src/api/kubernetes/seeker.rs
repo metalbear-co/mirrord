@@ -27,10 +27,6 @@ pub struct KubeResourceSeeker<'a> {
 }
 
 impl KubeResourceSeeker<'_> {
-    /// Returns a tuple with:
-    /// 1. map of pods according to [`Self::pods`];
-    /// 2. iterator of deployments according to [`Self::deployments`];
-    /// 2. iterator of rollouts according to [`Self::rollouts`];
     pub async fn all_open_source(&self) -> Result<Vec<String>> {
         let (pods, deployments, rollouts) = futures::try_join!(
             self.pods(),
