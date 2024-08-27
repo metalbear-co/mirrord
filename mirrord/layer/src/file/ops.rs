@@ -202,7 +202,6 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
 pub(crate) fn fdopendir(fd: RawFd) -> Detour<usize> {
     // usize == ptr size
     // we don't return a pointer to an address that contains DIR
-
     let remote_file_fd = OPEN_FILES
         .lock()?
         .get(&fd)

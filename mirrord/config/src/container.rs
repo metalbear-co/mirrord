@@ -11,7 +11,7 @@ static DEFAULT_CLI_IMAGE: &str = concat!(
     env!("CARGO_PKG_VERSION")
 );
 
-/// `mirrord container` command specific config.
+/// Unstable: `mirrord container` command specific config.
 #[derive(MirrordConfig, Clone, Debug, Serialize)]
 #[config(map_to = "ContainerFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]

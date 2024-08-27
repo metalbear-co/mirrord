@@ -4,12 +4,13 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use self::{copy_target::CopyTargetConfig, env::EnvConfig, fs::FsConfig, network::NetworkConfig};
-use crate::config::source::MirrordConfigSource;
+use crate::{config::source::MirrordConfigSource, feature::split_queues::SplitQueuesConfig};
 
 pub mod copy_target;
 pub mod env;
 pub mod fs;
 pub mod network;
+pub mod split_queues;
 
 /// Controls mirrord features.
 ///
@@ -96,6 +97,16 @@ pub struct FeatureConfig {
     /// Should mirrord return the hostname of the target pod when calling `gethostname`
     #[config(default = true)]
     pub hostname: bool,
+
+    /// ## feature.split_queues {#feature-split_queues}
+    ///
+    /// Define filters to split queues by, and make your local application consume only messages
+    /// that match those filters.
+    /// If you don't specify any filter for a queue that is however declared in the
+    /// `MirrordWorkloadQueueRegistry` of the target you're using, a match-nothing filter
+    /// will be used, and your local application will not receive any messages from that queue.
+    #[config(nested, unstable)]
+    pub split_queues: SplitQueuesConfig,
 }
 
 impl CollectAnalytics for &FeatureConfig {
@@ -105,5 +116,6 @@ impl CollectAnalytics for &FeatureConfig {
         analytics.add("network", &self.network);
         analytics.add("copy_target", &self.copy_target);
         analytics.add("hostname", self.hostname);
+        analytics.add("split_queues", &self.split_queues);
     }
 }

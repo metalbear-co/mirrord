@@ -67,6 +67,7 @@ use http_filter::*;
 /// ```
 #[derive(Clone, Debug, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
+#[schemars(untagged, rename_all = "lowercase")]
 pub enum IncomingFileConfig {
     Simple(Option<IncomingMode>),
     Advanced(Box<IncomingAdvancedFileConfig>),

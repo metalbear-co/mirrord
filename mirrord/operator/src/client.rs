@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, ops::Not};
 
 use base64::{engine::general_purpose, Engine};
 use chrono::{DateTime, Utc};
@@ -15,7 +15,11 @@ use mirrord_auth::{
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::LicenseValidity,
 };
-use mirrord_config::{feature::network::incoming::ConcurrentSteal, target::Target, LayerConfig};
+use mirrord_config::{
+    feature::{network::incoming::ConcurrentSteal, split_queues::SplitQueuesConfig},
+    target::Target,
+    LayerConfig,
+};
 use mirrord_kube::{api::kubernetes::create_kube_config, error::KubeApiError};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
@@ -26,7 +30,7 @@ use tracing::Level;
 
 use crate::{
     crd::{
-        CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, OperatorFeatures, TargetCrd,
+        CopyTargetCrd, CopyTargetSpec, MirrordOperatorCrd, NewOperatorFeature, TargetCrd,
         OPERATOR_STATUS_NAME,
     },
     types::{
@@ -542,16 +546,17 @@ where
         Ok(client_config)
     }
 
-    /// If `copy_target` feature is enabled in the given [`LayerConfig`], checks that the operator
-    /// supports it.
-    fn check_copy_target_feature_support(&self, config: &LayerConfig) -> OperatorApiResult<()> {
-        let client_wants_copy = config.feature.copy_target.enabled;
-        let operator_supports_copy = self.operator.spec.copy_target_enabled.unwrap_or(false);
-        if client_wants_copy && !operator_supports_copy {
-            return Err(OperatorApiError::UnsupportedFeature {
-                feature: "copy target".into(),
-                operator_version: self.operator.spec.operator_version.clone(),
-            });
+    /// Check the operator supports all the operator features required by the user's configuration.
+    fn check_feature_support(&self, config: &LayerConfig) -> OperatorApiResult<()> {
+        if config.feature.copy_target.enabled {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::CopyTarget)?
+        }
+        if config.feature.split_queues.is_set() {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::SqsQueueSplitting)?;
         }
 
         Ok(())
@@ -642,16 +647,24 @@ impl OperatorApi<PreparedClientCert> {
     where
         P: Progress,
     {
-        self.check_copy_target_feature_support(config)?;
+        self.check_feature_support(config)?;
 
-        let target = if config.feature.copy_target.enabled {
+        let target = if config.feature.copy_target.enabled
+            // use copy_target for splitting queues
+            || config.feature.split_queues.is_set()
+        {
+            if config.feature.copy_target.enabled.not() {
+                tracing::info!("Creating a copy-target for queue-splitting (even thought copy_target was not explicitly set).")
+            }
             let mut copy_subtask = progress.subtask("copying target");
 
             // We do not validate the `target` here, it's up to the operator.
             let target = config.target.path.clone().unwrap_or(Target::Targetless);
             let scale_down = config.feature.copy_target.scale_down;
             let namespace = self.target_namespace(config);
-            let copied = self.copy_target(target, scale_down, namespace).await?;
+            let copied = self
+                .copy_target(target, scale_down, namespace, &config.feature.split_queues)
+                .await?;
 
             copy_subtask.success(Some("target copied"));
 
@@ -676,10 +689,8 @@ impl OperatorApi<PreparedClientCert> {
         let use_proxy_api = self
             .operator
             .spec
-            .features
-            .as_ref()
-            .map(|features| features.contains(&OperatorFeatures::ProxyApi))
-            .unwrap_or(false);
+            .supported_features()
+            .contains(&NewOperatorFeature::ProxyApi);
         let connect_url = target.connect_url(
             use_proxy_api,
             config.feature.network.incoming.on_concurrent_steal,
@@ -718,6 +729,7 @@ impl OperatorApi<PreparedClientCert> {
         target: Target,
         scale_down: bool,
         namespace: &str,
+        split_queues: &SplitQueuesConfig,
     ) -> OperatorApiResult<CopyTargetCrd> {
         let name = TargetCrd::urlfied_name(&target);
 
@@ -727,6 +739,7 @@ impl OperatorApi<PreparedClientCert> {
                 target,
                 idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
                 scale_down,
+                split_queues: Some(split_queues.clone()),
             },
         );
 

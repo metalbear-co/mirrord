@@ -2,6 +2,7 @@
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
 #![feature(entry_insert)]
+#![feature(iterator_try_collect)]
 #![cfg_attr(target_os = "linux", feature(tcp_quickack))]
 #![feature(lazy_cell)]
 #![warn(clippy::indexing_slicing)]
@@ -36,6 +37,8 @@ mod sniffer;
 mod steal;
 #[cfg(target_os = "linux")]
 mod util;
+#[cfg(target_os = "linux")]
+mod vpn;
 #[cfg(target_os = "linux")]
 mod watched_task;
 

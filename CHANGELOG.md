@@ -8,6 +8,92 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.115.1](https://github.com/metalbear-co/mirrord/tree/3.115.1) - 2024-08-21
+
+
+### Fixed
+
+- Add retry for checking intproxy logs to get its listening port, Prevents any
+  issues when it takes a bit of time for intproxy to start when running in
+  container mode. [#2687](https://github.com/metalbear-co/mirrord/issues/2687)
+- Fixed `mirrord-agent` not picking up graceful shutdown signal.
+  [#2690](https://github.com/metalbear-co/mirrord/issues/2690)
+
+## [3.115.0](https://github.com/metalbear-co/mirrord/tree/3.115.0) - 2024-08-21
+
+
+### Added
+
+- Adds a batching readdir requests, which should improve the performance when
+  traversing large directories. Introduces a new `ReadDirBatched` message to the protocol.
+  [#2611](https://github.com/metalbear-co/mirrord/issues/2611)
+
+
+### Fixed
+
+- Fix hooking on arm64 Go on Linux
+  [#2680](https://github.com/metalbear-co/mirrord/issues/2680)
+
+
+### Internal
+
+- Adds intproxy logs for the integration tests in CI.
+
+## [3.114.1](https://github.com/metalbear-co/mirrord/tree/3.114.1) - 2024-08-18
+
+
+### Fixed
+
+- Make splitqueues optional to support old version
+  [#2675](https://github.com/metalbear-co/mirrord/issues/2675)
+
+
+### Internal
+
+- Update kube rs to use mainstream
+  [#2636](https://github.com/metalbear-co/mirrord/issues/2636)
+- Use main CI action for go e2e setup.
+
+
+## [3.114.0](https://github.com/metalbear-co/mirrord/tree/3.114.0) - 2024-08-16
+
+
+### Added
+
+- Add port forwarding feature which can be used to proxy data from a local port
+  to a remote one -
+  if the local port is not specified, it will default to the same as the remote
+  ```
+  mirrord port-forward [options] -L [local_port:]remote_ip:remote_port
+  ```
+  [#567](https://github.com/metalbear-co/mirrord/issues/567)
+- Client side support for the upcoming SQS queue splitting support in *mirrord
+  for Teams*. [#2066](https://github.com/metalbear-co/mirrord/issues/2066)
+
+## [3.113.1](https://github.com/metalbear-co/mirrord/tree/3.113.1) - 2024-08-15
+
+
+### Fixed
+
+- Fix small error in shared sockets that resulted in it adding the shared
+  socket env several times.
+  [#864](https://github.com/metalbear-co/mirrord/issues/864)
+- Specify that `mirrord container` is an unstable feature.
+  [#2641](https://github.com/metalbear-co/mirrord/issues/2641)
+- Fix IncomingConfig json schema regression.
+  [#2662](https://github.com/metalbear-co/mirrord/issues/2662)
+- Fix `arm64` version of `mirrord-cli` container image and add github cache for
+  container builds.
+- Fixed symbol hooks for Go 1.23.
+
+
+### Internal
+
+- Updated Go versions used in CI to 1.21, 1.22 and 1.23.
+  [#2660](https://github.com/metalbear-co/mirrord/issues/2660)
+- Some agent code housekeeping, including improved tracing and errors and
+  removal of index allocator.
+
 ## [3.113.0](https://github.com/metalbear-co/mirrord/tree/3.113.0) - 2024-08-14
 
 

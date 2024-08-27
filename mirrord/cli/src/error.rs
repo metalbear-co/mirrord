@@ -7,8 +7,11 @@ use mirrord_console::error::ConsoleError;
 use mirrord_intproxy::{agent_conn::ConnectionTlsError, error::IntProxyError};
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
+use mirrord_vpn::error::VpnError;
 use reqwest::StatusCode;
 use thiserror::Error;
+
+use crate::port_forward::PortForwardError;
 
 pub(crate) type Result<T, E = CliError> = core::result::Result<T, E>;
 
@@ -61,7 +64,7 @@ pub(crate) enum ContainerError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     UnableParseCommandStdout(String, std::io::Error),
 
-    #[error("Comand failed to execute command [{0}]: {1}")]
+    #[error("Command failed to execute command [{0}]: {1}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     UnsuccesfulCommandOutput(String, String),
 
@@ -256,6 +259,11 @@ pub(crate) enum CliError {
     #[diagnostic(transparent)]
     InternalProxyError(#[from] InternalProxyError),
 
+    /// Errors produced by `mirrord vpn` command.
+    #[error(transparent)]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    VpnError(#[from] VpnError),
+
     #[error("Getting cli path failed {0:#?}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     CliPathError(std::io::Error),
@@ -327,6 +335,10 @@ pub(crate) enum CliError {
     #[error("mirrord returned a target resource of unknown type: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     OperatorReturnedUnknownTargetType(String),
+
+    #[error("An error occurred in the port-forwarding process: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    PortForwardingError(#[from] PortForwardError),
 }
 
 impl From<OperatorApiError> for CliError {
@@ -336,7 +348,7 @@ impl From<OperatorApiError> for CliError {
                 feature,
                 operator_version,
             } => Self::FeatureNotSupportedInOperatorError {
-                feature,
+                feature: feature.to_string(),
                 operator_version,
             },
             OperatorApiError::CreateKubeClient(e) => Self::CreateKubeApiFailed(e),

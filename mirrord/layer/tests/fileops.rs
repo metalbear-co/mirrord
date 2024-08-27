@@ -35,8 +35,16 @@ fn get_rw_test_file_env_vars() -> Vec<(&'static str, &'static str)> {
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
-async fn self_open(dylib_path: &Path) {
-    let application = Application::Go19SelfOpen;
+async fn self_open(
+    #[values(
+        Application::Go21SelfOpen,
+        Application::Go22SelfOpen,
+        Application::Go23SelfOpen
+    )]
+    application: Application,
+    dylib_path: &Path,
+) {
+    let _tracing = init_tracing().unwrap();
 
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![], None)
@@ -57,6 +65,8 @@ async fn self_open(dylib_path: &Path) {
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
 async fn read_from_mirrord_bin(dylib_path: &Path) {
+    let _tracing = init_tracing().unwrap();
+
     let contents = "please don't flake";
     let temp_dir = env::temp_dir();
     let file_path = temp_dir.join("mirrord-test-read-from-mirrord-bin");
@@ -98,6 +108,8 @@ async fn read_from_mirrord_bin(dylib_path: &Path) {
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn pwrite(#[values(Application::RustFileOps)] application: Application, dylib_path: &Path) {
+    let _tracing = init_tracing().unwrap();
+
     // add rw override for the specific path
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
@@ -216,6 +228,8 @@ async fn node_close(
     #[values(Application::NodeFileOps)] application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing().unwrap();
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
@@ -273,9 +287,16 @@ async fn node_close(
 #[timeout(Duration::from_secs(60))]
 #[cfg(target_os = "linux")]
 async fn go_stat(
-    #[values(Application::Go19FileOps, Application::Go20FileOps)] application: Application,
+    #[values(
+        Application::Go21FileOps,
+        Application::Go22FileOps,
+        Application::Go23FileOps
+    )]
+    application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing().unwrap();
+
     // add rw override for the specific path
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
@@ -323,6 +344,7 @@ async fn go_stat(
             XstatResponse { metadata },
         ))))
         .await;
+
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
 }
@@ -332,9 +354,12 @@ async fn go_stat(
 #[timeout(Duration::from_secs(10))]
 #[cfg(target_os = "macos")]
 async fn go_dir(
-    #[values(Application::Go19Dir, Application::Go20Dir)] application: Application,
+    #[values(Application::Go21Dir, Application::Go22Dir, Application::Go23Dir)]
+    application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing().unwrap();
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
@@ -346,93 +371,98 @@ async fn go_dir(
     let fd = 1;
     intproxy.expect_file_open_for_reading("/tmp/foo", fd).await;
 
+    let mut message = intproxy.recv().await;
+    if matches!(message, ClientMessage::FileRequest(FileRequest::Xstat(..))) {
+        assert_eq!(
+            message,
+            ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
+                path: None,
+                fd: Some(fd),
+                follow_symlink: true
+            }))
+        );
+
+        let metadata = MetadataInternal {
+            device_id: 0,
+            size: 0,
+            user_id: 2,
+            blocks: 3,
+            mode: libc::S_IFDIR as u32,
+            ..Default::default()
+        };
+
+        intproxy
+            .send(DaemonMessage::File(FileResponse::Xstat(Ok(
+                XstatResponse { metadata },
+            ))))
+            .await;
+
+        message = intproxy.recv().await;
+    }
+
     assert_eq!(
-        intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::Xstat(XstatRequest {
-            path: None,
-            fd: Some(1),
-            follow_symlink: true
-        }))
-    );
-
-    let metadata = MetadataInternal {
-        device_id: 0,
-        size: 0,
-        user_id: 2,
-        blocks: 3,
-        mode: libc::S_IFDIR as u32,
-        ..Default::default()
-    };
-
-    intproxy
-        .send(DaemonMessage::File(FileResponse::Xstat(Ok(
-            XstatResponse { metadata },
-        ))))
-        .await;
-
-    assert_eq!(
-        intproxy.recv().await,
+        message,
         ClientMessage::FileRequest(FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd: 1 }))
     );
 
+    let dir_fd = 2;
     intproxy
         .send(DaemonMessage::File(FileResponse::OpenDir(Ok(
-            OpenDirResponse { fd: 2 },
+            OpenDirResponse { fd: dir_fd },
         ))))
         .await;
 
     assert_eq!(
         intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 2 }))
+        ClientMessage::FileRequest(FileRequest::ReadDirBatch(ReadDirBatchRequest {
+            remote_fd: dir_fd,
+            amount: 128
+        }))
     );
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
-            ReadDirResponse {
-                direntry: Some(DirEntryInternal {
-                    name: "a".to_string(),
-                    inode: 1,
-                    position: 1,
-                    file_type: libc::DT_REG,
-                }),
+        .send(DaemonMessage::File(FileResponse::ReadDirBatch(Ok(
+            ReadDirBatchResponse {
+                fd: dir_fd,
+                dir_entries: vec![
+                    DirEntryInternal {
+                        name: "a".to_string(),
+                        inode: 1,
+                        position: 1,
+                        file_type: libc::DT_REG,
+                    },
+                    DirEntryInternal {
+                        name: "b".to_string(),
+                        inode: 2,
+                        position: 2,
+                        file_type: libc::DT_REG,
+                    },
+                ],
             },
         ))))
         .await;
 
     assert_eq!(
         intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 2 }))
+        ClientMessage::FileRequest(FileRequest::ReadDirBatch(ReadDirBatchRequest {
+            remote_fd: dir_fd,
+            amount: 128
+        }))
     );
 
     intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
-            ReadDirResponse {
-                direntry: Some(DirEntryInternal {
-                    name: "b".to_string(),
-                    inode: 2,
-                    position: 2,
-                    file_type: libc::DT_REG,
-                }),
+        .send(DaemonMessage::File(FileResponse::ReadDirBatch(Ok(
+            ReadDirBatchResponse {
+                fd: dir_fd,
+                dir_entries: Vec::new(),
             },
         ))))
         .await;
 
     assert_eq!(
         intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 2 }))
+        ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: dir_fd }))
     );
-
-    intproxy
-        .send(DaemonMessage::File(FileResponse::ReadDir(Ok(
-            ReadDirResponse { direntry: None },
-        ))))
-        .await;
-
-    assert_eq!(
-        intproxy.recv().await,
-        ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: 2 }))
-    );
-
     intproxy.expect_file_close(fd).await;
 
     test_process.wait_assert_success().await;
@@ -444,9 +474,12 @@ async fn go_dir(
 #[timeout(Duration::from_secs(10))]
 #[cfg(target_os = "linux")]
 async fn go_dir_on_linux(
-    #[values(Application::Go19Dir, Application::Go20Dir)] application: Application,
+    #[values(Application::Go21Dir, Application::Go22Dir, Application::Go23Dir)]
+    application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing().unwrap();
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
@@ -534,9 +567,16 @@ async fn go_dir_on_linux(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn go_dir_bypass(
-    #[values(Application::Go19DirBypass, Application::Go20DirBypass)] application: Application,
+    #[values(
+        Application::Go21DirBypass,
+        Application::Go22DirBypass,
+        Application::Go23DirBypass
+    )]
+    application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing().unwrap();
+
     let tmp_dir = temp_dir().join("go_dir_bypass_test");
     std::fs::create_dir_all(tmp_dir.clone()).unwrap();
     std::fs::write(tmp_dir.join("a"), "").unwrap();
@@ -572,10 +612,12 @@ async fn go_dir_bypass(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn read_go(
-    #[values(Application::Go19Read, Application::Go20Read, Application::Go21Read)]
+    #[values(Application::Go21Read, Application::Go22Read, Application::Go23Read)]
     application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing().unwrap();
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![("MIRRORD_FILE_MODE", "read")], None)
         .await;
@@ -612,10 +654,12 @@ async fn read_go(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn write_go(
-    #[values(Application::Go19Write, Application::Go20Write, Application::Go21Write)]
+    #[values(Application::Go21Write, Application::Go22Write, Application::Go23Write)]
     application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing().unwrap();
+
     let (mut test_process, mut layer_connection) = application
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
@@ -639,10 +683,12 @@ async fn write_go(
 #[tokio::test]
 #[timeout(Duration::from_secs(10))]
 async fn lseek_go(
-    #[values(Application::Go19LSeek, Application::Go20LSeek, Application::Go21LSeek)]
+    #[values(Application::Go21LSeek, Application::Go22LSeek, Application::Go23LSeek)]
     application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing().unwrap();
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;
@@ -669,13 +715,15 @@ async fn lseek_go(
 #[timeout(Duration::from_secs(10))]
 async fn faccessat_go(
     #[values(
-        Application::Go19FAccessAt,
-        Application::Go20FAccessAt,
-        Application::Go21FAccessAt
+        Application::Go21FAccessAt,
+        Application::Go22FAccessAt,
+        Application::Go23FAccessAt
     )]
     application: Application,
     dylib_path: &Path,
 ) {
+    let _tracing = init_tracing().unwrap();
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, get_rw_test_file_env_vars(), None)
         .await;

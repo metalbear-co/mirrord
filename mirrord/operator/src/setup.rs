@@ -26,7 +26,7 @@ use k8s_openapi::{
 use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
-use crate::crd::{MirrordPolicy, TargetCrd};
+use crate::crd::{MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd};
 
 static OPERATOR_NAME: &str = "mirrord-operator";
 /// 443 is standard port for APIService, do not change this value
@@ -88,6 +88,8 @@ pub struct SetupOptions {
     pub license: LicenseType,
     pub namespace: OperatorNamespace,
     pub image: String,
+    pub aws_role_arn: Option<String>,
+    pub sqs_splitting: bool,
 }
 
 #[derive(Debug)]
@@ -103,6 +105,7 @@ pub struct Operator {
     user_cluster_role: OperatorClusterUserRole,
     client_ca_role: OperatorClientCaRole,
     client_ca_role_binding: OperatorClientCaRoleBinding,
+    sqs_splitting: bool,
 }
 
 impl Operator {
@@ -111,6 +114,8 @@ impl Operator {
             license,
             namespace,
             image,
+            aws_role_arn,
+            sqs_splitting,
         } = options;
 
         let (license_secret, license_key) = match license {
@@ -120,9 +125,9 @@ impl Operator {
             }
         };
 
-        let service_account = OperatorServiceAccount::new(&namespace);
+        let service_account = OperatorServiceAccount::new(&namespace, aws_role_arn);
 
-        let role = OperatorRole::new();
+        let role = OperatorRole::new(sqs_splitting);
         let role_binding = OperatorRoleBinding::new(&role, &service_account);
         let user_cluster_role = OperatorClusterUserRole::new();
 
@@ -136,6 +141,7 @@ impl Operator {
             license_secret.as_ref(),
             license_key,
             image,
+            sqs_splitting,
         );
 
         let service = OperatorService::new(&namespace);
@@ -154,6 +160,7 @@ impl Operator {
             user_cluster_role,
             client_ca_role,
             client_ca_role_binding,
+            sqs_splitting,
         }
     }
 }
@@ -197,6 +204,14 @@ impl OperatorSetup for Operator {
         writer.write_all(b"---\n")?;
         MirrordPolicy::crd().to_writer(&mut writer)?;
 
+        if self.sqs_splitting {
+            writer.write_all(b"---\n")?;
+            MirrordWorkloadQueueRegistry::crd().to_writer(&mut writer)?;
+
+            writer.write_all(b"---\n")?;
+            MirrordSqsSession::crd().to_writer(&mut writer)?;
+        }
+
         Ok(())
     }
 }
@@ -236,6 +251,7 @@ impl OperatorDeployment {
         license_secret: Option<&OperatorLicenseSecret>,
         license_key: Option<String>,
         image: String,
+        sqs_splitting: bool,
     ) -> Self {
         let mut envs = vec![
             EnvVar {
@@ -291,6 +307,14 @@ impl OperatorDeployment {
             envs.push(EnvVar {
                 name: "OPERATOR_LICENSE_KEY".to_owned(),
                 value: Some(license_key),
+                value_from: None,
+            });
+        }
+
+        if sqs_splitting {
+            envs.push(EnvVar {
+                name: "OPERATOR_SQS_SPLITTING".to_owned(),
+                value: Some("true".to_string()),
                 value_from: None,
             });
         }
@@ -379,11 +403,13 @@ impl OperatorDeployment {
 pub struct OperatorServiceAccount(ServiceAccount);
 
 impl OperatorServiceAccount {
-    pub fn new(namespace: &OperatorNamespace) -> Self {
+    pub fn new(namespace: &OperatorNamespace, aws_role_arn: Option<String>) -> Self {
         let sa = ServiceAccount {
             metadata: ObjectMeta {
                 name: Some(OPERATOR_SERVICE_ACCOUNT_NAME.to_owned()),
                 namespace: Some(namespace.name().to_owned()),
+                annotations: aws_role_arn
+                    .map(|arn| BTreeMap::from([("eks.amazonaws.com/role-arn".to_string(), arn)])),
                 labels: Some(APP_LABELS.clone()),
                 ..Default::default()
             },
@@ -411,86 +437,147 @@ impl OperatorServiceAccount {
 pub struct OperatorRole(ClusterRole);
 
 impl OperatorRole {
-    pub fn new() -> Self {
+    pub fn new(sqs_splitting: bool) -> Self {
+        let mut rules = vec![
+            PolicyRule {
+                api_groups: Some(vec![
+                    "".to_owned(),
+                    "apps".to_owned(),
+                    "batch".to_owned(),
+                    "argoproj.io".to_owned(),
+                ]),
+                resources: Some(vec![
+                    "nodes".to_owned(),
+                    "pods".to_owned(),
+                    "pods/log".to_owned(),
+                    "pods/ephemeralcontainers".to_owned(),
+                    "deployments".to_owned(),
+                    "deployments/scale".to_owned(),
+                    "rollouts".to_owned(),
+                    "rollouts/scale".to_owned(),
+                    "jobs".to_owned(),
+                    "cronjobs".to_owned(),
+                    "statefulsets".to_owned(),
+                    "statefulsets/scale".to_owned(),
+                ]),
+                verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
+                ..Default::default()
+            },
+            // For SQS controller to temporarily change deployments to use changed queues.
+            PolicyRule {
+                api_groups: Some(vec!["apps".to_owned()]),
+                resources: Some(vec!["deployments".to_owned()]),
+                verbs: vec!["patch".to_owned()],
+                ..Default::default()
+            },
+            // For SQS controller to temporarily change Argo Rollouts to use changed queues.
+            PolicyRule {
+                api_groups: Some(vec!["argoproj.io".to_owned()]),
+                resources: Some(vec!["rollouts".to_owned()]),
+                verbs: vec!["patch".to_owned()],
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec!["apps".to_owned(), "argoproj.io".to_owned()]),
+                resources: Some(vec![
+                    "deployments/scale".to_owned(),
+                    "rollouts/scale".to_owned(),
+                    "statefulsets/scale".to_owned(),
+                ]),
+                verbs: vec!["patch".to_owned()],
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec!["".to_owned(), "batch".to_owned()]),
+                resources: Some(vec!["jobs".to_owned(), "pods".to_owned()]),
+                verbs: vec!["create".to_owned(), "delete".to_owned()],
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec!["".to_owned()]),
+                resources: Some(vec!["pods/ephemeralcontainers".to_owned()]),
+                verbs: vec!["update".to_owned()],
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec!["".to_owned(), "authentication.k8s.io".to_owned()]),
+                resources: Some(vec![
+                    "groups".to_owned(),
+                    "users".to_owned(),
+                    "userextras/accesskeyid".to_owned(),
+                    "userextras/arn".to_owned(),
+                    "userextras/canonicalarn".to_owned(),
+                    "userextras/sessionname".to_owned(),
+                    "userextras/iam.gke.io/user-assertion".to_owned(),
+                    "userextras/user-assertion.cloud.google.com".to_owned(),
+                    "userextras/principalid".to_owned(),
+                    "userextras/oid".to_owned(),
+                    "userextras/username".to_owned(),
+                    "userextras/licensekey".to_owned(),
+                ]),
+                verbs: vec!["impersonate".to_owned()],
+                ..Default::default()
+            },
+            // Allow the operator to list+get mirrord policies.
+            PolicyRule {
+                api_groups: Some(vec!["policies.mirrord.metalbear.co".to_owned()]),
+                resources: Some(vec![MirrordPolicy::plural(&()).to_string()]),
+                verbs: vec!["list".to_owned(), "get".to_owned()],
+                ..Default::default()
+            },
+        ];
+        if sqs_splitting {
+            rules.extend([
+                // Allow the operator to list mirrord queue registries.
+                PolicyRule {
+                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
+                    resources: Some(vec![MirrordWorkloadQueueRegistry::plural(&()).to_string()]),
+                    verbs: vec!["list".to_owned()],
+                    ..Default::default()
+                },
+                // Allow the SQS controller to update queue registry status.
+                PolicyRule {
+                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
+                    resources: Some(vec!["mirrordworkloadqueueregistries/status".to_string()]),
+                    verbs: vec![
+                        // For setting the status in the SQS controller.
+                        "update".to_owned(),
+                    ],
+                    ..Default::default()
+                },
+                // Allow the operator to control mirrord SQS session objects.
+                PolicyRule {
+                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
+                    resources: Some(vec![MirrordSqsSession::plural(&()).to_string()]),
+                    verbs: vec![
+                        "create".to_owned(),
+                        "watch".to_owned(),
+                        "list".to_owned(),
+                        "get".to_owned(),
+                        "delete".to_owned(),
+                        "deletecollection".to_owned(),
+                        "patch".to_owned(),
+                    ],
+                    ..Default::default()
+                },
+                // Allow the SQS controller to update queue registry status.
+                PolicyRule {
+                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
+                    resources: Some(vec!["mirrordsqssessions/status".to_string()]),
+                    verbs: vec![
+                        // For setting the status in the SQS controller.
+                        "update".to_owned(),
+                    ],
+                    ..Default::default()
+                },
+            ]);
+        }
         let role = ClusterRole {
             metadata: ObjectMeta {
                 name: Some(OPERATOR_ROLE_NAME.to_owned()),
                 ..Default::default()
             },
-            rules: Some(vec![
-                PolicyRule {
-                    api_groups: Some(vec![
-                        "".to_owned(),
-                        "apps".to_owned(),
-                        "batch".to_owned(),
-                        "argoproj.io".to_owned(),
-                    ]),
-                    resources: Some(vec![
-                        "nodes".to_owned(),
-                        "pods".to_owned(),
-                        "pods/log".to_owned(),
-                        "pods/ephemeralcontainers".to_owned(),
-                        "deployments".to_owned(),
-                        "deployments/scale".to_owned(),
-                        "rollouts".to_owned(),
-                        "rollouts/scale".to_owned(),
-                        "jobs".to_owned(),
-                        "cronjobs".to_owned(),
-                        "statefulsets".to_owned(),
-                        "statefulsets/scale".to_owned(),
-                    ]),
-                    verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
-                    ..Default::default()
-                },
-                PolicyRule {
-                    api_groups: Some(vec!["apps".to_owned(), "argoproj.io".to_owned()]),
-                    resources: Some(vec![
-                        "deployments/scale".to_owned(),
-                        "rollouts/scale".to_owned(),
-                        "statefulsets/scale".to_owned(),
-                    ]),
-                    verbs: vec!["patch".to_owned()],
-                    ..Default::default()
-                },
-                PolicyRule {
-                    api_groups: Some(vec!["".to_owned(), "batch".to_owned()]),
-                    resources: Some(vec!["jobs".to_owned(), "pods".to_owned()]),
-                    verbs: vec!["create".to_owned(), "delete".to_owned()],
-                    ..Default::default()
-                },
-                PolicyRule {
-                    api_groups: Some(vec!["".to_owned()]),
-                    resources: Some(vec!["pods/ephemeralcontainers".to_owned()]),
-                    verbs: vec!["update".to_owned()],
-                    ..Default::default()
-                },
-                PolicyRule {
-                    api_groups: Some(vec!["".to_owned(), "authentication.k8s.io".to_owned()]),
-                    resources: Some(vec![
-                        "groups".to_owned(),
-                        "users".to_owned(),
-                        "userextras/accesskeyid".to_owned(),
-                        "userextras/arn".to_owned(),
-                        "userextras/canonicalarn".to_owned(),
-                        "userextras/sessionname".to_owned(),
-                        "userextras/iam.gke.io/user-assertion".to_owned(),
-                        "userextras/user-assertion.cloud.google.com".to_owned(),
-                        "userextras/principalid".to_owned(),
-                        "userextras/oid".to_owned(),
-                        "userextras/username".to_owned(),
-                        "userextras/licensekey".to_owned(),
-                    ]),
-                    verbs: vec!["impersonate".to_owned()],
-                    ..Default::default()
-                },
-                // Allow the operator to list mirrord policies.
-                PolicyRule {
-                    api_groups: Some(vec!["policies.mirrord.metalbear.co".to_owned()]),
-                    resources: Some(vec![MirrordPolicy::plural(&()).to_string()]),
-                    verbs: vec!["list".to_owned(), "get".to_owned()],
-                    ..Default::default()
-                },
-            ]),
+            rules: Some(rules),
             ..Default::default()
         };
 
@@ -508,7 +595,7 @@ impl OperatorRole {
 
 impl Default for OperatorRole {
     fn default() -> Self {
-        Self::new()
+        Self::new(false)
     }
 }
 
