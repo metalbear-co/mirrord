@@ -16,7 +16,6 @@ use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
 use kube::Client;
-use kube_resource::KubeResourceSeeker;
 use miette::JSONReportHandler;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, NullReporter, Reporter,
@@ -30,10 +29,9 @@ use mirrord_config::{
             incoming::IncomingMode,
         },
     },
-    target::TargetDisplay,
     LayerConfig, LayerFileConfig, MIRRORD_CONFIG_FILE_ENV,
 };
-use mirrord_kube::api::{container::SKIP_NAMES, kubernetes::create_kube_config};
+use mirrord_kube::api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{Progress, ProgressTracker};
 use operator::operator_command;
@@ -54,7 +52,6 @@ mod extension;
 mod external_proxy;
 mod extract;
 mod internal_proxy;
-mod kube_resource;
 mod operator;
 pub mod port_forward;
 mod teams;
@@ -348,7 +345,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     execution_result
 }
 
-async fn list_pods(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<Vec<String>> {
+async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<Vec<String>> {
     let client = create_kube_config(
         layer_config.accept_invalid_certificates,
         layer_config.kubeconfig.clone(),
@@ -363,28 +360,19 @@ async fn list_pods(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<
         .as_deref()
         .or(layer_config.target.namespace.as_deref());
 
-    let (pods, deployments, rollouts) = KubeResourceSeeker {
+    let seeker = KubeResourceSeeker {
         client: &client,
         namespace,
-    }
-    .all_open_source()
-    .await;
+    };
 
-    Ok(pods
-        .iter()
-        .flat_map(|(pod, containers)| {
-            if containers.len() == 1 {
-                vec![format!("pod/{pod}")]
-            } else {
-                containers
-                    .iter()
-                    .map(move |container| format!("pod/{pod}/container/{container}"))
-                    .collect::<Vec<String>>()
-            }
-        })
-        .chain(deployments.map(|deployment| format!("deployment/{deployment}")))
-        .chain(rollouts.map(|rollout| format!("rollout/{rollout}")))
-        .collect::<Vec<String>>())
+    match OperatorApi::try_new(layer_config, &mut NullReporter::default()).await? {
+        None if layer_config.operator == Some(true) => Err(CliError::OperatorNotInstalled),
+        Some(_) => seeker.all().await.map_err(CliError::ListTargetsFailed),
+        None => seeker
+            .all_open_source()
+            .await
+            .map_err(CliError::ListTargetsFailed),
+    }
 }
 
 /// Lists all possible target paths.
@@ -418,38 +406,7 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
         remove_proxy_env();
     }
 
-    // Try operator first if relevant
-    let operator_api = if layer_config.operator == Some(false) {
-        None
-    } else {
-        OperatorApi::try_new(&layer_config, &mut NullReporter::default()).await?
-    };
-
-    let mut targets = match operator_api {
-        Some(api) => {
-            let api = api.prepare_client_cert(&mut NullReporter::default()).await;
-            api.inspect_cert_error(
-                |error| tracing::error!(%error, "failed to prepare client certificate"),
-            );
-            api.list_targets(layer_config.target.namespace.as_deref())
-                .await?
-                .iter()
-                .filter_map(|target_crd| {
-                    let target = target_crd.spec.target.as_known().ok()?;
-                    if let Some(container) = target.container() {
-                        if SKIP_NAMES.contains(container.as_str()) {
-                            return None;
-                        }
-                    }
-                    Some(format!("{target}"))
-                })
-                .collect()
-        }
-
-        None if layer_config.operator == Some(true) => return Err(CliError::OperatorNotInstalled),
-
-        None => list_pods(&layer_config, args).await?,
-    };
+    let mut targets = list_targets(&layer_config, args).await?;
 
     targets.sort();
 

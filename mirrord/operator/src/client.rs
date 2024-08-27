@@ -5,10 +5,7 @@ use chrono::{DateTime, Utc};
 use conn_wrapper::ConnectionWrapper;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
 use http::{request::Request, HeaderName, HeaderValue};
-use kube::{
-    api::{ListParams, PostParams},
-    Api, Client, Config, Resource,
-};
+use kube::{api::PostParams, Api, Client, Config, Resource};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
     certificate::Certificate,
@@ -403,22 +400,6 @@ impl<C> OperatorApi<C>
 where
     C: ClientCertificateState,
 {
-    /// Lists targets in the given namespace.
-    #[tracing::instrument(level = Level::TRACE, ret, err)]
-    pub async fn list_targets(&self, namespace: Option<&str>) -> OperatorApiResult<Vec<TargetCrd>> {
-        Api::namespaced(
-            self.client.clone(),
-            namespace.unwrap_or(self.client.default_namespace()),
-        )
-        .list(&ListParams::default())
-        .await
-        .map_err(|error| OperatorApiError::KubeError {
-            error,
-            operation: OperatorOperation::ListingTargets,
-        })
-        .map(|list| list.items)
-    }
-
     pub fn check_license_validity<P>(&self, progress: &P) -> OperatorApiResult<()>
     where
         P: Progress,
