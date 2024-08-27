@@ -15,7 +15,6 @@ use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
-use futures::{future::OptionFuture, TryFutureExt};
 use kube::Client;
 use miette::JSONReportHandler;
 use mirrord_analytics::{
@@ -369,15 +368,19 @@ async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> Resu
         namespace,
     };
 
-    let operator_api =
-        OperatorApi::try_new(layer_config, &mut NullReporter::default())
-            .map_ok(|maybe_api| {
-                OptionFuture::from(maybe_api.map(|api| async {
-                    api.prepare_client_cert(&mut NullReporter::default()).await
-                }))
-            })
-            .await?
-            .await;
+    let mut reporter = NullReporter::default();
+
+    let operator_api = if let Some(api) = OperatorApi::try_new(layer_config, &mut reporter).await? {
+        let api = api.prepare_client_cert(&mut reporter).await;
+
+        api.inspect_cert_error(
+            |error| tracing::error!(%error, "failed to prepare client certificate"),
+        );
+
+        Some(api)
+    } else {
+        None
+    };
 
     match operator_api {
         None if layer_config.operator == Some(true) => Err(CliError::OperatorNotInstalled),
