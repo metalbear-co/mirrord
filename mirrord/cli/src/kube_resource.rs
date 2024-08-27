@@ -103,7 +103,7 @@ impl KubeResourceSeeker<'_> {
         // Set up filters on the K8s resources returned - in this case, excluding the agent
         // resources and then applying any provided field-based filter conditions.
         let params = ListParams {
-            label_selector: Some("app!=mirrord".to_string()),
+            label_selector: Some("app!=mirrord,!operator.metalbear.co/type".to_string()),
             field_selector: field_selector.map(ToString::to_string),
             ..Default::default()
         };
