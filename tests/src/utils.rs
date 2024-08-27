@@ -854,28 +854,32 @@ fn cron_job_from_json(name: &str, image: &str) -> k8s_openapi::api::batch::v1::C
                     }
                 },
                 "spec": {
-                    "restartPolicy": "OnFailure",
-                    "containers": [
-                        {
-                            "name": &CONTAINER_NAME,
-                            "image": image,
-                            "ports": [{ "containerPort": 80 }],
-                            "env": [
+                    "template": {
+                        "spec": {
+                            "restartPolicy": "OnFailure",
+                            "containers": [
                                 {
-                                  "name": "MIRRORD_FAKE_VAR_FIRST",
-                                  "value": "mirrord.is.running"
-                                },
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_SECOND",
-                                  "value": "7777"
-                                },
-                                {
-                                    "name": "MIRRORD_FAKE_VAR_THIRD",
-                                    "value": "foo=bar"
+                                    "name": &CONTAINER_NAME,
+                                    "image": image,
+                                    "ports": [{ "containerPort": 80 }],
+                                    "env": [
+                                        {
+                                          "name": "MIRRORD_FAKE_VAR_FIRST",
+                                          "value": "mirrord.is.running"
+                                        },
+                                        {
+                                          "name": "MIRRORD_FAKE_VAR_SECOND",
+                                          "value": "7777"
+                                        },
+                                        {
+                                            "name": "MIRRORD_FAKE_VAR_THIRD",
+                                            "value": "foo=bar"
+                                        }
+                                    ]
                                 }
-                            ],
+                            ]
                         }
-                    ]
+                    }
                 }
             }
         }
