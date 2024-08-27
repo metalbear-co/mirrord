@@ -157,10 +157,14 @@ pub(crate) enum OperatorSetupError {
 
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum CliError {
+    /// Do not construct this variant by hand, use [`CliError::auth_exec_error_or`] to allow for
+    /// more granular error detection.
     #[error("Failed to create Kubernetes API client: {0}")]
     #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
     CreateKubeApiFailed(KubeApiError),
 
+    /// Do not construct this variant by hand, use [`CliError::auth_exec_error_or`] to allow for
+    /// more granular error detection.
     #[error("Failed to create mirrord-agent: {0}")]
     #[diagnostic(help(
         "Please check the status of the agent pod, using `kubectl get pods` in the relevant namespace. \
@@ -168,6 +172,8 @@ pub(crate) enum CliError {
     ))]
     CreateAgentFailed(KubeApiError),
 
+    /// Do not construct this variant by hand, use [`CliError::auth_exec_error_or`] to allow for
+    /// more granular error detection.
     #[error("Failed to connect to the created mirrord-agent: {0}")]
     #[diagnostic(help(
         "Please check the following:
@@ -339,10 +345,41 @@ pub(crate) enum CliError {
     #[error("An error occurred in the port-forwarding process: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     PortForwardingError(#[from] PortForwardError),
+
+    #[error("Failed to execute authentication command specified in kubeconfig: {0}")]
+    #[diagnostic(help("
+        mirrord failed to execute Kube authentication command.
+        This can happen when the command is not specified using absolute path and cannot be found in $PATH in the context where mirrord is invoked.
+        Possible fixes:
+        1. Change $PATH to include the authentication command and relaunch the IDE/terminal.
+        2. Specify the command with an absolute path in the kubeconfig.{GENERAL_HELP}
+    "))]
+    KubeAuthExecFailed(String),
+}
+
+impl CliError {
+    /// If the given [`KubeApiError`] originates from failed authentication command exec, produces
+    /// [`CliError::KubeAuthExecFailed`]. Otherwise, uses the given `fallback` function to
+    /// produce the result.
+    pub fn auth_exec_error_or<F: FnOnce(KubeApiError) -> Self>(
+        error: KubeApiError,
+        fallback: F,
+    ) -> Self {
+        use kube::{client::AuthError, Error};
+
+        match error {
+            KubeApiError::KubeError(Error::Auth(AuthError::AuthExec(error))) => {
+                Self::KubeAuthExecFailed(error)
+            }
+            error => fallback(error),
+        }
+    }
 }
 
 impl From<OperatorApiError> for CliError {
     fn from(value: OperatorApiError) -> Self {
+        use kube::{client::AuthError, Error};
+
         match value {
             OperatorApiError::UnsupportedFeature {
                 feature,
@@ -351,12 +388,18 @@ impl From<OperatorApiError> for CliError {
                 feature: feature.to_string(),
                 operator_version,
             },
-            OperatorApiError::CreateKubeClient(e) => Self::CreateKubeApiFailed(e),
+            OperatorApiError::CreateKubeClient(e) => {
+                Self::auth_exec_error_or(e, Self::CreateKubeApiFailed)
+            }
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
             OperatorApiError::KubeError {
-                error: kube::Error::Api(ErrorResponse { message, code, .. }),
+                error: Error::Api(ErrorResponse { message, code, .. }),
                 operation,
             } if code == StatusCode::FORBIDDEN => Self::OperatorApiForbidden(operation, message),
+            OperatorApiError::KubeError {
+                error: Error::Auth(AuthError::AuthExec(error)),
+                ..
+            } => Self::KubeAuthExecFailed(error),
             OperatorApiError::KubeError { error, operation } => {
                 Self::OperatorApiFailed(operation, error)
             }
