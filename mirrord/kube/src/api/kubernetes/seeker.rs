@@ -27,6 +27,8 @@ pub struct KubeResourceSeeker<'a> {
 }
 
 impl KubeResourceSeeker<'_> {
+    /// Returns all resource types that don't require the operator to operate ie. pods, deployments,
+    /// rollouts
     pub async fn all_open_source(&self) -> Result<Vec<String>> {
         let (pods, deployments, rollouts) = futures::try_join!(
             self.pods(),
@@ -41,8 +43,9 @@ impl KubeResourceSeeker<'_> {
             .collect())
     }
 
+    /// Returns all resource types ie. pods, deployments, rollouts, jobs, cronjobs, statefulsets
     pub async fn all(&self) -> Result<Vec<String>> {
-        let (pods, deployments, rollouts, jobs, cron_job, stateful_set) = futures::try_join!(
+        let (pods, deployments, rollouts, jobs, cronjobs, statefulsets) = futures::try_join!(
             self.pods(),
             self.deployments(),
             self.simple_list_resource::<Rollout>("rollout"),
@@ -56,8 +59,8 @@ impl KubeResourceSeeker<'_> {
             .chain(deployments)
             .chain(rollouts)
             .chain(jobs)
-            .chain(cron_job)
-            .chain(stateful_set)
+            .chain(cronjobs)
+            .chain(statefulsets)
             .collect())
     }
 
