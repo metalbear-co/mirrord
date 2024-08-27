@@ -98,13 +98,11 @@ impl HttpFilter {
                 })
                 .unwrap_or(false),
 
-            Self::Composite { all, filters } => {
-                let f: fn(bool, bool) = match all {
-                    true => |a, n| a.and(n),
-                    false => |a, n| a.or(n),
-                };
-                *filters.iter().map(|f| f.matches(request)).fold(all, f)
-            }
+            Self::Composite { all: true, filters } => filters.iter().all(|f| f.matches(request)),
+            Self::Composite {
+                all: false,
+                filters,
+            } => filters.iter().any(|f| f.matches(request)),
         }
     }
 }

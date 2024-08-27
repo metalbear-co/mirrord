@@ -81,22 +81,14 @@ pub struct HttpFilterConfig {
     #[config(env = "MIRRORD_HTTP_PATH_FILTER")]
     pub path_filter: Option<String>,
 
-    /// #### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http-all-of}
+    /// #### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
     ///
-    ///
-    /// Supports a list of regexes validated by the
-    /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
-    ///
-    /// Case-insensitive. Messages must match all of the specified filters.
+    /// Messages must match all of the specified filters.
     pub all_of: Option<Vec<InnerFilter>>,
 
-    /// #### feature.network.incoming.http_filter.any_of {#feature-network-incoming-http-any-of}
+    /// #### feature.network.incoming.http_filter.any_of {#feature-network-incoming-http_filter-any_of}
     ///
-    ///
-    /// Supports a list of regexes validated by the
-    /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
-    ///
-    /// Case-insensitive. Messages can match any of the specified filters.
+    /// Messages must match any of the specified filters.
     pub any_of: Option<Vec<InnerFilter>>,
 
     /// ##### feature.network.incoming.http_filter.ports {#feature-network-incoming-http_filter-ports}
@@ -113,7 +105,14 @@ pub struct HttpFilterConfig {
 
 impl HttpFilterConfig {
     pub fn is_filter_set(&self) -> bool {
-        self.header_filter.is_some() || self.path_filter.is_some()
+        self.header_filter.is_some()
+            || self.path_filter.is_some()
+            || self.all_of.is_some()
+            || self.any_of.is_some()
+    }
+
+    pub fn is_composite(&self) -> bool {
+        self.all_of.is_some() || self.any_of.is_some()
     }
 
     pub fn get_filtered_ports(&self) -> Option<&[u16]> {
@@ -124,7 +123,24 @@ impl HttpFilterConfig {
 #[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum InnerFilter {
+    /// ##### feature.network.incoming.inner_filter.header_filter {#feature-network-incoming-inner-header-filter}
+    ///
+    ///
+    /// Supports regexes validated by the
+    /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
+    ///
+    /// The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
+    /// case-insensitive.
     Header { header: String },
+
+    /// ##### feature.network.incoming.inner_filter.path_filter {#feature-network-incoming-inner-path-filter}
+    ///
+    ///
+    /// Supports regexes validated by the
+    /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
+    ///
+    /// Case-insensitive. Tries to find match in the path (without query) and path+query.
+    /// If any of the two matches, the request is stolen.
     Path { path: String },
 }
 

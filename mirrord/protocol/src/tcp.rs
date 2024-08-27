@@ -427,9 +427,8 @@ pub static HTTP_CHUNKED_RESPONSE_VERSION: LazyLock<VersionReq> =
 pub static HTTP_FILTERED_UPGRADE_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.5.0".parse().expect("Bad Identifier"));
 
-/// Minimal mirrord-protocol version that allows composite filters in
-/// [`HttpFilterConfig`].
-pub static COMPOSITE_FILTER_VERSION: LazyLock<VersionReq> =
+/// Minimal mirrord-protocol version that allows [`HttpFilter::Composite`]
+pub static HTTP_COMPOSITE_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.9.1".parse().expect("Bad Identifier"));
 
 /// Protocol break - on version 2, please add source port, dest/src IP to the message

@@ -112,7 +112,7 @@ pub struct OperatorSession {
     operator_license_fingerprint: Option<String>,
     /// Version of [`mirrord_protocol`] used by the operator.
     /// Used to create [`ConnectionWrapper`].
-    operator_protocol_version: Option<Version>,
+    pub operator_protocol_version: Option<Version>,
 }
 
 impl fmt::Debug for OperatorSession {

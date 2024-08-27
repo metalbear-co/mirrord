@@ -17,11 +17,7 @@ pub mod internal_proxy;
 pub mod target;
 pub mod util;
 
-use std::{
-    collections::HashSet,
-    ops::{BitXor, Not},
-    path::Path,
-};
+use std::{collections::HashSet, ops::Not, path::Path};
 
 use config::{ConfigContext, ConfigError, MirrordConfig};
 use experimental::ExperimentalConfig;
@@ -372,23 +368,20 @@ impl LayerConfig {
         }
 
         let http_filter = &self.feature.network.incoming.http_filter;
-        let (path, header, all, any) = (
+        let used_filters = [
             http_filter.path_filter.is_some(),
             http_filter.header_filter.is_some(),
             http_filter.all_of.is_some(),
             http_filter.any_of.is_some(),
-        );
-        if !(path.bitxor(header).bitxor(all).bitxor(any)) // !XOR produces true if more than one are set or if none are set
-            && (path || header || all || any)
-        // OR produces true if any are set
-        {
+        ]
+        .into_iter()
+        .filter(|used| *used)
+        .count();
+        if used_filters > 1 {
             Err(ConfigError::Conflict(
-                "Cannot use multiple types of filter at the same time, use the 'any' or 'all' field to combine filters".to_string(),
+                "Cannot use multiple types of HTTP filter at the same time, use 'any_of' or 'all_of' to combine filters".to_string(),
             ))?
         }
-
-        // TODO: recursive check for structure of composite filters - must contain only valid
-        // TODO: filters
 
         if !self.feature.network.incoming.ignore_ports.is_empty()
             && self.feature.network.incoming.ports.is_some()

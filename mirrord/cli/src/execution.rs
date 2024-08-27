@@ -9,14 +9,15 @@ use mirrord_config::{
     config::ConfigError, internal_proxy::MIRRORD_INTPROXY_CONNECT_TCP_ENV, LayerConfig,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
-use mirrord_kube::api::kubernetes::AgentKubernetesConnectInfo;
+use mirrord_operator::client::OperatorSession;
 use mirrord_progress::Progress;
 use mirrord_protocol::{
-    tcp::COMPOSITE_FILTER_VERSION, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
+    tcp::HTTP_COMPOSITE_FILTER_VERSION, ClientMessage, DaemonMessage, EnvVars, GetEnvVarsRequest,
     LogLevel,
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
+use semver::Version;
 use serde::Serialize;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -168,16 +169,22 @@ impl MirrordExecution {
             .await
             .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        if let AgentConnectInfo::DirectKubernetes(AgentKubernetesConnectInfo {
-            agent_version: Some(agent_version),
-            ..
-        }) = &connect_info
-        {
-            let version = agent_version.parse().expect("Bad Identifier");
-            if !COMPOSITE_FILTER_VERSION.matches(&version) {
-                Err(ConfigError::Conflict(
-                        "Cannot use 'any' or 'all' fields with versions of mirrord agent lower than 1.9.1".to_string(),
-                    ))?
+        if config.feature.network.incoming.http_filter.is_composite() {
+            let version = match &connect_info {
+                AgentConnectInfo::Operator(OperatorSession {
+                    operator_protocol_version: Some(version),
+                    ..
+                }) => Some(version.clone()),
+                AgentConnectInfo::DirectKubernetes(_) => {
+                    Some(MirrordExecution::get_agent_version(&mut connection).await?)
+                }
+                _ => None,
+            };
+            if version.is_some() && !HTTP_COMPOSITE_FILTER_VERSION.matches(&version.unwrap()) {
+                Err(ConfigError::Conflict(format!(
+                    "Cannot use 'any' or 'all' incoming filter types fields with versions of mirrord agent lower than {}",
+                    HTTP_COMPOSITE_FILTER_VERSION.to_string()
+                )))?
             }
         }
 
@@ -290,6 +297,28 @@ impl MirrordExecution {
                 .unwrap_or_default(),
             uses_operator: matches!(connect_info, AgentConnectInfo::Operator(..)),
         })
+    }
+
+    async fn get_agent_version(connection: &mut AgentConnection) -> Result<Version> {
+        let Ok(_) = connection
+            .sender
+            .send(ClientMessage::SwitchProtocolVersion(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await
+        else {
+            return Err(CliError::InitialAgentCommFailed(
+                "protocol version check failed".to_string(),
+            ));
+        };
+        if let Some(DaemonMessage::SwitchProtocolVersionResponse(version)) =
+            connection.receiver.recv().await
+        {
+            return Ok(version);
+        }
+        return Err(CliError::InitialAgentCommFailed(
+            "protocol version check failed".to_string(),
+        ));
     }
 
     /// Starts the external proxy (`extproxy`) so sidecar intproxy can connect via this to agent
@@ -428,7 +457,7 @@ impl MirrordExecution {
                 Self::get_remote_env(connection, env_vars_exclude, env_vars_include),
             )
             .await
-            .map_err(|_| CliError::RemoteEnvFetchFailed("timeout".to_string()))??;
+            .map_err(|_| CliError::InitialAgentCommFailed("timeout".to_string()))??;
             env_vars.extend(remote_env);
             if let Some(overrides) = &config.feature.env.r#override {
                 env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
@@ -453,7 +482,7 @@ impl MirrordExecution {
             }))
             .await
             .map_err(|_| {
-                CliError::RemoteEnvFetchFailed("agent unexpectedly closed connection".to_string())
+                CliError::InitialAgentCommFailed("agent unexpectedly closed connection".to_string())
             })?;
 
         loop {
@@ -464,7 +493,7 @@ impl MirrordExecution {
                 }
                 Some(DaemonMessage::GetEnvVarsResponse(Err(error))) => {
                     tracing::error!(?error, "Agent responded with an error");
-                    Err(CliError::RemoteEnvFetchFailed(format!(
+                    Err(CliError::InitialAgentCommFailed(format!(
                         "agent responded with an error: {error}"
                     )))
                 }
@@ -476,13 +505,13 @@ impl MirrordExecution {
 
                     continue;
                 }
-                Some(DaemonMessage::Close(msg)) => Err(CliError::RemoteEnvFetchFailed(format!(
+                Some(DaemonMessage::Close(msg)) => Err(CliError::InitialAgentCommFailed(format!(
                     "agent closed connection with message: {msg}"
                 ))),
-                Some(msg) => Err(CliError::RemoteEnvFetchFailed(format!(
+                Some(msg) => Err(CliError::InitialAgentCommFailed(format!(
                     "agent responded with an unexpected message: {msg:?}"
                 ))),
-                None => Err(CliError::RemoteEnvFetchFailed(
+                None => Err(CliError::InitialAgentCommFailed(
                     "agent unexpectedly closed connection".to_string(),
                 )),
             };
