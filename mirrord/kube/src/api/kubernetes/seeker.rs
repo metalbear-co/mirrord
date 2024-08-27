@@ -163,12 +163,7 @@ impl KubeResourceSeeker<'_> {
                     yield Ok(resource);
                 }
 
-                if let Some(continue_token) = resource.metadata.continue_ && resource
-                    .metadata
-                    .remaining_item_count
-                    .map(|count| count > 0)
-                    .unwrap_or(false)
-                {
+                if let Some(continue_token) = resource.metadata.continue_ {
                     params = params.continue_token(&continue_token);
                 } else {
                     break;
