@@ -3722,6 +3722,7 @@ dependencies = [
  "nix 0.29.0",
  "prettytable-rs",
  "rcgen",
+ "regex",
  "reqwest 0.12.5",
  "rstest",
  "rustls 0.23.12",

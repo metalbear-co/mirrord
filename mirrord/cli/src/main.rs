@@ -35,9 +35,10 @@ use mirrord_config::{
 };
 use mirrord_kube::api::{container::SKIP_NAMES, kubernetes::create_kube_config};
 use mirrord_operator::client::OperatorApi;
-use mirrord_progress::{Progress, ProgressTracker};
+use mirrord_progress::{messages::EXEC_CONTAINER_BINARY, Progress, ProgressTracker};
 use operator::operator_command;
 use port_forward::PortForwarder;
+use regex::Regex;
 use semver::Version;
 use serde_json::json;
 use tracing::{error, info, warn};
@@ -320,6 +321,12 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
         "Launching {:?} with arguments {:?}",
         args.binary, args.binary_args
     );
+
+    let container_detection =
+        Regex::new("docker|podman|nerdctl").expect("Failed building container detection regex!");
+    if container_detection.is_match(&args.binary) {
+        progress.warning(EXEC_CONTAINER_BINARY);
+    }
 
     if !(args.params.no_tcp_outgoing || args.params.no_udp_outgoing) && args.params.no_remote_dns {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
