@@ -151,7 +151,7 @@ impl KubeResourceSeeker<'_> {
 
         stream! {
             let mut params =  ListParams {
-                label_selector: Some("operator.metalbear.co/owner!=mirrord-operator,app!=mirrord".to_string()),
+                label_selector: Some("app!=mirrord,!operator.metalbear.co/owner".to_string()),
                 field_selector: field_selector.map(ToString::to_string),
                 ..Default::default()
             };
