@@ -180,10 +180,13 @@ impl MirrordExecution {
                 }
                 _ => None,
             };
-            if version.is_some() && !HTTP_COMPOSITE_FILTER_VERSION.matches(&version.unwrap()) {
+            if !version
+                .map(|version| HTTP_COMPOSITE_FILTER_VERSION.matches(&version))
+                .unwrap_or(false)
+            {
                 Err(ConfigError::Conflict(format!(
-                    "Cannot use 'any' or 'all' incoming filter types fields with versions of mirrord agent lower than {}",
-                    HTTP_COMPOSITE_FILTER_VERSION.to_string()
+                    "Cannot use 'any_of' or 'all_of' HTTP filter types, protocol version used by mirrord-agent must match {}. Consider using a newer version of mirrord-agent",
+                    *HTTP_COMPOSITE_FILTER_VERSION
                 )))?
             }
         }
@@ -308,17 +311,18 @@ impl MirrordExecution {
             .await
         else {
             return Err(CliError::InitialAgentCommFailed(
-                "protocol version check failed".to_string(),
+                "failed to send protocol version request".to_string(),
             ));
         };
-        if let Some(DaemonMessage::SwitchProtocolVersionResponse(version)) =
-            connection.receiver.recv().await
-        {
-            return Ok(version);
+        match connection.receiver.recv().await {
+            Some(DaemonMessage::SwitchProtocolVersionResponse(version)) => Ok(version),
+            Some(msg) => Err(CliError::InitialAgentCommFailed(format!(
+                "received unexpected message during agent version check: {msg:?}"
+            ))),
+            None => Err(CliError::InitialAgentCommFailed(
+                "no response received from agent connection during agent version check".to_string(),
+            )),
         }
-        return Err(CliError::InitialAgentCommFailed(
-            "protocol version check failed".to_string(),
-        ));
     }
 
     /// Starts the external proxy (`extproxy`) so sidecar intproxy can connect via this to agent

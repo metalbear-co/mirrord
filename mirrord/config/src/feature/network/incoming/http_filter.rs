@@ -165,7 +165,6 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
             .source_value(context)
             .transpose()?;
 
-        // TODO: make sure env vars should be used to set these
         let all_of = None;
         let any_of = None;
 

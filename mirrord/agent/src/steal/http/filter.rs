@@ -31,14 +31,11 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
             }
             mirrord_protocol::tcp::HttpFilter::Composite { all, filters } => {
                 let all = *all;
-                let mut agent_filters = vec![];
-                for filter in filters {
-                    agent_filters.push(TryFrom::try_from(filter)?);
-                }
-                Ok(Self::Composite {
-                    all,
-                    filters: agent_filters,
-                })
+                let filters = filters
+                    .into_iter()
+                    .map(HttpFilter::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Self::Composite { all, filters })
             }
         }
     }
