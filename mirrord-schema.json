@@ -987,6 +987,28 @@
       "description": "Filter configuration for the HTTP traffic stealer feature.\n\nAllows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is set as `\"steal\"`, ignored otherwise.\n\nFor example, to filter based on header: ```json { \"header_filter\": \"host: api\\\\..+\" } ``` Setting that filter will make mirrord only steal requests with the `host` header set to hosts that start with \"api\", followed by a dot, and then at least one more character.\n\nFor example, to filter based on path: ```json { \"path_filter\": \"^/api/\" } ``` Setting this filter will make mirrord only steal requests to URIs starting with \"/api/\".\n\nThis can be useful for filtering out Kubernetes liveness, readiness and startup probes. For example, for avoiding stealing any probe sent by kubernetes, you can set this filter: ```json { \"header_filter\": \"^User-Agent: (?!kube-probe)\" } ``` Setting this filter will make mirrord only steal requests that **do** have a user agent that **does not** begin with \"kube-probe\".\n\nSimilarly, you can exclude certain paths using a negative look-ahead: ```json { \"path_filter\": \"^(?!/health/)\" } ``` Setting this filter will make mirrord only steal requests to URIs that do not start with \"/health/\".",
       "type": "object",
       "properties": {
+        "all_of": {
+          "title": "feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}",
+          "description": "Messages must match all of the specified filters.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/InnerFilter"
+          }
+        },
+        "any_of": {
+          "title": "feature.network.incoming.http_filter.any_of {#feature-network-incoming-http_filter-any_of}",
+          "description": "Messages must match any of the specified filters.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/InnerFilter"
+          }
+        },
         "header_filter": {
           "title": "feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}",
           "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nThe HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`, case-insensitive.",
@@ -1188,6 +1210,36 @@
           "enum": [
             "off"
           ]
+        }
+      ]
+    },
+    "InnerFilter": {
+      "anyOf": [
+        {
+          "title": "feature.network.incoming.inner_filter.header_filter {#feature-network-incoming-inner-header-filter}",
+          "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nThe HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`, case-insensitive.",
+          "type": "object",
+          "required": [
+            "header"
+          ],
+          "properties": {
+            "header": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "title": "feature.network.incoming.inner_filter.path_filter {#feature-network-incoming-inner-path-filter}",
+          "description": "Supports regexes validated by the [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nCase-insensitive. Tries to find match in the path (without query) and path+query. If any of the two matches, the request is stolen.",
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          }
         }
       ]
     },

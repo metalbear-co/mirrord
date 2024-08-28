@@ -367,23 +367,19 @@ impl LayerConfig {
             );
         }
 
-        if self
-            .feature
-            .network
-            .incoming
-            .http_filter
-            .path_filter
-            .is_some()
-            && self
-                .feature
-                .network
-                .incoming
-                .http_filter
-                .header_filter
-                .is_some()
-        {
+        let http_filter = &self.feature.network.incoming.http_filter;
+        let used_filters = [
+            http_filter.path_filter.is_some(),
+            http_filter.header_filter.is_some(),
+            http_filter.all_of.is_some(),
+            http_filter.any_of.is_some(),
+        ]
+        .into_iter()
+        .filter(|used| *used)
+        .count();
+        if used_filters > 1 {
             Err(ConfigError::Conflict(
-                "Cannot use both HTTP header filter and path filter at the same time".to_string(),
+                "Cannot use multiple types of HTTP filter at the same time, use 'any_of' or 'all_of' to combine filters".to_string(),
             ))?
         }
 

@@ -186,9 +186,9 @@ pub(crate) enum CliError {
     ))]
     AgentConnectionFailed(KubeApiError),
 
-    #[error("Failed to fetch remote environment variables from the agent: {0}")]
+    #[error("Failed to communicate with the agent: {0}")]
     #[diagnostic(help("Please check agent status and logs.{GENERAL_HELP}"))]
-    RemoteEnvFetchFailed(String),
+    InitialAgentCommFailed(String),
 
     #[error("Failed to execute binary `{0}` with args {1:?}")]
     #[diagnostic(help(
