@@ -446,7 +446,7 @@ where
     where
         P: Progress,
     {
-        let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+        let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).expect("Something went wrong when parsing mirrord version!");
 
         if self.operator.spec.operator_version > mirrord_version {
             let message = format!(
@@ -624,7 +624,7 @@ impl OperatorApi<PreparedClientCert> {
     {
         self.check_feature_support(config)?;
 
-        // Check if the deplyment is empty if so then
+        // Check if the deployment is empty if so then
         let is_empty_deployment = match &config.target.path {
             Some(Target::Deployment(target)) => {
                 let deployment_api = get_k8s_resource_api::<Deployment>(

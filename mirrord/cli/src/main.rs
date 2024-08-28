@@ -64,6 +64,7 @@ use verify_config::verify_config;
 
 use crate::util::remove_proxy_env;
 
+/// Controls whether we support listing all targets or just the open source ones.
 static ALL_TARGETS_SUPPORTED_OPERATOR_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=3.84.0".parse().expect("verion should be valid"));
 
@@ -348,6 +349,8 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     execution_result
 }
 
+/// Lists targets based on whether or not the operator has been enabled in `layer_config`.
+/// If the operator is enabled (and we can reach it), then we list [`Seeker::all`] targets, otherwise we list [`Seeker::all_open_source`] only.
 async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<Vec<String>> {
     let client = create_kube_config(
         layer_config.accept_invalid_certificates,
