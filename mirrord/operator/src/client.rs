@@ -5,10 +5,8 @@ use chrono::{DateTime, Utc};
 use conn_wrapper::ConnectionWrapper;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
 use http::{request::Request, HeaderName, HeaderValue};
-use kube::{
-    api::{ListParams, PostParams},
-    Api, Client, Config, Resource,
-};
+use k8s_openapi::api::apps::v1::Deployment;
+use kube::{api::PostParams, Api, Client, Config, Resource};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
     certificate::Certificate,
@@ -20,7 +18,10 @@ use mirrord_config::{
     target::Target,
     LayerConfig,
 };
-use mirrord_kube::{api::kubernetes::create_kube_config, error::KubeApiError};
+use mirrord_kube::{
+    api::kubernetes::{create_kube_config, get_k8s_resource_api},
+    error::KubeApiError,
+};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use semver::Version;
@@ -403,22 +404,6 @@ impl<C> OperatorApi<C>
 where
     C: ClientCertificateState,
 {
-    /// Lists targets in the given namespace.
-    #[tracing::instrument(level = Level::TRACE, ret, err)]
-    pub async fn list_targets(&self, namespace: Option<&str>) -> OperatorApiResult<Vec<TargetCrd>> {
-        Api::namespaced(
-            self.client.clone(),
-            namespace.unwrap_or(self.client.default_namespace()),
-        )
-        .list(&ListParams::default())
-        .await
-        .map_err(|error| OperatorApiError::KubeError {
-            error,
-            operation: OperatorOperation::ListingTargets,
-        })
-        .map(|list| list.items)
-    }
-
     pub fn check_license_validity<P>(&self, progress: &P) -> OperatorApiResult<()>
     where
         P: Progress,
@@ -461,28 +446,19 @@ where
     where
         P: Progress,
     {
-        match Version::parse(&self.operator.spec.operator_version) {
-            Ok(operator_version) => {
-                let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+        let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION"))
+            .expect("Something went wrong when parsing mirrord version!");
 
-                if operator_version > mirrord_version {
-                    let message = format!(
-                        "mirrord binary version {} does not match the operator version {}. Consider updating your mirrord binary.",
-                        mirrord_version,
-                        operator_version
-                    );
-                    progress.warning(&message);
-                    false
-                } else {
-                    true
-                }
-            }
-
-            Err(error) => {
-                tracing::debug!(%error, "failed to parse operator version");
-                progress.warning("Failed to parse operator version.");
-                false
-            }
+        if self.operator.spec.operator_version > mirrord_version {
+            let message = format!(
+                "mirrord binary version {} does not match the operator version {}. Consider updating your mirrord binary.",
+                mirrord_version,
+                self.operator.spec.operator_version
+            );
+            progress.warning(&message);
+            false
+        } else {
+            true
         }
     }
 
@@ -649,14 +625,44 @@ impl OperatorApi<PreparedClientCert> {
     {
         self.check_feature_support(config)?;
 
+        // Check if the deployment is empty if so then
+        let is_empty_deployment = match &config.target.path {
+            Some(Target::Deployment(target)) => {
+                let deployment_api = get_k8s_resource_api::<Deployment>(
+                    &self.client,
+                    config.target.namespace.as_deref(),
+                );
+
+                let deployment = deployment_api
+                    .get(&target.deployment)
+                    .await
+                    .map_err(|error| OperatorApiError::KubeError {
+                        error,
+                        operation: OperatorOperation::FindingTarget,
+                    })?;
+
+                !deployment
+                    .status
+                    .map(|status| status.available_replicas > Some(0))
+                    .unwrap_or_default()
+            }
+            _ => false,
+        };
+
         let target = if config.feature.copy_target.enabled
             // use copy_target for splitting queues
             || config.feature.split_queues.is_set()
+            || is_empty_deployment
         {
-            if config.feature.copy_target.enabled.not() {
-                tracing::info!("Creating a copy-target for queue-splitting (even thought copy_target was not explicitly set).")
-            }
             let mut copy_subtask = progress.subtask("copying target");
+
+            if config.feature.copy_target.enabled.not() {
+                if is_empty_deployment.not() {
+                    copy_subtask.info("Creating a copy-target for queue-splitting (even thought copy_target was not explicitly set).")
+                } else {
+                    copy_subtask.info("Creating a copy-target for deployment (even thought copy_target was not explicitly set).")
+                }
+            }
 
             // We do not validate the `target` here, it's up to the operator.
             let target = config.target.path.clone().unwrap_or(Target::Targetless);

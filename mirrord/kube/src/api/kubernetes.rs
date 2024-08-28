@@ -34,6 +34,7 @@ use crate::{
 };
 
 pub mod rollout;
+pub mod seeker;
 
 pub struct KubernetesAPI {
     client: Client,
