@@ -1,0 +1,1 @@
+Removed unnecessary steps from `macos_tests` CI job.
