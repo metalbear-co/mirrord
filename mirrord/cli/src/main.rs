@@ -393,12 +393,15 @@ async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> Resu
             if ALL_TARGETS_SUPPORTED_OPERATOR_VERSION
                 .matches(&api.operator().spec.operator_version) =>
         {
-            seeker.all().await.map_err(CliError::ListTargetsFailed)
+            seeker
+                .all()
+                .await
+                .map_err(|error| CliError::auth_exec_error_or(error, CliError::ListTargetsFailed))
         }
         _ => seeker
             .all_open_source()
             .await
-            .map_err(CliError::ListTargetsFailed),
+            .map_err(|error| CliError::auth_exec_error_or(error, CliError::ListTargetsFailed)),
     }
 }
 
