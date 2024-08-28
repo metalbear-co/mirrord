@@ -323,7 +323,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     );
 
     let container_detection =
-        Regex::new("(docker|podman|nerdctl)").expect("Failed building container detection regex!");
+        Regex::new("docker|podman|nerdctl").expect("Failed building container detection regex!");
     if container_detection.is_match(&args.binary) {
         progress.warning(EXEC_CONTAINER_BINARY);
     }
