@@ -370,7 +370,9 @@ async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> Resu
 
     let mut reporter = NullReporter::default();
 
-    let operator_api = if let Some(api) = OperatorApi::try_new(layer_config, &mut reporter).await? {
+    let operator_api = if layer_config.operator != Some(false)
+        && let Some(api) = OperatorApi::try_new(layer_config, &mut reporter).await?
+    {
         let api = api.prepare_client_cert(&mut reporter).await;
 
         api.inspect_cert_error(

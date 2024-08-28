@@ -48,7 +48,7 @@ impl KubeResourceSeeker<'_> {
     pub async fn all(&self) -> Result<Vec<String>> {
         let (pods, deployments, rollouts, jobs, cronjobs, statefulsets) = futures::try_join!(
             self.pods(),
-            self.deployments(),
+            self.simple_list_resource::<Deployment>("deployment"),
             self.simple_list_resource::<Rollout>("rollout"),
             self.simple_list_resource::<Job>("job"),
             self.simple_list_resource::<CronJob>("cronjob"),
