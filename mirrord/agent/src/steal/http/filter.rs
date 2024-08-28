@@ -32,7 +32,7 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
             mirrord_protocol::tcp::HttpFilter::Composite { all, filters } => {
                 let all = *all;
                 let filters = filters
-                    .into_iter()
+                    .iter()
                     .map(HttpFilter::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Self::Composite { all, filters })

@@ -165,8 +165,32 @@ impl Display for HttpFilter {
             HttpFilter::Header(filter) => write!(f, "header={filter}"),
             HttpFilter::Path(filter) => write!(f, "path={filter}"),
             HttpFilter::Composite { all, filters } => match all {
-                true => write!(f, "all:{filters:?}"),
-                false => write!(f, "any:{filters:?}"),
+                true => {
+                    write!(f, "all of ")?;
+                    let mut first = true;
+                    for filter in filters {
+                        if first {
+                            write!(f, "({filter})")?;
+                            first = false;
+                        } else {
+                            write!(f, ", ({filter})")?;
+                        }
+                    }
+                    Ok(())
+                }
+                false => {
+                    write!(f, "any of ")?;
+                    let mut first = true;
+                    for filter in filters {
+                        if first {
+                            write!(f, "({filter})")?;
+                            first = false;
+                        } else {
+                            write!(f, ", ({filter})")?;
+                        }
+                    }
+                    Ok(())
+                }
             },
         }
     }
