@@ -11,3 +11,9 @@ pub const MULTIPOD_WARNING: (&str, &str) = (
         You can get started with mirrord for Teams at this link: \
         https://mirrord.dev/docs/overview/teams/",
 );
+
+/// Warning when user tries to run `mirrord exec docker` (for example), instead of the correct
+/// `mirrord container ...`.
+pub const EXEC_CONTAINER_BINARY: &str = "`mirrord exec <docker|podman|nerdctl> ...` detected! \
+    If you try to run a container with mirrord, please use \
+    `mirrord container [options] -- <docker|podman|nerdctl> ...` instead.";
