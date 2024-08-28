@@ -350,7 +350,8 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
 }
 
 /// Lists targets based on whether or not the operator has been enabled in `layer_config`.
-/// If the operator is enabled (and we can reach it), then we list [`Seeker::all`] targets, otherwise we list [`Seeker::all_open_source`] only.
+/// If the operator is enabled (and we can reach it), then we list [`KubeResourceSeeker::all`]
+/// targets, otherwise we list [`KubeResourceSeeker::all_open_source`] only.
 async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<Vec<String>> {
     let client = create_kube_config(
         layer_config.accept_invalid_certificates,

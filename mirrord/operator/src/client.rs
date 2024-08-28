@@ -446,7 +446,8 @@ where
     where
         P: Progress,
     {
-        let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION")).expect("Something went wrong when parsing mirrord version!");
+        let mirrord_version = Version::parse(env!("CARGO_PKG_VERSION"))
+            .expect("Something went wrong when parsing mirrord version!");
 
         if self.operator.spec.operator_version > mirrord_version {
             let message = format!(
