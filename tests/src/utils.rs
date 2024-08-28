@@ -638,23 +638,25 @@ pub struct KubeService {
     pub name: String,
     pub namespace: String,
     pub target: String,
-    pod_guard: ResourceGuard,
-    service_guard: ResourceGuard,
+    guards: Vec<ResourceGuard>,
     namespace_guard: Option<ResourceGuard>,
 }
 
 impl Drop for KubeService {
     fn drop(&mut self) {
-        let deleters = [
-            self.pod_guard.take_deleter(),
-            self.service_guard.take_deleter(),
+        let mut deleters = self
+            .guards
+            .iter_mut()
+            .map(ResourceGuard::take_deleter)
+            .collect::<Vec<_>>();
+
+        deleters.push(
             self.namespace_guard
                 .as_mut()
                 .and_then(ResourceGuard::take_deleter),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
+        );
+
+        let deleters = deleters.into_iter().flatten().collect::<Vec<_>>();
 
         if deleters.is_empty() {
             return;
@@ -764,6 +766,179 @@ fn service_from_json(name: &str, service_type: &str) -> Service {
         }
     }))
     .expect("Failed creating `service` from json spec!")
+}
+
+#[cfg(feature = "operator")]
+fn stateful_set_from_json(name: &str, image: &str) -> k8s_openapi::api::apps::v1::StatefulSet {
+    serde_json::from_value(json!({
+        "apiVersion": "apps/v1",
+        "kind": "StatefulSet",
+        "metadata": {
+            "name": name,
+            "labels": {
+                "app": name,
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                "test-label-for-statefulsets": format!("statefulset-{name}")
+            }
+        },
+        "spec": {
+            "replicas": 1,
+            "selector": {
+                "matchLabels": {
+                    "app": &name
+                }
+            },
+            "template": {
+                "metadata": {
+                    "labels": {
+                        "app": &name,
+                        "test-label-for-pods": format!("pod-{name}"),
+                        format!("test-label-for-pods-{name}"): &name
+                    }
+                },
+                "spec": {
+                    "containers": [
+                        {
+                            "name": &CONTAINER_NAME,
+                            "image": image,
+                            "ports": [
+                                {
+                                    "containerPort": 80
+                                }
+                            ],
+                            "env": [
+                                {
+                                  "name": "MIRRORD_FAKE_VAR_FIRST",
+                                  "value": "mirrord.is.running"
+                                },
+                                {
+                                  "name": "MIRRORD_FAKE_VAR_SECOND",
+                                  "value": "7777"
+                                },
+                                {
+                                    "name": "MIRRORD_FAKE_VAR_THIRD",
+                                    "value": "foo=bar"
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        }
+    }))
+    .expect("Failed creating `statefulset` from json spec!")
+}
+
+#[cfg(feature = "operator")]
+fn cron_job_from_json(name: &str, image: &str) -> k8s_openapi::api::batch::v1::CronJob {
+    serde_json::from_value(json!({
+        "apiVersion": "batch/v1",
+        "kind": "CronJob",
+        "metadata": {
+            "name": name,
+            "labels": {
+                "app": name,
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                "test-label-for-cronjobs": format!("cronjob-{name}")
+            }
+        },
+        "spec": {
+            "schedule": "* * * * *",
+            "concurrencyPolicy": "Forbid",
+            "jobTemplate": {
+                "metadata": {
+                    "labels": {
+                        "app": &name,
+                        "test-label-for-pods": format!("pod-{name}"),
+                        format!("test-label-for-pods-{name}"): &name
+                    }
+                },
+                "spec": {
+                    "template": {
+                        "spec": {
+                            "restartPolicy": "OnFailure",
+                            "containers": [
+                                {
+                                    "name": &CONTAINER_NAME,
+                                    "image": image,
+                                    "ports": [{ "containerPort": 80 }],
+                                    "env": [
+                                        {
+                                          "name": "MIRRORD_FAKE_VAR_FIRST",
+                                          "value": "mirrord.is.running"
+                                        },
+                                        {
+                                          "name": "MIRRORD_FAKE_VAR_SECOND",
+                                          "value": "7777"
+                                        },
+                                        {
+                                            "name": "MIRRORD_FAKE_VAR_THIRD",
+                                            "value": "foo=bar"
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    }))
+    .expect("Failed creating `cronjob` from json spec!")
+}
+
+#[cfg(feature = "operator")]
+fn job_from_json(name: &str, image: &str) -> k8s_openapi::api::batch::v1::Job {
+    serde_json::from_value(json!({
+        "apiVersion": "batch/v1",
+        "kind": "Job",
+        "metadata": {
+            "name": name,
+            "labels": {
+                "app": name,
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                "test-label-for-jobs": format!("job-{name}")
+            }
+        },
+        "spec": {
+            "ttlSecondsAfterFinished": 10,
+            "backoffLimit": 1,
+            "template": {
+                "metadata": {
+                    "labels": {
+                        "app": &name,
+                        "test-label-for-pods": format!("pod-{name}"),
+                        format!("test-label-for-pods-{name}"): &name
+                    }
+                },
+                "spec": {
+                    "restartPolicy": "OnFailure",
+                    "containers": [
+                        {
+                            "name": &CONTAINER_NAME,
+                            "image": image,
+                            "ports": [{ "containerPort": 80 }],
+                            "env": [
+                                {
+                                  "name": "MIRRORD_FAKE_VAR_FIRST",
+                                  "value": "mirrord.is.running"
+                                },
+                                {
+                                  "name": "MIRRORD_FAKE_VAR_SECOND",
+                                  "value": "7777"
+                                },
+                                {
+                                    "name": "MIRRORD_FAKE_VAR_THIRD",
+                                    "value": "foo=bar"
+                                }
+                            ],
+                        }
+                    ]
+                }
+            },
+        }
+    }))
+    .expect("Failed creating `job` from json spec!")
 }
 
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
@@ -876,12 +1051,12 @@ pub async fn service(
         name,
         namespace: namespace.to_string(),
         target: format!("pod/{target}/container/{CONTAINER_NAME}"),
-        pod_guard,
-        service_guard,
+        guards: vec![pod_guard, service_guard],
         namespace_guard,
     }
 }
 
+#[cfg(not(feature = "operator"))]
 #[fixture]
 pub async fn service_for_mirrord_ls(
     #[default("default")] namespace: &str,
@@ -987,11 +1162,171 @@ pub async fn service_for_mirrord_ls(
         name,
         namespace: namespace.to_string(),
         target: format!("pod/{target}/container/{CONTAINER_NAME}"),
-        pod_guard,
-        service_guard,
+        guards: vec![pod_guard, service_guard],
         namespace_guard,
     }
 }
+
+#[cfg(feature = "operator")]
+#[fixture]
+pub async fn service_for_mirrord_ls(
+    #[default("default")] namespace: &str,
+    #[default("NodePort")] service_type: &str,
+    #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
+    #[default("http-echo")] service_name: &str,
+    #[default(true)] randomize_name: bool,
+    #[future] kube_client: Client,
+) -> KubeService {
+    use k8s_openapi::api::{
+        apps::v1::StatefulSet,
+        batch::v1::{CronJob, Job},
+    };
+
+    let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
+
+    let kube_client = kube_client.await;
+    let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
+    let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
+    let stateful_set_api: Api<StatefulSet> = Api::namespaced(kube_client.clone(), namespace);
+    let cron_job_api: Api<CronJob> = Api::namespaced(kube_client.clone(), namespace);
+    let job_api: Api<Job> = Api::namespaced(kube_client.clone(), namespace);
+    let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
+
+    let name = if randomize_name {
+        format!("{}-{}", service_name, random_string())
+    } else {
+        // If using a non-random name, delete existing resources first.
+        // Just continue if they don't exist.
+        // Force delete
+        let delete_params = DeleteParams {
+            grace_period_seconds: Some(0),
+            ..Default::default()
+        };
+
+        let _ = service_api.delete(service_name, &delete_params).await;
+        let _ = deployment_api.delete(service_name, &delete_params).await;
+        let _ = stateful_set_api.delete(service_name, &delete_params).await;
+        let _ = cron_job_api.delete(service_name, &delete_params).await;
+        let _ = job_api.delete(service_name, &delete_params).await;
+
+        service_name.to_string()
+    };
+
+    println!(
+        "{} creating service {name:?} in namespace {namespace:?}",
+        format_time()
+    );
+
+    let namespace_resource: Namespace = serde_json::from_value(json!({
+        "apiVersion": "v1",
+        "kind": "Namespace",
+        "metadata": {
+            "name": namespace,
+            "labels": {
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+            }
+        },
+    }))
+    .unwrap();
+    // Create namespace and wrap it in ResourceGuard if it does not yet exist.
+    let namespace_guard = ResourceGuard::create(
+        namespace_api.clone(),
+        namespace.to_string(),
+        &namespace_resource,
+        delete_after_fail,
+    )
+    .await
+    .ok();
+    if namespace_guard.is_some() {
+        watch_resource_exists(&namespace_api, namespace).await;
+    }
+
+    // `Deployment`
+    let deployment = deployment_from_json(&name, image);
+    let pod_guard = ResourceGuard::create(
+        deployment_api.clone(),
+        name.to_string(),
+        &deployment,
+        delete_after_fail,
+    )
+    .await
+    .unwrap();
+    watch_resource_exists(&deployment_api, &name).await;
+
+    // `Service`
+    let service = service_from_json(&name, service_type);
+    let service_guard = ResourceGuard::create(
+        service_api.clone(),
+        name.clone(),
+        &service,
+        delete_after_fail,
+    )
+    .await
+    .unwrap();
+    watch_resource_exists(&service_api, "default").await;
+
+    // `StatefulSet`
+    let stateful_set = stateful_set_from_json(&name, image);
+    let stateful_set_guard = ResourceGuard::create(
+        stateful_set_api.clone(),
+        name.to_string(),
+        &stateful_set,
+        delete_after_fail,
+    )
+    .await
+    .unwrap();
+    watch_resource_exists(&stateful_set_api, &name).await;
+
+    // `CronJob`
+    let cron_job = cron_job_from_json(&name, image);
+    let cron_job_guard = ResourceGuard::create(
+        cron_job_api.clone(),
+        name.to_string(),
+        &cron_job,
+        delete_after_fail,
+    )
+    .await
+    .unwrap();
+    watch_resource_exists(&cron_job_api, &name).await;
+
+    // `Job`
+    let job = job_from_json(&name, image);
+    let job_guard =
+        ResourceGuard::create(job_api.clone(), name.to_string(), &job, delete_after_fail)
+            .await
+            .unwrap();
+    watch_resource_exists(&job_api, &name).await;
+
+    let target = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
+        .await
+        .unwrap();
+
+    let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
+
+    await_condition(pod_api, &target, is_pod_running())
+        .await
+        .unwrap();
+
+    println!(
+        "{:?} done creating service {name:?} in namespace {namespace:?}",
+        Utc::now()
+    );
+
+    KubeService {
+        name,
+        namespace: namespace.to_string(),
+        target: format!("pod/{target}/container/{CONTAINER_NAME}"),
+        guards: vec![
+            pod_guard,
+            service_guard,
+            stateful_set_guard,
+            cron_job_guard,
+            job_guard,
+        ],
+        namespace_guard,
+    }
+}
+
 /// Service that should only be reachable from inside the cluster, as a communication partner
 /// for testing outgoing traffic. If this service receives the application's messages, they
 /// must have been intercepted and forwarded via the agent to be sent from the impersonated pod.

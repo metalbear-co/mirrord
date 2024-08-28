@@ -1,0 +1,1 @@
+Adds new (operator) targets for mirrord ls test.
