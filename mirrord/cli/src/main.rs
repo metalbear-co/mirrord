@@ -363,7 +363,7 @@ async fn list_pods(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<
     )
     .await
     .and_then(|config| Client::try_from(config).map_err(From::from))
-    .map_err(CliError::CreateKubeApiFailed)?;
+    .map_err(|error| CliError::auth_exec_error_or(error, CliError::CreateKubeApiFailed))?;
 
     let namespace = args
         .namespace
