@@ -500,22 +500,9 @@ impl OperatorRole {
                 ..Default::default()
             },
             PolicyRule {
-                api_groups: Some(vec!["".to_owned(), "authentication.k8s.io".to_owned()]),
-                resources: Some(vec![
-                    "groups".to_owned(),
-                    "users".to_owned(),
-                    "userextras/accesskeyid".to_owned(),
-                    "userextras/arn".to_owned(),
-                    "userextras/canonicalarn".to_owned(),
-                    "userextras/sessionname".to_owned(),
-                    "userextras/iam.gke.io/user-assertion".to_owned(),
-                    "userextras/user-assertion.cloud.google.com".to_owned(),
-                    "userextras/principalid".to_owned(),
-                    "userextras/oid".to_owned(),
-                    "userextras/username".to_owned(),
-                    "userextras/licensekey".to_owned(),
-                ]),
-                verbs: vec!["impersonate".to_owned()],
+                api_groups: Some(vec!["authorization.k8s.io".to_owned()]),
+                resources: Some(vec!["subjectaccessreviews".to_owned()]),
+                verbs: vec!["create".to_owned()],
                 ..Default::default()
             },
             // Allow the operator to list+get mirrord policies.
