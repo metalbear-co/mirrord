@@ -1000,10 +1000,12 @@ Setting this filter will make mirrord only steal requests to URIs that do not st
 #### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
 
 Messages must match all of the specified filters.
+Cannot be empty an empty list.
 
 #### feature.network.incoming.http_filter.any_of {#feature-network-incoming-http_filter-any_of}
 
 Messages must match any of the specified filters.
+Cannot be empty an empty list.
 
 ##### feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}
 

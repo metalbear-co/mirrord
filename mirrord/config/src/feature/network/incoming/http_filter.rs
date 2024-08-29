@@ -84,11 +84,13 @@ pub struct HttpFilterConfig {
     /// #### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
     ///
     /// Messages must match all of the specified filters.
+    /// Cannot be empty an empty list.
     pub all_of: Option<Vec<InnerFilter>>,
 
     /// #### feature.network.incoming.http_filter.any_of {#feature-network-incoming-http_filter-any_of}
     ///
     /// Messages must match any of the specified filters.
+    /// Cannot be empty an empty list.
     pub any_of: Option<Vec<InnerFilter>>,
 
     /// ##### feature.network.incoming.http_filter.ports {#feature-network-incoming-http_filter-ports}

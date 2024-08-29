@@ -1,0 +1,1 @@
+Rejecting empty composite HTTP filters during config validation.
