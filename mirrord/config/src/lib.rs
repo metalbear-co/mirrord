@@ -383,6 +383,16 @@ impl LayerConfig {
             ))?
         }
 
+        if [http_filter.all_of.as_ref(), http_filter.any_of.as_ref()]
+            .into_iter()
+            .flatten()
+            .any(Vec::is_empty)
+        {
+            Err(ConfigError::Conflict(
+                "Composite HTTP filter cannot be empty".to_string(),
+            ))?;
+        }
+
         if !self.feature.network.incoming.ignore_ports.is_empty()
             && self.feature.network.incoming.ports.is_some()
         {
