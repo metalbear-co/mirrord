@@ -3722,6 +3722,7 @@ dependencies = [
  "nix 0.29.0",
  "prettytable-rs",
  "rcgen",
+ "regex",
  "reqwest 0.12.5",
  "rstest",
  "rustls 0.23.12",
@@ -3925,6 +3926,7 @@ name = "mirrord-kube"
 version = "3.115.1"
 dependencies = [
  "actix-codec",
+ "async-stream",
  "base64 0.22.1",
  "futures",
  "http-body 1.0.1",
@@ -4059,7 +4061,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.10.0"
+version = "1.11.0"
 dependencies = [
  "actix-codec",
  "bincode",

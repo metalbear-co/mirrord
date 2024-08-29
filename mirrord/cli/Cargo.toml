@@ -66,6 +66,7 @@ rustls-pemfile = "2"
 tokio-rustls = "0.26"
 tokio-stream = { workspace = true, features = ["net"] }
 tokio-retry = "0.3"
+regex.workspace = true
 
 
 [target.'cfg(target_os = "macos")'.dependencies]

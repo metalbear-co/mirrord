@@ -100,7 +100,7 @@ impl SessionCommandHandler {
             {
                 OperatorApiError::UnsupportedFeature {
                     feature: NewOperatorFeature::SessionManagement,
-                    operator_version: operator_api.operator().spec.operator_version.clone(),
+                    operator_version: operator_api.operator().spec.operator_version.to_string(),
                 }
             }
             // Something actually went wrong.

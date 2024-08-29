@@ -163,6 +163,10 @@ pub(crate) enum CliError {
     #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
     CreateKubeApiFailed(KubeApiError),
 
+    #[error("Failed to list mirrord targets: {0}")]
+    #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
+    ListTargetsFailed(KubeApiError),
+
     /// Do not construct this variant directly, use [`CliError::auth_exec_error_or`] to allow for
     /// more granular error detection.
     #[error("Failed to create mirrord-agent: {0}")]
@@ -182,9 +186,9 @@ pub(crate) enum CliError {
     ))]
     AgentConnectionFailed(KubeApiError),
 
-    #[error("Failed to fetch remote environment variables from the agent: {0}")]
+    #[error("Failed to communicate with the agent: {0}")]
     #[diagnostic(help("Please check agent status and logs.{GENERAL_HELP}"))]
-    RemoteEnvFetchFailed(String),
+    InitialAgentCommFailed(String),
 
     #[error("Failed to execute binary `{0}` with args {1:?}")]
     #[diagnostic(help(

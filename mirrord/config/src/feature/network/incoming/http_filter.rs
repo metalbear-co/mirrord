@@ -81,6 +81,18 @@ pub struct HttpFilterConfig {
     #[config(env = "MIRRORD_HTTP_PATH_FILTER")]
     pub path_filter: Option<String>,
 
+    /// #### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
+    ///
+    /// Messages must match all of the specified filters.
+    /// Cannot be an empty list.
+    pub all_of: Option<Vec<InnerFilter>>,
+
+    /// #### feature.network.incoming.http_filter.any_of {#feature-network-incoming-http_filter-any_of}
+    ///
+    /// Messages must match any of the specified filters.
+    /// Cannot be an empty list.
+    pub any_of: Option<Vec<InnerFilter>>,
+
     /// ##### feature.network.incoming.http_filter.ports {#feature-network-incoming-http_filter-ports}
     ///
     /// Activate the HTTP traffic filter only for these ports.
@@ -95,12 +107,43 @@ pub struct HttpFilterConfig {
 
 impl HttpFilterConfig {
     pub fn is_filter_set(&self) -> bool {
-        self.header_filter.is_some() || self.path_filter.is_some()
+        self.header_filter.is_some()
+            || self.path_filter.is_some()
+            || self.all_of.is_some()
+            || self.any_of.is_some()
+    }
+
+    pub fn is_composite(&self) -> bool {
+        self.all_of.is_some() || self.any_of.is_some()
     }
 
     pub fn get_filtered_ports(&self) -> Option<&[u16]> {
         self.is_filter_set().then(|| &*self.ports.0)
     }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum InnerFilter {
+    /// ##### feature.network.incoming.inner_filter.header_filter {#feature-network-incoming-inner-header-filter}
+    ///
+    ///
+    /// Supports regexes validated by the
+    /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
+    ///
+    /// The HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,
+    /// case-insensitive.
+    Header { header: String },
+
+    /// ##### feature.network.incoming.inner_filter.path_filter {#feature-network-incoming-inner-path-filter}
+    ///
+    ///
+    /// Supports regexes validated by the
+    /// [`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.
+    ///
+    /// Case-insensitive. Tries to find match in the path (without query) and path+query.
+    /// If any of the two matches, the request is stolen.
+    Path { path: String },
 }
 
 /// <!--${internal}-->
@@ -124,6 +167,9 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
             .source_value(context)
             .transpose()?;
 
+        let all_of = None;
+        let any_of = None;
+
         let ports = FromEnv::new("MIRRORD_HTTP_FILTER_PORTS")
             .source_value(context)
             .transpose()?
@@ -132,6 +178,8 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
         Ok(Self::Generated {
             header_filter,
             path_filter,
+            all_of,
+            any_of,
             ports,
         })
     }

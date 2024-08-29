@@ -150,6 +150,13 @@ pub enum HttpFilter {
     Header(Filter),
     /// Filter by path ("/api/v1")
     Path(Filter),
+    /// Filter by multiple filters
+    Composite {
+        /// If true, all filters must match, otherwise any filter can match
+        all: bool,
+        /// Filters to use
+        filters: Vec<HttpFilter>,
+    },
 }
 
 impl Display for HttpFilter {
@@ -157,6 +164,34 @@ impl Display for HttpFilter {
         match self {
             HttpFilter::Header(filter) => write!(f, "header={filter}"),
             HttpFilter::Path(filter) => write!(f, "path={filter}"),
+            HttpFilter::Composite { all, filters } => match all {
+                true => {
+                    write!(f, "all of ")?;
+                    let mut first = true;
+                    for filter in filters {
+                        if first {
+                            write!(f, "({filter})")?;
+                            first = false;
+                        } else {
+                            write!(f, ", ({filter})")?;
+                        }
+                    }
+                    Ok(())
+                }
+                false => {
+                    write!(f, "any of ")?;
+                    let mut first = true;
+                    for filter in filters {
+                        if first {
+                            write!(f, "({filter})")?;
+                            first = false;
+                        } else {
+                            write!(f, ", ({filter})")?;
+                        }
+                    }
+                    Ok(())
+                }
+            },
         }
     }
 }
@@ -415,6 +450,10 @@ pub static HTTP_CHUNKED_RESPONSE_VERSION: LazyLock<VersionReq> =
 /// [`DaemonTcp::HttpRequestChunked`]/[`DaemonTcp::HttpRequestFramed`]/[`DaemonTcp::HttpRequest`].
 pub static HTTP_FILTERED_UPGRADE_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.5.0".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows [`HttpFilter::Composite`]
+pub static HTTP_COMPOSITE_FILTER_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.11.0".parse().expect("Bad Identifier"));
 
 /// Protocol break - on version 2, please add source port, dest/src IP to the message
 /// so we can avoid losing this information.

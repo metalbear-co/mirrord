@@ -9,6 +9,13 @@ pub enum HttpFilter {
     Header(Regex),
     /// Path based filter.
     Path(Regex),
+    /// Filter composed of multiple filters.
+    Composite {
+        /// If true, all filters must match, otherwise any filter can match.
+        all: bool,
+        /// Filters to use.
+        filters: Vec<HttpFilter>,
+    },
 }
 
 impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
@@ -21,6 +28,14 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
             }
             mirrord_protocol::tcp::HttpFilter::Path(path) => {
                 Ok(Self::Path(Regex::new(&format!("(?i){path}"))?))
+            }
+            mirrord_protocol::tcp::HttpFilter::Composite { all, filters } => {
+                let all = *all;
+                let filters = filters
+                    .iter()
+                    .map(HttpFilter::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Self::Composite { all, filters })
             }
         }
     }
@@ -87,6 +102,12 @@ impl HttpFilter {
                         .unwrap_or(false)
                 })
                 .unwrap_or(false),
+
+            Self::Composite { all: true, filters } => filters.iter().all(|f| f.matches(request)),
+            Self::Composite {
+                all: false,
+                filters,
+            } => filters.iter().any(|f| f.matches(request)),
         }
     }
 }
@@ -108,5 +129,72 @@ impl NormalizedHeaders {
                 })
                 .unwrap_or(false)
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use hyper::Request;
+    use mirrord_protocol::tcp::{self, Filter};
+
+    use crate::steal::http::HttpFilter;
+
+    #[test]
+    fn matching_all_filter() {
+        let tcp_filter = tcp::HttpFilter::Composite {
+            all: true,
+            filters: vec![
+                tcp::HttpFilter::Header(Filter::new("brass-key: a-bazillion".to_string()).unwrap()),
+                tcp::HttpFilter::Path(Filter::new("path/to/v1".to_string()).unwrap()),
+            ],
+        };
+
+        // should match
+        let mut input = Request::builder()
+            .uri("https://www.balconia.gov/api/path/to/v1")
+            .header("brass-key", "a-bazillion")
+            .body(())
+            .unwrap();
+        let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
+        assert!(filter.matches(&mut input));
+
+        // should fail
+        let mut input = Request::builder()
+            .uri("https://www.balconia.gov/api/path/to/v1")
+            .header("brass-key", "nothin")
+            .body(())
+            .unwrap();
+        assert!(!filter.matches(&mut input));
+    }
+
+    #[test]
+    fn matching_any_filter() {
+        let tcp_filter = tcp::HttpFilter::Composite {
+            all: false,
+            filters: vec![
+                tcp::HttpFilter::Header(Filter::new("brass-key: a-bazillion".to_string()).unwrap()),
+                tcp::HttpFilter::Header(Filter::new("dungeon-key: heavy".to_string()).unwrap()),
+                tcp::HttpFilter::Path(Filter::new("path/to/v1".to_string()).unwrap()),
+                tcp::HttpFilter::Path(Filter::new("path/for/v8".to_string()).unwrap()),
+            ],
+        };
+
+        // should match
+        let mut input = Request::builder()
+            .uri("https://www.balconia.gov/api/path/to/v1")
+            .header("brass-key", "nothin")
+            .body(())
+            .unwrap();
+        let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
+        assert!(filter.matches(&mut input));
+
+        // should fail
+        let mut input = Request::builder()
+            .uri("https://www.balconia.gov/api/path/to/v3")
+            .header("brass-key", "nothin")
+            .body(())
+            .unwrap();
+        let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
+        assert!(!filter.matches(&mut input));
     }
 }

@@ -530,6 +530,7 @@ jobs:
       - name: Collect logs
         if: ${{ failure() }}
         run: |
+          kubectl get all
           kubectl describe pods
           docker exec minikube find /var/log/pods -print -exec cat {} \;
 

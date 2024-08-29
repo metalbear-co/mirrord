@@ -997,6 +997,16 @@ Similarly, you can exclude certain paths using a negative look-ahead:
 Setting this filter will make mirrord only steal requests to URIs that do not start with
 "/health/".
 
+#### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
+
+Messages must match all of the specified filters.
+Cannot be an empty list.
+
+#### feature.network.incoming.http_filter.any_of {#feature-network-incoming-http_filter-any_of}
+
+Messages must match any of the specified filters.
+Cannot be an empty list.
+
 ##### feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}
 
 
@@ -1259,12 +1269,14 @@ and don't connect to the proxy.
 ```
 
 ### internal_proxy.log_destination {#internal_proxy-log_destination}
+
 Set the log file destination for the internal proxy.
 
 ### internal_proxy.log_level {#internal_proxy-log_level}
+
 Set the log level for the internal proxy.
-RUST_LOG convention (i.e `mirrord=trace`)
-will only be used if log_destination is set
+RUST_LOG convention (i.e `mirrord=trace`) will only be used if `log_destination`
+is set.
 
 ### internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}
 
