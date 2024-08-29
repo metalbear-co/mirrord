@@ -1,11 +1,12 @@
 use std::{
     collections::{HashMap, VecDeque},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };
 
 use futures::StreamExt;
 use mirrord_protocol::{
+    dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse},
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
@@ -29,7 +30,7 @@ use tokio_stream::{wrappers::TcpListenerStream, StreamMap};
 use tokio_util::io::ReaderStream;
 use tracing::Level;
 
-use crate::{connection::AgentConnection, PortMapping};
+use crate::{connection::AgentConnection, PortMapping, RemoteAddr};
 
 pub struct PortForwarder {
     /// communicates with the agent (only TCP supported)
@@ -41,7 +42,7 @@ pub struct PortForwarder {
     /// oneshot channels for sending connection IDs to tasks and the associated local address
     oneshots: VecDeque<(SocketAddr, oneshot::Sender<ConnectionId>)>,
     /// identifies a pair of mapped socket addresses by their corresponding connection ID
-    sockets: HashMap<ConnectionId, PortMapping>,
+    sockets: HashMap<ConnectionId, ResolvedPortMapping>,
     /// identifies task senders by their corresponding local socket address
     /// for sending data from the remote socket to the local address
     task_txs: HashMap<SocketAddr, Sender<Vec<u8>>>,
@@ -55,6 +56,12 @@ pub struct PortForwarder {
     ping_pong_timeout: Instant,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedPortMapping {
+    pub local: SocketAddr,
+    pub remote: SocketAddr,
+}
+
 /// Used by tasks for individual forwarding connections to send instructions to [`PortForwarder`]'s
 /// main loop.
 #[derive(Debug)]
@@ -62,37 +69,69 @@ enum PortForwardMessage {
     /// A request to make outgoing connection to the remote peer.
     /// Sent by the task only after receiving first batch of data from the user.
     /// The task waits for [`ConnectionId`] on the other end of the [`oneshot`] channel.
-    Connect(PortMapping, oneshot::Sender<ConnectionId>),
+    Connect(ResolvedPortMapping, oneshot::Sender<ConnectionId>),
 
     /// Data received from the user in the connection with the given id.
     Send(ConnectionId, Vec<u8>),
 
     /// A request to close the remote connection with the given id, if it exists.
-    Close(PortMapping, Option<ConnectionId>),
+    Close(ResolvedPortMapping, Option<ConnectionId>),
 }
 
 impl PortForwarder {
     pub(crate) async fn new(
-        agent_connection: AgentConnection,
+        mut agent_connection: AgentConnection,
         parsed_mappings: Vec<PortMapping>,
     ) -> Result<Self, PortForwardError> {
         // open tcp listener for local addrs
         let mut listeners = StreamMap::with_capacity(parsed_mappings.len());
-        let mut mappings = HashMap::with_capacity(parsed_mappings.len());
+        let mut mappings: HashMap<SocketAddr, SocketAddr> =
+            HashMap::with_capacity(parsed_mappings.len());
 
         if parsed_mappings.is_empty() {
             return Err(PortForwardError::NoMappingsError());
         }
+
+        // setup agent connection
+        agent_connection
+            .sender
+            .send(ClientMessage::SwitchProtocolVersion(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await?;
+        match agent_connection.receiver.recv().await {
+            Some(DaemonMessage::SwitchProtocolVersionResponse(version))
+                if CLIENT_READY_FOR_LOGS.matches(&version) =>
+            {
+                agent_connection
+                    .sender
+                    .send(ClientMessage::ReadyForLogs)
+                    .await?;
+            }
+            _ => return Err(PortForwardError::AgentConnectionFailed),
+        }
+
         for mapping in parsed_mappings {
             if listeners.contains_key(&mapping.local) {
                 // two mappings shared a key thus keys were not unique
                 return Err(PortForwardError::PortMapSetupError(mapping.local));
             }
+            let resolved_remote = match mapping.remote.0 {
+                RemoteAddr::Ip(ip) => IpAddr::V4(ip),
+                RemoteAddr::Hostname(hostname) => {
+                    PortForwarder::resolve_hostname(&mut agent_connection, hostname)
+                        .await?
+                        .into()
+                }
+            };
             let listener = TcpListener::bind(mapping.local).await;
             match listener {
                 Ok(listener) => {
                     listeners.insert(mapping.local, TcpListenerStream::new(listener));
-                    mappings.insert(mapping.local, mapping.remote);
+                    mappings.insert(
+                        mapping.local,
+                        SocketAddr::new(resolved_remote, mapping.remote.1),
+                    );
                 }
                 Err(error) => return Err(PortForwardError::TcpListenerError(error)),
             }
@@ -114,27 +153,29 @@ impl PortForwarder {
         })
     }
 
-    pub(crate) async fn run(&mut self) -> Result<(), PortForwardError> {
-        // setup agent connection
-        self.agent_connection
+    pub(crate) async fn resolve_hostname(
+        agent_connection: &mut AgentConnection,
+        node: String,
+    ) -> Result<IpAddr, PortForwardError> {
+        agent_connection
             .sender
-            .send(ClientMessage::SwitchProtocolVersion(
-                mirrord_protocol::VERSION.clone(),
-            ))
+            .send(ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
+                node,
+            }))
             .await?;
-        match self.agent_connection.receiver.recv().await {
-            Some(DaemonMessage::SwitchProtocolVersionResponse(version))
-                if CLIENT_READY_FOR_LOGS.matches(&version) =>
+        match agent_connection.receiver.recv().await {
+            Some(DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(Ok(DnsLookup(
+                record,
+            )))))
+                if record.len() == 1 =>
             {
-                self.agent_connection
-                    .sender
-                    .send(ClientMessage::ReadyForLogs)
-                    .await?;
+                return Ok(record.first().unwrap().ip);
             }
             _ => return Err(PortForwardError::AgentConnectionFailed),
         }
-        tracing::trace!("port forwarding setup complete");
+    }
 
+    pub(crate) async fn run(&mut self) -> Result<(), PortForwardError> {
         loop {
             select! {
                 _ = tokio::time::sleep_until(self.ping_pong_timeout.into()) => {
@@ -188,7 +229,7 @@ impl PortForwarder {
                                 connection_id,
                             ));
                         };
-                        let port_map = PortMapping {
+                        let port_map = ResolvedPortMapping {
                             local: local_socket,
                             remote: remote_socket,
                         };
@@ -217,7 +258,7 @@ impl PortForwarder {
                 },
                 DaemonTcpOutgoing::Read(res) => match res {
                     Ok(res) => {
-                        let Some(&PortMapping {
+                        let Some(&ResolvedPortMapping {
                             local: local_socket,
                             remote: _,
                         }) = self.sockets.get(&res.connection_id)
@@ -254,7 +295,7 @@ impl PortForwarder {
                     }
                 },
                 DaemonTcpOutgoing::Close(connection_id) => {
-                    let Some(PortMapping {
+                    let Some(ResolvedPortMapping {
                         local: local_socket,
                         remote: remote_socket,
                     }) = self.sockets.remove(&connection_id)
@@ -375,7 +416,7 @@ impl PortForwarder {
 struct LocalConnectionTask {
     read_stream: ReaderStream<OwnedReadHalf>,
     write: OwnedWriteHalf,
-    port_mapping: PortMapping,
+    port_mapping: ResolvedPortMapping,
     task_internal_tx: Sender<PortForwardMessage>,
     response_rx: Receiver<Vec<u8>>,
 }
@@ -390,7 +431,7 @@ impl LocalConnectionTask {
     ) -> Self {
         let (read, write) = stream.into_split();
         let read_stream = ReaderStream::with_capacity(read, 64 * 1024);
-        let port_mapping = PortMapping {
+        let port_mapping = ResolvedPortMapping {
             local: local_socket,
             remote: remote_socket,
         };
@@ -556,6 +597,8 @@ impl From<mpsc::error::SendError<ClientMessage>> for PortForwardError {
 
 #[cfg(test)]
 mod test {
+    use std::net::{IpAddr, SocketAddr};
+
     use mirrord_protocol::{
         outgoing::{
             tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -569,7 +612,9 @@ mod test {
         sync::mpsc,
     };
 
-    use crate::{connection::AgentConnection, port_forward::PortForwarder, PortMapping};
+    use crate::{
+        connection::AgentConnection, port_forward::PortForwarder, PortMapping, RemoteAddr,
+    };
 
     #[tokio::test]
     async fn test_port_forwarding() {
@@ -584,19 +629,18 @@ mod test {
             sender: client_msg_tx,
             receiver: daemon_msg_rx,
         };
+        let remote_destination = (RemoteAddr::Ip("152.37.40.40".parse().unwrap()), 3038);
         let parsed_mappings = vec![PortMapping {
             local: local_destination,
-            remote: "152.37.40.40:3038".parse().unwrap(),
+            remote: remote_destination,
         }];
 
-        let mut port_forwarder = PortForwarder::new(agent_connection, parsed_mappings)
-            .await
-            .unwrap();
-        tokio::spawn(async move { port_forwarder.run().await.unwrap() });
-
-        // send data to socket
-        let mut stream = TcpStream::connect(local_destination).await.unwrap();
-        stream.write_all(b"data-my-beloved").await.unwrap();
+        tokio::spawn(async move {
+            let mut port_forwarder = PortForwarder::new(agent_connection, parsed_mappings)
+                .await
+                .unwrap();
+            port_forwarder.run().await.unwrap()
+        });
 
         // expect handshake procedure
         let expected = Some(ClientMessage::SwitchProtocolVersion(
@@ -611,6 +655,10 @@ mod test {
             .unwrap();
         let expected = Some(ClientMessage::ReadyForLogs);
         assert_eq!(client_msg_rx.recv().await, expected);
+
+        // send data to socket
+        let mut stream = TcpStream::connect(local_destination).await.unwrap();
+        stream.write_all(b"data-my-beloved").await.unwrap();
 
         // expect Connect on client_msg_rx
         let remote_address = SocketAddress::Ip("152.37.40.40:3038".parse().unwrap());
@@ -664,12 +712,12 @@ mod test {
 
     #[tokio::test]
     async fn test_multiple_mappings_forwarding() {
-        let remote_destination_1 = "152.37.40.40:1018".parse().unwrap();
+        let remote_destination_1 = (RemoteAddr::Ip("152.37.40.40".parse().unwrap()), 1018);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_destination_1 = listener.local_addr().unwrap();
         drop(listener);
 
-        let remote_destination_2 = "152.37.40.40:2028".parse().unwrap();
+        let remote_destination_2 = (RemoteAddr::Ip("152.37.40.40".parse().unwrap()), 2028);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_destination_2 = listener.local_addr().unwrap();
         drop(listener);
@@ -684,21 +732,20 @@ mod test {
         let parsed_mappings = vec![
             PortMapping {
                 local: local_destination_1,
-                remote: remote_destination_1,
+                remote: remote_destination_1.clone(),
             },
             PortMapping {
                 local: local_destination_2,
-                remote: remote_destination_2,
+                remote: remote_destination_2.clone(),
             },
         ];
 
-        let mut port_forwarder = PortForwarder::new(agent_connection, parsed_mappings)
-            .await
-            .unwrap();
-        tokio::spawn(async move { port_forwarder.run().await.unwrap() });
-
-        // send data to first socket
-        let mut stream_1 = TcpStream::connect(local_destination_1).await.unwrap();
+        tokio::spawn(async move {
+            let mut port_forwarder = PortForwarder::new(agent_connection, parsed_mappings)
+                .await
+                .unwrap();
+            port_forwarder.run().await.unwrap()
+        });
 
         // expect handshake procedure
         let expected = Some(ClientMessage::SwitchProtocolVersion(
@@ -714,10 +761,17 @@ mod test {
         let expected = Some(ClientMessage::ReadyForLogs);
         assert_eq!(client_msg_rx.recv().await, expected);
 
+        // send data to first socket
+        let mut stream_1 = TcpStream::connect(local_destination_1).await.unwrap();
+
         // expect each Connect on client_msg_rx with correct mappings when data has been written
         // (lazy)
         stream_1.write_all(b"data-from-1").await.unwrap();
-        let remote_address_1 = SocketAddress::Ip(remote_destination_1);
+        let RemoteAddr::Ip(ip) = remote_destination_1.0 else {
+            unreachable!()
+        };
+        let remote_address_1 =
+            SocketAddress::Ip(SocketAddr::new(IpAddr::V4(ip), remote_destination_1.1));
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
             remote_address: remote_address_1.clone(),
         }));
@@ -729,7 +783,11 @@ mod test {
 
         // send data to second socket
         let mut stream_2 = TcpStream::connect(local_destination_2).await.unwrap();
-        let remote_address_2 = SocketAddress::Ip(remote_destination_2);
+        let RemoteAddr::Ip(ip) = remote_destination_2.0 else {
+            unreachable!()
+        };
+        let remote_address_2 =
+            SocketAddress::Ip(SocketAddr::new(IpAddr::V4(ip), remote_destination_2.1));
         stream_2.write_all(b"data-from-2").await.unwrap();
 
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
