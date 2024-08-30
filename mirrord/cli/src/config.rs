@@ -392,6 +392,10 @@ pub(super) struct PortForwardArgs {
     pub context: Option<String>,
 
     /// Mappings for port forwarding
+    /// Expected format is: '-L [local_port:]remote_ip_or_hostname:remote_port'
+    /// If the remote is given as an ip, this is parsed as soon as mirrord starts
+    /// Otherwise, the remote is assumed to be a hostname and lookup is performed in the cluster
+    /// after a connection is made to the target
     #[arg(short = 'L', long)]
     pub port_mappings: Vec<PortMapping>,
 }
@@ -461,7 +465,7 @@ impl FromStr for PortMapping {
 
 #[derive(Error, Debug, PartialEq)]
 pub enum PortMappingParseErr {
-    #[error("Invalid format of argument `{0}`, expected `[local-port:]remote-ipv4:remote-port`")]
+    #[error("Invalid format of argument `{0}`, expected `[local-port:]remote-ipv4-or-hostname:remote-port`")]
     InvalidFormat(String),
 
     #[error("Failed to parse port `{0}` in argument `{1}`")]
