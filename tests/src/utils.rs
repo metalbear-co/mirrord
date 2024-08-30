@@ -211,11 +211,11 @@ impl TestProcess {
     ///
     /// # Panics
     /// If `timeout` has passed and stdout still does not contain `N`.
-    pub async fn await_n_lines<const N: usize>(&self, timeout: Duration) -> Vec<String> {
+    pub async fn await_n_lines(&self, n: usize, timeout: Duration) -> Vec<String> {
         tokio::time::timeout(timeout, async move {
             loop {
                 let stdout = self.get_stdout().await;
-                if stdout.lines().count() >= N {
+                if stdout.lines().count() >= n {
                     return stdout
                         .lines()
                         .map(ToString::to_string)
@@ -225,7 +225,7 @@ impl TestProcess {
             }
         })
         .await
-        .expect("Test process output did not produce expected ammount of lines in time.")
+        .expect("Test process output did not produce expected amount of lines in time.")
     }
 
     pub async fn write_to_stdin(&mut self, data: &[u8]) {

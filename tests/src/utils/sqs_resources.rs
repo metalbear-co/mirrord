@@ -15,28 +15,31 @@ use aws_sdk_sqs::types::{
     MessageAttributeValue,
     QueueAttributeName::{FifoQueue, MessageRetentionPeriod},
 };
-use futures_util::FutureExt;
+use futures::StreamExt;
+use futures_util::{FutureExt, TryStreamExt};
 use k8s_openapi::api::{
     apps::v1::Deployment,
     core::v1::{EnvVar, Service},
 };
 use kube::{
-    api::{Patch, PatchParams, PostParams},
-    runtime::wait::await_condition,
-    Api, Client, Resource,
+    api::{Patch, PatchParams, PostParams, WatchEvent, WatchParams},
+    runtime::{wait::await_condition, watcher::watch_object},
+    Api, Client, Resource, ResourceExt,
 };
 use mirrord_operator::{
     crd::{
-        MirrordWorkloadQueueRegistry, MirrordWorkloadQueueRegistrySpec, QueueConsumer,
-        QueueConsumerType, QueueNameSource, SplitQueue, SqsQueueDetails,
+        is_session_ready, MirrordSqsSession, MirrordWorkloadQueueRegistry,
+        MirrordWorkloadQueueRegistrySpec, QueueConsumer, QueueConsumerType, QueueNameSource,
+        SplitQueue, SqsQueueDetails,
     },
     setup::OPERATOR_NAME,
 };
 use rstest::fixture;
+use tokio::{sync::oneshot::Sender, task::JoinHandle};
 
 use crate::utils::{
     get_pod_or_node_host, kube_client, service_with_env, watch_resource_exists, KubeService,
-    ResourceGuard,
+    ResourceGuard, CONTAINER_NAME,
 };
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
@@ -62,7 +65,9 @@ pub struct SqsTestResources {
     queue1: QueueInfo,
     queue2: QueueInfo,
     sqs_client: aws_sdk_sqs::Client,
+    kube_client: Client,
     _guards: Vec<ResourceGuard>,
+    sessions_ready_future: Option<JoinHandle<Result<(), ()>>>,
 }
 
 impl SqsTestResources {
@@ -84,6 +89,10 @@ impl SqsTestResources {
 
     pub fn sqs_client(&self) -> &aws_sdk_sqs::Client {
         &self.sqs_client
+    }
+
+    pub async fn wait_for_sqs_sessions(&mut self) -> Result<(), ()> {
+        self.sessions_ready_future.take().unwrap().await.unwrap()
     }
 }
 
@@ -453,6 +462,89 @@ async fn localstack_in_default_namespace(kube_client: &Client) -> bool {
     service_api.get("localstack").await.is_ok()
 }
 
+/// Watch target deployment and print updates, just to make the test easier to understand
+/// and debug.
+async fn watch_target_deployment(kube_client: Client, namespace: String, name: String) {
+    let deploy_api = Api::<Deployment>::namespaced(kube_client, &namespace);
+    let lp = WatchParams::default().fields(&format!("metadata.name={name}"));
+    println!("watching target deployment");
+    // Do in loop because stream can stop for no reason.
+    loop {
+        let mut stream = deploy_api.watch(&lp, "0").await.unwrap().boxed();
+        while let Some(event) = stream.try_next().await.unwrap() {
+            match event {
+                WatchEvent::Added(dep) => println!("Target deployment created: {}", dep.name_any()),
+                WatchEvent::Modified(dep) => {
+                    let env = dep
+                        .spec
+                        .unwrap()
+                        .template
+                        .spec
+                        .unwrap()
+                        .containers
+                        .pop()
+                        .unwrap()
+                        .env
+                        .unwrap();
+                    println!("Target deployment was modified. env: {env:#?}")
+                }
+                WatchEvent::Deleted(dep) => {
+                    println!("Target deployment was deleted {}", dep.name_any());
+                    return;
+                }
+                WatchEvent::Bookmark(dep) => {}
+                WatchEvent::Error(dep) => {
+                    println!("Error in target deployment: {}", dep);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/// Watch `MirrordSqsSession` resources in this namespace (which is private to this test instance
+/// alone), and send a signal once two unique sessions are ready.
+pub async fn watch_sqs_sessions(kube_client: Client, namespace: String) -> Result<(), ()> {
+    let sqs_sessions = Api::<MirrordSqsSession>::namespaced(kube_client, &namespace);
+    let wp = WatchParams::default().timeout(60);
+    println!("Waiting for 2 MirrordSqsSessions to be ready.");
+    let mut ready_session_name: Option<String> = None;
+    // Do in loop because stream can stop for no reason.
+    loop {
+        let mut stream = sqs_sessions.watch(&wp, "0").await.unwrap().boxed();
+        while let Some(session) = stream.try_next().await.unwrap() {
+            match session {
+                WatchEvent::Added(s) | WatchEvent::Modified(s) => {
+                    if is_session_ready(Some(&s)) {
+                        let session_name = s.name_any();
+                        if let Some(seen_name) = ready_session_name.as_ref() {
+                            if *seen_name != session_name {
+                                println!("second SQS session ready! {}", session_name);
+                                return Ok(());
+                            }
+                        } else {
+                            println!("first SQS session ready");
+                            ready_session_name = Some(session_name)
+                        }
+                    }
+                }
+                WatchEvent::Deleted(s) => {
+                    println!(
+                        "SQS session was deleted before both were ready: {}",
+                        s.name_any()
+                    );
+                    return Err(());
+                }
+                WatchEvent::Bookmark(_) => {}
+                WatchEvent::Error(e) => {
+                    println!("SQS Session watch error: {}", e);
+                    return Err(());
+                }
+            }
+        }
+    }
+}
+
 #[fixture]
 pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResources {
     let kube_client = kube_client.await;
@@ -468,13 +560,24 @@ pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResourc
     let queue1 = random_name_sqs_queue_with_echo_queue(false, &sqs_client, &mut guards).await;
     let queue2 = random_name_sqs_queue_with_echo_queue(true, &sqs_client, &mut guards).await;
     let k8s_service = sqs_consumer_service(&kube_client, &queue1, &queue2).await;
+    let _ = tokio::spawn(watch_target_deployment(
+        kube_client.clone(),
+        k8s_service.namespace.clone(),
+        k8s_service.name.clone(),
+    ));
+    let sessions_ready_future = Some(tokio::spawn(watch_sqs_sessions(
+        kube_client.clone(),
+        k8s_service.namespace.clone(),
+    )));
     create_queue_registry_resource(&kube_client, &k8s_service.namespace, &k8s_service.name).await;
     SqsTestResources {
         k8s_service,
         queue1,
         queue2,
         sqs_client,
+        kube_client,
         _guards: guards,
+        sessions_ready_future,
     }
 }
 
@@ -485,9 +588,14 @@ pub async fn write_sqs_messages(
     message_attributes: &[&str],
     messages: &[&str],
 ) {
+    println!("Sending messages {messages:?} to queue {}.", queue.name);
     let fifo = queue.name.ends_with(".fifo");
     let group_id = fifo.then_some("e2e-tests".to_string());
     for (i, (body, attr)) in messages.iter().zip(message_attributes).enumerate() {
+        println!(
+            r#"Sending message "{body}" with attribute "{message_attribute_name}: {attr}" to queue {}"#,
+            queue.name
+        );
         sqs_client
             .send_message()
             .queue_url(&queue.url)

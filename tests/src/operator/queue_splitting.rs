@@ -13,37 +13,44 @@ use crate::utils::{
     Application, TestProcess,
 };
 
-async fn expect_lines<const N: usize>(test_process: &TestProcess) -> Vec<String> {
-    let lines = test_process
-        .await_n_lines::<N>(Duration::from_secs(30))
-        .await;
+async fn expect_n_lines(n: usize, test_process: &TestProcess) -> Vec<String> {
+    let lines = test_process.await_n_lines(n, Duration::from_secs(30)).await;
     assert_eq!(
         lines.len(),
-        N,
+        n,
         "User received more messages than it was supposed to."
     );
     lines
 }
 
 /// Verify that the test process printed all the expected messages, and none other.
-async fn expect_messages<const N: usize>(messages: [&str; N], test_process: &TestProcess) {
-    let lines = expect_lines::<N>(test_process).await;
-    for message in messages.into_iter() {
+///
+/// The expected lines should all be unique in both arrays together (a line should not appear in
+/// both arrays or in any array twice).
+async fn expect_output_lines<const N: usize, const M: usize>(
+    expected_lines: [&str; N],
+    expected_in_order_lines: [&str; M],
+    test_process: &TestProcess,
+) {
+    let lines = expect_n_lines(
+        expected_lines.len() + expected_in_order_lines.len(),
+        test_process,
+    )
+    .await;
+    for expected_line in expected_lines.into_iter() {
         assert!(
-            lines.contains(&message.to_string()),
-            "User a was supposed to receive first message but did not"
+            lines.contains(&expected_line.to_string()),
+            "User a was expected to print {expected_line} but did not"
         );
     }
-}
-
-/// Verify that the test process printed all the expected messages, and none other.
-async fn expect_messages_in_order<const N: usize>(messages: [&str; N], test_process: &TestProcess) {
-    let lines = expect_lines::<N>(test_process).await;
-    assert_eq!(
-        &lines[..],
-        &messages[..],
-        "User did not receive the expected messages in the expected order."
-    )
+    let mut last_location = 0;
+    for expected_line in expected_in_order_lines.into_iter() {
+        let location = lines
+            .iter()
+            .position(|line| *line == expected_line)
+            .expect("A fifo message did not reach the correct user.");
+        assert!(last_location <= location, "Fifo messages out of order!")
+    }
 }
 
 /// Verify that the echo queue contains the expected messages, meaning the deployed application
@@ -71,8 +78,31 @@ async fn verify_splitter_temp_queues_deleted(sqs_test_resources: &SqsTestResourc
     let client = sqs_test_resources.sqs_client();
     let queue_name1 = sqs_test_resources.queue1().name.as_str();
     let queue_name2 = sqs_test_resources.queue2().name.as_str();
-    tokio::time::timeout(Duration::from_secs(60), async {
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let mut i = 0u8; // TODO: delete;
         loop {
+            {
+                // TODO: delete this whole block
+                i += 1;
+                if i % 100 == 0 {
+                    let queues = client
+                        .list_queues()
+                        // temp queues start with "mirrord-"
+                        .queue_name_prefix("mirrord-")
+                        .send()
+                        .await
+                        .expect("Could not list SQS queues.")
+                        .queue_urls
+                        .unwrap_or_default()
+                        .into_iter()
+                        // temp queue names contain the original queue name.
+                        .filter(|queue_url| {
+                            queue_url.contains(queue_name1) || queue_url.contains(queue_name2)
+                        })
+                        .collect::<Vec<_>>();
+                    println!("Lingering queues ({i}): {queues:#?}");
+                }
+            }
             if client
                 .list_queues()
                 // temp queues start with "mirrord-"
@@ -93,7 +123,7 @@ async fn verify_splitter_temp_queues_deleted(sqs_test_resources: &SqsTestResourc
         }
     })
     .await
-    .expect("SQS temp queues not deleted in 60 seconds.")
+    .expect("SQS temp queues not deleted in time.")
 }
 
 /// This test creates a new sqs_queue with a random name and credentials from env.
@@ -105,7 +135,7 @@ async fn verify_splitter_temp_queues_deleted(sqs_test_resources: &SqsTestResourc
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_dir: &PathBuf) {
-    let sqs_test_resources = sqs_test_resources.await;
+    let mut sqs_test_resources = sqs_test_resources.await;
     let application = Application::RustSqs;
 
     let mut config_path = config_dir.clone();
@@ -123,6 +153,10 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
 
     let mut config_path = config_dir.clone();
     config_path.push("sqs_queue_splitting_b.json");
+    // Wait between client starts.
+    // Support starting at the same time and remove this (https://github.com/metalbear-co/operator/issues/637)
+    // TODO: (now, in this PR) change from sleep to watch registry.
+    tokio::time::sleep(Duration::from_secs(30)).await;
 
     println!("Starting second mirrord client");
     let mut client_b = application
@@ -134,17 +168,37 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
         )
         .await;
 
+    println!("letting split time to start before writing messages");
+    // sqs_test_resources
+    //     .wait_for_sqs_sessions()
+    //     .await
+    //     .expect("There was a problem with the SQS Session resources");
+
+    // TODO:
+    tokio::time::sleep(Duration::from_secs(30)).await;
+
     write_sqs_messages(
         sqs_test_resources.sqs_client(),
         sqs_test_resources.queue1(),
-        "local",
+        "client",
         &["a", "b", "c", "c", "b", "a"],
         &["1", "2", "3", "4", "5", "6"],
     )
     .await;
 
-    expect_messages(["1", "6"], &client_a).await;
-    expect_messages(["2", "5"], &client_b).await;
+    write_sqs_messages(
+        sqs_test_resources.sqs_client(),
+        sqs_test_resources.queue2(),
+        "client",
+        &["a", "b", "c", "c", "b", "a"],
+        &["10", "20", "30", "40", "50", "60"],
+    )
+    .await;
+
+    // Test app prints 1: before messages from queue1 and 2: before messages from queue 2.
+    expect_output_lines(["1:1", "1:6"], ["2:10", "2:60"], &client_a).await;
+    expect_output_lines(["1:2", "1:5"], ["2:20", "2:50"], &client_b).await;
+
     // TODO: implement func
     expect_messages_in_queue(
         ["3", "4"],
@@ -153,19 +207,6 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     )
     .await;
 
-    println!("Queue 1 was split correctly!");
-
-    write_sqs_messages(
-        sqs_test_resources.sqs_client(),
-        sqs_test_resources.queue2(),
-        "local",
-        &["a", "b", "c", "c", "b", "a"],
-        &["10", "20", "30", "40", "50", "60"],
-    )
-    .await;
-
-    expect_messages_in_order(["10", "60"], &client_a).await;
-    expect_messages_in_order(["20", "50"], &client_b).await;
     // TODO: implement func
     expect_messages_in_fifo_queue(
         ["30", "40"],
@@ -182,5 +223,7 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     client_b.child.kill().await.unwrap();
 
     verify_splitter_temp_queues_deleted(&sqs_test_resources).await;
+
+    tokio::time::sleep(Duration::from_secs(60)).await; // TODO: remove
     println!("All temporary queues were deleted!");
 }

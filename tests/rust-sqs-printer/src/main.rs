@@ -8,8 +8,7 @@ const QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_Q_NAME1";
 const QUEUE_NAME_ENV_VAR2: &str = "SQS_TEST_Q_NAME2";
 
 /// Reads from queue and prints the contents of each message in a new line.
-async fn read_from_queue(read_q_name: String, client: Client) {
-    println!("Q Name: {read_q_name}");
+async fn read_from_queue(read_q_name: String, client: Client, queue_num: u8) {
     let read_q_url = client
         .get_queue_url()
         .queue_name(read_q_name)
@@ -50,7 +49,7 @@ async fn read_from_queue(read_q_name: String, client: Client) {
             } in messages
             {
                 println!(
-                    "{}",
+                    "{queue_num}:{}",
                     body.expect("Got message without body. Expected content.")
                 );
                 if let Some(handle) = receipt_handle {
@@ -72,9 +71,9 @@ async fn main() {
     let sdk_config = aws_config::load_from_env().await;
     let client = Client::new(&sdk_config);
     let read_q_name = std::env::var(QUEUE_NAME_ENV_VAR1).unwrap();
-    let q_task_handle = tokio::spawn(read_from_queue(read_q_name.clone(), client.clone()));
+    let q_task_handle = tokio::spawn(read_from_queue(read_q_name.clone(), client.clone(), 1));
     let read_q_name = std::env::var(QUEUE_NAME_ENV_VAR2).unwrap();
-    let fifo_q_task_handle = tokio::spawn(read_from_queue(read_q_name.clone(), client.clone()));
+    let fifo_q_task_handle = tokio::spawn(read_from_queue(read_q_name.clone(), client.clone(), 2));
     let (q_res, fifo_res) = tokio::join!(q_task_handle, fifo_q_task_handle);
     q_res.unwrap();
     fifo_res.unwrap();
