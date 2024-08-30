@@ -406,7 +406,7 @@ pub struct PortMapping {
     pub remote: (RemoteAddr, u16),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum RemoteAddr {
     // if the remote is given as an IPv4
     Ip(Ipv4Addr),
