@@ -391,11 +391,11 @@ pub(super) struct PortForwardArgs {
     #[arg(long)]
     pub context: Option<String>,
 
-    /// Mappings for port forwarding
-    /// Expected format is: '-L \[local_port:\]remote_ip_or_hostname:remote_port'
-    /// If the remote is given as an ip, this is parsed as soon as mirrord starts
+    /// Mappings for port forwarding.
+    /// Expected format is: '-L \[local_port:\]remote_ip_or_hostname:remote_port'.
+    /// If the remote is given as an ip, this is parsed as soon as mirrord starts.
     /// Otherwise, the remote is assumed to be a hostname and lookup is performed in the cluster
-    /// after a connection is made to the target
+    /// after a connection is made to the target.
     #[arg(short = 'L', long)]
     pub port_mappings: Vec<PortMapping>,
 }

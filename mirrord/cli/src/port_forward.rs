@@ -6,7 +6,7 @@ use std::{
 
 use futures::StreamExt;
 use mirrord_protocol::{
-    dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse},
+    dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse, LookupRecord},
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
@@ -289,42 +289,44 @@ impl PortForwarder {
                 }
             },
             DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(message)) => match message {
-                Ok(DnsLookup(record)) => {
-                    if record.len() == 1 {
-                        // pop oneshot, send string
-                        let resolved_ip = record.first().unwrap().ip;
-                        let Some((local_socket, channel)) = self.dns_oneshots.pop_front() else {
-                            return Err(PortForwardError::LookupReqNotFound(resolved_ip));
-                        };
-                        match channel.send(resolved_ip) {
-                            Ok(_) => (),
-                            Err(_) => {
-                                self.task_txs.remove(&local_socket);
-                                tracing::warn!("failed to send resolved ip {resolved_ip} to task on oneshot channel");
-                            }
-                        };
-                    } else {
-                        // lookup failed, close task and err
-                        let Some((local_socket, _channel)) = self.dns_oneshots.pop_front() else {
-                            // no ready task
-                            // LocalConnectionTask will fail when oneshot is dropped and handle
-                            // cleanup
-                            return Ok(());
-                        };
-                        self.task_txs.remove(&local_socket);
-                        let remote = self.raw_mappings.get(&local_socket);
-                        match remote {
-                            Some((remote, _)) => {
-                                tracing::warn!("failed to resolve remote hostname for {remote:?}")
-                            }
-                            None => unreachable!("remote always exists here"),
+                Ok(DnsLookup(record)) if !record.is_empty() => {
+                    // pop oneshot, send string
+                    let resolved_ipv4: Vec<&LookupRecord> = record
+                        .iter()
+                        .filter(|LookupRecord { ip, .. }| ip.is_ipv4())
+                        .collect();
+                    // use first IPv4 is it exists, otherwise use IPv6
+                    let resolved_ip = match resolved_ipv4.first() {
+                        Some(first) => first.ip,
+                        None => record.first().unwrap().ip,
+                    };
+                    let Some((local_socket, channel)) = self.dns_oneshots.pop_front() else {
+                        return Err(PortForwardError::LookupReqNotFound(resolved_ip));
+                    };
+                    match channel.send(resolved_ip) {
+                        Ok(_) => (),
+                        Err(_) => {
+                            self.task_txs.remove(&local_socket);
+                            tracing::warn!("failed to send resolved ip {resolved_ip} to task on oneshot channel");
                         }
-                    }
+                    };
                 }
-                Err(error) => {
-                    tracing::error!("failed to resolve hostname: {error}");
-                    // LocalConnectionTask will fail when oneshot is dropped and handle cleanup
-                    let _ = self.dns_oneshots.pop_front();
+                _ => {
+                    // lookup failed, close task and err
+                    let Some((local_socket, _channel)) = self.dns_oneshots.pop_front() else {
+                        tracing::warn!("failed to resolve remote hostname");
+                        // no ready task, LocalConnectionTask will fail when oneshot is dropped and
+                        // handle cleanup
+                        return Ok(());
+                    };
+                    self.task_txs.remove(&local_socket);
+                    let remote = self.raw_mappings.get(&local_socket);
+                    match remote {
+                        Some((remote, _)) => {
+                            tracing::warn!("failed to resolve remote hostname for {remote:?}")
+                        }
+                        None => unreachable!("remote always exists here"),
+                    }
                 }
             },
             DaemonMessage::LogMessage(log_message) => match log_message.level {
