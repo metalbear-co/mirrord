@@ -391,7 +391,11 @@ pub(super) struct PortForwardArgs {
     #[arg(long)]
     pub context: Option<String>,
 
-    /// Mappings for port forwarding
+    /// Mappings for port forwarding.
+    /// Expected format is: '-L \[local_port:\]remote_ip_or_hostname:remote_port'.
+    /// If the remote is given as an ip, this is parsed as soon as mirrord starts.
+    /// Otherwise, the remote is assumed to be a hostname and lookup is performed in the cluster
+    /// after a connection is made to the target.
     #[arg(short = 'L', long)]
     pub port_mappings: Vec<PortMapping>,
 }
@@ -399,7 +403,16 @@ pub(super) struct PortForwardArgs {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PortMapping {
     pub local: SocketAddr,
-    pub remote: SocketAddr,
+    pub remote: (RemoteAddr, u16),
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum RemoteAddr {
+    // if the remote is given as an IPv4
+    Ip(Ipv4Addr),
+    // if the remote needs DNS resolution, we'll delay until PortForwarder can use the
+    // AgentConnection
+    Hostname(String),
 }
 
 impl FromStr for PortMapping {
@@ -417,53 +430,46 @@ impl FromStr for PortMapping {
             }
         }
 
-        fn parse_ip(string: &str, original: &str) -> Result<Ipv4Addr, PortMappingParseErr> {
-            match string.parse::<Ipv4Addr>() {
-                Ok(ip) => Ok(ip),
-                Err(_error) => Err(PortMappingParseErr::IpParseErr(
-                    string.to_string(),
-                    original.to_string(),
-                )),
-            }
+        fn parse_remote_addr(string: &str) -> RemoteAddr {
+            string
+                .parse::<Ipv4Addr>()
+                .map(RemoteAddr::Ip)
+                .unwrap_or(RemoteAddr::Hostname(string.to_string()))
         }
 
         // expected format = local_port:dest_server:remote_port
         // alternatively,  = dest_server:remote_port
         let vec: Vec<&str> = string.split(':').collect();
-        let (local_port, remote_ip, remote_port) = match vec.as_slice() {
-            [local_port, remote_ip, remote_port] => {
+        let (local_port, remote_ip_str, remote_port) = match vec.as_slice() {
+            [local_port, remote_ip_str, remote_port] => {
                 let local_port = parse_port(local_port, string)?;
                 let remote_port = parse_port(remote_port, string)?;
-                let remote_ip = parse_ip(remote_ip, string)?;
-                (local_port, remote_ip, remote_port)
+                (local_port, remote_ip_str, remote_port)
             }
-            [remote_ip, remote_port] => {
+            [remote_ip_str, remote_port] => {
                 let remote_port = parse_port(remote_port, string)?;
-                let remote_ip = parse_ip(remote_ip, string)?;
-                (remote_port, remote_ip, remote_port)
+                (remote_port, remote_ip_str, remote_port)
             }
             _ => {
                 return Err(PortMappingParseErr::InvalidFormat(string.to_string()));
             }
         };
+        let remote_addr = parse_remote_addr(remote_ip_str);
 
         Ok(Self {
             local: SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), local_port),
-            remote: SocketAddr::new(IpAddr::V4(remote_ip), remote_port),
+            remote: (remote_addr, remote_port),
         })
     }
 }
 
 #[derive(Error, Debug, PartialEq)]
 pub enum PortMappingParseErr {
-    #[error("Invalid format of argument `{0}`, expected `[local-port:]remote-ipv4:remote-port`")]
+    #[error("Invalid format of argument `{0}`, expected `[local-port:]remote-ipv4-or-hostname:remote-port`")]
     InvalidFormat(String),
 
     #[error("Failed to parse port `{0}` in argument `{1}`")]
     PortParseErr(String, String),
-
-    #[error("Failed to parse IPv4 address `{0}` in argument `{1}`")]
-    IpParseErr(String, String),
 
     #[error("Port `0` is not allowed in argument `{0}`")]
     PortZeroInvalid(String),
@@ -741,16 +747,39 @@ mod tests {
     use super::*;
 
     #[rstest]
-    #[case("3030:152.37.110.132:3038", "127.0.0.1:3030", "152.37.110.132:3038")]
-    #[case("152.37.110.132:3038", "127.0.0.1:3038", "152.37.110.132:3038")]
-    fn parse_valid_mapping(
+    #[case("3030:152.37.110.132:3038", "127.0.0.1:3030", "152.37.110.132", "3038")]
+    #[case("152.37.110.132:3038", "127.0.0.1:3038", "152.37.110.132", "3038")]
+    fn parse_valid_mapping_ip(
         #[case] input: &str,
         #[case] expected_local: &str,
-        #[case] expected_remote: &str,
+        #[case] expected_remote_addr: &str,
+        #[case] expected_remote_port: &str,
     ) {
         let expected = PortMapping {
             local: expected_local.parse().unwrap(),
-            remote: expected_remote.parse().unwrap(),
+            remote: (
+                RemoteAddr::Ip(expected_remote_addr.parse().unwrap()),
+                expected_remote_port.parse().unwrap(),
+            ),
+        };
+        assert_eq!(PortMapping::from_str(input).unwrap(), expected);
+    }
+
+    #[rstest]
+    #[case("3030:its.a.hostname:3038", "127.0.0.1:3030", "its.a.hostname", "3038")]
+    #[case("stringy.gov.biz:3038", "127.0.0.1:3038", "stringy.gov.biz", "3038")]
+    fn parse_valid_mapping_hostname(
+        #[case] input: &str,
+        #[case] expected_local: &str,
+        #[case] expected_remote_addr: &str,
+        #[case] expected_remote_port: &str,
+    ) {
+        let expected = PortMapping {
+            local: expected_local.parse().unwrap(),
+            remote: (
+                RemoteAddr::Hostname(expected_remote_addr.to_string()),
+                expected_remote_port.parse().unwrap(),
+            ),
         };
         assert_eq!(PortMapping::from_str(input).unwrap(), expected);
     }
@@ -759,8 +788,7 @@ mod tests {
     #[case("3030:152.37.110.132:3038:2027")]
     #[case("152.37.110.132:3030:3038")]
     #[case("3030:152.37.110.132:0")]
-    #[case("3o3o:152.37.11o.132:3o38")]
-    #[case("3030:152110.132:3038")]
+    #[case("3o3o:152.37.110.132:3o38")]
     #[case("30303030:152.37.110.132:3038")]
     #[case("")]
     #[should_panic]

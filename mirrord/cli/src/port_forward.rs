@@ -1,11 +1,12 @@
 use std::{
     collections::{HashMap, VecDeque},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };
 
 use futures::StreamExt;
 use mirrord_protocol::{
+    dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse, LookupRecord},
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
@@ -29,19 +30,22 @@ use tokio_stream::{wrappers::TcpListenerStream, StreamMap};
 use tokio_util::io::ReaderStream;
 use tracing::Level;
 
-use crate::{connection::AgentConnection, PortMapping};
+use crate::{connection::AgentConnection, PortMapping, RemoteAddr};
 
 pub struct PortForwarder {
     /// communicates with the agent (only TCP supported)
     agent_connection: AgentConnection,
     /// associates local ports with destination ports
-    mappings: HashMap<SocketAddr, SocketAddr>,
+    /// destinations may contain unresolved hostnames
+    raw_mappings: HashMap<SocketAddr, (RemoteAddr, u16)>,
     /// accepts connections from the user app in the form of a stream
     listeners: StreamMap<SocketAddr, TcpListenerStream>,
     /// oneshot channels for sending connection IDs to tasks and the associated local address
-    oneshots: VecDeque<(SocketAddr, oneshot::Sender<ConnectionId>)>,
+    id_oneshots: VecDeque<(SocketAddr, oneshot::Sender<ConnectionId>)>,
+    /// oneshot channels for sending resolved hostnames to tasks and the associated local address
+    dns_oneshots: VecDeque<(SocketAddr, oneshot::Sender<IpAddr>)>,
     /// identifies a pair of mapped socket addresses by their corresponding connection ID
-    sockets: HashMap<ConnectionId, PortMapping>,
+    sockets: HashMap<ConnectionId, ResolvedPortMapping>,
     /// identifies task senders by their corresponding local socket address
     /// for sending data from the remote socket to the local address
     task_txs: HashMap<SocketAddr, Sender<Vec<u8>>>,
@@ -55,20 +59,33 @@ pub struct PortForwarder {
     ping_pong_timeout: Instant,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedPortMapping {
+    pub local: SocketAddr,
+    pub remote: SocketAddr,
+}
+
 /// Used by tasks for individual forwarding connections to send instructions to [`PortForwarder`]'s
 /// main loop.
 #[derive(Debug)]
 enum PortForwardMessage {
-    /// A request to make outgoing connection to the remote peer.
+    /// A request to perform lookup on the given hostname at the remote peer.
     /// Sent by the task only after receiving first batch of data from the user.
-    /// The task waits for [`ConnectionId`] on the other end of the [`oneshot`] channel.
-    Connect(PortMapping, oneshot::Sender<ConnectionId>),
+    /// The task waits for [`SocketAddr`] on the other end of the [`oneshot`] channel.
+    Lookup(SocketAddr, String, oneshot::Sender<IpAddr>),
+
+    /// A request to make outgoing connection to the remote peer.
+    /// Sent by the task only after receiving first batch of data from the user and after hostname
+    /// resolution (if applicable). The task waits for [`ConnectionId`] on the other end of the
+    /// [`oneshot`] channel.
+    Connect(ResolvedPortMapping, oneshot::Sender<ConnectionId>),
 
     /// Data received from the user in the connection with the given id.
     Send(ConnectionId, Vec<u8>),
 
-    /// A request to close the remote connection with the given id, if it exists.
-    Close(PortMapping, Option<ConnectionId>),
+    /// A request to close the remote connection with the given id, if it exists, and the local
+    /// socket.
+    Close(SocketAddr, Option<ConnectionId>),
 }
 
 impl PortForwarder {
@@ -78,16 +95,19 @@ impl PortForwarder {
     ) -> Result<Self, PortForwardError> {
         // open tcp listener for local addrs
         let mut listeners = StreamMap::with_capacity(parsed_mappings.len());
-        let mut mappings = HashMap::with_capacity(parsed_mappings.len());
+        let mut mappings: HashMap<SocketAddr, (RemoteAddr, u16)> =
+            HashMap::with_capacity(parsed_mappings.len());
 
         if parsed_mappings.is_empty() {
             return Err(PortForwardError::NoMappingsError());
         }
+
         for mapping in parsed_mappings {
             if listeners.contains_key(&mapping.local) {
                 // two mappings shared a key thus keys were not unique
                 return Err(PortForwardError::PortMapSetupError(mapping.local));
             }
+
             let listener = TcpListener::bind(mapping.local).await;
             match listener {
                 Ok(listener) => {
@@ -102,9 +122,10 @@ impl PortForwarder {
 
         Ok(Self {
             agent_connection,
-            mappings,
+            raw_mappings: mappings,
             listeners,
-            oneshots: VecDeque::new(),
+            id_oneshots: VecDeque::new(),
+            dns_oneshots: VecDeque::new(),
             sockets: HashMap::new(),
             task_txs: HashMap::new(),
             internal_msg_tx,
@@ -133,7 +154,6 @@ impl PortForwarder {
             }
             _ => return Err(PortForwardError::AgentConnectionFailed),
         }
-        tracing::trace!("port forwarding setup complete");
 
         loop {
             select! {
@@ -182,13 +202,13 @@ impl PortForwarder {
                                 "unexpectedly received Unix address for socket during setup".into(),
                             ));
                         };
-                        let Some((local_socket, channel)) = self.oneshots.pop_front() else {
+                        let Some((local_socket, channel)) = self.id_oneshots.pop_front() else {
                             return Err(PortForwardError::ReadyTaskNotFound(
                                 remote_socket,
                                 connection_id,
                             ));
                         };
-                        let port_map = PortMapping {
+                        let port_map = ResolvedPortMapping {
                             local: local_socket,
                             remote: remote_socket,
                         };
@@ -212,12 +232,12 @@ impl PortForwarder {
                     Err(error) => {
                         tracing::error!("failed to connect to a remote address: {error}");
                         // LocalConnectionTask will fail when oneshot is dropped and handle cleanup
-                        let _ = self.oneshots.pop_front();
+                        let _ = self.id_oneshots.pop_front();
                     }
                 },
                 DaemonTcpOutgoing::Read(res) => match res {
                     Ok(res) => {
-                        let Some(&PortMapping {
+                        let Some(&ResolvedPortMapping {
                             local: local_socket,
                             remote: _,
                         }) = self.sockets.get(&res.connection_id)
@@ -254,7 +274,7 @@ impl PortForwarder {
                     }
                 },
                 DaemonTcpOutgoing::Close(connection_id) => {
-                    let Some(PortMapping {
+                    let Some(ResolvedPortMapping {
                         local: local_socket,
                         remote: remote_socket,
                     }) = self.sockets.remove(&connection_id)
@@ -266,6 +286,47 @@ impl PortForwarder {
                     tracing::trace!(
                         "connection closed for port mapping {local_socket}:{remote_socket}, connection {connection_id}"
                     );
+                }
+            },
+            DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(message)) => match message {
+                Ok(DnsLookup(record)) if !record.is_empty() => {
+                    // pop oneshot, send string
+                    let resolved_ipv4: Vec<&LookupRecord> = record
+                        .iter()
+                        .filter(|LookupRecord { ip, .. }| ip.is_ipv4())
+                        .collect();
+                    // use first IPv4 is it exists, otherwise use IPv6
+                    let resolved_ip = match resolved_ipv4.first() {
+                        Some(first) => first.ip,
+                        None => record.first().unwrap().ip,
+                    };
+                    let Some((local_socket, channel)) = self.dns_oneshots.pop_front() else {
+                        return Err(PortForwardError::LookupReqNotFound(resolved_ip));
+                    };
+                    match channel.send(resolved_ip) {
+                        Ok(_) => (),
+                        Err(_) => {
+                            self.task_txs.remove(&local_socket);
+                            tracing::warn!("failed to send resolved ip {resolved_ip} to task on oneshot channel");
+                        }
+                    };
+                }
+                _ => {
+                    // lookup failed, close task and err
+                    let Some((local_socket, _channel)) = self.dns_oneshots.pop_front() else {
+                        tracing::warn!("failed to resolve remote hostname");
+                        // no ready task, LocalConnectionTask will fail when oneshot is dropped and
+                        // handle cleanup
+                        return Ok(());
+                    };
+                    self.task_txs.remove(&local_socket);
+                    let remote = self.raw_mappings.get(&local_socket);
+                    match remote {
+                        Some((remote, _)) => {
+                            tracing::warn!("failed to resolve remote hostname for {remote:?}")
+                        }
+                        None => unreachable!("remote always exists here"),
+                    }
                 }
             },
             DaemonMessage::LogMessage(log_message) => match log_message.level {
@@ -308,7 +369,7 @@ impl PortForwarder {
         };
 
         let task_internal_tx = self.internal_msg_tx.clone();
-        let Some(remote_socket) = self.mappings.get(&local_socket).cloned() else {
+        let Some(remote_socket) = self.raw_mappings.get(&local_socket).cloned() else {
             unreachable!("mappings are always created before this point")
         };
         let (response_tx, response_rx) = mpsc::channel(256);
@@ -334,9 +395,18 @@ impl PortForwarder {
         message: PortForwardMessage,
     ) -> Result<(), PortForwardError> {
         match message {
+            PortForwardMessage::Lookup(local, node, oneshot) => {
+                self.dns_oneshots.push_back((local, oneshot));
+                self.agent_connection
+                    .sender
+                    .send(ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
+                        node,
+                    }))
+                    .await?;
+            }
             PortForwardMessage::Connect(port_mapping, oneshot) => {
                 let remote_address = SocketAddress::Ip(port_mapping.remote);
-                self.oneshots.push_back((port_mapping.local, oneshot));
+                self.id_oneshots.push_back((port_mapping.local, oneshot));
                 self.agent_connection
                     .sender
                     .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(
@@ -355,8 +425,8 @@ impl PortForwarder {
                     )))
                     .await?;
             }
-            PortForwardMessage::Close(port_mapping, connection_id) => {
-                self.task_txs.remove(&port_mapping.local);
+            PortForwardMessage::Close(local_socket, connection_id) => {
+                self.task_txs.remove(&local_socket);
                 if let Some(connection_id) = connection_id {
                     self.agent_connection
                         .sender
@@ -384,7 +454,7 @@ impl LocalConnectionTask {
     pub fn new(
         stream: TcpStream,
         local_socket: SocketAddr,
-        remote_socket: SocketAddr,
+        remote_socket: (RemoteAddr, u16),
         task_internal_tx: Sender<PortForwardMessage>,
         response_rx: Receiver<Vec<u8>>,
     ) -> Self {
@@ -404,7 +474,8 @@ impl LocalConnectionTask {
     }
 
     pub async fn run(&mut self) -> Result<(), PortForwardError> {
-        let (oneshot_tx, oneshot_rx) = oneshot::channel::<ConnectionId>();
+        let (id_oneshot_tx, id_oneshot_rx) = oneshot::channel::<ConnectionId>();
+        let (dns_oneshot_tx, dns_oneshot_rx) = oneshot::channel::<IpAddr>();
 
         // lazy connection: wait until data starts
         let first = match self.read_stream.next().await {
@@ -414,18 +485,56 @@ impl LocalConnectionTask {
                 // stream ended without sending data
                 let _ = self
                     .task_internal_tx
-                    .send(PortForwardMessage::Close(self.port_mapping.clone(), None))
+                    .send(PortForwardMessage::Close(self.port_mapping.local, None))
                     .await;
                 return Ok(());
             }
         };
 
+        let (resolved_ip, port): (IpAddr, u16) = match &self.port_mapping.remote {
+            (RemoteAddr::Ip(ip), port) => (IpAddr::V4(*ip), *port),
+            (RemoteAddr::Hostname(hostname), port) => {
+                match self
+                    .task_internal_tx
+                    .send(PortForwardMessage::Lookup(
+                        self.port_mapping.local,
+                        hostname.clone(),
+                        dns_oneshot_tx,
+                    ))
+                    .await
+                {
+                    Ok(_) => (),
+                    Err(error) => {
+                        tracing::warn!(
+                    "failed to send hostname lookup request to PortForwarder on internal channel: {error}"
+                );
+                    }
+                }
+                // wait on oneshot for reply
+                match dns_oneshot_rx.await {
+                    Ok(ip) => (ip, *port),
+                    Err(error) => {
+                        tracing::warn!(
+                            "failed to receive resolved hostname from PortForwarder on internal channel: {error}"
+                        );
+                        let _ = self
+                            .task_internal_tx
+                            .send(PortForwardMessage::Close(self.port_mapping.local, None))
+                            .await;
+                        return Ok(());
+                    }
+                }
+            }
+        };
+        let resolved_remote = SocketAddr::new(resolved_ip, port);
+        let resolved_mapping = ResolvedPortMapping {
+            local: self.port_mapping.local,
+            remote: resolved_remote,
+        };
+
         match self
             .task_internal_tx
-            .send(PortForwardMessage::Connect(
-                self.port_mapping.clone(),
-                oneshot_tx,
-            ))
+            .send(PortForwardMessage::Connect(resolved_mapping, id_oneshot_tx))
             .await
         {
             Ok(_) => (),
@@ -435,7 +544,7 @@ impl LocalConnectionTask {
                 );
             }
         };
-        let connection_id = match oneshot_rx.await {
+        let connection_id = match id_oneshot_rx.await {
             Ok(connection_id) => connection_id,
             Err(error) => {
                 tracing::warn!(
@@ -443,7 +552,7 @@ impl LocalConnectionTask {
                 );
                 let _ = self
                     .task_internal_tx
-                    .send(PortForwardMessage::Close(self.port_mapping.clone(), None))
+                    .send(PortForwardMessage::Close(self.port_mapping.local, None))
                     .await;
                 return Ok(());
             }
@@ -508,7 +617,7 @@ impl LocalConnectionTask {
         let _ = self
             .task_internal_tx
             .send(PortForwardMessage::Close(
-                self.port_mapping.clone(),
+                self.port_mapping.local,
                 Some(connection_id),
             ))
             .await;
@@ -544,6 +653,9 @@ pub enum PortForwardError {
     #[error("no task for socket {0} ready to receive connection ID: `{1}`")]
     ReadyTaskNotFound(SocketAddr, ConnectionId),
 
+    #[error("no task ready to receive resolved ip: `{0}`")]
+    LookupReqNotFound(IpAddr),
+
     #[error("failed to establish connection with remote process: `{0}`")]
     ConnectionError(String),
 }
@@ -556,6 +668,8 @@ impl From<mpsc::error::SendError<ClientMessage>> for PortForwardError {
 
 #[cfg(test)]
 mod test {
+    use std::net::{IpAddr, SocketAddr};
+
     use mirrord_protocol::{
         outgoing::{
             tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -569,7 +683,9 @@ mod test {
         sync::mpsc,
     };
 
-    use crate::{connection::AgentConnection, port_forward::PortForwarder, PortMapping};
+    use crate::{
+        connection::AgentConnection, port_forward::PortForwarder, PortMapping, RemoteAddr,
+    };
 
     #[tokio::test]
     async fn test_port_forwarding() {
@@ -584,19 +700,18 @@ mod test {
             sender: client_msg_tx,
             receiver: daemon_msg_rx,
         };
+        let remote_destination = (RemoteAddr::Ip("152.37.40.40".parse().unwrap()), 3038);
         let parsed_mappings = vec![PortMapping {
             local: local_destination,
-            remote: "152.37.40.40:3038".parse().unwrap(),
+            remote: remote_destination,
         }];
 
-        let mut port_forwarder = PortForwarder::new(agent_connection, parsed_mappings)
-            .await
-            .unwrap();
-        tokio::spawn(async move { port_forwarder.run().await.unwrap() });
-
-        // send data to socket
-        let mut stream = TcpStream::connect(local_destination).await.unwrap();
-        stream.write_all(b"data-my-beloved").await.unwrap();
+        tokio::spawn(async move {
+            let mut port_forwarder = PortForwarder::new(agent_connection, parsed_mappings)
+                .await
+                .unwrap();
+            port_forwarder.run().await.unwrap()
+        });
 
         // expect handshake procedure
         let expected = Some(ClientMessage::SwitchProtocolVersion(
@@ -611,6 +726,10 @@ mod test {
             .unwrap();
         let expected = Some(ClientMessage::ReadyForLogs);
         assert_eq!(client_msg_rx.recv().await, expected);
+
+        // send data to socket
+        let mut stream = TcpStream::connect(local_destination).await.unwrap();
+        stream.write_all(b"data-my-beloved").await.unwrap();
 
         // expect Connect on client_msg_rx
         let remote_address = SocketAddress::Ip("152.37.40.40:3038".parse().unwrap());
@@ -664,12 +783,12 @@ mod test {
 
     #[tokio::test]
     async fn test_multiple_mappings_forwarding() {
-        let remote_destination_1 = "152.37.40.40:1018".parse().unwrap();
+        let remote_destination_1 = (RemoteAddr::Ip("152.37.40.40".parse().unwrap()), 1018);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_destination_1 = listener.local_addr().unwrap();
         drop(listener);
 
-        let remote_destination_2 = "152.37.40.40:2028".parse().unwrap();
+        let remote_destination_2 = (RemoteAddr::Ip("152.37.40.40".parse().unwrap()), 2028);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_destination_2 = listener.local_addr().unwrap();
         drop(listener);
@@ -684,21 +803,20 @@ mod test {
         let parsed_mappings = vec![
             PortMapping {
                 local: local_destination_1,
-                remote: remote_destination_1,
+                remote: remote_destination_1.clone(),
             },
             PortMapping {
                 local: local_destination_2,
-                remote: remote_destination_2,
+                remote: remote_destination_2.clone(),
             },
         ];
 
-        let mut port_forwarder = PortForwarder::new(agent_connection, parsed_mappings)
-            .await
-            .unwrap();
-        tokio::spawn(async move { port_forwarder.run().await.unwrap() });
-
-        // send data to first socket
-        let mut stream_1 = TcpStream::connect(local_destination_1).await.unwrap();
+        tokio::spawn(async move {
+            let mut port_forwarder = PortForwarder::new(agent_connection, parsed_mappings)
+                .await
+                .unwrap();
+            port_forwarder.run().await.unwrap()
+        });
 
         // expect handshake procedure
         let expected = Some(ClientMessage::SwitchProtocolVersion(
@@ -714,10 +832,17 @@ mod test {
         let expected = Some(ClientMessage::ReadyForLogs);
         assert_eq!(client_msg_rx.recv().await, expected);
 
+        // send data to first socket
+        let mut stream_1 = TcpStream::connect(local_destination_1).await.unwrap();
+
         // expect each Connect on client_msg_rx with correct mappings when data has been written
         // (lazy)
         stream_1.write_all(b"data-from-1").await.unwrap();
-        let remote_address_1 = SocketAddress::Ip(remote_destination_1);
+        let RemoteAddr::Ip(ip) = remote_destination_1.0 else {
+            unreachable!()
+        };
+        let remote_address_1 =
+            SocketAddress::Ip(SocketAddr::new(IpAddr::V4(ip), remote_destination_1.1));
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
             remote_address: remote_address_1.clone(),
         }));
@@ -729,7 +854,11 @@ mod test {
 
         // send data to second socket
         let mut stream_2 = TcpStream::connect(local_destination_2).await.unwrap();
-        let remote_address_2 = SocketAddress::Ip(remote_destination_2);
+        let RemoteAddr::Ip(ip) = remote_destination_2.0 else {
+            unreachable!()
+        };
+        let remote_address_2 =
+            SocketAddress::Ip(SocketAddr::new(IpAddr::V4(ip), remote_destination_2.1));
         stream_2.write_all(b"data-from-2").await.unwrap();
 
         let expected = ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
