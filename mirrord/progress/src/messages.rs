@@ -9,7 +9,7 @@ pub const MULTIPOD_WARNING: (&str, &str) = (
         Support for multi-pod impersonation requires the mirrord operator, \
         which is part of mirrord for Teams.\
         You can get started with mirrord for Teams at this link: \
-        https://mirrord.dev/docs/overview/teams/",
+        https://mirrord.dev/docs/overview/teams/?utm_source=multipodwarn",
 );
 
 /// Warning when user tries to run `mirrord exec docker` (for example), instead of the correct
