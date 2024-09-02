@@ -8,7 +8,7 @@ use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
     feature::split_queues::{SplitQueuesConfig, SqsMessageFilter},
-    target::{Target, TargetConfig},
+    target::{Target, TargetConfig, TargetDisplay},
 };
 use schemars::JsonSchema;
 use semver::Version;
@@ -47,14 +47,16 @@ impl TargetCrd {
     ///
     /// It's used to connect to a resource through the operator.
     pub fn urlfied_name(target: &Target) -> String {
-        let (type_name, target, container) = match target {
-            Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
-            Target::Pod(target) => ("pod", &target.pod, &target.container),
-            Target::Rollout(target) => ("rollout", &target.rollout, &target.container),
-            Target::Job(target) => ("job", &target.job, &target.container),
-            Target::CronJob(target) => ("cronjob", &target.cron_job, &target.container),
-            Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
-            Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
+        let type_name = target.type_();
+
+        let (target, container) = match target {
+            Target::Deployment(target) => (&target.deployment, &target.container),
+            Target::Pod(target) => (&target.pod, &target.container),
+            Target::Rollout(target) => (&target.rollout, &target.container),
+            Target::Job(target) => (&target.job, &target.container),
+            Target::CronJob(target) => (&target.cron_job, &target.container),
+            Target::StatefulSet(target) => (&target.stateful_set, &target.container),
+            Target::Targetless => return type_name.to_string(),
         };
 
         if let Some(container) = container {

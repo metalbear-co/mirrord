@@ -16,25 +16,20 @@ pub async fn mirrord_ls(#[future] service_for_mirrord_ls: KubeService) {
     assert!(res.success());
     let stdout = process.get_stdout().await;
     let targets: Vec<String> = serde_json::from_str(&stdout).unwrap();
-    let re =
-        Regex::new(r"^(pod|deployment|stateful_set|cron_job|job)/.+(/container/.+)?$").unwrap();
-    targets
-        .iter()
-        .for_each(|output| assert!(re.is_match(output)));
+    let re = Regex::new(r"^(pod|deployment|statefulset|cronjob|job)/.+(/container/.+)?$").unwrap();
+    targets.iter().for_each(|output| {
+        assert!(
+            re.is_match(output),
+            "output line {output} does not match regex {re}"
+        );
+    });
 
-    assert!(targets
-        .iter()
-        .any(|output| output.starts_with(&format!("pod/{}", service.name))));
-    assert!(targets
-        .iter()
-        .any(|output| output.starts_with(&format!("deployment/{}", service.name))));
-    assert!(targets
-        .iter()
-        .any(|output| output.starts_with(&format!("stateful_set/{}", service.name))));
-    assert!(targets
-        .iter()
-        .any(|output| output.starts_with(&format!("cron_job/{}", service.name))));
-    assert!(targets
-        .iter()
-        .any(|output| output.starts_with(&format!("job/{}", service.name))));
+    for target_type in ["pod", "deployment", "statefulset", "cronjob", "job"] {
+        assert!(
+            targets
+                .iter()
+                .any(|output| output.starts_with(&format!("{target_type}/{}", service.name))),
+            "no {target_type} target was found in the output",
+        );
+    }
 }
