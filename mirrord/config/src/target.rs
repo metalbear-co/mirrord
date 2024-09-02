@@ -312,7 +312,8 @@ impl Target {
 /// It's mainly implemented using the `impl_target_display` macro, except for [`Target`]
 /// and `TargetHandle`, which manually implement this.
 pub trait TargetDisplay {
-    /// The string version of a [`Target`]'s type, e.g. `Pod` -> `"Pod"`.
+    /// The string version of a [`Target`]'s type, e.g. `Pod` -> `"pod"`, `StatefulSet` ->
+    /// `"statefulset"`.
     fn type_(&self) -> &str;
 
     /// The `name` of a [`Target`], e.g. `"pod-of-beans"`.
@@ -324,10 +325,10 @@ pub trait TargetDisplay {
 
 /// Implements the [`TargetDisplay`] and [`fmt::Display`] traits for a target type.
 macro_rules! impl_target_display {
-    ($struct_name:ident, $target_type:ident) => {
+    ($struct_name:ident, $target_type:ident, $target_type_display:literal) => {
         impl TargetDisplay for $struct_name {
             fn type_(&self) -> &str {
-                stringify!($target_type)
+                $target_type_display
             }
 
             fn name(&self) -> &str {
@@ -355,12 +356,12 @@ macro_rules! impl_target_display {
     };
 }
 
-impl_target_display!(PodTarget, pod);
-impl_target_display!(DeploymentTarget, deployment);
-impl_target_display!(RolloutTarget, rollout);
-impl_target_display!(JobTarget, job);
-impl_target_display!(CronJobTarget, cron_job);
-impl_target_display!(StatefulSetTarget, stateful_set);
+impl_target_display!(PodTarget, pod, "pod");
+impl_target_display!(DeploymentTarget, deployment, "deployment");
+impl_target_display!(RolloutTarget, rollout, "rollout");
+impl_target_display!(JobTarget, job, "job");
+impl_target_display!(CronJobTarget, cron_job, "cronjob");
+impl_target_display!(StatefulSetTarget, stateful_set, "statefulset");
 
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -377,7 +378,6 @@ impl fmt::Display for Target {
 }
 
 impl TargetDisplay for Target {
-    #[tracing::instrument(level = "trace", ret)]
     fn type_(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
@@ -390,7 +390,6 @@ impl TargetDisplay for Target {
         }
     }
 
-    #[tracing::instrument(level = "trace", ret)]
     fn name(&self) -> &str {
         match self {
             Target::Targetless => "targetless",
@@ -403,7 +402,6 @@ impl TargetDisplay for Target {
         }
     }
 
-    #[tracing::instrument(level = "trace", ret)]
     fn container(&self) -> Option<&String> {
         match self {
             Target::Targetless => None,
