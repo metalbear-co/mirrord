@@ -138,6 +138,10 @@ where
             actions: {
                 let mut actions = HashSet::new();
                 actions.insert(IdeAction::Link {
+                    label: "Get started (read the docs)".to_string(),
+                    link: "https://mirrord.dev/docs/overview/teams/?utm_source=multipodwarn&utm_medium=plugin".to_string(),
+                });
+                actions.insert(IdeAction::Link {
                     label: "Try it now".to_string(),
                     link: "https://app.metalbear.co/".to_string(),
                 });
@@ -146,9 +150,9 @@ where
             },
         })?);
         // This is CLI Only because the extensions also implement this check with better messaging.
-        progress.print( "When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
+        progress.print("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
         progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
-        progress.print("You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/overview/teams/?utm_source=climultipod");
+        progress.print("You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/overview/teams/?utm_source=multipodwarn&utm_medium=cli");
     }
 
     let k8s_api = KubernetesAPI::create(config)

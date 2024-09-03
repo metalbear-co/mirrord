@@ -289,7 +289,7 @@ pub(crate) enum CliError {
     #[error("Feature `{0}` requires using mirrord operator")]
     #[diagnostic(help(
         "The mirrord operator is part of mirrord for Teams. \
-        You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/overview/teams/?utm_source=errreqop"
+        You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/overview/teams/?utm_source=errreqop&utm_medium=cli"
     ))]
     FeatureRequiresOperatorError(String),
 
@@ -308,7 +308,7 @@ pub(crate) enum CliError {
 
     If you want to run without the operator, please set `\"operator\": false` in the mirrord configuration file.
 
-    Please remember that some features are supported only when using mirrord operator (https://mirrord.dev/docs/overview/teams/#supported-features?utm_source=erropfailed).{GENERAL_HELP}"))]
+    Please remember that some features are supported only when using mirrord operator (https://mirrord.dev/docs/overview/teams/#supported-features?utm_source=erropfailed&utm_medium=cli).{GENERAL_HELP}"))]
     OperatorApiFailed(OperatorOperation, kube::Error),
 
     #[error("mirrord operator rejected {0}: {1}")]

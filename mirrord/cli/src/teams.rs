@@ -1,6 +1,7 @@
 use tokio::process::Command;
 
-const MIRRORD_FOR_TEAMS_URL: &str = "https://mirrord.dev/docs/overview/teams/?utm_source=teamscmd";
+const MIRRORD_FOR_TEAMS_URL: &str =
+    "https://mirrord.dev/docs/overview/teams/?utm_source=teamscmd&utm_medium=cli";
 
 #[cfg(not(target_os = "macos"))]
 fn get_open_command() -> Command {
