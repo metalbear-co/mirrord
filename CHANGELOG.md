@@ -8,6 +8,78 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.116.0](https://github.com/metalbear-co/mirrord/tree/3.116.0) - 2024-09-03
+
+
+### Added
+
+- Add initial and very basic implementation of vpn
+  [#2387](https://github.com/metalbear-co/mirrord/issues/2387)
+- Add warning when user tries to mirrord exec [container], pointing them to use
+  mirrord container instead.
+  [#2599](https://github.com/metalbear-co/mirrord/issues/2599)
+- Add support for hostname resolution in port-forward.
+  [#2696](https://github.com/metalbear-co/mirrord/issues/2696)
+- Add support for all_of, any_of composite http filters in config.
+  [#2699](https://github.com/metalbear-co/mirrord/issues/2699)
+
+
+### Changed
+
+- mirrord now produces a more descriptive error message when it fails to call
+  authentication command specified in the kubeconfig.
+  [#2575](https://github.com/metalbear-co/mirrord/issues/2575)
+- SQS CRD field names changed to camelCase.
+
+
+### Fixed
+
+- Start on deprecating operator target list.
+  [#2706](https://github.com/metalbear-co/mirrord/issues/2706)
+
+
+### Internal
+
+- Adds new (operator) targets for mirrord ls test.
+- Change permissions to use new `SubjectAccessReview` api instead of
+  `impersonate`.
+
+  Added:
+  ```yaml
+  - apiGroups:
+    - authorization.k8s.io
+    resources:
+    - subjectaccessreviews
+    verbs:
+    - create
+  ```
+
+  Removed:
+  ```yaml
+  - apiGroups:
+    - ""
+    - authentication.k8s.io
+    resources:
+    - groups
+    - users
+    - userextras/accesskeyid
+    - userextras/arn
+    - userextras/canonicalarn
+    - userextras/sessionname
+    - userextras/iam.gke.io/user-assertion
+    - userextras/user-assertion.cloud.google.com
+    - userextras/principalid
+    - userextras/oid
+    - userextras/username
+    - userextras/licensekey
+    verbs:
+    - impersonate
+  ```
+- Fix some typos
+- Fixed target type formatting and E2E test.
+- Fixed urlfied form of target types.
+- Rejecting empty composite HTTP filters during config validation.
+
 ## [3.115.1](https://github.com/metalbear-co/mirrord/tree/3.115.1) - 2024-08-21
 
 
