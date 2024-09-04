@@ -460,6 +460,9 @@ unsafe extern "C" fn dns_configuration_copy_detour() -> *mut dns_config_t {
     })
 }
 
+/// Because we create our pointers with boxes and not alloc ourselfs the easies way to safely
+/// drop everthing is just to recreate back the boxes that we casted into C structs as part of
+/// [`dns_configuration_copy_detour`]
 #[cfg(target_os = "macos")]
 #[hook_guard_fn]
 unsafe extern "C" fn dns_configuration_free_detour(config: *mut dns_config_t) {
