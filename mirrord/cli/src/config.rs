@@ -684,30 +684,19 @@ pub(super) struct ContainerArgs {
     /// Parameters to be passed to mirrord.
     pub params: ExecParams,
 
-    #[clap(long)]
-    pub ext_proxy_addr: Option<IpAddr>,
-
-    #[clap(long)]
-    pub ext_proxy_listen: Option<IpAddr>,
-
     /// Container command to be executed
     #[arg(trailing_var_arg = true)]
     pub exec: Vec<String>,
 }
 
 impl ContainerArgs {
-    pub fn into_parts(self) -> (RuntimeArgs, ExecParams, (Option<IpAddr>, Option<IpAddr>)) {
-        let ContainerArgs {
-            params,
-            exec,
-            ext_proxy_addr,
-            ext_proxy_listen,
-        } = self;
+    pub fn into_parts(self) -> (RuntimeArgs, ExecParams) {
+        let ContainerArgs { params, exec } = self;
 
         let runtime_args =
             RuntimeArgs::parse_from(std::iter::once("mirrord container --".into()).chain(exec));
 
-        (runtime_args, params, (ext_proxy_addr, ext_proxy_listen))
+        (runtime_args, params)
     }
 }
 

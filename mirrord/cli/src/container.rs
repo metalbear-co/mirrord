@@ -11,10 +11,7 @@ use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
 use mirrord_config::{
-    external_proxy::{
-        MIRRORD_EXTERNAL_ADDRESS_ENV, MIRRORD_EXTERNAL_LISTEN_ENV,
-        MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV, MIRRORD_EXTERNAL_TLS_KEY_ENV,
-    },
+    external_proxy::{MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV, MIRRORD_EXTERNAL_TLS_KEY_ENV},
     internal_proxy::{
         MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE_ENV, MIRRORD_INTPROXY_CLIENT_TLS_KEY_ENV,
         MIRRORD_INTPROXY_CONTAINER_MODE_ENV,
@@ -208,18 +205,10 @@ pub(crate) async fn container_command(
 
     progress.warning("mirrord container is currently an unstable feature");
 
-    let (runtime_args, exec_params, (ext_proxy_addr, ext_proxy_listen)) =
-        container_args.into_parts();
+    let (runtime_args, exec_params) = container_args.into_parts();
 
     for (name, value) in exec_params.as_env_vars()? {
         std::env::set_var(name, value);
-    }
-
-    if let Some(ext_proxy_addr) = ext_proxy_addr {
-        std::env::set_var(MIRRORD_EXTERNAL_ADDRESS_ENV, ext_proxy_addr.to_string());
-    }
-    if let Some(ext_proxy_listen) = ext_proxy_listen {
-        std::env::set_var(MIRRORD_EXTERNAL_LISTEN_ENV, ext_proxy_listen.to_string());
     }
 
     std::env::set_var(

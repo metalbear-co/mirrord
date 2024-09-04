@@ -6,8 +6,6 @@ use serde::Serialize;
 
 use crate::config::source::MirrordConfigSource;
 
-pub static MIRRORD_EXTERNAL_ADDRESS_ENV: &str = "MIRRORD_EXTERNAL_ADDRESS";
-pub static MIRRORD_EXTERNAL_LISTEN_ENV: &str = "MIRRORD_EXTERNAL_LISTEN";
 pub static MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV: &str = "MIRRORD_EXTERNAL_TLS_CERTIFICATE";
 pub static MIRRORD_EXTERNAL_TLS_KEY_ENV: &str = "MIRRORD_EXTERNAL_TLS_KEY";
 
@@ -29,10 +27,16 @@ pub static MIRRORD_EXTERNAL_TLS_KEY_ENV: &str = "MIRRORD_EXTERNAL_TLS_KEY";
 #[config(map_to = "ExternalProxyFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct ExternalProxyConfig {
-    #[config(env = MIRRORD_EXTERNAL_LISTEN_ENV)]
+    /// ### external_proxy.listen {#external_proxy-listen}
+    ///
+    /// Provide a specific address to listen to for external proxy
+    /// (will try and bind local machine ip if not specified)
     pub listen: Option<IpAddr>,
 
-    #[config(env = MIRRORD_EXTERNAL_ADDRESS_ENV)]
+    /// ### external_proxy.address {#external_proxy-address}
+    ///
+    /// Specify an address that is accessible from within the container runtime to the host machine
+    /// (example can be the resolved address of `host.docker.internal`)
     pub address: Option<IpAddr>,
 
     /// <!--${internal}-->
