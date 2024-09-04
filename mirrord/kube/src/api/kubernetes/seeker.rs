@@ -153,6 +153,7 @@ impl KubeResourceSeeker<'_> {
             let mut params =  ListParams {
                 label_selector: Some("app!=mirrord,!operator.metalbear.co/owner".to_string()),
                 field_selector: field_selector.map(ToString::to_string),
+                limit: Some(500),
                 ..Default::default()
             };
 
