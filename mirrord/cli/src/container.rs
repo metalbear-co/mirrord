@@ -156,6 +156,16 @@ async fn create_sidecar_intproxy(
             )
         })?;
 
+    let mut sidecar_watcher_command = Command::new(std::env::current_exe().unwrap());
+
+    sidecar_watcher_command
+        .args(["sidecar-watcher", &runtime_binary, &sidecar_container_id])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .stdin(std::process::Stdio::null());
+
+    let _ = sidecar_watcher_command.spawn();
+
     let mut retry_strategy = ExponentialBackoff::from_millis(100)
         .max_delay(Duration::from_secs(10))
         .map(jitter);

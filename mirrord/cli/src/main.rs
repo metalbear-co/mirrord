@@ -55,6 +55,7 @@ mod extract;
 mod internal_proxy;
 mod operator;
 pub mod port_forward;
+mod sidecar_watcher;
 mod teams;
 mod util;
 mod verify_config;
@@ -564,6 +565,10 @@ fn main() -> miette::Result<()> {
                 extension_exec(*args, watch).await?;
             }
             Commands::InternalProxy => internal_proxy::proxy(watch).await?,
+            Commands::SidecarWatcher {
+                runtime,
+                container_id,
+            } => sidecar_watcher::watcher(runtime, &container_id).await?,
             Commands::VerifyConfig(args) => verify_config(args).await?,
             Commands::Completions(args) => {
                 let mut cmd: clap::Command = Cli::command();
@@ -600,7 +605,7 @@ fn init_ext_error_handler(commands: &Commands) -> bool {
             let _ = miette::set_hook(Box::new(|_| Box::new(JSONReportHandler::new())));
             true
         }
-        Commands::InternalProxy => true,
+        Commands::InternalProxy | Commands::ExternalProxy => true,
         _ => false,
     }
 }

@@ -65,6 +65,12 @@ pub(super) enum Commands {
     #[command(hide = true, name = "intproxy")]
     InternalProxy,
 
+    #[command(hide = true)]
+    SidecarWatcher {
+        runtime: ContainerRuntime,
+        container_id: String,
+    },
+
     /// Port forwarding - UNSTABLE FEATURE
     #[command(name = "port-forward")]
     PortForward(Box<PortForwardArgs>),
