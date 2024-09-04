@@ -1095,6 +1095,7 @@ pub(super) fn gethostname() -> Detour<&'static CString> {
 }
 
 /// Retrieves the contents of remote's `/etc/resolv.conf`
+#[cfg(target_os = "macos")]
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn read_remote_resolv_conf() -> Detour<Vec<u8>> {
     let resolv_path = PathBuf::from("/etc/resolv.conf");
