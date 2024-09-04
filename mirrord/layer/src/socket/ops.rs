@@ -1473,7 +1473,7 @@ fn create_dns_resolver_t(
 /// This only performs free operations on values that are created in [`create_dns_resolver_t`]
 #[cfg(target_os = "macos")]
 #[mirrord_layer_macro::instrument(level = "trace")]
-pub(super) unsafe fn free_dns_resolver_t(resolver: *mut dns_resolver_t) {
+unsafe fn free_dns_resolver_t(resolver: *mut dns_resolver_t) {
     let resolver = Box::from_raw(resolver);
 
     let nameservers = Vec::from_raw_parts(resolver.nameserver, resolver.n_nameserver as usize, 0);
@@ -1496,6 +1496,10 @@ pub(super) unsafe fn free_dns_resolver_t(resolver: *mut dns_resolver_t) {
 #[cfg(target_os = "macos")]
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn remote_dns_configuration_copy() -> Detour<*mut dns_config_t> {
+    if !crate::setup().dns_enabled() {
+        return Detour::Bypass(Bypass::LocalDns);
+    }
+
     let remote = read_remote_resolv_conf()?;
 
     // TODO: possibly create a different error rather than the almost correct
@@ -1541,4 +1545,23 @@ pub(super) fn remote_dns_configuration_copy() -> Detour<*mut dns_config_t> {
     }));
 
     Detour::Success(config)
+}
+
+/// Because we create our pointers with boxes and not alloc ourselfs the easies way to safely
+/// drop everthing is just to recreate back the boxes that we casted into C structs as part of
+/// [`dns_configuration_copy_detour`]
+pub(super) unsafe fn remote_dns_configuration_free(config: *mut dns_config_t) -> Detour<()> {
+    if !crate::setup().dns_enabled() {
+        return Detour::Bypass(Bypass::LocalDns);
+    }
+
+    // It should drop it automatically after recreating the boxes and vecs
+
+    let config = Box::from_raw(config);
+
+    Vec::from_raw_parts(config.resolver, config.n_resolver as usize, 0)
+        .into_iter()
+        .for_each(|resolver| free_dns_resolver_t(resolver));
+
+    Detour::Success(())
 }
