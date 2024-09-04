@@ -1094,13 +1094,13 @@ pub(super) fn gethostname() -> Detour<&'static CString> {
     HOSTNAME.get_or_detour_init(remote_hostname_string)
 }
 
-/// Retrieves the `resolv_conf` from the agent's `/etc/resolv.conf`
+/// Retrieves the contents of remote's `/etc/resolv.conf`
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn read_remote_resolv_conf() -> Detour<Vec<u8>> {
-    let hostname_path = PathBuf::from("/etc/resolv.conf");
+    let resolv_path = PathBuf::from("/etc/resolv.conf");
 
     let OpenFileResponse { fd } = file::ops::RemoteFile::remote_open(
-        hostname_path,
+        resolv_path,
         OpenOptionsInternal {
             read: true,
             ..Default::default()
@@ -1422,6 +1422,8 @@ pub(super) fn sendmsg(
     Detour::Success(sent_result)
 }
 
+/// helper to reconstruct a [`dns_resolver_t`] for [`remote_dns_configuration_copy`]
+/// NOTE: do free any memory "leaked" in this function over at [`free_dns_resolver_t`]
 #[cfg(target_os = "macos")]
 fn create_dns_resolver_t(
     nameservers: impl IntoIterator<Item = socket2::SockAddr>,
@@ -1430,18 +1432,23 @@ fn create_dns_resolver_t(
 ) -> Box<dns_resolver_t> {
     let nameserver: Vec<*mut libc::sockaddr> = nameservers
         .into_iter()
+        // Remember to free in [`free_dns_resolver_t`]
         .map(|sockaddr| Box::into_raw(Box::new(sockaddr.as_storage())).cast())
         .collect();
 
+    // Remember to free in [`free_dns_resolver_t`]
     let (nameserver, n_nameserver, _) = nameserver.into_raw_parts();
 
     let search: Vec<*mut i8> = search
         .into_iter()
+        // Remember to free in [`free_dns_resolver_t`]
         .map(|sockaddr| sockaddr.into_raw().cast())
         .collect();
 
+    // Remember to free in [`free_dns_resolver_t`]
     let (search, n_search, _) = search.into_raw_parts();
 
+    // Remember to free in [`free_dns_resolver_t`]
     Box::new(dns_resolver_t {
         domain: std::ptr::null_mut(),
         n_nameserver: n_nameserver as i32,
@@ -1451,6 +1458,7 @@ fn create_dns_resolver_t(
         search,
         n_sortaddr: 0,
         sortaddr: std::ptr::null_mut(),
+        // Remember to free in [`free_dns_resolver_t`]
         options: options.into_raw(),
         timeout: 0,
         search_order: 0,
@@ -1461,6 +1469,7 @@ fn create_dns_resolver_t(
     })
 }
 
+/// This only performs free operations on values that are created in [`create_dns_resolver_t`]
 #[cfg(target_os = "macos")]
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) unsafe fn free_dns_resolver_t(resolver: *mut dns_resolver_t) {
@@ -1481,12 +1490,15 @@ pub(super) unsafe fn free_dns_resolver_t(resolver: *mut dns_resolver_t) {
     let _ = CString::from_raw(resolver.options);
 }
 
+/// reconstruct a macos specific [`dns_config_t`] api from parsing the `/etc/resolv.conf` file from
+/// remote container and fill only the first resolver in the response
 #[cfg(target_os = "macos")]
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn remote_dns_configuration_copy() -> Detour<*mut dns_config_t> {
     let remote = read_remote_resolv_conf()?;
 
-    // TODO: replace error
+    // TODO: possibly create a different error rather than the almost correct
+    // [`HookError::DNSNoName`]
     let resolv_conf = resolv_conf::Config::parse(remote).map_err(|_error| HookError::DNSNoName)?;
 
     let options = CString::new(format!(

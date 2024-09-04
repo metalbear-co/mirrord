@@ -444,13 +444,20 @@ pub(super) unsafe extern "C" fn sendmsg_detour(
     }
 }
 
-/// This implementation is actually enough for Netty case, since it seems to use the "standard"
-/// approach if resolver returned here is null TODO: return a real resolver based on remote
-/// resolv.conf
+/// Not a faithful reproduction of what [`FN_DNS_CONFIGURATION_COPY`] is supposed to do, see
+/// [`remote_dns_configuration_copy`].
 #[cfg(target_os = "macos")]
 #[hook_guard_fn]
 unsafe extern "C" fn dns_configuration_copy_detour() -> *mut dns_config_t {
-    remote_dns_configuration_copy().unwrap_or_bypass_with(|_| FN_DNS_CONFIGURATION_COPY())
+    remote_dns_configuration_copy().unwrap_or_bypass_with(|_| {
+        Box::into_raw(Box::new(dns_config_t {
+            n_resolver: 0,
+            resolver: std::ptr::null_mut(),
+            n_scoped_resolver: 0,
+            scoped_resolver: std::ptr::null_mut(),
+            reserved: [0; 5],
+        }))
+    })
 }
 
 #[cfg(target_os = "macos")]
