@@ -10,6 +10,8 @@ use errno::{set_errno, Errno};
 use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 
+#[cfg(target_os = "macos")]
+use super::apple_dnsinfo::*;
 use super::ops::*;
 use crate::{detour::DetourGuard, hooks::HookManager, replace};
 
@@ -442,176 +444,13 @@ pub(super) unsafe extern "C" fn sendmsg_detour(
     }
 }
 
-#[cfg(target_os = "macos")]
-#[allow(non_camel_case_types)]
-mod macos {
-    use alloc::ffi::CString;
-
-    #[repr(C, packed(4))]
-    pub struct dns_sortaddr_t {
-        pub address: libc::in_addr,
-        pub mask: libc::in_addr,
-    }
-
-    #[repr(C, packed(4))]
-    pub struct dns_resolver_t {
-        pub domain: *mut libc::c_char,
-        pub n_nameserver: i32,
-        pub nameserver: *mut *mut libc::sockaddr,
-        pub port: u16,
-        pub n_search: i32,
-        pub search: *mut *mut libc::c_char,
-        pub n_sortaddr: i32,
-        pub sortaddr: *mut *mut dns_sortaddr_t,
-        pub options: *mut libc::c_char,
-        pub timeout: u32,
-        pub search_order: u32,
-        pub if_index: u32,
-        pub flags: u32,
-        pub reach_flags: u32,
-        pub reserved: [u32; 5],
-    }
-
-    #[repr(C, packed(4))]
-    pub struct dns_config_t {
-        pub n_resolver: i32,
-        pub resolver: *mut *mut dns_resolver_t,
-        pub n_scoped_resolver: i32,
-        pub scoped_resolver: *mut *mut dns_resolver_t,
-        pub reserved: [u32; 5],
-    }
-
-    pub fn create_dns_resolver(
-        nameservers: impl IntoIterator<Item = socket2::SockAddr>,
-        search: impl IntoIterator<Item = CString>,
-        options: CString,
-    ) -> Box<dns_resolver_t> {
-        let nameserver: Vec<*mut libc::sockaddr> = nameservers
-            .into_iter()
-            .map(|sockaddr| Box::into_raw(Box::new(sockaddr.as_storage())).cast())
-            .collect();
-
-        let (nameserver, n_nameserver, _) = nameserver.into_raw_parts();
-
-        let search: Vec<*mut i8> = search
-            .into_iter()
-            .map(|sockaddr| sockaddr.into_raw().cast())
-            .collect();
-
-        let (search, n_search, _) = search.into_raw_parts();
-
-        Box::new(dns_resolver_t {
-            domain: std::ptr::null_mut(),
-            n_nameserver: n_nameserver as i32,
-            nameserver,
-            port: 0,
-            n_search: n_search as i32,
-            search,
-            n_sortaddr: 0,
-            sortaddr: std::ptr::null_mut(),
-            options: options.into_raw(),
-            timeout: 0,
-            search_order: 0,
-            if_index: 0,
-            flags: 0,
-            reach_flags: 2,
-            reserved: [0; 5],
-        })
-    }
-
-    pub unsafe fn free_dns_resolver(resolver: *mut dns_resolver_t) {
-        let resolver = Box::from_raw(resolver);
-
-        let nameservers =
-            Vec::from_raw_parts(resolver.nameserver, resolver.n_nameserver as usize, 0);
-
-        for nameserver in nameservers {
-            let _ = Box::from_raw(nameserver);
-        }
-
-        let searchs = Vec::from_raw_parts(resolver.search, resolver.n_search as usize, 0);
-
-        for search in searchs {
-            let _ = CString::from_raw(search);
-        }
-
-        let _ = CString::from_raw(resolver.options);
-    }
-}
-
-#[cfg(target_os = "macos")]
-use macos::*;
-
 /// This implementation is actually enough for Netty case, since it seems to use the "standard"
 /// approach if resolver returned here is null TODO: return a real resolver based on remote
 /// resolv.conf
 #[cfg(target_os = "macos")]
 #[hook_guard_fn]
 unsafe extern "C" fn dns_configuration_copy_detour() -> *mut dns_config_t {
-    use std::net::SocketAddr;
-
-    use mirrord_protocol::file::OpenOptionsInternal;
-    use resolv_conf::ScopedIp;
-
-    use crate::{detour::Detour, file::ops::RemoteFile};
-
-    let remote = RemoteFile::remote_open(
-        "/etc/resolv.conf".into(),
-        OpenOptionsInternal {
-            read: true,
-            ..Default::default()
-        },
-    );
-
-    let mut nameservers = Vec::new();
-    let mut search: Vec<CString> = Vec::new();
-    let mut options = None;
-
-    if let Detour::Success(remote) = remote {
-        if let Detour::Success(res) = RemoteFile::remote_read(remote.fd, 5000) {
-            #[allow(clippy::indexing_slicing)]
-            let resolv_conf = resolv_conf::Config::parse(&res.bytes[..(res.read_amount as usize)])
-                .expect("Failed to parse config");
-
-            if let Some(search_items) = resolv_conf.get_search() {
-                search.extend(
-                    search_items
-                        .iter()
-                        .filter_map(|search| CString::new(search.as_str()).ok()),
-                );
-            }
-
-            options = CString::new(format!(
-                "ndots:{ndots} attempts:{attempts}",
-                ndots = resolv_conf.ndots,
-                attempts = resolv_conf.attempts
-            ))
-            .ok();
-
-            nameservers.extend(resolv_conf.nameservers.into_iter().map(|nameserver| {
-                socket2::SockAddr::from(match nameserver {
-                    ScopedIp::V4(addr) => SocketAddr::new(addr.into(), 53),
-                    ScopedIp::V6(addr, _) => SocketAddr::new(addr.into(), 53),
-                })
-            }));
-        }
-
-        let _ = RemoteFile::remote_close(remote.fd);
-    }
-
-    let resolver = Box::into_raw(Box::new(create_dns_resolver(
-        nameservers,
-        search,
-        options.unwrap_or_default(),
-    )));
-
-    Box::into_raw(Box::new(dns_config_t {
-        n_resolver: 1,
-        resolver: resolver as *mut *mut dns_resolver_t,
-        n_scoped_resolver: 0,
-        scoped_resolver: std::ptr::null_mut(),
-        reserved: [0; 5],
-    }))
+    remote_dns_configuration_copy().unwrap_or_bypass_with(|_| FN_DNS_CONFIGURATION_COPY())
 }
 
 #[cfg(target_os = "macos")]
@@ -623,7 +462,7 @@ unsafe extern "C" fn dns_configuration_free_detour(config: *mut dns_config_t) {
 
     Vec::from_raw_parts(config.resolver, config.n_resolver as usize, 0)
         .into_iter()
-        .for_each(|resolver| free_dns_resolver(resolver));
+        .for_each(|resolver| free_dns_resolver_t(resolver));
 }
 
 pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
