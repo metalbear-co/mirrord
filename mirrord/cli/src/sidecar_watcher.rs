@@ -1,23 +1,57 @@
 use std::time::Duration;
 
 use tokio::process::Command;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use crate::{config::ContainerRuntime, error::Result};
 
 pub async fn watcher(runtime: ContainerRuntime, container_id: &str) -> Result<()> {
-    let mut command = Command::new(runtime.to_string());
-    command.args(["attach", "--no-stdin", container_id]);
+    let mut retry_strategy = ExponentialBackoff::from_millis(100)
+        .max_delay(Duration::from_secs(10))
+        .map(jitter);
 
-    match command.output().await {
-        Ok(output) => {
-            if !output.stderr.is_empty()
-                && let Ok(stderr) = String::from_utf8(output.stderr)
-            {
-                tracing::error!(?stderr, "error after running attach command");
+    loop {
+        let mut command = Command::new(runtime.to_string());
+        command.args(["attach", "--no-stdin", container_id]);
+
+        match command.output().await {
+            Ok(output) => {
+                if !output.stderr.is_empty()
+                    && let Ok(stderr) = String::from_utf8(output.stderr)
+                {
+                    tracing::error!(
+                        ?container_id,
+                        ?runtime,
+                        ?stderr,
+                        "error after running attach command"
+                    );
+
+                    break;
+                }
             }
-        }
-        Err(error) => {
-            tracing::error!(?error, "error running <runtime> attach <container_id>");
+            Err(error) => {
+                tracing::error!(
+                    ?container_id,
+                    ?error,
+                    ?runtime,
+                    "error running <runtime> attach <container_id>"
+                );
+
+                if let Some(backoff_timeout) = retry_strategy.next() {
+                    tokio::time::sleep(backoff_timeout).await
+                } else {
+                    tracing::error!(
+                        ?container_id,
+                        ?error,
+                        ?runtime,
+                        "timout reached for waiting for <runtime> attach to <container_id>"
+                    );
+
+                    // TODO: maybe throw an error though the stdout is detached, the tracing is
+                    // mainly for mirrord console
+                    return Ok(());
+                }
+            }
         }
     }
 
