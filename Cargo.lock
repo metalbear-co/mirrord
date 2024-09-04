@@ -3982,6 +3982,7 @@ dependencies = [
  "num-traits",
  "rand",
  "regex",
+ "resolv-conf",
  "rstest",
  "serde_json",
  "socket2",
