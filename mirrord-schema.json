@@ -773,6 +773,15 @@
       "description": "Configuration for the external proxy mirrord spawns when using the `mirrord container` command. This proxy is used to allow the internal proxy running in sidecar to connect to the mirrord agent.\n\nIf you get `ConnectionRefused` errors, increasing the timeouts a bit might solve the issue.\n\n```json { \"external_proxy\": { \"start_idle_timeout\": 30, \"idle_timeout\": 5 } } ```",
       "type": "object",
       "properties": {
+        "address": {
+          "title": "external_proxy.address {#external_proxy-address}",
+          "description": "Specify an address that is accessible from within the container runtime to the host machine (example can be the resolved address of `host.docker.internal`)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "ip"
+        },
         "idle_timeout": {
           "title": "external_proxy.idle_timeout {#external_proxy-idle_timeout}",
           "description": "How much time to wait while we don't have any active connections before exiting.\n\nCommon cases would be running a chain of processes that skip using the layer and don't connect to the proxy.\n\n```json { \"external_proxy\": { \"idle_timeout\": 30 } } ```",
@@ -782,6 +791,15 @@
           ],
           "format": "uint64",
           "minimum": 0.0
+        },
+        "listen": {
+          "title": "external_proxy.listen {#external_proxy-listen}",
+          "description": "Provide a specific address to listen to for external proxy (will try and bind local machine ip if not specified)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "ip"
         },
         "log_destination": {
           "title": "external_proxy.log_destination {#external_proxy-log_destination}",
