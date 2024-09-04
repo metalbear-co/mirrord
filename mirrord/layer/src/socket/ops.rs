@@ -1550,6 +1550,8 @@ pub(super) fn remote_dns_configuration_copy() -> Detour<*mut dns_config_t> {
 /// Because we create our pointers with boxes and not alloc ourselfs the easies way to safely
 /// drop everthing is just to recreate back the boxes that we casted into C structs as part of
 /// [`dns_configuration_copy_detour`]
+#[cfg(target_os = "macos")]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) unsafe fn remote_dns_configuration_free(config: *mut dns_config_t) -> Detour<()> {
     if !crate::setup().dns_enabled() {
         return Detour::Bypass(Bypass::LocalDns);
