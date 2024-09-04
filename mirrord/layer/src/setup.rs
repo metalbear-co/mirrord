@@ -117,11 +117,6 @@ impl LayerSetup {
         &self.config.feature.network.outgoing
     }
 
-    #[cfg(target_os = "macos")]
-    pub fn dns_enabled(&self) -> bool {
-        self.config.feature.network.dns.enabled
-    }
-
     pub fn experimental(&self) -> &ExperimentalConfig {
         &self.config.experimental
     }

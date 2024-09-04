@@ -449,30 +449,30 @@ pub(super) unsafe extern "C" fn sendmsg_detour(
 #[cfg(target_os = "macos")]
 #[hook_guard_fn]
 unsafe extern "C" fn dns_configuration_copy_detour() -> *mut dns_config_t {
-    use crate::detour::Bypass;
-
-    remote_dns_configuration_copy().unwrap_or_bypass_with(|bypass| match bypass {
-        Bypass::LocalDns => FN_DNS_CONFIGURATION_COPY(),
-        _ => Box::into_raw(Box::new(dns_config_t {
+    remote_dns_configuration_copy().unwrap_or_bypass_with(|_| {
+        Box::into_raw(Box::new(dns_config_t {
             n_resolver: 0,
             resolver: std::ptr::null_mut(),
             n_scoped_resolver: 0,
             scoped_resolver: std::ptr::null_mut(),
             reserved: [0; 5],
-        })),
+        }))
     })
 }
 
-/// Not a faithful reproduction of what [`FN_DNS_CONFIGURATION_FREE`] is supposed to do, see
-/// [`remote_dns_configuration_free`].
+/// Because we create our pointers with boxes and not alloc ourselfs the easies way to safely
+/// drop everthing is just to recreate back the boxes that we casted into C structs as part of
+/// [`dns_configuration_copy_detour`]
 #[cfg(target_os = "macos")]
 #[hook_guard_fn]
 unsafe extern "C" fn dns_configuration_free_detour(config: *mut dns_config_t) {
-    use crate::detour::{Bypass, Detour};
+    // It should drop it automatically after recreating the boxes and vecs
 
-    if let Detour::Bypass(Bypass::LocalDns) = remote_dns_configuration_free(config) {
-        FN_DNS_CONFIGURATION_FREE(config)
-    }
+    let config = Box::from_raw(config);
+
+    Vec::from_raw_parts(config.resolver, config.n_resolver as usize, 0)
+        .into_iter()
+        .for_each(|resolver| free_dns_resolver_t(resolver));
 }
 
 pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
