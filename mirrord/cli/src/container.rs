@@ -11,7 +11,10 @@ use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
 use mirrord_config::{
-    external_proxy::{MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV, MIRRORD_EXTERNAL_TLS_KEY_ENV},
+    external_proxy::{
+        MIRRORD_EXTERNAL_ADDRESS_ENV, MIRRORD_EXTERNAL_LISTEN_ENV,
+        MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV, MIRRORD_EXTERNAL_TLS_KEY_ENV,
+    },
     internal_proxy::{
         MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE_ENV, MIRRORD_INTPROXY_CLIENT_TLS_KEY_ENV,
         MIRRORD_INTPROXY_CONTAINER_MODE_ENV,
@@ -25,7 +28,7 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::Level;
 
 use crate::{
-    config::{ContainerCommand, ExecParams, RuntimeArgs},
+    config::{ContainerArgs, ContainerCommand},
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     container::command_builder::RuntimeCommandBuilder,
     error::{ContainerError, Result},
@@ -134,13 +137,8 @@ async fn create_sidecar_intproxy(
     sidecar_command.add_env(MIRRORD_INTPROXY_CONTAINER_MODE_ENV, "true");
     sidecar_command.add_envs(connection_info);
 
-    let sidecar_container_command = ContainerCommand::run([
-        "--rm",
-        "-d",
-        &config.container.cli_image,
-        "mirrord",
-        "intproxy",
-    ]);
+    let sidecar_container_command =
+        ContainerCommand::run(["-d", &config.container.cli_image, "mirrord", "intproxy"]);
 
     let (runtime_binary, sidecar_args) = sidecar_command
         .with_command(sidecar_container_command)
@@ -193,16 +191,25 @@ async fn create_sidecar_intproxy(
 /// Main entry point for the `mirrord container` command.
 /// This spawns: "agent" - "external proxy" - "intproxy sidecar" - "execution container"
 pub(crate) async fn container_command(
-    runtime_args: RuntimeArgs,
-    exec_params: ExecParams,
+    container_args: ContainerArgs,
     watch: drain::Watch,
 ) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord container");
 
     progress.warning("mirrord container is currently an unstable feature");
 
+    let (runtime_args, exec_params, (ext_proxy_addr, ext_proxy_listen)) =
+        container_args.into_parts();
+
     for (name, value) in exec_params.as_env_vars()? {
         std::env::set_var(name, value);
+    }
+
+    if let Some(ext_proxy_addr) = ext_proxy_addr {
+        std::env::set_var(MIRRORD_EXTERNAL_ADDRESS_ENV, ext_proxy_addr.to_string());
+    }
+    if let Some(ext_proxy_listen) = ext_proxy_listen {
+        std::env::set_var(MIRRORD_EXTERNAL_LISTEN_ENV, ext_proxy_listen.to_string());
     }
 
     std::env::set_var(
@@ -244,7 +251,10 @@ pub(crate) async fn container_command(
     let _external_proxy_tls_guards = if config.external_proxy.tls_certificate.is_none()
         || config.external_proxy.tls_key.is_none()
     {
-        let external_proxy_subject_alt_names = local_ip()
+        let external_proxy_subject_alt_names = config
+            .external_proxy
+            .address
+            .or_else(|| local_ip().ok())
             .map(|item| item.to_string())
             .into_iter()
             .collect();

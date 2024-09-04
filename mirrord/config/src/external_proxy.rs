@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{net::IpAddr, path::PathBuf};
 
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -6,6 +6,8 @@ use serde::Serialize;
 
 use crate::config::source::MirrordConfigSource;
 
+pub static MIRRORD_EXTERNAL_ADDRESS_ENV: &str = "MIRRORD_EXTERNAL_ADDRESS";
+pub static MIRRORD_EXTERNAL_LISTEN_ENV: &str = "MIRRORD_EXTERNAL_LISTEN";
 pub static MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV: &str = "MIRRORD_EXTERNAL_TLS_CERTIFICATE";
 pub static MIRRORD_EXTERNAL_TLS_KEY_ENV: &str = "MIRRORD_EXTERNAL_TLS_KEY";
 
@@ -27,6 +29,12 @@ pub static MIRRORD_EXTERNAL_TLS_KEY_ENV: &str = "MIRRORD_EXTERNAL_TLS_KEY";
 #[config(map_to = "ExternalProxyFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct ExternalProxyConfig {
+    #[config(env = MIRRORD_EXTERNAL_LISTEN_ENV)]
+    pub listen: Option<IpAddr>,
+
+    #[config(env = MIRRORD_EXTERNAL_ADDRESS_ENV)]
+    pub address: Option<IpAddr>,
+
     /// <!--${internal}-->
     ///
     /// Certificate path to be used for wrapping external proxy tcp listener with a tcp acceptor

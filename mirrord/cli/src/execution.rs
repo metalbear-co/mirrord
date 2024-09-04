@@ -375,7 +375,7 @@ impl MirrordExecution {
 
         let stdout = proxy_process.stdout.take().expect("stdout was piped");
 
-        let address: SocketAddr = BufReader::new(stdout)
+        let mut address: SocketAddr = BufReader::new(stdout)
             .lines()
             .next_line()
             .await
@@ -393,6 +393,10 @@ impl MirrordExecution {
                     "failed to parse port number printed by proxy: {e}"
                 ))
             })?;
+
+        if let Some(addr) = config.external_proxy.address {
+            address.set_ip(addr);
+        }
 
         // Provide details for layer to connect to agent via internal proxy
         env_vars.insert(

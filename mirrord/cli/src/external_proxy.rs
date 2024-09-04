@@ -102,7 +102,11 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
 
     let tls_acceptor = create_external_proxy_tls_acceptor(&config).await?;
     let listener = create_listen_socket(SocketAddr::new(
-        local_ip().unwrap_or_else(|_| Ipv4Addr::UNSPECIFIED.into()),
+        config
+            .external_proxy
+            .listen
+            .or_else(|| local_ip().ok())
+            .unwrap_or_else(|| Ipv4Addr::UNSPECIFIED.into()),
         0,
     ))
     .map_err(ExternalProxyError::ListenerSetup)?;
