@@ -8,6 +8,18 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.116.1](https://github.com/metalbear-co/mirrord/tree/3.116.1) - 2024-09-04
+
+
+### Fixed
+
+- Fixed upload of mirrord binaries' shasums to homebrew repository in the
+  release action.
+  [#homebrew-shasum-ci](https://github.com/metalbear-co/mirrord/issues/homebrew-shasum-ci)
+- Fix mirrord ls hanging by making so `KubeResourceSeeker` will list different
+  kinds of resources sequentially instead of in parallel.
+  [#2724](https://github.com/metalbear-co/mirrord/issues/2724)
+
 ## [3.116.0](https://github.com/metalbear-co/mirrord/tree/3.116.0) - 2024-09-03
 
 
