@@ -124,7 +124,12 @@ impl AgentConnection {
             }
 
             Some(AgentConnectInfo::ExternalProxy(proxy_addr)) => {
-                let proxy_addr: SocketAddr = proxy_addr.parse()?;
+                let proxy_addr: SocketAddr = proxy_addr.parse().map_err(|error| {
+                    tracing::error!(%proxy_addr, %error, "there was a problem parsing proxy_addr");
+
+                    AgentConnectionError::NoConnectionMethod
+                })?;
+
                 let socket = TcpSocket::new_v4()?;
                 socket.set_keepalive(true)?;
                 socket.set_nodelay(true)?;
