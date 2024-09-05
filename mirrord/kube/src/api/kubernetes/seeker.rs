@@ -55,13 +55,13 @@ impl KubeResourceSeeker<'_> {
             .simple_list_resource::<StatefulSet>("statefulset")
             .await?;
 
-        Ok(pods
+        Ok(deployments
             .into_iter()
-            .chain(deployments)
             .chain(rollouts)
-            .chain(jobs)
-            .chain(cronjobs)
             .chain(statefulsets)
+            .chain(cronjobs)
+            .chain(jobs)
+            .chain(pods)
             .collect())
     }
 
