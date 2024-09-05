@@ -1,0 +1,1 @@
+Fixed `mirrord ls` hanging when there is a lot of possible targets in the cluster.
