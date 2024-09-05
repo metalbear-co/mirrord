@@ -5,7 +5,7 @@ use std::{
     fs::File,
     io,
     io::BufReader,
-    net::{IpAddr, SocketAddr, ToSocketAddrs},
+    net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -89,7 +89,7 @@ pub enum ConnectionTlsError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentConnectInfo {
     /// Connect to agent through `mirrord extproxy`.
-    ExternalProxy(String),
+    ExternalProxy(SocketAddr),
     /// Connect to the agent through the operator.
     Operator(OperatorSession),
     /// Connect directly to the agent by name and port using k8s port forward.
@@ -124,11 +124,6 @@ impl AgentConnection {
             }
 
             Some(AgentConnectInfo::ExternalProxy(proxy_addr)) => {
-                let proxy_addr: SocketAddr = proxy_addr
-                    .to_socket_addrs()?
-                    .next()
-                    .ok_or_else(|| AgentConnectionError::NoConnectionMethod)?;
-
                 let socket = TcpSocket::new_v4()?;
                 socket.set_keepalive(true)?;
                 socket.set_nodelay(true)?;
@@ -171,7 +166,6 @@ impl AgentConnection {
                     .connect_tcp
                     .as_ref()
                     .ok_or(AgentConnectionError::NoConnectionMethod)?;
-
                 let stream = TcpStream::connect(address).await?;
                 wrap_raw_connection(stream)
             }

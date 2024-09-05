@@ -40,9 +40,8 @@ pub struct ExternalProxyConfig {
     /// ### external_proxy.address {#external_proxy-address}
     ///
     /// Specify an address that is accessible from within the container runtime to the host machine
-    /// (example can be `host.docker.internal` and `external_proxy.listen` is set to 127.0.0.1 will
-    /// use docker bridge for communication)
-    pub address: Option<String>,
+    /// (example can be the resolved address of `host.docker.internal`)
+    pub address: Option<IpAddr>,
 
     /// <!--${internal}-->
     ///
