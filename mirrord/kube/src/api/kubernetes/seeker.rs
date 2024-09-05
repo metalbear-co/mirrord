@@ -164,7 +164,7 @@ impl KubeResourceSeeker<'_> {
                     yield Ok(resource);
                 }
 
-                if let Some(continue_token) = resource.metadata.continue_ {
+                if let Some(continue_token) = resource.metadata.continue_.filter(|token| !token.is_empty()) {
                     params = params.continue_token(&continue_token);
                 } else {
                     break;
