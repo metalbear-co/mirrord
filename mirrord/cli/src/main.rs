@@ -540,10 +540,16 @@ fn main() -> miette::Result<()> {
 
     let (signal, watch) = drain::channel();
 
+    // There are situations where even if running "ext" commands that shouldn't log, we want those
+    // to log to be able to debug issues.
+    let force_log = std::env::var("MIRRORD_FORCE_LOG")
+        .map(|s| s.parse().unwrap_or(false))
+        .unwrap_or(false);
+
     let res: Result<(), CliError> = rt.block_on(async move {
         if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
             mirrord_console::init_async_logger(&console_addr, watch.clone(), 124).await?;
-        } else if !init_ext_error_handler(&cli.commands) {
+        } else if force_log || !init_ext_error_handler(&cli.commands) {
             registry()
                 .with(fmt::layer().with_writer(std::io::stderr))
                 .with(EnvFilter::from_default_env())

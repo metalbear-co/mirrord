@@ -10,6 +10,8 @@ use errno::{set_errno, Errno};
 use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 
+#[cfg(target_os = "macos")]
+use super::apple_dnsinfo::*;
 use super::ops::*;
 use crate::{detour::DetourGuard, hooks::HookManager, replace};
 
@@ -442,68 +444,35 @@ pub(super) unsafe extern "C" fn sendmsg_detour(
     }
 }
 
-#[cfg(target_os = "macos")]
-#[allow(non_camel_case_types)]
-mod macos {
-    #[repr(C, align(4))]
-    pub struct dns_sortaddr_t {
-        pub address: libc::in_addr,
-        pub mask: libc::in_addr,
-    }
-
-    #[repr(C, align(4))]
-    pub struct dns_resolver_t {
-        pub domain: *mut libc::c_char,
-        pub n_nameserver: i32,
-        pub nameserver: *mut *mut libc::sockaddr,
-        pub port: u16,
-        pub n_search: i32,
-        pub search: *mut *mut libc::c_char,
-        pub n_sortaddr: i32,
-        pub sortaddr: *mut *mut dns_sortaddr_t,
-        pub options: *mut libc::c_char,
-        pub timeout: u32,
-        pub search_order: u32,
-        pub if_index: u32,
-        pub flags: u32,
-        pub reach_flags: u32,
-        pub reserved: [u32; 5],
-    }
-
-    #[repr(C, align(4))]
-    pub struct dns_config_t {
-        pub n_resolver: i32,
-        pub resolver: *mut *mut dns_resolver_t,
-        pub n_scoped_resolver: i32,
-        pub scoped_resolver: *mut *mut dns_resolver_t,
-        pub reserved: [u32; 5],
-    }
-}
-
-#[cfg(target_os = "macos")]
-use macos::*;
-
-/// This implementation is actually enough for Netty case, since it seems to use the "standard"
-/// approach if resolver returned here is null TODO: return a real resolver based on remote
-/// resolv.conf
+/// Not a faithful reproduction of what [`FN_DNS_CONFIGURATION_COPY`] is supposed to do, see
+/// [`remote_dns_configuration_copy`].
 #[cfg(target_os = "macos")]
 #[hook_guard_fn]
 unsafe extern "C" fn dns_configuration_copy_detour() -> *mut dns_config_t {
-    tracing::debug!("dns copy");
-    Box::into_raw(Box::new(dns_config_t {
-        n_resolver: 0,
-        resolver: std::ptr::null_mut(),
-        n_scoped_resolver: 0,
-        scoped_resolver: std::ptr::null_mut(),
-        reserved: [0; 5],
-    }))
+    remote_dns_configuration_copy().unwrap_or_bypass_with(|_| {
+        Box::into_raw(Box::new(dns_config_t {
+            n_resolver: 0,
+            resolver: std::ptr::null_mut(),
+            n_scoped_resolver: 0,
+            scoped_resolver: std::ptr::null_mut(),
+            reserved: [0; 5],
+        }))
+    })
 }
 
+/// Because we create our pointers with boxes and not alloc ourselfs the easies way to safely
+/// drop everthing is just to recreate back the boxes that we casted into C structs as part of
+/// [`dns_configuration_copy_detour`]
 #[cfg(target_os = "macos")]
 #[hook_guard_fn]
 unsafe extern "C" fn dns_configuration_free_detour(config: *mut dns_config_t) {
-    let _config = Box::from_raw(config);
-    // It should drop it automatically
+    // It should drop it automatically after recreating the boxes and vecs
+
+    let config = Box::from_raw(config);
+
+    Vec::from_raw_parts(config.resolver, config.n_resolver as usize, 0)
+        .into_iter()
+        .for_each(|resolver| free_dns_resolver_t(resolver));
 }
 
 pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
