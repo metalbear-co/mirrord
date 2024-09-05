@@ -30,6 +30,8 @@ use socket2::SockAddr;
 use tracing::Level;
 use tracing::{error, trace};
 
+#[cfg(target_os = "macos")]
+use super::apple_dnsinfo::*;
 use super::{hooks::*, *};
 use crate::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
@@ -1092,6 +1094,34 @@ pub(super) fn gethostname() -> Detour<&'static CString> {
     HOSTNAME.get_or_detour_init(remote_hostname_string)
 }
 
+/// Retrieves the contents of remote's `/etc/resolv.conf`
+#[cfg(target_os = "macos")]
+#[mirrord_layer_macro::instrument(level = "trace")]
+pub(super) fn read_remote_resolv_conf() -> Detour<Vec<u8>> {
+    let resolv_path = PathBuf::from("/etc/resolv.conf");
+
+    let OpenFileResponse { fd } = file::ops::RemoteFile::remote_open(
+        resolv_path,
+        OpenOptionsInternal {
+            read: true,
+            ..Default::default()
+        },
+    )?;
+
+    let ReadFileResponse { bytes, read_amount } = file::ops::RemoteFile::remote_read(fd, 4096)?;
+
+    let _ = file::ops::RemoteFile::remote_close(fd).inspect_err(|fail| {
+        trace!("Leaking remote file fd (should be harmless) due to {fail:#?}!")
+    });
+
+    Detour::Success(
+        bytes
+            .into_iter()
+            .take(read_amount as usize)
+            .collect::<Vec<_>>(),
+    )
+}
+
 /// ## DNS resolution on port `53`
 ///
 /// We handle UDP sockets by putting them in a sort of _semantically_ connected state, meaning that
@@ -1391,4 +1421,124 @@ pub(super) fn sendmsg(
     };
 
     Detour::Success(sent_result)
+}
+
+/// helper to reconstruct a [`dns_resolver_t`] for [`remote_dns_configuration_copy`]
+/// NOTE: do free any memory "leaked" in this function over at [`free_dns_resolver_t`]
+#[cfg(target_os = "macos")]
+fn create_dns_resolver_t(
+    nameservers: impl IntoIterator<Item = socket2::SockAddr>,
+    search: impl IntoIterator<Item = CString>,
+    options: CString,
+) -> Box<dns_resolver_t> {
+    let nameserver: Vec<*mut libc::sockaddr> = nameservers
+        .into_iter()
+        // Remember to free in [`free_dns_resolver_t`]
+        .map(|sockaddr| Box::into_raw(Box::new(sockaddr.as_storage())).cast())
+        .collect();
+
+    // Remember to free in [`free_dns_resolver_t`]
+    let (nameserver, n_nameserver, _) = nameserver.into_raw_parts();
+
+    let search: Vec<*mut i8> = search
+        .into_iter()
+        // Remember to free in [`free_dns_resolver_t`]
+        .map(|sockaddr| sockaddr.into_raw().cast())
+        .collect();
+
+    // Remember to free in [`free_dns_resolver_t`]
+    let (search, n_search, _) = search.into_raw_parts();
+
+    // Remember to free in [`free_dns_resolver_t`]
+    Box::new(dns_resolver_t {
+        domain: std::ptr::null_mut(),
+        n_nameserver: n_nameserver as i32,
+        nameserver,
+        port: 0,
+        n_search: n_search as i32,
+        search,
+        n_sortaddr: 0,
+        sortaddr: std::ptr::null_mut(),
+        // Remember to free in [`free_dns_resolver_t`]
+        options: options.into_raw(),
+        timeout: 0,
+        search_order: 0,
+        if_index: 0,
+        flags: 0,
+        reach_flags: 2,
+        reserved: [0; 5],
+    })
+}
+
+/// This only performs free operations on values that are created in [`create_dns_resolver_t`]
+#[cfg(target_os = "macos")]
+#[mirrord_layer_macro::instrument(level = "trace")]
+pub(super) unsafe fn free_dns_resolver_t(resolver: *mut dns_resolver_t) {
+    let resolver = Box::from_raw(resolver);
+
+    let nameservers = Vec::from_raw_parts(resolver.nameserver, resolver.n_nameserver as usize, 0);
+
+    for nameserver in nameservers {
+        let _ = Box::from_raw(nameserver);
+    }
+
+    let searchs = Vec::from_raw_parts(resolver.search, resolver.n_search as usize, 0);
+
+    for search in searchs {
+        let _ = CString::from_raw(search);
+    }
+
+    let _ = CString::from_raw(resolver.options);
+}
+
+/// reconstruct a macos specific [`dns_config_t`] api from parsing the `/etc/resolv.conf` file from
+/// remote container and fill only the first resolver in the response
+#[cfg(target_os = "macos")]
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+pub(super) fn remote_dns_configuration_copy() -> Detour<*mut dns_config_t> {
+    let remote = read_remote_resolv_conf()?;
+
+    // TODO: possibly create a different error rather than the almost correct
+    // [`HookError::DNSNoName`]
+    let resolv_conf = resolv_conf::Config::parse(remote).map_err(|_error| HookError::DNSNoName)?;
+
+    let options = CString::new(format!(
+        "ndots:{ndots} attempts:{attempts}",
+        ndots = resolv_conf.ndots,
+        attempts = resolv_conf.attempts
+    ))
+    .unwrap_or_default();
+
+    let search: Vec<_> = resolv_conf
+        .get_search()
+        .map(|search| {
+            search
+                .iter()
+                .filter_map(|search| CString::new(search.as_str()).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let nameservers = resolv_conf.nameservers.into_iter().map(|nameserver| {
+        socket2::SockAddr::from(match nameserver {
+            resolv_conf::ScopedIp::V4(addr) => std::net::SocketAddr::new(addr.into(), 53),
+            resolv_conf::ScopedIp::V6(addr, _) => std::net::SocketAddr::new(addr.into(), 53),
+        })
+    });
+
+    let resolver = Box::into_raw(Box::new(create_dns_resolver_t(
+        nameservers,
+        search,
+        options,
+    )));
+
+    let config = Box::into_raw(Box::new(dns_config_t {
+        n_resolver: 1,
+        resolver: resolver as *mut *mut dns_resolver_t,
+        n_scoped_resolver: 0,
+        scoped_resolver: std::ptr::null_mut(),
+        reserved: [0; 5],
+    }));
+
+    Detour::Success(config)
 }

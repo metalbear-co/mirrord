@@ -31,6 +31,8 @@ use crate::{
     socket::ops::{remote_getaddrinfo, REMOTE_DNS_REVERSE_MAPPING},
 };
 
+#[cfg(target_os = "macos")]
+mod apple_dnsinfo;
 pub(crate) mod dns_selector;
 pub(super) mod hooks;
 pub(crate) mod ops;
