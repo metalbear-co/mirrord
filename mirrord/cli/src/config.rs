@@ -65,6 +65,8 @@ pub(super) enum Commands {
     #[command(hide = true, name = "intproxy")]
     InternalProxy,
 
+    /// Alternative to `--rm` flag in `<runtime> run` command but with a delay. see
+    /// [`sidecar_watcher::watcher`](crate::sidecar_watcher::watcher)
     #[command(hide = true)]
     SidecarWatcher {
         runtime: ContainerRuntime,

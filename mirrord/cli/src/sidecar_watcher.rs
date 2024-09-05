@@ -5,6 +5,9 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use crate::{config::ContainerRuntime, error::Result};
 
+/// This works as an alternative to `--rm` flag to sidecar container (`mirrord container` command),
+/// this will perform `<runtume> attach <container_id>` and once the container exits this should
+/// wait 5s (to allow `mirrord container` to collect the error log) and then delete the pod.
 pub async fn watcher(runtime: ContainerRuntime, container_id: &str) -> Result<()> {
     let mut retry_strategy = ExponentialBackoff::from_millis(100)
         .max_delay(Duration::from_secs(10))

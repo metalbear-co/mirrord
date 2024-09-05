@@ -28,7 +28,7 @@ use crate::{
     config::{ContainerArgs, ContainerCommand},
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     container::command_builder::RuntimeCommandBuilder,
-    error::{ContainerError, Result},
+    error::{CliError, ContainerError, Result},
     execution::{
         MirrordExecution, LINUX_INJECTION_ENV_VAR, MIRRORD_CONNECT_TCP_ENV,
         MIRRORD_EXECUTION_KIND_ENV,
@@ -128,7 +128,7 @@ async fn create_sidecar_intproxy(
     config: &LayerConfig,
     base_command: &RuntimeCommandBuilder,
     connection_info: Vec<(&str, &str)>,
-) -> Result<(String, SocketAddr), ContainerError> {
+) -> Result<(String, SocketAddr)> {
     let mut sidecar_command = base_command.clone();
 
     sidecar_command.add_env(MIRRORD_INTPROXY_CONTAINER_MODE_ENV, "true");
@@ -153,7 +153,8 @@ async fn create_sidecar_intproxy(
             )
         })?;
 
-    let mut sidecar_watcher_command = Command::new(std::env::current_exe().unwrap());
+    let mut sidecar_watcher_command =
+        Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
 
     sidecar_watcher_command
         .args(["sidecar-watcher", &runtime_binary, &sidecar_container_id])
