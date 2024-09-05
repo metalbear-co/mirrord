@@ -8,6 +8,14 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.116.2](https://github.com/metalbear-co/mirrord/tree/3.116.2) - 2024-09-05
+
+
+### Changed
+
+- Add option to have logs when running ext commands
+
+
 ## [3.116.1](https://github.com/metalbear-co/mirrord/tree/3.116.1) - 2024-09-04
 
 
