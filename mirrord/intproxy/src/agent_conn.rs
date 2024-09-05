@@ -172,6 +172,7 @@ impl AgentConnection {
                     .connect_tcp
                     .as_ref()
                     .ok_or(AgentConnectionError::NoConnectionMethod)?;
+
                 let stream = TcpStream::connect(address).await?;
                 wrap_raw_connection(stream)
             }

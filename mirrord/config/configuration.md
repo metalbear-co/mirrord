@@ -441,7 +441,8 @@ If you get `ConnectionRefused` errors, increasing the timeouts a bit might solve
 ### external_proxy.address {#external_proxy-address}
 
 Specify an address that is accessible from within the container runtime to the host machine
-(example can be the resolved address of `host.docker.internal`)
+(example can be `host.docker.internal` and `external_proxy.listen` is set to 127.0.0.1 will
+use docker bridge for communication)
 
 ### external_proxy.idle_timeout {#external_proxy-idle_timeout}
 
@@ -462,6 +463,10 @@ and don't connect to the proxy.
 
 Provide a specific address to listen to for external proxy
 (will try and bind local machine ip if not specified)
+
+This is a workaround for when the local machine ip that is default is bound is not
+accecible from the container (local address resoved to `192.168.0.2` but said ip is
+inacceible from within a container)
 
 ### external_proxy.log_destination {#external_proxy-log_destination}
 Set the log file destination for the external proxy.
