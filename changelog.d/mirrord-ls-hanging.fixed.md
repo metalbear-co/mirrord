@@ -1,1 +1,1 @@
-Fixed `mirrord ls` hanging in some scenarios.
+Fixed `mirrord ls` hanging when there is a lot of possible targets in the cluster.
