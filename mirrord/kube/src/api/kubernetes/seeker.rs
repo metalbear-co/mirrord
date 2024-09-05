@@ -30,9 +30,11 @@ impl KubeResourceSeeker<'_> {
     /// Returns all resource types that don't require the operator to operate ie. [`Pod`],
     /// [`Deployment`] and [`Rollout`]
     pub async fn all_open_source(&self) -> Result<Vec<String>> {
-        let pods = self.pods().await?;
-        let deployments = self.deployments().await?;
-        let rollouts = self.simple_list_resource::<Rollout>("rollout").await?;
+        let (pods, deployments, rollouts) = tokio::try_join!(
+            self.pods(),
+            self.deployments(),
+            self.simple_list_resource::<Rollout>("rollout")
+        )?;
 
         Ok(pods
             .into_iter()
@@ -44,16 +46,14 @@ impl KubeResourceSeeker<'_> {
     /// Returns all resource types ie. [`Pod`], [`Deployment`], [`Rollout`], [`Job`], [`CronJob`],
     /// and [`StatefulSet`]
     pub async fn all(&self) -> Result<Vec<String>> {
-        let pods = self.pods().await?;
-        let deployments = self
-            .simple_list_resource::<Deployment>("deployment")
-            .await?;
-        let rollouts = self.simple_list_resource::<Rollout>("rollout").await?;
-        let jobs = self.simple_list_resource::<Job>("job").await?;
-        let cronjobs = self.simple_list_resource::<CronJob>("cronjob").await?;
-        let statefulsets = self
-            .simple_list_resource::<StatefulSet>("statefulset")
-            .await?;
+        let (pods, deployments, rollouts, jobs, cronjobs, statefulsets) = tokio::try_join!(
+            self.pods(),
+            self.simple_list_resource::<Deployment>("deployment"),
+            self.simple_list_resource::<Rollout>("rollout"),
+            self.simple_list_resource::<Job>("job"),
+            self.simple_list_resource::<CronJob>("cronjob"),
+            self.simple_list_resource::<StatefulSet>("statefulset"),
+        )?;
 
         Ok(pods
             .into_iter()
