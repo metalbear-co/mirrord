@@ -562,7 +562,7 @@ have support for a shortened version, that you can see [here](#root-shortened).
 ## feature.copy_target {#feature-copy_target}
 
 Creates a new copy of the target. mirrord will use this copy instead of the original target
-(e.g. intercept network traffic). This feature requires a [mirrord operator](https://mirrord.dev/docs/overview/teams/).
+(e.g. intercept network traffic). This feature requires a [mirrord operator](https://mirrord.dev/docs/overview/teams/?utm_source=copytarget).
 
 This feature is not compatible with rollout targets and running without a target
 (`targetless` mode).

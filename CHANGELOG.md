@@ -8,6 +8,22 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.116.3](https://github.com/metalbear-co/mirrord/tree/3.116.3) - 2024-09-05
+
+
+### Fixed
+
+- Fixed `mirrord ls` hanging when there is a lot of possible targets in the
+  cluster.
+- Update detour for `dns_configuration_copy` to return remote value from
+  "/etc/resolv.conf" to fix nodejs dns resolution not working on macos.
+  [#2713](https://github.com/metalbear-co/mirrord/issues/2713)
+
+
+### Internal
+
+- Restored concurrency in `mirrord ls` list requests.
+
 ## [3.116.2](https://github.com/metalbear-co/mirrord/tree/3.116.2) - 2024-09-05
 
 
@@ -23,7 +39,6 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 - Fixed upload of mirrord binaries' shasums to homebrew repository in the
   release action.
-  [#homebrew-shasum-ci](https://github.com/metalbear-co/mirrord/issues/homebrew-shasum-ci)
 - Fix mirrord ls hanging by making so `KubeResourceSeeker` will list different
   kinds of resources sequentially instead of in parallel.
   [#2724](https://github.com/metalbear-co/mirrord/issues/2724)
