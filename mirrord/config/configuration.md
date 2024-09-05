@@ -441,7 +441,20 @@ If you get `ConnectionRefused` errors, increasing the timeouts a bit might solve
 ### external_proxy.address {#external_proxy-address}
 
 Specify an address that is accessible from within the container runtime to the host machine
-(example can be the resolved address of `host.docker.internal`)
+
+This is a workaround where the listen address should be different from the one the
+container is connecting to, example can be where `host.docker.internal -> 192.168.127.254`
+and we intend to utilize the network briging
+
+Note: this needs to be an ip because of TLS nagotiation.
+```json
+{
+    "external_proxy": {
+        "listen": "127.0.0.1",
+        "address": "192.168.127.254"
+    }
+}
+```
 
 ### external_proxy.idle_timeout {#external_proxy-idle_timeout}
 
@@ -1413,7 +1426,7 @@ Namespace where the target lives.
 
 Defaults to `"default"`.
 
-### target.path {#target-path}
+Recursion limit reached### target.path {#target-path}
 
 Specifies the running pod (or deployment) to mirror.
 
@@ -1427,13 +1440,13 @@ Supports:
 - `containername/{sample-container}`.
 - `job/{sample-job}` (only when [`copy_target`](#feature-copy_target) is enabled).
 
-## telemetry {#root-telemetry}
+Recursion limit reached## telemetry {#root-telemetry}
 Controls whether or not mirrord sends telemetry data to MetalBear cloud.
 Telemetry sent doesn't contain personal identifiers or any data that
 should be considered sensitive. It is used to improve the product.
 [For more information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md)
 
-## use_proxy {#root-use_proxy}
+Recursion limit reached## use_proxy {#root-use_proxy}
 
 When disabled, mirrord will remove `HTTP[S]_PROXY` env variables before
 doing any network requests. This is useful when the system sets a proxy
@@ -1441,3 +1454,4 @@ but you don't want mirrord to use it.
 This also applies to the mirrord process (as it just removes the env).
 If the remote pod sets this env, the mirrord process will still use it.
 
+Recursion limit reached
