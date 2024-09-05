@@ -254,8 +254,8 @@ pub(crate) async fn container_command(
         let external_proxy_subject_alt_names = config
             .external_proxy
             .address
-            .or_else(|| local_ip().ok())
-            .map(|item| item.to_string())
+            .clone()
+            .or_else(|| local_ip().map(|item| item.to_string()).ok())
             .into_iter()
             .collect();
 

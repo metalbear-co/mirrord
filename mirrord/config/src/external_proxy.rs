@@ -31,13 +31,18 @@ pub struct ExternalProxyConfig {
     ///
     /// Provide a specific address to listen to for external proxy
     /// (will try and bind local machine ip if not specified)
+    ///
+    /// This is a workaround for when the local machine ip that is default is bound is not
+    /// accecible from the container (local address resoved to `192.168.0.2` but said ip is
+    /// inacceible from within a container)
     pub listen: Option<IpAddr>,
 
     /// ### external_proxy.address {#external_proxy-address}
     ///
     /// Specify an address that is accessible from within the container runtime to the host machine
-    /// (example can be the resolved address of `host.docker.internal`)
-    pub address: Option<IpAddr>,
+    /// (example can be `host.docker.internal` and `external_proxy.listen` is set to 127.0.0.1 will
+    /// use docker bridge for communication)
+    pub address: Option<String>,
 
     /// <!--${internal}-->
     ///

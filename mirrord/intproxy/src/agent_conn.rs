@@ -89,7 +89,7 @@ pub enum ConnectionTlsError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentConnectInfo {
     /// Connect to agent through `mirrord extproxy`.
-    ExternalProxy(SocketAddr),
+    ExternalProxy(String),
     /// Connect to the agent through the operator.
     Operator(OperatorSession),
     /// Connect directly to the agent by name and port using k8s port forward.
@@ -124,6 +124,7 @@ impl AgentConnection {
             }
 
             Some(AgentConnectInfo::ExternalProxy(proxy_addr)) => {
+                let proxy_addr: SocketAddr = proxy_addr.parse()?;
                 let socket = TcpSocket::new_v4()?;
                 socket.set_keepalive(true)?;
                 socket.set_nodelay(true)?;
