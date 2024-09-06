@@ -445,7 +445,7 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     }
 
     // The targets come sorted in the following order:
-    // `pods - deployments - rollouts - jobs - cronjobs - statefulsets`
+    // `deployments - rollouts - statefulsets - cronjobs - jobs - pods`
     let targets = list_targets(&layer_config, args).await?;
     let json_obj = json!(targets);
     println!("{json_obj}");
