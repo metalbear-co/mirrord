@@ -155,8 +155,7 @@ pub fn choose_container<'a>(
 
     if container_statuses
         .iter()
-        .find(|status| status.name == TELEPRESENCE_CONTAINER_NAME)
-        .unwrap_or(false)
+        .any(|status| status.name == TELEPRESENCE_CONTAINER_NAME)
     {
         tracing::warn!("Telepresence container detected, stealing/mirroring might not work.");
     }
