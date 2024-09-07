@@ -5,8 +5,15 @@ use chrono::{DateTime, Utc};
 use conn_wrapper::ConnectionWrapper;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
 use http::{request::Request, HeaderName, HeaderValue};
-use k8s_openapi::api::apps::v1::Deployment;
-use kube::{api::PostParams, Api, Client, Config, Resource};
+use k8s_openapi::api::{
+    apps::v1::{Deployment, StatefulSet},
+    batch::v1::{CronJob, Job},
+    core::v1::Pod,
+};
+use kube::{
+    api::{ObjectMeta, PostParams},
+    Api, Client, Config, Resource,
+};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
     certificate::Certificate,
@@ -15,11 +22,11 @@ use mirrord_auth::{
 };
 use mirrord_config::{
     feature::{network::incoming::ConcurrentSteal, split_queues::SplitQueuesConfig},
-    target::Target,
+    target::{Target, TargetDisplay},
     LayerConfig,
 };
 use mirrord_kube::{
-    api::kubernetes::{create_kube_config, get_k8s_resource_api},
+    api::kubernetes::{create_kube_config, get_k8s_resource_api, rollout::Rollout},
     error::KubeApiError,
 };
 use mirrord_progress::Progress;
@@ -273,7 +280,7 @@ impl OperatorApi<NoClientCert> {
     /// step to confirm that the operator is not installed.
     ///
     /// If certain that the operator is not installed, returns [`None`].
-    #[tracing::instrument(level = Level::TRACE, skip_all, err)]
+    // #[tracing::instrument(level = Level::TRACE, skip_all, err)]
     pub async fn try_new<R>(
         config: &LayerConfig,
         reporter: &mut R,
@@ -601,6 +608,106 @@ impl OperatorApi<PreparedClientCert> {
     /// We allow copied pods to live only for 30 seconds before the internal proxy connects.
     const COPIED_POD_IDLE_TTL: u32 = 30;
 
+    async fn number_of_containers(
+        &self,
+        target: Option<&Target>,
+        namespace: Option<&str>,
+    ) -> OperatorApiResult<usize> {
+        let number_of_containers = match target {
+            Some(Target::Deployment(target)) => {
+                let deployment_api = get_k8s_resource_api::<Deployment>(&self.client, namespace);
+
+                let deployment = deployment_api
+                    .get(&target.deployment)
+                    .await
+                    .map_err(|error| OperatorApiError::KubeError {
+                        error,
+                        operation: OperatorOperation::FindingTarget,
+                    })?;
+
+                deployment
+                    .spec
+                    .and_then(|deployment_spec| deployment_spec.template.spec)
+                    .map(|pod_spec| pod_spec.containers.len())
+            }
+            Some(Target::Pod(target)) => {
+                let pod_api = get_k8s_resource_api::<Pod>(&self.client, namespace);
+
+                let pod = pod_api.get(&target.pod).await.map_err(|error| {
+                    OperatorApiError::KubeError {
+                        error,
+                        operation: OperatorOperation::FindingTarget,
+                    }
+                })?;
+
+                pod.spec.map(|pod_spec| pod_spec.containers.len())
+            }
+            Some(Target::Rollout(target)) => {
+                let rollout_api = get_k8s_resource_api::<Rollout>(&self.client, namespace);
+
+                let rollout = rollout_api.get(&target.rollout).await.map_err(|error| {
+                    OperatorApiError::KubeError {
+                        error,
+                        operation: OperatorOperation::FindingTarget,
+                    }
+                })?;
+
+                todo!()
+            }
+            Some(Target::Job(target)) => {
+                let job_api = get_k8s_resource_api::<Job>(&self.client, namespace);
+
+                let job = job_api.get(&target.job).await.map_err(|error| {
+                    OperatorApiError::KubeError {
+                        error,
+                        operation: OperatorOperation::FindingTarget,
+                    }
+                })?;
+
+                job.spec
+                    .and_then(|job_spec| job_spec.template.spec)
+                    .map(|pod_spec| pod_spec.containers.len())
+            }
+            Some(Target::CronJob(target)) => {
+                let cron_job_api = get_k8s_resource_api::<CronJob>(&self.client, namespace);
+
+                let cron_job = cron_job_api.get(&target.cron_job).await.map_err(|error| {
+                    OperatorApiError::KubeError {
+                        error,
+                        operation: OperatorOperation::FindingTarget,
+                    }
+                })?;
+
+                cron_job
+                    .spec
+                    .and_then(|cron_job_spec| cron_job_spec.job_template.spec)
+                    .and_then(|job_spec| job_spec.template.spec)
+                    .map(|pod_spec| pod_spec.containers.len())
+            }
+            Some(Target::StatefulSet(target)) => {
+                let stateful_set_api = get_k8s_resource_api::<StatefulSet>(&self.client, namespace);
+
+                let stateful_set =
+                    stateful_set_api
+                        .get(&target.stateful_set)
+                        .await
+                        .map_err(|error| OperatorApiError::KubeError {
+                            error,
+                            operation: OperatorOperation::FindingTarget,
+                        })?;
+
+                stateful_set
+                    .spec
+                    .and_then(|stateful_set_spec| stateful_set_spec.template.spec)
+                    .map(|pod_spec| pod_spec.containers.len())
+            }
+            Some(Target::Targetless) | None => None,
+        }
+        .unwrap_or(1);
+
+        Ok(number_of_containers)
+    }
+
     /// Starts a new operator session and connects to the target.
     /// Returned [`OperatorSessionConnection::session`] can be later used to create another
     /// connection in the same session with [`OperatorApi::connect_in_existing_session`].
@@ -628,6 +735,11 @@ impl OperatorApi<PreparedClientCert> {
         // Check if the deployment is empty if so then
         let is_empty_deployment = match &config.target.path {
             Some(Target::Deployment(target)) => {
+                // TODO(alex) [high] 2: Alright, change this `get_k8s_api` to be something
+                // that we can use, like a struct with steps (maybe).
+                //
+                // But for sure, in this match, we could check if there are multiple containers
+                // for the target with this `get_k8s_resource_api`.
                 let deployment_api = get_k8s_resource_api::<Deployment>(
                     &self.client,
                     config.target.namespace.as_deref(),
@@ -648,6 +760,28 @@ impl OperatorApi<PreparedClientCert> {
             }
             _ => false,
         };
+
+        // TODO(alex) [mid] 3: No need to have this as an option, if we don't have a target
+        // at this point, doesn't mirrord just fail? Is it even possible to get here with
+        // no target?
+        if self
+            .number_of_containers(
+                config.target.path.as_ref(),
+                config.target.namespace.as_deref(),
+            )
+            .await?
+            > 1
+            && config
+                .target
+                .path
+                .as_ref()
+                .is_some_and(|target| target.container().is_some())
+        {
+            progress.warning(
+                "Target has multiple containers, but no container was specified by user!\
+                    mirrord will pick a random container.",
+            );
+        }
 
         let target = if config.feature.copy_target.enabled
             // use copy_target for splitting queues
@@ -680,15 +814,19 @@ impl OperatorApi<PreparedClientCert> {
 
             let target_name =
                 TargetCrd::urlfied_name(config.target.path.as_ref().unwrap_or(&Target::Targetless));
-            let raw_target = Api::namespaced(self.client.clone(), self.target_namespace(config))
-                .get(&target_name)
-                .await
-                .map_err(|error| OperatorApiError::KubeError {
-                    error,
-                    operation: OperatorOperation::FindingTarget,
-                })?;
 
-            fetch_subtask.success(Some("target fetched"));
+            // TODO(alex) [high] 1: This is the target we're getting from kubernetes!
+            // Now I only need to check if it has multiple containers.
+            let raw_target: TargetCrd =
+                Api::namespaced(self.client.clone(), self.target_namespace(config))
+                    .get(&target_name)
+                    .await
+                    .map_err(|error| OperatorApiError::KubeError {
+                        error,
+                        operation: OperatorOperation::FindingTarget,
+                    })?;
+
+            fetch_subtask.success(Some(&format!("target fetched {}", raw_target.spec.target)));
 
             OperatorSessionTarget::Raw(raw_target)
         };

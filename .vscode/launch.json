@@ -80,6 +80,21 @@
         "MIRRORD_REMOTE_DNS": "true",
         "RUST_BACKTRACE": "short"
       }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "mirrord exec: Debug mirrord-cli",
+      "program": "${workspaceFolder}/target/debug/mirrord",
+      "args": ["exec", "--config-file", "/home/meowjesty/dev/metalbear/samples/issue-605-warn-auto-pick-container-operator/mirrord.json", "node", "/home/meowjesty/dev/metalbear/samples/issue-605-warn-auto-pick-container-operator/hello.mjs"],
+      "cwd": "${workspaceFolder}",
+      "sourceMap": {},
+      "sourceLanguages": [
+        "rust"
+      ],
+      "env": {
+        "RUST_LOG": "warn,mirrord=debug"
+      }
     }
   ]
 }

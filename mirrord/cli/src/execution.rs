@@ -148,7 +148,7 @@ where
 impl MirrordExecution {
     /// Starts the internal proxy (`intproxy`), and mirrord-layer, even if a bogus binary
     /// was passed by the user.
-    #[tracing::instrument(level = Level::TRACE, skip_all)]
+    // #[tracing::instrument(level = Level::TRACE, skip_all)]
     pub(crate) async fn start<P>(
         config: &LayerConfig,
         // We only need the executable on macos, for SIP handling.
