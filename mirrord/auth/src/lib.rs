@@ -1,7 +1,9 @@
 #![doc = include_str!("../README.md")]
 #![feature(lazy_cell)]
 
+// not direct dependency, but if we don't put it here it'll use openssl :(
 pub use pem;
+use reqwest as _;
 pub use x509_certificate;
 
 /// X509 Certificate abstraction for serialization and deserialization
