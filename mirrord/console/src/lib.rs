@@ -1,8 +1,5 @@
 #![warn(clippy::indexing_slicing)]
-
-// seems to have an issue with this warning..
-use tracing as _;
-use tracing_subscriber as _;
+#![allow(unused_crate_dependencies)]
 
 #[cfg(feature = "async-logger")]
 pub mod async_logger;
