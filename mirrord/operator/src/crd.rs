@@ -619,3 +619,74 @@ pub struct MirrordSqsSessionSpec {
     // so we save that field as a (HEX) string even though its source is a u64
     pub session_id: String,
 }
+
+/// For tracking external changes made by operator service when serving mirrord sessions, for
+/// example:
+/// 1. Scaling down workloads for the copy target feature.
+/// 2. Creating temporary SQS queues for the SQS splitting feature.
+/// 3. Injecting environment variables into target's pod spec for queue splitting feature.
+///
+/// When adding more operations like this, make sure to persist them in this resource.
+/// It will allow synchronization and rolling back changes after operator restart.
+///
+/// # Relation to session target
+///
+/// Multiple resources of this kind may be linked to a single target resource.
+/// They should all live in the same namespace as the target.
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    group = "operator.metalbear.co",
+    version = "v1",
+    kind = "MirrordOperatorExternalChange",
+    namespaced,
+    printcolumn = r#"{"name":"SESSION-ID", "type":"string", "description":"ID of mirrord session that triggered this change.", "jsonPath":".spec.sessionId"}"#,
+    printcolumn = r#"{"name":"TARGET-API-VERSION", "type":"string", "description":"API version of session's target.", "jsonPath":".spec.targetApiVersion"}"#,
+    printcolumn = r#"{"name":"TARGET-KIND", "type":"string", "description":"Kind of session's target.", "jsonPath":".spec.targetKind"}"#,
+    printcolumn = r#"{"name":"TARGET-NAME", "type":"string", "description":"Name of session's target.", "jsonPath":".spec.targetName"}"#
+)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrordOperatorExternalChangeSpec {
+    /// [`u64`] session identifier encoded in HEX.
+    /// This change belongs to this session and should be rolled back as soon as the session is
+    /// finished.
+    pub session_id: String,
+
+    /// API version of the session's target, e.g `apps/v1`.
+    pub target_api_version: String,
+
+    /// Kind of the session's target, e.g `Deployment`.
+    pub target_kind: String,
+
+    /// Name of the session's target, e.g `my-deployment`.
+    pub target_name: String,
+
+    /// Present if target resource was scaled down to 0.
+    /// Holds original scale.
+    pub scaled_down_from: Option<i32>,
+
+    /// Environment variables injected into pod template.
+    pub env_var_injected: Vec<EnvVarInjected>,
+
+    /// Created temporary sqs queues (SQS splitting feature).
+    pub created_sqs_queues: Vec<SqsQueueCreated>,
+}
+
+/// Represents an environment variable injected into target's pod spec (value replaced).
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvVarInjected {
+    /// Name of the altered container.
+    pub container_name: String,
+    /// Name of the variable.
+    pub env_name: String,
+    /// Original value of the variable.
+    pub original_value: String,
+}
+
+/// Represents a temporary SQS queue created in the AWS.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SqsQueueCreated {
+    /// Name of the queue.
+    pub queue_name: String,
+}

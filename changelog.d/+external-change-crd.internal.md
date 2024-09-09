@@ -1,0 +1,1 @@
+Added `MirrordOperatorExternalChange` custom resource definition to operator setup.

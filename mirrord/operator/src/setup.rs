@@ -26,7 +26,10 @@ use k8s_openapi::{
 use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
-use crate::crd::{MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd};
+use crate::crd::{
+    MirrordOperatorExternalChange, MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry,
+    TargetCrd,
+};
 
 static OPERATOR_NAME: &str = "mirrord-operator";
 /// 443 is standard port for APIService, do not change this value
@@ -203,6 +206,9 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         MirrordPolicy::crd().to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordOperatorExternalChange::crd().to_writer(&mut writer)?;
 
         if self.sqs_splitting {
             writer.write_all(b"---\n")?;
