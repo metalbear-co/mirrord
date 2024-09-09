@@ -27,6 +27,7 @@ pub struct ContainerConfig {
     /// ### container.cli_extra_args {#container-cli_extra_args}
     ///
     /// Any extra args to use when creating the sidecar mirrord-cli container.
+    #[config(default)]
     pub cli_extra_args: Vec<String>,
 
     /// ### container.cli_image_lib_path {#container-cli_image}
