@@ -133,8 +133,14 @@ async fn create_sidecar_intproxy(
     sidecar_command.add_env(MIRRORD_INTPROXY_CONTAINER_MODE_ENV, "true");
     sidecar_command.add_envs(connection_info);
 
-    let sidecar_container_command =
-        ContainerCommand::run(["-d", &config.container.cli_image, "mirrord", "intproxy"]);
+    let sidecar_container_command = ContainerCommand::run(
+        config
+            .container
+            .cli_extra_args
+            .iter()
+            .map(String::as_str)
+            .chain(["-d", &config.container.cli_image, "mirrord", "intproxy"]),
+    );
 
     let (runtime_binary, sidecar_args) = sidecar_command
         .with_command(sidecar_container_command)

@@ -386,6 +386,10 @@ IP:PORT to connect to instead of using k8s api, for testing purposes.
 
 Unstable: `mirrord container` command specific config.
 
+### container.cli_extra_args {#container-cli_extra_args}
+
+Any extra args to use when creating the sidecar mirrord-cli container.
+
 ### container.cli_image {#container-cli_image}
 
 Tag of the `mirrord-cli` image you want to use.

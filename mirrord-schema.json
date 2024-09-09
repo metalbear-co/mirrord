@@ -530,6 +530,17 @@
       "description": "Unstable: `mirrord container` command specific config.",
       "type": "object",
       "properties": {
+        "cli_extra_args": {
+          "title": "container.cli_extra_args {#container-cli_extra_args}",
+          "description": "Any extra args to use when creating the sidecar mirrord-cli container.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
         "cli_image": {
           "title": "container.cli_image {#container-cli_image}",
           "description": "Tag of the `mirrord-cli` image you want to use.\n\nDefaults to `\"ghcr.io/metalbear-co/mirrord-cli:<cli version>\"`.",
