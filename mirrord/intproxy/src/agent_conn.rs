@@ -5,7 +5,7 @@ use std::{
     fs::File,
     io,
     io::BufReader,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, SocketAddr, ToSocketAddrs},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -89,7 +89,7 @@ pub enum ConnectionTlsError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentConnectInfo {
     /// Connect to agent through `mirrord extproxy`.
-    ExternalProxy(SocketAddr),
+    ExternalProxy(String),
     /// Connect to the agent through the operator.
     Operator(OperatorSession),
     /// Connect directly to the agent by name and port using k8s port forward.
@@ -124,11 +124,16 @@ impl AgentConnection {
             }
 
             Some(AgentConnectInfo::ExternalProxy(proxy_addr)) => {
+                let proxy_sockaddr: SocketAddr = proxy_addr
+                    .to_socket_addrs()?
+                    .next()
+                    .ok_or_else(|| AgentConnectionError::NoConnectionMethod)?;
+
                 let socket = TcpSocket::new_v4()?;
                 socket.set_keepalive(true)?;
                 socket.set_nodelay(true)?;
 
-                let stream = socket.connect(proxy_addr).await?;
+                let stream = socket.connect(proxy_sockaddr).await?;
 
                 if let (Some(tls_certificate), Some(client_tls_certificate), Some(client_tls_key)) = (
                     config.external_proxy.tls_certificate.as_ref(),
@@ -137,7 +142,11 @@ impl AgentConnection {
                 ) {
                     wrap_connection_with_tls(
                         stream,
-                        proxy_addr.ip(),
+                        proxy_sockaddr.ip(),
+                        proxy_addr
+                            .split_once(':')
+                            .map(|(domain, _)| domain)
+                            .unwrap_or(&proxy_addr),
                         tls_certificate,
                         client_tls_certificate,
                         client_tls_key,
@@ -166,6 +175,7 @@ impl AgentConnection {
                     .connect_tcp
                     .as_ref()
                     .ok_or(AgentConnectionError::NoConnectionMethod)?;
+
                 let stream = TcpStream::connect(address).await?;
                 wrap_raw_connection(stream)
             }
@@ -228,7 +238,8 @@ impl BackgroundTask for AgentConnection {
 
 pub async fn wrap_connection_with_tls(
     stream: TcpStream,
-    proxy_addr: IpAddr,
+    proxy_ip: IpAddr,
+    proxy_server_name: &str,
     tls_certificate: &Path,
     client_tls_certificate: &Path,
     client_tls_key: &Path,
@@ -265,8 +276,8 @@ pub async fn wrap_connection_with_tls(
 
     let connector = TlsConnector::from(Arc::new(tls_config));
 
-    let domain = rustls::pki_types::ServerName::try_from(proxy_addr.to_string())
-        .map_err(|error| ConnectionTlsError::InvalidDnsName(proxy_addr, error))?
+    let domain = rustls::pki_types::ServerName::try_from(proxy_server_name)
+        .map_err(|error| ConnectionTlsError::InvalidDnsName(proxy_ip, error))?
         .to_owned();
 
     Ok(wrap_raw_connection(

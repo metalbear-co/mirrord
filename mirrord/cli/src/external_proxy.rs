@@ -23,7 +23,7 @@ use std::{
     fs::{File, OpenOptions},
     io,
     io::BufReader,
-    net::{Ipv4Addr, SocketAddr},
+    net::SocketAddr,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -32,7 +32,6 @@ use std::{
 };
 
 use futures::{SinkExt, StreamExt};
-use local_ip_address::local_ip;
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_intproxy::agent_conn::{AgentConnection, ConnectionTlsError};
@@ -101,15 +100,8 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
     (&config).collect_analytics(analytics.get_mut());
 
     let tls_acceptor = create_external_proxy_tls_acceptor(&config).await?;
-    let listener = create_listen_socket(SocketAddr::new(
-        config
-            .external_proxy
-            .listen
-            .or_else(|| local_ip().ok())
-            .unwrap_or_else(|| Ipv4Addr::UNSPECIFIED.into()),
-        0,
-    ))
-    .map_err(ExternalProxyError::ListenerSetup)?;
+    let listener = create_listen_socket(SocketAddr::new(config.external_proxy.listen, 0))
+        .map_err(ExternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(ExternalProxyError::ListenerSetup)?;
 
     unsafe { detach_io() }.map_err(ExternalProxyError::SetSid)?;

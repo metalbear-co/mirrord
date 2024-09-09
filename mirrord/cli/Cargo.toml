@@ -59,7 +59,6 @@ drain.workspace = true
 prettytable-rs = "0.10"
 clap_complete = "4.4.1"
 rustls.workspace = true
-local-ip-address = "0.6"
 tempfile = "3"
 rcgen = "0.13"
 rustls-pemfile = "2"

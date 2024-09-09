@@ -443,15 +443,13 @@ If you get `ConnectionRefused` errors, increasing the timeouts a bit might solve
 Specify an address that is accessible from within the container runtime to the host machine
 
 This is a workaround where the listen address should be different from the one the
-container is connecting to, example can be where `host.docker.internal -> 192.168.127.254`
+container is connecting to, example can be where `host.docker.internal -> host-gateway`
 and we intend to utilize the network bridging
 
-Note: this needs to be an ip because of TLS negotiation.
 ```json
 {
     "external_proxy": {
-        "listen": "127.0.0.1",
-        "address": "192.168.127.254"
+        "address": "host-gateway"
     }
 }
 ```
@@ -474,11 +472,11 @@ and don't connect to the proxy.
 ### external_proxy.listen {#external_proxy-listen}
 
 Provide a specific address to listen to for external proxy
-(will try and bind local machine ip if not specified)
+(will try and bind localhost if not specified)
 
-This is a workaround for when the local machine ip that is bound by default, is not
-accessible from the container (local address resolved to `192.168.0.2` but this ip is
-inaccessible from within a container)
+This is a workaround for when the network bridging that is setup by default, is not
+accessible for the container (when accessing `host.docker.internal` will not connect to
+`127.0.0.1` on host machine but rather some other ip can be bound for the connection)
 
 ### external_proxy.log_destination {#external_proxy-log_destination}
 Set the log file destination for the external proxy.

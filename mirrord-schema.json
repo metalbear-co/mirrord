@@ -775,12 +775,11 @@
       "properties": {
         "address": {
           "title": "external_proxy.address {#external_proxy-address}",
-          "description": "Specify an address that is accessible from within the container runtime to the host machine\n\nThis is a workaround where the listen address should be different from the one the container is connecting to, example can be where `host.docker.internal -> 192.168.127.254` and we intend to utilize the network bridging\n\nNote: this needs to be an ip because of TLS negotiation. ```json { \"external_proxy\": { \"listen\": \"127.0.0.1\", \"address\": \"192.168.127.254\" } } ```",
+          "description": "Specify an address that is accessible from within the container runtime to the host machine\n\nThis is a workaround where the listen address should be different from the one the container is connecting to, example can be where `host.docker.internal -> host-gateway` and we intend to utilize the network bridging\n\n```json { \"external_proxy\": { \"address\": \"host-gateway\" } } ```",
           "type": [
             "string",
             "null"
-          ],
-          "format": "ip"
+          ]
         },
         "idle_timeout": {
           "title": "external_proxy.idle_timeout {#external_proxy-idle_timeout}",
@@ -794,7 +793,7 @@
         },
         "listen": {
           "title": "external_proxy.listen {#external_proxy-listen}",
-          "description": "Provide a specific address to listen to for external proxy (will try and bind local machine ip if not specified)\n\nThis is a workaround for when the local machine ip that is bound by default, is not accessible from the container (local address resolved to `192.168.0.2` but this ip is inaccessible from within a container)",
+          "description": "Provide a specific address to listen to for external proxy (will try and bind localhost if not specified)\n\nThis is a workaround for when the network bridging that is setup by default, is not accessible for the container (when accessing `host.docker.internal` will not connect to `127.0.0.1` on host machine but rather some other ip can be bound for the connection)",
           "type": [
             "string",
             "null"

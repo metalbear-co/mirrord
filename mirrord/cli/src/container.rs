@@ -6,7 +6,6 @@ use std::{
 };
 
 use exec::execvp;
-use local_ip_address::local_ip;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
@@ -251,13 +250,7 @@ pub(crate) async fn container_command(
     let _external_proxy_tls_guards = if config.external_proxy.tls_certificate.is_none()
         || config.external_proxy.tls_key.is_none()
     {
-        let external_proxy_subject_alt_names = config
-            .external_proxy
-            .address
-            .or_else(|| local_ip().ok())
-            .map(|item| item.to_string())
-            .into_iter()
-            .collect();
+        let external_proxy_subject_alt_names = vec![config.external_proxy.address.clone()];
 
         let (external_proxy_cert, external_proxy_key) =
             create_self_signed_certificate(external_proxy_subject_alt_names)?;

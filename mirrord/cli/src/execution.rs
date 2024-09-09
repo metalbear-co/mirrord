@@ -375,7 +375,7 @@ impl MirrordExecution {
 
         let stdout = proxy_process.stdout.take().expect("stdout was piped");
 
-        let mut address: SocketAddr = BufReader::new(stdout)
+        let listen_address: SocketAddr = BufReader::new(stdout)
             .lines()
             .next_line()
             .await
@@ -394,14 +394,16 @@ impl MirrordExecution {
                 ))
             })?;
 
-        if let Some(addr) = config.external_proxy.address {
-            address.set_ip(addr);
-        }
+        let address = format!(
+            "{addr}:{port}",
+            addr = config.external_proxy.address,
+            port = listen_address.port()
+        );
 
         // Provide details for layer to connect to agent via internal proxy
         env_vars.insert(
             MIRRORD_INTPROXY_CONNECT_TCP_ENV.to_string(),
-            address.to_string(),
+            address.clone(),
         );
         env_vars.insert(
             AGENT_CONNECT_INFO_ENV_KEY.to_string(),
