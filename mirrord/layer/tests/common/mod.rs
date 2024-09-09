@@ -1,6 +1,5 @@
 use std::{
     assert_matches::assert_matches,
-    cmp::min,
     collections::HashMap,
     ffi::OsString,
     fmt::Debug,
