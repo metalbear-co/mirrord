@@ -9,7 +9,8 @@ use mirrord_kube::{
 };
 use mirrord_operator::client::{OperatorApi, OperatorSessionConnection};
 use mirrord_progress::{
-    messages::MULTIPOD_WARNING, IdeAction, IdeMessage, NotificationLevel, Progress,
+    messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
+    IdeAction, IdeMessage, NotificationLevel, Progress,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
@@ -153,6 +154,33 @@ where
         progress.print("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
         progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
         progress.print("You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/overview/teams/?utm_source=multipodwarn&utm_medium=cli");
+    }
+
+    if config.feature.network.incoming.http_filter.is_filter_set() {
+        // Send to IDEs that at an HTTP filter is set without operator.
+        progress.ide(serde_json::to_value(IdeMessage {
+            id: HTTP_FILTER_WARNING.0.to_string(),
+            level: NotificationLevel::Warning,
+            text: HTTP_FILTER_WARNING.1.to_string(),
+            actions: {
+                let mut actions = HashSet::new();
+                actions.insert(IdeAction::Link {
+                    label: "Get started (read the docs)".to_string(),
+                    link: "https://mirrord.dev/docs/overview/teams/?utm_source=httpfilter&utm_medium=plugin".to_string(),
+                });
+                actions.insert(IdeAction::Link {
+                    label: "Try it now".to_string(),
+                    link: "https://app.metalbear.co/".to_string(),
+                });
+
+                actions
+            },
+        })?);
+        // This is CLI Only because the extensions also implement this check with better messaging.
+        progress.print("You're using an HTTP filter, which generally indicates the use of a shared environment. If so, we recommend");
+        progress
+            .print("considering mirrord for Teams, which is better suited to shared environments.");
+        progress.print("You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/overview/teams/?utm_source=httpfilter&utm_medium=cli");
     }
 
     let k8s_api = KubernetesAPI::create(config)
