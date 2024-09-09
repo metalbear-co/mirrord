@@ -32,9 +32,9 @@ pub struct ExternalProxyConfig {
     /// Provide a specific address to listen to for external proxy
     /// (will try and bind local machine ip if not specified)
     ///
-    /// This is a workaround for when the local machine ip that is default is bound is not
-    /// accecible from the container (local address resoved to `192.168.0.2` but said ip is
-    /// inacceible from within a container)
+    /// This is a workaround for when the local machine ip that is bound by default, is not
+    /// accessible from the container (local address resolved to `192.168.0.2` but this ip is
+    /// inaccessible from within a container)
     pub listen: Option<IpAddr>,
 
     /// ### external_proxy.address {#external_proxy-address}
@@ -43,9 +43,9 @@ pub struct ExternalProxyConfig {
     ///
     /// This is a workaround where the listen address should be different from the one the
     /// container is connecting to, example can be where `host.docker.internal -> 192.168.127.254`
-    /// and we intend to utilize the network briging
+    /// and we intend to utilize the network bridging
     ///
-    /// Note: this needs to be an ip because of TLS nagotiation.
+    /// Note: this needs to be an ip because of TLS negotiation.
     /// ```json
     /// {
     ///     "external_proxy": {
