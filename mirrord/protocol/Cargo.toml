@@ -37,3 +37,4 @@ mirrord-macros = { path = "../macros" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 nix = { workspace = true, features = ["fs"] }
+libc.workspace = true
