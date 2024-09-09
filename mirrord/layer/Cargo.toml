@@ -45,7 +45,6 @@ errno = "0.3"
 socket2.workspace = true
 bytemuck = "1"
 hashbrown = "0.14"
-exec.workspace = true
 null-terminated = "0.3"
 base64.workspace = true
 
@@ -54,6 +53,7 @@ syscalls = { version = "0.6",  default-features = false, features = ["std", "aar
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
+exec.workspace = true
 resolv-conf = "0.7"
 
 [dev-dependencies]
