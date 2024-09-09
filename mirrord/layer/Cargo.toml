@@ -52,6 +52,7 @@ base64.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
+resolv-conf = "0.7"
 
 [dev-dependencies]
 mirrord-intproxy = { path = "../intproxy" }

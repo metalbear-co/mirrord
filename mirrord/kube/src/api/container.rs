@@ -18,6 +18,8 @@ pub mod targeted;
 pub mod targetless;
 pub mod util;
 
+const TELEPRESENCE_CONTAINER_NAME: &str = "traffic-agent";
+
 pub static SKIP_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     HashSet::from([
         "kuma-sidecar",
@@ -29,6 +31,7 @@ pub static SKIP_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
         "vault-agent",
         "vault-agent-init",
         "queue-proxy", // Knative
+        TELEPRESENCE_CONTAINER_NAME,
     ])
 });
 
@@ -150,6 +153,12 @@ pub fn choose_container<'a>(
 ) -> (Option<&'a ContainerStatus>, bool) {
     let mut picked_from_many = false;
 
+    if container_statuses
+        .iter()
+        .any(|status| status.name == TELEPRESENCE_CONTAINER_NAME)
+    {
+        tracing::warn!("Telepresence container detected, stealing/mirroring might not work.");
+    }
     let container = if let Some(name) = container_name {
         container_statuses
             .iter()
