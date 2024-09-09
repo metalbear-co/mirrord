@@ -93,7 +93,6 @@ rand = "0.8"
 streammap-ext = "0.1"
 num-traits = "0.2"
 regex = { version = "1", features = ["unicode-case"] }
-miette = "5"
 fancy-regex = { version = "0.13" }
 enum_dispatch = "0.3"
 

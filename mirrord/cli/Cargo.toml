@@ -67,6 +67,7 @@ tokio-rustls = "0.26"
 tokio-stream = { workspace = true, features = ["net"] }
 tokio-retry = "0.3"
 regex.workspace = true
+mid = "2.1.0"
 
 
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -121,67 +121,34 @@ where
         return Err(CliError::FeatureRequiresOperatorError("copy_target".into()));
     }
 
-    if matches!(
-        config.target,
-        mirrord_config::target::TargetConfig {
-            path: Some(
-                mirrord_config::target::Target::Deployment { .. }
-                    | mirrord_config::target::Target::Rollout(..)
-            ),
-            ..
-        }
+    match (
+        // user in mutipod without operator
+        matches!(
+            config.target,
+            mirrord_config::target::TargetConfig {
+                path: Some(
+                    mirrord_config::target::Target::Deployment { .. }
+                        | mirrord_config::target::Target::Rollout(..)
+                ),
+                ..
+            }
+        ),
+        // user using http filter(s) without operator
+        config.feature.network.incoming.http_filter.is_filter_set(),
     ) {
-        // Send to IDEs that we're in multi-pod without operator.
-        progress.ide(serde_json::to_value(IdeMessage {
-            id: MULTIPOD_WARNING.0.to_string(),
-            level: NotificationLevel::Warning,
-            text: MULTIPOD_WARNING.1.to_string(),
-            actions: {
-                let mut actions = HashSet::new();
-                actions.insert(IdeAction::Link {
-                    label: "Get started (read the docs)".to_string(),
-                    link: "https://mirrord.dev/docs/overview/teams/?utm_source=multipodwarn&utm_medium=plugin".to_string(),
-                });
-                actions.insert(IdeAction::Link {
-                    label: "Try it now".to_string(),
-                    link: "https://app.metalbear.co/".to_string(),
-                });
-
-                actions
-            },
-        })?);
-        // This is CLI Only because the extensions also implement this check with better messaging.
-        progress.print("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
-        progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
-        progress.print("You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/overview/teams/?utm_source=multipodwarn&utm_medium=cli");
-    }
-
-    if config.feature.network.incoming.http_filter.is_filter_set() {
-        // Send to IDEs that at an HTTP filter is set without operator.
-        progress.ide(serde_json::to_value(IdeMessage {
-            id: HTTP_FILTER_WARNING.0.to_string(),
-            level: NotificationLevel::Warning,
-            text: HTTP_FILTER_WARNING.1.to_string(),
-            actions: {
-                let mut actions = HashSet::new();
-                actions.insert(IdeAction::Link {
-                    label: "Get started (read the docs)".to_string(),
-                    link: "https://mirrord.dev/docs/overview/teams/?utm_source=httpfilter&utm_medium=plugin".to_string(),
-                });
-                actions.insert(IdeAction::Link {
-                    label: "Try it now".to_string(),
-                    link: "https://app.metalbear.co/".to_string(),
-                });
-
-                actions
-            },
-        })?);
-        // This is CLI Only because the extensions also implement this check with better messaging.
-        progress.print("You're using an HTTP filter, which generally indicates the use of a shared environment. If so, we recommend");
-        progress
-            .print("considering mirrord for Teams, which is better suited to shared environments.");
-        progress.print("You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/overview/teams/?utm_source=httpfilter&utm_medium=cli");
-    }
+        (true, true) => {
+            // only show user one of the two msgs - each user should always be shown same msg
+            let machine_id = mid::get("mirrord").unwrap().into_bytes();
+            if machine_id.last().unwrap() > &(u8::MAX / 2) {
+                show_multipod_warning(progress)?
+            } else {
+                show_http_filter_warning(progress)?
+            }
+        }
+        (true, false) => show_multipod_warning(progress)?,
+        (false, true) => show_http_filter_warning(progress)?,
+        _ => (),
+    };
 
     let k8s_api = KubernetesAPI::create(config)
         .await
@@ -212,4 +179,64 @@ where
         AgentConnectInfo::DirectKubernetes(agent_connect_info),
         AgentConnection { sender, receiver },
     ))
+}
+
+pub(crate) fn show_multipod_warning<P>(progress: &mut P) -> Result<(), CliError>
+where
+    P: Progress + Send + Sync,
+{
+    // Send to IDEs that we're in multi-pod without operator.
+    progress.ide(serde_json::to_value(IdeMessage {
+            id: MULTIPOD_WARNING.0.to_string(),
+            level: NotificationLevel::Warning,
+            text: MULTIPOD_WARNING.1.to_string(),
+            actions: {
+                let mut actions = HashSet::new();
+                actions.insert(IdeAction::Link {
+                    label: "Get started (read the docs)".to_string(),
+                    link: "https://mirrord.dev/docs/overview/teams/?utm_source=multipodwarn&utm_medium=plugin".to_string(),
+                });
+                actions.insert(IdeAction::Link {
+                    label: "Try it now".to_string(),
+                    link: "https://app.metalbear.co/".to_string(),
+                });
+
+                actions
+            },
+        })?);
+    // This is CLI Only because the extensions also implement this check with better messaging.
+    progress.print("When targeting multi-pod deployments, mirrord impersonates the first pod in the deployment.");
+    progress.print("Support for multi-pod impersonation requires the mirrord operator, which is part of mirrord for Teams.");
+    progress.print("You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/overview/teams/?utm_source=multipodwarn&utm_medium=cli");
+    Ok(())
+}
+
+pub(crate) fn show_http_filter_warning<P>(progress: &mut P) -> Result<(), CliError>
+where
+    P: Progress + Send + Sync,
+{
+    // Send to IDEs that at an HTTP filter is set without operator.
+    progress.ide(serde_json::to_value(IdeMessage {
+        id: HTTP_FILTER_WARNING.0.to_string(),
+        level: NotificationLevel::Warning,
+        text: HTTP_FILTER_WARNING.1.to_string(),
+        actions: {
+            let mut actions = HashSet::new();
+            actions.insert(IdeAction::Link {
+                label: "Get started (read the docs)".to_string(),
+                link: "https://mirrord.dev/docs/overview/teams/?utm_source=httpfilter&utm_medium=plugin".to_string(),
+            });
+            actions.insert(IdeAction::Link {
+                label: "Try it now".to_string(),
+                link: "https://app.metalbear.co/".to_string(),
+            });
+
+            actions
+        },
+    })?);
+    // This is CLI Only because the extensions also implement this check with better messaging.
+    progress.print("You're using an HTTP filter, which generally indicates the use of a shared environment. If so, we recommend");
+    progress.print("considering mirrord for Teams, which is better suited to shared environments.");
+    progress.print("You can get started with mirrord for Teams at this link: https://mirrord.dev/docs/overview/teams/?utm_source=httpfilter&utm_medium=cli");
+    Ok(())
 }
