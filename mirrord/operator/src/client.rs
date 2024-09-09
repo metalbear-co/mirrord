@@ -333,6 +333,55 @@ impl OperatorApi<NoClientCert> {
         })
     }
 
+    pub async fn try_new_new<R>(
+        operator_kube_config: &Config,
+        reporter: &mut R,
+        client: &Client,
+    ) -> OperatorApiResult<Option<Self>>
+    where
+        R: Reporter,
+    {
+        let operator: Result<MirrordOperatorCrd, _> =
+            Api::all(client.clone()).get(OPERATOR_STATUS_NAME).await;
+
+        let error = match operator {
+            Ok(operator) => {
+                reporter.set_operator_properties(AnalyticsOperatorProperties {
+                    client_hash: None,
+                    license_hash: operator
+                        .spec
+                        .license
+                        .fingerprint
+                        .as_deref()
+                        .map(AnalyticsHash::from_base64),
+                });
+
+                return Ok(Some(Self {
+                    client: client.clone(),
+                    client_cert: NoClientCert {
+                        base_config: operator_kube_config.clone(),
+                    },
+                    operator,
+                }));
+            }
+
+            Err(error @ kube::Error::Api(..)) => {
+                match discovery::operator_installed(&client).await {
+                    Ok(false) | Err(..) => {
+                        return Ok(None);
+                    }
+                    Ok(true) => error,
+                }
+            }
+
+            Err(error) => error,
+        };
+
+        Err(OperatorApiError::KubeError {
+            error,
+            operation: OperatorOperation::FindingOperator,
+        })
+    }
     /// Prepares client [`Certificate`] to be sent in all subsequent requests to the operator.
     /// In case of failure, state of this API instance does not change.
     #[tracing::instrument(level = Level::TRACE, skip(reporter))]
@@ -405,6 +454,43 @@ impl OperatorApi<MaybeClientCert> {
             operator: self.operator,
         })
     }
+}
+
+pub fn operator_config(base_kube_config: &Config) -> Config {
+    let mut operator_kube_config = base_kube_config.clone();
+    operator_kube_config.headers.push((
+        HeaderName::from_static(MIRRORD_CLI_VERSION_HEADER),
+        HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+    ));
+
+    let UserIdentity { name, hostname } = UserIdentity::load();
+
+    let headers = [
+        (CLIENT_NAME_HEADER, name),
+        (CLIENT_HOSTNAME_HEADER, hostname),
+    ];
+    for (name, raw_value) in headers {
+        let Some(raw_value) = raw_value else {
+            continue;
+        };
+
+        // Replace non-ascii (not supported in headers) chars and trim.
+        let cleaned = raw_value
+            .replace(|c: char| !c.is_ascii(), "")
+            .trim()
+            .to_string();
+        let value = HeaderValue::from_str(&cleaned);
+        match value {
+            Ok(value) => operator_kube_config
+                .headers
+                .push((HeaderName::from_static(name), value)),
+            Err(error) => {
+                tracing::debug!(%error, %name, raw_value = raw_value, cleaned, "Invalid header value");
+            }
+        }
+    }
+
+    operator_kube_config
 }
 
 impl<C> OperatorApi<C>
