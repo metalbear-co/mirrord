@@ -681,6 +681,8 @@ pub struct EnvVarInjected {
     pub env_name: String,
     /// Original value of the variable.
     pub original_value: String,
+    /// Value injected into the variable.
+    pub injected_value: String,
 }
 
 /// Represents a temporary SQS queue created in the AWS.
