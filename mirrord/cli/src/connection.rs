@@ -138,8 +138,18 @@ where
     ) {
         (true, true) => {
             // only show user one of the two msgs - each user should always be shown same msg
-            let machine_id = mid::get("mirrord").unwrap().into_bytes();
-            if machine_id.last().unwrap() > &(u8::MAX / 2) {
+            if mid::get("mirrord")
+                .inspect_err(|error| tracing::error!(%error, "failed to obtain machine ID"))
+                .ok()
+                .unwrap_or_default()
+                .as_bytes()
+                .iter()
+                .copied()
+                .reduce(u8::wrapping_add)
+                .unwrap_or_default()
+                % 2
+                == 0
+            {
                 show_multipod_warning(progress)?
             } else {
                 show_http_filter_warning(progress)?
