@@ -445,10 +445,9 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
         remove_proxy_env();
     }
 
-    let mut targets = list_targets(&layer_config, args).await?;
-
-    targets.sort();
-
+    // The targets come sorted in the following order:
+    // `deployments - rollouts - statefulsets - cronjobs - jobs - pods`
+    let targets = list_targets(&layer_config, args).await?;
     let json_obj = json!(targets);
     println!("{json_obj}");
     Ok(())
