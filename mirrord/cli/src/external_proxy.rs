@@ -20,9 +20,8 @@
 //! ```
 
 use std::{
-    fs::{File, OpenOptions},
+    fs::OpenOptions,
     io,
-    io::BufReader,
     net::SocketAddr,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -34,10 +33,9 @@ use std::{
 use futures::{SinkExt, StreamExt};
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
-use mirrord_intproxy::agent_conn::{AgentConnection, ConnectionTlsError};
+use mirrord_intproxy::agent_conn::AgentConnection;
 use mirrord_protocol::DaemonCodec;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_rustls::server::TlsStream;
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
@@ -99,7 +97,7 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
     let mut analytics = AnalyticsReporter::new(config.telemetry, execution_kind, watch);
     (&config).collect_analytics(analytics.get_mut());
 
-    let tls_acceptor = create_external_proxy_tls_acceptor(&config).await?;
+    // let tls_acceptor = create_external_proxy_tls_acceptor(&config).await?;
     let listener = create_listen_socket(SocketAddr::new(config.external_proxy.listen, 0))
         .map_err(ExternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(ExternalProxyError::ListenerSetup)?;
@@ -120,7 +118,6 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
                 if let Ok((stream, peer_addr)) = conn {
                     tracing::debug!(?peer_addr, "new connection");
 
-                    let tls_acceptor = tls_acceptor.clone();
                     let connections = connections.clone();
                     let cancellation_token = cancellation_token.clone();
                     let connection_cancelation_token = cancellation_token.child_token();
@@ -129,8 +126,6 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
                     connections.fetch_add(1, Ordering::Relaxed);
 
                     let fut = async move {
-                        let stream = tls_acceptor.accept(stream).await?;
-
                         handle_connection(stream, peer_addr, agent_conn, connection_cancelation_token).await;
 
                         tracing::debug!(?peer_addr, "closed connection");
@@ -174,63 +169,9 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
     Ok(())
 }
 
-async fn create_external_proxy_tls_acceptor(
-    config: &LayerConfig,
-) -> Result<tokio_rustls::TlsAcceptor, ExternalProxyError> {
-    let (Some(client_tls_certificate), Some(tls_certificate), Some(tls_key)) = (
-        config.internal_proxy.client_tls_certificate.as_ref(),
-        config.external_proxy.tls_certificate.as_ref(),
-        config.external_proxy.tls_key.as_ref(),
-    ) else {
-        return Err(ExternalProxyError::MissingTlsInfo);
-    };
-
-    let tls_client_certificates = rustls_pemfile::certs(&mut BufReader::new(
-        File::open(client_tls_certificate)
-            .map_err(|error| {
-                ConnectionTlsError::MissingPem(client_tls_certificate.to_path_buf(), error)
-            })
-            .map_err(ExternalProxyError::Tls)?,
-    ))
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|error| ConnectionTlsError::ParsingPem(client_tls_certificate.to_path_buf(), error))
-    .map_err(ExternalProxyError::Tls)?;
-
-    let tls_certificate = rustls_pemfile::certs(&mut BufReader::new(
-        File::open(tls_certificate)
-            .map_err(|error| ConnectionTlsError::MissingPem(tls_certificate.to_path_buf(), error))
-            .map_err(ExternalProxyError::Tls)?,
-    ))
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|error| ConnectionTlsError::ParsingPem(tls_certificate.to_path_buf(), error))
-    .map_err(ExternalProxyError::Tls)?;
-
-    let tls_keys = rustls_pemfile::private_key(&mut BufReader::new(
-        File::open(tls_key)
-            .map_err(|error| ConnectionTlsError::MissingPem(tls_key.to_path_buf(), error))?,
-    ))
-    .map_err(|error| ConnectionTlsError::ParsingPem(tls_key.to_path_buf(), error))?
-    .ok_or_else(|| ConnectionTlsError::MissingPrivateKey(tls_key.to_path_buf()))?;
-
-    let mut roots = rustls::RootCertStore::empty();
-
-    roots.add_parsable_certificates(tls_client_certificates);
-
-    let client_verifier = rustls::server::WebPkiClientVerifier::builder(roots.into())
-        .build()
-        .map_err(ConnectionTlsError::ClientVerifier)?;
-
-    let tls_config = rustls::ServerConfig::builder()
-        .with_client_cert_verifier(client_verifier)
-        .with_single_cert(tls_certificate, tls_keys)
-        .map_err(ConnectionTlsError::ServerConfig)?;
-
-    Ok(tokio_rustls::TlsAcceptor::from(Arc::new(tls_config)))
-}
-
 #[tracing::instrument(level = Level::TRACE, skip(agent_conn))]
 async fn handle_connection(
-    stream: TlsStream<TcpStream>,
+    stream: TcpStream,
     peer_addr: SocketAddr,
     mut agent_conn: AgentConnection,
     cancellation_token: CancellationToken,

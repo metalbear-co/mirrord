@@ -99,12 +99,6 @@ pub(crate) enum ExternalProxyError {
     #[error(transparent)]
     #[diagnostic(help("{GENERAL_BUG}"))]
     Tls(#[from] ConnectionTlsError),
-
-    #[error(
-        "there was no tls information provided, see `external_proxy` keys in config if specified"
-    )]
-    #[diagnostic(help("{GENERAL_BUG}"))]
-    MissingTlsInfo,
 }
 
 /// Errors that can occur when executing the `mirrord intproxy` command.

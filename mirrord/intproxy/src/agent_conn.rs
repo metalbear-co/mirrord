@@ -2,12 +2,9 @@
 //! mirrord crates.
 
 use std::{
-    fs::File,
     io,
-    io::BufReader,
     net::{IpAddr, SocketAddr, ToSocketAddrs},
-    path::{Path, PathBuf},
-    sync::Arc,
+    path::PathBuf,
 };
 
 use mirrord_analytics::Reporter;
@@ -25,12 +22,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
     net::{TcpSocket, TcpStream},
-    sync::{
-        mpsc,
-        mpsc::{Receiver, Sender},
-    },
+    sync::mpsc::{Receiver, Sender},
 };
-use tokio_rustls::TlsConnector;
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
@@ -135,26 +128,7 @@ impl AgentConnection {
 
                 let stream = socket.connect(proxy_sockaddr).await?;
 
-                if let (Some(tls_certificate), Some(client_tls_certificate), Some(client_tls_key)) = (
-                    config.external_proxy.tls_certificate.as_ref(),
-                    config.internal_proxy.client_tls_certificate.as_ref(),
-                    config.internal_proxy.client_tls_key.as_ref(),
-                ) {
-                    wrap_connection_with_tls(
-                        stream,
-                        proxy_sockaddr.ip(),
-                        proxy_addr
-                            .split_once(':')
-                            .map(|(domain, _)| domain)
-                            .unwrap_or(&proxy_addr),
-                        tls_certificate,
-                        client_tls_certificate,
-                        client_tls_key,
-                    )
-                    .await?
-                } else {
-                    wrap_raw_connection(stream)
-                }
+                wrap_raw_connection(stream)
             }
 
             Some(AgentConnectInfo::DirectKubernetes(connect_info)) => {
@@ -234,56 +208,4 @@ impl BackgroundTask for AgentConnection {
             }
         }
     }
-}
-
-pub async fn wrap_connection_with_tls(
-    stream: TcpStream,
-    proxy_ip: IpAddr,
-    proxy_server_name: &str,
-    tls_certificate: &Path,
-    client_tls_certificate: &Path,
-    client_tls_key: &Path,
-) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), ConnectionTlsError> {
-    let mut root_cert_store = rustls::RootCertStore::empty();
-
-    root_cert_store.add_parsable_certificates(
-        rustls_pemfile::certs(&mut BufReader::new(File::open(tls_certificate).map_err(
-            |error| ConnectionTlsError::MissingPem(tls_certificate.to_path_buf(), error),
-        )?))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| ConnectionTlsError::ParsingPem(tls_certificate.to_path_buf(), error))?,
-    );
-
-    let client_tls_certificate = rustls_pemfile::certs(&mut BufReader::new(
-        File::open(client_tls_certificate).map_err(|error| {
-            ConnectionTlsError::MissingPem(client_tls_certificate.to_path_buf(), error)
-        })?,
-    ))
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|error| ConnectionTlsError::ParsingPem(client_tls_certificate.to_path_buf(), error))?;
-
-    let client_tls_keys = rustls_pemfile::private_key(&mut BufReader::new(
-        File::open(client_tls_key)
-            .map_err(|error| ConnectionTlsError::MissingPem(client_tls_key.to_path_buf(), error))?,
-    ))
-    .map_err(|error| ConnectionTlsError::ParsingPem(client_tls_key.to_path_buf(), error))?
-    .ok_or_else(|| ConnectionTlsError::MissingPrivateKey(client_tls_key.to_path_buf()))?;
-
-    let tls_config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_cert_store)
-        .with_client_auth_cert(client_tls_certificate, client_tls_keys)
-        .map_err(ConnectionTlsError::ClientConfig)?;
-
-    let connector = TlsConnector::from(Arc::new(tls_config));
-
-    let domain = rustls::pki_types::ServerName::try_from(proxy_server_name)
-        .map_err(|error| ConnectionTlsError::InvalidDnsName(proxy_ip, error))?
-        .to_owned();
-
-    Ok(wrap_raw_connection(
-        connector
-            .connect(domain, stream)
-            .await
-            .map_err(ConnectionTlsError::Connection)?,
-    ))
 }
