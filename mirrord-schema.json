@@ -775,7 +775,7 @@
       "properties": {
         "address": {
           "title": "external_proxy.address {#external_proxy-address}",
-          "description": "Specify an address that is accessible from within the container runtime to the host machine\n\nThis is a workaround where the listen address should be different from the one the container is connecting to, example can be where `host.docker.internal -> 192.168.127.254` and we intend to utilize the network briging\n\nNote: this needs to be an ip because of TLS nagotiation. ```json { \"external_proxy\": { \"listen\": \"127.0.0.1\", \"address\": \"192.168.127.254\" } } ```",
+          "description": "Specify an address that is accessible from within the container runtime to the host machine\n\nThis is a workaround where the listen address should be different from the one the container is connecting to, example can be where `host.docker.internal -> 192.168.127.254` and we intend to utilize the network bridging\n\nNote: this needs to be an ip because of TLS negotiation. ```json { \"external_proxy\": { \"listen\": \"127.0.0.1\", \"address\": \"192.168.127.254\" } } ```",
           "type": [
             "string",
             "null"
@@ -794,7 +794,7 @@
         },
         "listen": {
           "title": "external_proxy.listen {#external_proxy-listen}",
-          "description": "Provide a specific address to listen to for external proxy (will try and bind local machine ip if not specified)\n\nThis is a workaround for when the local machine ip that is default is bound is not accecible from the container (local address resoved to `192.168.0.2` but said ip is inacceible from within a container)",
+          "description": "Provide a specific address to listen to for external proxy (will try and bind local machine ip if not specified)\n\nThis is a workaround for when the local machine ip that is bound by default, is not accessible from the container (local address resolved to `192.168.0.2` but this ip is inaccessible from within a container)",
           "type": [
             "string",
             "null"

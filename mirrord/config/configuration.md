@@ -444,9 +444,9 @@ Specify an address that is accessible from within the container runtime to the h
 
 This is a workaround where the listen address should be different from the one the
 container is connecting to, example can be where `host.docker.internal -> 192.168.127.254`
-and we intend to utilize the network briging
+and we intend to utilize the network bridging
 
-Note: this needs to be an ip because of TLS nagotiation.
+Note: this needs to be an ip because of TLS negotiation.
 ```json
 {
     "external_proxy": {
@@ -476,9 +476,9 @@ and don't connect to the proxy.
 Provide a specific address to listen to for external proxy
 (will try and bind local machine ip if not specified)
 
-This is a workaround for when the local machine ip that is default is bound is not
-accecible from the container (local address resoved to `192.168.0.2` but said ip is
-inacceible from within a container)
+This is a workaround for when the local machine ip that is bound by default, is not
+accessible from the container (local address resolved to `192.168.0.2` but this ip is
+inaccessible from within a container)
 
 ### external_proxy.log_destination {#external_proxy-log_destination}
 Set the log file destination for the external proxy.
@@ -1426,7 +1426,7 @@ Namespace where the target lives.
 
 Defaults to `"default"`.
 
-Recursion limit reached### target.path {#target-path}
+### target.path {#target-path}
 
 Specifies the running pod (or deployment) to mirror.
 
@@ -1440,13 +1440,13 @@ Supports:
 - `containername/{sample-container}`.
 - `job/{sample-job}` (only when [`copy_target`](#feature-copy_target) is enabled).
 
-Recursion limit reached## telemetry {#root-telemetry}
+## telemetry {#root-telemetry}
 Controls whether or not mirrord sends telemetry data to MetalBear cloud.
 Telemetry sent doesn't contain personal identifiers or any data that
 should be considered sensitive. It is used to improve the product.
 [For more information](https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md)
 
-Recursion limit reached## use_proxy {#root-use_proxy}
+## use_proxy {#root-use_proxy}
 
 When disabled, mirrord will remove `HTTP[S]_PROXY` env variables before
 doing any network requests. This is useful when the system sets a proxy
@@ -1454,4 +1454,3 @@ but you don't want mirrord to use it.
 This also applies to the mirrord process (as it just removes the env).
 If the remote pod sets this env, the mirrord process will still use it.
 
-Recursion limit reached
