@@ -23,7 +23,6 @@ default = ["client"]
 client = [
 	"dep:home",
 	"dep:fs4",
-	"dep:k8s-openapi",
 	"dep:kube",
 	"dep:serde_yaml",
 	"dep:tokio",
@@ -36,7 +35,6 @@ whoami = { version = "1", optional = true }
 home = { version = "0.5", optional = true }
 pem = "3"
 fs4 = { version = "0.8", features = ["tokio"], optional = true }
-k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = { workspace = true, optional = true }

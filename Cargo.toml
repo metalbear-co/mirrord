@@ -116,6 +116,10 @@ rustls = "0.23"
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 
+[workspace.lints.rust]
+unused_crate_dependencies = "deny"
+non_ascii_idents = "deny"
+
 [profile.release]
 strip = "debuginfo"
 # Enabling LTO causes this issue https://github.com/metalbear-co/mirrord/issues/906

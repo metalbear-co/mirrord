@@ -21,7 +21,6 @@ workspace = true
 [dependencies]
 mirrord-operator = { path = "../operator", features = [
     "client",
-    "license-fetch",
     "setup",
 ] }
 mirrord-progress = { path = "../progress" }
@@ -35,7 +34,6 @@ mirrord-vpn = { path = "../vpn" }
 
 actix-codec.workspace = true
 clap.workspace = true
-tun2 = { version = "2", features = ["async"] }
 tracing.workspace = true
 serde_json.workspace = true
 serde.workspace = true

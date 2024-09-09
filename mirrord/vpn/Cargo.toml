@@ -23,11 +23,10 @@ futures.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true
 ipnet = "2.9"
-paste = "1"
 pnet_packet = "0.35"
 semver.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "process"] }
 tracing.workspace = true
-tun2 = { version = "2", features = ["async"] }
+tun2 = { version = "2", default-features = false, features = ["async"] }
