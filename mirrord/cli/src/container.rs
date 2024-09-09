@@ -6,7 +6,6 @@ use std::{
 };
 
 use exec::execvp;
-use local_ip_address::local_ip;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
@@ -25,10 +24,10 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::Level;
 
 use crate::{
-    config::{ContainerCommand, ExecParams, RuntimeArgs},
+    config::{ContainerArgs, ContainerCommand},
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     container::command_builder::RuntimeCommandBuilder,
-    error::{ContainerError, Result},
+    error::{CliError, ContainerError, Result},
     execution::{
         MirrordExecution, LINUX_INJECTION_ENV_VAR, MIRRORD_CONNECT_TCP_ENV,
         MIRRORD_EXECUTION_KIND_ENV,
@@ -128,19 +127,20 @@ async fn create_sidecar_intproxy(
     config: &LayerConfig,
     base_command: &RuntimeCommandBuilder,
     connection_info: Vec<(&str, &str)>,
-) -> Result<(String, SocketAddr), ContainerError> {
+) -> Result<(String, SocketAddr)> {
     let mut sidecar_command = base_command.clone();
 
     sidecar_command.add_env(MIRRORD_INTPROXY_CONTAINER_MODE_ENV, "true");
     sidecar_command.add_envs(connection_info);
 
-    let sidecar_container_command = ContainerCommand::run([
-        "--rm",
-        "-d",
-        &config.container.cli_image,
-        "mirrord",
-        "intproxy",
-    ]);
+    let sidecar_container_command = ContainerCommand::run(
+        config
+            .container
+            .cli_extra_args
+            .iter()
+            .map(String::as_str)
+            .chain(["-d", &config.container.cli_image, "mirrord", "intproxy"]),
+    );
 
     let (runtime_binary, sidecar_args) = sidecar_command
         .with_command(sidecar_container_command)
@@ -157,6 +157,17 @@ async fn create_sidecar_intproxy(
                 "stdout and stderr were empty".to_owned(),
             )
         })?;
+
+    let mut sidecar_watcher_command =
+        Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
+
+    sidecar_watcher_command
+        .args(["sidecar-watcher", &runtime_binary, &sidecar_container_id])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .stdin(std::process::Stdio::null());
+
+    let _ = sidecar_watcher_command.spawn();
 
     let mut retry_strategy = ExponentialBackoff::from_millis(100)
         .max_delay(Duration::from_secs(10))
@@ -193,13 +204,14 @@ async fn create_sidecar_intproxy(
 /// Main entry point for the `mirrord container` command.
 /// This spawns: "agent" - "external proxy" - "intproxy sidecar" - "execution container"
 pub(crate) async fn container_command(
-    runtime_args: RuntimeArgs,
-    exec_params: ExecParams,
+    container_args: ContainerArgs,
     watch: drain::Watch,
 ) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord container");
 
     progress.warning("mirrord container is currently an unstable feature");
+
+    let (runtime_args, exec_params) = container_args.into_parts();
 
     for (name, value) in exec_params.as_env_vars()? {
         std::env::set_var(name, value);
@@ -244,10 +256,7 @@ pub(crate) async fn container_command(
     let _external_proxy_tls_guards = if config.external_proxy.tls_certificate.is_none()
         || config.external_proxy.tls_key.is_none()
     {
-        let external_proxy_subject_alt_names = local_ip()
-            .map(|item| item.to_string())
-            .into_iter()
-            .collect();
+        let external_proxy_subject_alt_names = vec![config.external_proxy.address.clone()];
 
         let (external_proxy_cert, external_proxy_key) =
             create_self_signed_certificate(external_proxy_subject_alt_names)?;

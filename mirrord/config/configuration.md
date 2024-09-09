@@ -386,6 +386,10 @@ IP:PORT to connect to instead of using k8s api, for testing purposes.
 
 Unstable: `mirrord container` command specific config.
 
+### container.cli_extra_args {#container-cli_extra_args}
+
+Any extra args to use when creating the sidecar mirrord-cli container.
+
 ### container.cli_image {#container-cli_image}
 
 Tag of the `mirrord-cli` image you want to use.
@@ -438,6 +442,22 @@ If you get `ConnectionRefused` errors, increasing the timeouts a bit might solve
 }
 ```
 
+### external_proxy.address {#external_proxy-address}
+
+Specify an address that is accessible from within the container runtime to the host machine
+
+This is a workaround where the listen address should be different from the one the
+container is connecting to, example can be where `host.docker.internal -> host-gateway`
+and we intend to utilize the network bridging
+
+```json
+{
+    "external_proxy": {
+        "address": "host-gateway"
+    }
+}
+```
+
 ### external_proxy.idle_timeout {#external_proxy-idle_timeout}
 
 How much time to wait while we don't have any active connections before exiting.
@@ -452,6 +472,15 @@ and don't connect to the proxy.
   }
 }
 ```
+
+### external_proxy.listen {#external_proxy-listen}
+
+Provide a specific address to listen to for external proxy
+(will try and bind localhost if not specified)
+
+This is a workaround for when the network bridging that is setup by default, is not
+accessible for the container (when accessing `host.docker.internal` will not connect to
+`127.0.0.1` on host machine but rather some other ip can be bound for the connection)
 
 ### external_proxy.log_destination {#external_proxy-log_destination}
 Set the log file destination for the external proxy.

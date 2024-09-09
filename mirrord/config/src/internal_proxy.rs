@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf};
+use std::path::PathBuf;
 
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -34,7 +34,7 @@ pub struct InternalProxyConfig {
     ///
     /// Address of external proxy to be used in `mirrord container`
     #[config(env = MIRRORD_INTPROXY_CONNECT_TCP_ENV)]
-    pub connect_tcp: Option<SocketAddr>,
+    pub connect_tcp: Option<String>,
 
     /// <!--${internal}-->
     ///

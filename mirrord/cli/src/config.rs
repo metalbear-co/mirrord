@@ -65,6 +65,16 @@ pub(super) enum Commands {
     #[command(hide = true, name = "intproxy")]
     InternalProxy,
 
+    /// Alternative to `--rm` flag in `<runtime> run` command but with a delay. see
+    /// [`sidecar_watcher::watcher`](crate::sidecar_watcher::watcher)
+    #[command(hide = true)]
+    SidecarWatcher {
+        /// Container runtime to use for `<runtme> attach`
+        runtime: ContainerRuntime,
+        /// The sidecar container_id to wait for exit and delete afterwards
+        container_id: String,
+    },
+
     /// Port forwarding - UNSTABLE FEATURE
     #[command(name = "port-forward")]
     PortForward(Box<PortForwardArgs>),

@@ -55,6 +55,7 @@ mod extract;
 mod internal_proxy;
 mod operator;
 pub mod port_forward;
+mod sidecar_watcher;
 mod teams;
 mod util;
 mod verify_config;
@@ -569,6 +570,10 @@ fn main() -> miette::Result<()> {
                 extension_exec(*args, watch).await?;
             }
             Commands::InternalProxy => internal_proxy::proxy(watch).await?,
+            Commands::SidecarWatcher {
+                runtime,
+                container_id,
+            } => sidecar_watcher::watcher(runtime, &container_id).await?,
             Commands::VerifyConfig(args) => verify_config(args).await?,
             Commands::Completions(args) => {
                 let mut cmd: clap::Command = Cli::command();
@@ -576,10 +581,7 @@ fn main() -> miette::Result<()> {
             }
             Commands::Teams => teams::navigate_to_intro().await,
             Commands::Diagnose(args) => diagnose_command(*args).await?,
-            Commands::Container(args) => {
-                let (runtime_args, exec_params) = args.into_parts();
-                container_command(runtime_args, exec_params, watch).await?
-            }
+            Commands::Container(args) => container_command(*args, watch).await?,
             Commands::ExternalProxy => external_proxy::proxy(watch).await?,
             Commands::PortForward(args) => port_forward(&args, watch).await?,
             Commands::Vpn(args) => vpn::vpn_command(*args).await?,
@@ -608,7 +610,7 @@ fn init_ext_error_handler(commands: &Commands) -> bool {
             let _ = miette::set_hook(Box::new(|_| Box::new(JSONReportHandler::new())));
             true
         }
-        Commands::InternalProxy => true,
+        Commands::InternalProxy | Commands::ExternalProxy => true,
         _ => false,
     }
 }

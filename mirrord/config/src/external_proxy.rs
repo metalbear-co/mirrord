@@ -1,4 +1,7 @@
-use std::path::PathBuf;
+use std::{
+    net::{IpAddr, Ipv4Addr},
+    path::PathBuf,
+};
 
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -27,6 +30,35 @@ pub static MIRRORD_EXTERNAL_TLS_KEY_ENV: &str = "MIRRORD_EXTERNAL_TLS_KEY";
 #[config(map_to = "ExternalProxyFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct ExternalProxyConfig {
+    /// ### external_proxy.listen {#external_proxy-listen}
+    ///
+    /// Provide a specific address to listen to for external proxy
+    /// (will try and bind localhost if not specified)
+    ///
+    /// This is a workaround for when the network bridging that is setup by default, is not
+    /// accessible for the container (when accessing `host.docker.internal` will not connect to
+    /// `127.0.0.1` on host machine but rather some other ip can be bound for the connection)
+    #[config(default = IpAddr::from(Ipv4Addr::LOCALHOST))]
+    pub listen: IpAddr,
+
+    /// ### external_proxy.address {#external_proxy-address}
+    ///
+    /// Specify an address that is accessible from within the container runtime to the host machine
+    ///
+    /// This is a workaround where the listen address should be different from the one the
+    /// container is connecting to, example can be where `host.docker.internal -> host-gateway`
+    /// and we intend to utilize the network bridging
+    ///
+    /// ```json
+    /// {
+    ///     "external_proxy": {
+    ///         "address": "host-gateway"
+    ///     }
+    /// }
+    /// ```
+    #[config(default = "host.docker.internal")]
+    pub address: String,
+
     /// <!--${internal}-->
     ///
     /// Certificate path to be used for wrapping external proxy tcp listener with a tcp acceptor
