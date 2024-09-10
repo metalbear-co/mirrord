@@ -10,6 +10,15 @@ pub const MULTIPOD_WARNING: (&str, &str) = (
         which is part of mirrord for Teams.",
 );
 
+/// Warning when user is using an HTTP filter without MfT.
+pub const HTTP_FILTER_WARNING: (&str, &str) = (
+    "http_filter_warning",
+    "You're using an HTTP filter, which generally indicates \
+        the use of a shared environment. If so, we recommend \
+        considering mirrord for Teams, which is better suited \
+        to shared environments.",
+);
+
 /// Warning when user tries to run `mirrord exec docker` (for example), instead of the correct
 /// `mirrord container ...`.
 pub const EXEC_CONTAINER_BINARY: &str = "`mirrord exec <docker|podman|nerdctl> ...` detected! \
