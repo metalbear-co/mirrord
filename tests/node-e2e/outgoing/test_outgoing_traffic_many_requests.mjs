@@ -32,13 +32,13 @@ function makeRequests() {
 
     const request = https.request(options, (response) => {
       requestIndex += 1;
-      console.log(
-        `>> ${requestIndex} ${host} statusCode ${response.statusCode}`
-      );
+      // console.log(
+      //   `>> ${requestIndex} ${host} statusCode ${response.statusCode}`
+      // );
 
-      response.on("data", (data) => {
-        process.stdout.write(`>> received ${data.slice(0, 4)}`);
-      });
+      // response.on("data", (data) => {
+      //   process.stdout.write(`>> received ${data.slice(0, 4)}`);
+      // });
 
       response.on("error", (fail) => {
         process.stderr.write(`>> response from ${host} failed with ${fail}`);
@@ -57,6 +57,6 @@ function makeRequests() {
   });
 }
 
-for (let i = 0; i < 1; i++) {
+for (let i = 0; i < 20; i++) {
   makeRequests();
 }
