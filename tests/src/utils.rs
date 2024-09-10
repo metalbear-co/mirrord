@@ -1342,7 +1342,7 @@ pub async fn service_for_mirrord_ls(
     }
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image);
+    let deployment = deployment_from_json(&name, image, default_env());
     let pod_guard = ResourceGuard::create(
         deployment_api.clone(),
         name.to_string(),

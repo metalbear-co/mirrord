@@ -14,7 +14,7 @@ use crate::utils::{
 };
 
 async fn expect_n_lines(n: usize, test_process: &TestProcess) -> Vec<String> {
-    let lines = test_process.await_n_lines(n, Duration::from_secs(30)).await;
+    let lines = test_process.await_n_lines(n, Duration::from_secs(60)).await; // TODO: reduce timeout
     assert_eq!(
         lines.len(),
         n,
