@@ -138,18 +138,7 @@ where
     ) {
         (true, true) => {
             // only show user one of the two msgs - each user should always be shown same msg
-            if mid::get("mirrord")
-                .inspect_err(|error| tracing::error!(%error, "failed to obtain machine ID"))
-                .ok()
-                .unwrap_or_default()
-                .as_bytes()
-                .iter()
-                .copied()
-                .reduce(u8::wrapping_add)
-                .unwrap_or_default()
-                % 2
-                == 0
-            {
+            if user_persistent_random_message_select() {
                 show_multipod_warning(progress)?
             } else {
                 show_http_filter_warning(progress)?
@@ -189,6 +178,20 @@ where
         AgentConnectInfo::DirectKubernetes(agent_connect_info),
         AgentConnection { sender, receiver },
     ))
+}
+
+fn user_persistent_random_message_select() -> bool {
+    mid::get("mirrord")
+        .inspect_err(|error| tracing::error!(%error, "failed to obtain machine ID"))
+        .ok()
+        .unwrap_or_default()
+        .as_bytes()
+        .iter()
+        .copied()
+        .reduce(u8::wrapping_add)
+        .unwrap_or_default()
+        % 2
+        == 0
 }
 
 pub(crate) fn show_multipod_warning<P>(progress: &mut P) -> Result<(), CliError>
