@@ -734,8 +734,12 @@ impl OperatorApi<PreparedClientCert> {
         Ok(OperatorSessionConnection { session, tx, rx })
     }
 
-    /// Creates a new [`CopyTargetCrd`] resource using the operator.
-    /// This should create a new dummy pod out of the given [`Target`].
+    pub fn get_user_id_str(&self) -> String {
+        general_purpose::STANDARD_NO_PAD.encode(self.client_cert.cert.public_key_data())
+    }
+
+    /// Creates a new or reuses existing [`CopyTargetCrd`] resource using the operator.
+    /// If new this should create a new dummy pod out of the given [`Target`].
     ///
     /// # Note
     ///
@@ -749,6 +753,8 @@ impl OperatorApi<PreparedClientCert> {
         namespace: &str,
         split_queues: Option<SplitQueuesConfig>,
     ) -> OperatorApiResult<CopyTargetCrd> {
+        let user_id = self.get_user_id_str();
+
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
 
         let existing_copy_targets =
@@ -768,11 +774,14 @@ impl OperatorApi<PreparedClientCert> {
             split_queues,
         };
 
-        if let Some(copy_target) = existing_copy_targets
-            .items
-            .into_iter()
-            .find(|copy_target| copy_target.spec == copy_target_spec)
-        {
+        if let Some(copy_target) = existing_copy_targets.items.into_iter().find(|copy_target| {
+            copy_target.spec == copy_target_spec
+                && copy_target
+                    .status
+                    .as_ref()
+                    .map(|status| status.creator_session.user_id.as_ref() == Some(&user_id))
+                    .unwrap_or(false)
+        }) {
             tracing::debug!(?copy_target, "reusing copy_target");
 
             return Ok(copy_target);

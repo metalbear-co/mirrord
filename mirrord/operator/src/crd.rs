@@ -224,6 +224,7 @@ pub struct Session {
     pub target: String,
     pub namespace: Option<String>,
     pub locked_ports: Option<Vec<(u16, String, Option<String>)>>,
+    pub user_id: Option<String>,
 }
 
 /// Resource used to access the operator's session management routes.
@@ -298,6 +299,7 @@ impl From<&OperatorFeatures> for NewOperatorFeature {
     version = "v1",
     kind = "CopyTarget",
     root = "CopyTargetCrd",
+    status = "CopyTargetStatus",
     namespaced
 )]
 pub struct CopyTargetSpec {
@@ -311,6 +313,12 @@ pub struct CopyTargetSpec {
     pub scale_down: bool,
     /// Split queues client side configuration.
     pub split_queues: Option<SplitQueuesConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CopyTargetStatus {
+    /// The session object of the original session that created this CopyTarget
+    pub creator_session: Session,
 }
 
 /// Features and operations that can be blocked by a `MirrordPolicy`.
