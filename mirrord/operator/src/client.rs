@@ -749,7 +749,6 @@ impl OperatorApi<PreparedClientCert> {
         namespace: &str,
         split_queues: Option<SplitQueuesConfig>,
     ) -> OperatorApiResult<CopyTargetCrd> {
-        let name = TargetCrd::urlfied_name(&target);
         let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
 
         let existing_copy_targets =
@@ -761,7 +760,8 @@ impl OperatorApi<PreparedClientCert> {
                     operation: OperatorOperation::CopyingTarget,
                 })?;
 
-        let new_spec = CopyTargetSpec {
+        let copy_target_name = TargetCrd::urlfied_name(&target);
+        let copy_target_spec = CopyTargetSpec {
             target,
             idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
             scale_down,
@@ -771,7 +771,7 @@ impl OperatorApi<PreparedClientCert> {
         if let Some(copy_target) = existing_copy_targets
             .items
             .into_iter()
-            .find(|copy_target| copy_target.spec == new_spec)
+            .find(|copy_target| copy_target.spec == copy_target_spec)
         {
             tracing::debug!(?copy_target, "reusing copy_target");
 
@@ -779,7 +779,10 @@ impl OperatorApi<PreparedClientCert> {
         }
 
         copy_target_api
-            .create(&PostParams::default(), &CopyTargetCrd::new(&name, new_spec))
+            .create(
+                &PostParams::default(),
+                &CopyTargetCrd::new(&copy_target_name, copy_target_spec),
+            )
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
