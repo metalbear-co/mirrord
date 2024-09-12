@@ -5,7 +5,6 @@ use chrono::{DateTime, Utc};
 use conn_wrapper::ConnectionWrapper;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
 use http::{request::Request, HeaderName, HeaderValue};
-use k8s_openapi::api::apps::v1::Deployment;
 use kube::{api::PostParams, Api, Client, Config, Resource};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
@@ -15,15 +14,13 @@ use mirrord_auth::{
 };
 use mirrord_config::{
     feature::{network::incoming::ConcurrentSteal, split_queues::SplitQueuesConfig},
-    target::Target,
+    target::{Target, TargetDisplay},
     LayerConfig,
 };
-use mirrord_kube::{
-    api::kubernetes::{create_kube_config, get_k8s_resource_api},
-    error::KubeApiError,
-};
+use mirrord_kube::{api::kubernetes::create_kube_config, error::KubeApiError};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
+use resolved::ResolvedTarget;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -43,6 +40,7 @@ use crate::{
 mod conn_wrapper;
 mod discovery;
 pub mod error;
+pub mod resolved;
 mod upgrade;
 
 /// State of client's [`Certificate`] the should be attached to some operator requests.
@@ -617,6 +615,7 @@ impl OperatorApi<PreparedClientCert> {
     )]
     pub async fn connect_in_new_session<P>(
         &self,
+        target: ResolvedTarget,
         config: &LayerConfig,
         progress: &P,
     ) -> OperatorApiResult<OperatorSessionConnection>
@@ -625,39 +624,30 @@ impl OperatorApi<PreparedClientCert> {
     {
         self.check_feature_support(config)?;
 
-        // Check if the deployment is empty if so then
-        let is_empty_deployment = match &config.target.path {
-            Some(Target::Deployment(target)) => {
-                let deployment_api = get_k8s_resource_api::<Deployment>(
-                    &self.client,
-                    config.target.namespace.as_deref(),
-                );
+        if target.containers_count() > 1
+            && config
+                .target
+                .path
+                .as_ref()
+                .is_some_and(|target| target.container().is_none())
+        {
+            progress.warning(&format!(
+                "Target has multiple containers, but no container was specified by user!\
+                    mirrord will pick a random container `{}`.",
+                target.get_container().unwrap_or_default()
+            ));
+        }
 
-                let deployment = deployment_api
-                    .get(&target.deployment)
-                    .await
-                    .map_err(|error| OperatorApiError::KubeError {
-                        error,
-                        operation: OperatorOperation::FindingTarget,
-                    })?;
-
-                !deployment
-                    .status
-                    .map(|status| status.available_replicas > Some(0))
-                    .unwrap_or_default()
-            }
-            _ => false,
-        };
-
+        let empty_deployment = target.empty_deployment();
         let target = if config.feature.copy_target.enabled
             // use copy_target for splitting queues
             || config.feature.split_queues.is_set()
-            || is_empty_deployment
+            || empty_deployment
         {
             let mut copy_subtask = progress.subtask("copying target");
 
             if config.feature.copy_target.enabled.not() {
-                if is_empty_deployment.not() {
+                if empty_deployment.not() {
                     copy_subtask.info("Creating a copy-target for queue-splitting (even thought copy_target was not explicitly set).")
                 } else {
                     copy_subtask.info("Creating a copy-target for deployment (even thought copy_target was not explicitly set).")

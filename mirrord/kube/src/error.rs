@@ -48,6 +48,14 @@ pub enum KubeApiError {
 
     #[error("Agent Job was created, but Pod is not running")]
     AgentPodNotRunning,
+
+    /// Attempted to create an [`OperatorTarget`](super::OperatorTarget) from a resource that
+    /// cannot be an immediate target.
+    #[error("targeting {0} requires the `copy_target` feature")]
+    RequiresCopy(
+        /// Should be plural name of the resource
+        String,
+    ),
 }
 
 impl KubeApiError {
@@ -112,5 +120,9 @@ impl KubeApiError {
         };
 
         Self::InvalidResourceState(message)
+    }
+
+    pub fn requires_copy<R: Resource<DynamicType = ()>>() -> Self {
+        Self::RequiresCopy(R::plural(&()).into_owned())
     }
 }

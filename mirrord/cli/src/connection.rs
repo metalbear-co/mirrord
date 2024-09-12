@@ -1,13 +1,13 @@
 use std::{collections::HashSet, time::Duration};
 
 use mirrord_analytics::Reporter;
-use mirrord_config::LayerConfig;
+use mirrord_config::{target::Target, LayerConfig};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
     api::{kubernetes::KubernetesAPI, wrap_raw_connection},
     error::KubeApiError,
 };
-use mirrord_operator::client::{OperatorApi, OperatorSessionConnection};
+use mirrord_operator::client::{resolved::ResolvedTarget, OperatorApi, OperatorSessionConnection};
 use mirrord_progress::{
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
     IdeAction, IdeMessage, NotificationLevel, Progress,
@@ -81,8 +81,18 @@ where
     let api = api.prepare_client_cert(analytics).await.into_certified()?;
     user_cert_subtask.success(Some("user credentials prepared"));
 
+    let target = ResolvedTarget::new(
+        api.client(),
+        &config.target.path.clone().unwrap_or(Target::Targetless),
+        config.target.namespace.as_deref(),
+    )
+    .await
+    .map_err(|kube_fail| CliError::OperatorTargetResolution(kube_fail))?;
+
     let mut session_subtask = operator_subtask.subtask("starting session");
-    let connection = api.connect_in_new_session(config, &session_subtask).await?;
+    let connection = api
+        .connect_in_new_session(target, config, &session_subtask)
+        .await?;
     session_subtask.success(Some("session started"));
 
     operator_subtask.success(Some("using operator"));

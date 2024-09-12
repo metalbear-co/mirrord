@@ -21,7 +21,11 @@ impl RuntimeDataFromLabels for RolloutTarget {
 
     async fn get_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>> {
         resource
-            .match_labels()
+            .spec
+            .clone()
+            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec"))?
+            .selector
+            .match_labels
             .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.matchLabels"))
     }
 }

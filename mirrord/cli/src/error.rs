@@ -359,6 +359,17 @@ pub(crate) enum CliError {
         2. In the kubeconfig, specify the command with an absolute path.{GENERAL_HELP}
     "))]
     KubeAuthExecFailed(String),
+
+    #[error("Failed while resolving target while using the mirrord-operator: {0}")]
+    #[diagnostic(help(
+        "
+        mirrord failed to resolve or validate a target.
+        Target resolution failure happens when the target cannot be found, or doesn't exist.
+        Validation may fail for a variety of reasons, such as: target is in an invalid state, or missing required fields.
+        Please check that your user (in mirrord-operator context) has access to the target, and that the target actually exists in the cluster.
+    "
+    ))]
+    OperatorTargetResolution(KubeApiError),
 }
 
 impl CliError {
