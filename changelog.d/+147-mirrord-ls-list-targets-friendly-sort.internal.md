@@ -1,1 +1,0 @@
-Sort the targets from mirrord ls in a more user friendly way, starting from pods.
