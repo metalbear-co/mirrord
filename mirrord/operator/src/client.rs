@@ -6,7 +6,10 @@ use conn_wrapper::ConnectionWrapper;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
 use http::{request::Request, HeaderName, HeaderValue};
 use k8s_openapi::api::apps::v1::Deployment;
-use kube::{api::PostParams, Api, Client, Config, Resource};
+use kube::{
+    api::{ListParams, PostParams},
+    Api, Client, Config, Resource,
+};
 use mirrord_analytics::{AnalyticsHash, AnalyticsOperatorProperties, Reporter};
 use mirrord_auth::{
     certificate::Certificate,
@@ -669,7 +672,16 @@ impl OperatorApi<PreparedClientCert> {
             let scale_down = config.feature.copy_target.scale_down;
             let namespace = self.target_namespace(config);
             let copied = self
-                .copy_target(target, scale_down, namespace, &config.feature.split_queues)
+                .copy_target(
+                    target,
+                    scale_down,
+                    namespace,
+                    config
+                        .feature
+                        .split_queues
+                        .is_set()
+                        .then(|| config.feature.split_queues.clone()),
+                )
                 .await?;
 
             copy_subtask.success(Some("target copied"));
@@ -722,8 +734,14 @@ impl OperatorApi<PreparedClientCert> {
         Ok(OperatorSessionConnection { session, tx, rx })
     }
 
-    /// Creates a new [`CopyTargetCrd`] resource using the operator.
-    /// This should create a new dummy pod out of the given [`Target`].
+    /// Returns client cert's public key in a base64 encoded string (no padding same like in
+    /// operator logic)
+    pub fn get_user_id_str(&self) -> String {
+        general_purpose::STANDARD_NO_PAD.encode(self.client_cert.cert.public_key_data())
+    }
+
+    /// Creates a new or reuses existing [`CopyTargetCrd`] resource using the operator.
+    /// If new this should create a new dummy pod out of the given [`Target`].
     ///
     /// # Note
     ///
@@ -735,22 +753,47 @@ impl OperatorApi<PreparedClientCert> {
         target: Target,
         scale_down: bool,
         namespace: &str,
-        split_queues: &SplitQueuesConfig,
+        split_queues: Option<SplitQueuesConfig>,
     ) -> OperatorApiResult<CopyTargetCrd> {
-        let name = TargetCrd::urlfied_name(&target);
+        let user_id = self.get_user_id_str();
 
-        let requested = CopyTargetCrd::new(
-            &name,
-            CopyTargetSpec {
-                target,
-                idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
-                scale_down,
-                split_queues: Some(split_queues.clone()),
-            },
-        );
+        let copy_target_api: Api<CopyTargetCrd> = Api::namespaced(self.client.clone(), namespace);
 
-        Api::namespaced(self.client.clone(), namespace)
-            .create(&PostParams::default(), &requested)
+        let existing_copy_targets =
+            copy_target_api
+                .list(&ListParams::default())
+                .await
+                .map_err(|error| OperatorApiError::KubeError {
+                    error,
+                    operation: OperatorOperation::CopyingTarget,
+                })?;
+
+        let copy_target_name = TargetCrd::urlfied_name(&target);
+        let copy_target_spec = CopyTargetSpec {
+            target,
+            idle_ttl: Some(Self::COPIED_POD_IDLE_TTL),
+            scale_down,
+            split_queues,
+        };
+
+        if let Some(copy_target) = existing_copy_targets.items.into_iter().find(|copy_target| {
+            copy_target.spec == copy_target_spec
+                && copy_target
+                    .status
+                    .as_ref()
+                    .map(|status| status.creator_session.user_id.as_ref() == Some(&user_id))
+                    .unwrap_or(false)
+        }) {
+            tracing::debug!(?copy_target, "reusing copy_target");
+
+            return Ok(copy_target);
+        }
+
+        copy_target_api
+            .create(
+                &PostParams::default(),
+                &CopyTargetCrd::new(&copy_target_name, copy_target_spec),
+            )
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
