@@ -3,13 +3,14 @@
 //! Test queue splitting features with an operator.
 
 use core::time::Duration;
-use std::{ops::Not, path::PathBuf};
+use std::{collections::HashSet, ops::Not, path::PathBuf};
 
+use aws_sdk_sqs::operation::receive_message::ReceiveMessageOutput;
 use rstest::*;
 
 use crate::utils::{
     config_dir,
-    sqs_resources::{sqs_test_resources, write_sqs_messages, SqsTestResources},
+    sqs_resources::{sqs_test_resources, write_sqs_messages, QueueInfo, SqsTestResources},
     Application, TestProcess,
 };
 
@@ -55,12 +56,35 @@ async fn expect_output_lines<const N: usize, const M: usize>(
 
 /// Verify that the echo queue contains the expected messages, meaning the deployed application
 /// received all the messages no user filtered.
+/// messages don't have to arrive in any particular message.
 async fn expect_messages_in_queue<const N: usize>(
     messages: [&str; N],
     client: &aws_sdk_sqs::Client,
-    q_name: &str,
+    echo_queue: &QueueInfo,
 ) {
-    // TODO!
+    let mut expected_messages = HashSet::from(messages);
+    loop {
+        if let Ok(ReceiveMessageOutput {
+            messages: Some(received_messages),
+            ..
+        }) = client
+            .receive_message()
+            .queue_url(&echo_queue.url)
+            .visibility_timeout(15)
+            .wait_time_seconds(20)
+            .send()
+            .await
+        {
+            for received_message in received_messages {
+                assert!(expected_messages.remove(
+                    received_message
+                        .body
+                        .expect("Received empty bodied message from echo queue.")
+                        .as_str()
+                ));
+            }
+        }
+    }
 }
 
 /// Verify that the echo queue contains the expected messages, meaning the deployed application
@@ -69,15 +93,42 @@ async fn expect_messages_in_queue<const N: usize>(
 async fn expect_messages_in_fifo_queue<const N: usize>(
     messages: [&str; N],
     client: &aws_sdk_sqs::Client,
-    q_name: &str,
+    echo_queue: &QueueInfo,
 ) {
-    // TODO!
+    let mut expected_messages = messages.into_iter();
+    let mut expected_message = expected_messages.next().unwrap();
+    loop {
+        if let Ok(ReceiveMessageOutput {
+            messages: Some(received_messages),
+            ..
+        }) = client
+            .receive_message()
+            .queue_url(&echo_queue.url)
+            .visibility_timeout(15)
+            .wait_time_seconds(20)
+            .send()
+            .await
+        {
+            for received_message in received_messages {
+                assert_eq!(
+                    expected_message,
+                    received_message
+                        .body
+                        .expect("Received empty bodied message from echo queue.")
+                );
+                let Some(message) = expected_messages.next() else {
+                    return;
+                };
+                expected_message = message;
+            }
+        }
+    }
 }
 
 async fn verify_splitter_temp_queues_deleted(sqs_test_resources: &SqsTestResources) {
-    let client = sqs_test_resources.sqs_client();
-    let queue_name1 = sqs_test_resources.queue1().name.as_str();
-    let queue_name2 = sqs_test_resources.queue2().name.as_str();
+    let client = &sqs_test_resources.sqs_client;
+    let queue_name1 = sqs_test_resources.queue1.name.as_str();
+    let queue_name2 = sqs_test_resources.queue2.name.as_str();
     tokio::time::timeout(Duration::from_secs(360), async {
         let mut i = 0u8; // TODO: delete;
         loop {
@@ -178,8 +229,8 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     tokio::time::sleep(Duration::from_secs(30)).await;
 
     write_sqs_messages(
-        sqs_test_resources.sqs_client(),
-        sqs_test_resources.queue1(),
+        &sqs_test_resources.sqs_client,
+        &sqs_test_resources.queue1,
         "client",
         &["a", "b", "c", "c", "b", "a"],
         &["1", "2", "3", "4", "5", "6"],
@@ -187,8 +238,8 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     .await;
 
     write_sqs_messages(
-        sqs_test_resources.sqs_client(),
-        sqs_test_resources.queue2(),
+        &sqs_test_resources.sqs_client,
+        &sqs_test_resources.queue2,
         "client",
         &["a", "b", "c", "c", "b", "a"],
         &["10", "20", "30", "40", "50", "60"],
@@ -204,8 +255,8 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     // TODO: implement func
     expect_messages_in_queue(
         ["3", "4"],
-        sqs_test_resources.sqs_client(),
-        sqs_test_resources.queue1().name.as_str(),
+        &sqs_test_resources.sqs_client,
+        &sqs_test_resources.echo_queue1,
     )
     .await;
 
@@ -214,8 +265,8 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     // TODO: implement func
     expect_messages_in_fifo_queue(
         ["30", "40"],
-        sqs_test_resources.sqs_client(),
-        sqs_test_resources.queue2().name.as_str(),
+        &sqs_test_resources.sqs_client,
+        &sqs_test_resources.echo_queue2,
     )
     .await;
     println!("Queue 2 was split correctly!");
