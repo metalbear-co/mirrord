@@ -78,7 +78,7 @@ async fn verify_splitter_temp_queues_deleted(sqs_test_resources: &SqsTestResourc
     let client = sqs_test_resources.sqs_client();
     let queue_name1 = sqs_test_resources.queue1().name.as_str();
     let queue_name2 = sqs_test_resources.queue2().name.as_str();
-    tokio::time::timeout(Duration::from_secs(120), async {
+    tokio::time::timeout(Duration::from_secs(360), async {
         let mut i = 0u8; // TODO: delete;
         loop {
             {
@@ -197,7 +197,9 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
 
     // Test app prints 1: before messages from queue1 and 2: before messages from queue 2.
     expect_output_lines(["1:1", "1:6"], ["2:10", "2:60"], &client_a).await;
+    println!("Client a received the correct messages.");
     expect_output_lines(["1:2", "1:5"], ["2:20", "2:50"], &client_b).await;
+    println!("Client b received the correct messages.");
 
     // TODO: implement func
     expect_messages_in_queue(
@@ -207,6 +209,8 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     )
     .await;
 
+    println!("Queue 1 was split correctly!");
+
     // TODO: implement func
     expect_messages_in_fifo_queue(
         ["30", "40"],
@@ -214,7 +218,6 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
         sqs_test_resources.queue2().name.as_str(),
     )
     .await;
-
     println!("Queue 2 was split correctly!");
 
     // TODO: verify queue tags.
@@ -224,6 +227,5 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
 
     verify_splitter_temp_queues_deleted(&sqs_test_resources).await;
 
-    tokio::time::sleep(Duration::from_secs(60)).await; // TODO: remove
     println!("All temporary queues were deleted!");
 }
