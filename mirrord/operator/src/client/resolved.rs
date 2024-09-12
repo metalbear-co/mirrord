@@ -14,7 +14,6 @@ use mirrord_kube::{
 };
 
 /// Helper struct for resolving user-provided [`Target`] to Kubernetes resources.
-/// visibility/permissions requirements of the operator.
 #[derive(Debug, Clone)]
 pub enum ResolvedTarget {
     Deployment(Deployment, Option<String>),
@@ -27,6 +26,10 @@ pub enum ResolvedTarget {
 }
 
 impl ResolvedTarget {
+    /// Gets a target from k8s with the [`Client`] that is passed here, and checks if it's
+    /// a valid mirrord target with [`ResolvedTarget::assert_valid_mirrord_target`].
+    ///
+    /// Currently this `client` comes set up with a mirrord-operator config.
     pub async fn new(
         client: &Client,
         target: &Target,
@@ -78,9 +81,6 @@ impl ResolvedTarget {
     /// 3. [`ResolvedTarget::Job`] - error, as this is `copy_target` exclusive
     /// 4. [`ResolvedTarget::Targetless`] - no check
     async fn assert_valid_mirrord_target(self, client: &Client) -> Result<Self, KubeApiError> {
-        // TODO(alex) [high] 11: Validate non-operator mirrord requirements? Could probably
-        // take the `with_operator` bool here as well?
-
         match &self {
             ResolvedTarget::Deployment(deployment, container) => {
                 let available = deployment
@@ -187,6 +187,7 @@ impl ResolvedTarget {
         Ok(self)
     }
 
+    /// Convenient way of getting the container from this target.
     pub(super) fn container(&self) -> Option<&str> {
         match self {
             ResolvedTarget::Deployment(_, container)
@@ -199,6 +200,7 @@ impl ResolvedTarget {
         }
     }
 
+    /// Is this a [`ResolvedTarget::Deployment`], and is it empty?
     pub(super) fn empty_deployment(&self) -> bool {
         if let Self::Deployment(target, _) = self {
             !target
@@ -211,6 +213,7 @@ impl ResolvedTarget {
         }
     }
 
+    /// Returns the number of containers for this [`ResolvedTarget`], defaulting to 1.
     pub(super) fn containers_count(&self) -> usize {
         match self {
             ResolvedTarget::Deployment(target, _) => target

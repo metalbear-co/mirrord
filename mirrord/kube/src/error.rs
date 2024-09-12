@@ -51,6 +51,8 @@ pub enum KubeApiError {
 
     /// Attempted to create an [`OperatorTarget`](super::OperatorTarget) from a resource that
     /// cannot be an immediate target.
+    ///
+    /// Create this variant with the [`KubeApiError::requires_copy`] method.
     #[error("targeting {0} requires the `copy_target` feature")]
     RequiresCopy(
         /// Should be plural name of the resource

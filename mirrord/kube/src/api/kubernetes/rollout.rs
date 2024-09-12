@@ -25,7 +25,8 @@ pub struct Rollout {
 #[serde(rename_all = "camelCase")]
 pub struct RolloutStatus {
     pub available_replicas: Option<i32>,
-    /// Looks like this is a string for some reason: https://github.com/argoproj/argo-rollouts/blob/4f1edbe9332b93d8aaf1d8f34239da6f952b8a93/pkg/apis/rollouts/v1alpha1/types.go#L922
+    /// Looks like this is a string for some reason:
+    /// [rollouts/v1alpha1/types.go](https://github.com/argoproj/argo-rollouts/blob/4f1edbe9332b93d8aaf1d8f34239da6f952b8a93/pkg/apis/rollouts/v1alpha1/types.go#L922)
     pub observed_generation: Option<String>,
 }
 

@@ -19,6 +19,7 @@ impl RuntimeDataFromLabels for RolloutTarget {
         self.container.as_deref()
     }
 
+    /// Digs into `resource` to return its `.spec.selector.matchLabels`.
     async fn get_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>> {
         resource
             .spec
