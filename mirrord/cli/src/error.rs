@@ -171,7 +171,8 @@ pub(crate) enum CliError {
     /// more granular error detection.
     #[error("Failed to create mirrord-agent: {0}")]
     #[diagnostic(help(
-        "Please check the status of the agent pod, using `kubectl get pods` in the relevant namespace. \
+        r"1. Please check the status of the agent pod, using `kubectl get pods` in the relevant namespace.
+        2. If you don't see any `mirrord-agent-[...]` pods, then try running `kubectl get jobs`, and `kubectl describe mirrord-agent-[...]`.
         Make sure it is able to fetch the agent image, it didn't fail due to lack of resources, etc.{GENERAL_HELP}"
     ))]
     CreateAgentFailed(KubeApiError),
