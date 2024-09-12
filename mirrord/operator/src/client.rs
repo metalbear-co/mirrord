@@ -734,6 +734,8 @@ impl OperatorApi<PreparedClientCert> {
         Ok(OperatorSessionConnection { session, tx, rx })
     }
 
+    /// Returns client cert's public key in a base64 encoded string (no padding same like in
+    /// operator logic)
     pub fn get_user_id_str(&self) -> String {
         general_purpose::STANDARD_NO_PAD.encode(self.client_cert.cert.public_key_data())
     }

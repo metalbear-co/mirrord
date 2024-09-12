@@ -315,6 +315,7 @@ pub struct CopyTargetSpec {
     pub split_queues: Option<SplitQueuesConfig>,
 }
 
+/// This is the `status` field for [`CopyTargetCrd`].
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct CopyTargetStatus {
     /// The session object of the original session that created this CopyTarget
