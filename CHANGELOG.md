@@ -8,6 +8,28 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.117.0](https://github.com/metalbear-co/mirrord/tree/3.117.0) - 2024-09-12
+
+
+### Added
+
+- Detect Telepresence's traffic-agent and warn user about incompatibility
+  [#2738](https://github.com/metalbear-co/mirrord/issues/2738)
+
+
+### Internal
+
+- Suggest mfT when user uses HTTP filter, only show user one warning for
+  multipod/ HTTP filter.
+  [#2701](https://github.com/metalbear-co/mirrord/issues/2701)
+- Add attribution to docs links using query parameters.
+  [#2703](https://github.com/metalbear-co/mirrord/issues/2703)
+- Add patch to allow a user to reuse copy-target and fix issue where prelauch
+  commands in intellij prevented execution.
+- Sort the targets from mirrord ls in a more user friendly way, starting from
+  pods.
+
+
 ## [3.116.3](https://github.com/metalbear-co/mirrord/tree/3.116.3) - 2024-09-05
 
 

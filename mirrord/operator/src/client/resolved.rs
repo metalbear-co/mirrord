@@ -3,7 +3,7 @@ use k8s_openapi::api::{
     batch::v1::{CronJob, Job},
     core::v1::Pod,
 };
-use kube::{Client, ResourceExt};
+use kube::Client;
 use mirrord_config::target::Target;
 use mirrord_kube::{
     api::{
@@ -187,7 +187,7 @@ impl ResolvedTarget {
         Ok(self)
     }
 
-    pub(super) fn get_container(&self) -> Option<&str> {
+    pub(super) fn container(&self) -> Option<&str> {
         match self {
             ResolvedTarget::Deployment(_, container)
             | ResolvedTarget::Rollout(_, container)
@@ -196,18 +196,6 @@ impl ResolvedTarget {
             | ResolvedTarget::StatefulSet(_, container)
             | ResolvedTarget::Pod(_, container) => container.as_deref(),
             ResolvedTarget::Targetless(..) => None,
-        }
-    }
-
-    pub(super) fn name_any(&self) -> String {
-        match self {
-            ResolvedTarget::Deployment(target, _) => target.name_any(),
-            ResolvedTarget::Rollout(target, _) => target.name_any(),
-            ResolvedTarget::Pod(target, _) => target.name_any(),
-            ResolvedTarget::Job(target, _) => target.name_any(),
-            ResolvedTarget::CronJob(target, _) => target.name_any(),
-            ResolvedTarget::StatefulSet(target, _) => target.name_any(),
-            ResolvedTarget::Targetless(..) => "targetless".to_string(),
         }
     }
 
@@ -230,7 +218,12 @@ impl ResolvedTarget {
                 .as_ref()
                 .and_then(|spec| spec.template.spec.as_ref())
                 .map(|pod_spec| pod_spec.containers.len()),
-            ResolvedTarget::Rollout(target, _) => todo!(),
+            ResolvedTarget::Rollout(target, _) => target
+                .spec
+                .as_ref()
+                .and_then(|spec| spec.template.as_ref())
+                .and_then(|pod_template| pod_template.spec.as_ref())
+                .map(|pod_spec| pod_spec.containers.len()),
             ResolvedTarget::StatefulSet(target, _) => target
                 .spec
                 .as_ref()
