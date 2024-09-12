@@ -76,8 +76,7 @@ impl ResolvedTarget {
     ///
     /// 1. [`ResolvedTarget::Deployment`] or [`ResolvedTarget::Rollout`] - has available replicas
     ///    and the target container, if specified, is found in the spec
-    /// 2. [`ResolvedTarget::Pod`] - passes target-readiness check of
-    ///    [`StatusObserver`](operator_context::target::status::StatusObserver)
+    /// 2. [`ResolvedTarget::Pod`] - passes target-readiness check of `StatusObserver`
     /// 3. [`ResolvedTarget::Job`] - error, as this is `copy_target` exclusive
     /// 4. [`ResolvedTarget::Targetless`] - no check
     async fn assert_valid_mirrord_target(self, client: &Client) -> Result<Self, KubeApiError> {

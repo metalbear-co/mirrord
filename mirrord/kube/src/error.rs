@@ -49,8 +49,7 @@ pub enum KubeApiError {
     #[error("Agent Job was created, but Pod is not running")]
     AgentPodNotRunning,
 
-    /// Attempted to create an [`OperatorTarget`](super::OperatorTarget) from a resource that
-    /// cannot be an immediate target.
+    /// Attempted to create an `OperatorTarget` from a resource that cannot be an immediate target.
     ///
     /// Create this variant with the [`KubeApiError::requires_copy`] method.
     #[error("targeting {0} requires the `copy_target` feature")]

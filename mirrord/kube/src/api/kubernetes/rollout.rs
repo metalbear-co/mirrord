@@ -30,7 +30,7 @@ pub struct RolloutStatus {
     pub observed_generation: Option<String>,
 }
 
-/// Argo [`Rollout`]s provide [`Pod`] template in one of two ways:
+/// Argo [`Rollout`]s provide `Pod` template in one of two ways:
 /// 1. Inline (`template` field).
 /// 2. Via a reference to some Kubernetes workload (`workloadRef` field).
 ///
@@ -64,7 +64,7 @@ pub struct WorkloadRef {
 }
 
 /// Custom deserializer for a rollout template field due to
-/// https://github.com/metalbear-co/operator/issues/548
+/// [#548](https://github.com/metalbear-co/operator/issues/548)
 /// First deserializes it as value, fixes possible issues and then deserializes it as
 /// PodTemplateSpec.
 fn rollout_pod_spec<'de, D>(deserializer: D) -> Result<Option<PodTemplateSpec>, D::Error>
