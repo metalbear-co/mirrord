@@ -91,9 +91,10 @@ impl ResolvedTarget {
                     .unwrap_or_default(); // Field can be missing when there are no replicas
 
                 if available <= 0 {
-                    return Err(
-                        KubeApiError::invalid_state(deployment, "no available replicas").into(),
-                    );
+                    return Err(KubeApiError::invalid_state(
+                        deployment,
+                        "no available replicas",
+                    ));
                 }
 
                 if let Some(container) = container {
@@ -125,9 +126,10 @@ impl ResolvedTarget {
                     .unwrap_or_default(); // Field can be missing when there are no replicas
 
                 if available <= 0 {
-                    return Err(
-                        KubeApiError::invalid_state(rollout, "no available replicas").into(),
-                    );
+                    return Err(KubeApiError::invalid_state(
+                        rollout,
+                        "no available replicas",
+                    ));
                 }
 
                 let pod_template = rollout.get_pod_template(client).await?;
@@ -143,10 +145,10 @@ impl ResolvedTarget {
             }
 
             ResolvedTarget::Job(..) => {
-                return Err(KubeApiError::requires_copy::<Job>().into());
+                return Err(KubeApiError::requires_copy::<Job>());
             }
             ResolvedTarget::CronJob(..) => {
-                return Err(KubeApiError::requires_copy::<CronJob>().into());
+                return Err(KubeApiError::requires_copy::<CronJob>());
             }
             ResolvedTarget::StatefulSet(stateful_set, container) => {
                 let available = stateful_set
@@ -157,9 +159,10 @@ impl ResolvedTarget {
                     .unwrap_or_default(); // Field can be missing when there are no replicas
 
                 if available <= 0 {
-                    return Err(
-                        KubeApiError::invalid_state(stateful_set, "no available replicas").into(),
-                    );
+                    return Err(KubeApiError::invalid_state(
+                        stateful_set,
+                        "no available replicas",
+                    ));
                 }
 
                 if let Some(container) = container {

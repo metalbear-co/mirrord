@@ -87,7 +87,7 @@ where
         config.target.namespace.as_deref(),
     )
     .await
-    .map_err(|kube_fail| CliError::OperatorTargetResolution(kube_fail))?;
+    .map_err(CliError::OperatorTargetResolution)?;
 
     let mut session_subtask = operator_subtask.subtask("starting session");
     let connection = api
