@@ -3,16 +3,17 @@ use std::borrow::Cow;
 use k8s_openapi::{
     api::{
         apps::v1::{Deployment, ReplicaSet, StatefulSet},
+        authorization::v1::{ResourceAttributes, SubjectAccessReview, SubjectAccessReviewStatus},
         core::v1::{PodTemplate, PodTemplateSpec},
     },
     apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta},
     ListableResource, Metadata, NamespaceResourceScope, Resource,
 };
-use kube::Client;
+use kube::{api::PostParams, Api, Client};
 use serde::{de, Deserialize, Serialize};
 
 use super::get_k8s_resource_api;
-use crate::error::KubeApiError;
+use crate::{error::KubeApiError, subject_access_review::SubjectAccessReviewSource};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Rollout {
@@ -157,6 +158,37 @@ impl Rollout {
                 .map(Cow::Owned),
         }
     }
+
+    /// Try and perform a nested [`SubjectAccessReview`] request if using `workload_ref` otherwise
+    /// will result in `Ok(None)` where this should be considered as equivalent to `allowed == true`
+    pub async fn get_pod_template_access<'a, S>(
+        &'a self,
+        client: &Client,
+        subject_access_source: &S,
+    ) -> Result<Option<SubjectAccessReviewStatus>, KubeApiError>
+    where
+        S: SubjectAccessReviewSource,
+    {
+        let spec = self
+            .spec
+            .as_ref()
+            .ok_or_else(|| KubeApiError::missing_field(self, ".spec"))?;
+
+        match spec {
+            RolloutSpec {
+                workload_ref: Some(workload_ref),
+                ..
+            } => workload_ref
+                .get_pod_template_access(
+                    client,
+                    self.metadata.namespace.as_deref(),
+                    subject_access_source,
+                )
+                .await
+                .map(Some),
+            _ => Ok(None),
+        }
+    }
 }
 
 impl WorkloadRef {
@@ -220,6 +252,45 @@ impl WorkloadRef {
             }
             _ => Ok(None),
         }
+    }
+
+    /// Check weather the user has access to resource referanced by this [`WorkloadRef`].
+    pub async fn get_pod_template_access<S>(
+        &self,
+        client: &Client,
+        namespace: Option<&str>,
+        subject_access_source: &S,
+    ) -> Result<SubjectAccessReviewStatus, KubeApiError>
+    where
+        S: SubjectAccessReviewSource,
+    {
+        let subject_access_review_api = Api::<SubjectAccessReview>::all(client.clone());
+
+        // Split "apps/v1" to ("apps", "v1") and core apis like "v1" to ("", "v1")
+        let (group, version) = self
+            .api_version
+            .split_once('/')
+            .unwrap_or(("", self.api_version.as_str()));
+
+        let subject_review =
+            subject_access_source.create_subject_access_review(ResourceAttributes {
+                group: Some(group.to_owned()),
+                name: Some(self.name.clone()),
+                namespace: namespace.map(str::to_owned),
+                resource: Some(format!("{}s", self.kind.to_lowercase())),
+                verb: Some("get".into()),
+                version: Some(version.to_owned()),
+                ..Default::default()
+            });
+
+        let mut access = subject_access_review_api
+            .create(&PostParams::default(), &subject_review)
+            .await?;
+
+        access
+            .status
+            .take()
+            .ok_or_else(|| KubeApiError::missing_field(&access, ".status"))
     }
 }
 
