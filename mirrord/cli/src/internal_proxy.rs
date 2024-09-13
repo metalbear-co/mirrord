@@ -16,7 +16,6 @@ use std::{
     io,
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
-    str::FromStr,
     time::Duration,
 };
 
@@ -62,16 +61,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
         .internal_proxy
         .log_destination
         .as_ref()
-        .and_then(|destination| {
-            PathBuf::try_from(destination)
-                .inspect_err(|fail| {
-                    tracing::warn!(
-                        %fail,
-                        "Internal proxy log destination seems to be an invalid path!"
-                    )
-                })
-                .ok()
-        })
+        .map(PathBuf::from)
         .unwrap_or_else(|| {
             let random_name: String = rand::thread_rng()
                 .sample_iter(&Alphanumeric)
