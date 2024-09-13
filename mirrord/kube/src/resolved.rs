@@ -5,7 +5,8 @@ use k8s_openapi::api::{
 };
 use kube::Client;
 use mirrord_config::target::Target;
-use mirrord_kube::{
+
+use super::{
     api::{
         kubernetes::{get_k8s_resource_api, rollout::Rollout},
         runtime::RuntimeData,
@@ -190,7 +191,7 @@ impl ResolvedTarget {
     }
 
     /// Convenient way of getting the container from this target.
-    pub(super) fn container(&self) -> Option<&str> {
+    pub fn container(&self) -> Option<&str> {
         match self {
             ResolvedTarget::Deployment(_, container)
             | ResolvedTarget::Rollout(_, container)
@@ -203,7 +204,7 @@ impl ResolvedTarget {
     }
 
     /// Is this a [`ResolvedTarget::Deployment`], and is it empty?
-    pub(super) fn empty_deployment(&self) -> bool {
+    pub fn empty_deployment(&self) -> bool {
         if let Self::Deployment(target, _) = self {
             !target
                 .status
@@ -216,7 +217,7 @@ impl ResolvedTarget {
     }
 
     /// Returns the number of containers for this [`ResolvedTarget`], defaulting to 1.
-    pub(super) fn containers_count(&self) -> usize {
+    pub fn containers_count(&self) -> usize {
         match self {
             ResolvedTarget::Deployment(target, _) => target
                 .spec

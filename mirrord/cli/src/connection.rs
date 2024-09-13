@@ -6,8 +6,9 @@ use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
     api::{kubernetes::KubernetesAPI, wrap_raw_connection},
     error::KubeApiError,
+    resolved::ResolvedTarget,
 };
-use mirrord_operator::client::{resolved::ResolvedTarget, OperatorApi, OperatorSessionConnection};
+use mirrord_operator::client::{OperatorApi, OperatorSessionConnection};
 use mirrord_progress::{
     messages::{HTTP_FILTER_WARNING, MULTIPOD_WARNING},
     IdeAction, IdeMessage, NotificationLevel, Progress,

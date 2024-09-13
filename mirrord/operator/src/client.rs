@@ -20,10 +20,11 @@ use mirrord_config::{
     target::{Target, TargetDisplay},
     LayerConfig,
 };
-use mirrord_kube::{api::kubernetes::create_kube_config, error::KubeApiError};
+use mirrord_kube::{
+    api::kubernetes::create_kube_config, error::KubeApiError, resolved::ResolvedTarget,
+};
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
-use resolved::ResolvedTarget;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -43,7 +44,6 @@ use crate::{
 mod conn_wrapper;
 mod discovery;
 pub mod error;
-pub mod resolved;
 mod upgrade;
 
 /// State of client's [`Certificate`] the should be attached to some operator requests.
