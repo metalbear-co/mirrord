@@ -84,6 +84,22 @@ pub struct InternalProxyConfig {
     #[config(default = 5)]
     pub idle_timeout: u64,
 
+    /// ### internal_proxy.breakpoint_timeout {#internal_proxy-breakpoint_timeout}
+    ///
+    /// Sometimes the cpu is too busy with other tasks and the internal proxy is blocked
+    /// from performing its keep-alive check. Increase this value if mirrord exits while
+    /// you're debugging with breakpoints.
+    ///
+    /// ```json
+    /// {
+    ///   "internal_proxy": {
+    ///     "idle_timeout": 31536000
+    ///   }
+    /// }
+    /// ```
+    #[config(default = 31536000)]
+    pub breakpoint_timeout: u64,
+
     /// ### internal_proxy.log_level {#internal_proxy-log_level}
     ///
     /// Set the log level for the internal proxy.

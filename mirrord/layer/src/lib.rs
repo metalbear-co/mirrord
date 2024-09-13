@@ -164,7 +164,7 @@ static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
 
 /// Proxy Connection timeout
 /// Set to 10 seconds as most agent operations timeout after 5 seconds
-const PROXY_CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
+const PROXY_CONNECTION_TIMEOUT: OnceLock<Duration> = OnceLock::new();
 
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
@@ -240,7 +240,8 @@ fn load_only_layer_start(config: &LayerConfig) {
                 .expect("EXECUTABLE_ARGS MUST BE SET")
                 .to_process_info(config),
         ),
-        PROXY_CONNECTION_TIMEOUT,
+        *PROXY_CONNECTION_TIMEOUT
+            .get_or_init(|| Duration::from_secs(config.internal_proxy.breakpoint_timeout)),
     )
     .expect("failed to initialize proxy connection");
 
@@ -337,6 +338,9 @@ fn layer_start(mut config: LayerConfig) {
 
     init_tracing();
 
+    let proxy_connection_timeout = *PROXY_CONNECTION_TIMEOUT
+        .get_or_init(|| Duration::from_secs(config.internal_proxy.breakpoint_timeout));
+
     let debugger_ports = DebuggerPorts::from_env();
     let local_hostname = trace_only || !config.feature.hostname;
     let process_info = EXECUTABLE_ARGS
@@ -370,7 +374,7 @@ fn layer_start(mut config: LayerConfig) {
         let new_connection = ProxyConnection::new(
             address,
             NewSessionRequest::New(process_info),
-            PROXY_CONNECTION_TIMEOUT,
+            proxy_connection_timeout,
         )
         .unwrap_or_else(|_| panic!("failed to initialize proxy connection at {address}"));
         PROXY_CONNECTION
@@ -626,7 +630,10 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
             let new_connection = ProxyConnection::new(
                 parent_connection.proxy_addr(),
                 NewSessionRequest::Forked(parent_connection.layer_id()),
-                PROXY_CONNECTION_TIMEOUT,
+                PROXY_CONNECTION_TIMEOUT
+                    .get()
+                    .copied()
+                    .unwrap_or_else(|| Duration::from_secs(31536000)),
             )
             .expect("failed to establish proxy connection for child");
             PROXY_CONNECTION
