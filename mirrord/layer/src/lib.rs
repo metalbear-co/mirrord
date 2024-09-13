@@ -164,7 +164,7 @@ static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
 
 /// Proxy Connection timeout
 /// Set to 10 seconds as most agent operations timeout after 5 seconds
-const PROXY_CONNECTION_TIMEOUT: OnceLock<Duration> = OnceLock::new();
+static PROXY_CONNECTION_TIMEOUT: OnceLock<Duration> = OnceLock::new();
 
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
 fn layer_pre_initialization() -> Result<(), LayerError> {
