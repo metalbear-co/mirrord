@@ -3713,6 +3713,7 @@ name = "mirrord"
 version = "3.117.0"
 dependencies = [
  "actix-codec",
+ "chrono",
  "clap",
  "clap_complete",
  "const-random",
@@ -3738,6 +3739,7 @@ dependencies = [
  "mirrord-vpn",
  "nix 0.29.0",
  "prettytable-rs",
+ "rand",
  "rcgen",
  "regex",
  "reqwest 0.12.5",
