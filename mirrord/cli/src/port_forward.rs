@@ -61,6 +61,7 @@ pub struct PortForwarder {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedPortMapping {
+    // TODO: move this and enum below so portforwarder and reverse are together
     pub local: SocketAddr,
     pub remote: SocketAddr,
 }
@@ -442,7 +443,224 @@ impl PortForwarder {
     }
 }
 
+pub struct ReversePortForwarder {
+    /// communicates with the agent (only TCP supported)
+    agent_connection: AgentConnection,
+    /// associates local ports with destination ports
+    /// destinations may contain unresolved hostnames
+    raw_mappings: HashMap<SocketAddr, (RemoteAddr, u16)>,
+    /// accepts connections from the user app in the form of a stream
+    // TODO: i dont think we need this? probably just establish connections with local when needed
+    // listeners: StreamMap<SocketAddr, TcpListenerStream>,
+    /// oneshot channels for sending connection IDs to tasks and the associated local address
+    // TODO: i dont think this is needed - task is created when conn id is known
+    // id_oneshots: VecDeque<(SocketAddr, oneshot::Sender<ConnectionId>)>,
+    /// oneshot channels for sending resolved hostnames to tasks and the associated local address
+    // TODO: hostnames can be resolved immediately? to request conection from agent
+    // dns_oneshots: VecDeque<(SocketAddr, oneshot::Sender<IpAddr>)>,
+    /// identifies a pair of mapped socket addresses by their corresponding connection ID
+    sockets: HashMap<ConnectionId, ResolvedPortMapping>,
+    /// identifies task senders by their corresponding local socket address
+    /// for sending data from the remote socket to the local address
+    // TODO: switch to corresponding remote address? check if 1 to many rule is reversed wrt local
+    // to remote
+    task_txs: HashMap<SocketAddr, Sender<Vec<u8>>>,
+
+    /// transmit internal messages from tasks to [`PortForwarder`]'s main loop.
+    internal_msg_tx: Sender<PortForwardMessage>,
+    internal_msg_rx: Receiver<PortForwardMessage>,
+
+    /// true if Ping has been sent to agent
+    waiting_for_pong: bool,
+    ping_pong_timeout: Instant,
+}
+
+impl ReversePortForwarder {
+    pub(crate) async fn new(
+        agent_connection: AgentConnection,
+        parsed_mappings: Vec<PortMapping>,
+    ) -> Result<Self, PortForwardError> {
+        let mut mappings: HashMap<SocketAddr, (RemoteAddr, u16)> =
+            HashMap::with_capacity(parsed_mappings.len());
+
+        if parsed_mappings.is_empty() {
+            return Err(PortForwardError::NoMappingsError());
+        }
+
+        // for mapping in parsed_mappings {
+        //     if listeners.contains_key(&mapping.local) {
+        //         // two mappings shared a key thus keys were not unique
+        //         return Err(PortForwardError::PortMapSetupError(mapping.local));
+        //     }
+
+        //     let listener = TcpListener::bind(mapping.local).await;
+        //     match listener {
+        //         Ok(listener) => {
+        //             listeners.insert(mapping.local, TcpListenerStream::new(listener));
+        //             mappings.insert(mapping.local, mapping.remote);
+        //         }
+        //         Err(error) => return Err(PortForwardError::TcpListenerError(error)),
+        //     }
+        // }
+
+        // TODO: instead of listeners, need to validate remote addrs are all unique
+        // TODO: figure out if every task needs a separate TcpStream connection
+        // resolve dns later when connection with agent is established
+        for mapping in parsed_mappings {
+            // check destinations are unique
+        }
+
+        let (internal_msg_tx, internal_msg_rx) = mpsc::channel(1024);
+
+        Ok(Self {
+            agent_connection,
+            raw_mappings: mappings,
+            // listeners,
+            // id_oneshots: VecDeque::new(),
+            // dns_oneshots: VecDeque::new(),
+            sockets: HashMap::new(),
+            task_txs: HashMap::new(),
+            internal_msg_tx,
+            internal_msg_rx,
+            waiting_for_pong: false,
+            ping_pong_timeout: Instant::now(),
+        })
+    }
+
+    pub(crate) async fn run(&mut self) -> Result<(), PortForwardError> {
+        // setup agent connection
+        self.agent_connection
+            .sender
+            .send(ClientMessage::SwitchProtocolVersion(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await?;
+        match self.agent_connection.receiver.recv().await {
+            Some(DaemonMessage::SwitchProtocolVersionResponse(version))
+                if CLIENT_READY_FOR_LOGS.matches(&version) =>
+            {
+                self.agent_connection
+                    .sender
+                    .send(ClientMessage::ReadyForLogs)
+                    .await?;
+            }
+            _ => return Err(PortForwardError::AgentConnectionFailed),
+        }
+
+        // resolve dns here for all remotes - otherwise we wont know which connections to ask for
+        // send agentmessage to steal from all remote addresses
+        // dont wait on responses, straight into loop, handle in agent msg function
+
+        loop {
+            select! {
+                _ = tokio::time::sleep_until(self.ping_pong_timeout.into()) => {
+                    if self.waiting_for_pong {
+                        // no pong received before timeout
+                        break Err(PortForwardError::AgentError("agent failed to respond to Ping".into()));
+                    }
+                    self.agent_connection.sender.send(ClientMessage::Ping).await?;
+                    self.waiting_for_pong = true;
+                    self.ping_pong_timeout = Instant::now() + Duration::from_secs(30);
+                },
+
+                message = self.agent_connection.receiver.recv() => match message {
+                    Some(message) => self.handle_msg_from_agent(message).await?,
+                    None => {
+                        break Err(PortForwardError::AgentError("unexpected end of connection with agent".into()));
+                    },
+                },
+
+                // stream coming from the user app
+                // message = self.listeners.next() => match message {
+                //     Some(message) => self.handle_listener_stream(message).await?,
+                //     None => unreachable!("created listener sockets are never closed"),
+                // },
+
+                message = self.internal_msg_rx.recv() => {
+                    self.handle_msg_from_task(message.expect("this channel is never closed")).await?;
+                },
+            }
+        }
+    }
+
+    fn handle_msg_from_agent(&mut self, message: DaemonMessage) -> Result<(), PortForwardError> {
+        match message {
+            DaemonMessage::Tcp(_) => todo!(), /* TODO: check if mirroring is applicable? dont */
+            // think it is
+            DaemonMessage::TcpSteal(message) => match message {
+                mirrord_protocol::tcp::DaemonTcp::NewConnection(_) => todo!(),
+                mirrord_protocol::tcp::DaemonTcp::Data(_) => todo!(),
+                mirrord_protocol::tcp::DaemonTcp::Close(_) => todo!(),
+                mirrord_protocol::tcp::DaemonTcp::SubscribeResult(_) => todo!(), // TODO: check?
+                mirrord_protocol::tcp::DaemonTcp::HttpRequest(_) => todo!(),
+                mirrord_protocol::tcp::DaemonTcp::HttpRequestFramed(_) => todo!(), /* TODO: may be able to handle all three at the same time? */
+                mirrord_protocol::tcp::DaemonTcp::HttpRequestChunked(_) => todo!(),
+            },
+            DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(message)) => match message {
+                Ok(DnsLookup(record)) if !record.is_empty() => {
+                    // pop oneshot, send string
+                    let resolved_ipv4: Vec<&LookupRecord> = record
+                        .iter()
+                        .filter(|LookupRecord { ip, .. }| ip.is_ipv4())
+                        .collect();
+                    // use first IPv4 is it exists, otherwise use IPv6
+                    let resolved_ip = match resolved_ipv4.first() {
+                        Some(first) => first.ip,
+                        None => record.first().unwrap().ip,
+                    };
+                    let Some((local_socket, channel)) = self.dns_oneshots.pop_front() else {
+                        return Err(PortForwardError::LookupReqNotFound(resolved_ip));
+                    };
+                    match channel.send(resolved_ip) {
+                        Ok(_) => (),
+                        Err(_) => {
+                            self.task_txs.remove(&local_socket);
+                            tracing::warn!("failed to send resolved ip {resolved_ip} to task on oneshot channel");
+                        }
+                    };
+                }
+                _ => {
+                    // lookup failed, close task and err
+                    let Some((local_socket, _channel)) = self.dns_oneshots.pop_front() else {
+                        tracing::warn!("failed to resolve remote hostname");
+                        // no ready task, LocalConnectionTask will fail when oneshot is dropped and
+                        // handle cleanup
+                        return Ok(());
+                    };
+                    self.task_txs.remove(&local_socket);
+                    let remote = self.raw_mappings.get(&local_socket);
+                    match remote {
+                        Some((remote, _)) => {
+                            tracing::warn!("failed to resolve remote hostname for {remote:?}")
+                        }
+                        None => unreachable!("remote always exists here"),
+                    }
+                }
+            },
+            DaemonMessage::LogMessage(log_message) => match log_message.level {
+                LogLevel::Warn => tracing::warn!("agent log: {}", log_message.message),
+                LogLevel::Error => tracing::error!("agent log: {}", log_message.message),
+            },
+            DaemonMessage::Close(error) => {
+                return Err(PortForwardError::AgentError(error));
+            }
+            DaemonMessage::Pong if self.waiting_for_pong => {
+                self.waiting_for_pong = false;
+            }
+            other => {
+                // includes unexepcted DaemonMessage::Pong
+                return Err(PortForwardError::AgentError(format!(
+                    "unexpected message from agent: {other:?}"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+}
+
 struct LocalConnectionTask {
+    // TODO: add doc here?
     read_stream: ReaderStream<OwnedReadHalf>,
     write: OwnedWriteHalf,
     port_mapping: PortMapping,
@@ -623,6 +841,8 @@ impl LocalConnectionTask {
             .await;
         result
     }
+
+    // TODO: reverse_run()
 }
 
 #[derive(Debug, Error)]
@@ -631,6 +851,7 @@ pub enum PortForwardError {
     #[error("multiple port forwarding mappings found for local address `{0}`")]
     PortMapSetupError(SocketAddr),
 
+    // TODO: reverse of above
     #[error("no port forwarding mappings were provided")]
     NoMappingsError(),
 

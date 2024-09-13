@@ -398,6 +398,10 @@ pub(super) struct PortForwardArgs {
     /// after a connection is made to the target.
     #[arg(short = 'L', long)]
     pub port_mappings: Vec<PortMapping>,
+
+    /// Enable reverse port forwarding
+    #[arg(short = 'r', long)]
+    pub reverse_port_forward: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

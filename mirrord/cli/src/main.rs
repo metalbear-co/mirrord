@@ -35,7 +35,7 @@ use mirrord_kube::api::kubernetes::{create_kube_config, seeker::KubeResourceSeek
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{messages::EXEC_CONTAINER_BINARY, Progress, ProgressTracker};
 use operator::operator_command;
-use port_forward::PortForwarder;
+use port_forward::{PortForwarder, ReversePortForwarder};
 use regex::Regex;
 use semver::{Version, VersionReq};
 use serde_json::json;
@@ -518,6 +518,14 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
 
     let (_connection_info, connection) =
         create_and_connect(&config, &mut progress, &mut analytics).await?;
+
+    if args.reverse_port_forward {
+        // TODO: make portforward interface and impl new, run both ways?
+        let mut port_forward =
+            ReversePortForwarder::new(connection, args.port_mappings.clone()).await?;
+        port_forward.run().await?;
+        return Ok(());
+    }
     let mut port_forward = PortForwarder::new(connection, args.port_mappings.clone()).await?;
     port_forward.run().await?;
     Ok(())
