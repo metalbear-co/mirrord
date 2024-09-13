@@ -5,7 +5,7 @@
 use core::time::Duration;
 use std::{collections::HashSet, ops::Not, path::PathBuf};
 
-use aws_sdk_sqs::operation::receive_message::ReceiveMessageOutput;
+use aws_sdk_sqs::{operation::receive_message::ReceiveMessageOutput, types::Message};
 use rstest::*;
 
 use crate::utils::{
@@ -50,8 +50,20 @@ async fn expect_output_lines<const N: usize, const M: usize>(
             .iter()
             .position(|line| *line == expected_line)
             .expect("A fifo message did not reach the correct user.");
-        assert!(last_location <= location, "Fifo messages out of order!")
+        assert!(last_location <= location, "Fifo messages out of order!");
+        last_location = location;
     }
+}
+
+async fn delete_message(client: &aws_sdk_sqs::Client, queue_url: &str, receipt_handle: &str) {
+    client
+        .delete_message()
+        .queue_url(queue_url)
+        .receipt_handle(receipt_handle)
+        .send()
+        .await
+        .inspect_err(|err| eprintln!("deleting received message failed: {err:?}"))
+        .ok();
 }
 
 /// Verify that the echo queue contains the expected messages, meaning the deployed application
@@ -62,29 +74,35 @@ async fn expect_messages_in_queue<const N: usize>(
     client: &aws_sdk_sqs::Client,
     echo_queue: &QueueInfo,
 ) {
-    let mut expected_messages = HashSet::from(messages);
-    loop {
-        if let Ok(ReceiveMessageOutput {
-            messages: Some(received_messages),
-            ..
-        }) = client
-            .receive_message()
-            .queue_url(&echo_queue.url)
-            .visibility_timeout(15)
-            .wait_time_seconds(20)
-            .send()
-            .await
-        {
-            for received_message in received_messages {
-                assert!(expected_messages.remove(
-                    received_message
-                        .body
-                        .expect("Received empty bodied message from echo queue.")
-                        .as_str()
-                ));
+    tokio::time::timeout(Duration::from_secs(20), async {
+        println!("Verifying correct messages in echo queue {} (verifying the deployed application got the messages it was supposed to)", echo_queue.name);
+        let mut expected_messages = HashSet::from(messages);
+        loop {
+            if let Ok(ReceiveMessageOutput {
+                          messages: Some(received_messages),
+                          ..
+                      }) = client
+                .receive_message()
+                .queue_url(&echo_queue.url)
+                .visibility_timeout(15)
+                .wait_time_seconds(20)
+                .send()
+                .await
+            {
+                for Message {
+                    receipt_handle, body, ..
+                } in received_messages {
+                    let message = body.expect("Received empty bodied message from echo queue.");
+                    println!(r#"got message "{message}" in queue "{}"."#, echo_queue.name);
+                    assert!(expected_messages.remove(message.as_str()));
+                    delete_message(client, &echo_queue.url, &receipt_handle.expect("no receipt handle")).await;
+                    if expected_messages.is_empty() {
+                        return;
+                    }
+                }
             }
         }
-    }
+    }).await.unwrap();
 }
 
 /// Verify that the echo queue contains the expected messages, meaning the deployed application
@@ -95,41 +113,45 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
     client: &aws_sdk_sqs::Client,
     echo_queue: &QueueInfo,
 ) {
-    let mut expected_messages = messages.into_iter();
-    let mut expected_message = expected_messages.next().unwrap();
-    loop {
-        if let Ok(ReceiveMessageOutput {
-            messages: Some(received_messages),
-            ..
-        }) = client
-            .receive_message()
-            .queue_url(&echo_queue.url)
-            .visibility_timeout(15)
-            .wait_time_seconds(20)
-            .send()
-            .await
-        {
-            for received_message in received_messages {
-                assert_eq!(
-                    expected_message,
-                    received_message
-                        .body
-                        .expect("Received empty bodied message from echo queue.")
-                );
-                let Some(message) = expected_messages.next() else {
-                    return;
-                };
-                expected_message = message;
+    tokio::time::timeout(Duration::from_secs(20), async {
+        println!("Verifying correct messages in echo queue {} (verifying the deployed application got the messages it was supposed to)", echo_queue.name);
+        let mut expected_messages = messages.into_iter();
+        let mut expected_message = expected_messages.next().unwrap();
+        loop {
+            let ReceiveMessageOutput {
+                messages,
+                ..
+            } = client
+                .receive_message()
+                .queue_url(&echo_queue.url)
+                .visibility_timeout(15)
+                .wait_time_seconds(20)
+                .send()
+                .await
+                .expect("receiving messages from echo queue failed");
+            if let Some(received_messages) = messages {
+                for Message {
+                    body, receipt_handle, ..
+                } in received_messages {
+                    let message = body.expect("Received empty bodied message from echo queue.");
+                    println!(r#"got message "{message}" in queue "{}"."#, echo_queue.name);
+                    assert_eq!(message, expected_message,);
+                    delete_message(client, &echo_queue.url, &receipt_handle.expect("no receipt handle")).await;
+                    let Some(message) = expected_messages.next() else {
+                        return;
+                    };
+                    expected_message = message;
+                }
             }
         }
-    }
+    }).await.unwrap();
 }
 
 async fn verify_splitter_temp_queues_deleted(sqs_test_resources: &SqsTestResources) {
     let client = &sqs_test_resources.sqs_client;
     let queue_name1 = sqs_test_resources.queue1.name.as_str();
     let queue_name2 = sqs_test_resources.queue2.name.as_str();
-    tokio::time::timeout(Duration::from_secs(360), async {
+    tokio::time::timeout(Duration::from_secs(120), async {
         let mut i = 0u8; // TODO: delete;
         loop {
             {
@@ -186,7 +208,7 @@ async fn verify_splitter_temp_queues_deleted(sqs_test_resources: &SqsTestResourc
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_dir: &PathBuf) {
-    let mut sqs_test_resources = sqs_test_resources.await;
+    let sqs_test_resources = sqs_test_resources.await;
     let application = Application::RustSqs;
 
     let mut config_path = config_dir.clone();

@@ -3,13 +3,12 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    fmt::{Debug, Formatter},
+    fmt::Debug,
     time::Duration,
 };
 
-use aws_credential_types::{
-    provider::{future::ProvideCredentials as ProvideCredentialsFuture, ProvideCredentials},
-    Credentials,
+use aws_credential_types::provider::{
+    future::ProvideCredentials as ProvideCredentialsFuture, ProvideCredentials,
 };
 use aws_sdk_sqs::types::{
     MessageAttributeValue,
@@ -23,7 +22,7 @@ use k8s_openapi::api::{
 };
 use kube::{
     api::{Patch, PatchParams, PostParams, WatchEvent, WatchParams},
-    runtime::{wait::await_condition, watcher::watch_object},
+    runtime::wait::await_condition,
     Api, Client, Resource, ResourceExt,
 };
 use mirrord_operator::{
@@ -35,11 +34,10 @@ use mirrord_operator::{
     setup::OPERATOR_NAME,
 };
 use rstest::fixture;
-use tokio::{sync::oneshot::Sender, task::JoinHandle};
+use tokio::task::JoinHandle;
 
 use crate::utils::{
-    get_pod_or_node_host, kube_client, service_with_env, watch_resource_exists, KubeService,
-    ResourceGuard, CONTAINER_NAME,
+    get_pod_or_node_host, kube_client, service_with_env, KubeService, ResourceGuard,
 };
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
@@ -47,6 +45,14 @@ const QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_Q_NAME1";
 
 /// Name of the environment variable that holds the name of the second SQS queue to read from.
 const QUEUE_NAME_ENV_VAR2: &str = "SQS_TEST_Q_NAME2";
+
+/// Name of the environment variable that holds the name of the first SQS queue the deployed
+/// application will write to.
+const ECHO_QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_ECHO_Q_NAME1";
+
+/// Name of the environment variable that holds the name of the second SQS queue the deployed
+/// application will write to.
+const ECHO_QUEUE_NAME_ENV_VAR2: &str = "SQS_TEST_ECHO_Q_NAME2";
 
 const QUEUE_REGISTRY_RESOURCE_NAME: &str = "mirrord-e2e-test-queue-registry";
 
@@ -67,7 +73,6 @@ pub struct SqsTestResources {
     pub queue2: QueueInfo,
     pub echo_queue2: QueueInfo,
     pub sqs_client: aws_sdk_sqs::Client,
-    kube_client: Client,
     _guards: Vec<ResourceGuard>,
     sessions_ready_future: Option<JoinHandle<Result<(), ()>>>,
 }
@@ -228,12 +233,14 @@ async fn sqs_consumer_service(
     kube_client: &Client,
     queue1: &QueueInfo,
     queue2: &QueueInfo,
+    echo_queue1: &QueueInfo,
+    echo_queue2: &QueueInfo,
 ) -> KubeService {
     let namespace = format!("e2e-tests-sqs-splitting-{}", crate::utils::random_string());
     service_with_env(
         &namespace,
         "ClusterIP",
-        "docker.io/t4lz/sqs-forwarder:8.26", // TODO
+        "docker.io/t4lz/sqs-forwarder:9.13-22", // TODO
         "queue-forwarder",
         false,
         kube_client.clone(),
@@ -245,6 +252,14 @@ async fn sqs_consumer_service(
             {
               "name": QUEUE_NAME_ENV_VAR2,
               "value": queue2.name.as_str()
+            },
+            {
+              "name": ECHO_QUEUE_NAME_ENV_VAR1,
+              "value": echo_queue1.name.as_str()
+            },
+            {
+              "name": ECHO_QUEUE_NAME_ENV_VAR2,
+              "value": echo_queue2.name.as_str()
             },
             {
               "name": "AWS_ENDPOINT_URL",
@@ -433,7 +448,11 @@ fn get_patch_applied_check(generation: i64) -> impl Fn(Option<&Deployment>) -> b
                 .as_ref()
                 .and_then(|status| status.observed_generation)
         })
-        .inspect(|observed_generation| println!("checking if operator patch complete"))
+        .inspect(|observed_generation| {
+            println!(
+                "Checking if operator patch completed. observed generation: {observed_generation}."
+            )
+        })
         .map(|observed_generation| observed_generation >= generation)
         // If there is no deployment, if the deployment has no status, or if the status does not
         // contain an observed generation, we take it to mean the deployment has not yet reached
@@ -512,7 +531,8 @@ pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResourc
         random_name_sqs_queue_with_echo_queue(false, &sqs_client, &mut guards).await;
     let (queue2, echo_queue2) =
         random_name_sqs_queue_with_echo_queue(true, &sqs_client, &mut guards).await;
-    let k8s_service = sqs_consumer_service(&kube_client, &queue1, &queue2).await;
+    let k8s_service =
+        sqs_consumer_service(&kube_client, &queue1, &queue2, &echo_queue1, &echo_queue2).await;
     let sessions_ready_future = Some(tokio::spawn(watch_sqs_sessions(
         kube_client.clone(),
         k8s_service.namespace.clone(),
@@ -525,7 +545,6 @@ pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResourc
         queue2,
         echo_queue2,
         sqs_client,
-        kube_client,
         _guards: guards,
         sessions_ready_future,
     }
