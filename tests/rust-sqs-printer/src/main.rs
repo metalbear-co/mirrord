@@ -26,7 +26,7 @@ async fn read_from_queue(read_q_name: String, client: Client, queue_num: u8) {
         // By setting a time != 0 (20 is the maximum), we perform "long polling" which means we
         // won't get "false empties" and also less empty responses, because SQS will wait for that
         // time before returning an empty response.
-        .wait_time_seconds(20)
+        .wait_time_seconds(5)
         .queue_url(&read_q_url);
     loop {
         let res = match receive_message_request.clone().send().await {

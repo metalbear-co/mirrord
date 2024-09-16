@@ -223,8 +223,9 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     config_path.push("sqs_queue_splitting_b.json");
     // Wait between client starts.
     // Support starting at the same time and remove this (https://github.com/metalbear-co/operator/issues/637)
-    // TODO: (now, in this PR) change from sleep to watch registry.
-    tokio::time::sleep(Duration::from_secs(30)).await;
+    sqs_test_resources.wait_for_registry_status(30).await;
+    // TODO make this unnecessary.
+    tokio::time::sleep(Duration::from_secs(20)).await;
 
     println!("Starting second mirrord client");
     let mut client_b = application
@@ -243,7 +244,7 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
         .expect("There was a problem with the SQS Session resources");
 
     // TODO: make this unnecessary.
-    tokio::time::sleep(Duration::from_secs(30)).await;
+    tokio::time::sleep(Duration::from_secs(60)).await;
 
     write_sqs_messages(
         &sqs_test_resources.sqs_client,

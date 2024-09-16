@@ -79,6 +79,10 @@ pub struct SqsTestResources {
     /// A future that completes once there are 2 ready SQS sessions.
     /// Option, because it is moved when awaited.
     sessions_ready_future: Option<JoinHandle<Result<(), ()>>>,
+    /// A future that completes once the queue registry resource has a status, meaning the first
+    /// user started a session. Needed because currently two users cannot start at the same time.
+    /// Option, because it is moved when awaited.
+    registry_has_status_future: Option<JoinHandle<()>>,
 }
 
 impl SqsTestResources {
@@ -104,6 +108,20 @@ impl SqsTestResources {
         .await
         .unwrap()
         .unwrap()
+    }
+
+    /// Returns once the queue registry has a status.
+    ///
+    /// # Panics
+    /// If `timeout` has passed and stdout still does not contain `n` lines.
+    pub async fn wait_for_registry_status(&mut self, timeout_secs: u64) {
+        tokio::time::timeout(
+            Duration::from_secs(timeout_secs),
+            self.registry_has_status_future.take().unwrap(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
     }
 }
 
@@ -537,6 +555,21 @@ pub async fn watch_sqs_sessions(kube_client: Client, namespace: String) -> Resul
     }
 }
 
+fn queue_registry_has_status(queue_registry: Option<&MirrordWorkloadQueueRegistry>) -> bool {
+    queue_registry.and_then(|qr| qr.status.as_ref()).is_some()
+}
+
+async fn await_registry_status(kube_client: Client, namespace: String) {
+    let qr_api: Api<MirrordWorkloadQueueRegistry> = Api::namespaced(kube_client, &namespace);
+    await_condition(
+        qr_api,
+        QUEUE_REGISTRY_RESOURCE_NAME,
+        queue_registry_has_status,
+    )
+    .await
+    .unwrap();
+}
+
 /// - Check if there is a localstack instance deployed in the default namespace and patch the
 ///   mirrord operator with SQS env to use that localstack instance.
 /// - Create an SQS client (that uses localstack if there).
@@ -568,6 +601,10 @@ pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResourc
         kube_client.clone(),
         k8s_service.namespace.clone(),
     )));
+    let registry_has_status_future = Some(tokio::spawn(await_registry_status(
+        kube_client.clone(),
+        k8s_service.namespace.clone(),
+    )));
     create_queue_registry_resource(&kube_client, &k8s_service.namespace, &k8s_service.name).await;
     SqsTestResources {
         k8s_service,
@@ -578,6 +615,7 @@ pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResourc
         sqs_client,
         _guards: guards,
         sessions_ready_future,
+        registry_has_status_future,
     }
 }
 
