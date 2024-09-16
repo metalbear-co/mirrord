@@ -365,7 +365,7 @@ jobs:
           name: intproxy_logs_linux
           path: /tmp/intproxy_logs/linux
 
-  macos_tests:
+  macos_x64_tests:
     runs-on: macos-13
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
@@ -378,7 +378,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt, clippy
-          target: aarch64-apple-darwin
+          target: x86_64-apple-darwin
           toolchain: nightly-2024-04-15
       - name: Install Protoc
         uses: arduino/setup-protoc@v2
@@ -386,8 +386,6 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: clippy x64
         run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=x86_64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
-      - name: clippy aarch64
-        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=aarch64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
       - name: mirrord SIP UT
         run: cargo test --target=x86_64-apple-darwin -p mirrord-sip
       # prepare stuff needed for integration tests
@@ -475,7 +473,7 @@ jobs:
           node-version: 18
       - run: npm install express # For http mirroring test with node.
       - run: cargo build --target=x86_64-apple-darwin -p mirrord-layer # Build layer lib. The tests load it into the apps.
-      - name: mirrord layer tests
+      - name: mirrord layer tests x64
         run: cargo test --target=x86_64-apple-darwin -p mirrord-layer
       - name: save intproxy logs
         continue-on-error: true
@@ -486,6 +484,125 @@ jobs:
           name: intproxy_logs_macos
           path: /tmp/intproxy_logs/macos
 
+
+  macos_aarch64_tests:
+    runs-on: macos-14
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    env:
+      MIRRORD_TEST_USE_EXISTING_LIB: ../../universal-apple-darwin/debug/libmirrord_layer.dylib
+    steps:
+      - uses: actions/checkout@v4 # Checkout the mirrord repo.
+      # the setup rust toolchain action ignores the input if file exists.. so remove it
+      - run: rm rust-toolchain.toml
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+          target: aarch64-apple-darwin
+          toolchain: nightly-2024-04-15
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v2
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: clippy aarch64
+        run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=aarch64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
+      - name: mirrord SIP UT
+        run: cargo test --target=aarch64-apple-darwin -p mirrord-sip
+      # prepare stuff needed for integration tests
+      - run: |
+          cd mirrord/layer/tests/apps/issue1123
+          rustc issue1123.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1054
+          rustc issue1054.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1458
+          rustc issue1458.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue1458portnot53
+          rustc issue1458portnot53.rs --out-dir target
+      - run: |
+          cd mirrord/layer/tests/apps/issue2058
+          rustc issue2058.rs --out-dir target
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+          cache-dependency-path: tests/go-e2e/go.sum
+      - run: |
+          go version
+      # don't use "cache" for other Gos since it will try to overwrite and have bad results.
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 21
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "1.22"
+          cache: false
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 22
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "1.23"
+          cache: false
+      - run: |
+          go version
+      - run: | # Build Go test apps.
+          ./scripts/build_go_apps.sh 23
+      - run: |
+          cd mirrord/layer/tests/apps/fileops
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/outgoing
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/recv_from
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/dns_resolve
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1776
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1776portnot53
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1899
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue2001
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue2438
+          cargo build
+      - run: ./scripts/build_c_apps.sh
+      # For the `java_temurin_sip` test.
+      - uses: sdkman/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
+        id: sdkman
+        with:
+          candidate: java
+          version: 17.0.6-tem
+      - run: java -version
+      - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
+      - run: pip3 install flask # For http mirroring test with Flask.
+      - run: pip3 install fastapi # For http mirroring test with FastAPI.
+      - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - run: npm install express # For http mirroring test with node.
+      - run: ./scripts/build_fat_mac.sh
+      - name: mirrord layer tests aarch64
+        run: cargo test --target=aarch64-apple-darwin -p mirrord-layer
+      - name: save intproxy logs
+        continue-on-error: true
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          # Name of the artifact to upload.
+          name: intproxy_logs_macos
+          path: /tmp/intproxy_logs/macos
   e2e:
     runs-on: ubuntu-latest
     strategy:
@@ -599,7 +716,8 @@ jobs:
         vscode_e2e_on_release_branch,
         test_agent_image,
         test_cli_image,
-        macos_tests,
+        macos_x64_tests,
+        macos_aarch64_tests,
         integration_tests,
         e2e,
         test_agent,
@@ -617,7 +735,8 @@ jobs:
             (needs.towncrier_check.result == 'success') &&
             (needs.test_agent_image.result == 'success' || needs.test_agent_image.result == 'skipped') &&
             (needs.test_cli_image.result == 'success' || needs.test_cli_image.result == 'skipped') &&
-            (needs.macos_tests.result == 'success' || needs.macos_tests.result == 'skipped') &&
+            (needs.macos_x64_tests.result == 'success' || needs.macos_x64_tests.result == 'skipped') &&
+            (needs.macos_aarch64_tests.result == 'success' || needs.macos_aarch64_tests.result == 'skipped') &&
             (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped') &&
             (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
             (needs.test_agent.result == 'success' || needs.test_agent.result == 'skipped') &&
