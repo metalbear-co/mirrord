@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };
@@ -446,24 +446,15 @@ impl PortForwarder {
 pub struct ReversePortForwarder {
     /// communicates with the agent (only TCP supported)
     agent_connection: AgentConnection,
-    /// associates local ports with destination ports
+    /// associates destination ports with local ports
     /// destinations may contain unresolved hostnames
-    raw_mappings: HashMap<SocketAddr, (RemoteAddr, u16)>,
-    /// accepts connections from the user app in the form of a stream
-    // TODO: i dont think we need this? probably just establish connections with local when needed
-    // listeners: StreamMap<SocketAddr, TcpListenerStream>,
-    /// oneshot channels for sending connection IDs to tasks and the associated local address
-    // TODO: i dont think this is needed - task is created when conn id is known
-    // id_oneshots: VecDeque<(SocketAddr, oneshot::Sender<ConnectionId>)>,
+    raw_mappings: HashMap<(RemoteAddr, u16), SocketAddr>,
     /// oneshot channels for sending resolved hostnames to tasks and the associated local address
-    // TODO: hostnames can be resolved immediately? to request conection from agent
-    // dns_oneshots: VecDeque<(SocketAddr, oneshot::Sender<IpAddr>)>,
+    dns_oneshots: VecDeque<(SocketAddr, oneshot::Sender<IpAddr>)>,
     /// identifies a pair of mapped socket addresses by their corresponding connection ID
     sockets: HashMap<ConnectionId, ResolvedPortMapping>,
-    /// identifies task senders by their corresponding local socket address
+    /// identifies task senders by their corresponding remote (resolved) socket address
     /// for sending data from the remote socket to the local address
-    // TODO: switch to corresponding remote address? check if 1 to many rule is reversed wrt local
-    // to remote
     task_txs: HashMap<SocketAddr, Sender<Vec<u8>>>,
 
     /// transmit internal messages from tasks to [`PortForwarder`]'s main loop.
@@ -480,34 +471,22 @@ impl ReversePortForwarder {
         agent_connection: AgentConnection,
         parsed_mappings: Vec<PortMapping>,
     ) -> Result<Self, PortForwardError> {
-        let mut mappings: HashMap<SocketAddr, (RemoteAddr, u16)> =
+        let mut mappings: HashMap<(RemoteAddr, u16), SocketAddr> =
             HashMap::with_capacity(parsed_mappings.len());
 
         if parsed_mappings.is_empty() {
             return Err(PortForwardError::NoMappingsError());
         }
 
-        // for mapping in parsed_mappings {
-        //     if listeners.contains_key(&mapping.local) {
-        //         // two mappings shared a key thus keys were not unique
-        //         return Err(PortForwardError::PortMapSetupError(mapping.local));
-        //     }
-
-        //     let listener = TcpListener::bind(mapping.local).await;
-        //     match listener {
-        //         Ok(listener) => {
-        //             listeners.insert(mapping.local, TcpListenerStream::new(listener));
-        //             mappings.insert(mapping.local, mapping.remote);
-        //         }
-        //         Err(error) => return Err(PortForwardError::TcpListenerError(error)),
-        //     }
-        // }
-
-        // TODO: instead of listeners, need to validate remote addrs are all unique
-        // TODO: figure out if every task needs a separate TcpStream connection
-        // resolve dns later when connection with agent is established
-        for mapping in parsed_mappings {
+        for mapping in &parsed_mappings {
             // check destinations are unique
+            if mappings.contains_key(&mapping.remote) {
+                // two mappings shared a key thus keys were not unique
+                return Err(PortForwardError::ReversePortMapSetupError(
+                    mapping.remote.clone(),
+                ));
+            }
+            mappings.insert(mapping.remote.clone(), mapping.local);
         }
 
         let (internal_msg_tx, internal_msg_rx) = mpsc::channel(1024);
@@ -515,9 +494,7 @@ impl ReversePortForwarder {
         Ok(Self {
             agent_connection,
             raw_mappings: mappings,
-            // listeners,
-            // id_oneshots: VecDeque::new(),
-            // dns_oneshots: VecDeque::new(),
+            dns_oneshots: VecDeque::new(),
             sockets: HashMap::new(),
             task_txs: HashMap::new(),
             internal_msg_tx,
@@ -570,12 +547,6 @@ impl ReversePortForwarder {
                     },
                 },
 
-                // stream coming from the user app
-                // message = self.listeners.next() => match message {
-                //     Some(message) => self.handle_listener_stream(message).await?,
-                //     None => unreachable!("created listener sockets are never closed"),
-                // },
-
                 message = self.internal_msg_rx.recv() => {
                     self.handle_msg_from_task(message.expect("this channel is never closed")).await?;
                 },
@@ -585,13 +556,12 @@ impl ReversePortForwarder {
 
     fn handle_msg_from_agent(&mut self, message: DaemonMessage) -> Result<(), PortForwardError> {
         match message {
-            DaemonMessage::Tcp(_) => todo!(), /* TODO: check if mirroring is applicable? dont */
-            // think it is
+            DaemonMessage::Tcp(_) => todo!(), // TODO: check if mirroring is allowed
             DaemonMessage::TcpSteal(message) => match message {
                 mirrord_protocol::tcp::DaemonTcp::NewConnection(_) => todo!(),
                 mirrord_protocol::tcp::DaemonTcp::Data(_) => todo!(),
                 mirrord_protocol::tcp::DaemonTcp::Close(_) => todo!(),
-                mirrord_protocol::tcp::DaemonTcp::SubscribeResult(_) => todo!(), // TODO: check?
+                mirrord_protocol::tcp::DaemonTcp::SubscribeResult(_) => todo!(), /* TODO: check? think this is unexpected */
                 mirrord_protocol::tcp::DaemonTcp::HttpRequest(_) => todo!(),
                 mirrord_protocol::tcp::DaemonTcp::HttpRequestFramed(_) => todo!(), /* TODO: may be able to handle all three at the same time? */
                 mirrord_protocol::tcp::DaemonTcp::HttpRequestChunked(_) => todo!(),
@@ -850,6 +820,9 @@ pub enum PortForwardError {
     // setup errors
     #[error("multiple port forwarding mappings found for local address `{0}`")]
     PortMapSetupError(SocketAddr),
+
+    #[error("multiple port forwarding mappings found for desination address `{0:?}`")]
+    ReversePortMapSetupError((RemoteAddr, u16)),
 
     // TODO: reverse of above
     #[error("no port forwarding mappings were provided")]
