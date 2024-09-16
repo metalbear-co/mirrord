@@ -203,14 +203,14 @@ impl TestProcess {
         panic!("Timeout waiting for line: {line}");
     }
 
-    /// Wait for the test app to output the given amount of lines.
+    /// Wait for the test app to output (at least) the given amount of lines.
     ///
     /// # Arguments
     ///
     /// * `timeout` - how long to wait for process to output enough lines.
     ///
     /// # Panics
-    /// If `timeout` has passed and stdout still does not contain `N`.
+    /// If `timeout` has passed and stdout still does not contain `n` lines.
     pub async fn await_n_lines(&self, n: usize, timeout: Duration) -> Vec<String> {
         tokio::time::timeout(timeout, async move {
             loop {
@@ -226,6 +226,33 @@ impl TestProcess {
         })
         .await
         .expect("Test process output did not produce expected amount of lines in time.")
+    }
+
+    /// Wait for the test app to output the given amount of lines, then assert it did not output
+    /// more than expected.
+    ///
+    /// > Note: we do not wait to make sure more lines are not printed, we just check the lines we
+    /// > got after waiting for n lines. So it is possible for this to happen:
+    ///   1. Test process outputs `n` lines.
+    ///   2. `await_n_lines` returns those `n` lines.
+    ///   3. This function asserts there are only `n` lines.
+    ///   3. The test process outputs more lines.
+    ///
+    /// # Arguments
+    ///
+    /// * `timeout` - how long to wait for process to output enough lines.
+    ///
+    /// # Panics
+    /// - If `timeout` has passed and stdout still does not contain `n` lines.
+    /// - If stdout contains more than `n` lines.
+    pub async fn await_exactly_n_lines(&self, n: usize, timeout: Duration) -> Vec<String> {
+        let lines = self.await_n_lines(n, timeout).await;
+        assert_eq!(
+            lines.len(),
+            n,
+            "Test application printed out more lines than expected."
+        );
+        lines
     }
 
     pub async fn write_to_stdin(&mut self, data: &[u8]) {

@@ -54,8 +54,10 @@ const ECHO_QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_ECHO_Q_NAME1";
 /// application will write to.
 const ECHO_QUEUE_NAME_ENV_VAR2: &str = "SQS_TEST_ECHO_Q_NAME2";
 
+/// Does not have to be dynamic because each test run creates its own namespace.
 const QUEUE_REGISTRY_RESOURCE_NAME: &str = "mirrord-e2e-test-queue-registry";
 
+/// To mark the operator deployment is currently patched to use localstack.
 const LOCALSTACK_PATCH_LABEL_NAME: &str = "sqs-e2e-tests-localstack-patch";
 
 const LOCALSTACK_ENDPOINT_URL: &str = "http://localstack.default.svc.cluster.local:4566";
@@ -74,6 +76,8 @@ pub struct SqsTestResources {
     pub echo_queue2: QueueInfo,
     pub sqs_client: aws_sdk_sqs::Client,
     _guards: Vec<ResourceGuard>,
+    /// A future that completes once there are 2 ready SQS sessions.
+    /// Option, because it is moved when awaited.
     sessions_ready_future: Option<JoinHandle<Result<(), ()>>>,
 }
 
@@ -86,11 +90,24 @@ impl SqsTestResources {
         self.k8s_service.deployment_target()
     }
 
-    pub async fn wait_for_sqs_sessions(&mut self) -> Result<(), ()> {
-        self.sessions_ready_future.take().unwrap().await.unwrap()
+    /// Returns with `Ok(())` once there are 2 ready SQS Sessions.
+    /// Returns `Err(())` if a session was deleted before 2 were ready, or if there was an API
+    /// error.
+    ///
+    /// # Panics
+    /// If `timeout` has passed and stdout still does not contain `n` lines.
+    pub async fn wait_for_sqs_sessions(&mut self, timeout_secs: u64) -> Result<(), ()> {
+        tokio::time::timeout(
+            Duration::from_secs(timeout_secs),
+            self.sessions_ready_future.take().unwrap(),
+        )
+        .await
+        .unwrap()
+        .unwrap()
     }
 }
 
+/// A credential provider that makes the SQS SDK use localstack.
 #[derive(Debug)]
 struct LocalstackTestCredentialsProvider;
 
@@ -107,6 +124,7 @@ impl ProvideCredentials for LocalstackTestCredentialsProvider {
     }
 }
 
+/// Get an SQS client. If a localstack URL is provided the client will use that localstack service.
 async fn get_sqs_client(localstack_url: Option<String>) -> aws_sdk_sqs::Client {
     let mut config = aws_config::from_env();
     if let Some(endpoint_url) = localstack_url {
@@ -461,6 +479,7 @@ fn get_patch_applied_check(generation: i64) -> impl Fn(Option<&Deployment>) -> b
     }
 }
 
+/// Get a URL for localstack that is reachable from outside the cluster.
 async fn localstack_endpoint_external_url(kube_client: &Client) -> String {
     let localstack_host = get_pod_or_node_host(kube_client.clone(), "localstack", "default").await;
     format!("http://{localstack_host}:31566")
@@ -473,7 +492,10 @@ async fn localstack_in_default_namespace(kube_client: &Client) -> bool {
 }
 
 /// Watch `MirrordSqsSession` resources in this namespace (which is private to this test instance
-/// alone), and send a signal once two unique sessions are ready.
+/// alone), and return once two unique sessions are ready.
+///
+/// Return `Err(())` if there was an error while watching or if a session was deleted before 2 were
+/// ready.
 pub async fn watch_sqs_sessions(kube_client: Client, namespace: String) -> Result<(), ()> {
     let sqs_sessions = Api::<MirrordSqsSession>::namespaced(kube_client, &namespace);
     let wp = WatchParams::default().timeout(60);
@@ -515,6 +537,15 @@ pub async fn watch_sqs_sessions(kube_client: Client, namespace: String) -> Resul
     }
 }
 
+/// - Check if there is a localstack instance deployed in the default namespace and patch the
+///   mirrord operator with SQS env to use that localstack instance.
+/// - Create an SQS client (that uses localstack if there).
+/// - Create 4 guarded SQS queues with partially random names: 2 queues for the test applications to
+///   consume from, and two "echo" queues from the deployed test application to forward messages to,
+///   so that the test can verify it received them.
+/// - Start a task that waits for 2 SQS Sessions to be ready.
+/// - Deploy a consumer service in a new guarded namespace with a partially random name.
+/// - Create a `MirrordWorkloadQueueRegistry` resource in the test's namespace.
 #[fixture]
 pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResources {
     let kube_client = kube_client.await;

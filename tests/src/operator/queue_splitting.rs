@@ -14,16 +14,6 @@ use crate::utils::{
     Application, TestProcess,
 };
 
-async fn expect_n_lines(n: usize, test_process: &TestProcess) -> Vec<String> {
-    let lines = test_process.await_n_lines(n, Duration::from_secs(60)).await; // TODO: reduce timeout
-    assert_eq!(
-        lines.len(),
-        n,
-        "User received more messages than it was supposed to."
-    );
-    lines
-}
-
 /// Verify that the test process printed all the expected messages, and none other.
 ///
 /// The expected lines should all be unique in both arrays together (a line should not appear in
@@ -33,11 +23,12 @@ async fn expect_output_lines<const N: usize, const M: usize>(
     expected_in_order_lines: [&str; M],
     test_process: &TestProcess,
 ) {
-    let lines = expect_n_lines(
-        expected_lines.len() + expected_in_order_lines.len(),
-        test_process,
-    )
-    .await;
+    let lines = test_process
+        .await_exactly_n_lines(
+            expected_lines.len() + expected_in_order_lines.len(),
+            Duration::from_secs(20),
+        )
+        .await;
     for expected_line in expected_lines.into_iter() {
         assert!(
             lines.contains(&expected_line.to_string()),
@@ -55,6 +46,7 @@ async fn expect_output_lines<const N: usize, const M: usize>(
     }
 }
 
+/// Call SQS API to delete a message by `queue_url` and message `receipt_handle`.
 async fn delete_message(client: &aws_sdk_sqs::Client, queue_url: &str, receipt_handle: &str) {
     client
         .delete_message()
@@ -63,7 +55,7 @@ async fn delete_message(client: &aws_sdk_sqs::Client, queue_url: &str, receipt_h
         .send()
         .await
         .inspect_err(|err| eprintln!("deleting received message failed: {err:?}"))
-        .ok();
+        .expect("failed to delete SQS message");
 }
 
 /// Verify that the echo queue contains the expected messages, meaning the deployed application
@@ -199,16 +191,19 @@ async fn verify_splitter_temp_queues_deleted(sqs_test_resources: &SqsTestResourc
     .expect("SQS temp queues not deleted in time.")
 }
 
-/// This test creates a new sqs_queue with a random name and credentials from env.
-///
-/// Define a queue splitter for a deployment. Start two services that both consume from an SQS
-/// queue, send some messages to the queue, verify that each of the applications running with
-/// mirrord get exactly the messages they are supposed to, and that the deployed application gets
-/// the rest.
+/// Run 2 local applications with mirrord that both consume messages from the same 2 queues.
+/// Use different message filters in their mirrord configurations.
+/// Send messages to both queues, with different values of the "client" message attribute, so that
+/// they reach the different clients (or the deployed application).
+/// The local applications print the message they received to stdout, so read their output and
+/// verify each of the local applications gets the messages it is supposed to get.
+/// The remote application forwards the messages it receives to "echo" queues, so receive messages
+/// from those queues and verify the remote application exactly the messages it was supposed to.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(180))]
 pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_dir: &PathBuf) {
-    let sqs_test_resources = sqs_test_resources.await;
+    let mut sqs_test_resources = sqs_test_resources.await;
     let application = Application::RustSqs;
 
     let mut config_path = config_dir.clone();
@@ -242,12 +237,12 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
         .await;
 
     println!("letting split time to start before writing messages");
-    // sqs_test_resources
-    //     .wait_for_sqs_sessions()
-    //     .await
-    //     .expect("There was a problem with the SQS Session resources");
+    sqs_test_resources
+        .wait_for_sqs_sessions(20)
+        .await
+        .expect("There was a problem with the SQS Session resources");
 
-    // TODO:
+    // TODO: make this unnecessary.
     tokio::time::sleep(Duration::from_secs(30)).await;
 
     write_sqs_messages(
@@ -297,6 +292,5 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     client_b.child.kill().await.unwrap();
 
     // verify_splitter_temp_queues_deleted(&sqs_test_resources).await;
-
-    println!("All temporary queues were deleted!");
+    // println!("All temporary queues were deleted!");
 }
