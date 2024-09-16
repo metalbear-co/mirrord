@@ -500,6 +500,7 @@ fn get_patch_applied_check(generation: i64) -> impl Fn(Option<&Deployment>) -> b
 /// Get a URL for localstack that is reachable from outside the cluster.
 async fn localstack_endpoint_external_url(kube_client: &Client) -> String {
     let localstack_host = get_pod_or_node_host(kube_client.clone(), "localstack", "default").await;
+    let localstack_host = localstack_host.trim();
     format!("http://{localstack_host}:31566")
 }
 
