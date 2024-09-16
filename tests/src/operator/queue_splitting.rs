@@ -3,7 +3,7 @@
 //! Test queue splitting features with an operator.
 
 use core::time::Duration;
-use std::{collections::HashSet, ops::Not, path::PathBuf};
+use std::{collections::HashSet, path::PathBuf};
 
 use aws_sdk_sqs::{operation::receive_message::ReceiveMessageOutput, types::Message};
 use rstest::*;
@@ -139,58 +139,6 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
     }).await.unwrap();
 }
 
-async fn verify_splitter_temp_queues_deleted(sqs_test_resources: &SqsTestResources) {
-    let client = &sqs_test_resources.sqs_client;
-    let queue_name1 = sqs_test_resources.queue1.name.as_str();
-    let queue_name2 = sqs_test_resources.queue2.name.as_str();
-    tokio::time::timeout(Duration::from_secs(120), async {
-        let mut i = 0u8; // TODO: delete;
-        loop {
-            {
-                // TODO: delete this whole block
-                i += 1;
-                if i % 100 == 0 {
-                    let queues = client
-                        .list_queues()
-                        // temp queues start with "mirrord-"
-                        .queue_name_prefix("mirrord-")
-                        .send()
-                        .await
-                        .expect("Could not list SQS queues.")
-                        .queue_urls
-                        .unwrap_or_default()
-                        .into_iter()
-                        // temp queue names contain the original queue name.
-                        .filter(|queue_url| {
-                            queue_url.contains(queue_name1) || queue_url.contains(queue_name2)
-                        })
-                        .collect::<Vec<_>>();
-                    println!("Lingering queues ({i}): {queues:#?}");
-                }
-            }
-            if client
-                .list_queues()
-                // temp queues start with "mirrord-"
-                .queue_name_prefix("mirrord-")
-                .send()
-                .await
-                .expect("Could not list SQS queues.")
-                .queue_urls
-                .unwrap_or_default()
-                .iter()
-                // temp queue names contain the original queue name.
-                .any(|queue_url| queue_url.contains(queue_name1) || queue_url.contains(queue_name2))
-                .not()
-            {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    .expect("SQS temp queues not deleted in time.")
-}
-
 /// Run 2 local applications with mirrord that both consume messages from the same 2 queues.
 /// Use different message filters in their mirrord configurations.
 /// Send messages to both queues, with different values of the "client" message attribute, so that
@@ -291,7 +239,4 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
 
     client_a.child.kill().await.unwrap();
     client_b.child.kill().await.unwrap();
-
-    // verify_splitter_temp_queues_deleted(&sqs_test_resources).await;
-    // println!("All temporary queues were deleted!");
 }
