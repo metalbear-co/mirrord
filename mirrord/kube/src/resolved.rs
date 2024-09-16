@@ -1,9 +1,11 @@
+use std::collections::BTreeMap;
+
 use k8s_openapi::api::{
     apps::v1::{Deployment, StatefulSet},
     batch::v1::{CronJob, Job},
     core::v1::Pod,
 };
-use kube::Client;
+use kube::{Client, Resource, ResourceExt};
 use mirrord_config::target::Target;
 
 use super::{
@@ -66,9 +68,7 @@ impl ResolvedTarget {
             Target::Targetless => Ok(ResolvedTarget::Targetless(
                 namespace.unwrap_or("default").to_string(),
             )),
-        }?
-        .assert_valid_mirrord_target(client)
-        .await?;
+        }?;
 
         Ok(target)
     }
@@ -80,7 +80,7 @@ impl ResolvedTarget {
     /// 2. [`ResolvedTarget::Pod`] - passes target-readiness check of `StatusObserver`
     /// 3. [`ResolvedTarget::Job`] - error, as this is `copy_target` exclusive
     /// 4. [`ResolvedTarget::Targetless`] - no check
-    async fn assert_valid_mirrord_target(self, client: &Client) -> Result<Self, KubeApiError> {
+    pub async fn assert_valid_mirrord_target(self, client: &Client) -> Result<Self, KubeApiError> {
         match &self {
             ResolvedTarget::Deployment(deployment, container) => {
                 let available = deployment
@@ -253,6 +253,81 @@ impl ResolvedTarget {
             ResolvedTarget::Targetless(..) => Some(1),
         }
         .unwrap_or(1)
+    }
+
+    /// Convert [`ResolvedTarget`] into `<Target>.metadata.labels`
+    pub fn into_labels(self) -> Option<BTreeMap<String, String>> {
+        match self {
+            ResolvedTarget::Deployment(deployment, _) => deployment.metadata.labels,
+            ResolvedTarget::Rollout(rollout, _) => rollout.metadata.labels,
+            ResolvedTarget::Pod(pod, _) => pod.metadata.labels,
+            ResolvedTarget::Job(job, _) => job.metadata.labels,
+            ResolvedTarget::CronJob(cron_job, _) => cron_job.metadata.labels,
+            ResolvedTarget::StatefulSet(stateful_set, _) => stateful_set.metadata.labels,
+            ResolvedTarget::Targetless(_) => None,
+        }
+    }
+
+    pub fn type_(&self) -> &str {
+        match self {
+            ResolvedTarget::Deployment(_, _) => "deployment",
+            ResolvedTarget::Rollout(_, _) => "rollout",
+            ResolvedTarget::Pod(_, _) => "pod",
+            ResolvedTarget::Job(_, _) => "job",
+            ResolvedTarget::CronJob(_, _) => "cronjob",
+            ResolvedTarget::StatefulSet(_, _) => "statefulset",
+            ResolvedTarget::Targetless(_) => "targetless",
+        }
+    }
+
+    pub fn get_container(&self) -> Option<&str> {
+        match self {
+            ResolvedTarget::Deployment(_, container)
+            | ResolvedTarget::Rollout(_, container)
+            | ResolvedTarget::Job(_, container)
+            | ResolvedTarget::CronJob(_, container)
+            | ResolvedTarget::StatefulSet(_, container)
+            | ResolvedTarget::Pod(_, container) => container.as_deref(),
+            ResolvedTarget::Targetless(..) => None,
+        }
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            ResolvedTarget::Deployment(deployment, _) => deployment.metadata.name.as_deref(),
+            ResolvedTarget::Rollout(rollout, _) => rollout.meta().name.as_deref(),
+            ResolvedTarget::Pod(pod, _) => pod.metadata.name.as_deref(),
+            ResolvedTarget::Job(job, _) => job.metadata.name.as_deref(),
+            ResolvedTarget::CronJob(cron_job, _) => cron_job.metadata.name.as_deref(),
+            ResolvedTarget::StatefulSet(stateful_set, _) => stateful_set.metadata.name.as_deref(),
+            ResolvedTarget::Targetless(_) => None,
+        }
+    }
+
+    pub fn name_any(&self) -> String {
+        match self {
+            ResolvedTarget::Deployment(dep, _) => dep.name_any(),
+            ResolvedTarget::Rollout(roll, _) => roll.name_any(),
+            ResolvedTarget::Pod(pod, _) => pod.name_any(),
+            ResolvedTarget::Job(job, _) => job.name_any(),
+            ResolvedTarget::CronJob(cj, _) => cj.name_any(),
+            ResolvedTarget::StatefulSet(set, _) => set.name_any(),
+            ResolvedTarget::Targetless(..) => "targetless".to_string(),
+        }
+    }
+
+    pub fn namespace(&self) -> Option<&str> {
+        match self {
+            ResolvedTarget::Deployment(deployment, _) => deployment.metadata.namespace.as_deref(),
+            ResolvedTarget::Rollout(rollout, _) => rollout.meta().namespace.as_deref(),
+            ResolvedTarget::Pod(pod, _) => pod.metadata.namespace.as_deref(),
+            ResolvedTarget::Job(job, _) => job.metadata.namespace.as_deref(),
+            ResolvedTarget::CronJob(cron_job, _) => cron_job.metadata.namespace.as_deref(),
+            ResolvedTarget::StatefulSet(stateful_set, _) => {
+                stateful_set.metadata.namespace.as_deref()
+            }
+            ResolvedTarget::Targetless(namespace) => Some(namespace),
+        }
     }
 }
 

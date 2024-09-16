@@ -88,6 +88,9 @@ where
         config.target.namespace.as_deref(),
     )
     .await
+    .map_err(CliError::OperatorTargetResolution)?
+    .assert_valid_mirrord_target(api.client())
+    .await
     .map_err(CliError::OperatorTargetResolution)?;
 
     let mut session_subtask = operator_subtask.subtask("starting session");
