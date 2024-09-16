@@ -6,7 +6,8 @@ use k8s_openapi::api::{
     core::v1::Pod,
 };
 use kube::{Client, Resource, ResourceExt};
-use mirrord_config::target::Target;
+use mirrord_config::{feature::network::incoming::ConcurrentSteal, target::Target};
+use tracing::Level;
 
 use super::{
     api::{
@@ -33,6 +34,7 @@ impl ResolvedTarget {
     /// a valid mirrord target with [`ResolvedTarget::assert_valid_mirrord_target`].
     ///
     /// Currently this `client` comes set up with a mirrord-operator config.
+    #[tracing::instrument(level = Level::DEBUG, skip(client), ret, err)]
     pub async fn new(
         client: &Client,
         target: &Target,
@@ -80,6 +82,7 @@ impl ResolvedTarget {
     /// 2. [`ResolvedTarget::Pod`] - passes target-readiness check of `StatusObserver`
     /// 3. [`ResolvedTarget::Job`] - error, as this is `copy_target` exclusive
     /// 4. [`ResolvedTarget::Targetless`] - no check
+    #[tracing::instrument(level = Level::DEBUG, skip(client), ret, err)]
     pub async fn assert_valid_mirrord_target(self, client: &Client) -> Result<Self, KubeApiError> {
         match &self {
             ResolvedTarget::Deployment(deployment, container) => {
@@ -188,6 +191,38 @@ impl ResolvedTarget {
         }
 
         Ok(self)
+    }
+
+    pub fn connect_url(
+        &self,
+        use_proxy: bool,
+        concurrent_steal: ConcurrentSteal,
+        api_version: &str,
+        plural: &str,
+        url_path: &str,
+    ) -> Result<String, KubeApiError> {
+        let name = self.urlfied_name();
+        let namespace = self.namespace().clone().unwrap_or("default");
+
+        let url = if use_proxy {
+            format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?on_concurrent_steal={concurrent_steal}&connect=true")
+        } else {
+            format!("{url_path}/{name}?on_concurrent_steal={concurrent_steal}&connect=true")
+        };
+
+        Ok(url)
+    }
+
+    fn urlfied_name(&self) -> String {
+        let type_name = self.type_();
+        let target = self.name().clone().unwrap_or("targetless");
+        let container = self.container();
+
+        if let Some(container) = container {
+            format!("{}.{}.container.{}", type_name, target, container)
+        } else {
+            format!("{}.{}", type_name, target)
+        }
     }
 
     /// Convenient way of getting the container from this target.

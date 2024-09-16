@@ -642,6 +642,25 @@ impl OperatorApi<PreparedClientCert> {
         }
 
         let empty_deployment = target.empty_deployment();
+
+        let use_proxy_api = self
+            .operator
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::ProxyApi);
+
+        let connect_url = target
+            .connect_url(
+                use_proxy_api,
+                config.feature.network.incoming.on_concurrent_steal,
+                &TargetCrd::api_version(&()),
+                &TargetCrd::plural(&()),
+                &TargetCrd::url_path(&(), target.namespace()),
+            )
+            .expect("FIXME");
+
+        // TODO(alex) [high] 1: No need for targetcrd? We need the connect url only, and
+        // to trigger copy target stuff?
         let target = if config.feature.copy_target.enabled
             // use copy_target for splitting queues
             || config.feature.split_queues.is_set()
@@ -676,33 +695,13 @@ impl OperatorApi<PreparedClientCert> {
 
             copy_subtask.success(Some("target copied"));
 
-            OperatorSessionTarget::Copied(copied)
+            todo!()
+            // OperatorSessionTarget::Copied(copied)
         } else {
-            let mut fetch_subtask = progress.subtask("fetching target");
-
-            let target_name =
-                TargetCrd::urlfied_name(config.target.path.as_ref().unwrap_or(&Target::Targetless));
-            let raw_target = Api::namespaced(self.client.clone(), self.target_namespace(config))
-                .get(&target_name)
-                .await
-                .map_err(|error| OperatorApiError::KubeError {
-                    error,
-                    operation: OperatorOperation::FindingTarget,
-                })?;
-
-            fetch_subtask.success(Some("target fetched"));
-
-            OperatorSessionTarget::Raw(raw_target)
+            0
         };
-        let use_proxy_api = self
-            .operator
-            .spec
-            .supported_features()
-            .contains(&NewOperatorFeature::ProxyApi);
-        let connect_url = target.connect_url(
-            use_proxy_api,
-            config.feature.network.incoming.on_concurrent_steal,
-        )?;
+
+        tracing::debug!("connect_url {connect_url:?}");
 
         let session = OperatorSession {
             id: rand::random(),
