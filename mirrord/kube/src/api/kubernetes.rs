@@ -98,6 +98,7 @@ impl KubernetesAPI {
     ) -> Result<tokio::net::TcpStream> {
         use std::{net::IpAddr, time::Duration};
 
+        use k8s_openapi::api::core::v1::Pod;
         use tokio::net::TcpStream;
 
         let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, namespace.as_deref());
@@ -114,7 +115,7 @@ impl KubernetesAPI {
             let ip = pod_ip
                 .parse::<IpAddr>()
                 .map_err(|e| KubeApiError::invalid_value(&pod, "status.podIp", e))?;
-            trace!("connecting to pod {pod_ip}:{agent_port}");
+            tracing::trace!("connecting to pod {pod_ip}:{agent_port}");
 
             tokio::time::timeout(
                 Duration::from_secs(self.agent.startup_timeout),
@@ -127,7 +128,7 @@ impl KubernetesAPI {
                 Some(namespace) => format!("{pod_name}.{namespace}"),
                 None => pod_name,
             };
-            trace!("connecting to pod {hostname}:{agent_port}");
+            tracing::trace!("connecting to pod {hostname}:{agent_port}");
 
             tokio::time::timeout(
                 Duration::from_secs(self.agent.startup_timeout),
