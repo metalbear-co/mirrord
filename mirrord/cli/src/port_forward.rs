@@ -11,6 +11,7 @@ use mirrord_protocol::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
     },
+    tcp::DaemonTcp,
     ClientMessage, ConnectionId, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS,
 };
 use thiserror::Error;
@@ -577,15 +578,22 @@ impl ReversePortForwarder {
         message: DaemonMessage,
     ) -> Result<(), PortForwardError> {
         match message {
-            DaemonMessage::Tcp(_) => todo!(), // TODO: mark as unexpected for now, impl later
+            DaemonMessage::Tcp(_tcp_msg) => {
+                // TODO: mirror mode
+                return Err(PortForwardError::AgentError(format!(
+                    "unexpected DaemonMessage::Tcp message from agent (reverse port forwarding in mirror mode not yet implemented)"
+                )));
+            }
             DaemonMessage::TcpSteal(message) => match message {
-                mirrord_protocol::tcp::DaemonTcp::NewConnection(_) => todo!(),
-                mirrord_protocol::tcp::DaemonTcp::Data(_) => todo!(),
-                mirrord_protocol::tcp::DaemonTcp::Close(_) => todo!(),
-                mirrord_protocol::tcp::DaemonTcp::SubscribeResult(_) => todo!(), /* TODO: check? think this is unexpected */
-                mirrord_protocol::tcp::DaemonTcp::HttpRequest(_) => todo!(),
-                mirrord_protocol::tcp::DaemonTcp::HttpRequestFramed(_) => todo!(), /* TODO: may be able to handle all three at the same time? */
-                mirrord_protocol::tcp::DaemonTcp::HttpRequestChunked(_) => todo!(),
+                DaemonTcp::NewConnection(_) => todo!(),
+                DaemonTcp::Data(_) => todo!(),
+                DaemonTcp::Close(_) => todo!(),
+                DaemonTcp::SubscribeResult(_) => todo!(),
+                // TODO: check? think this is unexpected
+                DaemonTcp::HttpRequest(_) => todo!(),
+                DaemonTcp::HttpRequestFramed(_) => todo!(),
+                // TODO: may be able to handle all three at the same time?
+                DaemonTcp::HttpRequestChunked(_) => todo!(),
             },
             DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(message)) => match message {
                 // pick up in main loop
