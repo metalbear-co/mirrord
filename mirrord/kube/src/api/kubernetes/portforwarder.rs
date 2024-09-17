@@ -101,19 +101,28 @@ impl SinglePortForwarder {
         loop {
             tokio::select! {
                 error = error_future.as_mut() => {
-                    tracing::error!("todo: {error:#?}");
 
-                    if retry_strategy.peek().is_none() {
+                    if retry_strategy.peek().is_none() || error.is_none() {
+                        tracing::warn!(?connect_info, "fininsed retry strategy closing connection");
+
                         break;
+                    }
+
+                    if let Some(error) = error {
+                        tracing::warn!(?connect_info, %error, "error while performing port-forward, retrying");
                     }
 
                     match create_portforward_streams(&pod_api, &connect_info, &mut retry_strategy).await {
                         Ok((next_stream, next_error_future)) => {
+                            let _ = stream.shutdown().await;
+
                             stream = next_stream;
                             error_future = next_error_future;
+
+                            tracing::trace!(?connect_info, "retry connect successful");
                         }
                         Err(error) => {
-                            tracing::error!("todo: {error:#?}");
+                            tracing::error!(?connect_info, %error, "retry connect failed");
 
                             break;
                         }
@@ -128,6 +137,8 @@ impl SinglePortForwarder {
 
                                 break;
                             }
+
+                            from_pod_buffer.clear();
                         }
                         Err(error) => {
                             tracing::error!("todo: {error}");
@@ -145,6 +156,8 @@ impl SinglePortForwarder {
 
                                 break;
                             }
+
+                            to_pod_buffer.clear();
                         }
                         Err(error) => {
                             tracing::error!("todo: {error}");
