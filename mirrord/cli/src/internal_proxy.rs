@@ -15,8 +15,7 @@ use std::{
     fs::OpenOptions,
     io,
     net::{Ipv4Addr, SocketAddr},
-    path::PathBuf,
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
@@ -28,7 +27,6 @@ use mirrord_intproxy::{
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use nix::sys::resource::{setrlimit, Resource};
-use rand::{distributions::Alphanumeric, Rng};
 use tokio::net::TcpListener;
 use tracing::{warn, Level};
 use tracing_subscriber::EnvFilter;
@@ -55,42 +53,25 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
 
     tracing::info!(?config, "internal_proxy starting");
 
-    // Setting up default logging for intproxy.
-    let log_destination = config
-        .internal_proxy
-        .log_destination
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let random_name: String = rand::thread_rng()
-                .sample_iter(&Alphanumeric)
-                .take(7)
-                .map(char::from)
-                .collect();
-            let timestamp = SystemTime::UNIX_EPOCH.elapsed().unwrap().as_secs();
+    if let Some(log_destination) = config.internal_proxy.log_destination.as_ref() {
+        let output_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_destination)
+            .map_err(|e| InternalProxyError::OpenLogFile(log_destination.clone(), e))?;
 
-            PathBuf::from(format!("/tmp/mirrord-intproxy-{timestamp}-{random_name}"))
-        });
+        let tracing_registry = tracing_subscriber::fmt()
+            .with_writer(output_file)
+            .with_ansi(false);
 
-    let output_file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_destination)
-        .map_err(|fail| {
-            InternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
-        })?;
-
-    let log_level = config
-        .internal_proxy
-        .log_level
-        .as_deref()
-        .unwrap_or("mirrord=trace");
-
-    tracing_subscriber::fmt()
-        .with_writer(output_file)
-        .with_ansi(false)
-        .with_env_filter(EnvFilter::builder().parse_lossy(log_level))
-        .init();
+        if let Some(log_level) = config.internal_proxy.log_level.as_ref() {
+            tracing_registry
+                .with_env_filter(EnvFilter::builder().parse_lossy(log_level))
+                .init();
+        } else {
+            tracing_registry.init();
+        }
+    }
 
     // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
     // so we assume Linux can be higher and set to that.
