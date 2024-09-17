@@ -61,6 +61,7 @@ async fn operator_setup(
     license_path: Option<PathBuf>,
     aws_role_arn: Option<String>,
     sqs_splitting: bool,
+    kafka_splitting: bool,
 ) -> Result<(), OperatorSetupError> {
     if !accept_tos {
         eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
@@ -105,6 +106,7 @@ async fn operator_setup(
             image,
             aws_role_arn,
             sqs_splitting,
+            kafka_splitting,
         });
 
         match file {
@@ -305,6 +307,7 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             license_path,
             aws_role_arn,
             sqs_splitting,
+            kafka_splitting,
         } => operator_setup(
             accept_tos,
             file,
@@ -313,6 +316,7 @@ pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
             license_path,
             aws_role_arn,
             sqs_splitting,
+            kafka_splitting,
         )
         .await
         .map_err(CliError::from),

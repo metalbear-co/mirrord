@@ -26,7 +26,10 @@ use k8s_openapi::{
 use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
-use crate::crd::{MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd};
+use crate::crd::{
+    kafka::MirrordKafkaClientProperties, MirrordExternalChange, MirrordPolicy, MirrordSqsSession,
+    MirrordWorkloadQueueRegistry, TargetCrd,
+};
 
 pub static OPERATOR_NAME: &str = "mirrord-operator";
 /// 443 is standard port for APIService, do not change this value
@@ -90,6 +93,7 @@ pub struct SetupOptions {
     pub image: String,
     pub aws_role_arn: Option<String>,
     pub sqs_splitting: bool,
+    pub kafka_splitting: bool,
 }
 
 #[derive(Debug)]
@@ -106,6 +110,7 @@ pub struct Operator {
     client_ca_role: OperatorClientCaRole,
     client_ca_role_binding: OperatorClientCaRoleBinding,
     sqs_splitting: bool,
+    kafka_splitting: bool,
 }
 
 impl Operator {
@@ -116,6 +121,7 @@ impl Operator {
             image,
             aws_role_arn,
             sqs_splitting,
+            kafka_splitting,
         } = options;
 
         let (license_secret, license_key) = match license {
@@ -142,6 +148,7 @@ impl Operator {
             license_key,
             image,
             sqs_splitting,
+            kafka_splitting,
         );
 
         let service = OperatorService::new(&namespace);
@@ -161,6 +168,7 @@ impl Operator {
             client_ca_role,
             client_ca_role_binding,
             sqs_splitting,
+            kafka_splitting,
         }
     }
 }
@@ -204,13 +212,23 @@ impl OperatorSetup for Operator {
         writer.write_all(b"---\n")?;
         MirrordPolicy::crd().to_writer(&mut writer)?;
 
-        if self.sqs_splitting {
+        if self.sqs_splitting || self.kafka_splitting {
             writer.write_all(b"---\n")?;
             MirrordWorkloadQueueRegistry::crd().to_writer(&mut writer)?;
+        }
 
+        if self.sqs_splitting {
             writer.write_all(b"---\n")?;
             MirrordSqsSession::crd().to_writer(&mut writer)?;
         }
+
+        if self.kafka_splitting {
+            writer.write_all(b"---\n")?;
+            MirrordKafkaClientProperties::crd().to_writer(&mut writer)?;
+        }
+
+        writer.write_all(b"---\n")?;
+        MirrordExternalChange::crd().to_writer(&mut writer)?;
 
         Ok(())
     }
@@ -252,6 +270,7 @@ impl OperatorDeployment {
         license_key: Option<String>,
         image: String,
         sqs_splitting: bool,
+        kafka_splitting: bool,
     ) -> Self {
         let mut envs = vec![
             EnvVar {
@@ -315,6 +334,14 @@ impl OperatorDeployment {
             envs.push(EnvVar {
                 name: "OPERATOR_SQS_SPLITTING".to_owned(),
                 value: Some("true".to_string()),
+                value_from: None,
+            });
+        }
+
+        if kafka_splitting {
+            envs.push(EnvVar {
+                name: "OPERATOR_KAFKA_SPLITTING".into(),
+                value: Some("true".into()),
                 value_from: None,
             });
         }

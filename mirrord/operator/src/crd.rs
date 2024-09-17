@@ -7,7 +7,7 @@ use kube::{CustomResource, Resource};
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
-    feature::split_queues::{SplitQueuesConfig, SqsMessageFilter},
+    feature::split_queues::SplitQueuesConfig,
     target::{Target, TargetConfig},
 };
 use schemars::JsonSchema;
@@ -19,6 +19,7 @@ use self::label_selector::LabelSelector;
 use crate::client::error::OperatorApiError;
 use crate::types::LicenseInfoOwned;
 
+pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
 
@@ -261,8 +262,9 @@ pub enum OperatorFeatures {
 pub enum NewOperatorFeature {
     ProxyApi,
     CopyTarget,
-    SqsQueueSplitting,
     SessionManagement,
+    SqsQueueSplitting,
+    KafkaQueueSplitting,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -275,9 +277,10 @@ impl Display for NewOperatorFeature {
         let name = match self {
             NewOperatorFeature::ProxyApi => "proxy API",
             NewOperatorFeature::CopyTarget => "copy target",
-            NewOperatorFeature::SqsQueueSplitting => "SQS queue splitting",
-            NewOperatorFeature::Unknown => "unknown feature",
             NewOperatorFeature::SessionManagement => "session management",
+            NewOperatorFeature::SqsQueueSplitting => "SQS queue splitting",
+            NewOperatorFeature::KafkaQueueSplitting => "Kafka queue splitting",
+            NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
     }
@@ -413,6 +416,10 @@ pub enum SplitQueue {
     /// Amazon SQS
     #[serde(rename = "SQS")]
     Sqs(SqsQueueDetails),
+
+    /// Kafka topic
+    #[serde(rename = "kafkaTopic")]
+    Kafka(kafka::KafkaTopicDetails),
 }
 
 /// A workload that is a consumer of a queue that is being split.
@@ -642,7 +649,7 @@ pub struct MirrordSqsSessionSpec {
     /// For each queue_id, a mapping from attribute name, to attribute value regex.
     /// The queue_id for a queue is determined at the queue registry. It is not (necessarily)
     /// The name of the queue on AWS.
-    pub queue_filters: HashMap<QueueId, SqsMessageFilter>,
+    pub queue_filters: HashMap<QueueId, BTreeMap<String, String>>,
 
     /// The target of this session.
     pub queue_consumer: QueueConsumer,
@@ -651,4 +658,53 @@ pub struct MirrordSqsSessionSpec {
     // The Kubernetes API can't deal with 64 bit numbers (with most significant bit set)
     // so we save that field as a (HEX) string even though its source is a u64
     pub session_id: String,
+}
+
+/// Persistent external change made by the mirrord operator for the purpose of running a session.
+/// Lives in the same namespace as session's target.
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    group = "operator.metalbear.co",
+    version = "v1",
+    kind = "MirrordExternalChange",
+    namespaced
+)]
+pub struct MirrordExternalChangeSpec {
+    /// u64 session identifier encoded in HEX.
+    /// This change belongs to this session and should be rolled back as soon as the session is
+    /// finished.
+    pub session_id: String,
+
+    /// API version of the target, e.g `apps/v1`.
+    pub target_api_version: String,
+
+    /// Kind of the target, e.g `Deployment`.
+    pub target_kind: String,
+
+    /// Name of the target, e.g `my-deployment`.
+    pub target_name: String,
+
+    /// If target resource was scaled down to 0, this field holds the original scale.
+    pub scaled_down_from: Option<i32>,
+
+    /// If environment variable value was replaced.
+    pub env_var_injected: Option<EnvVarInjected>,
+
+    /// If temporary Kafka topic was created.
+    pub kafka_topic_created: Option<KafkaTopicCreated>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvVarInjected {
+    pub container_name: String,
+    pub env_name: String,
+    pub original_value: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct KafkaTopicCreated {
+    pub client_properties: String,
+    pub topic_name: String,
 }

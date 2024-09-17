@@ -4195,6 +4195,7 @@ version = "3.118.1"
 dependencies = [
  "bimap",
  "bitflags 2.6.0",
+ "fancy-regex",
  "ipnet",
  "k8s-openapi",
  "mirrord-analytics",

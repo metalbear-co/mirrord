@@ -528,6 +528,9 @@ pub(super) enum OperatorCommand {
             requires = "aws_role_arn"
         )]
         sqs_splitting: bool,
+
+        #[arg(long, visible_alias = "kafka", default_value_t = false)]
+        kafka_splitting: bool,
     },
     /// Print operator status
     Status {
