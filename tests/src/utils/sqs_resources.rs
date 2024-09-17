@@ -382,7 +382,7 @@ async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<Resourc
     }
 
     let container_index = container_index.to_string();
-    let path = jsonptr::Pointer::new(&[
+    let path = jsonptr::Pointer::new([
         "spec",
         "template",
         "spec",
@@ -410,7 +410,7 @@ async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<Resourc
         .await
         .unwrap();
 
-    let container_name_path = jsonptr::Pointer::new(&[
+    let container_name_path = jsonptr::Pointer::new([
         "spec",
         "template",
         "spec",

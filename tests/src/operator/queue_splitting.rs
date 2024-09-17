@@ -3,7 +3,7 @@
 //! Test queue splitting features with an operator.
 
 use core::time::Duration;
-use std::{collections::HashSet, path::PathBuf};
+use std::{collections::HashSet, path::Path};
 
 use aws_sdk_sqs::{operation::receive_message::ReceiveMessageOutput, types::Message};
 use rstest::*;
@@ -150,11 +150,11 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(180))]
-pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_dir: &PathBuf) {
+pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_dir: &Path) {
     let mut sqs_test_resources = sqs_test_resources.await;
     let application = Application::RustSqs;
 
-    let mut config_path = config_dir.clone();
+    let mut config_path = config_dir.to_path_buf();
     config_path.push("sqs_queue_splitting_a.json");
 
     println!("Starting first mirrord client");
@@ -167,7 +167,7 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
         )
         .await;
 
-    let mut config_path = config_dir.clone();
+    let mut config_path = config_dir.to_path_buf();
     config_path.push("sqs_queue_splitting_b.json");
     // Wait between client starts.
     // Support starting at the same time and remove this (https://github.com/metalbear-co/operator/issues/637)
