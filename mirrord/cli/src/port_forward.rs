@@ -449,6 +449,8 @@ pub struct ReversePortForwarder {
     /// associates destination ports with local ports
     /// destinations may contain unresolved hostnames
     raw_mappings: HashMap<(RemoteAddr, u16), SocketAddr>,
+    /// associates resolved destination ports with local ports
+    resolved_mappings: HashMap<SocketAddr, SocketAddr>,
     /// oneshot channels for sending resolved hostnames to tasks and the associated local address
     dns_oneshots: VecDeque<(SocketAddr, oneshot::Sender<IpAddr>)>,
     /// identifies a pair of mapped socket addresses by their corresponding connection ID
@@ -494,6 +496,7 @@ impl ReversePortForwarder {
         Ok(Self {
             agent_connection,
             raw_mappings: mappings,
+            resolved_mappings: HashMap::new(),
             dns_oneshots: VecDeque::new(),
             sockets: HashMap::new(),
             task_txs: HashMap::new(),
@@ -524,9 +527,23 @@ impl ReversePortForwarder {
             _ => return Err(PortForwardError::AgentConnectionFailed),
         }
 
-        // resolve dns here for all remotes - otherwise we wont know which connections to ask for
-        // send agentmessage to steal from all remote addresses
-        // dont wait on responses, straight into loop, handle in agent msg function
+        // resolve dns here for all remotes - replies handles in agent msg function
+        for ((remote_addr, remote_port), local) in &self.raw_mappings {
+            match remote_addr {
+                RemoteAddr::Ip(ip) => {
+                    let resolved_remote = SocketAddr::new(IpAddr::V4(*ip), *remote_port);
+                    self.resolved_mappings.insert(resolved_remote, *local);
+                }
+                RemoteAddr::Hostname(hostname) => {
+                    self.agent_connection
+                        .sender
+                        .send(ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
+                            node: hostname.to_string(),
+                        }))
+                        .await?;
+                }
+            };
+        }
 
         loop {
             select! {
@@ -554,9 +571,13 @@ impl ReversePortForwarder {
         }
     }
 
-    fn handle_msg_from_agent(&mut self, message: DaemonMessage) -> Result<(), PortForwardError> {
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    async fn handle_msg_from_agent(
+        &mut self,
+        message: DaemonMessage,
+    ) -> Result<(), PortForwardError> {
         match message {
-            DaemonMessage::Tcp(_) => todo!(), // TODO: check if mirroring is allowed
+            DaemonMessage::Tcp(_) => todo!(), // TODO: mark as unexpected for now, impl later
             DaemonMessage::TcpSteal(message) => match message {
                 mirrord_protocol::tcp::DaemonTcp::NewConnection(_) => todo!(),
                 mirrord_protocol::tcp::DaemonTcp::Data(_) => todo!(),
@@ -567,6 +588,9 @@ impl ReversePortForwarder {
                 mirrord_protocol::tcp::DaemonTcp::HttpRequestChunked(_) => todo!(),
             },
             DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(message)) => match message {
+                // pick up in main loop
+                // there it can be added to self.resolved_mappings by checking self.raw_mappings
+                // remote for the lookup record name and grabbing local + remoteport
                 Ok(DnsLookup(record)) if !record.is_empty() => {
                     // pop oneshot, send string
                     let resolved_ipv4: Vec<&LookupRecord> = record
@@ -598,13 +622,13 @@ impl ReversePortForwarder {
                         return Ok(());
                     };
                     self.task_txs.remove(&local_socket);
-                    let remote = self.raw_mappings.get(&local_socket);
-                    match remote {
-                        Some((remote, _)) => {
-                            tracing::warn!("failed to resolve remote hostname for {remote:?}")
-                        }
-                        None => unreachable!("remote always exists here"),
-                    }
+                    // let remote = self.raw_mappings.get(&local_socket);
+                    // match remote {
+                    //     Some((remote, _)) => {
+                    //         tracing::warn!("failed to resolve remote hostname for {remote:?}")
+                    //     }
+                    //     None => unreachable!("remote always exists here"),
+                    // }
                 }
             },
             DaemonMessage::LogMessage(log_message) => match log_message.level {
@@ -626,6 +650,19 @@ impl ReversePortForwarder {
         }
 
         Ok(())
+    }
+
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    async fn handle_msg_from_task(
+        &mut self,
+        message: PortForwardMessage,
+    ) -> Result<(), PortForwardError> {
+        match message {
+            PortForwardMessage::Lookup(_, _, _) => todo!(),
+            PortForwardMessage::Connect(_, _) => todo!(),
+            PortForwardMessage::Send(_, _) => todo!(),
+            PortForwardMessage::Close(_, _) => todo!(),
+        }
     }
 }
 
