@@ -68,7 +68,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
                 .take(7)
                 .map(char::from)
                 .collect();
-            let timestamp = Utc::now().timestamp();
+            let timestamp = SystemTime::UNIX_EPOCH.elapsed().unwrap();
 
             PathBuf::from(format!("/tmp/mirrord-intproxy-{timestamp}-{random_name}"))
         });
