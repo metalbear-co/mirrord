@@ -140,7 +140,7 @@ impl SinglePortForwarder {
                     match to_pod_read {
                         Ok(amount) => {
                             #[allow(clippy::indexing_slicing)]
-                            if let Err(error) = sink.write_all(&to_pod_buffer[..amount]).await {
+                            if let Err(error) = stream.write_all(&to_pod_buffer[..amount]).await {
                                 tracing::error!("todo: {error}");
 
                                 break;
