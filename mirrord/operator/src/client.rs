@@ -16,7 +16,7 @@ use mirrord_auth::{
     credentials::LicenseValidity,
 };
 use mirrord_config::{
-    feature::{network::incoming::ConcurrentSteal, split_queues::SplitQueuesConfig},
+    feature::split_queues::SplitQueuesConfig,
     target::{Target, TargetDisplay},
     LayerConfig,
 };
@@ -154,85 +154,6 @@ impl fmt::Debug for OperatorSessionConnection {
             .field("rx_closed", &self.rx.is_closed())
             .field("rx_queued_messages", &rx_queued_messages)
             .finish()
-    }
-}
-
-/// Prepared target of an operator session.
-#[derive(Debug)]
-enum OperatorSessionTarget {
-    /// CRD of an immediate target validated and fetched from the operator.
-    Raw(TargetCrd),
-    /// CRD of a copied target created by the operator.
-    Copied(CopyTargetCrd),
-}
-
-impl OperatorSessionTarget {
-    /// Returns a connection url for the given [`OperatorSessionTarget`].
-    /// This can be used to create a websocket connection with the operator.
-    fn connect_url(
-        &self,
-        use_proxy: bool,
-        concurrent_steal: ConcurrentSteal,
-    ) -> Result<String, OperatorApiError> {
-        Ok(match (use_proxy, self) {
-            (true, OperatorSessionTarget::Raw(crd)) => {
-                let name = TargetCrd::urlfied_name(crd.spec.target.as_known()?);
-                let namespace = crd
-                    .meta()
-                    .namespace
-                    .as_deref()
-                    .expect("missing 'TargetCrd' namespace");
-                let api_version = TargetCrd::api_version(&());
-                let plural = TargetCrd::plural(&());
-
-                format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?on_concurrent_steal={concurrent_steal}&connect=true")
-            }
-
-            (false, OperatorSessionTarget::Raw(crd)) => {
-                let name = TargetCrd::urlfied_name(crd.spec.target.as_known()?);
-                let namespace = crd
-                    .meta()
-                    .namespace
-                    .as_deref()
-                    .expect("missing 'TargetCrd' namespace");
-                let url_path = TargetCrd::url_path(&(), Some(namespace));
-
-                format!("{url_path}/{name}?on_concurrent_steal={concurrent_steal}&connect=true")
-            }
-            (true, OperatorSessionTarget::Copied(crd)) => {
-                let name = crd
-                    .meta()
-                    .name
-                    .as_deref()
-                    .expect("missing 'CopyTargetCrd' name");
-                let namespace = crd
-                    .meta()
-                    .namespace
-                    .as_deref()
-                    .expect("missing 'CopyTargetCrd' namespace");
-                let api_version = CopyTargetCrd::api_version(&());
-                let plural = CopyTargetCrd::plural(&());
-
-                format!(
-                    "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?connect=true"
-                )
-            }
-            (false, OperatorSessionTarget::Copied(crd)) => {
-                let name = crd
-                    .meta()
-                    .name
-                    .as_deref()
-                    .expect("missing 'CopyTargetCrd' name");
-                let namespace = crd
-                    .meta()
-                    .namespace
-                    .as_deref()
-                    .expect("missing 'CopyTargetCrd' namespace");
-                let url_path = CopyTargetCrd::url_path(&(), Some(namespace));
-
-                format!("{url_path}/{name}?connect=true")
-            }
-        })
     }
 }
 
@@ -649,19 +570,9 @@ impl OperatorApi<PreparedClientCert> {
             .supported_features()
             .contains(&NewOperatorFeature::ProxyApi);
 
-        let connect_url = target
-            .connect_url(
-                use_proxy_api,
-                config.feature.network.incoming.on_concurrent_steal,
-                &TargetCrd::api_version(&()),
-                &TargetCrd::plural(&()),
-                &TargetCrd::url_path(&(), target.namespace()),
-            )
-            .expect("FIXME");
-
         // TODO(alex) [high] 1: No need for targetcrd? We need the connect url only, and
         // to trigger copy target stuff?
-        let target = if config.feature.copy_target.enabled
+        let connect_url = if config.feature.copy_target.enabled
             // use copy_target for splitting queues
             || config.feature.split_queues.is_set()
             || empty_deployment
@@ -695,10 +606,17 @@ impl OperatorApi<PreparedClientCert> {
 
             copy_subtask.success(Some("target copied"));
 
-            todo!()
-            // OperatorSessionTarget::Copied(copied)
+            TargetCrd::urlfied_name(&copied.spec.target)
         } else {
-            0
+            let target = target.assert_valid_mirrord_target(self.client()).await?;
+
+            target.connect_url(
+                use_proxy_api,
+                config.feature.network.incoming.on_concurrent_steal,
+                &TargetCrd::api_version(&()),
+                &TargetCrd::plural(&()),
+                &TargetCrd::url_path(&(), target.namespace()),
+            )?
         };
 
         tracing::debug!("connect_url {connect_url:?}");
@@ -736,6 +654,12 @@ impl OperatorApi<PreparedClientCert> {
     ///
     /// `copy_target` feature is not available for all target types.
     /// Target type compatibility is checked by the operator.
+    // TODO(alex) [high] 2: Now I need to fix this somehow. Ideally, it would make a request
+    // to the operator to create the copy, then we would list the targets and turn it into
+    // a `ResolvedTarget`, or maybe `impl From<CopyTargetCrd> for ResolvedTarget`, instead
+    // of listing.
+    // I think we could come here after `ResolvedTarget` has been used, which is not ideal,
+    // as there will be no target to resolve?
     #[tracing::instrument(level = "trace", err)]
     async fn copy_target(
         &self,

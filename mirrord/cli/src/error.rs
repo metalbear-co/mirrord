@@ -439,6 +439,7 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::FetchedUnknownTargetType(error) => {
                 Self::OperatorReturnedUnknownTargetType(error.0)
             }
+            OperatorApiError::KubeApi(error) => Self::OperatorTargetResolution(error),
         }
     }
 }

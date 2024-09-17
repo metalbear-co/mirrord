@@ -13,7 +13,6 @@ use mirrord_config::{
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use tracing::Level;
 
 use self::label_selector::LabelSelector;
 #[cfg(feature = "client")]
@@ -52,7 +51,6 @@ impl TargetCrd {
     ///
     /// Do **not** change url paths here, even if the operator recognizes the other format.
     /// It can break exisiting [`MirrordPolicy`]s (see [`MirrordPolicySpec::target_path`]).
-    #[tracing::instrument(level = Level::DEBUG, ret)]
     pub fn urlfied_name(target: &Target) -> String {
         let (type_name, target, container) = match target {
             Target::Deployment(target) => ("deploy", &target.deployment, &target.container),
