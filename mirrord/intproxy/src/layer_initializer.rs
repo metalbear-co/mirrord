@@ -6,7 +6,7 @@ use mirrord_intproxy_protocol::{
 };
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
-use tracing::info;
+use tracing::{info, Level};
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
@@ -43,7 +43,7 @@ impl LayerInitializer {
     }
 
     /// Initialize connection with the new layer, assigning fresh [`LayerId`].
-    #[tracing::instrument(level = "trace" ret)]
+    #[tracing::instrument(level = Level::TRACE ret)]
     async fn handle_new_stream(
         &mut self,
         stream: TcpStream,

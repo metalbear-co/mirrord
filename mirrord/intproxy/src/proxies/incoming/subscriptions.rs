@@ -7,6 +7,7 @@ use mirrord_intproxy_protocol::{
     IncomingResponse, LayerId, MessageId, PortSubscribe, PortUnsubscribe, ProxyToLayerMessage,
 };
 use mirrord_protocol::{BlockedAction, ClientMessage, Port, RemoteResult, ResponseError};
+use tracing::Level;
 
 use super::{port_subscription_ext::PortSubscriptionExt, IncomingProxyError};
 use crate::{
@@ -227,7 +228,7 @@ impl SubscriptionsManager {
 
     /// Notifies this struct about agent's response.
     /// Returns messages to be sent to the layers.
-    #[tracing::instrument(level = "trace", ret, skip(self))]
+    #[tracing::instrument(level = Level::TRACE, ret, skip(self))]
     pub fn agent_responded(
         &mut self,
         result: RemoteResult<Port>,

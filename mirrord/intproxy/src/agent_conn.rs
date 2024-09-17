@@ -31,6 +31,7 @@ use tokio::{
     },
 };
 use tokio_rustls::TlsConnector;
+use tracing::Level;
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
@@ -181,7 +182,7 @@ impl AgentConnection {
         Ok(Self { agent_tx, agent_rx })
     }
 
-    #[tracing::instrument(level = "trace", name = "send_agent_message", skip(self), ret)]
+    #[tracing::instrument(level = Level::TRACE, name = "send_agent_message", skip(self), ret)]
     async fn send(&self, msg: ClientMessage) -> Result<(), AgentChannelError> {
         self.agent_tx.send(msg).await.map_err(|_| AgentChannelError)
     }
