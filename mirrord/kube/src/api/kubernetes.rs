@@ -1,9 +1,6 @@
 use std::ops::Deref;
 
-use k8s_openapi::{
-    api::core::v1::{Namespace, Pod},
-    NamespaceResourceScope,
-};
+use k8s_openapi::{api::core::v1::Namespace, NamespaceResourceScope};
 use kube::{
     api::ListParams,
     config::{KubeConfigOptions, Kubeconfig},
@@ -17,7 +14,7 @@ use mirrord_config::{
 use mirrord_progress::Progress;
 use mirrord_protocol::MeshVendor;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, trace};
+use tracing::{debug, info};
 
 use crate::{
     api::{
@@ -33,6 +30,8 @@ use crate::{
     error::{KubeApiError, Result},
 };
 
+#[cfg(not(feature = "incluster"))]
+pub mod portforwarder;
 pub mod rollout;
 pub mod seeker;
 
@@ -147,86 +146,11 @@ impl KubernetesAPI {
         &self,
         connect_info: AgentKubernetesConnectInfo,
     ) -> Result<Box<dyn UnpinStream>> {
-        use tokio::io::AsyncWriteExt;
-        use tokio_retry::{
-            strategy::{jitter, ExponentialBackoff},
-            Retry,
-        };
+        let (stream, portforward) =
+            portforwarder::retry_portforward(&self.client, connect_info).await?;
 
-        let pod_api: Api<Pod> =
-            get_k8s_resource_api(&self.client, connect_info.namespace.as_deref());
-        let mut retry_strategy = ExponentialBackoff::from_millis(10).map(jitter).take(5);
-        let ports = &[connect_info.agent_port];
-        let mut port_forwarder = Retry::spawn(&mut retry_strategy, || {
-            trace!("port-forward to pod {:?}", &connect_info);
-            pod_api.portforward(&connect_info.pod_name, ports)
-        })
-        .await?;
+        tokio::spawn(portforward.into_retry_future());
 
-        let stream = port_forwarder
-            .take_stream(connect_info.agent_port)
-            .ok_or(KubeApiError::PortForwardFailed)?;
-
-        let error_future = port_forwarder
-            .take_error(connect_info.agent_port)
-            .ok_or(KubeApiError::PortForwardFailed)?;
-
-        let (client, mut server) = tokio::io::duplex(64);
-
-        tokio::spawn(async move {
-            let mut stream = Box::pin(stream);
-            let mut error_future = Box::pin(error_future);
-
-            loop {
-                tokio::select! {
-                    error = error_future.as_mut() => {
-                        if let Some(error) = error {
-                            tracing::warn!(?connect_info, %error, "error while handing portforward");
-
-                            let Some(delay) = retry_strategy.next() else {
-                                break;
-                            };
-
-                            tokio::time::sleep(delay).await;
-
-                            let ports = &[connect_info.agent_port];
-                            let port_forwarder_result = Retry::spawn(&mut retry_strategy, || {
-                                trace!("port-forward to pod {:?}", &connect_info);
-                                pod_api.portforward(&connect_info.pod_name, ports)
-                            })
-                            .await;
-
-                            match port_forwarder_result {
-                                Ok(mut port_forwarder) => {
-                                    let Some(next_stream) = port_forwarder.take_stream(connect_info.agent_port) else {
-                                        break;
-                                    };
-
-                                    stream.set(next_stream);
-
-                                    let Some(next_error_future) = port_forwarder.take_error(connect_info.agent_port) else {
-                                        break;
-                                    };
-
-                                    error_future.set(next_error_future);
-                                }
-                                Err(error) => {
-                                    tracing::warn!(?connect_info, %error, "error while retrying handing portforward");
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    _ = tokio::io::copy_bidirectional(&mut stream, &mut server) => {
-                        break;
-                    }
-                }
-            }
-
-            let _ = server.shutdown().await;
-        });
-
-        let stream: Box<dyn UnpinStream> = Box::new(client);
         Ok(stream)
     }
 

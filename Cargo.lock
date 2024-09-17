@@ -3945,6 +3945,7 @@ dependencies = [
  "actix-codec",
  "async-stream",
  "base64 0.22.1",
+ "bytes",
  "futures",
  "http-body 1.0.1",
  "hyper 1.4.1",

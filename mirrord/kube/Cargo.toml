@@ -27,6 +27,7 @@ mirrord-protocol = { path = "../protocol" }
 
 actix-codec.workspace = true
 async-stream = "0.3"
+bytes = "1"
 futures.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true
