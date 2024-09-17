@@ -214,8 +214,7 @@ impl ResolvedTarget {
     }
 
     pub fn urlfied_name(&self) -> String {
-        let type_name = self.type_();
-        let mut url = format!("{type_name}");
+        let mut url = self.type_().to_string();
 
         if let Some(target_name) = self.name() {
             url.push_str(&format!(".{target_name}"));
