@@ -1013,9 +1013,8 @@ fn default_env() -> Value {
 
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
-/// This behavior can be changed, see `FORCE_CLEANUP_ENV_NAME`.
+/// This behavior can be changed, see [`PRESERVE_FAILED_ENV_NAME`].
 /// * `randomize_name` - whether a random suffix should be added to the end of the resource names
-// TODO: update outdated comment, FORCE_CLEANUP_ENV_NAME does not exist
 #[fixture]
 pub async fn service(
     #[default("default")] namespace: &str,
@@ -1039,7 +1038,7 @@ pub async fn service(
 
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
-/// This behavior can be changed, see [`FORCE_CLEANUP_ENV_NAME`].
+/// This behavior can be changed, see [`PRESERVE_FAILED_ENV_NAME`].
 /// * `randomize_name` - whether a random suffix should be added to the end of the resource names
 /// * `env` - `Value`, should be `Value::Array` of kubernetes container env var definitions.
 pub async fn service_with_env(
@@ -1071,7 +1070,7 @@ pub async fn service_with_env(
 ///
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be
 /// deleted when the returned service is dropped, unless it is dropped during panic.
-/// This behavior can be changed, see [`FORCE_CLEANUP_ENV_NAME`].
+/// This behavior can be changed, see [`PRESERVE_FAILED_ENV_NAME`].
 /// * `randomize_name` - whether a random suffix should be added to the end of the resource names
 /// * `env` - `Value`, should be `Value::Array` of kubernetes container env var definitions.
 async fn internal_service(
