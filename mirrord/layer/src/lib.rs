@@ -241,7 +241,7 @@ fn load_only_layer_start(config: &LayerConfig) {
                 .to_process_info(config),
         ),
         *PROXY_CONNECTION_TIMEOUT
-            .get_or_init(|| Duration::from_secs(config.internal_proxy.breakpoint_timeout)),
+            .get_or_init(|| Duration::from_secs(config.internal_proxy.socket_timeout)),
     )
     .expect("failed to initialize proxy connection");
 
@@ -339,7 +339,7 @@ fn layer_start(mut config: LayerConfig) {
     init_tracing();
 
     let proxy_connection_timeout = *PROXY_CONNECTION_TIMEOUT
-        .get_or_init(|| Duration::from_secs(config.internal_proxy.breakpoint_timeout));
+        .get_or_init(|| Duration::from_secs(config.internal_proxy.socket_timeout));
 
     let debugger_ports = DebuggerPorts::from_env();
     let local_hostname = trace_only || !config.feature.hostname;
