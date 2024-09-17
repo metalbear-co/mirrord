@@ -84,8 +84,8 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
     let log_level = config
         .internal_proxy
         .log_level
-        .clone()
-        .unwrap_or_else(|| "mirrord=trace".to_string());
+        .as_deref()
+        .unwrap_or("mirrord=trace");
 
     tracing_subscriber::fmt()
         .with_writer(output_file)
