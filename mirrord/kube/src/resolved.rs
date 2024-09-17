@@ -215,14 +215,17 @@ impl ResolvedTarget {
 
     pub fn urlfied_name(&self) -> String {
         let type_name = self.type_();
-        let target = self.name().unwrap_or("targetless");
-        let container = self.container();
+        let mut url = format!("{type_name}");
 
-        if let Some(container) = container {
-            format!("{}.{}.container.{}", type_name, target, container)
-        } else {
-            format!("{}.{}", type_name, target)
+        if let Some(target_name) = self.name() {
+            url.push_str(&format!(".{target_name}"));
         }
+
+        if let Some(container) = self.container() {
+            url.push_str(&format!(".container.{container}"));
+        }
+
+        url
     }
 
     /// Convenient way of getting the container from this target.
