@@ -37,6 +37,7 @@ pub struct ContainerConfig {
     ///   }
     /// }
     /// ```
+    #[config(default)]
     pub cli_extra_args: Vec<String>,
 
     /// ### container.cli_image_lib_path {#container-cli_image}

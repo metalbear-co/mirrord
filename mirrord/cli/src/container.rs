@@ -140,7 +140,13 @@ async fn create_sidecar_intproxy(
             .cli_extra_args
             .iter()
             .map(String::as_str)
-            .chain(["--rm", "-d", &config.container.cli_image, "mirrord", "intproxy"]),
+            .chain([
+                "--rm",
+                "-d",
+                &config.container.cli_image,
+                "mirrord",
+                "intproxy",
+            ]),
     );
 
     let (runtime_binary, sidecar_args) = sidecar_command
