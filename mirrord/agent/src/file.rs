@@ -412,7 +412,7 @@ impl FileManager {
     }
 
     /// Handles our `readlink_detour` with [`std::fs::read_link`].
-    #[tracing::instrument(level = "trace", skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all, err(level = Level::ERROR))]
     pub(crate) fn read_link(&mut self, path: PathBuf) -> RemoteResult<ReadLinkFileResponse> {
         let path = path
             .strip_prefix("/")

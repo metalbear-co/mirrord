@@ -10,7 +10,7 @@ use mirrord_protocol::file::{
     ReadLinkFileResponse, SeekFileResponse, WriteFileResponse, XstatFsResponse, XstatResponse,
 };
 use rand::distributions::{Alphanumeric, DistString};
-use tracing::{error, trace};
+use tracing::{error, trace, Level};
 
 use super::{hooks::FN_OPEN, open_dirs::OPEN_DIRS, *};
 #[cfg(target_os = "linux")]
@@ -295,24 +295,18 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
 }
 
 /// Resolves the symbolic link `path`.
-///
-/// Bypassed if the `experimental.readlink` config is not set to `true`.
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
-    if crate::setup().experimental().readlink {
-        let path = remap_path!(path?);
+    let path = remap_path!(path?);
 
-        check_relative_paths!(path);
+    check_relative_paths!(path);
 
-        ensure_not_ignored!(path, false);
+    ensure_not_ignored!(path, false);
 
-        let requesting_path = ReadLinkFileRequest { path };
-        let response = common::make_proxy_request_with_response(requesting_path)??;
+    let requesting_path = ReadLinkFileRequest { path };
+    let response = common::make_proxy_request_with_response(requesting_path)??;
 
-        Detour::Success(response)
-    } else {
-        None?
-    }
+    Detour::Success(response)
 }
 
 pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<WriteFileResponse> {
