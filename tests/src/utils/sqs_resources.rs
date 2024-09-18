@@ -276,7 +276,7 @@ async fn sqs_consumer_service(
     service_with_env(
         &namespace,
         "ClusterIP",
-        "docker.io/t4lz/sqs-forwarder:9.13-22", // TODO
+        "docker.io/t4lz/sqs-forwarder:9.18", // TODO
         "queue-forwarder",
         false,
         kube_client.clone(),
