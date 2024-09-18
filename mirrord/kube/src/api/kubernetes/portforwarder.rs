@@ -20,9 +20,11 @@ use crate::{
 };
 
 pin_project! {
+    /// A wrapper for [`AsyncRead`] & [`AsyncWrite`] that dosn't call shutdown from [`AsyncWrite`] api
+    /// but it is done manually with `manual_shutdown`
     struct ManualShutdown<S> {
         #[pin]
-        inner: S
+        inner: S,
     }
 }
 
@@ -70,6 +72,7 @@ where
         self.project().inner.poll_flush(cx)
     }
 
+    /// Does nothing, call `manual_shutdown` for actuall inner shutdown call
     fn poll_shutdown(
         self: Pin<&mut Self>,
         _: &mut Context<'_>,
