@@ -11,7 +11,10 @@ use mirrord_protocol::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
     },
-    tcp::{ChunkedRequest, DaemonTcp, HttpRequest, NewTcpConnection, TcpData},
+    tcp::{
+        ChunkedRequest, DaemonTcp, HttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnection,
+        StealType, TcpData,
+    },
     ClientMessage, ConnectionId, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS,
 };
 use thiserror::Error;
@@ -448,20 +451,23 @@ impl PortForwarder {
 }
 
 pub struct ReversePortForwarder {
-    /// communicates with the agent (only TCP supported)
+    /// if true, traffic is stolen from remote.
+    /// otherwise, traffic is mirrored
+    steal_mode: bool,
+    /// communicates with the agent (only TCP supported).
     agent_connection: AgentConnection,
-    /// associates resolved destination ports with local ports
+    /// associates resolved destination ports with local ports.
     mappings: HashMap<RemotePort, LocalPort>,
-    /// identifies a pair of mapped socket addresses by their corresponding connection ID
+    /// identifies a pair of mapped socket addresses by their corresponding connection ID.
     mappings_by_connection: HashMap<ConnectionId, PortOnlyMapping>,
-    /// identifies task senders by their corresponding connection ID
+    /// identifies task senders by their corresponding connection ID.
     task_txs: HashMap<ConnectionId, Sender<Vec<u8>>>,
 
     /// transmit internal messages from tasks to [`PortForwarder`]'s main loop.
     internal_msg_tx: Sender<PortForwardMessage>,
     internal_msg_rx: Receiver<PortForwardMessage>,
 
-    /// true if Ping has been sent to agent
+    /// true if Ping has been sent to agent.
     waiting_for_pong: bool,
     ping_pong_timeout: Instant,
 }
@@ -471,6 +477,7 @@ impl ReversePortForwarder {
         agent_connection: AgentConnection,
         parsed_mappings: Vec<PortOnlyMapping>,
     ) -> Result<Self, PortForwardError> {
+        let steal_mode = true;
         let mut mappings: HashMap<RemotePort, LocalPort> =
             HashMap::with_capacity(parsed_mappings.len());
 
@@ -490,6 +497,7 @@ impl ReversePortForwarder {
         let (internal_msg_tx, internal_msg_rx) = mpsc::channel(1024);
 
         Ok(Self {
+            steal_mode,
             agent_connection,
             mappings,
             mappings_by_connection: HashMap::new(),
@@ -519,6 +527,25 @@ impl ReversePortForwarder {
                     .await?;
             }
             _ => return Err(PortForwardError::AgentConnectionFailed),
+        }
+
+        for remote_port in self.mappings.keys() {
+            match self.steal_mode {
+                true => {
+                    self.agent_connection
+                        .sender
+                        .send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
+                            StealType::All(*remote_port),
+                        )))
+                        .await?
+                }
+                false => {
+                    self.agent_connection
+                        .sender
+                        .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(*remote_port)))
+                        .await?
+                }
+            }
         }
 
         loop {
