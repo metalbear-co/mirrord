@@ -31,7 +31,10 @@ use tokio_stream::{wrappers::TcpListenerStream, StreamMap};
 use tokio_util::io::ReaderStream;
 use tracing::Level;
 
-use crate::{connection::AgentConnection, AddrPortMapping, RemoteAddr};
+use crate::{
+    connection::AgentConnection, AddrPortMapping, LocalPort, PortOnlyMapping, RemoteAddr,
+    RemotePort,
+};
 
 pub struct PortForwarder {
     /// communicates with the agent (only TCP supported)
@@ -447,16 +450,12 @@ impl PortForwarder {
 pub struct ReversePortForwarder {
     /// communicates with the agent (only TCP supported)
     agent_connection: AgentConnection,
-    /// associates destination ports with local ports
-    /// destinations may contain unresolved hostnames
-    raw_mappings: HashMap<(RemoteAddr, u16), SocketAddr>, // FIX: remove
     /// associates resolved destination ports with local ports
-    resolved_mappings: HashMap<SocketAddr, SocketAddr>,
+    mappings: HashMap<RemotePort, LocalPort>,
     /// identifies a pair of mapped socket addresses by their corresponding connection ID
-    sockets: HashMap<ConnectionId, ResolvedPortMapping>,
-    /// identifies task senders by their corresponding remote (resolved) socket address
-    /// for sending data from the remote socket to the local address
-    task_txs: HashMap<SocketAddr, Sender<Vec<u8>>>,
+    mappings_by_connection: HashMap<ConnectionId, PortOnlyMapping>,
+    /// identifies task senders by their corresponding connection ID
+    task_txs: HashMap<ConnectionId, Sender<Vec<u8>>>,
 
     /// transmit internal messages from tasks to [`PortForwarder`]'s main loop.
     internal_msg_tx: Sender<PortForwardMessage>,
@@ -470,9 +469,9 @@ pub struct ReversePortForwarder {
 impl ReversePortForwarder {
     pub(crate) async fn new(
         agent_connection: AgentConnection,
-        parsed_mappings: Vec<AddrPortMapping>, // FIX: args change
+        parsed_mappings: Vec<PortOnlyMapping>,
     ) -> Result<Self, PortForwardError> {
-        let mut mappings: HashMap<(RemoteAddr, u16), SocketAddr> =
+        let mut mappings: HashMap<RemotePort, LocalPort> =
             HashMap::with_capacity(parsed_mappings.len());
 
         if parsed_mappings.is_empty() {
@@ -483,20 +482,17 @@ impl ReversePortForwarder {
             // check destinations are unique
             if mappings.contains_key(&mapping.remote) {
                 // two mappings shared a key thus keys were not unique
-                return Err(PortForwardError::ReversePortMapSetupError(
-                    mapping.remote.clone(),
-                ));
+                return Err(PortForwardError::ReversePortMapSetupError(mapping.remote));
             }
-            mappings.insert(mapping.remote.clone(), mapping.local);
+            mappings.insert(mapping.remote, mapping.local);
         }
 
         let (internal_msg_tx, internal_msg_rx) = mpsc::channel(1024);
 
         Ok(Self {
             agent_connection,
-            raw_mappings: mappings,
-            resolved_mappings: HashMap::new(),
-            sockets: HashMap::new(),
+            mappings,
+            mappings_by_connection: HashMap::new(),
             task_txs: HashMap::new(),
             internal_msg_tx,
             internal_msg_rx,
@@ -566,41 +562,42 @@ impl ReversePortForwarder {
             DaemonMessage::TcpSteal(message) => match message {
                 DaemonTcp::NewConnection(NewTcpConnection {
                     connection_id,
-                    remote_address,
                     destination_port,
-                    source_port,
-                    local_address,
+                    ..
                 }) => {
-                    //     let local_socket = message.0;
-                    //     let stream = match message.1 {
-                    //         Ok(stream) => stream,
-                    //         Err(error) => {
-                    //             // error from TcpStream
-                    //             tracing::error!(
-                    //     "error occured while listening to local socket {local_socket}: {error}"
-                    // );
-                    //             self.listeners.remove(&local_socket);
-                    //             return Ok(());
-                    //         }
-                    //     };
+                    let Some(&local_port) = self.mappings.get(&destination_port) else {
+                        // ignore mappings that aren't recognised
+                        tracing::debug!("connection received from agent for unrecognised remote port {destination_port}");
+                        return Ok(());
+                    };
+                    self.mappings_by_connection.insert(
+                        connection_id,
+                        PortOnlyMapping {
+                            local: local_port,
+                            remote: destination_port,
+                        },
+                    );
 
-                    //     let task_internal_tx = self.internal_msg_tx.clone();
-                    //     let Some(remote_socket) = self.raw_mappings.get(&local_socket).cloned()
-                    // else {         unreachable!("mappings are always created
-                    // before this point")     };
-                    //     let (response_tx, response_rx) = mpsc::channel(256);
-                    //     self.task_txs.insert(local_socket, response_tx);
+                    let task_internal_tx = self.internal_msg_tx.clone();
+                    let (response_tx, response_rx) = mpsc::channel(256);
+                    self.task_txs.insert(connection_id, response_tx);
 
-                    //     tokio::spawn(async move {
-                    //         let mut task = LocalConnectionTask::new(
-                    //             stream,
-                    //             local_socket,
-                    //             remote_socket,
-                    //             task_internal_tx,
-                    //             response_rx,
-                    //         );
-                    //         task.run().await
-                    //     });
+                    let stream =
+                        match TcpStream::connect(format!("127.0.0.1:{destination_port}")).await {
+                            Ok(stream) => stream,
+                            Err(error) => return Err(PortForwardError::TcpStreamError(error)),
+                        };
+
+                    tokio::spawn(async move {
+                        let mut task = LocalConnectionTask::new_reverse(
+                            stream,
+                            local_port,
+                            destination_port,
+                            task_internal_tx,
+                            response_rx,
+                        );
+                        task.run_reverse().await
+                    });
                 }
                 // data
                 DaemonTcp::Data(TcpData {
@@ -662,9 +659,15 @@ impl ReversePortForwarder {
 struct LocalConnectionTask {
     read_stream: ReaderStream<OwnedReadHalf>,
     write: OwnedWriteHalf,
-    port_mapping: AddrPortMapping,
+    port_mapping: TaskPortMapping,
     task_internal_tx: Sender<PortForwardMessage>,
     response_rx: Receiver<Vec<u8>>,
+}
+
+#[derive(Clone, Debug)]
+enum TaskPortMapping {
+    AddrPort(AddrPortMapping),
+    PortOnly(PortOnlyMapping),
 }
 
 impl LocalConnectionTask {
@@ -684,13 +687,16 @@ impl LocalConnectionTask {
         Self {
             read_stream,
             write,
-            port_mapping,
+            port_mapping: TaskPortMapping::AddrPort(port_mapping),
             task_internal_tx,
             response_rx,
         }
     }
 
     pub async fn run(&mut self) -> Result<(), PortForwardError> {
+        let TaskPortMapping::AddrPort(port_mapping) = self.port_mapping.clone() else {
+            unreachable!("port_mapping type assured in new() function")
+        };
         let (id_oneshot_tx, id_oneshot_rx) = oneshot::channel::<ConnectionId>();
         let (dns_oneshot_tx, dns_oneshot_rx) = oneshot::channel::<IpAddr>();
 
@@ -702,19 +708,19 @@ impl LocalConnectionTask {
                 // stream ended without sending data
                 let _ = self
                     .task_internal_tx
-                    .send(PortForwardMessage::Close(self.port_mapping.local, None))
+                    .send(PortForwardMessage::Close(port_mapping.local, None))
                     .await;
                 return Ok(());
             }
         };
 
-        let (resolved_ip, port): (IpAddr, u16) = match &self.port_mapping.remote {
+        let (resolved_ip, port): (IpAddr, u16) = match &port_mapping.remote {
             (RemoteAddr::Ip(ip), port) => (IpAddr::V4(*ip), *port),
             (RemoteAddr::Hostname(hostname), port) => {
                 match self
                     .task_internal_tx
                     .send(PortForwardMessage::Lookup(
-                        self.port_mapping.local,
+                        port_mapping.local,
                         hostname.clone(),
                         dns_oneshot_tx,
                     ))
@@ -736,7 +742,7 @@ impl LocalConnectionTask {
                         );
                         let _ = self
                             .task_internal_tx
-                            .send(PortForwardMessage::Close(self.port_mapping.local, None))
+                            .send(PortForwardMessage::Close(port_mapping.local, None))
                             .await;
                         return Ok(());
                     }
@@ -745,7 +751,7 @@ impl LocalConnectionTask {
         };
         let resolved_remote = SocketAddr::new(resolved_ip, port);
         let resolved_mapping = ResolvedPortMapping {
-            local: self.port_mapping.local,
+            local: port_mapping.local,
             remote: resolved_remote,
         };
 
@@ -769,7 +775,7 @@ impl LocalConnectionTask {
                 );
                 let _ = self
                     .task_internal_tx
-                    .send(PortForwardMessage::Close(self.port_mapping.local, None))
+                    .send(PortForwardMessage::Close(port_mapping.local, None))
                     .await;
                 return Ok(());
             }
@@ -802,7 +808,7 @@ impl LocalConnectionTask {
                     Some(Err(error)) => {
                         tracing::warn!(
                             %error,
-                            port_mapping = ?self.port_mapping,
+                            port_mapping = ?port_mapping,
                             "local connection failed",
                         );
                         break Ok(());
@@ -819,7 +825,7 @@ impl LocalConnectionTask {
                             Err(error) => {
                                 tracing::error!(
                                     %error,
-                                    port_mapping = ?self.port_mapping,
+                                    port_mapping = ?port_mapping,
                                     "local connection failed",
                                 );
                                 break Ok(());
@@ -834,14 +840,41 @@ impl LocalConnectionTask {
         let _ = self
             .task_internal_tx
             .send(PortForwardMessage::Close(
-                self.port_mapping.local,
+                port_mapping.local,
                 Some(connection_id),
             ))
             .await;
         result
     }
 
-    // TODO: reverse_run()
+    pub fn new_reverse(
+        stream: TcpStream,
+        local_port: LocalPort,
+        remote_port: RemotePort,
+        task_internal_tx: Sender<PortForwardMessage>,
+        response_rx: Receiver<Vec<u8>>,
+    ) -> Self {
+        let (read, write) = stream.into_split();
+        let read_stream = ReaderStream::with_capacity(read, 64 * 1024);
+        let port_mapping = PortOnlyMapping {
+            local: local_port,
+            remote: remote_port,
+        };
+        Self {
+            read_stream,
+            write,
+            port_mapping: TaskPortMapping::PortOnly(port_mapping),
+            task_internal_tx,
+            response_rx,
+        }
+    }
+
+    pub async fn run_reverse(&mut self) -> Result<(), PortForwardError> {
+        let TaskPortMapping::PortOnly(_port_mapping) = self.port_mapping.clone() else {
+            unreachable!("port_mapping type assured in new() function")
+        };
+        todo!()
+    }
 }
 
 #[derive(Debug, Error)]
@@ -853,8 +886,8 @@ pub enum PortForwardError {
     #[error("multiple port forwarding mappings found for local address `{0}`")]
     PortMapSetupError(SocketAddr),
 
-    #[error("multiple port forwarding mappings found for desination address `{0:?}`")]
-    ReversePortMapSetupError((RemoteAddr, u16)),
+    #[error("multiple port forwarding mappings found for desination port `{0:?}`")]
+    ReversePortMapSetupError(RemotePort),
 
     #[error("no port forwarding mappings were provided")]
     NoMappingsError(),
@@ -871,6 +904,9 @@ pub enum PortForwardError {
 
     #[error("TcpListener operation failed with error: `{0}`")]
     TcpListenerError(std::io::Error),
+
+    #[error("TcpStream operation failed with error: `{0}`")]
+    TcpStreamError(std::io::Error),
 
     #[error("no destination address found for local address `{0}`")]
     SocketMappingNotFound(SocketAddr),

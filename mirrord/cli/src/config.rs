@@ -486,9 +486,12 @@ pub enum PortMappingParseErr {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PortOnlyMapping {
-    pub local: u16,
-    pub remote: u16,
+    pub local: LocalPort,
+    pub remote: RemotePort,
 }
+
+pub type LocalPort = u16;
+pub type RemotePort = u16;
 
 impl FromStr for PortOnlyMapping {
     type Err = PortMappingParseErr;
