@@ -686,11 +686,11 @@ pub struct MirrordExternalChangesSpec {
     /// Namespace of the target, e.g `default`.
     pub target_namespace: String,
 
-    /// If environment variable value was replaced in the target's pod template.
-    pub env_var_injected: Option<EnvVarInjected>,
+    /// Environment variables that were replaced in the target's pod template.
+    pub env_vars_injected: Vec<EnvVarInjected>,
 
-    /// If temporary Kafka topic was created.
-    pub kafka_topic_created: Option<KafkaTopicCreated>,
+    /// Created temporary Kafka topics.
+    pub kafka_topics_created: Vec<KafkaTopicCreated>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
