@@ -11,6 +11,7 @@ use mirrord_protocol::{
     ConnectionId, RemoteResult, ResponseError,
 };
 use thiserror::Error;
+use tracing::Level;
 
 use self::interceptor::Interceptor;
 use crate::{
@@ -103,7 +104,7 @@ impl OutgoingProxy {
     /// Passes the data to the correct [`Interceptor`] task.
     /// Fails when the agent sends an error, because this error cannot be traced back to an exact
     /// connection.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     async fn handle_agent_read(
         &mut self,
         read: RemoteResult<DaemonRead>,
@@ -134,7 +135,7 @@ impl OutgoingProxy {
     /// Handles agent's response to a connection request.
     /// Prepares a local socket and registers a new [`Interceptor`] task for this connection.
     /// Replies to the layer's request.
-    #[tracing::instrument(level = "trace", skip(self, message_bus))]
+    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
     async fn handle_connect_response(
         &mut self,
         connect: RemoteResult<DaemonConnect>,
@@ -194,7 +195,7 @@ impl OutgoingProxy {
     }
 
     /// Saves the layer's request id and sends the connection request to the agent.
-    #[tracing::instrument(level = "trace", skip(self, message_bus))]
+    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
     async fn handle_connect_request(
         &mut self,
         message_id: MessageId,

@@ -181,7 +181,7 @@ impl IncomingProxy {
     const CHANNEL_SIZE: usize = 512;
 
     /// Tries to register the new subscription in the [`SubscriptionsManager`].
-    #[tracing::instrument(level = "trace", skip(self, message_bus))]
+    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
     async fn handle_port_subscribe(
         &mut self,
         message_id: MessageId,
@@ -199,7 +199,7 @@ impl IncomingProxy {
     }
 
     /// Tries to unregister the subscription from the [`SubscriptionsManager`].
-    #[tracing::instrument(level = "trace", skip(self, message_bus))]
+    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
     async fn handle_port_unsubscribe(
         &mut self,
         layer_id: LayerId,
@@ -216,7 +216,7 @@ impl IncomingProxy {
     /// Retrieves or creates an [`Interceptor`] for the given [`HttpRequestFallback`].
     /// The request may or may not belong to an existing connection (when stealing with an http
     /// filter, connections are created implicitly).
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     fn get_interceptor_for_http_request(
         &mut self,
         request: &HttpRequestFallback,
@@ -259,7 +259,7 @@ impl IncomingProxy {
     }
 
     /// Handles all agent messages.
-    #[tracing::instrument(level = "trace", skip(self, message_bus))]
+    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
     async fn handle_agent_message(
         &mut self,
         message: DaemonTcp,
