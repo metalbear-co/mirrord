@@ -43,7 +43,7 @@ impl LayerInitializer {
     }
 
     /// Initialize connection with the new layer, assigning fresh [`LayerId`].
-    #[tracing::instrument(level = Level::TRACE ret)]
+    #[tracing::instrument(level = Level::TRACE, ret)]
     async fn handle_new_stream(
         &mut self,
         stream: TcpStream,
