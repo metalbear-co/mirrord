@@ -13,9 +13,9 @@ use mirrord_protocol::{
     },
     tcp::{
         ChunkedRequest, DaemonTcp, HttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnection,
-        StealType, TcpData,
+        StealType, TcpClose, TcpData,
     },
-    ClientMessage, ConnectionId, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS,
+    ClientMessage, ConnectionId, DaemonMessage, LogLevel, ResponseError, CLIENT_READY_FOR_LOGS,
 };
 use thiserror::Error;
 use tokio::{
@@ -630,7 +630,13 @@ impl ReversePortForwarder {
                 DaemonTcp::Data(TcpData {
                     connection_id,
                     bytes,
-                }) => todo!(),
+                }) => {
+                    let Some(tx) = self.task_txs.get(&connection_id) else {
+                        // ignore unknown connection IDs
+                        return Ok(());
+                    };
+                    tx.send(bytes).await?;
+                }
                 DaemonTcp::HttpRequest(HttpRequest {
                     internal_request,
                     connection_id,
@@ -645,8 +651,16 @@ impl ReversePortForwarder {
                 }) => todo!(),
                 DaemonTcp::HttpRequestChunked(chunked_request) => todo!(),
                 // other
-                DaemonTcp::Close(_) => todo!(),
-                DaemonTcp::SubscribeResult(_) => todo!(),
+                DaemonTcp::Close(TcpClose { connection_id }) => {
+                    // remove from mapping by connection
+                    self.mappings_by_connection.remove(&connection_id);
+                    // remove from task txs - task will be notified when tx dropped
+                    self.task_txs.remove(&connection_id);
+                }
+                DaemonTcp::SubscribeResult(result) => match result {
+                    Ok(_) => Ok(()),
+                    Err(error) => Err(PortForwardError::SubscriptionError(error)),
+                }?,
             },
             DaemonMessage::LogMessage(log_message) => match log_message.level {
                 LogLevel::Warn => tracing::warn!("agent log: {}", log_message.message),
@@ -926,6 +940,9 @@ pub enum PortForwardError {
     #[error("connection with the agent failed")]
     AgentConnectionFailed,
 
+    #[error("connection with a task failed")]
+    TaskConnectionFailed,
+
     #[error("failed to send Ping to agent: `{0}`")]
     PingError(String),
 
@@ -946,11 +963,20 @@ pub enum PortForwardError {
 
     #[error("failed to establish connection with remote process: `{0}`")]
     ConnectionError(String),
+
+    #[error("failed to subscribe to remote port: `{0}`")]
+    SubscriptionError(ResponseError),
 }
 
 impl From<mpsc::error::SendError<ClientMessage>> for PortForwardError {
     fn from(_: mpsc::error::SendError<ClientMessage>) -> Self {
         Self::AgentConnectionFailed
+    }
+}
+
+impl From<mpsc::error::SendError<Vec<u8>>> for PortForwardError {
+    fn from(_: mpsc::error::SendError<Vec<u8>>) -> Self {
+        Self::TaskConnectionFailed
     }
 }
 
