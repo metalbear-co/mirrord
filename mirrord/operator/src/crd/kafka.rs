@@ -3,6 +3,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Properties to use when creating operator's Kafka client.
+/// Resources of this kind should live in the operator's namespace.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "queues.mirrord.metalbear.co",

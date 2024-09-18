@@ -27,7 +27,7 @@ use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
 use crate::crd::{
-    kafka::MirrordKafkaClientProperties, MirrordExternalChange, MirrordPolicy, MirrordSqsSession,
+    kafka::MirrordKafkaClientProperties, MirrordExternalChanges, MirrordPolicy, MirrordSqsSession,
     MirrordWorkloadQueueRegistry, TargetCrd,
 };
 
@@ -228,7 +228,7 @@ impl OperatorSetup for Operator {
         }
 
         writer.write_all(b"---\n")?;
-        MirrordExternalChange::crd().to_writer(&mut writer)?;
+        MirrordExternalChanges::crd().to_writer(&mut writer)?;
 
         Ok(())
     }

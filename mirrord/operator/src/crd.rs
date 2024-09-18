@@ -660,20 +660,19 @@ pub struct MirrordSqsSessionSpec {
     pub session_id: String,
 }
 
-/// Persistent external change made by the mirrord operator for the purpose of running a session.
-/// Lives in the same namespace as session's target.
+/// Persistent external changes made by the mirrord operator for the purpose of running a session.
+/// Resources of this kind should live in the operator's namespace.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
     version = "v1",
-    kind = "MirrordExternalChange",
+    kind = "MirrordExternalChanges",
     namespaced
 )]
-pub struct MirrordExternalChangeSpec {
-    /// u64 session identifier encoded in HEX.
-    /// This change belongs to this session and should be rolled back as soon as the session is
-    /// finished.
-    pub session_id: String,
+#[serde(rename_all = "camelCase")]
+pub struct MirrordExternalChangesSpec {
+    /// Unique id of an internal process inside the operator that owns this change.
+    pub owner_process: String,
 
     /// API version of the target, e.g `apps/v1`.
     pub target_api_version: String,
@@ -684,10 +683,10 @@ pub struct MirrordExternalChangeSpec {
     /// Name of the target, e.g `my-deployment`.
     pub target_name: String,
 
-    /// If target resource was scaled down to 0, this field holds the original scale.
-    pub scaled_down_from: Option<i32>,
+    /// Namespace of the target, e.g `default`.
+    pub target_namespace: String,
 
-    /// If environment variable value was replaced.
+    /// If environment variable value was replaced in the target's pod template.
     pub env_var_injected: Option<EnvVarInjected>,
 
     /// If temporary Kafka topic was created.
