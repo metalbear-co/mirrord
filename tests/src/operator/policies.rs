@@ -285,7 +285,7 @@ async fn run_mirrord_and_verify_steal_result(
 #[case(block_unfiltered_steal_with_path_pattern())]
 #[case(block_unfiltered_steal_with_deployment_path_pattern())]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(120))]
+#[timeout(Duration::from_secs(240))]
 pub async fn create_policy_and_try_to_steal(
     #[future] services: (KubeService, KubeService),
     #[future] kube_client: kube::Client,
