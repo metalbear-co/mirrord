@@ -38,11 +38,7 @@ pub struct KafkaTopicDetails {
     /// Where to find consumer group id in the target spec.
     pub group_id_source: TopicPropertySource,
     /// Links to [`MirrordKafkaClientProperties`] in the operator's namespace.
-    pub admin_client_properties: String,
-    /// Links to [`MirrordKafkaClientProperties`] in the operator's namespace.
-    pub producer_client_properties: String,
-    /// Links to [`MirrordKafkaClientProperties`] in the operator's namespace.
-    pub consumer_client_properties: String,
+    pub client_properties: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
