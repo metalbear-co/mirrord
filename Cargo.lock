@@ -3954,6 +3954,7 @@ dependencies = [
  "mirrord-config",
  "mirrord-progress",
  "mirrord-protocol",
+ "pin-project-lite",
  "rand",
  "regex",
  "rstest",

@@ -1,9 +1,14 @@
-use std::{future::Future, time::Duration};
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 
-use bytes::BytesMut;
 use k8s_openapi::api::core::v1::Pod;
 use kube::{Api, Client};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use pin_project_lite::pin_project;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_retry::{
     strategy::{jitter, ExponentialBackoff},
     Retry,
@@ -13,6 +18,65 @@ use crate::{
     api::kubernetes::{get_k8s_resource_api, AgentKubernetesConnectInfo, UnpinStream},
     error::{KubeApiError, Result},
 };
+
+pin_project! {
+    struct ManualShutdown<S> {
+        #[pin]
+        inner: S
+    }
+}
+
+impl<S> ManualShutdown<S> {
+    fn new(inner: S) -> Self {
+        ManualShutdown { inner }
+    }
+}
+
+impl<S> ManualShutdown<S>
+where
+    S: AsyncWrite + Unpin,
+{
+    async fn manual_shutdown(&mut self) -> Result<(), std::io::Error> {
+        self.inner.shutdown().await
+    }
+}
+
+impl<S> AsyncRead for ManualShutdown<S>
+where
+    S: AsyncRead,
+{
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        self.project().inner.poll_read(cx, buf)
+    }
+}
+
+impl<S> AsyncWrite for ManualShutdown<S>
+where
+    S: AsyncWrite,
+{
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        self.project().inner.poll_write(cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
+        self.project().inner.poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        _: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        Poll::Ready(Ok(()))
+    }
+}
 
 type RetryStrategy = dyn Iterator<Item = Duration> + Send;
 
@@ -53,7 +117,7 @@ pub struct SinglePortForwarder {
 
     pod_api: Api<Pod>,
 
-    sink: Box<dyn UnpinStream>,
+    sink: ManualShutdown<Box<dyn UnpinStream>>,
 
     stream: Box<dyn UnpinStream>,
 
@@ -72,6 +136,8 @@ impl SinglePortForwarder {
 
         let (stream, error_future) =
             create_portforward_streams(&pod_api, &connect_info, &mut retry_strategy).await?;
+
+        let sink = ManualShutdown::new(sink);
 
         Ok(SinglePortForwarder {
             connect_info,
@@ -94,9 +160,6 @@ impl SinglePortForwarder {
         } = self;
 
         let mut retry_strategy = retry_strategy.peekable();
-
-        let mut to_pod_buffer = BytesMut::with_capacity(1024);
-        let mut from_pod_buffer = BytesMut::with_capacity(1024);
 
         loop {
             tokio::select! {
@@ -128,49 +191,17 @@ impl SinglePortForwarder {
                         }
                     }
                 }
-                from_pod_read = stream.read_buf(&mut from_pod_buffer) => {
-                    match from_pod_read {
-                        Ok(amount) => {
-                            #[allow(clippy::indexing_slicing)]
-                            if let Err(error) = sink.write_all(&from_pod_buffer[..amount]).await {
-                                tracing::error!(?connect_info, %error, "unable to write to local sink");
+                copy_result = tokio::io::copy_bidirectional(&mut stream, &mut sink) => {
+                    if let Err(error) = copy_result {
+                        tracing::error!(?connect_info, %error, "unable to copy_bidirectional agent stream to local sink");
 
-                                break;
-                            }
-
-                            from_pod_buffer.clear();
-                        }
-                        Err(error) => {
-                            tracing::error!(?connect_info, %error, "unable to read from remote stream");
-
-                            break;
-                        }
-                    }
-                }
-                to_pod_read = sink.read_buf(&mut to_pod_buffer) => {
-                    match to_pod_read {
-                        Ok(amount) => {
-                            #[allow(clippy::indexing_slicing)]
-                            if let Err(error) = stream.write_all(&to_pod_buffer[..amount]).await {
-                                tracing::error!(?connect_info, %error, "unable to write to remote stream");
-
-                                break;
-                            }
-
-                            to_pod_buffer.clear();
-                        }
-                        Err(error) => {
-                            tracing::error!(?connect_info, %error, "unable to read from local sink");
-
-                            break;
-                        }
+                        break;
                     }
                 }
             }
         }
 
-        let _ = stream.shutdown().await;
-        let _ = sink.shutdown().await;
+        let _ = sink.manual_shutdown().await;
     }
 }
 
@@ -178,7 +209,7 @@ pub async fn retry_portforward(
     client: &Client,
     connect_info: AgentKubernetesConnectInfo,
 ) -> Result<(Box<dyn UnpinStream>, SinglePortForwarder)> {
-    let (lhs, rhs) = tokio::io::duplex(64);
+    let (lhs, rhs) = tokio::io::duplex(4096);
 
     let port_forwarder = SinglePortForwarder::connect(client, connect_info, Box::new(rhs)).await?;
 

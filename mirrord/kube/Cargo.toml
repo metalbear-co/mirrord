@@ -40,6 +40,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tokio-retry = "0.3"
+pin-project-lite = "0.2"
 
 [dev-dependencies]
 base64.workspace = true
