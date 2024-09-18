@@ -847,13 +847,15 @@ impl LocalConnectionTask {
 #[derive(Debug, Error)]
 pub enum PortForwardError {
     // setup errors
+    #[error("wrong combination of arguments used: {0}")]
+    ArgsError(String),
+
     #[error("multiple port forwarding mappings found for local address `{0}`")]
     PortMapSetupError(SocketAddr),
 
     #[error("multiple port forwarding mappings found for desination address `{0:?}`")]
     ReversePortMapSetupError((RemoteAddr, u16)),
 
-    // TODO: reverse of above
     #[error("no port forwarding mappings were provided")]
     NoMappingsError(),
 

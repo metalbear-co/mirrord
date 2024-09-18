@@ -397,15 +397,20 @@ pub(super) struct PortForwardArgs {
     /// Otherwise, the remote is assumed to be a hostname and lookup is performed in the cluster
     /// after a connection is made to the target.
     #[arg(short = 'L', long)]
-    pub port_mappings: Vec<PortMapping>,
+    pub port_mappings: Option<Vec<AddrPortMapping>>,
 
     /// Enable reverse port forwarding
     #[arg(short = 'r', long)]
     pub reverse_port_forward: bool,
+
+    /// Mappings for reverse port forwarding.
+    /// Expected format is: '-R \[remote_port:\]local_port'.
+    #[arg(short = 'R', long)]
+    pub reverse_port_mappings: Option<Vec<PortOnlyMapping>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct PortMapping {
+pub struct AddrPortMapping {
     pub local: SocketAddr,
     pub remote: (RemoteAddr, u16),
 }
@@ -419,7 +424,7 @@ pub enum RemoteAddr {
     Hostname(String),
 }
 
-impl FromStr for PortMapping {
+impl FromStr for AddrPortMapping {
     type Err = PortMappingParseErr;
 
     fn from_str(string: &str) -> Result<Self, Self::Err> {
@@ -477,6 +482,47 @@ pub enum PortMappingParseErr {
 
     #[error("Port `0` is not allowed in argument `{0}`")]
     PortZeroInvalid(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PortOnlyMapping {
+    pub local: u16,
+    pub remote: u16,
+}
+
+impl FromStr for PortOnlyMapping {
+    type Err = PortMappingParseErr;
+
+    fn from_str(string: &str) -> Result<Self, Self::Err> {
+        fn parse_port(string: &str, original: &str) -> Result<u16, PortMappingParseErr> {
+            match string.parse::<u16>() {
+                Ok(0) => Err(PortMappingParseErr::PortZeroInvalid(string.to_string())),
+                Ok(port) => Ok(port),
+                Err(_error) => Err(PortMappingParseErr::PortParseErr(
+                    string.to_string(),
+                    original.to_string(),
+                )),
+            }
+        }
+        // expected format = remote_port:local_port
+        // alternatively,  = remote_port
+        let vec: Vec<&str> = string.split(':').collect();
+        let (remote, local) = match vec.as_slice() {
+            [remote_port, local_port] => {
+                let local_port = parse_port(local_port, string)?;
+                let remote_port = parse_port(remote_port, string)?;
+                (remote_port, local_port)
+            }
+            [remote_port] => {
+                let remote_port = parse_port(remote_port, string)?;
+                (remote_port, remote_port)
+            }
+            _ => {
+                return Err(PortMappingParseErr::InvalidFormat(string.to_string()));
+            }
+        };
+        Ok(Self { local, remote })
+    }
 }
 
 #[derive(Args, Debug)]
@@ -759,14 +805,14 @@ mod tests {
         #[case] expected_remote_addr: &str,
         #[case] expected_remote_port: &str,
     ) {
-        let expected = PortMapping {
+        let expected = AddrPortMapping {
             local: expected_local.parse().unwrap(),
             remote: (
                 RemoteAddr::Ip(expected_remote_addr.parse().unwrap()),
                 expected_remote_port.parse().unwrap(),
             ),
         };
-        assert_eq!(PortMapping::from_str(input).unwrap(), expected);
+        assert_eq!(AddrPortMapping::from_str(input).unwrap(), expected);
     }
 
     #[rstest]
@@ -778,14 +824,14 @@ mod tests {
         #[case] expected_remote_addr: &str,
         #[case] expected_remote_port: &str,
     ) {
-        let expected = PortMapping {
+        let expected = AddrPortMapping {
             local: expected_local.parse().unwrap(),
             remote: (
                 RemoteAddr::Hostname(expected_remote_addr.to_string()),
                 expected_remote_port.parse().unwrap(),
             ),
         };
-        assert_eq!(PortMapping::from_str(input).unwrap(), expected);
+        assert_eq!(AddrPortMapping::from_str(input).unwrap(), expected);
     }
 
     #[rstest]
@@ -797,7 +843,7 @@ mod tests {
     #[case("")]
     #[should_panic]
     fn parse_invalid_mapping(#[case] input: &str) {
-        PortMapping::from_str(input).unwrap();
+        AddrPortMapping::from_str(input).unwrap();
     }
 
     #[test]
