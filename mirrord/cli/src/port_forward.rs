@@ -11,7 +11,7 @@ use mirrord_protocol::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
     },
-    tcp::DaemonTcp,
+    tcp::{ChunkedRequest, DaemonTcp, HttpRequest, NewTcpConnection, TcpData},
     ClientMessage, ConnectionId, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS,
 };
 use thiserror::Error;
@@ -31,7 +31,7 @@ use tokio_stream::{wrappers::TcpListenerStream, StreamMap};
 use tokio_util::io::ReaderStream;
 use tracing::Level;
 
-use crate::{connection::AgentConnection, PortMapping, RemoteAddr};
+use crate::{connection::AgentConnection, AddrPortMapping, RemoteAddr};
 
 pub struct PortForwarder {
     /// communicates with the agent (only TCP supported)
@@ -93,7 +93,7 @@ enum PortForwardMessage {
 impl PortForwarder {
     pub(crate) async fn new(
         agent_connection: AgentConnection,
-        parsed_mappings: Vec<PortMapping>,
+        parsed_mappings: Vec<AddrPortMapping>,
     ) -> Result<Self, PortForwardError> {
         // open tcp listener for local addrs
         let mut listeners = StreamMap::with_capacity(parsed_mappings.len());
@@ -449,7 +449,7 @@ pub struct ReversePortForwarder {
     agent_connection: AgentConnection,
     /// associates destination ports with local ports
     /// destinations may contain unresolved hostnames
-    raw_mappings: HashMap<(RemoteAddr, u16), SocketAddr>,
+    raw_mappings: HashMap<(RemoteAddr, u16), SocketAddr>, // FIX: remove
     /// associates resolved destination ports with local ports
     resolved_mappings: HashMap<SocketAddr, SocketAddr>,
     /// identifies a pair of mapped socket addresses by their corresponding connection ID
@@ -470,7 +470,7 @@ pub struct ReversePortForwarder {
 impl ReversePortForwarder {
     pub(crate) async fn new(
         agent_connection: AgentConnection,
-        parsed_mappings: Vec<PortMapping>,
+        parsed_mappings: Vec<AddrPortMapping>, // FIX: args change
     ) -> Result<Self, PortForwardError> {
         let mut mappings: HashMap<(RemoteAddr, u16), SocketAddr> =
             HashMap::with_capacity(parsed_mappings.len());
@@ -525,24 +525,6 @@ impl ReversePortForwarder {
             _ => return Err(PortForwardError::AgentConnectionFailed),
         }
 
-        // resolve dns here for all remotes - replies handles in agent msg function
-        for ((remote_addr, remote_port), local) in &self.raw_mappings {
-            match remote_addr {
-                RemoteAddr::Ip(ip) => {
-                    let resolved_remote = SocketAddr::new(IpAddr::V4(*ip), *remote_port);
-                    self.resolved_mappings.insert(resolved_remote, *local);
-                }
-                RemoteAddr::Hostname(hostname) => {
-                    self.agent_connection
-                        .sender
-                        .send(ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest {
-                            node: hostname.to_string(),
-                        }))
-                        .await?;
-                }
-            };
-        }
-
         loop {
             select! {
                 _ = tokio::time::sleep_until(self.ping_pong_timeout.into()) => {
@@ -582,53 +564,65 @@ impl ReversePortForwarder {
                 )));
             }
             DaemonMessage::TcpSteal(message) => match message {
-                DaemonTcp::NewConnection(_) => todo!(),
-                DaemonTcp::Data(_) => todo!(),
+                DaemonTcp::NewConnection(NewTcpConnection {
+                    connection_id,
+                    remote_address,
+                    destination_port,
+                    source_port,
+                    local_address,
+                }) => {
+                    //     let local_socket = message.0;
+                    //     let stream = match message.1 {
+                    //         Ok(stream) => stream,
+                    //         Err(error) => {
+                    //             // error from TcpStream
+                    //             tracing::error!(
+                    //     "error occured while listening to local socket {local_socket}: {error}"
+                    // );
+                    //             self.listeners.remove(&local_socket);
+                    //             return Ok(());
+                    //         }
+                    //     };
+
+                    //     let task_internal_tx = self.internal_msg_tx.clone();
+                    //     let Some(remote_socket) = self.raw_mappings.get(&local_socket).cloned()
+                    // else {         unreachable!("mappings are always created
+                    // before this point")     };
+                    //     let (response_tx, response_rx) = mpsc::channel(256);
+                    //     self.task_txs.insert(local_socket, response_tx);
+
+                    //     tokio::spawn(async move {
+                    //         let mut task = LocalConnectionTask::new(
+                    //             stream,
+                    //             local_socket,
+                    //             remote_socket,
+                    //             task_internal_tx,
+                    //             response_rx,
+                    //         );
+                    //         task.run().await
+                    //     });
+                }
+                // data
+                DaemonTcp::Data(TcpData {
+                    connection_id,
+                    bytes,
+                }) => todo!(),
+                DaemonTcp::HttpRequest(HttpRequest {
+                    internal_request,
+                    connection_id,
+                    request_id,
+                    port,
+                }) => todo!(),
+                DaemonTcp::HttpRequestFramed(HttpRequest {
+                    internal_request,
+                    connection_id,
+                    request_id,
+                    port,
+                }) => todo!(),
+                DaemonTcp::HttpRequestChunked(chunked_request) => todo!(),
+                // other
                 DaemonTcp::Close(_) => todo!(),
                 DaemonTcp::SubscribeResult(_) => todo!(),
-                // TODO: check? think this is unexpected
-                DaemonTcp::HttpRequest(_) => todo!(),
-                DaemonTcp::HttpRequestFramed(_) => todo!(),
-                // TODO: may be able to handle all three at the same time?
-                DaemonTcp::HttpRequestChunked(_) => todo!(),
-            },
-            DaemonMessage::GetAddrInfoResponse(GetAddrInfoResponse(message)) => match message {
-                // pick up in main loop
-                // there it can be added to self.resolved_mappings by checking self.raw_mappings
-                // remote for the lookup record name and grabbing local + remoteport
-                Ok(DnsLookup(record)) if !record.is_empty() => {
-                    let resolved_ipv4: Vec<&LookupRecord> = record
-                        .iter()
-                        .filter(|LookupRecord { ip, .. }| ip.is_ipv4())
-                        .collect();
-                    // use first IPv4 is it exists, otherwise use IPv6
-                    let resolved_record = match resolved_ipv4.first() {
-                        Some(first) => first,
-                        None => record.first().unwrap(),
-                    };
-                    // find associated remote ports and local addresses
-                    let mut found = false;
-                    for (remote, local) in self.raw_mappings.iter() {
-                        if let RemoteAddr::Hostname(name) = &remote.0
-                            && name == &resolved_record.name
-                        {
-                            found = true;
-                            let remote_addr = SocketAddr::new(resolved_record.ip, remote.1);
-                            if let Some(_) = self.resolved_mappings.insert(remote_addr, *local) {
-                                return Err(PortForwardError::ReversePortMapSetupError(
-                                    remote.clone(),
-                                ));
-                            }
-                        }
-                    }
-                    if !found {
-                        return Err(PortForwardError::LookupReqNotFound(resolved_record.ip));
-                    }
-                }
-                _ => {
-                    // lookup failed
-                    tracing::warn!("failed to resolve remote hostname");
-                }
             },
             DaemonMessage::LogMessage(log_message) => match log_message.level {
                 LogLevel::Warn => tracing::warn!("agent log: {}", log_message.message),
@@ -666,10 +660,9 @@ impl ReversePortForwarder {
 }
 
 struct LocalConnectionTask {
-    // TODO: add doc here?
     read_stream: ReaderStream<OwnedReadHalf>,
     write: OwnedWriteHalf,
-    port_mapping: PortMapping,
+    port_mapping: AddrPortMapping,
     task_internal_tx: Sender<PortForwardMessage>,
     response_rx: Receiver<Vec<u8>>,
 }
@@ -684,7 +677,7 @@ impl LocalConnectionTask {
     ) -> Self {
         let (read, write) = stream.into_split();
         let read_stream = ReaderStream::with_capacity(read, 64 * 1024);
-        let port_mapping = PortMapping {
+        let port_mapping = AddrPortMapping {
             local: local_socket,
             remote: remote_socket,
         };
@@ -914,7 +907,7 @@ mod test {
     };
 
     use crate::{
-        connection::AgentConnection, port_forward::PortForwarder, PortMapping, RemoteAddr,
+        connection::AgentConnection, port_forward::PortForwarder, AddrPortMapping, RemoteAddr,
     };
 
     #[tokio::test]
@@ -931,7 +924,7 @@ mod test {
             receiver: daemon_msg_rx,
         };
         let remote_destination = (RemoteAddr::Ip("152.37.40.40".parse().unwrap()), 3038);
-        let parsed_mappings = vec![PortMapping {
+        let parsed_mappings = vec![AddrPortMapping {
             local: local_destination,
             remote: remote_destination,
         }];
@@ -1031,11 +1024,11 @@ mod test {
             receiver: daemon_msg_rx,
         };
         let parsed_mappings = vec![
-            PortMapping {
+            AddrPortMapping {
                 local: local_destination_1,
                 remote: remote_destination_1.clone(),
             },
-            PortMapping {
+            AddrPortMapping {
                 local: local_destination_2,
                 remote: remote_destination_2.clone(),
             },
