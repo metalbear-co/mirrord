@@ -8,6 +8,7 @@ use tokio::net::{
     tcp::{OwnedReadHalf, OwnedWriteHalf},
     TcpStream,
 };
+use tracing::Level;
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
@@ -35,7 +36,7 @@ impl LayerConnection {
         }
     }
 
-    #[tracing::instrument(level = "trace", name = "send_layer_message", skip(self), fields(layer_id = self.layer_id.0), ret)]
+    #[tracing::instrument(level = Level::TRACE, name = "send_layer_message", skip(self), fields(layer_id = self.layer_id.0), ret)]
     async fn send_and_flush(
         &mut self,
         msg: &LocalMessage<ProxyToLayerMessage>,

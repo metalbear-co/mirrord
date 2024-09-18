@@ -15,6 +15,7 @@ use std::{collections::VecDeque, fmt};
 
 use mirrord_intproxy_protocol::{LayerId, MessageId};
 use thiserror::Error;
+use tracing::Level;
 
 /// Erorr returned when the proxy attempts to retrieve [`MessageId`] and [`LayerId`] of a request
 /// corresponding to a response received from the agent, but the [`RequestQueue`] is empty. This
@@ -43,13 +44,13 @@ impl fmt::Debug for RequestQueue {
 
 impl RequestQueue {
     /// Save the request at the end of this queue.
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = Level::TRACE)]
     pub fn insert(&mut self, message_id: MessageId, layer_id: LayerId) {
         self.inner.push_back((message_id, layer_id));
     }
 
     /// Retrieve and remove a request from the front of this queue.
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = Level::TRACE)]
     pub fn get(&mut self) -> Result<(MessageId, LayerId), RequestQueueEmpty> {
         self.inner.pop_front().ok_or(RequestQueueEmpty)
     }
