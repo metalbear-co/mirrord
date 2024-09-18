@@ -162,8 +162,8 @@ static EXECUTABLE_ARGS: OnceLock<ExecuteArgs> = OnceLock::new();
 /// Executable path we're loaded to
 static EXECUTABLE_PATH: OnceLock<String> = OnceLock::new();
 
-/// Proxy Connection timeout
-/// Set to 10 seconds as most agent operations timeout after 5 seconds
+/// Read/write timeout for layer<->intproxy TCP sockets.
+/// Can be configured in the [`LayerConfig`].
 static PROXY_CONNECTION_TIMEOUT: OnceLock<Duration> = OnceLock::new();
 
 /// Loads mirrord configuration and does some patching (SIP, dotnet, etc)
