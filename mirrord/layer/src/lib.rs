@@ -633,7 +633,7 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
                 PROXY_CONNECTION_TIMEOUT
                     .get()
                     .copied()
-                    .unwrap_or_else(|| Duration::from_secs(31536000)),
+                    .expect("PROXY_CONNECTION_TIMEOUT should be set by now!"),
             )
             .expect("failed to establish proxy connection for child");
             PROXY_CONNECTION
