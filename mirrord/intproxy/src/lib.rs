@@ -16,6 +16,7 @@ use proxies::{
     simple::{SimpleProxy, SimpleProxyMessage},
 };
 use tokio::{net::TcpListener, time};
+use tracing::Level;
 
 use crate::{
     agent_conn::AgentConnection, background_tasks::TaskError, error::IntProxyError,
@@ -255,7 +256,7 @@ impl IntProxy {
 
     /// Routes most messages from the agent to the correct background task.
     /// Some messages are handled here.
-    #[tracing::instrument(level = "trace", skip(self), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
     async fn handle_agent_message(&mut self, message: DaemonMessage) -> Result<(), IntProxyError> {
         match message {
             DaemonMessage::Pong => self.task_txs.ping_pong.send(AgentSentPong).await,
@@ -332,7 +333,7 @@ impl IntProxy {
     }
 
     /// Routes a message from the layer to the correct background task.
-    #[tracing::instrument(level = "trace", skip(self), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
     async fn handle_layer_message(&self, message: FromLayer) -> Result<(), IntProxyError> {
         let FromLayer {
             message_id,
