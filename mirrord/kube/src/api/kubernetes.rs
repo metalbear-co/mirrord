@@ -1,9 +1,6 @@
 use std::ops::Deref;
 
-use k8s_openapi::{
-    api::core::v1::{Namespace, Pod},
-    NamespaceResourceScope,
-};
+use k8s_openapi::{api::core::v1::Namespace, NamespaceResourceScope};
 use kube::{
     api::ListParams,
     config::{KubeConfigOptions, Kubeconfig},
@@ -17,7 +14,7 @@ use mirrord_config::{
 use mirrord_progress::Progress;
 use mirrord_protocol::MeshVendor;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, trace};
+use tracing::{debug, info};
 
 use crate::{
     api::{
@@ -33,6 +30,8 @@ use crate::{
     error::{KubeApiError, Result},
 };
 
+#[cfg(not(feature = "incluster"))]
+pub mod portforwarder;
 pub mod rollout;
 pub mod seeker;
 
@@ -99,6 +98,7 @@ impl KubernetesAPI {
     ) -> Result<tokio::net::TcpStream> {
         use std::{net::IpAddr, time::Duration};
 
+        use k8s_openapi::api::core::v1::Pod;
         use tokio::net::TcpStream;
 
         let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, namespace.as_deref());
@@ -115,7 +115,7 @@ impl KubernetesAPI {
             let ip = pod_ip
                 .parse::<IpAddr>()
                 .map_err(|e| KubeApiError::invalid_value(&pod, "status.podIp", e))?;
-            trace!("connecting to pod {pod_ip}:{agent_port}");
+            tracing::trace!("connecting to pod {pod_ip}:{agent_port}");
 
             tokio::time::timeout(
                 Duration::from_secs(self.agent.startup_timeout),
@@ -128,7 +128,7 @@ impl KubernetesAPI {
                 Some(namespace) => format!("{pod_name}.{namespace}"),
                 None => pod_name,
             };
-            trace!("connecting to pod {hostname}:{agent_port}");
+            tracing::trace!("connecting to pod {hostname}:{agent_port}");
 
             tokio::time::timeout(
                 Duration::from_secs(self.agent.startup_timeout),
@@ -147,26 +147,10 @@ impl KubernetesAPI {
         &self,
         connect_info: AgentKubernetesConnectInfo,
     ) -> Result<Box<dyn UnpinStream>> {
-        use tokio_retry::{
-            strategy::{jitter, ExponentialBackoff},
-            Retry,
-        };
+        let (stream, portforward) =
+            portforwarder::retry_portforward(&self.client, connect_info).await?;
 
-        let pod_api: Api<Pod> =
-            get_k8s_resource_api(&self.client, connect_info.namespace.as_deref());
-        let retry_strategy = ExponentialBackoff::from_millis(10).map(jitter).take(3);
-        let ports = &[connect_info.agent_port];
-        let mut port_forwarder = Retry::spawn(retry_strategy, || {
-            trace!("port-forward to pod {:?}", &connect_info);
-            pod_api.portforward(&connect_info.pod_name, ports)
-        })
-        .await?;
-
-        let stream = port_forwarder
-            .take_stream(connect_info.agent_port)
-            .ok_or(KubeApiError::PortForwardFailed)?;
-
-        let stream: Box<dyn UnpinStream> = Box::new(stream);
+        tokio::spawn(portforward.into_retry_future());
 
         Ok(stream)
     }
