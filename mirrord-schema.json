@@ -1247,16 +1247,6 @@
       "description": "Configuration for the internal proxy mirrord spawns for each local mirrord session that local layers use to connect to the remote agent\n\nThis is seldom used, but if you get `ConnectionRefused` errors, you might want to increase the timeouts a bit.\n\n```json { \"internal_proxy\": { \"start_idle_timeout\": 30, \"idle_timeout\": 5 } } ```",
       "type": "object",
       "properties": {
-        "breakpoint_timeout": {
-          "title": "internal_proxy.breakpoint_timeout {#internal_proxy-breakpoint_timeout}",
-          "description": "Sometimes the cpu is too busy with other tasks and the internal proxy is blocked from performing its keep-alive check. Increase this value if mirrord exits while you're debugging with breakpoints.\n\n```json { \"internal_proxy\": { \"idle_timeout\": 31536000 } } ```",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0.0
-        },
         "client_tls_certificate": {
           "description": "<!--${internal}-->\n\nCertificate to use as tls client credentials for connection to `connect_tcp`. (self-signed one will be generated automaticaly if not specified)",
           "type": [
@@ -1310,6 +1300,15 @@
             "string",
             "null"
           ]
+        },
+        "socket_timeout": {
+          "description": "<!--${internal}-->\n\nSometimes the cpu is too busy with other tasks and the internal proxy sockets end up timing out. It's set at a ridiculous high value to prevent this from happening when a user hits a breakpoint while debugging, and stays stopped for a while, which sometimes results in mirrord not working when they resume.\n\n```json { \"internal_proxy\": { \"socket_timeout\": 31536000 } } ```",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
         },
         "start_idle_timeout": {
           "title": "internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}",
