@@ -27,7 +27,7 @@ use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
 use crate::crd::{
-    kafka::MirrordKafkaClientProperties, MirrordExternalChanges, MirrordPolicy, MirrordSqsSession,
+    kafka::MirrordKafkaClientProperties, MirrordPolicy, MirrordSqsSession,
     MirrordWorkloadQueueRegistry, TargetCrd,
 };
 
@@ -133,7 +133,7 @@ impl Operator {
 
         let service_account = OperatorServiceAccount::new(&namespace, aws_role_arn);
 
-        let role = OperatorRole::new(sqs_splitting);
+        let role = OperatorRole::new(sqs_splitting, kafka_splitting);
         let role_binding = OperatorRoleBinding::new(&role, &service_account);
         let user_cluster_role = OperatorClusterUserRole::new();
 
@@ -226,9 +226,6 @@ impl OperatorSetup for Operator {
             writer.write_all(b"---\n")?;
             MirrordKafkaClientProperties::crd().to_writer(&mut writer)?;
         }
-
-        writer.write_all(b"---\n")?;
-        MirrordExternalChanges::crd().to_writer(&mut writer)?;
 
         Ok(())
     }
@@ -464,7 +461,7 @@ impl OperatorServiceAccount {
 pub struct OperatorRole(ClusterRole);
 
 impl OperatorRole {
-    pub fn new(sqs_splitting: bool) -> Self {
+    pub fn new(sqs_splitting: bool, kafka_splitting: bool) -> Self {
         let mut rules = vec![
             PolicyRule {
                 api_groups: Some(vec![
@@ -488,20 +485,6 @@ impl OperatorRole {
                     "statefulsets/scale".to_owned(),
                 ]),
                 verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
-                ..Default::default()
-            },
-            // For SQS controller to temporarily change deployments to use changed queues.
-            PolicyRule {
-                api_groups: Some(vec!["apps".to_owned()]),
-                resources: Some(vec!["deployments".to_owned()]),
-                verbs: vec!["patch".to_owned()],
-                ..Default::default()
-            },
-            // For SQS controller to temporarily change Argo Rollouts to use changed queues.
-            PolicyRule {
-                api_groups: Some(vec!["argoproj.io".to_owned()]),
-                resources: Some(vec!["rollouts".to_owned()]),
-                verbs: vec!["patch".to_owned()],
                 ..Default::default()
             },
             PolicyRule {
@@ -540,8 +523,25 @@ impl OperatorRole {
                 ..Default::default()
             },
         ];
-        if sqs_splitting {
+
+        if sqs_splitting || kafka_splitting {
             rules.extend([
+                // For SQS/Kafka controller to temporarily change deployments to use changed
+                // queues.
+                PolicyRule {
+                    api_groups: Some(vec!["apps".to_owned()]),
+                    resources: Some(vec!["deployments".to_owned()]),
+                    verbs: vec!["patch".to_owned()],
+                    ..Default::default()
+                },
+                // For SQS/Kafka controller to temporarily change Argo Rollouts to use changed
+                // queues.
+                PolicyRule {
+                    api_groups: Some(vec!["argoproj.io".to_owned()]),
+                    resources: Some(vec!["rollouts".to_owned()]),
+                    verbs: vec!["patch".to_owned()],
+                    ..Default::default()
+                },
                 // Allow the operator to list mirrord queue registries.
                 PolicyRule {
                     api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
@@ -549,6 +549,11 @@ impl OperatorRole {
                     verbs: vec!["list".to_owned()],
                     ..Default::default()
                 },
+            ]);
+        }
+
+        if sqs_splitting {
+            rules.extend([
                 // Allow the SQS controller to update queue registry status.
                 PolicyRule {
                     api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
@@ -586,6 +591,7 @@ impl OperatorRole {
                 },
             ]);
         }
+
         let role = ClusterRole {
             metadata: ObjectMeta {
                 name: Some(OPERATOR_ROLE_NAME.to_owned()),
@@ -609,7 +615,7 @@ impl OperatorRole {
 
 impl Default for OperatorRole {
     fn default() -> Self {
-        Self::new(false)
+        Self::new(false, false)
     }
 }
 
