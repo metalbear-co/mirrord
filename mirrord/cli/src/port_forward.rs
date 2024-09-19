@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    io::Read,
     net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };
@@ -631,9 +632,8 @@ impl ReversePortForwarder {
                 DaemonTcp::HttpRequestChunked(chunked_request) => todo!(),
                 // other
                 DaemonTcp::Close(TcpClose { connection_id }) => {
-                    // remove from mapping by connection
-                    self.mappings_by_connection.remove(&connection_id);
                     // remove from task txs - task will be notified when tx dropped
+                    // task will send PortForwardMessage::Close for cleanup
                     self.task_txs.remove(&connection_id);
                 }
                 DaemonTcp::SubscribeResult(result) => match result {
@@ -668,11 +668,33 @@ impl ReversePortForwarder {
         message: PortForwardMessage,
     ) -> Result<(), PortForwardError> {
         match message {
-            PortForwardMessage::Lookup(_, _, _) => todo!(),
-            PortForwardMessage::Connect(_, _) => todo!(),
-            PortForwardMessage::Send(_, _) => todo!(),
-            PortForwardMessage::Close(_, _) => todo!(),
+            PortForwardMessage::Send(connection_id, bytes) => {
+                self.agent_connection
+                    .sender
+                    .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(
+                        LayerWrite {
+                            connection_id,
+                            bytes,
+                        },
+                    )))
+                    .await?;
+            }
+            PortForwardMessage::Close(_port_mapping, Some(connection_id)) => {
+                // remove from mapping by connection
+                self.mappings_by_connection.remove(&connection_id);
+                self.agent_connection
+                    .sender
+                    .send(ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(
+                        LayerClose { connection_id },
+                    )))
+                    .await?;
+            }
+            PortForwardMessage::Lookup(..) | PortForwardMessage::Connect(..) => {
+                unreachable!("run_reverse() does not send this variant")
+            }
+            _ => unreachable!(),
         }
+        Ok(())
     }
 }
 
