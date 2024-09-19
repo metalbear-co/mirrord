@@ -672,5 +672,8 @@ pub struct MirrordSqsSessionSpec {
 #[serde(rename_all = "camelCase")]
 pub enum MirrordExternalChangeSpec {
     #[serde(rename_all = "camelCase")]
-    TemporaryKafkaTopic { name: String },
+    TemporaryKafkaTopic {
+        name: String,
+        client_properties: String,
+    },
 }
