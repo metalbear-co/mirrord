@@ -526,7 +526,7 @@ impl LayerConfig {
 
         if self.experimental.readlink {
             context.add_warning(
-                "experimenta.readlink config has been deprecated, and `readlink` is now\
+                "experimental.readlink config has been deprecated, and `readlink` is now\
                     enabled by default! You may remove it from your config."
                     .into(),
             );
