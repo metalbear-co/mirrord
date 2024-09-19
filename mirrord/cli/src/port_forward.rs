@@ -409,8 +409,11 @@ impl PortForwarder {
                     )))
                     .await?;
             }
-            PortForwardMessage::Close(local_socket, connection_id) => {
-                self.task_txs.remove(&local_socket);
+            PortForwardMessage::Close(port_mapping, connection_id) => {
+                let TaskPortMapping::AddrPort(port_mapping) = port_mapping else {
+                    unreachable!("port_mapping type assured in new() function")
+                };
+                self.task_txs.remove(&port_mapping.local);
                 if let Some(connection_id) = connection_id {
                     self.agent_connection
                         .sender
@@ -599,7 +602,7 @@ impl ReversePortForwarder {
                             task_internal_tx,
                             response_rx,
                         );
-                        task.run_reverse().await
+                        task.run_reverse(connection_id).await
                     });
                 }
                 // data
@@ -693,7 +696,7 @@ enum PortForwardMessage {
 
     /// A request to close the remote connection with the given id, if it exists, and the local
     /// socket.
-    Close(SocketAddr, Option<ConnectionId>),
+    Close(TaskPortMapping, Option<ConnectionId>),
 }
 
 #[derive(Clone, Debug)]
@@ -703,11 +706,16 @@ enum TaskPortMapping {
 }
 
 struct LocalConnectionTask {
+    /// read half of the TcpStream connected to the local port, wrapped in a stream
     read_stream: ReaderStream<OwnedReadHalf>,
+    /// write half of the TcpStream connected to the local port
     write: OwnedWriteHalf,
+    /// the mapping local_port:remote_ip:remote_port or remote_port:local_port for reverse portfwd
     port_mapping: TaskPortMapping,
+    /// tx for sending internal messages to the main loop
     task_internal_tx: Sender<PortForwardMessage>,
-    response_rx: Receiver<Vec<u8>>,
+    /// rx for receiving data from the main loop
+    data_rx: Receiver<Vec<u8>>,
 }
 
 impl LocalConnectionTask {
@@ -729,7 +737,7 @@ impl LocalConnectionTask {
             write,
             port_mapping: TaskPortMapping::AddrPort(port_mapping),
             task_internal_tx,
-            response_rx,
+            data_rx: response_rx,
         }
     }
 
@@ -748,7 +756,7 @@ impl LocalConnectionTask {
                 // stream ended without sending data
                 let _ = self
                     .task_internal_tx
-                    .send(PortForwardMessage::Close(port_mapping.local, None))
+                    .send(PortForwardMessage::Close(self.port_mapping.clone(), None))
                     .await;
                 return Ok(());
             }
@@ -782,7 +790,7 @@ impl LocalConnectionTask {
                         );
                         let _ = self
                             .task_internal_tx
-                            .send(PortForwardMessage::Close(port_mapping.local, None))
+                            .send(PortForwardMessage::Close(self.port_mapping.clone(), None))
                             .await;
                         return Ok(());
                     }
@@ -815,7 +823,7 @@ impl LocalConnectionTask {
                 );
                 let _ = self
                     .task_internal_tx
-                    .send(PortForwardMessage::Close(port_mapping.local, None))
+                    .send(PortForwardMessage::Close(self.port_mapping.clone(), None))
                     .await;
                 return Ok(());
             }
@@ -858,7 +866,7 @@ impl LocalConnectionTask {
                     },
                 },
 
-                message = self.response_rx.recv() => match message {
+                message = self.data_rx.recv() => match message {
                     Some(message) => {
                         match self.write.write_all(message.as_ref()).await {
                             Ok(_) => continue,
@@ -880,7 +888,7 @@ impl LocalConnectionTask {
         let _ = self
             .task_internal_tx
             .send(PortForwardMessage::Close(
-                port_mapping.local,
+                self.port_mapping.clone(),
                 Some(connection_id),
             ))
             .await;
@@ -905,15 +913,68 @@ impl LocalConnectionTask {
             write,
             port_mapping: TaskPortMapping::PortOnly(port_mapping),
             task_internal_tx,
-            response_rx,
+            data_rx: response_rx,
         }
     }
 
-    pub async fn run_reverse(&mut self) -> Result<(), PortForwardError> {
-        let TaskPortMapping::PortOnly(_port_mapping) = self.port_mapping.clone() else {
-            unreachable!("port_mapping type assured in new() function")
+    pub async fn run_reverse(
+        &mut self,
+        connection_id: ConnectionId,
+    ) -> Result<(), PortForwardError> {
+        let TaskPortMapping::PortOnly(port_mapping) = self.port_mapping else {
+            unreachable!("port_mapping type assured in new_reverse() function")
         };
-        todo!()
+
+        let result: Result<(), PortForwardError> = loop {
+            select! {
+                message = self.read_stream.next() => match message {
+                    Some(Ok(message)) => {
+                        match self.task_internal_tx
+                            .send(PortForwardMessage::Send(connection_id, message.into()))
+                            .await
+                        {
+                            Ok(_) => (),
+                            Err(error) => {
+                                tracing::warn!("failed to send response to main loop: {error}");
+                            }
+                        };
+                    },
+                    Some(Err(error)) => {
+                        tracing::warn!(
+                            %error,
+                            port_mapping = ?port_mapping,
+                            "local connection failed",
+                        );
+                        break Ok(());
+                    },
+                    None => {
+                        break Ok(());
+                    },
+                },
+                message = self.data_rx.recv() => match message {
+                    Some(message) => {
+                        match self.write.write(message.as_slice()).await {
+                            Ok(_) => (),
+                            Err(error) => {
+                                tracing::warn!("failed to send data to local port: {error}");
+                            }
+                        }
+                    },
+                    None => {
+                        break Ok(());
+                    },
+                }
+            }
+        };
+
+        let _ = self
+            .task_internal_tx
+            .send(PortForwardMessage::Close(
+                self.port_mapping.clone(),
+                Some(connection_id),
+            ))
+            .await;
+        result
     }
 }
 

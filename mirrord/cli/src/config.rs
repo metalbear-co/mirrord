@@ -488,7 +488,7 @@ pub enum PortMappingParseErr {
     PortZeroInvalid(String),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Copy)]
 pub struct PortOnlyMapping {
     pub local: LocalPort,
     pub remote: RemotePort,
