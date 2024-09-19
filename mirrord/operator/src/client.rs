@@ -661,7 +661,7 @@ impl OperatorApi<PreparedClientCert> {
 
             if config.feature.copy_target.enabled.not() {
                 if is_empty_deployment.not() {
-                    copy_subtask.info("Creating a copy-target for queue-splitting (even thought copy_target was not explicitly set).")
+                    copy_subtask.info("Creating a copy-target for queue-splitting (even though copy_target was not explicitly set).")
                 } else {
                     copy_subtask.info("Creating a copy-target for deployment (even thought copy_target was not explicitly set).")
                 }

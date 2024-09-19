@@ -28,7 +28,7 @@ use thiserror::Error;
 
 use crate::crd::{MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd};
 
-static OPERATOR_NAME: &str = "mirrord-operator";
+pub static OPERATOR_NAME: &str = "mirrord-operator";
 /// 443 is standard port for APIService, do not change this value
 /// (will require users to add FW rules)
 static OPERATOR_PORT: i32 = 443;
