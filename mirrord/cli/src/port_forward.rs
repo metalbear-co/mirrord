@@ -476,8 +476,8 @@ impl ReversePortForwarder {
     pub(crate) async fn new(
         agent_connection: AgentConnection,
         parsed_mappings: Vec<PortOnlyMapping>,
+        steal_mode: bool,
     ) -> Result<Self, PortForwardError> {
-        let steal_mode = true;
         let mut mappings: HashMap<RemotePort, LocalPort> =
             HashMap::with_capacity(parsed_mappings.len());
 
