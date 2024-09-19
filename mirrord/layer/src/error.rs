@@ -227,7 +227,9 @@ impl From<HookError> for i64 {
             HookError::ProxyError(ref err) => {
                 graceful_exit!(
                     "Proxy error, connectivity issue or a bug. \n\
-                    You may report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml \n{err}"
+                    Please report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml \n\
+                    You may find the `mirrord-intproxy` logs in your `/tmp` directory (default).\n\
+                    {err}"
                 )
             }
             _ => error!("Error occured in Layer >> {fail:?}"),

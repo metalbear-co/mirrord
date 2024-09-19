@@ -38,6 +38,12 @@ body:
       label: Relevant Logs
       description: If possible, reproduce the bug with the envrionment variable RUST_LOG set to 'trace', and attach the printed logs
       render: shell
+  - type: textarea
+    id: intproxy-logs
+    attributes:
+      label: Internal proxy logs
+      description: Please attach the relevant `mirrord-intproxy` logs. You may find them in your `/tmp` directory (default).
+      render: shell
   - type: input
     id: os_version
     attributes:
