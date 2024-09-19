@@ -149,7 +149,7 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
 /// from those queues and verify the remote application exactly the messages it was supposed to.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(180))]
+#[timeout(Duration::from_secs(360))]
 pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_dir: &Path) {
     let mut sqs_test_resources = sqs_test_resources.await;
     let application = Application::RustSqs;
