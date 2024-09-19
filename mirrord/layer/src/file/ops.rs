@@ -5,9 +5,13 @@ use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 #[cfg(target_os = "linux")]
 use libc::{c_char, statx, statx_timestamp};
 use libc::{c_int, iovec, unlink, AT_FDCWD};
-use mirrord_protocol::file::{
-    OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse, ReadLinkFileRequest,
-    ReadLinkFileResponse, SeekFileResponse, WriteFileResponse, XstatFsResponse, XstatResponse,
+use mirrord_protocol::{
+    file::{
+        OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse,
+        ReadLinkFileRequest, ReadLinkFileResponse, SeekFileResponse, WriteFileResponse,
+        XstatFsResponse, XstatResponse,
+    },
+    ResponseError,
 };
 use rand::distributions::{Alphanumeric, DistString};
 use tracing::{error, trace, Level};
@@ -304,9 +308,13 @@ pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
     ensure_not_ignored!(path, false);
 
     let requesting_path = ReadLinkFileRequest { path };
-    let response = common::make_proxy_request_with_response(requesting_path)??;
 
-    Detour::Success(response)
+    // `NotImplemented` error here means that the protocol doesn't support it.
+    match common::make_proxy_request_with_response(requesting_path)? {
+        Ok(response) => Detour::Success(response),
+        Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
+        Err(fail) => Detour::Error(fail.into()),
+    }
 }
 
 pub(crate) fn pwrite(local_fd: RawFd, buffer: &[u8], offset: u64) -> Detour<WriteFileResponse> {
