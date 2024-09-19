@@ -156,7 +156,7 @@ fn block_unfiltered_steal_with_deployment_path_pattern() -> PolicyTestCase {
         policy: MirrordPolicy::new(
             "e2e-test-block-unfiltered-steal-with-path-pattern",
             MirrordPolicySpec {
-                target_path: Some("deployment/*service-a*".into()),
+                target_path: Some("deploy/*service-a*".into()),
                 selector: None,
                 block: vec![BlockedFeature::StealWithoutFilter],
             },
@@ -244,7 +244,7 @@ async fn run_mirrord_and_verify_steal_result(
     let application = Application::Go21HTTP;
 
     let target = if target_deployment {
-        format!("deployment/{}", kube_service.name)
+        format!("deploy/{}", kube_service.name)
     } else {
         kube_service.target.clone()
     };

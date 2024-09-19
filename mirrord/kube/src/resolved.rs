@@ -214,8 +214,6 @@ impl ResolvedTarget {
     }
 
     pub fn urlfied_name(&self) -> String {
-        // TODO(alex) [high] 1: `type_()` here will return `deployment`, but mirrord policies
-        // support both `deploy` and `deployment` ...
         let mut url = self.type_().to_string();
 
         if let Some(target_name) = self.name() {
