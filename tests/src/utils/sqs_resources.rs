@@ -276,7 +276,7 @@ async fn sqs_consumer_service(
     service_with_env(
         &namespace,
         "ClusterIP",
-        "ghcr.io/metalbear-co/sqs-forwarder:latest",
+        "ghcr.io/metalbear-co/mirrord-sqs-forwarder:latest",
         "queue-forwarder",
         false,
         kube_client.clone(),
