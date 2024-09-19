@@ -39,6 +39,12 @@ use crate::{
     RemotePort,
 };
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedPortMapping {
+    pub local: SocketAddr,
+    pub remote: SocketAddr,
+}
+
 pub struct PortForwarder {
     /// communicates with the agent (only TCP supported)
     agent_connection: AgentConnection,
@@ -64,36 +70,6 @@ pub struct PortForwarder {
     /// true if Ping has been sent to agent
     waiting_for_pong: bool,
     ping_pong_timeout: Instant,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ResolvedPortMapping {
-    // TODO: move this and enum below so portforwarder and reverse are together
-    pub local: SocketAddr,
-    pub remote: SocketAddr,
-}
-
-/// Used by tasks for individual forwarding connections to send instructions to [`PortForwarder`]'s
-/// main loop.
-#[derive(Debug)]
-enum PortForwardMessage {
-    /// A request to perform lookup on the given hostname at the remote peer.
-    /// Sent by the task only after receiving first batch of data from the user.
-    /// The task waits for [`SocketAddr`] on the other end of the [`oneshot`] channel.
-    Lookup(SocketAddr, String, oneshot::Sender<IpAddr>),
-
-    /// A request to make outgoing connection to the remote peer.
-    /// Sent by the task only after receiving first batch of data from the user and after hostname
-    /// resolution (if applicable). The task waits for [`ConnectionId`] on the other end of the
-    /// [`oneshot`] channel.
-    Connect(ResolvedPortMapping, oneshot::Sender<ConnectionId>),
-
-    /// Data received from the user in the connection with the given id.
-    Send(ConnectionId, Vec<u8>),
-
-    /// A request to close the remote connection with the given id, if it exists, and the local
-    /// socket.
-    Close(SocketAddr, Option<ConnectionId>),
 }
 
 impl PortForwarder {
@@ -697,18 +673,41 @@ impl ReversePortForwarder {
     }
 }
 
-struct LocalConnectionTask {
-    read_stream: ReaderStream<OwnedReadHalf>,
-    write: OwnedWriteHalf,
-    port_mapping: TaskPortMapping,
-    task_internal_tx: Sender<PortForwardMessage>,
-    response_rx: Receiver<Vec<u8>>,
+/// Used by tasks for individual forwarding connections to send instructions to [`PortForwarder`]'s
+/// main loop.
+#[derive(Debug)]
+enum PortForwardMessage {
+    /// A request to perform lookup on the given hostname at the remote peer.
+    /// Sent by the task only after receiving first batch of data from the user.
+    /// The task waits for [`SocketAddr`] on the other end of the [`oneshot`] channel.
+    Lookup(SocketAddr, String, oneshot::Sender<IpAddr>),
+
+    /// A request to make outgoing connection to the remote peer.
+    /// Sent by the task only after receiving first batch of data from the user and after hostname
+    /// resolution (if applicable). The task waits for [`ConnectionId`] on the other end of the
+    /// [`oneshot`] channel.
+    Connect(ResolvedPortMapping, oneshot::Sender<ConnectionId>),
+
+    /// Data received from the user in the connection with the given id.
+    Send(ConnectionId, Vec<u8>),
+
+    /// A request to close the remote connection with the given id, if it exists, and the local
+    /// socket.
+    Close(SocketAddr, Option<ConnectionId>),
 }
 
 #[derive(Clone, Debug)]
 enum TaskPortMapping {
     AddrPort(AddrPortMapping),
     PortOnly(PortOnlyMapping),
+}
+
+struct LocalConnectionTask {
+    read_stream: ReaderStream<OwnedReadHalf>,
+    write: OwnedWriteHalf,
+    port_mapping: TaskPortMapping,
+    task_internal_tx: Sender<PortForwardMessage>,
+    response_rx: Receiver<Vec<u8>>,
 }
 
 impl LocalConnectionTask {
