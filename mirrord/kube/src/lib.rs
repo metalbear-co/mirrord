@@ -15,4 +15,3 @@
 pub mod api;
 pub mod error;
 pub mod resolved;
-pub mod subject_access_review;
