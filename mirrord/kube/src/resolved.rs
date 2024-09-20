@@ -115,7 +115,7 @@ impl ResolvedTarget {
                 }
             }
             ResolvedTarget::Pod(pod, container) => {
-                get_full_runtime_data(pod, container.as_deref())?;
+                let _ = RuntimeData::from_pod(pod, container.as_deref())?;
             }
 
             ResolvedTarget::Rollout(rollout, container) => {
@@ -364,32 +364,4 @@ impl ResolvedTarget {
             ResolvedTarget::Targetless(namespace) => Some(namespace),
         }
     }
-}
-
-/// Checks target-readiness of a [`Pod`]. The given [`Pod`] is considered target-ready when
-/// [`RuntimeData::from_pod`] succeeds.
-///
-/// # Return
-///
-/// Returns [`RuntimeData`] extracted from the [`Pod`] and restart count of the selected
-/// container.
-pub fn get_full_runtime_data(
-    pod: &Pod,
-    container_name: Option<&str>,
-) -> Result<(RuntimeData, i32), KubeApiError> {
-    let runtime_data = RuntimeData::from_pod(pod, container_name)?;
-
-    let restart_count = pod
-        .status
-        .as_ref()
-        .and_then(|status| status.container_statuses.as_ref())
-        .into_iter()
-        .flatten()
-        .find(|status| status.name == runtime_data.container_name)
-        .expect(
-            "container should exist in containerStatuses, we just found it with RuntimeData::from_pod",
-        )
-        .restart_count;
-
-    Ok((runtime_data, restart_count))
 }
