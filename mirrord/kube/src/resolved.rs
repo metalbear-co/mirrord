@@ -30,9 +30,7 @@ pub enum ResolvedTarget {
 }
 
 impl ResolvedTarget {
-    /// Gets a target from k8s with the [`Client`] that is passed here, and checks if it's
-    /// a valid mirrord target with [`ResolvedTarget::assert_valid_mirrord_target`].
-    ///
+    /// Gets a target from k8s with the [`Client`] that is passed here.
     /// Currently this `client` comes set up with a mirrord-operator config.
     #[tracing::instrument(level = Level::DEBUG, skip(client), ret, err)]
     pub async fn new(
