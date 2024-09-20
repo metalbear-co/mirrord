@@ -570,8 +570,6 @@ impl OperatorApi<PreparedClientCert> {
             .supported_features()
             .contains(&NewOperatorFeature::ProxyApi);
 
-        // TODO(alex) [high] 1: No need for targetcrd? We need the connect url only, and
-        // to trigger copy target stuff?
         let connect_url = if config.feature.copy_target.enabled
             // use copy_target for splitting queues
             || config.feature.split_queues.is_set()
@@ -654,12 +652,6 @@ impl OperatorApi<PreparedClientCert> {
     ///
     /// `copy_target` feature is not available for all target types.
     /// Target type compatibility is checked by the operator.
-    // TODO(alex) [high] 2: Now I need to fix this somehow. Ideally, it would make a request
-    // to the operator to create the copy, then we would list the targets and turn it into
-    // a `ResolvedTarget`, or maybe `impl From<CopyTargetCrd> for ResolvedTarget`, instead
-    // of listing.
-    // I think we could come here after `ResolvedTarget` has been used, which is not ideal,
-    // as there will be no target to resolve?
     #[tracing::instrument(level = "trace", err)]
     async fn copy_target(
         &self,

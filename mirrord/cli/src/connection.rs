@@ -82,9 +82,6 @@ where
     let api = api.prepare_client_cert(analytics).await.into_certified()?;
     user_cert_subtask.success(Some("user credentials prepared"));
 
-    // TODO(alex) [high] 3: I don't think we can `ResolveTarget` here, it must be done only
-    // after we decide if it should be copy or not? Or at least, if we can't find a valid
-    // target, then it should become a copy?
     let target = ResolvedTarget::new(
         api.client(),
         &config.target.path.clone().unwrap_or(Target::Targetless),
