@@ -741,7 +741,6 @@ pub enum Application {
     RustRecvFrom,
     RustListenPorts,
     Fork,
-    /// `mirrord/layer/tests/apps/readlink/readlink.c`
     ReadLink,
     OpenFile,
     CIssue2055,
