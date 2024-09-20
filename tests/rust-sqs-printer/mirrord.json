@@ -1,0 +1,20 @@
+{
+  "operator": true,
+  "target": "deployment/sqs-printer",
+  "feature": {
+    "split_queues": {
+      "manual-queue": {
+        "queue_type": "SQS",
+        "message_filter": {
+          "local": "1"
+        }
+      },
+      "fifo-queue": {
+        "queue_type": "SQS",
+        "message_filter": {
+          "local": "1"
+        }
+      }
+    }
+  }
+}
