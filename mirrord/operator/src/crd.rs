@@ -659,21 +659,3 @@ pub struct MirrordSqsSessionSpec {
     // so we save that field as a (HEX) string even though its source is a u64
     pub session_id: String,
 }
-
-/// Properties to use when creating operator's Kafka client.
-/// Resources of this kind should live in the operator's namespace.
-#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "MirrordExternalChange",
-    namespaced
-)]
-#[serde(rename_all = "camelCase")]
-pub enum MirrordExternalChangeSpec {
-    #[serde(rename_all = "camelCase")]
-    TemporaryKafkaTopic {
-        name: String,
-        client_properties: String,
-    },
-}
