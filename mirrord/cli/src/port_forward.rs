@@ -441,6 +441,7 @@ pub struct ReversePortForwarder {
     /// identifies a pair of mapped socket addresses by their corresponding connection ID.
     mappings_by_connection: HashMap<ConnectionId, PortOnlyMapping>,
     /// identifies task senders by their corresponding connection ID.
+    // TODO: change sender type to allow bytes or httprequestfallback
     task_txs: HashMap<ConnectionId, Sender<Vec<u8>>>,
 
     /// transmit internal messages from tasks to [`PortForwarder`]'s main loop.
@@ -618,18 +619,46 @@ impl ReversePortForwarder {
                     tx.send(bytes).await?;
                 }
                 DaemonTcp::HttpRequest(HttpRequest {
-                    internal_request,
+                    internal_request: _,
                     connection_id,
-                    request_id,
-                    port,
-                }) => todo!(),
+                    request_id: _,
+                    port: _,
+                }) => {
+                    let Some(_port_mapping) = self.mappings_by_connection.get(&connection_id)
+                    else {
+                        // ignore unknown connection IDs
+                        return Ok(());
+                    };
+                    let Some(sender) = self.task_txs.get(&connection_id) else {
+                        unreachable!("sender is always created before this point")
+                    };
+                    // TODO: turn internal_request into HttpFallback
+                    let http_req = vec![];
+                    sender.send(http_req).await?;
+                }
                 DaemonTcp::HttpRequestFramed(HttpRequest {
-                    internal_request,
+                    internal_request: _,
                     connection_id,
-                    request_id,
-                    port,
-                }) => todo!(),
-                DaemonTcp::HttpRequestChunked(chunked_request) => todo!(),
+                    request_id: _,
+                    port: _,
+                }) => {
+                    let Some(_port_mapping) = self.mappings_by_connection.get(&connection_id)
+                    else {
+                        // ignore unknown connection IDs
+                        return Ok(());
+                    };
+                    let Some(sender) = self.task_txs.get(&connection_id) else {
+                        unreachable!("sender is always created before this point")
+                    };
+                    // TODO: turn internal_request into HttpFallback
+                    let http_req = vec![];
+                    sender.send(http_req).await?;
+                }
+                DaemonTcp::HttpRequestChunked(chunked_request) => match chunked_request {
+                    ChunkedRequest::Start(_) => todo!(),
+                    ChunkedRequest::Body(_) => todo!(),
+                    ChunkedRequest::Error(_) => todo!(),
+                },
                 // other
                 DaemonTcp::Close(TcpClose { connection_id }) => {
                     // remove from task txs - task will be notified when tx dropped
