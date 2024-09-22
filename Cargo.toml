@@ -112,6 +112,7 @@ exec = "0.3"
 drain = "0.1"
 base64 = "0.22"
 rustls = "0.23"
+aws-lc-sys = "0.20.1" # version 0.21.1 fails to compile on Linux x86
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
