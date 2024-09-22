@@ -8,6 +8,47 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.118.0](https://github.com/metalbear-co/mirrord/tree/3.118.0) - 2024-09-22
+
+
+### Added
+
+- Add `cli_extra_args` field to `container` config to allow specifing custom
+  arguments for `mirrord container` sidecar container.
+
+  ```json
+  {
+    "container": {
+      "cli_extra_args": ["--network", "host"]
+    }
+  }
+  ```
+  this config will spawn mirrord cli container with `<runtime> run --network
+  host --rm -d ...`.
+  [#2756](https://github.com/metalbear-co/mirrord/issues/2756)
+
+
+### Changed
+
+- Increase timeout of layer-intproxy socket connection to a ludicrous amount.
+  [#2652](https://github.com/metalbear-co/mirrord/issues/2652)
+- Have intproxy log to a file in /tmp by default.
+  [#2750](https://github.com/metalbear-co/mirrord/issues/2750)
+- Bump dependencies
+
+
+### Fixed
+
+- Add a retry for port-forward agent connection if error was recived via error
+  channel after websocket was established.
+  [#2759](https://github.com/metalbear-co/mirrord/issues/2759)
+
+
+### Internal
+
+- E2E tests for SQS splitting.
+
+
 ## [3.117.0](https://github.com/metalbear-co/mirrord/tree/3.117.0) - 2024-09-12
 
 
