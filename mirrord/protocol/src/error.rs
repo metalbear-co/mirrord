@@ -64,6 +64,9 @@ pub enum ResponseError {
 
     #[error("Failed stripping path with `{0}`!")]
     StripPrefix(String),
+
+    #[error("operation is async and now is in progress")]
+    InProgress,
 }
 
 impl From<StripPrefixError> for ResponseError {

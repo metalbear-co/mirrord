@@ -48,14 +48,8 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
     Ok(())
 }
 
-/// Main entry point for the internal proxy.
-/// It listens for inbound layer connect and forwards to agent.
-pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError> {
-    let config = LayerConfig::from_env()?;
-
-    tracing::info!(?config, "internal_proxy starting");
-
-    // Setting up default logging for intproxy.
+// Setting up default logging for intproxy.
+fn setup_file_tracing(config: &LayerConfig) -> Result<(), InternalProxyError> {
     let log_destination = config
         .internal_proxy
         .log_destination
@@ -91,6 +85,20 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
         .with_ansi(false)
         .with_env_filter(EnvFilter::builder().parse_lossy(log_level))
         .init();
+
+    Ok(())
+}
+
+/// Main entry point for the internal proxy.
+/// It listens for inbound layer connect and forwards to agent.
+pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError> {
+    let config = LayerConfig::from_env()?;
+
+    tracing::info!(?config, "internal_proxy starting");
+
+    if std::env::var("MIRRORD_CONSOLE_ADDR").is_err() {
+        setup_file_tracing(&config)?;
+    }
 
     // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
     // so we assume Linux can be higher and set to that.

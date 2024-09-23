@@ -48,6 +48,36 @@ pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
     }
 }
 
+fn proxy_receive_into_response<T: IsLayerRequestWithResponse>(
+    response_id: u64,
+) -> HookResult<T::Response> {
+    // // SAFETY: mutation happens only on initialization.
+    unsafe {
+        PROXY_CONNECTION
+            .get()
+            .ok_or(HookError::CannotGetProxyConnection)?
+            .receive_into_response::<T>(response_id)
+            .map_err(Into::into)
+    }
+}
+
+pub fn make_proxy_request_with_response_iterator<'r, T>(
+    request: T,
+) -> Box<dyn Iterator<Item = HookResult<T::Response>> + Send + 'r>
+where
+    T: IsLayerRequestWithResponse + Debug,
+    T::Response: Debug + Send + 'r,
+{
+    let response_id = match make_proxy_request_no_response(request) {
+        Err(error) => return Box::new(std::iter::once(HookResult::Err(error))),
+        Ok(response_id) => response_id,
+    };
+
+    Box::new(std::iter::from_fn(move || {
+        Some(proxy_receive_into_response::<T>(response_id))
+    }))
+}
+
 /// Converts raw pointer values `P` to some other type.
 ///
 /// ## Usage

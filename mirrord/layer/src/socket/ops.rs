@@ -17,14 +17,17 @@ use errno::set_errno;
 use libc::{c_int, c_void, hostent, sockaddr, socklen_t, AF_UNIX};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
-    ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
-    OutgoingConnectResponse, PortSubscribe,
+    ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectFlags,
+    OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe,
 };
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
-use nix::sys::socket::{sockopt, SockaddrLike, SockaddrStorage};
+use nix::{
+    fcntl::OFlag,
+    sys::socket::{sockopt, SockaddrLike, SockaddrStorage},
+};
 use socket2::SockAddr;
 #[cfg(debug_assertions)]
 use tracing::Level;
@@ -425,6 +428,7 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
     protocol: NetProtocol,
+    flags: OutgoingConnectFlags,
 ) -> Detour<ConnectResult> {
     // Closure that performs the connection with mirrord messaging.
     let remote_connection = |remote_address: SockAddr| {
@@ -434,46 +438,90 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
         let request = OutgoingConnectRequest {
             remote_address: remote_address.clone(),
             protocol,
+            flags,
         };
-        let response = common::make_proxy_request_with_response(request)??;
 
-        let OutgoingConnectResponse {
-            layer_address,
-            in_cluster_address,
-        } = response;
+        let mut responses = common::make_proxy_request_with_response_iterator(request);
 
-        // Connect to the interceptor socket that is listening.
-        let connect_result: ConnectResult = if CALL_CONNECT {
-            let layer_address = SockAddr::try_from(layer_address.clone())?;
+        match responses
+            .next()
+            .expect("response iter will respolve or block")?
+        {
+            Ok(response) => {
+                let OutgoingConnectResponse {
+                    layer_address,
+                    in_cluster_address,
+                } = response;
 
-            unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
-        } else {
-            ConnectResult {
-                result: 0,
-                error: None,
+                // Connect to the interceptor socket that is listening.
+                let connect_result: ConnectResult = if CALL_CONNECT {
+                    let layer_address = SockAddr::try_from(layer_address.clone())?;
+
+                    unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }
+                        .into()
+                } else {
+                    ConnectResult {
+                        result: 0,
+                        error: None,
+                    }
+                };
+
+                if connect_result.is_failure() {
+                    error!(
+                        "connect -> Failed call to libc::connect with {:#?}",
+                        connect_result,
+                    );
+                    Err(io::Error::last_os_error())?
+                }
+
+                let connected = Connected {
+                    remote_address,
+                    local_address: in_cluster_address,
+                    layer_address: Some(layer_address),
+                };
+
+                trace!("we are connected {connected:#?}");
+
+                Arc::get_mut(&mut user_socket_info).unwrap().state =
+                    SocketState::Connected(connected);
+                SOCKETS.lock()?.insert(sockfd, user_socket_info);
+
+                Detour::Success(connect_result)
             }
-        };
+            Err(err @ ResponseError::InProgress) => {
+                // Spawn a watcher that will call [`FN_CONNECT`] when response is ready
+                std::thread::spawn(move || {
+                    for response in responses {
+                        match response {
+                            Ok(Err(ResponseError::InProgress)) => {
+                                continue;
+                            }
+                            Ok(Err(_)) | Err(_) => {
+                                break;
+                            }
+                            Ok(Ok(OutgoingConnectResponse { layer_address, .. })) => {
+                                let layer_address =
+                                    SockAddr::try_from(layer_address.clone()).unwrap();
 
-        if connect_result.is_failure() {
-            error!(
-                "connect -> Failed call to libc::connect with {:#?}",
-                connect_result,
-            );
-            Err(io::Error::last_os_error())?
+                                let connect_result: ConnectResult = unsafe {
+                                    FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len())
+                                }
+                                .into();
+
+                                if connect_result.is_failure() {
+                                    tracing::warn!(?connect_result, "async connect is a faulure");
+                                }
+
+                                return;
+                            }
+                        }
+                    }
+                });
+
+                Detour::Error(err.into())
+            }
+            Err(err) => Detour::Error(err.into()),
         }
-
-        let connected = Connected {
-            remote_address,
-            local_address: in_cluster_address,
-            layer_address: Some(layer_address),
-        };
-
-        trace!("we are connected {connected:#?}");
-
-        Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
-        SOCKETS.lock()?.insert(sockfd, user_socket_info);
-
-        Detour::Success(connect_result)
     };
 
     if remote_address.is_unix() {
@@ -569,7 +617,17 @@ pub(super) fn connect(
 
     let unix_streams = crate::setup().remote_unix_streams();
 
-    trace!("in connect {:#?}", SOCKETS);
+    let socket_fd_flags = nix::fcntl::fcntl(sockfd, nix::fcntl::FcntlArg::F_GETFL)
+        .map(OFlag::from_bits_truncate)
+        .map_err(io::Error::from)?;
+
+    let mut outgoing_flags = OutgoingConnectFlags::empty();
+
+    if socket_fd_flags.contains(OFlag::O_NONBLOCK) {
+        outgoing_flags |= OutgoingConnectFlags::NONBLOCK;
+    }
+
+    tracing::debug!(flags = ?socket_fd_flags, sockets = ?SOCKETS, "in connect");
 
     let user_socket_info = match SOCKETS.lock()?.remove(&sockfd) {
         Some(socket) => socket,
@@ -647,6 +705,7 @@ pub(super) fn connect(
             remote_address,
             user_socket_info,
             NetProtocol::Datagrams,
+            outgoing_flags,
         ),
 
         NetProtocol::Stream => match user_socket_info.state {
@@ -659,6 +718,7 @@ pub(super) fn connect(
                     remote_address,
                     user_socket_info,
                     NetProtocol::Stream,
+                    outgoing_flags,
                 )
             }
 
@@ -1301,6 +1361,7 @@ pub(super) fn send_to(
             destination,
             user_socket_info,
             NetProtocol::Datagrams,
+            OutgoingConnectFlags::empty(),
         )?;
 
         let layer_address: SockAddr = SOCKETS
@@ -1394,6 +1455,7 @@ pub(super) fn sendmsg(
             destination,
             user_socket_info,
             NetProtocol::Datagrams,
+            OutgoingConnectFlags::empty(),
         )?;
 
         let layer_address: SockAddr = SOCKETS

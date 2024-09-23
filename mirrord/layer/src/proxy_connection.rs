@@ -101,8 +101,16 @@ impl ProxyConnection {
         Ok(message_id)
     }
 
-    pub fn receive(&self, response_id: u64) -> Result<ProxyToLayerMessage> {
+    pub fn receive(&self, response_id: MessageId) -> Result<ProxyToLayerMessage> {
         self.responses.lock()?.receive(response_id)
+    }
+
+    pub fn receive_into_response<T>(&self, response_id: MessageId) -> Result<T::Response>
+    where
+        T: IsLayerRequestWithResponse,
+    {
+        let response = self.receive(response_id)?;
+        T::try_unwrap_response(response).map_err(ProxyError::UnexpectedResponse)
     }
 
     #[mirrord_layer_macro::instrument(level = "trace", skip(self), ret)]
@@ -112,8 +120,7 @@ impl ProxyConnection {
         T::Response: Debug,
     {
         let response_id = self.send(request.wrap())?;
-        let response = self.receive(response_id)?;
-        T::try_unwrap_response(response).map_err(ProxyError::UnexpectedResponse)
+        self.receive_into_response::<T>(response_id)
     }
 
     #[mirrord_layer_macro::instrument(level = "trace", skip(self), ret)]

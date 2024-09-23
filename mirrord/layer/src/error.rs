@@ -211,7 +211,8 @@ impl From<HookError> for i64 {
                 | ResponseError::NotDirectory(_)
                 | ResponseError::Remote(_)
                 | ResponseError::RemoteIO(_)
-                | ResponseError::DnsLookup(_),
+                | ResponseError::DnsLookup(_)
+                | ResponseError::InProgress,
             ) => {
                 info!("libc error (doesn't indicate a problem) >> {fail:#?}")
             }
@@ -277,6 +278,7 @@ impl From<HookError> for i64 {
                     );
                     libc::EINVAL
                 }
+                ResponseError::InProgress => libc::EINPROGRESS,
             },
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,

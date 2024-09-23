@@ -3,8 +3,8 @@
 use std::{collections::HashMap, fmt, io};
 
 use mirrord_intproxy_protocol::{
-    LayerId, MessageId, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
-    ProxyToLayerMessage,
+    LayerId, MessageId, NetProtocol, OutgoingConnectFlags, OutgoingConnectRequest,
+    OutgoingConnectResponse, ProxyToLayerMessage,
 };
 use mirrord_protocol::{
     outgoing::{tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing, DaemonConnect, DaemonRead},
@@ -199,14 +199,24 @@ impl OutgoingProxy {
     async fn handle_connect_request(
         &mut self,
         message_id: MessageId,
-        session_id: LayerId,
+        layer_id: LayerId,
         request: OutgoingConnectRequest,
         message_bus: &mut MessageBus<Self>,
     ) {
-        self.queue(request.protocol).insert(message_id, session_id);
+        self.queue(request.protocol).insert(message_id, layer_id);
 
         let msg = request.protocol.wrap_agent_connect(request.remote_address);
         message_bus.send(ProxyMessage::ToAgent(msg)).await;
+
+        if request.flags.contains(OutgoingConnectFlags::NONBLOCK) {
+            message_bus
+                .send(ToLayer {
+                    message: ProxyToLayerMessage::OutgoingConnect(Err(ResponseError::InProgress)),
+                    message_id,
+                    layer_id,
+                })
+                .await;
+        }
     }
 }
 
@@ -253,7 +263,6 @@ impl BackgroundTask for OutgoingProxy {
                         message_bus
                     ).await,
                 },
-
                 Some(task_update) = self.background_tasks.next() => match task_update {
                     (id, TaskUpdate::Message(bytes)) => {
                         let msg = id.protocol.wrap_agent_write(id.connection_id, bytes);
