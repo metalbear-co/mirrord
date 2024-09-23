@@ -1,10 +1,11 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };
 
 use futures::StreamExt;
+use mirrord_config::feature::network::incoming::IncomingConfig;
 use mirrord_intproxy::{
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
     error::IntProxyError,
@@ -18,8 +19,9 @@ use mirrord_protocol::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
     },
-    tcp::{LayerTcp, LayerTcpSteal, StealType},
-    ClientMessage, ConnectionId, DaemonMessage, LogLevel, ResponseError, CLIENT_READY_FOR_LOGS,
+    tcp::{Filter, HttpFilter, LayerTcp, LayerTcpSteal, StealType},
+    ClientMessage, ConnectionId, DaemonMessage, LogLevel, Port, ResponseError,
+    CLIENT_READY_FOR_LOGS,
 };
 use thiserror::Error;
 use tokio::{
@@ -431,9 +433,8 @@ impl PortForwarder {
 }
 
 pub struct ReversePortForwarder {
-    /// if true, traffic is stolen from remote.
-    /// otherwise, traffic is mirrored
-    steal_mode: bool,
+    /// details for traffic mirroring or stealing
+    incoming_mode: IncomingMode,
     /// communicates with the agent (only TCP supported).
     agent_connection: AgentConnection,
     /// associates resolved destination ports with local ports.
@@ -441,7 +442,7 @@ pub struct ReversePortForwarder {
     /// background task (uses IncomingProxy to communicate with layer)
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
     /// incoming proxy background task tx
-    incoming: TaskSender<IncomingProxy>,
+    incoming_proxy: TaskSender<IncomingProxy>,
 
     /// true if Ping has been sent to agent.
     waiting_for_pong: bool,
@@ -452,7 +453,7 @@ impl ReversePortForwarder {
     pub(crate) async fn new(
         agent_connection: AgentConnection,
         parsed_mappings: Vec<PortOnlyMapping>,
-        steal_mode: bool,
+        network_config: IncomingConfig,
     ) -> Result<Self, PortForwardError> {
         let mut mappings: HashMap<RemotePort, LocalPort> =
             HashMap::with_capacity(parsed_mappings.len());
@@ -476,13 +477,11 @@ impl ReversePortForwarder {
             Default::default();
         let incoming =
             background_tasks.register(IncomingProxy::default(), MainTaskId::IncomingProxy, 512);
+        // construct IncomingMode from config file
+        let incoming_mode = IncomingMode::new(&network_config);
         for (i, (&remote, &local)) in mappings.iter().enumerate() {
             // send subscription to incoming proxy
-            let subscription: PortSubscription = match steal_mode {
-                // TODO: add filter handling?
-                true => PortSubscription::Steal(StealType::All(local)),
-                false => PortSubscription::Mirror(local),
-            };
+            let subscription = incoming_mode.subscription(remote);
             let message_id = i as u64;
             let layer_id = LayerId(1);
             let req = IncomingRequest::PortSubscribe(PortSubscribe {
@@ -501,11 +500,11 @@ impl ReversePortForwarder {
         }
 
         Ok(Self {
-            steal_mode,
+            incoming_mode,
             agent_connection,
             mappings,
             background_tasks,
-            incoming,
+            incoming_proxy: incoming,
             waiting_for_pong: false,
             ping_pong_timeout: Instant::now(),
         })
@@ -532,23 +531,16 @@ impl ReversePortForwarder {
         }
 
         for remote_port in self.mappings.keys() {
-            match self.steal_mode {
-                true => {
-                    // TODO: add filter handling
-                    self.agent_connection
-                        .sender
-                        .send(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
-                            StealType::All(*remote_port),
-                        )))
-                        .await?
+            let subscription = self.incoming_mode.subscription(*remote_port);
+            let msg = match subscription {
+                PortSubscription::Steal(steal_type) => {
+                    ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(steal_type))
                 }
-                false => {
-                    self.agent_connection
-                        .sender
-                        .send(ClientMessage::Tcp(LayerTcp::PortSubscribe(*remote_port)))
-                        .await?
+                PortSubscription::Mirror(_) => {
+                    ClientMessage::Tcp(LayerTcp::PortSubscribe(*remote_port))
                 }
-            }
+            };
+            self.agent_connection.sender.send(msg).await?
         }
 
         loop {
@@ -584,12 +576,12 @@ impl ReversePortForwarder {
     ) -> Result<(), PortForwardError> {
         match message {
             DaemonMessage::Tcp(msg) => {
-                self.incoming
+                self.incoming_proxy
                     .send(IncomingProxyMessage::AgentMirror(msg))
                     .await
             }
             DaemonMessage::TcpSteal(msg) => {
-                self.incoming
+                self.incoming_proxy
                     .send(IncomingProxyMessage::AgentSteal(msg))
                     .await
             }
@@ -860,6 +852,80 @@ impl LocalConnectionTask {
             ))
             .await;
         result
+    }
+}
+
+/// Structs from mirrord_layer
+/// HTTP filter used by the layer with the `steal` feature.
+#[derive(Debug)]
+pub enum StealHttpFilter {
+    /// No filter.
+    None,
+    /// More recent filter (header or path).
+    Filter(HttpFilter),
+}
+
+/// Settings for handling HTTP with the `steal` feature.
+#[derive(Debug)]
+struct StealHttpSettings {
+    /// The HTTP filter to use.
+    pub filter: StealHttpFilter,
+    /// Ports to filter HTTP on.
+    pub ports: HashSet<Port>,
+}
+
+/// Operation mode for the `incoming` feature.
+#[derive(Debug)]
+enum IncomingMode {
+    /// The agent sends data to both the user application and the remote target.
+    /// Data coming from the layer is discarded.
+    Mirror,
+    /// The agent sends data only to the user application.
+    /// Data coming from the layer is sent to the agent.
+    Steal(StealHttpSettings),
+}
+
+impl IncomingMode {
+    /// Creates a new instance from the given [`LayerConfig`].
+    fn new(config: &IncomingConfig) -> Self {
+        if !config.is_steal() {
+            return Self::Mirror;
+        }
+
+        let http_filter_config = &config.http_filter;
+
+        let ports = { http_filter_config.ports.iter().copied().collect() };
+
+        let filter = match (
+            &http_filter_config.path_filter,
+            &http_filter_config.header_filter,
+        ) {
+            (Some(path), None) => StealHttpFilter::Filter(HttpFilter::Path(
+                Filter::new(path.into()).expect("invalid filter expression"),
+            )),
+            (None, Some(header)) => StealHttpFilter::Filter(HttpFilter::Header(
+                Filter::new(header.into()).expect("invalid filter expression"),
+            )),
+            (None, None) => StealHttpFilter::None,
+            _ => panic!("multiple HTTP filters specified"),
+        };
+
+        Self::Steal(StealHttpSettings { filter, ports })
+    }
+
+    /// Returns [`PortSubscription`] request to be used for the given port.
+    fn subscription(&self, port: Port) -> PortSubscription {
+        let Self::Steal(steal) = self else {
+            return PortSubscription::Mirror(port);
+        };
+
+        let steal_type = match &steal.filter {
+            _ if !steal.ports.contains(&port) => StealType::All(port),
+            StealHttpFilter::None => StealType::All(port),
+            StealHttpFilter::Filter(filter) => StealType::FilteredHttpEx(port, filter.clone()),
+        };
+
+        PortSubscription::Steal(steal_type)
     }
 }
 
