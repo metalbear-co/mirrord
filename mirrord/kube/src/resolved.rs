@@ -19,11 +19,19 @@ pub mod cron_job;
 pub mod deployment;
 pub mod job;
 pub mod pod;
-pub mod resource;
 pub mod rollout;
 pub mod stateful_set;
 
 /// Helper struct for resolving user-provided [`Target`] to Kubernetes resources.
+///
+/// It has 3 implementations based on `CHECKED`, which indicates if this target has been
+/// checked with [`ResolvedTarget::assert_valid_mirrord_target`].
+///
+/// 1. A generic implementation with helper methods for getting strings such as names,
+/// types and so on;
+/// 2. `CHECKED = false` that may be used to build the struct, and to call
+/// `assert_valid_mirrord_target` (along with the generic methods);
+/// 3. `CHECKED = true` which is how we get a connection url for the target;
 #[derive(Debug, Clone)]
 pub enum ResolvedTarget<const CHECKED: bool> {
     Deployment(ResolvedResource<Deployment>),
@@ -31,11 +39,21 @@ pub enum ResolvedTarget<const CHECKED: bool> {
     Job(ResolvedResource<Job>),
     CronJob(ResolvedResource<CronJob>),
     StatefulSet(ResolvedResource<StatefulSet>),
+
+    /// [`Pod`] is a special case, in that it does not implement [`RuntimeDataFromLabels`],
+    /// and instead we implement a `runtime_data` method directly in its
+    /// [`ResolvedResource<Pod>`] impl.
     Pod(ResolvedResource<Pod>),
     /// Holds the `namespace` for this target.
     Targetless(String),
 }
 
+/// A kubernetes [`Resource`], and container pair to be used based on the target we
+/// resolved, see [`ResolvedTarget`].
+///
+/// Having this be its own type (instead of just a tuple) lets us implement the
+/// [`RuntimeDataFromLabels`] trait, which is part of finding out the pod we want to
+/// target via the [`RuntimeDataProvider`](crate::api::runtime::RuntimeDataProvider).
 #[derive(Debug, Clone)]
 pub struct ResolvedResource<R>
 where

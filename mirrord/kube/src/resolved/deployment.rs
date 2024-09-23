@@ -5,12 +5,6 @@ use k8s_openapi::api::apps::v1::Deployment;
 use super::ResolvedResource;
 use crate::{api::runtime::RuntimeDataFromLabels, error::KubeApiError};
 
-#[derive(Debug, Clone)]
-pub struct ResolvedDeployment {
-    pub resource: Deployment,
-    pub container: Option<String>,
-}
-
 impl RuntimeDataFromLabels for ResolvedResource<Deployment> {
     type Resource = Deployment;
 

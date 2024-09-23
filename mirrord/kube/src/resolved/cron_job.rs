@@ -8,12 +8,6 @@ use crate::{
     error::{KubeApiError, Result},
 };
 
-#[derive(Debug, Clone)]
-pub struct ResolvedCronJob {
-    pub resource: CronJob,
-    pub container: Option<String>,
-}
-
 impl RuntimeDataFromLabels for ResolvedResource<CronJob> {
     type Resource = CronJob;
 
