@@ -537,7 +537,7 @@ impl OperatorApi<PreparedClientCert> {
     )]
     pub async fn connect_in_new_session<P>(
         &self,
-        target: ResolvedTarget,
+        target: ResolvedTarget<false>,
         config: &LayerConfig,
         progress: &P,
     ) -> OperatorApiResult<OperatorSessionConnection>

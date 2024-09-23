@@ -341,7 +341,7 @@ impl RuntimeDataProvider for Target {
     }
 }
 
-impl RuntimeDataProvider for ResolvedTarget {
+impl RuntimeDataProvider for ResolvedTarget<true> {
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
         match self {
             Self::Deployment(target) => target.runtime_data(client, namespace).await,
