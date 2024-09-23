@@ -10,22 +10,11 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn readlink(
-    #[values(Some("readlink.json"))] with_config: Option<&str>,
-    dylib_path: &Path,
-    config_dir: &Path,
-) {
+async fn readlink(dylib_path: &Path) {
     let application = Application::ReadLink;
 
-    let config = with_config.map(|config| {
-        let mut config_path = config_dir.to_path_buf();
-        config_path.push(config);
-        config_path
-    });
-    let config = config.as_ref().map(|path_buf| path_buf.to_str().unwrap());
-
     let (mut test_process, mut intproxy) = application
-        .start_process_with_layer(dylib_path, Default::default(), config)
+        .start_process_with_layer(dylib_path, Default::default(), None)
         .await;
 
     println!("waiting for file request.");
