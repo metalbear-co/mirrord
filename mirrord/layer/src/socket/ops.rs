@@ -23,6 +23,7 @@ use mirrord_intproxy_protocol::{
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
+    RemoteResult,
 };
 use nix::{
     fcntl::OFlag,
@@ -416,6 +417,45 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     }
 }
 
+fn non_blocking_connect_watcher(
+    sockfd: RawFd,
+    responses: impl Iterator<Item = HookResult<RemoteResult<OutgoingConnectResponse>>>,
+) {
+    for response in responses {
+        match response {
+            Ok(Err(ResponseError::InProgress)) => {
+                continue;
+            }
+            Ok(Ok(OutgoingConnectResponse { layer_address, .. })) => {
+                let layer_address = SockAddr::try_from(layer_address.clone()).unwrap();
+
+                let connect_result: ConnectResult =
+                    unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }
+                        .into();
+
+                if connect_result.is_failure() {
+                    tracing::warn!(?connect_result, ?sockfd, "async connect is a faulure");
+                } else {
+                    tracing::debug!(?connect_result, ?sockfd, "async connect");
+                }
+
+                break;
+            }
+            Err(error) => {
+                tracing::error!(%error, "error reciving response from agent");
+
+                break;
+            }
+            Ok(Err(error)) => {
+                // TODO: Need to handle this case, not sure yet
+                tracing::error!(%error, "recived error from remote connect");
+
+                break;
+            }
+        }
+    }
+}
+
 /// Common logic between Tcp/Udp `connect`, when used for the outgoing traffic feature.
 ///
 /// Sends a hook message that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request
@@ -488,35 +528,9 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
 
                 Detour::Success(connect_result)
             }
-            Err(err @ ResponseError::InProgress) => {
+            Err(err @ ResponseError::InProgress) if CALL_CONNECT => {
                 // Spawn a watcher that will call [`FN_CONNECT`] when response is ready
-                std::thread::spawn(move || {
-                    for response in responses {
-                        match response {
-                            Ok(Err(ResponseError::InProgress)) => {
-                                continue;
-                            }
-                            Ok(Err(_)) | Err(_) => {
-                                break;
-                            }
-                            Ok(Ok(OutgoingConnectResponse { layer_address, .. })) => {
-                                let layer_address =
-                                    SockAddr::try_from(layer_address.clone()).unwrap();
-
-                                let connect_result: ConnectResult = unsafe {
-                                    FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len())
-                                }
-                                .into();
-
-                                if connect_result.is_failure() {
-                                    tracing::warn!(?connect_result, "async connect is a faulure");
-                                }
-
-                                return;
-                            }
-                        }
-                    }
-                });
+                std::thread::spawn(move || non_blocking_connect_watcher(sockfd, responses));
 
                 Detour::Error(err.into())
             }
