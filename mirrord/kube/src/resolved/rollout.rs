@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use super::ResolvedResource;
 use crate::{
@@ -9,8 +9,13 @@ use crate::{
 impl RuntimeDataFromLabels for ResolvedResource<Rollout> {
     type Resource = Rollout;
 
-    fn name(&self) -> &str {
-        self.resource.metadata.name.as_ref().unwrap().as_str()
+    fn name(&self) -> Cow<str> {
+        self.resource
+            .metadata
+            .name
+            .as_ref()
+            .map(Cow::from)
+            .unwrap_or_default()
     }
 
     fn container(&self) -> Option<&str> {

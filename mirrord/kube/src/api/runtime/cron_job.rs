@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use k8s_openapi::api::batch::v1::CronJob;
 use mirrord_config::target::cron_job::CronJobTarget;
@@ -9,8 +9,8 @@ use crate::error::{KubeApiError, Result};
 impl RuntimeDataFromLabels for CronJobTarget {
     type Resource = CronJob;
 
-    fn name(&self) -> &str {
-        &self.cron_job
+    fn name(&self) -> Cow<str> {
+        Cow::from(&self.cron_job)
     }
 
     fn container(&self) -> Option<&str> {

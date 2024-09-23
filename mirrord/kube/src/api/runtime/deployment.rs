@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use k8s_openapi::api::apps::v1::Deployment;
 use mirrord_config::target::deployment::DeploymentTarget;
@@ -9,8 +9,8 @@ use crate::error::{KubeApiError, Result};
 impl RuntimeDataFromLabels for DeploymentTarget {
     type Resource = Deployment;
 
-    fn name(&self) -> &str {
-        &self.deployment
+    fn name(&self) -> Cow<str> {
+        Cow::from(&self.deployment)
     }
 
     fn container(&self) -> Option<&str> {

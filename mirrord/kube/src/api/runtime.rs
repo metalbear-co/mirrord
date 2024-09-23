@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::BTreeMap,
     convert::Infallible,
     fmt::{self, Display, Formatter},
@@ -278,7 +279,7 @@ pub trait RuntimeDataFromLabels {
     #[allow(async_fn_in_trait)]
     async fn get_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>>;
 
-    fn name(&self) -> &str;
+    fn name(&self) -> Cow<str>;
 
     fn container(&self) -> Option<&str>;
 }
@@ -290,7 +291,7 @@ where
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
         let api: Api<<Self as RuntimeDataFromLabels>::Resource> =
             get_k8s_resource_api(client, namespace);
-        let resource = api.get(self.name()).await?;
+        let resource = api.get(&self.name()).await?;
 
         let labels = Self::get_labels(&resource).await?;
 
