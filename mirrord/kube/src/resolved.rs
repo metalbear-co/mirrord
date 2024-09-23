@@ -1,5 +1,8 @@
 use std::collections::BTreeMap;
 
+use cron_job::ResolvedCronJob;
+use deployment::ResolvedDeployment;
+use job::ResolvedJob;
 use k8s_openapi::api::{
     apps::v1::{Deployment, StatefulSet},
     batch::v1::{CronJob, Job},
@@ -7,26 +10,40 @@ use k8s_openapi::api::{
 };
 use kube::{Client, Resource, ResourceExt};
 use mirrord_config::{feature::network::incoming::ConcurrentSteal, target::Target};
+use resource::ResolvedRollout;
 use tracing::Level;
 
 use super::{
-    api::{
-        kubernetes::{get_k8s_resource_api, rollout::Rollout},
-        runtime::RuntimeData,
-    },
+    api::{kubernetes::get_k8s_resource_api, runtime::RuntimeData},
     error::KubeApiError,
 };
+use crate::api::{kubernetes::rollout::Rollout, runtime::RuntimeDataFromLabels};
+
+pub mod cron_job;
+pub mod deployment;
+pub mod job;
+pub mod resource;
+pub mod stateful_set;
 
 /// Helper struct for resolving user-provided [`Target`] to Kubernetes resources.
 #[derive(Debug, Clone)]
 pub enum ResolvedTarget {
-    Deployment(Deployment, Option<String>),
-    Rollout(Rollout, Option<String>),
-    Job(Job, Option<String>),
-    CronJob(CronJob, Option<String>),
+    Deployment(ResolvedResource<Deployment>),
+    Rollout(ResolvedResource<Rollout>),
+    Job(ResolvedResource<Job>),
+    CronJob(ResolvedResource<CronJob>),
     StatefulSet(StatefulSet, Option<String>),
     Pod(Pod, Option<String>),
     Targetless(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedResource<R>
+where
+    R: Resource,
+{
+    pub resource: R,
+    pub container: Option<String>,
 }
 
 impl ResolvedTarget {
@@ -39,22 +56,42 @@ impl ResolvedTarget {
         namespace: Option<&str>,
     ) -> Result<Self, KubeApiError> {
         let target = match &target {
-            Target::Deployment(target) => get_k8s_resource_api(client, namespace)
+            Target::Deployment(target) => get_k8s_resource_api::<Deployment>(client, namespace)
                 .get(&target.deployment)
                 .await
-                .map(|deployment| ResolvedTarget::Deployment(deployment, target.container.clone())),
-            Target::Rollout(target) => get_k8s_resource_api(client, namespace)
+                .map(|resource| {
+                    ResolvedTarget::Deployment(ResolvedResource {
+                        resource,
+                        container: target.container.clone(),
+                    })
+                }),
+            Target::Rollout(target) => get_k8s_resource_api::<Rollout>(client, namespace)
                 .get(&target.rollout)
                 .await
-                .map(|rollout| ResolvedTarget::Rollout(rollout, target.container.clone())),
-            Target::Job(target) => get_k8s_resource_api(client, namespace)
+                .map(|resource| {
+                    ResolvedTarget::Rollout(ResolvedResource {
+                        resource,
+                        container: target.container.clone(),
+                    })
+                }),
+            Target::Job(target) => get_k8s_resource_api::<Job>(client, namespace)
                 .get(&target.job)
                 .await
-                .map(|job| ResolvedTarget::Job(job, target.container.clone())),
-            Target::CronJob(target) => get_k8s_resource_api(client, namespace)
+                .map(|resource| {
+                    ResolvedTarget::Job(ResolvedResource {
+                        resource,
+                        container: target.container.clone(),
+                    })
+                }),
+            Target::CronJob(target) => get_k8s_resource_api::<CronJob>(client, namespace)
                 .get(&target.cron_job)
                 .await
-                .map(|cron_job| ResolvedTarget::CronJob(cron_job, target.container.clone())),
+                .map(|resource| {
+                    ResolvedTarget::CronJob(ResolvedResource {
+                        resource,
+                        container: target.container.clone(),
+                    })
+                }),
             Target::StatefulSet(target) => get_k8s_resource_api(client, namespace)
                 .get(&target.stateful_set)
                 .await
@@ -83,65 +120,71 @@ impl ResolvedTarget {
     #[tracing::instrument(level = Level::DEBUG, skip(client), ret, err)]
     pub async fn assert_valid_mirrord_target(self, client: &Client) -> Result<Self, KubeApiError> {
         match &self {
-            ResolvedTarget::Deployment(deployment, container) => {
-                let available = deployment
+            ResolvedTarget::Deployment(ResolvedResource {
+                resource,
+                container,
+            }) => {
+                let available = resource
                     .status
                     .as_ref()
-                    .ok_or_else(|| KubeApiError::missing_field(deployment, ".status"))?
+                    .ok_or_else(|| KubeApiError::missing_field(resource, ".status"))?
                     .available_replicas
                     .unwrap_or_default(); // Field can be missing when there are no replicas
 
                 if available <= 0 {
                     return Err(KubeApiError::invalid_state(
-                        deployment,
+                        resource,
                         "no available replicas",
                     ));
                 }
 
                 if let Some(container) = container {
                     // verify that the container exists
-                    deployment
+                    resource
                         .spec
                         .as_ref()
-                        .ok_or_else(|| KubeApiError::missing_field(deployment, ".spec"))?
+                        .ok_or_else(|| KubeApiError::missing_field(resource, ".spec"))?
                         .template
                         .spec
                         .as_ref()
-                        .ok_or_else(|| KubeApiError::missing_field(deployment, ".spec.template.spec"))?
+                        .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.template.spec"))?
                         .containers
                         .iter()
                         .find(|c| c.name == *container)
-                        .ok_or_else(|| KubeApiError::invalid_state(deployment, format_args!("specified pod template does not contain target container `{container}`")))?;
+                        .ok_or_else(|| KubeApiError::invalid_state(resource, format_args!("specified pod template does not contain target container `{container}`")))?;
                 }
             }
             ResolvedTarget::Pod(pod, container) => {
                 let _ = RuntimeData::from_pod(pod, container.as_deref())?;
             }
 
-            ResolvedTarget::Rollout(rollout, container) => {
-                let available = rollout
+            ResolvedTarget::Rollout(ResolvedResource {
+                resource,
+                container,
+            }) => {
+                let available = resource
                     .status
                     .as_ref()
-                    .ok_or_else(|| KubeApiError::missing_field(rollout, ".status"))?
+                    .ok_or_else(|| KubeApiError::missing_field(resource, ".status"))?
                     .available_replicas
                     .unwrap_or_default(); // Field can be missing when there are no replicas
 
                 if available <= 0 {
                     return Err(KubeApiError::invalid_state(
-                        rollout,
+                        resource,
                         "no available replicas",
                     ));
                 }
 
-                let pod_template = rollout.get_pod_template(client).await?;
+                let pod_template = resource.get_pod_template(client).await?;
 
                 if let Some(container) = container {
                     // verify that the container exists
-                    pod_template.spec.as_ref().ok_or_else(|| KubeApiError::invalid_state(rollout, "specified pod template is missing field `.spec`"))?
+                    pod_template.spec.as_ref().ok_or_else(|| KubeApiError::invalid_state(resource, "specified pod template is missing field `.spec`"))?
                     .containers
                                 .iter()
                                 .find(|c| c.name == *container)
-                                .ok_or_else(|| KubeApiError::invalid_state(rollout, format_args!("specified pod template does not contain target container `{container}`")))?;
+                                .ok_or_else(|| KubeApiError::invalid_state(resource, format_args!("specified pod template does not contain target container `{container}`")))?;
                 }
             }
 
@@ -228,10 +271,10 @@ impl ResolvedTarget {
     /// Convenient way of getting the container from this target.
     pub fn container(&self) -> Option<&str> {
         match self {
-            ResolvedTarget::Deployment(_, container)
-            | ResolvedTarget::Rollout(_, container)
-            | ResolvedTarget::Job(_, container)
-            | ResolvedTarget::CronJob(_, container)
+            ResolvedTarget::Deployment(ResolvedResource { container, .. })
+            | ResolvedTarget::Rollout(ResolvedResource { container, .. })
+            | ResolvedTarget::Job(ResolvedResource { container, .. })
+            | ResolvedTarget::CronJob(ResolvedResource { container, .. })
             | ResolvedTarget::StatefulSet(_, container)
             | ResolvedTarget::Pod(_, container) => container.as_deref(),
             ResolvedTarget::Targetless(..) => None,
@@ -240,8 +283,8 @@ impl ResolvedTarget {
 
     /// Is this a [`ResolvedTarget::Deployment`], and is it empty?
     pub fn empty_deployment(&self) -> bool {
-        if let Self::Deployment(target, _) = self {
-            !target
+        if let Self::Deployment(ResolvedResource { resource, .. }) = self {
+            !resource
                 .status
                 .as_ref()
                 .map(|status| status.available_replicas > Some(0))
@@ -252,14 +295,14 @@ impl ResolvedTarget {
     }
 
     /// Returns the number of containers for this [`ResolvedTarget`], defaulting to 1.
-    pub fn containers_count(&self) -> usize {
+    pub fn containers_status(&self) -> usize {
         match self {
-            ResolvedTarget::Deployment(target, _) => target
+            ResolvedTarget::Deployment(ResolvedResource { resource, .. }) => resource
                 .spec
                 .as_ref()
                 .and_then(|spec| spec.template.spec.as_ref())
                 .map(|pod_spec| pod_spec.containers.len()),
-            ResolvedTarget::Rollout(target, _) => target
+            ResolvedTarget::Rollout(ResolvedResource { resource, .. }) => resource
                 .spec
                 .as_ref()
                 .and_then(|spec| spec.template.as_ref())
@@ -270,13 +313,13 @@ impl ResolvedTarget {
                 .as_ref()
                 .and_then(|spec| spec.template.spec.as_ref())
                 .map(|pod_spec| pod_spec.containers.len()),
-            ResolvedTarget::CronJob(target, _) => target
+            ResolvedTarget::CronJob(ResolvedResource { resource, .. }) => resource
                 .spec
                 .as_ref()
                 .and_then(|spec| spec.job_template.spec.as_ref())
                 .and_then(|job_spec| job_spec.template.spec.as_ref())
                 .map(|pod_spec| pod_spec.containers.len()),
-            ResolvedTarget::Job(target, _) => target
+            ResolvedTarget::Job(ResolvedResource { resource, .. }) => resource
                 .spec
                 .as_ref()
                 .and_then(|spec| spec.template.spec.as_ref())
@@ -293,11 +336,13 @@ impl ResolvedTarget {
     /// Convert [`ResolvedTarget`] into `<Target>.metadata.labels`
     pub fn into_labels(self) -> Option<BTreeMap<String, String>> {
         match self {
-            ResolvedTarget::Deployment(deployment, _) => deployment.metadata.labels,
-            ResolvedTarget::Rollout(rollout, _) => rollout.metadata.labels,
+            ResolvedTarget::Deployment(ResolvedResource { resource, .. }) => {
+                resource.metadata.labels
+            }
+            ResolvedTarget::Rollout(ResolvedResource { resource, .. }) => resource.metadata.labels,
             ResolvedTarget::Pod(pod, _) => pod.metadata.labels,
-            ResolvedTarget::Job(job, _) => job.metadata.labels,
-            ResolvedTarget::CronJob(cron_job, _) => cron_job.metadata.labels,
+            ResolvedTarget::Job(ResolvedResource { resource, .. }) => resource.metadata.labels,
+            ResolvedTarget::CronJob(ResolvedResource { resource, .. }) => resource.metadata.labels,
             ResolvedTarget::StatefulSet(stateful_set, _) => stateful_set.metadata.labels,
             ResolvedTarget::Targetless(_) => None,
         }
@@ -305,11 +350,11 @@ impl ResolvedTarget {
 
     pub fn type_(&self) -> &str {
         match self {
-            ResolvedTarget::Deployment(_, _) => "deployment",
-            ResolvedTarget::Rollout(_, _) => "rollout",
+            ResolvedTarget::Deployment(_) => "deployment",
+            ResolvedTarget::Rollout(_) => "rollout",
             ResolvedTarget::Pod(_, _) => "pod",
-            ResolvedTarget::Job(_, _) => "job",
-            ResolvedTarget::CronJob(_, _) => "cronjob",
+            ResolvedTarget::Job(_) => "job",
+            ResolvedTarget::CronJob(_) => "cronjob",
             ResolvedTarget::StatefulSet(_, _) => "statefulset",
             ResolvedTarget::Targetless(_) => "targetless",
         }
@@ -317,10 +362,10 @@ impl ResolvedTarget {
 
     pub fn get_container(&self) -> Option<&str> {
         match self {
-            ResolvedTarget::Deployment(_, container)
-            | ResolvedTarget::Rollout(_, container)
-            | ResolvedTarget::Job(_, container)
-            | ResolvedTarget::CronJob(_, container)
+            ResolvedTarget::Deployment(ResolvedResource { container, .. })
+            | ResolvedTarget::Rollout(ResolvedResource { container, .. })
+            | ResolvedTarget::Job(ResolvedResource { container, .. })
+            | ResolvedTarget::CronJob(ResolvedResource { container, .. })
             | ResolvedTarget::StatefulSet(_, container)
             | ResolvedTarget::Pod(_, container) => container.as_deref(),
             ResolvedTarget::Targetless(..) => None,
@@ -329,11 +374,19 @@ impl ResolvedTarget {
 
     pub fn name(&self) -> Option<&str> {
         match self {
-            ResolvedTarget::Deployment(deployment, _) => deployment.metadata.name.as_deref(),
-            ResolvedTarget::Rollout(rollout, _) => rollout.meta().name.as_deref(),
+            ResolvedTarget::Deployment(ResolvedResource { resource, .. }) => {
+                resource.metadata.name.as_deref()
+            }
+            ResolvedTarget::Rollout(ResolvedResource { resource, .. }) => {
+                resource.meta().name.as_deref()
+            }
             ResolvedTarget::Pod(pod, _) => pod.metadata.name.as_deref(),
-            ResolvedTarget::Job(job, _) => job.metadata.name.as_deref(),
-            ResolvedTarget::CronJob(cron_job, _) => cron_job.metadata.name.as_deref(),
+            ResolvedTarget::Job(ResolvedResource { resource, .. }) => {
+                resource.metadata.name.as_deref()
+            }
+            ResolvedTarget::CronJob(ResolvedResource { resource, .. }) => {
+                resource.metadata.name.as_deref()
+            }
             ResolvedTarget::StatefulSet(stateful_set, _) => stateful_set.metadata.name.as_deref(),
             ResolvedTarget::Targetless(_) => None,
         }
@@ -341,11 +394,11 @@ impl ResolvedTarget {
 
     pub fn name_any(&self) -> String {
         match self {
-            ResolvedTarget::Deployment(dep, _) => dep.name_any(),
-            ResolvedTarget::Rollout(roll, _) => roll.name_any(),
+            ResolvedTarget::Deployment(ResolvedResource { resource, .. }) => resource.name_any(),
+            ResolvedTarget::Rollout(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::Pod(pod, _) => pod.name_any(),
-            ResolvedTarget::Job(job, _) => job.name_any(),
-            ResolvedTarget::CronJob(cj, _) => cj.name_any(),
+            ResolvedTarget::Job(ResolvedResource { resource, .. }) => resource.name_any(),
+            ResolvedTarget::CronJob(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::StatefulSet(set, _) => set.name_any(),
             ResolvedTarget::Targetless(..) => "targetless".to_string(),
         }
@@ -353,11 +406,19 @@ impl ResolvedTarget {
 
     pub fn namespace(&self) -> Option<&str> {
         match self {
-            ResolvedTarget::Deployment(deployment, _) => deployment.metadata.namespace.as_deref(),
-            ResolvedTarget::Rollout(rollout, _) => rollout.meta().namespace.as_deref(),
+            ResolvedTarget::Deployment(ResolvedResource { resource, .. }) => {
+                resource.metadata.namespace.as_deref()
+            }
+            ResolvedTarget::Rollout(ResolvedResource { resource, .. }) => {
+                resource.meta().namespace.as_deref()
+            }
             ResolvedTarget::Pod(pod, _) => pod.metadata.namespace.as_deref(),
-            ResolvedTarget::Job(job, _) => job.metadata.namespace.as_deref(),
-            ResolvedTarget::CronJob(cron_job, _) => cron_job.metadata.namespace.as_deref(),
+            ResolvedTarget::Job(ResolvedResource { resource, .. }) => {
+                resource.metadata.namespace.as_deref()
+            }
+            ResolvedTarget::CronJob(ResolvedResource { resource, .. }) => {
+                resource.metadata.namespace.as_deref()
+            }
             ResolvedTarget::StatefulSet(stateful_set, _) => {
                 stateful_set.metadata.namespace.as_deref()
             }

@@ -549,7 +549,7 @@ impl OperatorApi<PreparedClientCert> {
         self.check_feature_support(config)?;
 
         // TODO(alex) [high] 1: Choose container.
-        if target.containers_count() > 1
+        if target.containers_status() > 1
             && config
                 .target
                 .path

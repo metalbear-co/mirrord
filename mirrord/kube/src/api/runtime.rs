@@ -22,6 +22,7 @@ use crate::{
         kubernetes::get_k8s_resource_api,
     },
     error::{KubeApiError, Result},
+    resolved::ResolvedTarget,
 };
 
 pub mod cron_job;
@@ -336,6 +337,20 @@ impl RuntimeDataProvider for Target {
             Target::CronJob(target) => target.runtime_data(client, namespace).await,
             Target::StatefulSet(target) => target.runtime_data(client, namespace).await,
             Target::Targetless => Err(KubeApiError::MissingRuntimeData),
+        }
+    }
+}
+
+impl RuntimeDataProvider for ResolvedTarget {
+    async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
+        match self {
+            Self::Deployment(deployment) => deployment.runtime_data(client, namespace).await,
+            // Self::Pod(target) => target.runtime_data(client, namespace).await,
+            // Self::Rollout(target) => target.runtime_data(client, namespace).await,
+            // Self::Job(target) => target.runtime_data(client, namespace).await,
+            // Self::CronJob(target) => target.runtime_data(client, namespace).await,
+            // Self::StatefulSet(target) => target.runtime_data(client, namespace).await,
+            _ => todo!(),
         }
     }
 }
