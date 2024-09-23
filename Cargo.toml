@@ -26,7 +26,7 @@ resolver = "2"
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.117.0"
+version = "3.118.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -111,7 +111,7 @@ once_cell = "1"
 exec = "0.3"
 drain = "0.1"
 base64 = "0.22"
-rustls = "0.23"
+rustls = "0.23.12" # latest (1.9.0) aws-lc-rs causes troubles https://github.com/metalbear-co/mirrord/issues/2774
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
