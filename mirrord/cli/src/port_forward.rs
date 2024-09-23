@@ -1,6 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    io::Read,
+    collections::{HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };
@@ -9,7 +8,7 @@ use futures::StreamExt;
 use mirrord_intproxy::{
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
     error::IntProxyError,
-    main_tasks::{FromLayer, MainTaskId, ProxyMessage},
+    main_tasks::{MainTaskId, ProxyMessage},
     proxies::incoming::{IncomingProxy, IncomingProxyMessage},
 };
 use mirrord_intproxy_protocol::{IncomingRequest, LayerId, PortSubscribe, PortSubscription};
@@ -19,10 +18,7 @@ use mirrord_protocol::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
     },
-    tcp::{
-        ChunkedRequest, DaemonTcp, HttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnection,
-        StealType, TcpClose, TcpData,
-    },
+    tcp::{LayerTcp, LayerTcpSteal, StealType},
     ClientMessage, ConnectionId, DaemonMessage, LogLevel, ResponseError, CLIENT_READY_FOR_LOGS,
 };
 use thiserror::Error;
@@ -442,16 +438,10 @@ pub struct ReversePortForwarder {
     agent_connection: AgentConnection,
     /// associates resolved destination ports with local ports.
     mappings: HashMap<RemotePort, LocalPort>,
-    /// identifies a pair of mapped socket addresses by their corresponding connection ID.
-    mappings_by_connection: HashMap<ConnectionId, PortOnlyMapping>,
-    /// identifies task senders by their corresponding connection ID.
-    task_txs: HashMap<ConnectionId, Sender<Vec<u8>>>,
     /// background task (uses IncomingProxy to communicate with layer)
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
     /// incoming proxy background task tx
     incoming: TaskSender<IncomingProxy>,
-    /// incoming proxy message IDs
-    proxy_message_ids: HashMap<u64, PortOnlyMapping>,
 
     /// true if Ping has been sent to agent.
     waiting_for_pong: bool,
@@ -514,11 +504,8 @@ impl ReversePortForwarder {
             steal_mode,
             agent_connection,
             mappings,
-            mappings_by_connection: HashMap::new(),
-            task_txs: HashMap::new(),
             background_tasks,
             incoming,
-            proxy_message_ids,
             waiting_for_pong: false,
             ping_pong_timeout: Instant::now(),
         })
