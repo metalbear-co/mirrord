@@ -307,7 +307,7 @@ impl ResolvedTarget<false> {
     ///
     /// 1. [`ResolvedTarget::Deployment`] or [`ResolvedTarget::Rollout`] - has available replicas
     ///    and the target container, if specified, is found in the spec
-    /// 2. [`ResolvedTarget::Pod`] - passes target-readiness check, see [`get_full_runtime_data`].
+    /// 2. [`ResolvedTarget::Pod`] - passes target-readiness check, see [`RuntimeData::from_pod`].
     /// 3. [`ResolvedTarget::Job`] - error, as this is `copy_target` exclusive
     /// 4. [`ResolvedTarget::Targetless`] - no check
     #[tracing::instrument(level = Level::DEBUG, skip(client), ret, err)]
