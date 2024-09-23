@@ -56,7 +56,7 @@ pub enum TopicPropertySource {
     kind = "MirrordKafkaTemporaryTopic",
     namespaced,
     printcolumn = r#"{"name":"NAME", "type":"string", "description":"Name of the topic.", "jsonPath":".spec.name"}"#,
-    printcolumn = r#"{"name":"CLIENT-PROPERTIES", "type":"string", "description":"Name of MirrordKafkaClientProperties to use when creating Kafka client.", "jsonPath":".spec.clientProperties"}"#,
+    printcolumn = r#"{"name":"CLIENT-PROPERTIES", "type":"string", "description":"Name of MirrordKafkaClientProperties to use when creating Kafka client.", "jsonPath":".spec.clientProperties"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordKafkaTemporaryTopicSpec {

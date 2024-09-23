@@ -659,3 +659,25 @@ pub struct MirrordSqsSessionSpec {
     // so we save that field as a (HEX) string even though its source is a u64
     pub session_id: String,
 }
+
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    group = "operator.metalbear.co",
+    version = "v1",
+    kind = "MirrordAppliedTargetPatch"
+)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrordAppliedTargetPatchSpec {
+    pub target_name: String,
+    pub target_api_version: String,
+    pub target_kind: String,
+    pub patched_env: Vec<PatchedEnv>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct PatchedEnv {
+    pub name: String,
+    pub container: String,
+    pub original_value: String,
+    pub injected_value: String,
+}
