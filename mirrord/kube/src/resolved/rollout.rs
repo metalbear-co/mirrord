@@ -1,15 +1,13 @@
 use std::collections::BTreeMap;
 
-use k8s_openapi::api::batch::v1::Job;
-
 use super::ResolvedResource;
 use crate::{
-    api::runtime::RuntimeDataFromLabels,
+    api::{kubernetes::rollout::Rollout, runtime::RuntimeDataFromLabels},
     error::{KubeApiError, Result},
 };
 
-impl RuntimeDataFromLabels for ResolvedResource<Job> {
-    type Resource = Job;
+impl RuntimeDataFromLabels for ResolvedResource<Rollout> {
+    type Resource = Rollout;
 
     fn name(&self) -> &str {
         self.resource.metadata.name.as_ref().unwrap().as_str()
@@ -23,7 +21,7 @@ impl RuntimeDataFromLabels for ResolvedResource<Job> {
         resource
             .spec
             .as_ref()
-            .and_then(|spec| spec.selector.as_ref()?.match_labels.clone())
+            .and_then(|spec| spec.selector.match_labels.clone())
             .ok_or_else(|| {
                 KubeApiError::missing_field(
                     resource,

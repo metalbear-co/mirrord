@@ -344,13 +344,13 @@ impl RuntimeDataProvider for Target {
 impl RuntimeDataProvider for ResolvedTarget {
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
         match self {
-            Self::Deployment(deployment) => deployment.runtime_data(client, namespace).await,
-            // Self::Pod(target) => target.runtime_data(client, namespace).await,
-            // Self::Rollout(target) => target.runtime_data(client, namespace).await,
-            // Self::Job(target) => target.runtime_data(client, namespace).await,
-            // Self::CronJob(target) => target.runtime_data(client, namespace).await,
-            // Self::StatefulSet(target) => target.runtime_data(client, namespace).await,
-            _ => todo!(),
+            Self::Deployment(target) => target.runtime_data(client, namespace).await,
+            Self::Pod(target) => target.runtime_data().await,
+            Self::Rollout(target) => target.runtime_data(client, namespace).await,
+            Self::Job(target) => target.runtime_data(client, namespace).await,
+            Self::CronJob(target) => target.runtime_data(client, namespace).await,
+            Self::StatefulSet(target) => target.runtime_data(client, namespace).await,
+            Self::Targetless(_) => Err(KubeApiError::MissingRuntimeData),
         }
     }
 }
