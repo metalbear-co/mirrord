@@ -15,13 +15,11 @@ use mirrord_auth::{
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::LicenseValidity,
 };
-use mirrord_config::{
-    feature::split_queues::SplitQueuesConfig,
-    target::{Target, TargetDisplay},
-    LayerConfig,
-};
+use mirrord_config::{feature::split_queues::SplitQueuesConfig, target::Target, LayerConfig};
 use mirrord_kube::{
-    api::kubernetes::create_kube_config, error::KubeApiError, resolved::ResolvedTarget,
+    api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
+    error::KubeApiError,
+    resolved::ResolvedTarget,
 };
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
@@ -548,29 +546,13 @@ impl OperatorApi<PreparedClientCert> {
     {
         self.check_feature_support(config)?;
 
-        // TODO(alex) [high] 1: Choose container.
-        if target.containers_status() > 1
-            && config
-                .target
-                .path
-                .as_ref()
-                .is_some_and(|target| target.container().is_none())
-        {
-            progress.warning(&format!(
-                "Target has multiple containers, but no container was specified by user!\
-                    mirrord will pick a random container `{}`.",
-                target.container().unwrap_or_default()
-            ));
-        }
-
-        let empty_deployment = target.empty_deployment();
-
         let use_proxy_api = self
             .operator
             .spec
             .supported_features()
             .contains(&NewOperatorFeature::ProxyApi);
 
+        let empty_deployment = target.empty_deployment();
         let connect_url = if config.feature.copy_target.enabled
             // use copy_target for splitting queues
             || config.feature.split_queues.is_set()
@@ -608,6 +590,21 @@ impl OperatorApi<PreparedClientCert> {
             TargetCrd::urlfied_name(&copied.spec.target)
         } else {
             let target = target.assert_valid_mirrord_target(self.client()).await?;
+
+            let runtime_data = target
+                .runtime_data(self.client(), target.namespace())
+                .await?;
+
+            if runtime_data.guessed_container {
+                progress.warning(
+                    format!(
+                        "Target has multiple containers, mirrord picked \"{}\".\
+                     To target a different one, include it in the target path.",
+                        runtime_data.container_name
+                    )
+                    .as_str(),
+                );
+            }
 
             target.connect_url(
                 use_proxy_api,
