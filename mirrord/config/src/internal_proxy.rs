@@ -84,6 +84,23 @@ pub struct InternalProxyConfig {
     #[config(default = 5)]
     pub idle_timeout: u64,
 
+    /// <!--${internal}-->
+    ///
+    /// Sometimes the cpu is too busy with other tasks and the internal proxy sockets end
+    /// up timing out. It's set at a ridiculous high value to prevent this from happening
+    /// when a user hits a breakpoint while debugging, and stays stopped for a while, which
+    /// sometimes results in mirrord not working when they resume.
+    ///
+    /// ```json
+    /// {
+    ///   "internal_proxy": {
+    ///     "socket_timeout": 31536000
+    ///   }
+    /// }
+    /// ```
+    #[config(default = 31536000)]
+    pub socket_timeout: u64,
+
     /// ### internal_proxy.log_level {#internal_proxy-log_level}
     ///
     /// Set the log level for the internal proxy.

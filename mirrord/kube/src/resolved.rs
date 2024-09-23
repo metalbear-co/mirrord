@@ -32,6 +32,7 @@ pub enum ResolvedTarget<const CHECKED: bool> {
     CronJob(ResolvedResource<CronJob>),
     StatefulSet(ResolvedResource<StatefulSet>),
     Pod(ResolvedResource<Pod>),
+    /// Holds the `namespace` for this target.
     Targetless(String),
 }
 
@@ -428,9 +429,9 @@ impl ResolvedTarget<false> {
                 }))
             }
 
-            ResolvedTarget::Targetless(foo) => {
+            ResolvedTarget::Targetless(namespace) => {
                 // no check needed here
-                Ok(ResolvedTarget::Targetless(foo))
+                Ok(ResolvedTarget::Targetless(namespace))
             }
         }
     }
