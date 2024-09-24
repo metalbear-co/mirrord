@@ -3,14 +3,11 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use kube::{CustomResource, Resource, ResourceExt};
+use kube::{CustomResource, Resource};
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
-    feature::{
-        network::incoming::ConcurrentSteal,
-        split_queues::{SplitQueuesConfig, SqsMessageFilter},
-    },
+    feature::split_queues::{SplitQueuesConfig, SqsMessageFilter},
     target::{Target, TargetConfig},
 };
 use mirrord_kube::error::KubeApiError;
@@ -333,7 +330,7 @@ impl CopyTargetCrd {
             .expect("Missing `TargetCrd namespace`");
         let api_version = CopyTargetCrd::api_version(&());
         let plural = CopyTargetCrd::plural(&());
-        let url_path = CopyTargetCrd::url_path(&(), Some(&namespace));
+        let url_path = CopyTargetCrd::url_path(&(), Some(namespace));
 
         let url = if use_proxy {
             format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?connect=true")
