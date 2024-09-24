@@ -524,6 +524,14 @@ impl LayerConfig {
         self.feature.network.dns.verify(context)?;
         self.feature.network.outgoing.verify(context)?;
 
+        if self.experimental.readlink {
+            context.add_warning(
+                "experimental.readlink config has been deprecated, and `readlink` is now\
+                    enabled by default! You may remove it from your config."
+                    .into(),
+            );
+        }
+
         Ok(())
     }
 }
