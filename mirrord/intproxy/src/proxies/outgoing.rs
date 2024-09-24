@@ -208,7 +208,9 @@ impl OutgoingProxy {
         let msg = request.protocol.wrap_agent_connect(request.remote_address);
         message_bus.send(ProxyMessage::ToAgent(msg)).await;
 
-        if request.flags.contains(OutgoingConnectFlags::NONBLOCK) {
+        if matches!(request.protocol, NetProtocol::Stream)
+            && request.flags.contains(OutgoingConnectFlags::NONBLOCK)
+        {
             message_bus
                 .send(ToLayer {
                     message: ProxyToLayerMessage::OutgoingConnect(Err(ResponseError::InProgress)),
