@@ -209,6 +209,12 @@ pub(crate) enum Bypass {
 
     /// DNS query should be done locally.
     LocalDns,
+
+    /// Operation is not implemented, but it should not be a hard error.
+    ///
+    /// Useful for operations that are version gated, and we want to bypass when the protocol
+    /// doesn't support them.
+    NotImplemented,
 }
 
 impl Bypass {
