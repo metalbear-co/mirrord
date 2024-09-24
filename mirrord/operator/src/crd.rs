@@ -331,13 +331,11 @@ impl CopyTargetCrd {
         let plural = CopyTargetCrd::plural(&());
         let url_path = CopyTargetCrd::url_path(&(), Some(namespace));
 
-        let url = if use_proxy {
+        if use_proxy {
             format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?connect=true")
         } else {
             format!("{url_path}/{name}?connect=true")
-        };
-
-        url
+        }
     }
 }
 
