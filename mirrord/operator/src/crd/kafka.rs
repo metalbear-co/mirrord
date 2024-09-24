@@ -33,10 +33,10 @@ pub struct MirrordKafkaClientProperty {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct KafkaTopicDetails {
-    /// Where to find Kafka topic name in the target spec.
-    pub name_source: TopicPropertySource,
-    /// Where to find consumer group id in the target spec.
-    pub group_id_source: TopicPropertySource,
+    /// All occurrences of this topic's name in the pod spec.
+    pub name_sources: Vec<TopicPropertySource>,
+    /// All occurrences of this topic's group id in the pod spec.
+    pub group_id_sources: Vec<TopicPropertySource>,
     /// Links to [`MirrordKafkaClientProperties`] in the operator's namespace.
     pub client_properties: String,
 }
@@ -44,7 +44,14 @@ pub struct KafkaTopicDetails {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum TopicPropertySource {
-    EnvVar(String),
+    DirectEnvVar(DirectEnvVar),
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectEnvVar {
+    pub container: String,
+    pub name: String,
 }
 
 /// Created temporary topic in a Kafka cluster.

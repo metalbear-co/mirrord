@@ -418,7 +418,7 @@ pub enum SplitQueue {
     Sqs(SqsQueueDetails),
 
     /// Kafka topic
-    #[serde(rename = "kafkaTopic")]
+    #[serde(rename = "KAFKA")]
     Kafka(kafka::KafkaTopicDetails),
 }
 
