@@ -14,6 +14,7 @@ use crate::{
         source::MirrordConfigSource,
         ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result,
     },
+    feature::network::incoming::ConcurrentSteal,
     util::string_or_struct_option,
 };
 

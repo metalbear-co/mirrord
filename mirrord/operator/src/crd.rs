@@ -3,13 +3,17 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use kube::CustomResource;
+use kube::{CustomResource, Resource, ResourceExt};
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
-    feature::split_queues::{SplitQueuesConfig, SqsMessageFilter},
+    feature::{
+        network::incoming::ConcurrentSteal,
+        split_queues::{SplitQueuesConfig, SqsMessageFilter},
+    },
     target::{Target, TargetConfig},
 };
+use mirrord_kube::error::KubeApiError;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -313,6 +317,23 @@ pub struct CopyTargetSpec {
     pub scale_down: bool,
     /// Split queues client side configuration.
     pub split_queues: Option<SplitQueuesConfig>,
+}
+
+impl CopyTargetCrd {
+    pub fn connect_url(&self, urlfied_name: &str, use_proxy: bool) -> Result<String, KubeApiError> {
+        let namespace = self.namespace().expect("Missing `TargetCrd namespace`");
+        let api_version = CopyTargetCrd::api_version(&());
+        let plural = CopyTargetCrd::plural(&());
+        let url_path = CopyTargetCrd::url_path(&(), Some(&namespace));
+
+        let url = if use_proxy {
+            format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{urlfied_name}?connect=true")
+        } else {
+            format!("{url_path}/{urlfied_name}?connect=true")
+        };
+
+        Ok(url)
+    }
 }
 
 /// This is the `status` field for [`CopyTargetCrd`].
