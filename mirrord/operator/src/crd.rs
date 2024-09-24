@@ -680,5 +680,5 @@ pub struct PatchedEnv {
     pub container: String,
     pub original_value: String,
     pub injected_value: String,
-    pub owner_process: Uuid,
+    pub owner_process: String,
 }
