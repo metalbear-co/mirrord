@@ -664,7 +664,8 @@ pub struct MirrordSqsSessionSpec {
 #[kube(
     group = "operator.metalbear.co",
     version = "v1",
-    kind = "MirrordAppliedTargetPatch"
+    kind = "MirrordAppliedTargetPatch",
+    namespaced
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordAppliedTargetPatchSpec {
