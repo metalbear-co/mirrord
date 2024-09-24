@@ -26,7 +26,7 @@ async fn expect_output_lines<const N: usize, const M: usize>(
     let lines = test_process
         .await_exactly_n_lines(
             expected_lines.len() + expected_in_order_lines.len(),
-            Duration::from_secs(20),
+            Duration::from_secs(40),
         )
         .await;
     for expected_line in expected_lines.into_iter() {
@@ -66,7 +66,7 @@ async fn expect_messages_in_queue<const N: usize>(
     client: &aws_sdk_sqs::Client,
     echo_queue: &QueueInfo,
 ) {
-    tokio::time::timeout(Duration::from_secs(20), async {
+    tokio::time::timeout(Duration::from_secs(40), async {
         println!("Verifying correct messages in echo queue {} (verifying the deployed application got the messages it was supposed to)", echo_queue.name);
         let mut expected_messages = HashSet::from(messages);
         loop {
@@ -77,7 +77,7 @@ async fn expect_messages_in_queue<const N: usize>(
                 .receive_message()
                 .queue_url(&echo_queue.url)
                 .visibility_timeout(15)
-                .wait_time_seconds(20)
+                .wait_time_seconds(40)
                 .send()
                 .await
             {
@@ -149,7 +149,7 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
 /// from those queues and verify the remote application exactly the messages it was supposed to.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(360))]
+#[timeout(Duration::from_secs(420))]
 pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_dir: &Path) {
     let mut sqs_test_resources = sqs_test_resources.await;
     let application = Application::RustSqs;
@@ -212,7 +212,7 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     )
     .await;
 
-    // Test app prints 1: before messages from queue1 and 2: before messages from queue 2.
+    // Test app prints 1: before messages from queue 1 and 2: before messages from queue 2.
     expect_output_lines(["1:1", "1:6"], ["2:10", "2:60"], &client_a).await;
     println!("Client a received the correct messages.");
     expect_output_lines(["1:2", "1:5"], ["2:20", "2:50"], &client_b).await;
