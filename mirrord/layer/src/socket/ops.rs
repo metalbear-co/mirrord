@@ -291,7 +291,7 @@ pub(super) fn bind(
         .lock()?
         .iter()
         .any(|(_, socket)| match &socket.state {
-            SocketState::Initialized | SocketState::Connected(_) => false,
+            SocketState::Initialized | SocketState::Connecting | SocketState::Connected(_) => false,
             SocketState::Bound(bound) | SocketState::Listening(bound) => {
                 bound.requested_address == requested_address
             }
@@ -427,11 +427,13 @@ fn non_blocking_connect_watcher(
                 continue;
             }
             Ok(Ok(OutgoingConnectResponse { layer_address, .. })) => {
-                let layer_address = SockAddr::try_from(layer_address.clone()).unwrap();
+                let connect_result: ConnectResult = {
+                    let layer_address = SockAddr::try_from(layer_address.clone())
+                        .expect("layer address should always be cast to sockaddr");
 
-                let connect_result: ConnectResult =
                     unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }
-                        .into();
+                        .into()
+                };
 
                 if connect_result.is_failure() {
                     tracing::warn!(?connect_result, ?sockfd, "async connect is a faulure");
@@ -473,7 +475,7 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
     // Closure that performs the connection with mirrord messaging.
     let remote_connection = |remote_address: SockAddr| {
         // Prepare this socket to be intercepted.
-        let remote_address = SocketAddress::try_from(remote_address).unwrap();
+        let remote_address = SocketAddress::try_from(remote_address)?;
 
         let request = OutgoingConnectRequest {
             remote_address: remote_address.clone(),
@@ -507,10 +509,8 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
                 };
 
                 if connect_result.is_failure() {
-                    error!(
-                        "connect -> Failed call to libc::connect with {:#?}",
-                        connect_result,
-                    );
+                    tracing::error!(?connect_result, "connect -> Failed call to libc::connect");
+
                     Err(io::Error::last_os_error())?
                 }
 
@@ -520,15 +520,23 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
                     layer_address: Some(layer_address),
                 };
 
-                trace!("we are connected {connected:#?}");
+                tracing::trace!(?connected, "we are connected");
 
-                Arc::get_mut(&mut user_socket_info).unwrap().state =
-                    SocketState::Connected(connected);
+                Arc::get_mut(&mut user_socket_info)
+                    .expect("user_socket_info should be accessible via mutable ref")
+                    .state = SocketState::Connected(connected);
+
                 SOCKETS.lock()?.insert(sockfd, user_socket_info);
 
                 Detour::Success(connect_result)
             }
             Err(err @ ResponseError::InProgress) if CALL_CONNECT => {
+                Arc::get_mut(&mut user_socket_info)
+                    .expect("user_socket_info should be accessible via mutable ref")
+                    .state = SocketState::Connecting;
+
+                SOCKETS.lock()?.insert(sockfd, user_socket_info);
+
                 // Spawn a watcher that will call [`FN_CONNECT`] when response is ready
                 std::thread::spawn(move || non_blocking_connect_watcher(sockfd, responses));
 
@@ -723,7 +731,7 @@ pub(super) fn connect(
         ),
 
         NetProtocol::Stream => match user_socket_info.state {
-            SocketState::Initialized | SocketState::Bound(..)
+            SocketState::Initialized | SocketState::Connecting | SocketState::Bound(..)
                 if (optional_ip_address.is_some() && enabled_tcp_outgoing)
                     || (remote_address.is_unix() && !unix_streams.is_empty()) =>
             {
