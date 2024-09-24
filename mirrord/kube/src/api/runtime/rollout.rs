@@ -20,7 +20,9 @@ impl RuntimeDataFromLabels for RolloutTarget {
     }
 
     /// Digs into `resource` to return its `.spec.selector.matchLabels`.
-    async fn get_selector_match_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>> {
+    async fn get_selector_match_labels(
+        resource: &Self::Resource,
+    ) -> Result<BTreeMap<String, String>> {
         resource
             .spec
             .clone()
