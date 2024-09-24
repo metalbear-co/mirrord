@@ -591,19 +591,22 @@ impl OperatorApi<PreparedClientCert> {
         } else {
             let target = target.assert_valid_mirrord_target(self.client()).await?;
 
-            let runtime_data = target
-                .runtime_data(self.client(), target.namespace())
-                .await?;
+            // `targetless` has no `RuntimeData`!
+            if matches!(target, ResolvedTarget::Targetless(_)).not() {
+                let runtime_data = target
+                    .runtime_data(self.client(), target.namespace())
+                    .await?;
 
-            if runtime_data.guessed_container {
-                progress.warning(
-                    format!(
-                        "Target has multiple containers, mirrord picked \"{}\".\
+                if runtime_data.guessed_container {
+                    progress.warning(
+                        format!(
+                            "Target has multiple containers, mirrord picked \"{}\".\
                      To target a different one, include it in the target path.",
-                        runtime_data.container_name
-                    )
-                    .as_str(),
-                );
+                            runtime_data.container_name
+                        )
+                        .as_str(),
+                    );
+                }
             }
 
             target.connect_url(
