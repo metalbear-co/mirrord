@@ -24,7 +24,9 @@ impl RuntimeDataFromLabels for ResolvedResource<CronJob> {
         self.container.as_deref()
     }
 
-    async fn get_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>> {
+    async fn get_selector_match_labels(
+        resource: &Self::Resource,
+    ) -> Result<BTreeMap<String, String>> {
         resource
             .spec
             .as_ref()

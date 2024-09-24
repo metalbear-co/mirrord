@@ -277,7 +277,9 @@ pub trait RuntimeDataFromLabels {
         + fmt::Debug;
 
     #[allow(async_fn_in_trait)]
-    async fn get_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>>;
+    async fn get_selector_match_labels(
+        resource: &Self::Resource,
+    ) -> Result<BTreeMap<String, String>>;
 
     fn name(&self) -> Cow<str>;
 
@@ -293,7 +295,7 @@ where
             get_k8s_resource_api(client, namespace);
         let resource = api.get(&self.name()).await?;
 
-        let labels = Self::get_labels(&resource).await?;
+        let labels = Self::get_selector_match_labels(&resource).await?;
 
         let formatted_labels = labels
             .iter()
