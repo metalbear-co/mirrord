@@ -587,8 +587,8 @@ impl OperatorApi<PreparedClientCert> {
 
             copy_subtask.success(Some("target copied"));
 
-            let urlfied_name = TargetCrd::urlfied_name(&copied.spec.target);
-            copied.connect_url(&urlfied_name, use_proxy_api)?
+            // TODO(alex) [high] 1: Still not correct.
+            copied.connect_url(use_proxy_api)?
         } else {
             let target = target.assert_valid_mirrord_target(self.client()).await?;
 

@@ -320,16 +320,25 @@ pub struct CopyTargetSpec {
 }
 
 impl CopyTargetCrd {
-    pub fn connect_url(&self, urlfied_name: &str, use_proxy: bool) -> Result<String, KubeApiError> {
-        let namespace = self.namespace().expect("Missing `TargetCrd namespace`");
+    pub fn connect_url(&self, use_proxy: bool) -> Result<String, KubeApiError> {
+        let name = self
+            .meta()
+            .name
+            .as_deref()
+            .expect("Missing `CopyTargetCrd` name");
+        let namespace = self
+            .meta()
+            .namespace
+            .as_deref()
+            .expect("Missing `TargetCrd namespace`");
         let api_version = CopyTargetCrd::api_version(&());
         let plural = CopyTargetCrd::plural(&());
         let url_path = CopyTargetCrd::url_path(&(), Some(&namespace));
 
         let url = if use_proxy {
-            format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{urlfied_name}?connect=true")
+            format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?connect=true")
         } else {
-            format!("{url_path}/{urlfied_name}?connect=true")
+            format!("{url_path}/{name}?connect=true")
         };
 
         Ok(url)
