@@ -587,7 +587,7 @@ impl OperatorApi<PreparedClientCert> {
 
             copy_subtask.success(Some("target copied"));
 
-            copied.connect_url(use_proxy_api)?
+            copied.connect_url(use_proxy_api)
         } else {
             let target = target.assert_valid_mirrord_target(self.client()).await?;
 

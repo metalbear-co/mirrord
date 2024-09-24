@@ -10,7 +10,6 @@ use mirrord_config::{
     feature::split_queues::{SplitQueuesConfig, SqsMessageFilter},
     target::{Target, TargetConfig},
 };
-use mirrord_kube::error::KubeApiError;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -317,7 +316,7 @@ pub struct CopyTargetSpec {
 }
 
 impl CopyTargetCrd {
-    pub fn connect_url(&self, use_proxy: bool) -> Result<String, KubeApiError> {
+    pub fn connect_url(&self, use_proxy: bool) -> String {
         let name = self
             .meta()
             .name
@@ -338,7 +337,7 @@ impl CopyTargetCrd {
             format!("{url_path}/{name}?connect=true")
         };
 
-        Ok(url)
+        url
     }
 }
 
