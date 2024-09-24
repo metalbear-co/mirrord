@@ -9,10 +9,13 @@ use mirrord_config::feature::network::incoming::IncomingConfig;
 use mirrord_intproxy::{
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
     error::IntProxyError,
-    main_tasks::{MainTaskId, ProxyMessage},
-    proxies::incoming::{IncomingProxy, IncomingProxyMessage},
+    main_tasks::{MainTaskId, ProxyMessage, ToLayer},
+    proxies::incoming::{IncomingProxy, IncomingProxyError, IncomingProxyMessage},
 };
-use mirrord_intproxy_protocol::{IncomingRequest, LayerId, PortSubscribe, PortSubscription};
+use mirrord_intproxy_protocol::{
+    IncomingRequest, IncomingResponse, LayerId, PortSubscribe, PortSubscription,
+    ProxyToLayerMessage,
+};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse, LookupRecord},
     outgoing::{
@@ -472,7 +475,6 @@ impl ReversePortForwarder {
         }
 
         // setup IncomingProxy
-        let mut proxy_message_ids = HashMap::new();
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
             Default::default();
         let incoming =
@@ -495,8 +497,6 @@ impl ReversePortForwarder {
                     message_id, layer_id, req,
                 ))
                 .await;
-            // wait for confirmations
-            proxy_message_ids.insert(i as u64, PortOnlyMapping { local, remote });
         }
 
         Ok(Self {
@@ -552,17 +552,20 @@ impl ReversePortForwarder {
                     }
                     self.agent_connection.sender.send(ClientMessage::Ping).await?;
                     self.waiting_for_pong = true;
-                    self.ping_pong_timeout = Instant::now() + Duration::from_secs(30);
+                    self.ping_pong_timeout = Instant::now() + Duration::from_secs(30000);
                 },
 
                 message = self.agent_connection.receiver.recv() => match message {
-                    Some(message) => self.handle_msg_from_agent(message).await?,
+                    Some(message) => {
+                        // dbg!(&message);
+                        self.handle_msg_from_agent(message).await?},
                     None => {
                         break Err(PortForwardError::AgentError("unexpected end of connection with agent".into()));
                     },
                 },
 
                 Some((task_id, update)) = self.background_tasks.next() => {
+                    // dbg!((&task_id, &update));
                     self.handle_msg_from_local(task_id, update).await?
                 },
             }
@@ -617,11 +620,22 @@ impl ReversePortForwarder {
                 ProxyMessage::ToAgent(message) => {
                     self.agent_connection.sender.send(message).await?;
                 }
+                ProxyMessage::ToLayer(ToLayer { message, .. }) => match message {
+                    ProxyToLayerMessage::Incoming(IncomingResponse::PortSubscribe(res)) => {
+                        if let Err(error) = res {
+                            return Err(PortForwardError::from(IntProxyError::from(
+                                IncomingProxyError::SubscriptionFailed(error),
+                            )));
+                        }
+                    }
+                    _ => {
+                        unreachable!("message type are never used in port forwarding: {message:?}")
+                    }
+                },
                 ProxyMessage::FromLayer(_)
                 | ProxyMessage::FromAgent(_)
-                | ProxyMessage::ToLayer(_)
                 | ProxyMessage::NewLayer(_) => {
-                    unreachable!("these message types are never used in port forwarding")
+                    unreachable!("message type are never used in port forwarding: {message:?}")
                 }
             },
             (MainTaskId::IncomingProxy, TaskUpdate::Finished(result)) => match result {
@@ -640,6 +654,7 @@ impl ReversePortForwarder {
             },
             _ => unreachable!("other task types are never used in port forwarding"),
         }
+
         Ok(())
     }
 }
@@ -993,13 +1008,15 @@ impl From<IntProxyError> for PortForwardError {
 
 #[cfg(test)]
 mod test {
-    use std::net::{IpAddr, SocketAddr};
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
+    use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
     use mirrord_protocol::{
         outgoing::{
             tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
             DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
         },
+        tcp::{DaemonTcp, LayerTcp, LayerTcpSteal, NewTcpConnection, StealType, TcpClose, TcpData},
         ClientMessage, DaemonMessage,
     };
     use tokio::{
@@ -1009,7 +1026,9 @@ mod test {
     };
 
     use crate::{
-        connection::AgentConnection, port_forward::PortForwarder, AddrPortMapping, RemoteAddr,
+        connection::AgentConnection,
+        port_forward::{PortForwarder, ReversePortForwarder},
+        AddrPortMapping, PortOnlyMapping, RemoteAddr,
     };
 
     #[tokio::test]
@@ -1265,5 +1284,231 @@ mod test {
         let mut buf = [0; 10];
         stream_2.read_exact(&mut buf).await.unwrap();
         assert_eq!(buf, b"reply-to-2".as_ref());
+    }
+
+    #[tokio::test]
+    async fn reverse_port_forwarding_mirror() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_destination = listener.local_addr().unwrap();
+
+        let (daemon_msg_tx, daemon_msg_rx) = mpsc::channel::<DaemonMessage>(12);
+        let (client_msg_tx, mut client_msg_rx) = mpsc::channel::<ClientMessage>(12);
+
+        let agent_connection = AgentConnection {
+            sender: client_msg_tx,
+            receiver: daemon_msg_rx,
+        };
+        let remote_address = IpAddr::from("152.37.40.40".parse::<Ipv4Addr>().unwrap());
+        let destination_port = 3038;
+        let parsed_mappings = vec![PortOnlyMapping {
+            local: local_destination.port(),
+            remote: destination_port,
+        }];
+        let network_config = IncomingConfig::default();
+
+        tokio::spawn(async move {
+            println!("tokio task");
+            let mut port_forwarder =
+                ReversePortForwarder::new(agent_connection, parsed_mappings, network_config)
+                    .await
+                    .unwrap();
+            port_forwarder.run().await.unwrap()
+        });
+
+        // expect handshake procedure
+        let expected = Some(ClientMessage::SwitchProtocolVersion(
+            mirrord_protocol::VERSION.clone(),
+        ));
+        assert_eq!(client_msg_rx.recv().await, expected);
+        daemon_msg_tx
+            .send(DaemonMessage::SwitchProtocolVersionResponse(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await
+            .unwrap();
+        let expected = Some(ClientMessage::ReadyForLogs);
+        assert_eq!(client_msg_rx.recv().await, expected);
+
+        // expect port subscription for remote port and send subscribe result
+        let expected = Some(ClientMessage::Tcp(LayerTcp::PortSubscribe(
+            destination_port,
+        )));
+        assert_eq!(client_msg_rx.recv().await, expected);
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(
+                destination_port,
+            ))))
+            .await
+            .unwrap();
+
+        // send new connection from agent and some data
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::NewConnection(
+                NewTcpConnection {
+                    connection_id: 1,
+                    remote_address,
+                    destination_port,
+                    source_port: local_destination.port(),
+                    local_address: local_destination.ip(),
+                },
+            )))
+            .await
+            .unwrap();
+        let mut stream = listener.accept().await.unwrap().0;
+
+        let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
+            ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
+            other => other,
+        };
+        assert_eq!(
+            message,
+            ClientMessage::Tcp(LayerTcp::PortSubscribe(destination_port))
+        );
+
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
+                connection_id: 1,
+                bytes: b"data-my-beloved".to_vec(),
+            })))
+            .await
+            .unwrap();
+
+        // check data arrives at local
+        let mut buf = [0; 15];
+        stream.read_exact(&mut buf).await.unwrap();
+        assert_eq!(buf, b"data-my-beloved".as_ref());
+
+        // ensure graceful behaviour on close
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::Close(TcpClose {
+                connection_id: 1,
+            })))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn reverse_port_forwarding_steal() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_destination = listener.local_addr().unwrap();
+
+        let (daemon_msg_tx, daemon_msg_rx) = mpsc::channel::<DaemonMessage>(12);
+        let (client_msg_tx, mut client_msg_rx) = mpsc::channel::<ClientMessage>(12);
+
+        let agent_connection = AgentConnection {
+            sender: client_msg_tx,
+            receiver: daemon_msg_rx,
+        };
+        let remote_address = IpAddr::from("152.37.40.40".parse::<Ipv4Addr>().unwrap());
+        let destination_port = 3038;
+        let parsed_mappings = vec![PortOnlyMapping {
+            local: local_destination.port(),
+            remote: destination_port,
+        }];
+        let mut network_config = IncomingConfig::default();
+        network_config.mode = IncomingMode::Steal;
+
+        tokio::spawn(async move {
+            println!("tokio task");
+            let mut port_forwarder =
+                ReversePortForwarder::new(agent_connection, parsed_mappings, network_config)
+                    .await
+                    .unwrap();
+            port_forwarder.run().await.unwrap()
+        });
+
+        // expect handshake procedure
+        let expected = Some(ClientMessage::SwitchProtocolVersion(
+            mirrord_protocol::VERSION.clone(),
+        ));
+        assert_eq!(client_msg_rx.recv().await, expected);
+        daemon_msg_tx
+            .send(DaemonMessage::SwitchProtocolVersionResponse(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await
+            .unwrap();
+        let expected = Some(ClientMessage::ReadyForLogs);
+        assert_eq!(client_msg_rx.recv().await, expected);
+
+        // expect port subscription for remote port and send subscribe result
+        let expected = Some(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
+            StealType::All(destination_port),
+        )));
+        assert_eq!(client_msg_rx.recv().await, expected);
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(
+                destination_port,
+            ))))
+            .await
+            .unwrap();
+
+        // send new connection from agent and some data
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::NewConnection(
+                NewTcpConnection {
+                    connection_id: 1,
+                    remote_address,
+                    destination_port,
+                    source_port: local_destination.port(),
+                    local_address: local_destination.ip(),
+                },
+            )))
+            .await
+            .unwrap();
+        let mut stream = listener.accept().await.unwrap().0;
+
+        let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
+            ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
+            other => other,
+        };
+        assert_eq!(
+            message,
+            ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(
+                destination_port
+            ),))
+        );
+
+        daemon_msg_tx
+            .send(DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
+                connection_id: 1,
+                bytes: b"data-my-beloved".to_vec(),
+            })))
+            .await
+            .unwrap();
+
+        // check data arrives at local
+        let mut buf = [0; 15];
+        stream.read_exact(&mut buf).await.unwrap();
+        assert_eq!(buf, b"data-my-beloved".as_ref());
+
+        // check for response from local
+        stream.write_all(b"reply-my-beloved").await.unwrap();
+        let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
+            ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
+            other => other,
+        };
+        assert!(matches!(
+            message,
+            ClientMessage::TcpSteal(LayerTcpSteal::Data(_))
+        ));
+
+        // ensure graceful behaviour on close
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::Close(TcpClose {
+                connection_id: 1,
+            })))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn reverse_multiple_mappings_forwarding() {
+        todo!()
+    }
+
+    #[tokio::test]
+    async fn filtered_reverse_port_forwarding() {
+        todo!()
     }
 }
