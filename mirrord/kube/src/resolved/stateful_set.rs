@@ -1,16 +1,20 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
-use k8s_openapi::api::apps::v1::Deployment;
-use mirrord_config::target::deployment::DeploymentTarget;
+use k8s_openapi::api::apps::v1::StatefulSet;
 
-use super::RuntimeDataFromLabels;
+use super::{ResolvedResource, RuntimeDataFromLabels};
 use crate::error::{KubeApiError, Result};
 
-impl RuntimeDataFromLabels for DeploymentTarget {
-    type Resource = Deployment;
+impl RuntimeDataFromLabels for ResolvedResource<StatefulSet> {
+    type Resource = StatefulSet;
 
     fn name(&self) -> Cow<str> {
-        Cow::from(&self.deployment)
+        self.resource
+            .metadata
+            .name
+            .as_ref()
+            .map(Cow::from)
+            .unwrap_or_default()
     }
 
     fn container(&self) -> Option<&str> {

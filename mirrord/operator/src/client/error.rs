@@ -68,6 +68,9 @@ pub enum OperatorApiError {
 
     #[error("mirrord operator returned a target of unknown type: {}", .0 .0)]
     FetchedUnknownTargetType(#[from] UnknownTargetType),
+
+    #[error("mirrord operator failed KubeApi operation: {0}")]
+    KubeApi(#[from] KubeApiError),
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;
