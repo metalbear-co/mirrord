@@ -1,0 +1,19 @@
+{
+  "operator": true,
+  "feature": {
+    "split_queues": {
+      "e2e-test-queue1": {
+        "queue_type": "SQS",
+        "message_filter": {
+          "client": "^a$"
+        }
+      },
+      "e2e-test-queue2": {
+        "queue_type": "SQS",
+        "message_filter": {
+          "client": "^a$"
+        }
+      }
+    }
+  }
+}

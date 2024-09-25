@@ -217,8 +217,34 @@ impl BackgroundTask for SimpleProxy {
                             .await;
                     }
                 }
-                SimpleProxyMessage::FileReq(message_id, session_id, req) => {
-                    self.file_reqs.insert(message_id, session_id);
+                // TODO(alex): We can remove this case when users are up-to-date for `readlink`.
+                SimpleProxyMessage::FileReq(
+                    message_id,
+                    layer_id,
+                    req @ FileRequest::ReadLink(_),
+                ) => {
+                    if protocol_version
+                        .as_ref()
+                        .is_some_and(|version| READDIR_BATCH_VERSION.matches(version))
+                    {
+                        self.file_reqs.insert(message_id, layer_id);
+                        message_bus
+                            .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(req)))
+                            .await;
+                    } else {
+                        message_bus
+                            .send(ToLayer {
+                                message_id,
+                                message: ProxyToLayerMessage::File(FileResponse::ReadLink(Err(
+                                    ResponseError::NotImplemented,
+                                ))),
+                                layer_id,
+                            })
+                            .await;
+                    }
+                }
+                SimpleProxyMessage::FileReq(message_id, layer_id, req) => {
+                    self.file_reqs.insert(message_id, layer_id);
                     message_bus
                         .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(req)))
                         .await;

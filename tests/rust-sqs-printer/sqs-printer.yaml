@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sqs-printer
+  labels:
+    app: sqs-printer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sqs-printer
+  template:
+    metadata:
+      labels:
+        app: sqs-printer
+    spec:
+      serviceAccountName: sqs-reader-account
+      containers:
+        - name: sqs-printer
+          image: docker.io/t4lz/sqs-printer:latest
+          env:
+            - name: RUST_BACKTRACE
+              value: "1"
+            - name: SQS_TEST_Q_NAME1
+              value: ManualTesting1
+            - name: SQS_TEST_Q_NAME2
+              value: TestQueue.fifo
+
