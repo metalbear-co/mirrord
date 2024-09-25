@@ -26,7 +26,7 @@ async fn expect_output_lines<const N: usize, const M: usize>(
     let lines = test_process
         .await_exactly_n_lines(
             expected_lines.len() + expected_in_order_lines.len(),
-            Duration::from_secs(40),
+            Duration::from_secs(20),
         )
         .await;
     for expected_line in expected_lines.into_iter() {
@@ -66,7 +66,7 @@ async fn expect_messages_in_queue<const N: usize>(
     client: &aws_sdk_sqs::Client,
     echo_queue: &QueueInfo,
 ) {
-    tokio::time::timeout(Duration::from_secs(40), async {
+    tokio::time::timeout(Duration::from_secs(20), async {
         println!("Verifying correct messages in echo queue {} (verifying the deployed application got the messages it was supposed to)", echo_queue.name);
         let mut expected_messages = HashSet::from(messages);
         loop {
@@ -77,7 +77,7 @@ async fn expect_messages_in_queue<const N: usize>(
                 .receive_message()
                 .queue_url(&echo_queue.url)
                 .visibility_timeout(15)
-                .wait_time_seconds(40)
+                .wait_time_seconds(20)
                 .send()
                 .await
             {
@@ -149,7 +149,7 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
 /// from those queues and verify the remote application exactly the messages it was supposed to.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(420))]
+#[timeout(Duration::from_secs(260))]
 pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_dir: &Path) {
     let mut sqs_test_resources = sqs_test_resources.await;
     let application = Application::RustSqs;
