@@ -552,7 +552,7 @@ impl ReversePortForwarder {
                     }
                     self.agent_connection.sender.send(ClientMessage::Ping).await?;
                     self.waiting_for_pong = true;
-                    self.ping_pong_timeout = Instant::now() + Duration::from_secs(30000);
+                    self.ping_pong_timeout = Instant::now() + Duration::from_secs(30);
                 },
 
                 message = self.agent_connection.receiver.recv() => match message {
@@ -1307,7 +1307,6 @@ mod test {
         let network_config = IncomingConfig::default();
 
         tokio::spawn(async move {
-            println!("tokio task");
             let mut port_forwarder =
                 ReversePortForwarder::new(agent_connection, parsed_mappings, network_config)
                     .await
@@ -1409,7 +1408,6 @@ mod test {
         network_config.mode = IncomingMode::Steal;
 
         tokio::spawn(async move {
-            println!("tokio task");
             let mut port_forwarder =
                 ReversePortForwarder::new(agent_connection, parsed_mappings, network_config)
                     .await
@@ -1503,12 +1501,168 @@ mod test {
     }
 
     #[tokio::test]
-    async fn reverse_multiple_mappings_forwarding() {
-        todo!()
+    async fn reverse_multiple_mappings_forwarding_mirror() {
+        // uses mirror mode so no responses expected
+        let listener_1 = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener_2 = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_destination_1 = listener_1.local_addr().unwrap();
+        let local_destination_2 = listener_2.local_addr().unwrap();
+
+        let (daemon_msg_tx, daemon_msg_rx) = mpsc::channel::<DaemonMessage>(12);
+        let (client_msg_tx, mut client_msg_rx) = mpsc::channel::<ClientMessage>(12);
+
+        let agent_connection = AgentConnection {
+            sender: client_msg_tx,
+            receiver: daemon_msg_rx,
+        };
+        let remote_address = IpAddr::from("152.37.40.40".parse::<Ipv4Addr>().unwrap());
+        let destination_port_1 = 3038;
+        let destination_port_2 = 4048;
+        let parsed_mappings = vec![
+            PortOnlyMapping {
+                local: local_destination_1.port(),
+                remote: destination_port_1,
+            },
+            PortOnlyMapping {
+                local: local_destination_2.port(),
+                remote: destination_port_2,
+            },
+        ];
+        let network_config = IncomingConfig::default();
+
+        tokio::spawn(async move {
+            let mut port_forwarder =
+                ReversePortForwarder::new(agent_connection, parsed_mappings, network_config)
+                    .await
+                    .unwrap();
+            port_forwarder.run().await.unwrap()
+        });
+
+        // expect handshake procedure
+        let expected = Some(ClientMessage::SwitchProtocolVersion(
+            mirrord_protocol::VERSION.clone(),
+        ));
+        assert_eq!(client_msg_rx.recv().await, expected);
+        daemon_msg_tx
+            .send(DaemonMessage::SwitchProtocolVersionResponse(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await
+            .unwrap();
+        let expected = Some(ClientMessage::ReadyForLogs);
+        assert_eq!(client_msg_rx.recv().await, expected);
+
+        // expect port subscription for remote port and send subscribe result
+        assert!(matches!(
+            client_msg_rx.recv().await,
+            Some(ClientMessage::Tcp(LayerTcp::PortSubscribe(_)))
+        ));
+        assert!(matches!(
+            client_msg_rx.recv().await,
+            Some(ClientMessage::Tcp(LayerTcp::PortSubscribe(_)))
+        ));
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(
+                destination_port_1,
+            ))))
+            .await
+            .unwrap();
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(
+                destination_port_2,
+            ))))
+            .await
+            .unwrap();
+
+        // send new connections from agent and some data
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::NewConnection(
+                NewTcpConnection {
+                    connection_id: 1,
+                    remote_address,
+                    destination_port: destination_port_1,
+                    source_port: local_destination_1.port(),
+                    local_address: local_destination_1.ip(),
+                },
+            )))
+            .await
+            .unwrap();
+        let mut stream_1 = listener_1.accept().await.unwrap().0;
+
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::NewConnection(
+                NewTcpConnection {
+                    connection_id: 2,
+                    remote_address,
+                    destination_port: destination_port_2,
+                    source_port: local_destination_2.port(),
+                    local_address: local_destination_2.ip(),
+                },
+            )))
+            .await
+            .unwrap();
+        let mut stream_2 = listener_2.accept().await.unwrap().0;
+
+        for _ in 0..2 {
+            let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
+                ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
+                other => other,
+            };
+            assert!(matches!(
+                message,
+                ClientMessage::Tcp(LayerTcp::PortSubscribe(_))
+            ));
+        }
+
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
+                connection_id: 1,
+                bytes: b"connection-1-my-beloved".to_vec(),
+            })))
+            .await
+            .unwrap();
+
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
+                connection_id: 2,
+                bytes: b"connection-2-my-beloved".to_vec(),
+            })))
+            .await
+            .unwrap();
+
+        // check data arrives at local
+        let mut buf = [0; 23];
+        stream_1.read_exact(&mut buf).await.unwrap();
+        assert_eq!(buf, b"connection-1-my-beloved".as_ref());
+
+        let mut buf = [0; 23];
+        stream_2.read_exact(&mut buf).await.unwrap();
+        assert_eq!(buf, b"connection-2-my-beloved".as_ref());
+
+        // ensure graceful behaviour on close
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::Close(TcpClose {
+                connection_id: 1,
+            })))
+            .await
+            .unwrap();
+
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::Close(TcpClose {
+                connection_id: 2,
+            })))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
     async fn filtered_reverse_port_forwarding() {
+        todo!()
+    }
+
+    #[tokio::test]
+    async fn filtered_reverse_multiple_port_forwarding() {
+        // filter header "key": "value"
         todo!()
     }
 }
