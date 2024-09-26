@@ -87,8 +87,8 @@ pub struct OutgoingProxy {
     txs: HashMap<InterceptorId, TaskSender<Interceptor>>,
     /// For managing [`Interceptor`] tasks.
     background_tasks: BackgroundTasks<InterceptorId, Vec<u8>, io::Error>,
-
-    pending_connections: HashMap<(MessageId, LayerId), PreparedSocket>,
+    /// For storing [`PreparedSocket`]s before agent reply is recived
+    connecting_sockets: HashMap<(MessageId, LayerId), PreparedSocket>,
 }
 
 impl OutgoingProxy {
@@ -149,7 +149,7 @@ impl OutgoingProxy {
         let connect = match connect {
             Ok(connect) => connect,
             Err(e) => {
-                let _ = self.pending_connections.remove(&(message_id, layer_id));
+                let _ = self.connecting_sockets.remove(&(message_id, layer_id));
 
                 message_bus
                     .send(ToLayer {
@@ -169,7 +169,7 @@ impl OutgoingProxy {
             local_address,
         } = connect;
 
-        let prepared_socket = match self.pending_connections.remove(&(message_id, layer_id)) {
+        let prepared_socket = match self.connecting_sockets.remove(&(message_id, layer_id)) {
             None => protocol.prepare_socket(remote_address).await?,
             Some(prepared_socket) => prepared_socket,
         };
@@ -224,7 +224,7 @@ impl OutgoingProxy {
                     .await?;
                 let layer_address = prepared_socket.local_address()?;
 
-                self.pending_connections
+                self.connecting_sockets
                     .insert((message_id, layer_id), prepared_socket);
 
                 OutgoingConnectResponse::InProgress { layer_address }
