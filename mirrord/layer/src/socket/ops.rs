@@ -419,26 +419,32 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
 
 fn non_blocking_connect_watcher(
     sockfd: RawFd,
+    remote_address: SocketAddress,
     responses: impl Iterator<Item = HookResult<RemoteResult<OutgoingConnectResponse>>>,
 ) {
     for response in responses {
         match response {
-            Ok(Err(ResponseError::InProgress)) => {
+            Ok(Ok(OutgoingConnectResponse::InProgress { .. })) => {
                 continue;
             }
-            Ok(Ok(OutgoingConnectResponse { layer_address, .. })) => {
-                let connect_result: ConnectResult = {
-                    let layer_address = SockAddr::try_from(layer_address.clone())
-                        .expect("layer address should always be cast to sockaddr");
-
-                    unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }
-                        .into()
+            Ok(Ok(OutgoingConnectResponse::Connected {
+                layer_address,
+                in_cluster_address,
+            })) => {
+                let connected = Connected {
+                    remote_address,
+                    local_address: in_cluster_address,
+                    layer_address: Some(layer_address),
                 };
 
-                if connect_result.is_failure() {
-                    tracing::warn!(?connect_result, ?sockfd, "async connect is a faulure");
-                } else {
-                    tracing::debug!(?connect_result, ?sockfd, "async connect");
+                tracing::trace!(?connected, "we are connected");
+
+                if let Ok(mut guard) = SOCKETS.lock() {
+                    if let Some(user_socket_info) = guard.get_mut(&sockfd) {
+                        Arc::get_mut(user_socket_info)
+                            .expect("user_socket_info should be accessible via mutable ref")
+                            .state = SocketState::Connected(connected);
+                    }
                 }
 
                 break;
@@ -489,12 +495,10 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
             .next()
             .expect("response iter will respolve or block")?
         {
-            Ok(response) => {
-                let OutgoingConnectResponse {
-                    layer_address,
-                    in_cluster_address,
-                } = response;
-
+            Ok(OutgoingConnectResponse::Connected {
+                layer_address,
+                in_cluster_address,
+            }) => {
                 // Connect to the interceptor socket that is listening.
                 let connect_result: ConnectResult = if CALL_CONNECT {
                     let layer_address = SockAddr::try_from(layer_address.clone())?;
@@ -530,17 +534,31 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
 
                 Detour::Success(connect_result)
             }
-            Err(err @ ResponseError::InProgress) if CALL_CONNECT => {
+            Ok(OutgoingConnectResponse::InProgress { layer_address }) => {
+                let connect_result: ConnectResult = {
+                    let layer_address = SockAddr::try_from(layer_address.clone())?;
+
+                    unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }
+                        .into()
+                };
+
+                if connect_result.is_failure() {
+                    tracing::error!(?connect_result, "connect -> Failed call to libc::connect");
+
+                    Err(io::Error::last_os_error())?
+                }
+
                 Arc::get_mut(&mut user_socket_info)
                     .expect("user_socket_info should be accessible via mutable ref")
                     .state = SocketState::Connecting;
 
                 SOCKETS.lock()?.insert(sockfd, user_socket_info);
 
-                // Spawn a watcher that will call [`FN_CONNECT`] when response is ready
-                std::thread::spawn(move || non_blocking_connect_watcher(sockfd, responses));
+                std::thread::spawn(move || {
+                    non_blocking_connect_watcher(sockfd, remote_address, responses)
+                });
 
-                Detour::Error(err.into())
+                Detour::Success(connect_result)
             }
             Err(err) => Detour::Error(err.into()),
         }

@@ -17,7 +17,7 @@ use self::interceptor::Interceptor;
 use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
     main_tasks::ToLayer,
-    proxies::outgoing::net_protocol_ext::NetProtocolExt,
+    proxies::outgoing::net_protocol_ext::{NetProtocolExt, PreparedSocket},
     request_queue::{RequestQueue, RequestQueueEmpty},
     ProxyMessage,
 };
@@ -87,6 +87,8 @@ pub struct OutgoingProxy {
     txs: HashMap<InterceptorId, TaskSender<Interceptor>>,
     /// For managing [`Interceptor`] tasks.
     background_tasks: BackgroundTasks<InterceptorId, Vec<u8>, io::Error>,
+
+    pending_connections: HashMap<(MessageId, LayerId), PreparedSocket>,
 }
 
 impl OutgoingProxy {
@@ -165,7 +167,10 @@ impl OutgoingProxy {
             local_address,
         } = connect;
 
-        let prepared_socket = protocol.prepare_socket(remote_address).await?;
+        let prepared_socket = match self.pending_connections.remove(&(message_id, layer_id)) {
+            None => protocol.prepare_socket(remote_address).await?,
+            Some(prepared_socket) => prepared_socket,
+        };
         let layer_address = prepared_socket.local_address()?;
 
         let id = InterceptorId {
@@ -182,10 +187,12 @@ impl OutgoingProxy {
 
         message_bus
             .send(ToLayer {
-                message: ProxyToLayerMessage::OutgoingConnect(Ok(OutgoingConnectResponse {
-                    layer_address,
-                    in_cluster_address: local_address,
-                })),
+                message: ProxyToLayerMessage::OutgoingConnect(Ok(
+                    OutgoingConnectResponse::Connected {
+                        layer_address,
+                        in_cluster_address: local_address,
+                    },
+                )),
                 message_id,
                 layer_id,
             })
@@ -205,20 +212,39 @@ impl OutgoingProxy {
     ) {
         self.queue(request.protocol).insert(message_id, layer_id);
 
-        let msg = request.protocol.wrap_agent_connect(request.remote_address);
-        message_bus.send(ProxyMessage::ToAgent(msg)).await;
-
         if matches!(request.protocol, NetProtocol::Stream)
             && request.flags.contains(OutgoingConnectFlags::NONBLOCK)
         {
+            let response: RemoteResult<_> = try {
+                let prepared_socket = request
+                    .protocol
+                    .prepare_socket(request.remote_address.clone())
+                    .await?;
+                let layer_address = prepared_socket.local_address()?;
+
+                self.pending_connections
+                    .insert((message_id, layer_id), prepared_socket);
+
+                OutgoingConnectResponse::InProgress { layer_address }
+            };
+
+            let did_error = response.is_err();
+
             message_bus
                 .send(ToLayer {
-                    message: ProxyToLayerMessage::OutgoingConnect(Err(ResponseError::InProgress)),
+                    message: ProxyToLayerMessage::OutgoingConnect(response),
                     message_id,
                     layer_id,
                 })
                 .await;
+
+            if did_error {
+                return;
+            }
         }
+
+        let msg = request.protocol.wrap_agent_connect(request.remote_address);
+        message_bus.send(ProxyMessage::ToAgent(msg)).await;
     }
 }
 

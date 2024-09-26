@@ -271,11 +271,16 @@ pub enum IncomingResponse {
 
 /// A response to layer's [`OutgoingConnectRequest`].
 #[derive(Encode, Decode, Debug)]
-pub struct OutgoingConnectResponse {
-    /// The address the layer should connect to instead of the address requested by the user.
-    pub layer_address: SocketAddress,
-    /// In-cluster address of the pod.
-    pub in_cluster_address: SocketAddress,
+pub enum OutgoingConnectResponse {
+    InProgress {
+        layer_address: SocketAddress,
+    },
+    Connected {
+        /// The address the layer should connect to instead of the address requested by the user.
+        layer_address: SocketAddress,
+        /// In-cluster address of the pod.
+        in_cluster_address: SocketAddress,
+    },
 }
 
 /// A helper trait for `layer -> proxy` requests.
