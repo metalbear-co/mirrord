@@ -535,11 +535,17 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
                 Detour::Success(connect_result)
             }
             Ok(OutgoingConnectResponse::InProgress { layer_address }) => {
-                let connect_result: ConnectResult = {
+                // Connect to the interceptor socket that is listening.
+                let connect_result: ConnectResult = if CALL_CONNECT {
                     let layer_address = SockAddr::try_from(layer_address.clone())?;
 
                     unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }
                         .into()
+                } else {
+                    ConnectResult {
+                        result: 0,
+                        error: None,
+                    }
                 };
 
                 if connect_result.is_failure() {
