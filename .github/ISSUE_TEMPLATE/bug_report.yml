@@ -42,7 +42,10 @@ body:
     id: intproxy-logs
     attributes:
       label: Internal proxy logs
-      description: Please attach the relevant `mirrord-intproxy` logs. You may find them in your `/tmp` directory (default).
+      description: |
+        Please attach the relevant `mirrord-intproxy` logs. You can find them in your `/tmp` directory (by default).
+        The default log file looks like `/tmp/mirrord-intproxy-1727386366-5rqqf2x`.
+        You can change this default with the `internal_proxy.log_destination` mirrord config.
       render: shell
   - type: input
     id: os_version
