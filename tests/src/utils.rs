@@ -5,6 +5,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     net::Ipv4Addr,
+    ops::Not,
     path::PathBuf,
     process::{ExitStatus, Stdio},
     sync::{Arc, Once},
@@ -29,7 +30,7 @@ use rand::{distributions::Alphanumeric, Rng};
 use reqwest::{RequestBuilder, StatusCode};
 use rstest::*;
 use serde::{de::DeserializeOwned, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use tempfile::{tempdir, TempDir};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
@@ -37,6 +38,9 @@ use tokio::{
     sync::RwLock,
     task::JoinHandle,
 };
+
+#[cfg(feature = "operator")]
+pub mod sqs_resources;
 
 const TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 pub const CONTAINER_NAME: &str = "test";
@@ -96,6 +100,7 @@ pub enum Application {
     PythonCloseSocket,
     PythonCloseSocketKeepConnection,
     RustWebsockets,
+    RustSqs,
 }
 
 #[derive(Debug)]
@@ -196,6 +201,58 @@ impl TestProcess {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         panic!("Timeout waiting for line: {line}");
+    }
+
+    /// Wait for the test app to output (at least) the given amount of lines.
+    ///
+    /// # Arguments
+    ///
+    /// * `timeout` - how long to wait for process to output enough lines.
+    ///
+    /// # Panics
+    /// If `timeout` has passed and stdout still does not contain `n` lines.
+    pub async fn await_n_lines(&self, n: usize, timeout: Duration) -> Vec<String> {
+        tokio::time::timeout(timeout, async move {
+            loop {
+                let stdout = self.get_stdout().await;
+                if stdout.lines().count() >= n {
+                    return stdout
+                        .lines()
+                        .map(ToString::to_string)
+                        .collect::<Vec<String>>();
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .expect("Test process output did not produce expected amount of lines in time.")
+    }
+
+    /// Wait for the test app to output the given amount of lines, then assert it did not output
+    /// more than expected.
+    ///
+    /// > Note: we do not wait to make sure more lines are not printed, we just check the lines we
+    /// > got after waiting for n lines. So it is possible for this to happen:
+    ///   1. Test process outputs `n` lines.
+    ///   2. `await_n_lines` returns those `n` lines.
+    ///   3. This function asserts there are only `n` lines.
+    ///   3. The test process outputs more lines.
+    ///
+    /// # Arguments
+    ///
+    /// * `timeout` - how long to wait for process to output enough lines.
+    ///
+    /// # Panics
+    /// - If `timeout` has passed and stdout still does not contain `n` lines.
+    /// - If stdout contains more than `n` lines.
+    pub async fn await_exactly_n_lines(&self, n: usize, timeout: Duration) -> Vec<String> {
+        let lines = self.await_n_lines(n, timeout).await;
+        assert_eq!(
+            lines.len(),
+            n,
+            "Test application printed out more lines than expected."
+        );
+        lines
     }
 
     pub async fn write_to_stdin(&mut self, data: &[u8]) {
@@ -334,6 +391,7 @@ impl Application {
                 vec!["curl", "https://kubernetes/api", "--insecure"]
             }
             Application::RustWebsockets => vec!["../target/debug/rust-websockets"],
+            Application::RustSqs => vec!["../target/debug/rust-sqs-printer"],
         }
     }
 
@@ -642,6 +700,12 @@ pub struct KubeService {
     namespace_guard: Option<ResourceGuard>,
 }
 
+impl KubeService {
+    pub fn deployment_target(&self) -> String {
+        format!("deployment/{}", self.name)
+    }
+}
+
 impl Drop for KubeService {
     fn drop(&mut self) {
         let mut deleters = self
@@ -673,7 +737,7 @@ impl Drop for KubeService {
     }
 }
 
-fn deployment_from_json(name: &str, image: &str) -> Deployment {
+fn deployment_from_json(name: &str, image: &str, env: Value) -> Deployment {
     serde_json::from_value(json!({
         "apiVersion": "apps/v1",
         "kind": "Deployment",
@@ -710,20 +774,7 @@ fn deployment_from_json(name: &str, image: &str) -> Deployment {
                                     "containerPort": 80
                                 }
                             ],
-                            "env": [
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_FIRST",
-                                  "value": "mirrord.is.running"
-                                },
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_SECOND",
-                                  "value": "7777"
-                                },
-                                {
-                                    "name": "MIRRORD_FAKE_VAR_THIRD",
-                                    "value": "foo=bar"
-                                }
-                            ],
+                            "env": env,
                         }
                     ]
                 }
@@ -941,11 +992,29 @@ fn job_from_json(name: &str, image: &str) -> k8s_openapi::api::batch::v1::Job {
     .expect("Failed creating `job` from json spec!")
 }
 
+fn default_env() -> Value {
+    json!(
+        [
+            {
+              "name": "MIRRORD_FAKE_VAR_FIRST",
+              "value": "mirrord.is.running"
+            },
+            {
+              "name": "MIRRORD_FAKE_VAR_SECOND",
+              "value": "7777"
+            },
+            {
+                "name": "MIRRORD_FAKE_VAR_THIRD",
+                "value": "foo=bar"
+            }
+        ]
+    )
+}
+
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
-/// This behavior can be changed, see `FORCE_CLEANUP_ENV_NAME`.
+/// This behavior can be changed, see [`PRESERVE_FAILED_ENV_NAME`].
 /// * `randomize_name` - whether a random suffix should be added to the end of the resource names
-// TODO: update outdated comment, FORCE_CLEANUP_ENV_NAME does not exist
 #[fixture]
 pub async fn service(
     #[default("default")] namespace: &str,
@@ -955,9 +1024,66 @@ pub async fn service(
     #[default(true)] randomize_name: bool,
     #[future] kube_client: Client,
 ) -> KubeService {
+    internal_service(
+        namespace,
+        service_type,
+        image,
+        service_name,
+        randomize_name,
+        kube_client.await,
+        default_env(),
+    )
+    .await
+}
+
+/// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
+/// when the returned service is dropped, unless it is dropped during panic.
+/// This behavior can be changed, see [`PRESERVE_FAILED_ENV_NAME`].
+/// * `randomize_name` - whether a random suffix should be added to the end of the resource names
+/// * `env` - `Value`, should be `Value::Array` of kubernetes container env var definitions.
+pub async fn service_with_env(
+    namespace: &str,
+    service_type: &str,
+    image: &str,
+    service_name: &str,
+    randomize_name: bool,
+    kube_client: Client,
+    env: Value,
+) -> KubeService {
+    internal_service(
+        namespace,
+        service_type,
+        image,
+        service_name,
+        randomize_name,
+        kube_client,
+        env,
+    )
+    .await
+}
+
+/// Internal function to create a custom [`KubeService`].
+/// We keep this private so that whenever we need more customization of test resources, we can
+/// change this function and how the public ones use it, and add a new public function that exposes
+/// more customization, and we don't need to change all existing usages of public functions/fixtures
+/// in tests.
+///
+/// Create a new [`KubeService`] and related Kubernetes resources. The resources will be
+/// deleted when the returned service is dropped, unless it is dropped during panic.
+/// This behavior can be changed, see [`PRESERVE_FAILED_ENV_NAME`].
+/// * `randomize_name` - whether a random suffix should be added to the end of the resource names
+/// * `env` - `Value`, should be `Value::Array` of kubernetes container env var definitions.
+async fn internal_service(
+    namespace: &str,
+    service_type: &str,
+    image: &str,
+    service_name: &str,
+    randomize_name: bool,
+    kube_client: Client,
+    env: Value,
+) -> KubeService {
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
 
-    let kube_client = kube_client.await;
     let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
     let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
     let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
@@ -1009,7 +1135,7 @@ pub async fn service(
     }
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image);
+    let deployment = deployment_from_json(&name, image, env);
     let pod_guard = ResourceGuard::create(
         deployment_api.clone(),
         name.to_string(),
@@ -1120,7 +1246,7 @@ pub async fn service_for_mirrord_ls(
     }
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image);
+    let deployment = deployment_from_json(&name, image, default_env());
     let pod_guard = ResourceGuard::create(
         deployment_api.clone(),
         name.to_string(),
@@ -1242,7 +1368,7 @@ pub async fn service_for_mirrord_ls(
     }
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image);
+    let deployment = deployment_from_json(&name, image, default_env());
     let pod_guard = ResourceGuard::create(
         deployment_api.clone(),
         name.to_string(),
@@ -1429,28 +1555,42 @@ pub fn resolve_node_host() -> String {
         "127.0.0.1".to_string()
     }
 }
-
 pub async fn get_service_host_and_port(
     kube_client: Client,
     service: &KubeService,
 ) -> (String, i32) {
-    let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &service.namespace);
+    get_pod_or_node_host_and_port(kube_client, &service.name, &service.namespace).await
+}
+
+async fn get_pod_or_node_host(kube_client: Client, name: &str, namespace: &str) -> String {
+    let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
     let pods = pod_api
-        .list(&ListParams::default().labels(&format!("app={}", service.name)))
+        .list(&ListParams::default().labels(&format!("app={}", name)))
         .await
         .unwrap();
-    let mut host_ip = pods
-        .into_iter()
+    pods.into_iter()
         .next()
         .and_then(|pod| pod.status)
         .and_then(|status| status.host_ip)
-        .unwrap();
-    if host_ip.parse::<Ipv4Addr>().unwrap().is_private() {
-        host_ip = resolve_node_host();
-    }
-    let services_api: Api<Service> = Api::namespaced(kube_client.clone(), &service.namespace);
+        .and_then(|ip| {
+            ip.parse::<Ipv4Addr>()
+                .unwrap()
+                .is_private()
+                .not()
+                .then_some(ip)
+        })
+        .unwrap_or_else(resolve_node_host)
+}
+
+async fn get_pod_or_node_host_and_port(
+    kube_client: Client,
+    name: &str,
+    namespace: &str,
+) -> (String, i32) {
+    let host_ip = get_pod_or_node_host(kube_client.clone(), name, namespace).await;
+    let services_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
     let services = services_api
-        .list(&ListParams::default().labels(&format!("app={}", service.name)))
+        .list(&ListParams::default().labels(&format!("app={}", name)))
         .await
         .unwrap();
     let port = services
