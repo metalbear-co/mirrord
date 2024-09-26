@@ -1,16 +1,20 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
 use k8s_openapi::api::apps::v1::Deployment;
-use mirrord_config::target::deployment::DeploymentTarget;
 
-use super::RuntimeDataFromLabels;
-use crate::error::{KubeApiError, Result};
+use super::ResolvedResource;
+use crate::{api::runtime::RuntimeDataFromLabels, error::KubeApiError};
 
-impl RuntimeDataFromLabels for DeploymentTarget {
+impl RuntimeDataFromLabels for ResolvedResource<Deployment> {
     type Resource = Deployment;
 
     fn name(&self) -> Cow<str> {
-        Cow::from(&self.deployment)
+        self.resource
+            .metadata
+            .name
+            .as_ref()
+            .map(Cow::from)
+            .unwrap_or_default()
     }
 
     fn container(&self) -> Option<&str> {
@@ -19,7 +23,7 @@ impl RuntimeDataFromLabels for DeploymentTarget {
 
     async fn get_selector_match_labels(
         resource: &Self::Resource,
-    ) -> Result<BTreeMap<String, String>> {
+    ) -> Result<BTreeMap<String, String>, KubeApiError> {
         resource
             .spec
             .as_ref()

@@ -212,7 +212,7 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     )
     .await;
 
-    // Test app prints 1: before messages from queue1 and 2: before messages from queue 2.
+    // Test app prints 1: before messages from queue 1 and 2: before messages from queue 2.
     expect_output_lines(["1:1", "1:6"], ["2:10", "2:60"], &client_a).await;
     println!("Client a received the correct messages.");
     expect_output_lines(["1:2", "1:5"], ["2:20", "2:50"], &client_b).await;

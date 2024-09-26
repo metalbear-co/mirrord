@@ -3,7 +3,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use kube::CustomResource;
+use kube::{CustomResource, Resource};
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
@@ -291,7 +291,7 @@ impl From<&OperatorFeatures> for NewOperatorFeature {
     }
 }
 
-/// This [`Resource`](kube::Resource) represents a copy pod created from an existing [`Target`]
+/// This [`Resource`] represents a copy pod created from an existing [`Target`]
 /// (operator's copy pod feature).
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[kube(
@@ -313,6 +313,30 @@ pub struct CopyTargetSpec {
     pub scale_down: bool,
     /// Split queues client side configuration.
     pub split_queues: Option<SplitQueuesConfig>,
+}
+
+impl CopyTargetCrd {
+    pub fn connect_url(&self, use_proxy: bool) -> String {
+        let name = self
+            .meta()
+            .name
+            .as_deref()
+            .expect("Missing `CopyTargetCrd` name");
+        let namespace = self
+            .meta()
+            .namespace
+            .as_deref()
+            .expect("Missing `TargetCrd namespace`");
+        let api_version = CopyTargetCrd::api_version(&());
+        let plural = CopyTargetCrd::plural(&());
+        let url_path = CopyTargetCrd::url_path(&(), Some(namespace));
+
+        if use_proxy {
+            format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?connect=true")
+        } else {
+            format!("{url_path}/{name}?connect=true")
+        }
+    }
 }
 
 /// This is the `status` field for [`CopyTargetCrd`].

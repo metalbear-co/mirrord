@@ -1,16 +1,23 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
 use k8s_openapi::api::batch::v1::CronJob;
-use mirrord_config::target::cron_job::CronJobTarget;
 
-use super::RuntimeDataFromLabels;
-use crate::error::{KubeApiError, Result};
+use super::ResolvedResource;
+use crate::{
+    api::runtime::RuntimeDataFromLabels,
+    error::{KubeApiError, Result},
+};
 
-impl RuntimeDataFromLabels for CronJobTarget {
+impl RuntimeDataFromLabels for ResolvedResource<CronJob> {
     type Resource = CronJob;
 
     fn name(&self) -> Cow<str> {
-        Cow::from(&self.cron_job)
+        self.resource
+            .metadata
+            .name
+            .as_ref()
+            .map(Cow::from)
+            .unwrap_or_default()
     }
 
     fn container(&self) -> Option<&str> {
