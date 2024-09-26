@@ -1490,10 +1490,13 @@ mod test {
             ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
             other => other,
         };
-        assert!(matches!(
+        assert_eq!(
             message,
-            ClientMessage::TcpSteal(LayerTcpSteal::Data(_))
-        ));
+            ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
+                connection_id: 1,
+                bytes: b"reply-my-beloved".to_vec()
+            }))
+        );
 
         // ensure graceful behaviour on close
         daemon_msg_tx
@@ -1556,15 +1559,19 @@ mod test {
         let expected = Some(ClientMessage::ReadyForLogs);
         assert_eq!(client_msg_rx.recv().await, expected);
 
-        // expect port subscription for remote port and send subscribe result
-        assert!(matches!(
-            client_msg_rx.recv().await,
-            Some(ClientMessage::Tcp(LayerTcp::PortSubscribe(_)))
-        ));
-        assert!(matches!(
-            client_msg_rx.recv().await,
-            Some(ClientMessage::Tcp(LayerTcp::PortSubscribe(_)))
-        ));
+        // expect port subscription for each remote port and send subscribe result
+        // matches! used because order may be random
+        for _ in 0..2 {
+            let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
+                ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
+                other => other,
+            };
+            assert!(
+                matches!(message, ClientMessage::Tcp(LayerTcp::PortSubscribe(_))),
+                "expected ClientMessage::Tcp(LayerTcp::PortSubscribe(_), received {message:?}"
+            );
+        }
+
         daemon_msg_tx
             .send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(
                 destination_port_1,
@@ -1607,15 +1614,17 @@ mod test {
             .unwrap();
         let mut stream_2 = listener_2.accept().await.unwrap().0;
 
+        // expect port subscription for each remote port and send subscribe result
+        // matches! used because order may be random
         for _ in 0..2 {
             let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
                 ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
                 other => other,
             };
-            assert!(matches!(
-                message,
-                ClientMessage::Tcp(LayerTcp::PortSubscribe(_))
-            ));
+            assert!(
+                matches!(message, ClientMessage::Tcp(LayerTcp::PortSubscribe(_))),
+                "expected ClientMessage::Tcp(LayerTcp::PortSubscribe(_), received {message:?}"
+            );
         }
 
         daemon_msg_tx
@@ -1706,12 +1715,19 @@ mod test {
         assert_eq!(client_msg_rx.recv().await, expected);
 
         // expect port subscription for remote port and send subscribe result
-        assert!(matches!(
-            client_msg_rx.recv().await,
-            Some(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
-                StealType::FilteredHttpEx(..),
-            )))
-        ));
+        let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
+            ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
+            other => other,
+        };
+        assert_eq!(
+            message,
+            ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::FilteredHttpEx(
+                destination_port,
+                mirrord_protocol::tcp::HttpFilter::Header(
+                    Filter::new("header: value".to_string()).unwrap()
+                )
+            ),))
+        );
         daemon_msg_tx
             .send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(
                 destination_port,
