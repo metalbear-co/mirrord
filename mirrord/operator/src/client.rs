@@ -5,7 +5,6 @@ use chrono::{DateTime, Utc};
 use conn_wrapper::ConnectionWrapper;
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
 use http::{request::Request, HeaderName, HeaderValue};
-use k8s_openapi::api::apps::v1::Deployment;
 use kube::{
     api::{ListParams, PostParams},
     Api, Client, Config, Resource,
@@ -16,14 +15,11 @@ use mirrord_auth::{
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::LicenseValidity,
 };
-use mirrord_config::{
-    feature::{network::incoming::ConcurrentSteal, split_queues::SplitQueuesConfig},
-    target::Target,
-    LayerConfig,
-};
+use mirrord_config::{feature::split_queues::SplitQueuesConfig, target::Target, LayerConfig};
 use mirrord_kube::{
-    api::kubernetes::{create_kube_config, get_k8s_resource_api},
+    api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
     error::KubeApiError,
+    resolved::ResolvedTarget,
 };
 use mirrord_progress::Progress;
 use mirrord_protocol::{ClientMessage, DaemonMessage};
@@ -156,85 +152,6 @@ impl fmt::Debug for OperatorSessionConnection {
             .field("rx_closed", &self.rx.is_closed())
             .field("rx_queued_messages", &rx_queued_messages)
             .finish()
-    }
-}
-
-/// Prepared target of an operator session.
-#[derive(Debug)]
-enum OperatorSessionTarget {
-    /// CRD of an immediate target validated and fetched from the operator.
-    Raw(TargetCrd),
-    /// CRD of a copied target created by the operator.
-    Copied(CopyTargetCrd),
-}
-
-impl OperatorSessionTarget {
-    /// Returns a connection url for the given [`OperatorSessionTarget`].
-    /// This can be used to create a websocket connection with the operator.
-    fn connect_url(
-        &self,
-        use_proxy: bool,
-        concurrent_steal: ConcurrentSteal,
-    ) -> Result<String, OperatorApiError> {
-        Ok(match (use_proxy, self) {
-            (true, OperatorSessionTarget::Raw(crd)) => {
-                let name = TargetCrd::urlfied_name(crd.spec.target.as_known()?);
-                let namespace = crd
-                    .meta()
-                    .namespace
-                    .as_deref()
-                    .expect("missing 'TargetCrd' namespace");
-                let api_version = TargetCrd::api_version(&());
-                let plural = TargetCrd::plural(&());
-
-                format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?on_concurrent_steal={concurrent_steal}&connect=true")
-            }
-
-            (false, OperatorSessionTarget::Raw(crd)) => {
-                let name = TargetCrd::urlfied_name(crd.spec.target.as_known()?);
-                let namespace = crd
-                    .meta()
-                    .namespace
-                    .as_deref()
-                    .expect("missing 'TargetCrd' namespace");
-                let url_path = TargetCrd::url_path(&(), Some(namespace));
-
-                format!("{url_path}/{name}?on_concurrent_steal={concurrent_steal}&connect=true")
-            }
-            (true, OperatorSessionTarget::Copied(crd)) => {
-                let name = crd
-                    .meta()
-                    .name
-                    .as_deref()
-                    .expect("missing 'CopyTargetCrd' name");
-                let namespace = crd
-                    .meta()
-                    .namespace
-                    .as_deref()
-                    .expect("missing 'CopyTargetCrd' namespace");
-                let api_version = CopyTargetCrd::api_version(&());
-                let plural = CopyTargetCrd::plural(&());
-
-                format!(
-                    "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?connect=true"
-                )
-            }
-            (false, OperatorSessionTarget::Copied(crd)) => {
-                let name = crd
-                    .meta()
-                    .name
-                    .as_deref()
-                    .expect("missing 'CopyTargetCrd' name");
-                let namespace = crd
-                    .meta()
-                    .namespace
-                    .as_deref()
-                    .expect("missing 'CopyTargetCrd' namespace");
-                let url_path = CopyTargetCrd::url_path(&(), Some(namespace));
-
-                format!("{url_path}/{name}?connect=true")
-            }
-        })
     }
 }
 
@@ -620,6 +537,7 @@ impl OperatorApi<PreparedClientCert> {
     )]
     pub async fn connect_in_new_session<P>(
         &self,
+        target: ResolvedTarget<false>,
         config: &LayerConfig,
         progress: &P,
     ) -> OperatorApiResult<OperatorSessionConnection>
@@ -628,31 +546,14 @@ impl OperatorApi<PreparedClientCert> {
     {
         self.check_feature_support(config)?;
 
-        // Check if the deployment is empty if so then
-        let is_empty_deployment = match &config.target.path {
-            Some(Target::Deployment(target)) => {
-                let deployment_api = get_k8s_resource_api::<Deployment>(
-                    &self.client,
-                    config.target.namespace.as_deref(),
-                );
+        let use_proxy_api = self
+            .operator
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::ProxyApi);
 
-                let deployment = deployment_api
-                    .get(&target.deployment)
-                    .await
-                    .map_err(|error| OperatorApiError::KubeError {
-                        error,
-                        operation: OperatorOperation::FindingTarget,
-                    })?;
-
-                !deployment
-                    .status
-                    .map(|status| status.available_replicas > Some(0))
-                    .unwrap_or_default()
-            }
-            _ => false,
-        };
-
-        let target = if config.feature.copy_target.enabled
+        let is_empty_deployment = target.empty_deployment();
+        let connect_url = if config.feature.copy_target.enabled
             // use copy_target for splitting queues
             || config.feature.split_queues.is_set()
             || is_empty_deployment
@@ -686,33 +587,38 @@ impl OperatorApi<PreparedClientCert> {
 
             copy_subtask.success(Some("target copied"));
 
-            OperatorSessionTarget::Copied(copied)
+            copied.connect_url(use_proxy_api)
         } else {
-            let mut fetch_subtask = progress.subtask("fetching target");
+            let target = target.assert_valid_mirrord_target(self.client()).await?;
 
-            let target_name =
-                TargetCrd::urlfied_name(config.target.path.as_ref().unwrap_or(&Target::Targetless));
-            let raw_target = Api::namespaced(self.client.clone(), self.target_namespace(config))
-                .get(&target_name)
-                .await
-                .map_err(|error| OperatorApiError::KubeError {
-                    error,
-                    operation: OperatorOperation::FindingTarget,
-                })?;
+            // `targetless` has no `RuntimeData`!
+            if matches!(target, ResolvedTarget::Targetless(_)).not() {
+                let runtime_data = target
+                    .runtime_data(self.client(), target.namespace())
+                    .await?;
 
-            fetch_subtask.success(Some("target fetched"));
+                if runtime_data.guessed_container {
+                    progress.warning(
+                        format!(
+                            "Target has multiple containers, mirrord picked \"{}\".\
+                     To target a different one, include it in the target path.",
+                            runtime_data.container_name
+                        )
+                        .as_str(),
+                    );
+                }
+            }
 
-            OperatorSessionTarget::Raw(raw_target)
+            target.connect_url(
+                use_proxy_api,
+                config.feature.network.incoming.on_concurrent_steal,
+                &TargetCrd::api_version(&()),
+                &TargetCrd::plural(&()),
+                &TargetCrd::url_path(&(), target.namespace()),
+            )?
         };
-        let use_proxy_api = self
-            .operator
-            .spec
-            .supported_features()
-            .contains(&NewOperatorFeature::ProxyApi);
-        let connect_url = target.connect_url(
-            use_proxy_api,
-            config.feature.network.incoming.on_concurrent_steal,
-        )?;
+
+        tracing::debug!("connect_url {connect_url:?}");
 
         let session = OperatorSession {
             id: rand::random(),

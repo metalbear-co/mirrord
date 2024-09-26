@@ -171,7 +171,8 @@ pub(crate) enum CliError {
     /// more granular error detection.
     #[error("Failed to create mirrord-agent: {0}")]
     #[diagnostic(help(
-        "Please check the status of the agent pod, using `kubectl get pods` in the relevant namespace. \
+        r"1. Please check the status of the agent pod, using `kubectl get pods` in the relevant namespace.
+        2. If you don't see any `mirrord-agent-[...]` pods, then try running `kubectl get jobs`, and `kubectl describe mirrord-agent-[...]`.
         Make sure it is able to fetch the agent image, it didn't fail due to lack of resources, etc.{GENERAL_HELP}"
     ))]
     CreateAgentFailed(KubeApiError),
@@ -359,6 +360,17 @@ pub(crate) enum CliError {
         2. In the kubeconfig, specify the command with an absolute path.{GENERAL_HELP}
     "))]
     KubeAuthExecFailed(String),
+
+    #[error("Failed while resolving target while using the mirrord-operator: {0}")]
+    #[diagnostic(help(
+        "
+        mirrord failed to resolve or validate a target.
+        Target resolution failure happens when the target cannot be found, or doesn't exist.
+        Validation may fail for a variety of reasons, such as: target is in an invalid state, or missing required fields.
+        Please check that your Kubernetes user has access to the target, and that the target actually exists in the cluster.
+    "
+    ))]
+    OperatorTargetResolution(KubeApiError),
 }
 
 impl CliError {
@@ -427,6 +439,7 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::FetchedUnknownTargetType(error) => {
                 Self::OperatorReturnedUnknownTargetType(error.0)
             }
+            OperatorApiError::KubeApi(error) => Self::OperatorTargetResolution(error),
         }
     }
 }

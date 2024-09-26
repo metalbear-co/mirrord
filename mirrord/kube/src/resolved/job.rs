@@ -1,16 +1,23 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
 use k8s_openapi::api::batch::v1::Job;
-use mirrord_config::target::job::JobTarget;
 
-use super::RuntimeDataFromLabels;
-use crate::error::{KubeApiError, Result};
+use super::ResolvedResource;
+use crate::{
+    api::runtime::RuntimeDataFromLabels,
+    error::{KubeApiError, Result},
+};
 
-impl RuntimeDataFromLabels for JobTarget {
+impl RuntimeDataFromLabels for ResolvedResource<Job> {
     type Resource = Job;
 
     fn name(&self) -> Cow<str> {
-        Cow::from(&self.job)
+        self.resource
+            .metadata
+            .name
+            .as_ref()
+            .map(Cow::from)
+            .unwrap_or_default()
     }
 
     fn container(&self) -> Option<&str> {
