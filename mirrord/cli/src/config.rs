@@ -407,10 +407,6 @@ pub(super) struct PortForwardArgs {
     /// Expected format is: '-R \[remote_port:\]local_port'.
     #[arg(short = 'R', long)]
     pub reverse_port_mappings: Option<Vec<PortOnlyMapping>>,
-
-    /// Steal TCP instead of mirroring
-    #[arg(long = "steal")]
-    pub tcp_steal: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

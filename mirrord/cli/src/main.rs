@@ -525,9 +525,6 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
         args.reverse_port_forward,
     ) {
         (Some(mappings), None, false) => {
-            if args.tcp_steal {
-                progress.warning("Value of 'steal_traffic' argument is ignored unless using reverse port forwarding with '-r'")
-            }
             let mut port_forward = PortForwarder::new(connection, mappings).await?;
             port_forward.run().await?;
         }
