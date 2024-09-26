@@ -149,6 +149,8 @@ impl OutgoingProxy {
         let connect = match connect {
             Ok(connect) => connect,
             Err(e) => {
+                let _ = self.pending_connections.remove(&(message_id, layer_id));
+
                 message_bus
                     .send(ToLayer {
                         message: ProxyToLayerMessage::OutgoingConnect(Err(e)),
