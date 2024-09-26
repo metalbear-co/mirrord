@@ -557,7 +557,6 @@ impl ReversePortForwarder {
 
                 message = self.agent_connection.receiver.recv() => match message {
                     Some(message) => {
-                        // dbg!(&message);
                         self.handle_msg_from_agent(message).await?},
                     None => {
                         break Err(PortForwardError::AgentError("unexpected end of connection with agent".into()));
@@ -1016,9 +1015,14 @@ mod test {
             tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
             DaemonConnect, DaemonRead, LayerConnect, LayerWrite, SocketAddress,
         },
-        tcp::{DaemonTcp, LayerTcp, LayerTcpSteal, NewTcpConnection, StealType, TcpClose, TcpData},
+        tcp::{
+            DaemonTcp, Filter, HttpRequest, HttpResponse, InternalHttpRequest,
+            InternalHttpResponse, LayerTcp, LayerTcpSteal, NewTcpConnection, StealType, TcpClose,
+            TcpData,
+        },
         ClientMessage, DaemonMessage,
     };
+    use reqwest::{header::HeaderMap, Method, StatusCode, Version};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::{TcpListener, TcpStream},
@@ -1032,7 +1036,7 @@ mod test {
     };
 
     #[tokio::test]
-    async fn test_port_forwarding() {
+    async fn single_port_forwarding() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_destination = listener.local_addr().unwrap();
         drop(listener);
@@ -1126,7 +1130,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_multiple_mappings_forwarding() {
+    async fn multiple_mappings_port_forwarding() {
         let remote_destination_1 = (RemoteAddr::Ip("152.37.40.40".parse().unwrap()), 1018);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_destination_1 = listener.local_addr().unwrap();
@@ -1657,12 +1661,155 @@ mod test {
 
     #[tokio::test]
     async fn filtered_reverse_port_forwarding() {
-        todo!()
-    }
+        // simulates filtered stealing with one port mapping
+        // filters are matched in the agent but this tests Http type messages
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_destination = listener.local_addr().unwrap();
 
-    #[tokio::test]
-    async fn filtered_reverse_multiple_port_forwarding() {
-        // filter header "key": "value"
-        todo!()
+        let (daemon_msg_tx, daemon_msg_rx) = mpsc::channel::<DaemonMessage>(12);
+        let (client_msg_tx, mut client_msg_rx) = mpsc::channel::<ClientMessage>(12);
+
+        let agent_connection = AgentConnection {
+            sender: client_msg_tx,
+            receiver: daemon_msg_rx,
+        };
+        let remote_address = IpAddr::from("152.37.40.40".parse::<Ipv4Addr>().unwrap());
+        let destination_port = 8080;
+        let parsed_mappings = vec![PortOnlyMapping {
+            local: local_destination.port(),
+            remote: destination_port,
+        }];
+        let mut network_config = IncomingConfig::default();
+        network_config.mode = IncomingMode::Steal;
+        network_config.http_filter.header_filter = Some("header: value".to_string());
+
+        tokio::spawn(async move {
+            let mut port_forwarder =
+                ReversePortForwarder::new(agent_connection, parsed_mappings, network_config)
+                    .await
+                    .unwrap();
+            port_forwarder.run().await.unwrap()
+        });
+
+        // expect handshake procedure
+        let expected = Some(ClientMessage::SwitchProtocolVersion(
+            mirrord_protocol::VERSION.clone(),
+        ));
+        assert_eq!(client_msg_rx.recv().await, expected);
+        daemon_msg_tx
+            .send(DaemonMessage::SwitchProtocolVersionResponse(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await
+            .unwrap();
+        let expected = Some(ClientMessage::ReadyForLogs);
+        assert_eq!(client_msg_rx.recv().await, expected);
+
+        // expect port subscription for remote port and send subscribe result
+        assert!(matches!(
+            client_msg_rx.recv().await,
+            Some(ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(
+                StealType::FilteredHttpEx(..),
+            )))
+        ));
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(
+                destination_port,
+            ))))
+            .await
+            .unwrap();
+
+        // send new connection from agent and some data
+        daemon_msg_tx
+            .send(DaemonMessage::TcpSteal(DaemonTcp::NewConnection(
+                NewTcpConnection {
+                    connection_id: 1,
+                    remote_address,
+                    destination_port,
+                    source_port: local_destination.port(),
+                    local_address: local_destination.ip(),
+                },
+            )))
+            .await
+            .unwrap();
+        let mut stream = listener.accept().await.unwrap().0;
+
+        let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
+            ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
+            other => other,
+        };
+        assert_eq!(
+            message,
+            ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::FilteredHttpEx(
+                destination_port,
+                mirrord_protocol::tcp::HttpFilter::Header(
+                    Filter::new("header: value".to_string()).unwrap()
+                )
+            ),))
+        );
+
+        // send data from agent with correct header
+        let mut headers = HeaderMap::new();
+        headers.insert("header", "value".parse().unwrap());
+        let internal_request = InternalHttpRequest {
+            method: Method::GET,
+            uri: "https://www.rust-lang.org/install.html".parse().unwrap(),
+            headers,
+            version: Version::HTTP_11,
+            body: vec![],
+        };
+        daemon_msg_tx
+            .send(DaemonMessage::TcpSteal(DaemonTcp::HttpRequest(
+                HttpRequest {
+                    internal_request,
+                    connection_id: 1,
+                    request_id: 1,
+                    port: local_destination.port(),
+                },
+            )))
+            .await
+            .unwrap();
+
+        // check data is read from stream
+        let mut buf = [0; 15];
+        assert_eq!(buf, [0; 15]);
+        stream.read_exact(&mut buf).await.unwrap();
+        assert_ne!(buf, [0; 15]);
+
+        // check for response from local
+        stream
+            .write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nyay").as_bytes())
+            .await
+            .unwrap();
+
+        let mut headers = HeaderMap::new();
+        headers.insert("content-length", "3".parse().unwrap());
+        let internal_response = InternalHttpResponse {
+            status: StatusCode::from_u16(200).unwrap(),
+            version: Version::HTTP_11,
+            headers,
+            body: b"yay".to_vec(),
+        };
+        let expected_response =
+            ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(HttpResponse {
+                connection_id: 1,
+                request_id: 1,
+                port: local_destination.port(),
+                internal_response,
+            }));
+
+        let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
+            ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
+            other => other,
+        };
+        assert_eq!(message, expected_response);
+
+        // ensure graceful behaviour on close
+        daemon_msg_tx
+            .send(DaemonMessage::Tcp(DaemonTcp::Close(TcpClose {
+                connection_id: 1,
+            })))
+            .await
+            .unwrap();
     }
 }
