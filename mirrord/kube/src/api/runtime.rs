@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::BTreeMap,
     convert::Infallible,
     fmt::{self, Display, Formatter},
@@ -22,6 +23,7 @@ use crate::{
         kubernetes::get_k8s_resource_api,
     },
     error::{KubeApiError, Result},
+    resolved::ResolvedTarget,
 };
 
 pub mod cron_job;
@@ -275,9 +277,11 @@ pub trait RuntimeDataFromLabels {
         + fmt::Debug;
 
     #[allow(async_fn_in_trait)]
-    async fn get_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>>;
+    async fn get_selector_match_labels(
+        resource: &Self::Resource,
+    ) -> Result<BTreeMap<String, String>>;
 
-    fn name(&self) -> &str;
+    fn name(&self) -> Cow<str>;
 
     fn container(&self) -> Option<&str>;
 }
@@ -289,9 +293,9 @@ where
     async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
         let api: Api<<Self as RuntimeDataFromLabels>::Resource> =
             get_k8s_resource_api(client, namespace);
-        let resource = api.get(self.name()).await?;
+        let resource = api.get(&self.name()).await?;
 
-        let labels = Self::get_labels(&resource).await?;
+        let labels = Self::get_selector_match_labels(&resource).await?;
 
         let formatted_labels = labels
             .iter()
@@ -336,6 +340,20 @@ impl RuntimeDataProvider for Target {
             Target::CronJob(target) => target.runtime_data(client, namespace).await,
             Target::StatefulSet(target) => target.runtime_data(client, namespace).await,
             Target::Targetless => Err(KubeApiError::MissingRuntimeData),
+        }
+    }
+}
+
+impl RuntimeDataProvider for ResolvedTarget<true> {
+    async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData> {
+        match self {
+            Self::Deployment(target) => target.runtime_data(client, namespace).await,
+            Self::Pod(target) => target.runtime_data().await,
+            Self::Rollout(target) => target.runtime_data(client, namespace).await,
+            Self::Job(target) => target.runtime_data(client, namespace).await,
+            Self::CronJob(target) => target.runtime_data(client, namespace).await,
+            Self::StatefulSet(target) => target.runtime_data(client, namespace).await,
+            Self::Targetless(_) => Err(KubeApiError::MissingRuntimeData),
         }
     }
 }

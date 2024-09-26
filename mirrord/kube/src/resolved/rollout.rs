@@ -1,16 +1,21 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
-use k8s_openapi::api::batch::v1::Job;
-use mirrord_config::target::job::JobTarget;
+use super::ResolvedResource;
+use crate::{
+    api::{kubernetes::rollout::Rollout, runtime::RuntimeDataFromLabels},
+    error::{KubeApiError, Result},
+};
 
-use super::RuntimeDataFromLabels;
-use crate::error::{KubeApiError, Result};
-
-impl RuntimeDataFromLabels for JobTarget {
-    type Resource = Job;
+impl RuntimeDataFromLabels for ResolvedResource<Rollout> {
+    type Resource = Rollout;
 
     fn name(&self) -> Cow<str> {
-        Cow::from(&self.job)
+        self.resource
+            .metadata
+            .name
+            .as_ref()
+            .map(Cow::from)
+            .unwrap_or_default()
     }
 
     fn container(&self) -> Option<&str> {
@@ -23,7 +28,7 @@ impl RuntimeDataFromLabels for JobTarget {
         resource
             .spec
             .as_ref()
-            .and_then(|spec| spec.selector.as_ref()?.match_labels.clone())
+            .and_then(|spec| spec.selector.match_labels.clone())
             .ok_or_else(|| {
                 KubeApiError::missing_field(
                     resource,
