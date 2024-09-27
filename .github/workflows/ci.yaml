@@ -158,6 +158,7 @@ jobs:
         uses: astral-sh/setup-uv@v2
       - run: uv python install
       - run: uv venv
+      - run: uv pip install ziglang
       - run: uv pip install cargo-zigbuild
       - run: cargo fmt --all -- --check
       # x64
