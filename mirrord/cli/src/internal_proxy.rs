@@ -69,7 +69,9 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
                 .collect();
             let timestamp = SystemTime::UNIX_EPOCH.elapsed().unwrap().as_secs();
 
-            PathBuf::from(format!("/tmp/mirrord-intproxy-{timestamp}-{random_name}"))
+            PathBuf::from(format!(
+                "/tmp/mirrord-intproxy-{timestamp}-{random_name}.log"
+            ))
         });
 
     let output_file = OpenOptions::new()
