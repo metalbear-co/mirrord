@@ -900,7 +900,7 @@ enum IncomingMode {
 }
 
 impl IncomingMode {
-    /// Creates a new instance from the given [`LayerConfig`].
+    /// Creates a new instance from the given [`IncomingConfig`].
     fn new(config: &IncomingConfig) -> Self {
         if !config.is_steal() {
             return Self::Mirror;
@@ -1408,8 +1408,10 @@ mod test {
             local: local_destination.port(),
             remote: destination_port,
         }];
-        let mut network_config = IncomingConfig::default();
-        network_config.mode = IncomingMode::Steal;
+        let network_config = IncomingConfig {
+            mode: IncomingMode::Steal,
+            ..Default::default()
+        };
 
         tokio::spawn(async move {
             let mut port_forwarder =
@@ -1688,8 +1690,10 @@ mod test {
             local: local_destination.port(),
             remote: destination_port,
         }];
-        let mut network_config = IncomingConfig::default();
-        network_config.mode = IncomingMode::Steal;
+        let mut network_config = IncomingConfig {
+            mode: IncomingMode::Steal,
+            ..Default::default()
+        };
         network_config.http_filter.header_filter = Some("header: value".to_string());
 
         tokio::spawn(async move {
@@ -1794,7 +1798,7 @@ mod test {
 
         // check for response from local
         stream
-            .write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nyay").as_bytes())
+            .write_all("HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nyay".as_bytes())
             .await
             .unwrap();
 
