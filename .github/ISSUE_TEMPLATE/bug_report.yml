@@ -36,7 +36,7 @@ body:
     id: layer-logs
     attributes:
       label: mirrord layer logs
-      description: If possible, reproduce the bug with the envrionment variable RUST_LOG set to 'trace', and attach the printed logs.
+      description: If possible, reproduce the bug with the environment variable RUST_LOG set to 'trace', and attach the printed logs.
       render: shell
   - type: textarea
     id: intproxy-logs
