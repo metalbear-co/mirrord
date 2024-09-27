@@ -154,19 +154,15 @@ jobs:
           toolchain: nightly-2024-04-15
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
-      - name: Install uv
-        uses: astral-sh/setup-uv@v2
-      - run: uv python install
-      - run: uv venv
-      - run: uv pip install ziglang
-      - run: uv pip install cargo-zigbuild
+      - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
+      - run: pip3 install cargo-zigbuild # For http mirroring test with Flask.
       - run: cargo fmt --all -- --check
       # x64
-      - run: uv run cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
       # Check that compiles for the supported linux targets (aarch64)
-      - run: uv run cargo-zigbuild clippy --lib --bins --all-features --target aarch64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo-zigbuild clippy --lib --bins --all-features --target aarch64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
       # Check whether `mirrord-operator` crate compiles the way it's used in the operator
-      - run: uv run cargo-zigbuild check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
+      - run: cargo-zigbuild check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
 
   # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
   # the output of this test is a boolean indicating if it's a release branch
