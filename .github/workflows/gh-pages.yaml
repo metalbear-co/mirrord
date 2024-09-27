@@ -23,7 +23,7 @@ concurrency:
 jobs:
   # Generates rust docs with `RUSTDOCFLAGS` flags, and push it to `gh-pages` branch.
   deploy-rust-docs:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: ghcr.io/metalbear-co/ci-docs-build:latest
     env:
       # enables the creation of a workspace index.html page.
