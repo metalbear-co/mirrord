@@ -416,10 +416,6 @@ pub enum SplitQueue {
     /// Amazon SQS
     #[serde(rename = "SQS")]
     Sqs(SqsQueueDetails),
-
-    /// Kafka topic
-    #[serde(rename = "KAFKA")]
-    Kafka(kafka::KafkaTopicDetails),
 }
 
 /// A workload that is a consumer of a queue that is being split.
@@ -658,28 +654,4 @@ pub struct MirrordSqsSessionSpec {
     // The Kubernetes API can't deal with 64 bit numbers (with most significant bit set)
     // so we save that field as a (HEX) string even though its source is a u64
     pub session_id: String,
-}
-
-#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[kube(
-    group = "operator.metalbear.co",
-    version = "v1",
-    kind = "MirrordAppliedTargetPatch",
-    namespaced
-)]
-#[serde(rename_all = "camelCase")]
-pub struct MirrordAppliedTargetPatchSpec {
-    pub target_name: String,
-    pub target_api_version: String,
-    pub target_kind: String,
-    pub patched_env: Vec<PatchedEnv>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct PatchedEnv {
-    pub name: String,
-    pub container: String,
-    pub original_value: String,
-    pub injected_value: String,
-    pub owner_process: String,
 }

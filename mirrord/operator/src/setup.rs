@@ -27,8 +27,10 @@ use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
 use crate::crd::{
-    kafka::MirrordKafkaClientProperties, MirrordPolicy, MirrordSqsSession,
-    MirrordWorkloadQueueRegistry, TargetCrd,
+    kafka::{
+        MirrordKafkaClientProperties, MirrordKafkaSplittableTopic, MirrordKafkaTemporaryTopic,
+    },
+    MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
 };
 
 pub static OPERATOR_NAME: &str = "mirrord-operator";
@@ -225,6 +227,9 @@ impl OperatorSetup for Operator {
         if self.kafka_splitting {
             writer.write_all(b"---\n")?;
             MirrordKafkaClientProperties::crd().to_writer(&mut writer)?;
+
+            writer.write_all(b"---\n")?;
+            MirrordKafkaTemporaryTopic::crd().to_writer(&mut writer)?;
         }
 
         Ok(())
@@ -542,11 +547,36 @@ impl OperatorRole {
                     verbs: vec!["patch".to_owned()],
                     ..Default::default()
                 },
-                // Allow the operator to list mirrord queue registries.
+            ]);
+        }
+
+        if kafka_splitting {
+            rules.extend([
                 PolicyRule {
-                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
-                    resources: Some(vec![MirrordWorkloadQueueRegistry::plural(&()).to_string()]),
-                    verbs: vec!["list".to_owned()],
+                    api_groups: Some(vec![MirrordKafkaTemporaryTopic::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordKafkaTemporaryTopic::plural(&()).into_owned()]),
+                    verbs: ["get", "list", "watch", "create", "delete"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                    ..Default::default()
+                },
+                PolicyRule {
+                    api_groups: Some(vec![MirrordKafkaClientProperties::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordKafkaClientProperties::plural(&()).into_owned()]),
+                    verbs: ["get", "list", "watch"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                    ..Default::default()
+                },
+                PolicyRule {
+                    api_groups: Some(vec![MirrordKafkaSplittableTopic::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordKafkaSplittableTopic::plural(&()).into_owned()]),
+                    verbs: ["get", "list", "watch"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
                     ..Default::default()
                 },
             ]);
@@ -562,6 +592,13 @@ impl OperatorRole {
                         // For setting the status in the SQS controller.
                         "update".to_owned(),
                     ],
+                    ..Default::default()
+                },
+                // Allow the operator to list mirrord queue registries.
+                PolicyRule {
+                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
+                    resources: Some(vec![MirrordWorkloadQueueRegistry::plural(&()).to_string()]),
+                    verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
                     ..Default::default()
                 },
                 // Allow the operator to control mirrord SQS session objects.

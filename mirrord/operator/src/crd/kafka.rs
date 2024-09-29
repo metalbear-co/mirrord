@@ -30,15 +30,23 @@ pub struct MirrordKafkaClientProperty {
     pub value: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct KafkaTopicDetails {
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    group = "queues.mirrord.metalbear.co",
+    version = "v1alpha",
+    kind = "MirrordKafkaSplittableTopic",
+    namespaced
+)]
+pub struct MirrordKafkaSplittableTopicSpec {
     /// All occurrences of this topic's name in the pod spec.
     pub name_sources: Vec<TopicPropertySource>,
     /// All occurrences of this topic's group id in the pod spec.
     pub group_id_sources: Vec<TopicPropertySource>,
     /// Links to [`MirrordKafkaClientProperties`] in the operator's namespace.
     pub client_properties: String,
+    pub workload_name: String,
+    pub workload_kind: String,
+    pub workload_api_version: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
