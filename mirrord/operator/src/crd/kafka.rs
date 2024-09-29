@@ -22,6 +22,7 @@ pub struct MirrordKafkaClientPropertiesSpec {
 
 /// Property to use when creating operator's Kafka client.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct MirrordKafkaClientProperty {
     /// Name of the property, e.g `bootstrap.servers`.
     pub name: String,
@@ -37,6 +38,7 @@ pub struct MirrordKafkaClientProperty {
     kind = "MirrordKafkaTopicsConsumer",
     namespaced
 )]
+#[serde(rename_all = "camelCase")]
 pub struct MirrordKafkaTopicsConsumerSpec {
     pub consumer_name: String,
     pub consumer_kind: String,
@@ -45,6 +47,7 @@ pub struct MirrordKafkaTopicsConsumerSpec {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct KafkaTopicDetails {
     /// Id of this topic.
     pub id: String,
