@@ -34,19 +34,26 @@ pub struct MirrordKafkaClientProperty {
 #[kube(
     group = "queues.mirrord.metalbear.co",
     version = "v1alpha",
-    kind = "MirrordKafkaSplittableTopic",
+    kind = "MirrordKafkaTopicsConsumer",
     namespaced
 )]
-pub struct MirrordKafkaSplittableTopicSpec {
+pub struct MirrordKafkaTopicsConsumerSpec {
+    pub consumer_name: String,
+    pub consumer_kind: String,
+    pub consumer_api_version: String,
+    pub topics: Vec<KafkaTopicDetails>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct KafkaTopicDetails {
+    /// Id of this topic.
+    pub id: String,
     /// All occurrences of this topic's name in the pod spec.
     pub name_sources: Vec<TopicPropertySource>,
     /// All occurrences of this topic's group id in the pod spec.
     pub group_id_sources: Vec<TopicPropertySource>,
     /// Links to [`MirrordKafkaClientProperties`] in the operator's namespace.
     pub client_properties: String,
-    pub workload_name: String,
-    pub workload_kind: String,
-    pub workload_api_version: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]

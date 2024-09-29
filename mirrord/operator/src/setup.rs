@@ -28,7 +28,7 @@ use thiserror::Error;
 
 use crate::crd::{
     kafka::{
-        MirrordKafkaClientProperties, MirrordKafkaSplittableTopic, MirrordKafkaTemporaryTopic,
+        MirrordKafkaClientProperties, MirrordKafkaTopicsConsumer, MirrordKafkaTemporaryTopic,
     },
     MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
 };
@@ -571,8 +571,8 @@ impl OperatorRole {
                     ..Default::default()
                 },
                 PolicyRule {
-                    api_groups: Some(vec![MirrordKafkaSplittableTopic::group(&()).into_owned()]),
-                    resources: Some(vec![MirrordKafkaSplittableTopic::plural(&()).into_owned()]),
+                    api_groups: Some(vec![MirrordKafkaTopicsConsumer::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordKafkaTopicsConsumer::plural(&()).into_owned()]),
                     verbs: ["get", "list", "watch"]
                         .into_iter()
                         .map(String::from)
