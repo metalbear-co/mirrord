@@ -178,7 +178,14 @@ impl KubernetesAPI {
         let pod_ips = runtime_data
             .as_ref()
             .filter(|runtime_data| !runtime_data.pod_ips.is_empty())
-            .map(|runtime_data| runtime_data.pod_ips.join(","));
+            .map(|runtime_data| {
+                runtime_data
+                    .pod_ips
+                    .iter()
+                    .map(|ip| ip.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            });
 
         let params = ContainerParams::new(tls_cert, pod_ips);
 
