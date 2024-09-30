@@ -617,6 +617,14 @@ impl ReversePortForwarder {
         match (task_id, update) {
             (MainTaskId::IncomingProxy, TaskUpdate::Message(message)) => match message {
                 ProxyMessage::ToAgent(message) => {
+                    if matches!(
+                        message,
+                        ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(_))
+                    ) || matches!(message, ClientMessage::Tcp(LayerTcp::PortSubscribe(_)))
+                    {
+                        // suppress additional subscription requests
+                        return Ok(());
+                    }
                     self.agent_connection.sender.send(message).await?;
                 }
                 ProxyMessage::ToLayer(ToLayer { message, .. }) => match message {
@@ -1007,7 +1015,10 @@ impl From<IntProxyError> for PortForwardError {
 
 #[cfg(test)]
 mod test {
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::{
+        net::{IpAddr, Ipv4Addr, SocketAddr},
+        time::Duration,
+    };
 
     use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
     use mirrord_protocol::{
@@ -1023,6 +1034,7 @@ mod test {
         ClientMessage, DaemonMessage,
     };
     use reqwest::{header::HeaderMap, Method, StatusCode, Version};
+    use rstest::rstest;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::{TcpListener, TcpStream},
@@ -1290,7 +1302,9 @@ mod test {
         assert_eq!(buf, b"reply-to-2".as_ref());
     }
 
+    #[rstest]
     #[tokio::test]
+    #[timeout(Duration::from_secs(5))]
     async fn reverse_port_forwarding_mirror() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_destination = listener.local_addr().unwrap();
@@ -1359,15 +1373,6 @@ mod test {
             .unwrap();
         let mut stream = listener.accept().await.unwrap().0;
 
-        let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
-            ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
-            other => other,
-        };
-        assert_eq!(
-            message,
-            ClientMessage::Tcp(LayerTcp::PortSubscribe(destination_port))
-        );
-
         daemon_msg_tx
             .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
                 connection_id: 1,
@@ -1390,7 +1395,9 @@ mod test {
             .unwrap();
     }
 
+    #[rstest]
     #[tokio::test]
+    #[timeout(Duration::from_secs(5))]
     async fn reverse_port_forwarding_steal() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_destination = listener.local_addr().unwrap();
@@ -1462,17 +1469,6 @@ mod test {
             .unwrap();
         let mut stream = listener.accept().await.unwrap().0;
 
-        let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
-            ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
-            other => other,
-        };
-        assert_eq!(
-            message,
-            ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::All(
-                destination_port
-            ),))
-        );
-
         daemon_msg_tx
             .send(DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
                 connection_id: 1,
@@ -1509,7 +1505,9 @@ mod test {
             .unwrap();
     }
 
+    #[rstest]
     #[tokio::test]
+    #[timeout(Duration::from_secs(5))]
     async fn reverse_multiple_mappings_forwarding_mirror() {
         // uses mirror mode so no responses expected
         let listener_1 = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1616,19 +1614,6 @@ mod test {
             .unwrap();
         let mut stream_2 = listener_2.accept().await.unwrap().0;
 
-        // expect port subscription for each remote port and send subscribe result
-        // matches! used because order may be random
-        for _ in 0..2 {
-            let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
-                ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
-                other => other,
-            };
-            assert!(
-                matches!(message, ClientMessage::Tcp(LayerTcp::PortSubscribe(_))),
-                "expected ClientMessage::Tcp(LayerTcp::PortSubscribe(_), received {message:?}"
-            );
-        }
-
         daemon_msg_tx
             .send(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
                 connection_id: 1,
@@ -1670,7 +1655,9 @@ mod test {
             .unwrap();
     }
 
+    #[rstest]
     #[tokio::test]
+    #[timeout(Duration::from_secs(5))]
     async fn filtered_reverse_port_forwarding() {
         // simulates filtered stealing with one port mapping
         // filters are matched in the agent but this tests Http type messages
@@ -1753,20 +1740,6 @@ mod test {
             .await
             .unwrap();
         let mut stream = listener.accept().await.unwrap().0;
-
-        let message = match client_msg_rx.recv().await.ok_or(0).unwrap() {
-            ClientMessage::Ping => client_msg_rx.recv().await.ok_or(0).unwrap(),
-            other => other,
-        };
-        assert_eq!(
-            message,
-            ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(StealType::FilteredHttpEx(
-                destination_port,
-                mirrord_protocol::tcp::HttpFilter::Header(
-                    Filter::new("header: value".to_string()).unwrap()
-                )
-            ),))
-        );
 
         // send data from agent with correct header
         let mut headers = HeaderMap::new();
