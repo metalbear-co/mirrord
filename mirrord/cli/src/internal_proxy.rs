@@ -145,8 +145,8 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
         .run(first_connection_timeout, consecutive_connection_timeout)
         .await
         .map_err(InternalProxyError::from)
-        .inspect_err(|e| {
-            tracing::error!("internal proxy exiting: {e:?}");
+        .inspect_err(|error| {
+            tracing::error!(%error, "Internal proxy encountered an error, exiting");
         })
 }
 
