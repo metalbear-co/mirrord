@@ -9,7 +9,7 @@ on:
 
 jobs:
   build_binaries_aarch64-unknown-linux-gnu:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -33,7 +33,7 @@ jobs:
             target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
           if-no-files-found: error
   build_binaries_x86_64-unknown-linux-gnu:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -130,7 +130,7 @@ jobs:
           if-no-files-found: error
 
   release_docker_image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       packages: write
       contents: read
@@ -181,7 +181,7 @@ jobs:
             ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}
 
   release_cli_docker_image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       packages: write
       contents: read
@@ -239,7 +239,7 @@ jobs:
         release_docker_image,
         release_cli_docker_image,
       ]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch'
     permissions:
       packages: write
@@ -303,7 +303,7 @@ jobs:
 
   release_homebrew:
     needs: release_gh
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch'
     steps:
       - uses: actions/download-artifact@v4
@@ -342,7 +342,7 @@ jobs:
 
   update_latest:
     needs: release_homebrew
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch'
     steps:
       - name: Check out code
