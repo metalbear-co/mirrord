@@ -130,7 +130,7 @@ impl RuntimeData {
                 pod_ip
                     .parse::<Ipv4Addr>()
                     .inspect_err(|e| {
-                        tracing::warn!("failed to parse pod IP: {e:?}");
+                        tracing::warn!("failed to parse pod IP {pod_ip}: {e:?}");
                     })
                     .ok()
             })
