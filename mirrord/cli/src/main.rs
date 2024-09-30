@@ -568,7 +568,7 @@ fn main() -> miette::Result<()> {
             Commands::ExtensionExec(args) => {
                 extension_exec(*args, watch).await?;
             }
-            Commands::InternalProxy => internal_proxy::proxy(watch).await?,
+            Commands::InternalProxy { port } => internal_proxy::proxy(port, watch).await?,
             Commands::VerifyConfig(args) => verify_config(args).await?,
             Commands::Completions(args) => {
                 let mut cmd: clap::Command = Cli::command();
@@ -580,7 +580,7 @@ fn main() -> miette::Result<()> {
                 let (runtime_args, exec_params) = args.into_parts();
                 container_command(runtime_args, exec_params, watch).await?
             }
-            Commands::ExternalProxy => external_proxy::proxy(watch).await?,
+            Commands::ExternalProxy { port } => external_proxy::proxy(port, watch).await?,
             Commands::PortForward(args) => port_forward(&args, watch).await?,
             Commands::Vpn(args) => vpn::vpn_command(*args).await?,
         };
@@ -608,7 +608,7 @@ fn init_ext_error_handler(commands: &Commands) -> bool {
             let _ = miette::set_hook(Box::new(|_| Box::new(JSONReportHandler::new())));
             true
         }
-        Commands::InternalProxy | Commands::ExternalProxy => true,
+        Commands::InternalProxy { .. } | Commands::ExternalProxy { .. } => true,
         _ => false,
     }
 }

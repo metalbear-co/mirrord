@@ -59,11 +59,17 @@ pub(super) enum Commands {
 
     /// External Proxy - used for intproxy when it's running with `mirrord container` command.
     #[command(hide = true, name = "extproxy")]
-    ExternalProxy,
+    ExternalProxy {
+        #[arg(long, default_value_t = 0)]
+        port: u16,
+    },
 
     /// Internal proxy - used to aggregate connections from multiple layers
     #[command(hide = true, name = "intproxy")]
-    InternalProxy,
+    InternalProxy {
+        #[arg(long, default_value_t = 0)]
+        port: u16,
+    },
 
     /// Port forwarding - UNSTABLE FEATURE
     #[command(name = "port-forward")]
