@@ -214,12 +214,10 @@ impl OperatorSetup for Operator {
         writer.write_all(b"---\n")?;
         MirrordPolicy::crd().to_writer(&mut writer)?;
 
-        if self.sqs_splitting || self.kafka_splitting {
+        if self.sqs_splitting {
             writer.write_all(b"---\n")?;
             MirrordWorkloadQueueRegistry::crd().to_writer(&mut writer)?;
-        }
 
-        if self.sqs_splitting {
             writer.write_all(b"---\n")?;
             MirrordSqsSession::crd().to_writer(&mut writer)?;
         }
@@ -230,6 +228,9 @@ impl OperatorSetup for Operator {
 
             writer.write_all(b"---\n")?;
             MirrordKafkaTemporaryTopic::crd().to_writer(&mut writer)?;
+
+            writer.write_all(b"---\n")?;
+            MirrordKafkaTopicsConsumer::crd().to_writer(&mut writer)?;
         }
 
         Ok(())
