@@ -93,6 +93,10 @@ impl LayerSetup {
         }
     }
 
+    pub fn layer_config(&self) -> &LayerConfig {
+        &self.config
+    }
+
     pub fn env_config(&self) -> &EnvConfig {
         &self.config.feature.env
     }
