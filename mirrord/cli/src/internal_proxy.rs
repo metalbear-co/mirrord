@@ -55,46 +55,44 @@ pub(crate) async fn proxy(listen_port: u16, watch: drain::Watch) -> Result<(), I
 
     tracing::info!(?config, "internal_proxy starting");
 
-    if std::env::var("MIRRORD_CONSOLE_ADDR").is_err() {
-        // Setting up default logging for intproxy.
-        let log_destination = config
-            .internal_proxy
-            .log_destination
-            .as_ref()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                let random_name: String = rand::thread_rng()
-                    .sample_iter(&Alphanumeric)
-                    .take(7)
-                    .map(char::from)
-                    .collect();
-                let timestamp = SystemTime::UNIX_EPOCH.elapsed().unwrap().as_secs();
+    // Setting up default logging for intproxy.
+    let log_destination = config
+        .internal_proxy
+        .log_destination
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            let random_name: String = rand::thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(7)
+                .map(char::from)
+                .collect();
+            let timestamp = SystemTime::UNIX_EPOCH.elapsed().unwrap().as_secs();
 
-                PathBuf::from(format!(
-                    "/tmp/mirrord-intproxy-{timestamp}-{random_name}.log"
-                ))
-            });
+            PathBuf::from(format!(
+                "/tmp/mirrord-intproxy-{timestamp}-{random_name}.log"
+            ))
+        });
 
-        let output_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_destination)
-            .map_err(|fail| {
-                InternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
-            })?;
+    let output_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_destination)
+        .map_err(|fail| {
+            InternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
+        })?;
 
-        let log_level = config
-            .internal_proxy
-            .log_level
-            .as_deref()
-            .unwrap_or("mirrord=info");
+    let log_level = config
+        .internal_proxy
+        .log_level
+        .as_deref()
+        .unwrap_or("mirrord=info");
 
-        tracing_subscriber::fmt()
-            .with_writer(output_file)
-            .with_ansi(false)
-            .with_env_filter(EnvFilter::builder().parse_lossy(log_level))
-            .init();
-    }
+    tracing_subscriber::fmt()
+        .with_writer(output_file)
+        .with_ansi(false)
+        .with_env_filter(EnvFilter::builder().parse_lossy(log_level))
+        .init();
 
     // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
     // so we assume Linux can be higher and set to that.
