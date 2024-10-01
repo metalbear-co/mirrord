@@ -48,18 +48,22 @@ env:
 
 jobs:
   towncrier_check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+      - run: uv python install
+      - run: uv venv
       - name: install towncrier
-        run: pip install --break-system-packages towncrier==23.11.0
+        run: uv pip install towncrier==23.11.0
       - name: verify newsfragment exist
-        run: towncrier check
+        run: uv run towncrier check
 
   changed_files:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # don't run CI on drafts
     if: github.event.pull_request.draft == false
     outputs:
@@ -135,7 +139,7 @@ jobs:
           echo ${{ steps.changed-protocol-toml.outputs.any_changed }};
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
@@ -150,7 +154,8 @@ jobs:
           toolchain: nightly-2024-04-15
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
-      - run: python3 -m pip install --break-system-packages cargo-zigbuild
+      - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
+      - run: pip3 install cargo-zigbuild # For http mirroring test with Flask.
       - run: cargo fmt --all -- --check
       # x64
       - run: cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
@@ -163,7 +168,7 @@ jobs:
   # the output of this test is a boolean indicating if it's a release branch
   # which is then used by `build_mirrord_on_release_branch`
   check_if_release_branch:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       release_branch: ${{ steps.release-branch.outputs.branch }}
     steps:
@@ -175,7 +180,7 @@ jobs:
           echo ${{ steps.release-branch.outputs.branch }}
 
   check-rust-docs:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
@@ -193,7 +198,7 @@ jobs:
       - run: cargo doc --document-private-items --no-deps
 
   test_agent:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     container:
@@ -207,7 +212,7 @@ jobs:
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent
 
   test_agent_image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
     steps:
@@ -229,7 +234,7 @@ jobs:
           path: /tmp/test.tar
 
   test_cli_image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
     steps:
@@ -246,7 +251,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   integration_tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [changed_files]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
@@ -487,7 +492,7 @@ jobs:
           path: /tmp/intproxy_logs/macos
 
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         container-runtime: ["docker", "containerd"]
@@ -535,7 +540,7 @@ jobs:
           docker exec minikube find /var/log/pods -print -exec cat {} \;
 
   lint_markdown:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: changed_files
     if: ${{needs.changed_files.outputs.markdown_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
@@ -548,7 +553,7 @@ jobs:
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
   # building concurrently can run faster the release ide tests
   build_mirrord_on_release_branch:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     name: build mirrord
     needs: check_if_release_branch
     if: ${{ needs.check_if_release_branch.outputs.release_branch == 'true' }}
@@ -607,7 +612,7 @@ jobs:
         lint_markdown,
         check-rust-docs,
       ]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: CI succeeded
         # We have to do it in the shell since if it's in the if condition

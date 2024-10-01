@@ -63,7 +63,9 @@ fn setup_file_tracing(config: &LayerConfig) -> Result<(), InternalProxyError> {
                 .collect();
             let timestamp = SystemTime::UNIX_EPOCH.elapsed().unwrap().as_secs();
 
-            PathBuf::from(format!("/tmp/mirrord-intproxy-{timestamp}-{random_name}"))
+            PathBuf::from(format!(
+                "/tmp/mirrord-intproxy-{timestamp}-{random_name}.log"
+            ))
         });
 
     let output_file = OpenOptions::new()
@@ -151,6 +153,9 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
         .run(first_connection_timeout, consecutive_connection_timeout)
         .await
         .map_err(InternalProxyError::from)
+        .inspect_err(|error| {
+            tracing::error!(%error, "Internal proxy encountered an error, exiting");
+        })
 }
 
 /// Creates a connection with the agent and handles one round of ping pong.

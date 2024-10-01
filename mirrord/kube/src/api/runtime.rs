@@ -3,6 +3,7 @@ use std::{
     collections::BTreeMap,
     convert::Infallible,
     fmt::{self, Display, Formatter},
+    net::Ipv4Addr,
     ops::FromResidual,
     str::FromStr,
 };
@@ -70,7 +71,7 @@ impl Display for ContainerRuntime {
 #[derive(Debug)]
 pub struct RuntimeData {
     pub pod_name: String,
-    pub pod_ips: Vec<String>,
+    pub pod_ips: Vec<Ipv4Addr>,
     pub pod_namespace: Option<String>,
     pub node_name: String,
     pub container_id: String,
@@ -125,7 +126,14 @@ impl RuntimeData {
             .ok_or_else(|| KubeApiError::missing_field(pod, ".status.podIPs"))?
             .iter()
             .filter_map(|pod_ip| pod_ip.ip.as_ref())
-            .cloned()
+            .filter_map(|pod_ip| {
+                pod_ip
+                    .parse::<Ipv4Addr>()
+                    .inspect_err(|e| {
+                        tracing::warn!("failed to parse pod IP {pod_ip}: {e:?}");
+                    })
+                    .ok()
+            })
             .collect();
 
         let container_statuses = pod

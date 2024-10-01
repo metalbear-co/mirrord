@@ -33,10 +33,19 @@ body:
       description: If your bug produces a backtrace, please include it here.
       render: shell
   - type: textarea
-    id: logs
+    id: layer-logs
     attributes:
-      label: Relevant Logs
-      description: If possible, reproduce the bug with the envrionment variable RUST_LOG set to 'trace', and attach the printed logs
+      label: mirrord layer logs
+      description: If possible, reproduce the bug with the environment variable RUST_LOG set to 'trace', and attach the printed logs.
+      render: shell
+  - type: textarea
+    id: intproxy-logs
+    attributes:
+      label: Internal proxy logs
+      description: |
+        Please attach the relevant `mirrord-intproxy` logs. You can find them in your `/tmp` directory (by default).
+        The default log file looks like `/tmp/mirrord-intproxy-1727386366-5rqqf2x`.
+        You can change this default with the `internal_proxy.log_destination` mirrord config.
       render: shell
   - type: input
     id: os_version
