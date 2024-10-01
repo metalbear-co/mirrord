@@ -440,7 +440,7 @@ pub struct ReversePortForwarder {
     incoming_mode: IncomingMode,
     /// communicates with the agent (only TCP supported).
     agent_connection: AgentConnection,
-    /// associates resolved destination ports with local ports.
+    /// associates destination ports with local ports.
     mappings: HashMap<RemotePort, LocalPort>,
     /// background task (uses IncomingProxy to communicate with layer)
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
@@ -467,11 +467,10 @@ impl ReversePortForwarder {
 
         for mapping in &parsed_mappings {
             // check destinations are unique
-            if mappings.contains_key(&mapping.remote) {
+            if mappings.insert(mapping.remote, mapping.local).is_some() {
                 // two mappings shared a key thus keys were not unique
                 return Err(PortForwardError::ReversePortMapSetupError(mapping.remote));
             }
-            mappings.insert(mapping.remote, mapping.local);
         }
 
         // setup IncomingProxy

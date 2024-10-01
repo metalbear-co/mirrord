@@ -519,25 +519,25 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
     let (_connection_info, connection) =
         create_and_connect(&config, &mut progress, &mut analytics).await?;
 
+    // TODO: user should be able to use combination of -L, -R
     match (
         args.port_mappings.clone(),
         args.reverse_port_mappings.clone(),
-        args.reverse_port_forward,
     ) {
-        (Some(mappings), None, false) => {
+        (Some(mappings), None) => {
             let mut port_forward = PortForwarder::new(connection, mappings).await?;
             port_forward.run().await?;
         }
-        (None, Some(mappings), true) => {
+        (None, Some(mappings)) => {
             let mut port_forward =
                 ReversePortForwarder::new(connection, mappings, config.feature.network.incoming)
                     .await?;
             port_forward.run().await?;
         }
         _ => {
-            // error: need to specify either -R or -L OR wrong combo of -r -L/R used
+            // error: need to specify either -R or -L
             return Err(CliError::PortForwardingError(PortForwardError::ArgsError(
-                "for port forwarding, use -L arguments. For reverse port forwarding, use -r with -R arguments".to_string(),
+                "for port forwarding, use -L arguments. For reverse port forwarding, use -R arguments".to_string(),
             )));
         }
     }

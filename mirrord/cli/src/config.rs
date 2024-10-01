@@ -396,15 +396,16 @@ pub(super) struct PortForwardArgs {
     /// If the remote is given as an ip, this is parsed as soon as mirrord starts.
     /// Otherwise, the remote is assumed to be a hostname and lookup is performed in the cluster
     /// after a connection is made to the target.
+    /// Multiple forwarding mappings are each passed with -L.
     #[arg(short = 'L', long)]
     pub port_mappings: Option<Vec<AddrPortMapping>>,
 
-    /// Enable reverse port forwarding
-    #[arg(short = 'r', long)]
-    pub reverse_port_forward: bool,
-
     /// Mappings for reverse port forwarding.
     /// Expected format is: '-R \[remote_port:\]local_port'.
+    /// In reverse port forwarding, traffic to the remote_port on the target pod is stolen or
+    /// mirrored to localhost:local_host. If stealing, the response is sent back to the
+    /// target:remote_port.
+    /// Multiple reverse mappings are each passed with -R.
     #[arg(short = 'R', long)]
     pub reverse_port_mappings: Option<Vec<PortOnlyMapping>>,
 }
