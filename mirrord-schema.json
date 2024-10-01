@@ -827,6 +827,13 @@
             "null"
           ]
         },
+        "tls_enable": {
+          "description": "<!--${internal}-->\n\nWhether to use a tls or plain connection",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "tls_key": {
           "description": "<!--${internal}-->\n\nPrivate Key path to be used for wrapping external proxy tcp listener with a tcp acceptor (self-signed one will be generated automaticaly if not specified)",
           "type": [
