@@ -27,9 +27,7 @@ use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
 use crate::crd::{
-    kafka::{
-        MirrordKafkaClientProperties, MirrordKafkaTopicsConsumer, MirrordKafkaTemporaryTopic,
-    },
+    kafka::{MirrordKafkaClientProperties, MirrordKafkaTemporaryTopic, MirrordKafkaTopicsConsumer},
     MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
 };
 

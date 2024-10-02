@@ -7,7 +7,7 @@ use kube::{CustomResource, Resource};
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
-    feature::split_queues::SplitQueuesConfig,
+    feature::split_queues::{QueueMessageFilter, SplitQueuesConfig},
     target::{Target, TargetConfig},
 };
 use schemars::JsonSchema;
@@ -645,7 +645,7 @@ pub struct MirrordSqsSessionSpec {
     /// For each queue_id, a mapping from attribute name, to attribute value regex.
     /// The queue_id for a queue is determined at the queue registry. It is not (necessarily)
     /// The name of the queue on AWS.
-    pub queue_filters: HashMap<QueueId, BTreeMap<String, String>>,
+    pub queue_filters: HashMap<QueueId, QueueMessageFilter>,
 
     /// The target of this session.
     pub queue_consumer: QueueConsumer,

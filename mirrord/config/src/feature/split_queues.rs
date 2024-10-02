@@ -28,13 +28,13 @@ pub type QueueId = String;
 ///         }
 ///       },
 ///       "third-queue": {
-///         "queue_type": "kafka_topic",
+///         "queue_type": "Kafka",
 ///         "message_filter": {
 ///           "who": "*you$"
 ///         }
 ///       },
 ///       "fourth-queue": {
-///         "queue_type": "kafka_topic",
+///         "queue_type": "Kafka",
 ///         "message_filter": {
 ///           "wows": "so wows",
 ///           "coolz": "^very .*"
@@ -45,56 +45,37 @@ pub type QueueId = String;
 /// }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]
-pub struct SplitQueuesConfig(pub Option<BTreeMap<QueueId, QueueFilter>>);
+pub struct SplitQueuesConfig(BTreeMap<QueueId, QueueFilter>);
 
 impl SplitQueuesConfig {
     /// Returns whether this configuration contains any queue at all.
     pub fn is_set(&self) -> bool {
-        self.0
-            .as_ref()
-            .map(|map| !map.is_empty())
-            .unwrap_or_default()
+        !self.0.is_empty()
     }
 
     /// Out of the whole queue splitting config, get only the sqs queues.
     pub fn sqs(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ BTreeMap<String, String>)> {
-        self.0
-            .iter()
-            .flatten()
-            .filter_map(|(name, filter)| match filter {
-                QueueFilter::Sqs(filter) => Some((name.as_str(), filter)),
-                _ => None,
-            })
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::Sqs(filter) => Some((name.as_str(), filter)),
+            _ => None,
+        })
     }
 
     /// Out of the whole queue splitting config, get only the kafka topics.
     pub fn kafka(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ BTreeMap<String, String>)> {
-        self.0
-            .iter()
-            .flatten()
-            .filter_map(|(name, filter)| match filter {
-                QueueFilter::Kafka(filter) => Some((name.as_str(), filter)),
-                _ => None,
-            })
+        self.0.iter().filter_map(|(name, filter)| match filter {
+            QueueFilter::Kafka(filter) => Some((name.as_str(), filter)),
+            _ => None,
+        })
     }
 
     pub fn verify(
         &self,
-        context: &mut ConfigContext,
+        _context: &mut ConfigContext,
     ) -> Result<(), QueueSplittingVerificationError> {
-        let Some(filters) = self.0.as_ref() else {
-            return Ok(());
-        };
-
-        for (queue_name, filter) in filters {
+        for (queue_name, filter) in &self.0 {
             let filter = match filter {
-                QueueFilter::Sqs(filter) | QueueFilter::Kafka(filter) => {
-                    if filter.is_empty() {
-                        context.add_warning(format!("Message filter for queue {queue_name} is empty and will match all messages."));
-                    }
-
-                    filter
-                }
+                QueueFilter::Sqs(filter) | QueueFilter::Kafka(filter) => filter,
                 QueueFilter::Unknown => {
                     return Err(QueueSplittingVerificationError::UnknownQueueType(
                         queue_name.clone(),
@@ -132,6 +113,12 @@ impl FromMirrordConfig for SplitQueuesConfig {
     type Generator = Self;
 }
 
+/// A filter is a mapping between message attribute (SQS) or header (Kafka) names and regexes they
+/// should match. The local application will only receive messages that match **all** of the given
+/// patterns. This means, only messages that have **all** the attributes/headers in the filter,
+/// with values of those attributes matching the respective regex.
+pub type QueueMessageFilter = BTreeMap<String, String>;
+
 /// More queue types might be added in the future.
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
 #[serde(tag = "queue_type", content = "message_filter")]
@@ -143,7 +130,7 @@ pub enum QueueFilter {
     /// This means, only messages that have **all** of the attributes in the filter,
     /// with values of those attributes matching the respective patterns.
     #[serde(rename = "SQS")]
-    Sqs(BTreeMap<String, String>),
+    Sqs(QueueMessageFilter),
 
     /// Kafka.
     ///
@@ -151,11 +138,13 @@ pub enum QueueFilter {
     /// values. The local application will only receive messages that match **all** of the
     /// given patterns. This means, only messages that have **all** of the headers in the
     /// filter, with values of those headers matching the respective patterns.
-    #[serde(rename = "kafka")]
-    Kafka(BTreeMap<String, String>),
+    #[serde(rename = "Kafka")]
+    Kafka(QueueMessageFilter),
 
     /// When a newer client sends a new filter kind to an older operator, that does not yet know
     /// about that filter type, this is what that filter will be deserialized to.
+    ///
+    /// TODO(razz4780) this doesn't work
     #[schemars(skip)]
     #[serde(other, skip_serializing)]
     Unknown,
@@ -163,13 +152,7 @@ pub enum QueueFilter {
 
 impl CollectAnalytics for &SplitQueuesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
-        analytics.add(
-            "queue_count",
-            self.0
-                .as_ref()
-                .map(|mapping| mapping.len())
-                .unwrap_or_default(),
-        );
+        analytics.add("queue_count", self.0.len());
         analytics.add("sqs_queue_count", self.sqs().count());
         analytics.add("kafka_queue_count", self.kafka().count());
     }
