@@ -337,6 +337,9 @@ jobs:
           cd mirrord/layer/tests/apps/issue1776portnot53
           cargo build
       - run: |
+          cd mirrord/layer/tests/apps/issue1898
+          cargo build
+      - run: |
           cd mirrord/layer/tests/apps/issue1899
           cargo build
       - run: |
@@ -453,6 +456,9 @@ jobs:
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue1776portnot53
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/issue1898
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue1899
