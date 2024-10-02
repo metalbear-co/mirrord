@@ -129,7 +129,7 @@ where
     let args = binary_args
         .clone()
         .into_iter()
-        .map(|s| CString::new(s))
+        .map(CString::new)
         .collect::<Result<Vec<_>, _>>()?;
     let env = env_vars
         .into_iter()
