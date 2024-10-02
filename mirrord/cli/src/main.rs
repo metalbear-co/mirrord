@@ -3,7 +3,7 @@
 #![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{sync::LazyLock, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, sync::LazyLock, time::Duration};
 
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
@@ -31,6 +31,7 @@ use mirrord_config::{
     },
     LayerConfig, LayerFileConfig, MIRRORD_CONFIG_FILE_ENV,
 };
+use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_kube::api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{messages::EXEC_CONTAINER_BINARY, Progress, ProgressTracker};
@@ -453,8 +454,61 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
 }
 
 async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()> {
+    fn hash_port_mappings(
+        args: &PortForwardArgs,
+    ) -> Result<HashMap<SocketAddr, (RemoteAddr, u16)>, PortForwardError> {
+        let Some(port_mappings) = &args.port_mappings else {
+            unreachable!()
+        };
+        let mut mappings: HashMap<SocketAddr, (RemoteAddr, u16)> =
+            HashMap::with_capacity(port_mappings.len());
+        for mapping in port_mappings {
+            if mappings
+                .insert(mapping.local, mapping.remote.clone())
+                .is_some()
+            {
+                // two mappings shared a key thus keys were not unique
+                return Err(PortForwardError::PortMapSetupError(mapping.local));
+            }
+        }
+        Ok(mappings)
+    }
+
+    fn hash_rev_port_mappings(
+        args: &PortForwardArgs,
+    ) -> Result<HashMap<RemotePort, LocalPort>, PortForwardError> {
+        let Some(port_mappings) = &args.reverse_port_mappings else {
+            unreachable!()
+        };
+        let mut mappings: HashMap<RemotePort, LocalPort> =
+            HashMap::with_capacity(port_mappings.len());
+        for mapping in port_mappings {
+            // check destinations are unique
+            if mappings.insert(mapping.remote, mapping.local).is_some() {
+                // two mappings shared a key thus keys were not unique
+                return Err(PortForwardError::ReversePortMapSetupError(mapping.remote));
+            }
+        }
+        Ok(mappings)
+    }
+
     let mut progress = ProgressTracker::from_env("mirrord port-forward");
     progress.warning("Port forwarding is currently an unstable feature and subject to change. See https://github.com/metalbear-co/mirrord/issues/2640 for more info.");
+
+    // validate that mappings have unique local ports and reverse mappings have unique remote ports
+    // before we do any more setup, keeping the hashmaps for calling PortForwarder/Reverse
+    // it would be nicer to do this with clap but we're limited by the derive interface
+    let port_mappings = if args.port_mappings.is_some() {
+        hash_port_mappings(args)?
+    } else {
+        HashMap::new()
+    };
+    let rev_port_mappings = if args.reverse_port_mappings.is_some() {
+        hash_rev_port_mappings(args)?
+    } else {
+        HashMap::new()
+    };
+
     if !args.disable_version_check {
         prompt_outdated_version(&progress).await;
     }
@@ -515,32 +569,50 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
     for warning in context.get_warnings() {
         progress.warning(warning);
     }
-
-    let (_connection_info, connection) =
+    let (connection_info, connection) =
         create_and_connect(&config, &mut progress, &mut analytics).await?;
 
-    // TODO: user should be able to use combination of -L, -R
-    match (
-        args.port_mappings.clone(),
-        args.reverse_port_mappings.clone(),
-    ) {
-        (Some(mappings), None) => {
-            let mut port_forward = PortForwarder::new(connection, mappings).await?;
-            port_forward.run().await?;
+    // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
+    // error print-outs
+    let agent_conn = AgentConnection::new(&config, Some(connection_info), &mut analytics)
+        .await
+        .map_err(|agent_con_error| match agent_con_error {
+            AgentConnectionError::Io(error) => CliError::PortForwardingSetupError(error.into()),
+            AgentConnectionError::Operator(operator_api_error) => operator_api_error.into(),
+            AgentConnectionError::Kube(kube_api_error) => {
+                CliError::auth_exec_error_or(kube_api_error, CliError::PortForwardingSetupError)
+            }
+            AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
+            AgentConnectionError::NoConnectionMethod => todo!(),
+        })?;
+    let connection_2 = connection::AgentConnection {
+        sender: agent_conn.agent_tx,
+        receiver: agent_conn.agent_rx,
+    };
+
+    let _ = tokio::try_join!(
+        async {
+            if args.port_mappings.is_some() {
+                let mut port_forward = PortForwarder::new(connection, port_mappings).await?;
+                port_forward.run().await.map_err(|error| error.into())
+            } else {
+                Ok::<(), CliError>(())
+            }
+        },
+        async {
+            if args.reverse_port_mappings.is_some() {
+                let mut port_forward = ReversePortForwarder::new(
+                    connection_2,
+                    rev_port_mappings,
+                    config.feature.network.incoming,
+                )
+                .await?;
+                port_forward.run().await.map_err(|error| error.into())
+            } else {
+                Ok::<(), CliError>(())
+            }
         }
-        (None, Some(mappings)) => {
-            let mut port_forward =
-                ReversePortForwarder::new(connection, mappings, config.feature.network.incoming)
-                    .await?;
-            port_forward.run().await?;
-        }
-        _ => {
-            // error: need to specify either -R or -L
-            return Err(CliError::PortForwardingError(PortForwardError::ArgsError(
-                "for port forwarding, use -L arguments. For reverse port forwarding, use -R arguments".to_string(),
-            )));
-        }
-    }
+    )?;
 
     Ok(())
 }

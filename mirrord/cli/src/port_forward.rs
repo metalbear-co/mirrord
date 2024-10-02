@@ -43,10 +43,7 @@ use tokio_stream::{wrappers::TcpListenerStream, StreamMap};
 use tokio_util::io::ReaderStream;
 use tracing::Level;
 
-use crate::{
-    connection::AgentConnection, AddrPortMapping, LocalPort, PortOnlyMapping, RemoteAddr,
-    RemotePort,
-};
+use crate::{connection::AgentConnection, AddrPortMapping, LocalPort, RemoteAddr, RemotePort};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedPortMapping {
@@ -84,28 +81,16 @@ pub struct PortForwarder {
 impl PortForwarder {
     pub(crate) async fn new(
         agent_connection: AgentConnection,
-        parsed_mappings: Vec<AddrPortMapping>,
+        mappings: HashMap<SocketAddr, (RemoteAddr, u16)>,
     ) -> Result<Self, PortForwardError> {
         // open tcp listener for local addrs
-        let mut listeners = StreamMap::with_capacity(parsed_mappings.len());
-        let mut mappings: HashMap<SocketAddr, (RemoteAddr, u16)> =
-            HashMap::with_capacity(parsed_mappings.len());
+        let mut listeners = StreamMap::with_capacity(mappings.len());
 
-        if parsed_mappings.is_empty() {
-            return Err(PortForwardError::NoMappingsError());
-        }
-
-        for mapping in parsed_mappings {
-            if listeners.contains_key(&mapping.local) {
-                // two mappings shared a key thus keys were not unique
-                return Err(PortForwardError::PortMapSetupError(mapping.local));
-            }
-
-            let listener = TcpListener::bind(mapping.local).await;
+        for &local_socket in mappings.keys() {
+            let listener = TcpListener::bind(local_socket).await;
             match listener {
                 Ok(listener) => {
-                    listeners.insert(mapping.local, TcpListenerStream::new(listener));
-                    mappings.insert(mapping.local, mapping.remote);
+                    listeners.insert(local_socket, TcpListenerStream::new(listener));
                 }
                 Err(error) => return Err(PortForwardError::TcpListenerError(error)),
             }
@@ -455,24 +440,9 @@ pub struct ReversePortForwarder {
 impl ReversePortForwarder {
     pub(crate) async fn new(
         agent_connection: AgentConnection,
-        parsed_mappings: Vec<PortOnlyMapping>,
+        mappings: HashMap<RemotePort, LocalPort>,
         network_config: IncomingConfig,
     ) -> Result<Self, PortForwardError> {
-        let mut mappings: HashMap<RemotePort, LocalPort> =
-            HashMap::with_capacity(parsed_mappings.len());
-
-        if parsed_mappings.is_empty() {
-            return Err(PortForwardError::NoMappingsError());
-        }
-
-        for mapping in &parsed_mappings {
-            // check destinations are unique
-            if mappings.insert(mapping.remote, mapping.local).is_some() {
-                // two mappings shared a key thus keys were not unique
-                return Err(PortForwardError::ReversePortMapSetupError(mapping.remote));
-            }
-        }
-
         // setup IncomingProxy
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
             Default::default();
@@ -1015,6 +985,7 @@ impl From<IntProxyError> for PortForwardError {
 #[cfg(test)]
 mod test {
     use std::{
+        collections::HashMap,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         time::Duration,
     };
@@ -1043,7 +1014,7 @@ mod test {
     use crate::{
         connection::AgentConnection,
         port_forward::{PortForwarder, ReversePortForwarder},
-        AddrPortMapping, PortOnlyMapping, RemoteAddr,
+        RemoteAddr,
     };
 
     #[tokio::test]
@@ -1060,13 +1031,10 @@ mod test {
             receiver: daemon_msg_rx,
         };
         let remote_destination = (RemoteAddr::Ip("152.37.40.40".parse().unwrap()), 3038);
-        let parsed_mappings = vec![AddrPortMapping {
-            local: local_destination,
-            remote: remote_destination,
-        }];
+        let mappings = HashMap::from([(local_destination, remote_destination.clone())]);
 
         tokio::spawn(async move {
-            let mut port_forwarder = PortForwarder::new(agent_connection, parsed_mappings)
+            let mut port_forwarder = PortForwarder::new(agent_connection, mappings)
                 .await
                 .unwrap();
             port_forwarder.run().await.unwrap()
@@ -1159,19 +1127,13 @@ mod test {
             sender: client_msg_tx,
             receiver: daemon_msg_rx,
         };
-        let parsed_mappings = vec![
-            AddrPortMapping {
-                local: local_destination_1,
-                remote: remote_destination_1.clone(),
-            },
-            AddrPortMapping {
-                local: local_destination_2,
-                remote: remote_destination_2.clone(),
-            },
-        ];
+        let mappings = HashMap::from([
+            (local_destination_1, remote_destination_1.clone()),
+            (local_destination_2, remote_destination_2.clone()),
+        ]);
 
         tokio::spawn(async move {
-            let mut port_forwarder = PortForwarder::new(agent_connection, parsed_mappings)
+            let mut port_forwarder = PortForwarder::new(agent_connection, mappings)
                 .await
                 .unwrap();
             port_forwarder.run().await.unwrap()
@@ -1317,15 +1279,12 @@ mod test {
         };
         let remote_address = IpAddr::from("152.37.40.40".parse::<Ipv4Addr>().unwrap());
         let destination_port = 3038;
-        let parsed_mappings = vec![PortOnlyMapping {
-            local: local_destination.port(),
-            remote: destination_port,
-        }];
+        let mappings = HashMap::from([(destination_port, local_destination.port())]);
         let network_config = IncomingConfig::default();
 
         tokio::spawn(async move {
             let mut port_forwarder =
-                ReversePortForwarder::new(agent_connection, parsed_mappings, network_config)
+                ReversePortForwarder::new(agent_connection, mappings, network_config)
                     .await
                     .unwrap();
             port_forwarder.run().await.unwrap()
@@ -1410,10 +1369,7 @@ mod test {
         };
         let remote_address = IpAddr::from("152.37.40.40".parse::<Ipv4Addr>().unwrap());
         let destination_port = 3038;
-        let parsed_mappings = vec![PortOnlyMapping {
-            local: local_destination.port(),
-            remote: destination_port,
-        }];
+        let mappings = HashMap::from([(destination_port, local_destination.port())]);
         let network_config = IncomingConfig {
             mode: IncomingMode::Steal,
             ..Default::default()
@@ -1421,7 +1377,7 @@ mod test {
 
         tokio::spawn(async move {
             let mut port_forwarder =
-                ReversePortForwarder::new(agent_connection, parsed_mappings, network_config)
+                ReversePortForwarder::new(agent_connection, mappings, network_config)
                     .await
                     .unwrap();
             port_forwarder.run().await.unwrap()
@@ -1524,21 +1480,15 @@ mod test {
         let remote_address = IpAddr::from("152.37.40.40".parse::<Ipv4Addr>().unwrap());
         let destination_port_1 = 3038;
         let destination_port_2 = 4048;
-        let parsed_mappings = vec![
-            PortOnlyMapping {
-                local: local_destination_1.port(),
-                remote: destination_port_1,
-            },
-            PortOnlyMapping {
-                local: local_destination_2.port(),
-                remote: destination_port_2,
-            },
-        ];
+        let mappings = HashMap::from([
+            (destination_port_1, local_destination_1.port()),
+            (destination_port_2, local_destination_2.port()),
+        ]);
         let network_config = IncomingConfig::default();
 
         tokio::spawn(async move {
             let mut port_forwarder =
-                ReversePortForwarder::new(agent_connection, parsed_mappings, network_config)
+                ReversePortForwarder::new(agent_connection, mappings, network_config)
                     .await
                     .unwrap();
             port_forwarder.run().await.unwrap()
@@ -1672,10 +1622,7 @@ mod test {
         };
         let remote_address = IpAddr::from("152.37.40.40".parse::<Ipv4Addr>().unwrap());
         let destination_port = 8080;
-        let parsed_mappings = vec![PortOnlyMapping {
-            local: local_destination.port(),
-            remote: destination_port,
-        }];
+        let mappings = HashMap::from([(destination_port, local_destination.port())]);
         let mut network_config = IncomingConfig {
             mode: IncomingMode::Steal,
             ..Default::default()
@@ -1684,7 +1631,7 @@ mod test {
 
         tokio::spawn(async move {
             let mut port_forwarder =
-                ReversePortForwarder::new(agent_connection, parsed_mappings, network_config)
+                ReversePortForwarder::new(agent_connection, mappings, network_config)
                     .await
                     .unwrap();
             port_forwarder.run().await.unwrap()

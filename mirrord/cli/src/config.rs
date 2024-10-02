@@ -341,7 +341,7 @@ impl TargetParams {
 }
 
 #[derive(Args, Debug)]
-#[command(group(ArgGroup::new("port-forward")))]
+#[command(group(ArgGroup::new("port-forward").args(["port_mappings", "reverse_port_mappings"]).required(true).multiple(true)))] // TODO: check w/out multiple
 pub(super) struct PortForwardArgs {
     /// Parameters for the target
     #[clap(flatten)]
@@ -398,7 +398,7 @@ pub(super) struct PortForwardArgs {
     /// after a connection is made to the target.
     /// Multiple forwarding mappings are each passed with -L.
     #[arg(short = 'L', long)]
-    pub port_mappings: Option<Vec<AddrPortMapping>>,
+    pub port_mappings: Option<Vec<AddrPortMapping>>, // TODO: remove options
 
     /// Mappings for reverse port forwarding.
     /// Expected format is: '-R \[remote_port:\]local_port'.
