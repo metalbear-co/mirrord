@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, str::FromStr};
+use std::{ffi::NulError, net::SocketAddr, path::PathBuf, str::FromStr};
 
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
@@ -380,6 +380,9 @@ pub(crate) enum CliError {
     "
     ))]
     OperatorTargetResolution(KubeApiError),
+
+    #[error("A null byte was found when trying to execute process: {0}")]
+    ExecNulError(#[from] NulError),
 }
 
 impl CliError {
