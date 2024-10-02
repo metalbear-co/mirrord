@@ -17,18 +17,15 @@ use errno::set_errno;
 use libc::{c_int, c_void, hostent, sockaddr, socklen_t, AF_UNIX};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
-    ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectFlags,
-    OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe,
+    ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
+    OutgoingConnectResponse, PortSubscribe,
 };
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
     RemoteResult,
 };
-use nix::{
-    fcntl::OFlag,
-    sys::socket::{sockopt, SockaddrLike, SockaddrStorage},
-};
+use nix::sys::socket::{sockopt, SockaddrLike, SockaddrStorage};
 use socket2::SockAddr;
 #[cfg(debug_assertions)]
 use tracing::Level;
@@ -476,7 +473,6 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
     protocol: NetProtocol,
-    flags: OutgoingConnectFlags,
 ) -> Detour<ConnectResult> {
     // Closure that performs the connection with mirrord messaging.
     let remote_connection = |remote_address: SockAddr| {
@@ -486,7 +482,6 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
         let request = OutgoingConnectRequest {
             remote_address: remote_address.clone(),
             protocol,
-            flags,
         };
 
         let mut responses = common::make_proxy_request_with_response_iterator(request);
@@ -663,17 +658,7 @@ pub(super) fn connect(
 
     let unix_streams = crate::setup().remote_unix_streams();
 
-    let socket_fd_flags = nix::fcntl::fcntl(sockfd, nix::fcntl::FcntlArg::F_GETFL)
-        .map(OFlag::from_bits_truncate)
-        .map_err(io::Error::from)?;
-
-    let mut outgoing_flags = OutgoingConnectFlags::empty();
-
-    if socket_fd_flags.contains(OFlag::O_NONBLOCK) {
-        outgoing_flags |= OutgoingConnectFlags::NONBLOCK;
-    }
-
-    tracing::debug!(flags = ?socket_fd_flags, sockets = ?SOCKETS, "in connect");
+    tracing::debug!(sockets = ?SOCKETS, "in connect");
 
     let user_socket_info = match SOCKETS.lock()?.remove(&sockfd) {
         Some(socket) => socket,
@@ -751,7 +736,6 @@ pub(super) fn connect(
             remote_address,
             user_socket_info,
             NetProtocol::Datagrams,
-            outgoing_flags,
         ),
 
         NetProtocol::Stream => match user_socket_info.state {
@@ -764,7 +748,6 @@ pub(super) fn connect(
                     remote_address,
                     user_socket_info,
                     NetProtocol::Stream,
-                    outgoing_flags,
                 )
             }
 
@@ -1407,7 +1390,6 @@ pub(super) fn send_to(
             destination,
             user_socket_info,
             NetProtocol::Datagrams,
-            OutgoingConnectFlags::empty(),
         )?;
 
         let layer_address: SockAddr = SOCKETS
@@ -1501,7 +1483,6 @@ pub(super) fn sendmsg(
             destination,
             user_socket_info,
             NetProtocol::Datagrams,
-            OutgoingConnectFlags::empty(),
         )?;
 
         let layer_address: SockAddr = SOCKETS
