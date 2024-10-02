@@ -529,6 +529,9 @@ pub(super) enum OperatorCommand {
         )]
         sqs_splitting: bool,
 
+        /// Enable Kafka queue splitting.
+        /// When set, some extra CRDs will be installed on the cluster, and the operator will run
+        /// a Kafka splitting component.
         #[arg(long, visible_alias = "kafka", default_value_t = false)]
         kafka_splitting: bool,
     },
