@@ -398,7 +398,7 @@ pub(super) struct PortForwardArgs {
     /// after a connection is made to the target.
     /// Multiple forwarding mappings are each passed with -L.
     #[arg(short = 'L', long)]
-    pub port_mappings: Option<Vec<AddrPortMapping>>, // TODO: remove options
+    pub port_mappings: Vec<AddrPortMapping>,
 
     /// Mappings for reverse port forwarding.
     /// Expected format is: '-R \[remote_port:\]local_port'.
@@ -407,7 +407,7 @@ pub(super) struct PortForwardArgs {
     /// target:remote_port.
     /// Multiple reverse mappings are each passed with -R.
     #[arg(short = 'R', long)]
-    pub reverse_port_mappings: Option<Vec<PortOnlyMapping>>,
+    pub reverse_port_mappings: Vec<PortOnlyMapping>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -457,9 +457,7 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
     fn hash_port_mappings(
         args: &PortForwardArgs,
     ) -> Result<HashMap<SocketAddr, (RemoteAddr, u16)>, PortForwardError> {
-        let Some(port_mappings) = &args.port_mappings else {
-            unreachable!()
-        };
+        let port_mappings = &args.port_mappings;
         let mut mappings: HashMap<SocketAddr, (RemoteAddr, u16)> =
             HashMap::with_capacity(port_mappings.len());
         for mapping in port_mappings {
@@ -477,9 +475,7 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
     fn hash_rev_port_mappings(
         args: &PortForwardArgs,
     ) -> Result<HashMap<RemotePort, LocalPort>, PortForwardError> {
-        let Some(port_mappings) = &args.reverse_port_mappings else {
-            unreachable!()
-        };
+        let port_mappings = &args.reverse_port_mappings;
         let mut mappings: HashMap<RemotePort, LocalPort> =
             HashMap::with_capacity(port_mappings.len());
         for mapping in port_mappings {
@@ -498,12 +494,12 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
     // validate that mappings have unique local ports and reverse mappings have unique remote ports
     // before we do any more setup, keeping the hashmaps for calling PortForwarder/Reverse
     // it would be nicer to do this with clap but we're limited by the derive interface
-    let port_mappings = if args.port_mappings.is_some() {
+    let port_mappings = if !args.port_mappings.is_empty() {
         hash_port_mappings(args)?
     } else {
         HashMap::new()
     };
-    let rev_port_mappings = if args.reverse_port_mappings.is_some() {
+    let rev_port_mappings = if !args.reverse_port_mappings.is_empty() {
         hash_rev_port_mappings(args)?
     } else {
         HashMap::new()
@@ -592,7 +588,7 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
 
     let _ = tokio::try_join!(
         async {
-            if args.port_mappings.is_some() {
+            if !args.port_mappings.is_empty() {
                 let mut port_forward = PortForwarder::new(connection, port_mappings).await?;
                 port_forward.run().await.map_err(|error| error.into())
             } else {
@@ -600,7 +596,7 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
             }
         },
         async {
-            if args.reverse_port_mappings.is_some() {
+            if !args.reverse_port_mappings.is_empty() {
                 let mut port_forward = ReversePortForwarder::new(
                     connection_2,
                     rev_port_mappings,
