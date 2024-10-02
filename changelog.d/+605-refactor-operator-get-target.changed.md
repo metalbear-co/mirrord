@@ -1,1 +1,0 @@
-Refactor how mirrord gets a target when the operator is enabled, and warn when randomly selecting a container in multi-container situations (if the user did not specify a container).
