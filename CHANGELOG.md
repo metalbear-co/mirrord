@@ -8,6 +8,37 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.118.1](https://github.com/metalbear-co/mirrord/tree/3.118.1) - 2024-10-02
+
+
+### Added
+
+- Internal proxy now explicitly logs exit error.
+
+
+### Changed
+
+- Enabled readlink hook by default.
+  [#2518](https://github.com/metalbear-co/mirrord/issues/2518)
+- Prompt user for intproxy logs (when intproxy crashes).
+  Adds `.log` as a file type for intproxy default log file.
+  [#2750](https://github.com/metalbear-co/mirrord/issues/2750)
+- Refactor how mirrord gets a target when the operator is enabled, and warn
+  when randomly selecting a container in multi-container situations (if the
+  user did not specify a container).
+
+
+### Fixed
+
+- Handle cases where target pod has IPv6
+  [#2788](https://github.com/metalbear-co/mirrord/issues/2788)
+
+
+### Internal
+
+- Fix CI failures due to "externally-managed-environment" error
+- Run go mod tidy on all go stuff
+
 ## [3.118.0](https://github.com/metalbear-co/mirrord/tree/3.118.0) - 2024-09-22
 
 
