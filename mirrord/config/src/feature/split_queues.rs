@@ -113,7 +113,7 @@ impl FromMirrordConfig for SplitQueuesConfig {
     type Generator = Self;
 }
 
-pub type MessageFilter = BTreeMap<String, String>;
+pub type QueueMessageFilter = BTreeMap<String, String>;
 
 /// More queue types might be added in the future.
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
@@ -126,7 +126,7 @@ pub enum QueueFilter {
     /// This means, only messages that have **all** of the attributes in the filter,
     /// with values of those attributes matching the respective patterns.
     #[serde(rename = "SQS")]
-    Sqs(MessageFilter),
+    Sqs(QueueMessageFilter),
 
     /// Kafka.
     ///
@@ -135,7 +135,7 @@ pub enum QueueFilter {
     /// This means, only messages that have **all** of the headers in the filter,
     /// with values of those headers matching the respective patterns.
     #[serde(rename = "Kafka")]
-    Kafka(MessageFilter),
+    Kafka(QueueMessageFilter),
 
     /// When a newer client sends a new filter kind to an older operator, that does not yet know
     /// about that filter type, this is what that filter will be deserialized to.
