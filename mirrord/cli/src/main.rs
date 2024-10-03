@@ -141,7 +141,7 @@ where
             // check if binary is present in each path
             path.push(binary.clone());
             if path.is_executable() {
-                resolved = path.to_string_lossy().into();
+                resolved = CString::new(path.as_ref().as_os_str().as_bytes())?;
                 break;
             }
         }
