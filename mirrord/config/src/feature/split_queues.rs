@@ -28,13 +28,13 @@ pub type QueueId = String;
 ///         }
 ///       },
 ///       "third-queue": {
-///         "queue_type": "kafka",
+///         "queue_type": "Kafka",
 ///         "message_filter": {
 ///           "who": "*you$"
 ///         }
 ///       },
 ///       "fourth-queue": {
-///         "queue_type": "kafka",
+///         "queue_type": "Kafka",
 ///         "message_filter": {
 ///           "wows": "so wows",
 ///           "coolz": "^very .*"
@@ -56,7 +56,7 @@ impl SplitQueuesConfig {
     /// Out of the whole queue splitting config, get only the sqs queues.
     pub fn sqs(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ BTreeMap<String, String>)> {
         self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::Sqs(filter) => Some((name.as_str(), filter)),
+            QueueFilter::Sqs { message_filter } => Some((name.as_str(), message_filter)),
             _ => None,
         })
     }
@@ -64,7 +64,7 @@ impl SplitQueuesConfig {
     /// Out of the whole queue splitting config, get only the kafka topics.
     pub fn kafka(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ BTreeMap<String, String>)> {
         self.0.iter().filter_map(|(name, filter)| match filter {
-            QueueFilter::Kafka(filter) => Some((name.as_str(), filter)),
+            QueueFilter::Kafka { message_filter } => Some((name.as_str(), message_filter)),
             _ => None,
         })
     }
@@ -75,7 +75,9 @@ impl SplitQueuesConfig {
     ) -> Result<(), QueueSplittingVerificationError> {
         for (queue_name, filter) in &self.0 {
             let filter = match filter {
-                QueueFilter::Sqs(filter) | QueueFilter::Kafka(filter) => filter,
+                QueueFilter::Sqs { message_filter } | QueueFilter::Kafka { message_filter } => {
+                    message_filter
+                }
                 QueueFilter::Unknown => {
                     return Err(QueueSplittingVerificationError::UnknownQueueType(
                         queue_name.clone(),
@@ -117,25 +119,27 @@ pub type QueueMessageFilter = BTreeMap<String, String>;
 
 /// More queue types might be added in the future.
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
-#[serde(tag = "queue_type", content = "message_filter")]
+#[serde(tag = "queue_type")]
 pub enum QueueFilter {
     /// Amazon Simple Queue Service.
-    ///
-    /// A filter is a mapping between message attribute names and regexes they should match.
-    /// The local application will only receive messages that match **all** of the given patterns.
-    /// This means, only messages that have **all** of the attributes in the filter,
-    /// with values of those attributes matching the respective patterns.
     #[serde(rename = "SQS")]
-    Sqs(QueueMessageFilter),
+    Sqs {
+        /// A filter is a mapping between message attribute names and regexes they should match.
+        /// The local application will only receive messages that match **all** of the given
+        /// patterns. This means, only messages that have **all** of the attributes in the
+        /// filter, with values of those attributes matching the respective patterns.
+        message_filter: QueueMessageFilter,
+    },
 
     /// Kafka.
-    ///
-    /// A filter is a mapping between message header names and regexes they should match.
-    /// The local application will only receive messages that match **all** of the given patterns.
-    /// This means, only messages that have **all** of the headers in the filter,
-    /// with values of those headers matching the respective patterns.
     #[serde(rename = "Kafka")]
-    Kafka(QueueMessageFilter),
+    Kafka {
+        /// A filter is a mapping between message header names and regexes they should match.
+        /// The local application will only receive messages that match **all** of the given
+        /// patterns. This means, only messages that have **all** of the headers in the
+        /// filter, with values of those headers matching the respective patterns.
+        message_filter: QueueMessageFilter,
+    },
 
     /// When a newer client sends a new filter kind to an older operator, that does not yet know
     /// about that filter type, this is what that filter will be deserialized to.
@@ -160,4 +164,39 @@ pub enum QueueSplittingVerificationError {
     UnknownQueueType(String),
     #[error("{0}.message_filter.{1}: failed to parse regular expression ({2})")]
     InvalidRegex(String, String, fancy_regex::Error),
+}
+
+mod test {
+    use super::QueueFilter;
+
+    #[test]
+    fn deserialize_known_queue_type() {
+        let value = serde_json::json!({
+            "queue_type": "Kafka",
+            "message_filter": {
+                "key": "value",
+            },
+        });
+
+        let filter = serde_json::from_value::<QueueFilter>(value).unwrap();
+        assert_eq!(
+            filter,
+            QueueFilter::Kafka {
+                message_filter: [("key".to_string(), "value".to_string())].into()
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_unknown_queue_type() {
+        let value = serde_json::json!({
+            "queue_type": "unknown",
+            "message_filter": {
+                "key": "value",
+            }
+        });
+
+        let filter = serde_json::from_value::<QueueFilter>(value).unwrap();
+        assert_eq!(filter, QueueFilter::Unknown);
+    }
 }
