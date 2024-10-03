@@ -28,13 +28,13 @@ pub type QueueId = String;
 ///         }
 ///       },
 ///       "third-queue": {
-///         "queue_type": "Kafka",
+///         "queue_type": "kafka",
 ///         "message_filter": {
 ///           "who": "*you$"
 ///         }
 ///       },
 ///       "fourth-queue": {
-///         "queue_type": "Kafka",
+///         "queue_type": "kafka",
 ///         "message_filter": {
 ///           "wows": "so wows",
 ///           "coolz": "^very .*"
@@ -113,11 +113,7 @@ impl FromMirrordConfig for SplitQueuesConfig {
     type Generator = Self;
 }
 
-/// A filter is a mapping between message attribute (SQS) or header (Kafka) names and regexes they
-/// should match. The local application will only receive messages that match **all** of the given
-/// patterns. This means, only messages that have **all** the attributes/headers in the filter,
-/// with values of those attributes matching the respective regex.
-pub type QueueMessageFilter = BTreeMap<String, String>;
+pub type MessageFilter = BTreeMap<String, String>;
 
 /// More queue types might be added in the future.
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
@@ -130,16 +126,16 @@ pub enum QueueFilter {
     /// This means, only messages that have **all** of the attributes in the filter,
     /// with values of those attributes matching the respective patterns.
     #[serde(rename = "SQS")]
-    Sqs(QueueMessageFilter),
+    Sqs(MessageFilter),
 
     /// Kafka.
     ///
-    /// A filter is a mapping between message header names and regexes matched against their
-    /// values. The local application will only receive messages that match **all** of the
-    /// given patterns. This means, only messages that have **all** of the headers in the
-    /// filter, with values of those headers matching the respective patterns.
+    /// A filter is a mapping between message header names and regexes they should match.
+    /// The local application will only receive messages that match **all** of the given patterns.
+    /// This means, only messages that have **all** of the headers in the filter,
+    /// with values of those headers matching the respective patterns.
     #[serde(rename = "Kafka")]
-    Kafka(QueueMessageFilter),
+    Kafka(MessageFilter),
 
     /// When a newer client sends a new filter kind to an older operator, that does not yet know
     /// about that filter type, this is what that filter will be deserialized to.
