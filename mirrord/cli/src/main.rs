@@ -104,10 +104,7 @@ where
 
     // Collect environment variables curretn local vars and add those from agent + layer settings.
     let mut env_vars: HashMap<String, String> = vars().collect();
-    for (key, val) in execution_info.environment.clone() {
-        // configured vars should overwrite existing vars
-        let _ = env_vars.insert(key, val);
-    }
+    env_vars.extend(execution_info.environment.clone());
 
     for key in &execution_info.env_to_unset {
         env_vars.remove(key);
