@@ -143,8 +143,6 @@ pub enum QueueFilter {
 
     /// When a newer client sends a new filter kind to an older operator, that does not yet know
     /// about that filter type, this is what that filter will be deserialized to.
-    ///
-    /// TODO(razz4780) this doesn't work
     #[schemars(skip)]
     #[serde(other, skip_serializing)]
     Unknown,
