@@ -10,7 +10,10 @@ use mirrord_intproxy::{
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
     error::IntProxyError,
     main_tasks::{MainTaskId, ProxyMessage, ToLayer},
-    proxies::incoming::{IncomingProxy, IncomingProxyError, IncomingProxyMessage},
+    proxies::incoming::{
+        port_subscription_ext::PortSubscriptionExt, IncomingProxy, IncomingProxyError,
+        IncomingProxyMessage,
+    },
 };
 use mirrord_intproxy_protocol::{
     IncomingRequest, IncomingResponse, LayerId, PortSubscribe, PortSubscription,
@@ -434,7 +437,6 @@ pub struct ReversePortForwarder {
 
     /// true if Ping has been sent to agent.
     waiting_for_pong: bool,
-    ping_pong_timeout: Instant,
 }
 
 impl ReversePortForwarder {
@@ -475,7 +477,6 @@ impl ReversePortForwarder {
             background_tasks,
             incoming_proxy: incoming,
             waiting_for_pong: false,
-            ping_pong_timeout: Instant::now(),
         })
     }
 
@@ -501,27 +502,19 @@ impl ReversePortForwarder {
 
         for remote_port in self.mappings.keys() {
             let subscription = self.incoming_mode.subscription(*remote_port);
-            let msg = match subscription {
-                PortSubscription::Steal(steal_type) => {
-                    ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(steal_type))
-                }
-                PortSubscription::Mirror(_) => {
-                    ClientMessage::Tcp(LayerTcp::PortSubscribe(*remote_port))
-                }
-            };
+            let msg = subscription.agent_subscribe();
             self.agent_connection.sender.send(msg).await?
         }
 
         loop {
             select! {
-                _ = tokio::time::sleep_until(self.ping_pong_timeout.into()) => {
+                _ = tokio::time::sleep(Duration::from_secs(30)) => {
                     if self.waiting_for_pong {
                         // no pong received before timeout
                         break Err(PortForwardError::AgentError("agent failed to respond to Ping".into()));
                     }
                     self.agent_connection.sender.send(ClientMessage::Ping).await?;
                     self.waiting_for_pong = true;
-                    self.ping_pong_timeout = Instant::now() + Duration::from_secs(30);
                 },
 
                 message = self.agent_connection.receiver.recv() => match message {
@@ -533,7 +526,6 @@ impl ReversePortForwarder {
                 },
 
                 Some((task_id, update)) = self.background_tasks.next() => {
-                    // dbg!((&task_id, &update));
                     self.handle_msg_from_local(task_id, update).await?
                 },
             }
@@ -589,29 +581,27 @@ impl ReversePortForwarder {
                     if matches!(
                         message,
                         ClientMessage::TcpSteal(LayerTcpSteal::PortSubscribe(_))
-                    ) || matches!(message, ClientMessage::Tcp(LayerTcp::PortSubscribe(_)))
-                    {
+                            | ClientMessage::Tcp(LayerTcp::PortSubscribe(_))
+                    ) {
                         // suppress additional subscription requests
                         return Ok(());
                     }
                     self.agent_connection.sender.send(message).await?;
                 }
-                ProxyMessage::ToLayer(ToLayer { message, .. }) => match message {
-                    ProxyToLayerMessage::Incoming(IncomingResponse::PortSubscribe(res)) => {
-                        if let Err(error) = res {
-                            return Err(PortForwardError::from(IntProxyError::from(
-                                IncomingProxyError::SubscriptionFailed(error),
-                            )));
-                        }
+                ProxyMessage::ToLayer(ToLayer {
+                    message: ProxyToLayerMessage::Incoming(IncomingResponse::PortSubscribe(res)),
+                    ..
+                }) => {
+                    if let Err(error) = res {
+                        return Err(PortForwardError::from(IntProxyError::from(
+                            IncomingProxyError::SubscriptionFailed(error),
+                        )));
                     }
-                    _ => {
-                        unreachable!("message type are never used in port forwarding: {message:?}")
-                    }
-                },
-                ProxyMessage::FromLayer(_)
-                | ProxyMessage::FromAgent(_)
-                | ProxyMessage::NewLayer(_) => {
-                    unreachable!("message type are never used in port forwarding: {message:?}")
+                }
+                other => {
+                    tracing::debug!(
+                        "unexpected message type from background task (message ignored): {other:?}"
+                    )
                 }
             },
             (MainTaskId::IncomingProxy, TaskUpdate::Finished(result)) => match result {

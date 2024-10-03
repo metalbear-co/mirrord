@@ -351,6 +351,9 @@ pub(crate) enum CliError {
     #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
     PortForwardingSetupError(KubeApiError),
 
+    #[error("Failed to make secondary agent connection: invalid configuration, could not find method for connection")]
+    PortForwardingNoConnectionMethod,
+
     #[error("Failed to make secondary agent connection (TLS): {0}")]
     AgentConnTlsError(#[from] ConnectionTlsError),
 

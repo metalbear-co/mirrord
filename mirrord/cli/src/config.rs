@@ -341,7 +341,7 @@ impl TargetParams {
 }
 
 #[derive(Args, Debug)]
-#[command(group(ArgGroup::new("port-forward").args(["port_mappings", "reverse_port_mappings"]).required(true).multiple(true)))] // TODO: check w/out multiple
+#[command(group(ArgGroup::new("port-forward").args(["port_mappings", "reverse_port_mappings"]).required(true)))]
 pub(super) struct PortForwardArgs {
     /// Parameters for the target
     #[clap(flatten)]
@@ -403,8 +403,8 @@ pub(super) struct PortForwardArgs {
     /// Mappings for reverse port forwarding.
     /// Expected format is: '-R \[remote_port:\]local_port'.
     /// In reverse port forwarding, traffic to the remote_port on the target pod is stolen or
-    /// mirrored to localhost:local_host. If stealing, the response is sent back to the
-    /// target:remote_port.
+    /// mirrored to localhost:local_port. If stealing, the response is returned to be sent from
+    /// the target:remote_port.
     /// Multiple reverse mappings are each passed with -R.
     #[arg(short = 'R', long)]
     pub reverse_port_mappings: Vec<PortOnlyMapping>,

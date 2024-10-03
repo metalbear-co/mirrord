@@ -494,16 +494,8 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
     // validate that mappings have unique local ports and reverse mappings have unique remote ports
     // before we do any more setup, keeping the hashmaps for calling PortForwarder/Reverse
     // it would be nicer to do this with clap but we're limited by the derive interface
-    let port_mappings = if !args.port_mappings.is_empty() {
-        hash_port_mappings(args)?
-    } else {
-        HashMap::new()
-    };
-    let rev_port_mappings = if !args.reverse_port_mappings.is_empty() {
-        hash_rev_port_mappings(args)?
-    } else {
-        HashMap::new()
-    };
+    let port_mappings = hash_port_mappings(args)?;
+    let rev_port_mappings = hash_rev_port_mappings(args)?;
 
     if !args.disable_version_check {
         prompt_outdated_version(&progress).await;
@@ -579,7 +571,7 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
                 CliError::auth_exec_error_or(kube_api_error, CliError::PortForwardingSetupError)
             }
             AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
-            AgentConnectionError::NoConnectionMethod => todo!(),
+            AgentConnectionError::NoConnectionMethod => CliError::PortForwardingNoConnectionMethod,
         })?;
     let connection_2 = connection::AgentConnection {
         sender: agent_conn.agent_tx,
