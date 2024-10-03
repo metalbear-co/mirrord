@@ -166,6 +166,7 @@ pub enum QueueSplittingVerificationError {
     InvalidRegex(String, String, fancy_regex::Error),
 }
 
+#[cfg(test)]
 mod test {
     use super::QueueFilter;
 
