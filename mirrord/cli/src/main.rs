@@ -3,7 +3,9 @@
 #![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{collections::HashMap, ffi::CString, net::SocketAddr, sync::LazyLock, time::Duration};
+use std::{
+    collections::HashMap, env::vars, ffi::CString, net::SocketAddr, sync::LazyLock, time::Duration,
+};
 
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
@@ -100,8 +102,12 @@ where
     // Stop confusion with layer
     std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
 
-    // Collect environment variables from agent + layer settings.
-    let mut env_vars = execution_info.environment.clone();
+    // Collect environment variables curretn local vars and add those from agent + layer settings.
+    let mut env_vars: HashMap<String, String> = vars().collect();
+    for (key, val) in execution_info.environment.clone() {
+        // configured vars should overwrite existing vars
+        let _ = env_vars.insert(key, val);
+    }
 
     for key in &execution_info.env_to_unset {
         env_vars.remove(key);
@@ -124,13 +130,13 @@ where
     );
     sub_progress_config.success(Some("config summary"));
 
-    // env vars shoudl look like "varname=value" CStrings
     let path = CString::new(binary.clone())?;
     let args = binary_args
         .clone()
         .into_iter()
         .map(CString::new)
         .collect::<Result<Vec<_>, _>>()?;
+    // env vars should be formatted as "varname=value" CStrings
     let env = env_vars
         .into_iter()
         .map(|(k, v)| CString::new(format!("{k}={v}")))
