@@ -26,7 +26,7 @@ pub struct MirrordKafkaClientConfigSpec {
 }
 
 /// Property to use when creating operator's Kafka client.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordKafkaClientProperty {
     /// Name of the property, e.g `bootstrap.servers`.
@@ -137,7 +137,7 @@ pub struct KafkaTopicDetails {
 }
 
 /// Source of some topic property required for Kafka splitting.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema, Hash)]
 #[serde(rename_all = "camelCase")]
 pub enum TopicPropertySource {
     /// Environment variable with value defined directly in the pod template.
@@ -145,7 +145,7 @@ pub enum TopicPropertySource {
 }
 
 /// Location of an environment variable defined in the pod template.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema, Hash)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvVarLocation {
     /// Name of the container.
@@ -160,7 +160,7 @@ pub struct EnvVarLocation {
 ///
 /// Resources of this kind should live in the operator's namespace. They will be used to clean up
 /// topics that are no longer used.
-#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq, Hash)]
 #[kube(
     group = "queues.mirrord.metalbear.co",
     version = "v1alpha",
