@@ -107,8 +107,8 @@ pub struct MirrordKafkaTopicsConsumerSpec {
     /// Workload api version, for example `apps/v1`.
     pub consumer_api_version: String,
 
-    /// Timeout for waiting until workload patch takes effect, that is at least one pod with
-    /// patched spec is running.
+    /// Timeout for waiting until workload patch takes effect, that is at least one pod reads from
+    /// the ephemeral topic.
     ///
     /// Specified in seconds. Defaults to 60s.
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -90,7 +90,7 @@ impl SplitQueuesConfig {
                     QueueSplittingVerificationError::InvalidRegex(
                         queue_name.clone(),
                         name.clone(),
-                        error,
+                        error.into(),
                     )
                 })?;
             }
@@ -161,7 +161,12 @@ pub enum QueueSplittingVerificationError {
     #[error("{0}: unknown queue type")]
     UnknownQueueType(String),
     #[error("{0}.message_filter.{1}: failed to parse regular expression ({2})")]
-    InvalidRegex(String, String, fancy_regex::Error),
+    InvalidRegex(
+        String,
+        String,
+        // without `Box`, clippy complains when `ConfigError` is used in `Err`
+        Box<fancy_regex::Error>,
+    ),
 }
 
 #[cfg(test)]

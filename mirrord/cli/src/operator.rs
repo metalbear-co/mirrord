@@ -1,8 +1,4 @@
-use std::{
-    fs::File,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{fs::File, path::Path, time::Duration};
 
 use futures::TryFutureExt;
 use kube::{Api, Client};
@@ -15,7 +11,7 @@ use mirrord_kube::api::kubernetes::create_kube_config;
 use mirrord_operator::{
     client::OperatorApi,
     crd::{MirrordOperatorCrd, MirrordOperatorSpec},
-    setup::{LicenseType, Operator, OperatorNamespace, OperatorSetup, SetupOptions},
+    setup::{LicenseType, Operator, OperatorSetup, SetupOptions},
     types::LicenseInfoOwned,
 };
 use mirrord_progress::{Progress, ProgressTracker};
@@ -29,7 +25,7 @@ use crate::{
     config::{OperatorArgs, OperatorCommand},
     error::{CliError, OperatorSetupError},
     util::remove_proxy_env,
-    Result,
+    OperatorSetupParams, Result,
 };
 
 mod session;
@@ -54,14 +50,16 @@ async fn get_last_version() -> Result<String, reqwest::Error> {
 
 /// Setup the operator into a file or to stdout, with explanation.
 async fn operator_setup(
-    accept_tos: bool,
-    file: Option<PathBuf>,
-    namespace: OperatorNamespace,
-    license_key: Option<String>,
-    license_path: Option<PathBuf>,
-    aws_role_arn: Option<String>,
-    sqs_splitting: bool,
-    kafka_splitting: bool,
+    OperatorSetupParams {
+        accept_tos,
+        license_key,
+        license_path,
+        file,
+        namespace,
+        aws_role_arn,
+        sqs_splitting,
+        kafka_splitting,
+    }: OperatorSetupParams,
 ) -> Result<(), OperatorSetupError> {
     if !accept_tos {
         eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
@@ -299,27 +297,7 @@ Operator License
 /// Handle commands related to the operator `mirrord operator ...`
 pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
     match args.command {
-        OperatorCommand::Setup {
-            accept_tos,
-            file,
-            namespace,
-            license_key,
-            license_path,
-            aws_role_arn,
-            sqs_splitting,
-            kafka_splitting,
-        } => operator_setup(
-            accept_tos,
-            file,
-            namespace,
-            license_key,
-            license_path,
-            aws_role_arn,
-            sqs_splitting,
-            kafka_splitting,
-        )
-        .await
-        .map_err(CliError::from),
+        OperatorCommand::Setup(params) => operator_setup(params).await.map_err(CliError::from),
         OperatorCommand::Status { config_file } => operator_status(config_file.as_deref()).await,
         OperatorCommand::Session(session_command) => {
             SessionCommandHandler::new(session_command)
