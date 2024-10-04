@@ -447,6 +447,7 @@ mod main {
 
     /// SIP check for binaries.
     fn is_binary_sip(path: &Path, patch_binaries: &[String]) -> Result<bool> {
+        dbg!(path, patch_binaries);
         // Patch binary if it is in the list of binaries to patch.
         // See `ends_with` docs for understanding better when it returns true.
         Ok(patch_binaries.iter().any(|x| path.ends_with(x))
@@ -483,7 +484,15 @@ mod main {
             return Ok(NoSip);
         }
 
-        if let Some(shebang) = read_shebang_from_file(&complete_path)? {
+        if let Ok(option) = read_shebang_from_file(&complete_path) {
+            let shebang = match option {
+                Some(shebang) => shebang,
+                None => ScriptShebang {
+                    interpreter_path: which("bash")?,
+                    start_of_rest_of_file: 0, /* FIX: this causes the first line of the script to
+                                               * be ignored */
+                },
+            };
             let interpreter_complete_path = get_complete_path(&shebang.interpreter_path)?;
             if is_in_mirrord_tmp_dir(&interpreter_complete_path)? {
                 return Ok(NoSip);
@@ -567,7 +576,7 @@ mod main {
     /// If it is not, `Ok(None)`.
     /// Propagate errors.
     pub fn sip_patch(binary_path: &str, patch_binaries: &[String]) -> Result<Option<String>> {
-        match get_sip_status(binary_path, patch_binaries) {
+        match dbg!(get_sip_status(binary_path, patch_binaries)) {
             Ok(SipScript { path, shebang }) => {
                 let patched_interpreter = patch_binary(&shebang.interpreter_path)?;
                 let patched_script = patch_script(
