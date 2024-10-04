@@ -1,4 +1,4 @@
-use futures::{FutureExt, TryFutureExt};
+use futures::FutureExt;
 use k8s_cri::v1::{runtime_service_client::RuntimeServiceClient, ContainerStatusRequest};
 use serde::Deserialize;
 use tokio::net::UnixStream;

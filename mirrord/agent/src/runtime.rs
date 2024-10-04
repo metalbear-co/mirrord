@@ -10,6 +10,7 @@ use containerd_client::{
     with_namespace,
 };
 use enum_dispatch::enum_dispatch;
+use futures::FutureExt;
 use oci_spec::runtime::Spec;
 use tokio::net::UnixStream;
 use tonic::transport::{Endpoint, Uri};
