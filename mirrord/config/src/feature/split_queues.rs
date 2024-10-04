@@ -169,7 +169,7 @@ mod test {
     use super::QueueFilter;
 
     #[test]
-    fn deserialize_known_queue_type() {
+    fn deserialize_known_queue_types() {
         let value = serde_json::json!({
             "queue_type": "Kafka",
             "message_filter": {
@@ -181,6 +181,21 @@ mod test {
         assert_eq!(
             filter,
             QueueFilter::Kafka {
+                message_filter: [("key".to_string(), "value".to_string())].into()
+            }
+        );
+
+        let value = serde_json::json!({
+            "queue_type": "SQS",
+            "message_filter": {
+                "key": "value",
+            },
+        });
+
+        let filter = serde_json::from_value::<QueueFilter>(value).unwrap();
+        assert_eq!(
+            filter,
+            QueueFilter::Sqs {
                 message_filter: [("key".to_string(), "value".to_string())].into()
             }
         );
