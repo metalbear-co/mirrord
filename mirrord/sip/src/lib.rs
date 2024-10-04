@@ -8,9 +8,9 @@ mod rpath;
 
 mod main {
     use std::{
-        env,
+        env::{self, var},
         ffi::OsStr,
-        io::{self, ErrorKind::AlreadyExists, Read},
+        io::{ErrorKind::AlreadyExists, Read},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
         path::{Path, PathBuf},
         str::from_utf8,
@@ -338,7 +338,8 @@ mod main {
         let contents = data
             .get(shebang.start_of_rest_of_file..)
             .expect("original shebang size exceeds file size");
-        let mut new_contents = String::from("#!") + new_shebang;
+        // trailing space is needed for scripts without a shebang
+        let mut new_contents = String::from("#!") + new_shebang + " ";
         new_contents.push_str(
             from_utf8(contents)
                 .map_err(|_utf| UnlikelyError("Can't read script contents as utf8".to_string()))?,
@@ -387,7 +388,6 @@ mod main {
         let mut buffer = String::new();
         match f.read_to_string(&mut buffer) {
             Ok(_) => {}
-            Err(e) if e.kind() == io::ErrorKind::InvalidData => return Ok(None),
             Err(e) => return Err(SipError::IO(e)),
         }
 
@@ -487,9 +487,10 @@ mod main {
             let shebang = match option {
                 Some(shebang) => shebang,
                 None => ScriptShebang {
-                    interpreter_path: which("bash")?,
-                    start_of_rest_of_file: 0, /* FIX: this causes the first line of the script to
-                                               * be ignored */
+                    interpreter_path: PathBuf::from(
+                        var("SHELL").expect("$SHELL should be present"),
+                    ),
+                    start_of_rest_of_file: 0,
                 },
             };
             let interpreter_complete_path = get_complete_path(&shebang.interpreter_path)?;
@@ -707,6 +708,11 @@ mod main {
         #[test]
         fn sip_patch_for_script_with_shebang() {
             test_patch_script("#!/usr/bin/env bash\necho hello\n")
+        }
+
+        #[test]
+        fn sip_patch_for_script_with_no_shebang() {
+            test_patch_script("echo hello\n")
         }
 
         #[test]
