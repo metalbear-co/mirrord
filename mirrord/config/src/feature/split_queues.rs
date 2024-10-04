@@ -54,7 +54,7 @@ impl SplitQueuesConfig {
     }
 
     /// Out of the whole queue splitting config, get only the sqs queues.
-    pub fn sqs(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ BTreeMap<String, String>)> {
+    pub fn sqs(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ QueueMessageFilter)> {
         self.0.iter().filter_map(|(name, filter)| match filter {
             QueueFilter::Sqs { message_filter } => Some((name.as_str(), message_filter)),
             _ => None,
@@ -62,7 +62,7 @@ impl SplitQueuesConfig {
     }
 
     /// Out of the whole queue splitting config, get only the kafka topics.
-    pub fn kafka(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ BTreeMap<String, String>)> {
+    pub fn kafka(&self) -> impl '_ + Iterator<Item = (&'_ str, &'_ QueueMessageFilter)> {
         self.0.iter().filter_map(|(name, filter)| match filter {
             QueueFilter::Kafka { message_filter } => Some((name.as_str(), message_filter)),
             _ => None,

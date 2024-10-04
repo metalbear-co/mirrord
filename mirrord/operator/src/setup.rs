@@ -27,7 +27,7 @@ use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
 use crate::crd::{
-    kafka::{MirrordKafkaClientConfig, MirrordKafkaTemporaryTopic, MirrordKafkaTopicsConsumer},
+    kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
 };
 
@@ -225,7 +225,7 @@ impl OperatorSetup for Operator {
             MirrordKafkaClientConfig::crd().to_writer(&mut writer)?;
 
             writer.write_all(b"---\n")?;
-            MirrordKafkaTemporaryTopic::crd().to_writer(&mut writer)?;
+            MirrordKafkaEphemeralTopic::crd().to_writer(&mut writer)?;
 
             writer.write_all(b"---\n")?;
             MirrordKafkaTopicsConsumer::crd().to_writer(&mut writer)?;
@@ -552,8 +552,8 @@ impl OperatorRole {
         if kafka_splitting {
             rules.extend([
                 PolicyRule {
-                    api_groups: Some(vec![MirrordKafkaTemporaryTopic::group(&()).into_owned()]),
-                    resources: Some(vec![MirrordKafkaTemporaryTopic::plural(&()).into_owned()]),
+                    api_groups: Some(vec![MirrordKafkaEphemeralTopic::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordKafkaEphemeralTopic::plural(&()).into_owned()]),
                     verbs: ["get", "list", "watch", "create", "delete"]
                         .into_iter()
                         .map(String::from)
