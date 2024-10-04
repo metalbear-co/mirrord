@@ -447,7 +447,6 @@ mod main {
 
     /// SIP check for binaries.
     fn is_binary_sip(path: &Path, patch_binaries: &[String]) -> Result<bool> {
-        dbg!(path, patch_binaries);
         // Patch binary if it is in the list of binaries to patch.
         // See `ends_with` docs for understanding better when it returns true.
         Ok(patch_binaries.iter().any(|x| path.ends_with(x))
@@ -576,7 +575,7 @@ mod main {
     /// If it is not, `Ok(None)`.
     /// Propagate errors.
     pub fn sip_patch(binary_path: &str, patch_binaries: &[String]) -> Result<Option<String>> {
-        match dbg!(get_sip_status(binary_path, patch_binaries)) {
+        match get_sip_status(binary_path, patch_binaries) {
             Ok(SipScript { path, shebang }) => {
                 let patched_interpreter = patch_binary(&shebang.interpreter_path)?;
                 let patched_script = patch_script(
