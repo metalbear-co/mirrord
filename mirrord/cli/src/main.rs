@@ -4,12 +4,8 @@
 #![warn(clippy::indexing_slicing)]
 
 use std::{
-    collections::HashMap,
-    env::{split_paths, var_os, vars},
-    ffi::CString,
-    net::SocketAddr,
-    sync::LazyLock,
-    time::Duration,
+    collections::HashMap, env::vars, ffi::CString, net::SocketAddr, os::unix::ffi::OsStrExt,
+    sync::LazyLock, time::Duration,
 };
 
 use clap::{CommandFactory, Parser};
@@ -21,7 +17,6 @@ use diagnose::diagnose_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
-use is_executable::IsExecutable;
 use kube::Client;
 use miette::JSONReportHandler;
 use mirrord_analytics::{
@@ -120,6 +115,13 @@ where
     // Put original executable in argv[0] even if actually running patched version.
     binary_args.insert(0, args.binary.clone());
 
+    // since execvpe doesn't exist on macOS, resolve path with which and use execve
+    let binary_path = match which(&binary) {
+        Ok(pathbuf) => pathbuf,
+        Err(error) => return Err(CliError::BinaryWhichError(binary, error.to_string())),
+    };
+    let path = CString::new(binary_path.as_os_str().as_bytes())?;
+
     sub_progress.success(Some("ready to launch process"));
 
     // Print config details for the user
@@ -132,24 +134,6 @@ where
         false,
     );
     sub_progress_config.success(Some("config summary"));
-
-    // since execvpe doesn't exist on macOS, resolve path manually and use execve
-    let binary_path: String = if let Some(path) = var_os("PATH") {
-        let mut resolved = binary.clone();
-        let paths = split_paths(&path).collect::<Vec<_>>();
-        for mut path in paths {
-            // check if binary is present in each path
-            path.push(binary.clone());
-            if path.is_executable() {
-                resolved = CString::new(path.as_ref().as_os_str().as_bytes())?;
-                break;
-            }
-        }
-        resolved
-    } else {
-        binary.clone()
-    };
-    let path = CString::new(binary_path)?;
 
     let args = binary_args
         .clone()

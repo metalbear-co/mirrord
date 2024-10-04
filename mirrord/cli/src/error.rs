@@ -383,6 +383,9 @@ pub(crate) enum CliError {
 
     #[error("A null byte was found when trying to execute process: {0}")]
     ExecNulError(#[from] NulError),
+
+    #[error("Couldn't resolve binary name '{0}': {1}")]
+    BinaryWhichError(String, String),
 }
 
 impl CliError {

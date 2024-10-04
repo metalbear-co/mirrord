@@ -4055,7 +4055,6 @@ dependencies = [
  "exec",
  "futures",
  "humantime",
- "is_executable",
  "k8s-openapi",
  "kube",
  "local-ip-address",
