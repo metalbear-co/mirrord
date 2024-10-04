@@ -151,7 +151,9 @@ async fn connect(path: impl AsRef<std::path::Path>) -> ContainerRuntimeResult<Ch
 
     Endpoint::try_from("http://localhost")
         .map_err(ContainerRuntimeError::containerd)?
-        .connect_with_connector(service_fn(move |_: Uri| UnixStream::connect(path.clone())))
+        .connect_with_connector(service_fn(move |_: Uri| {
+            UnixStream::connect(path.clone()).map(hyper_util::rt::TokioIo::new)
+        }))
         .await
         .map_err(ContainerRuntimeError::containerd)
 }
