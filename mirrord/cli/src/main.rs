@@ -3,7 +3,10 @@
 #![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{collections::HashMap, net::SocketAddr, sync::LazyLock, time::Duration};
+use std::{
+    collections::HashMap, env::vars, ffi::CString, net::SocketAddr, os::unix::ffi::OsStrExt,
+    sync::LazyLock, time::Duration,
+};
 
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
@@ -11,7 +14,6 @@ use config::*;
 use connection::create_and_connect;
 use container::container_command;
 use diagnose::diagnose_command;
-use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
@@ -35,6 +37,8 @@ use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_kube::api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{messages::EXEC_CONTAINER_BINARY, Progress, ProgressTracker};
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use nix::errno::Errno;
 use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
@@ -99,18 +103,24 @@ where
     // Stop confusion with layer
     std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
 
-    // Set environment variables from agent + layer settings.
-    for (key, value) in &execution_info.environment {
-        std::env::set_var(key, value);
-    }
+    // Collect environment variables curretn local vars and add those from agent + layer settings.
+    let mut env_vars: HashMap<String, String> = vars().collect();
+    env_vars.extend(execution_info.environment.clone());
 
     for key in &execution_info.env_to_unset {
-        std::env::remove_var(key);
+        env_vars.remove(key);
     }
 
     let mut binary_args = args.binary_args.clone();
     // Put original executable in argv[0] even if actually running patched version.
     binary_args.insert(0, args.binary.clone());
+
+    // since execvpe doesn't exist on macOS, resolve path with which and use execve
+    let binary_path = match which(&binary) {
+        Ok(pathbuf) => pathbuf,
+        Err(error) => return Err(CliError::BinaryWhichError(binary, error.to_string())),
+    };
+    let path = CString::new(binary_path.as_os_str().as_bytes())?;
 
     sub_progress.success(Some("ready to launch process"));
 
@@ -125,21 +135,31 @@ where
     );
     sub_progress_config.success(Some("config summary"));
 
+    let args = binary_args
+        .clone()
+        .into_iter()
+        .map(CString::new)
+        .collect::<Result<Vec<_>, _>>()?;
+    // env vars should be formatted as "varname=value" CStrings
+    let env = env_vars
+        .into_iter()
+        .map(|(k, v)| CString::new(format!("{k}={v}")))
+        .collect::<Result<Vec<_>, _>>()?;
+
     // The execve hook is not yet active and does not hijack this call.
-    let err = execvp(binary.clone(), binary_args.clone());
-    error!("Couldn't execute {:?}", err);
+    let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
+        .expect_err("call to execve cannot succeed");
+    error!("Couldn't execute {:?}", errno);
     analytics.set_error(AnalyticsError::BinaryExecuteFailed);
 
     // Kills the intproxy, freeing the agent.
     execution_info.stop().await;
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    if let exec::Error::Errno(errno) = err {
-        if Into::<i32>::into(errno) == 86 {
-            // "Bad CPU type in executable"
-            if _did_sip_patch {
-                return Err(CliError::RosettaMissing(binary));
-            }
+    if errno == Errno::from_raw(86) {
+        // "Bad CPU type in executable"
+        if _did_sip_patch {
+            return Err(CliError::RosettaMissing(binary));
         }
     }
 
@@ -334,6 +354,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
 
+    // set_var used here as mirrord needs these values
     for (name, value) in args.params.as_env_vars()? {
         std::env::set_var(name, value);
     }
