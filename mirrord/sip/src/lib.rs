@@ -10,7 +10,10 @@ mod main {
     use std::{
         env::{self, var},
         ffi::OsStr,
-        io::{ErrorKind::AlreadyExists, Read},
+        io::{
+            ErrorKind::{self, AlreadyExists},
+            Read,
+        },
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
         path::{Path, PathBuf},
         str::from_utf8,
@@ -338,8 +341,8 @@ mod main {
         let contents = data
             .get(shebang.start_of_rest_of_file..)
             .expect("original shebang size exceeds file size");
-        // trailing space is needed for scripts without a shebang
-        let mut new_contents = String::from("#!") + new_shebang + " ";
+        // trailing newline is needed for scripts without a shebang
+        let mut new_contents = String::from("#!") + new_shebang + "\n";
         new_contents.push_str(
             from_utf8(contents)
                 .map_err(|_utf| UnlikelyError("Can't read script contents as utf8".to_string()))?,
@@ -483,7 +486,8 @@ mod main {
             return Ok(NoSip);
         }
 
-        if let Ok(option) = read_shebang_from_file(&complete_path) {
+        let result = read_shebang_from_file(&complete_path);
+        if let Ok(option) = result {
             let shebang = match option {
                 Some(shebang) => shebang,
                 None => ScriptShebang {
@@ -509,13 +513,19 @@ mod main {
                 }
             })
         } else {
-            is_binary_sip(&complete_path, patch_binaries).map(|is_sip| {
-                if is_sip {
-                    SipBinary(complete_path)
-                } else {
-                    NoSip
+            match result {
+                Err(SipError::IO(e)) if e.kind() == ErrorKind::InvalidData => {
+                    // file could not be converted to string, check if binary
+                    is_binary_sip(&complete_path, patch_binaries).map(|is_sip| {
+                        if is_sip {
+                            SipBinary(complete_path)
+                        } else {
+                            NoSip
+                        }
+                    })
                 }
-            })
+                _ => Err(result.unwrap_err()),
+            }
         }
     }
 
