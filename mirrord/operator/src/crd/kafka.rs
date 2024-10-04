@@ -8,12 +8,12 @@ use serde::{Deserialize, Serialize};
 #[kube(
     group = "queues.mirrord.metalbear.co",
     version = "v1alpha",
-    kind = "MirrordKafkaClientProperties",
+    kind = "MirrordKafkaClientConfig",
     namespaced,
     printcolumn = r#"{"name":"PARENT", "type":"string", "description":"Name of parent configuration.", "jsonPath":".spec.parent"}"#
 )]
 #[serde(rename_all = "camelCase")]
-pub struct MirrordKafkaClientPropertiesSpec {
+pub struct MirrordKafkaClientConfigSpec {
     /// Name of parent resource to use as base when resolving final configuration.
     pub parent: Option<String>,
     /// Properties to set.
@@ -55,8 +55,8 @@ pub struct KafkaTopicDetails {
     pub name_sources: Vec<TopicPropertySource>,
     /// All occurrences of this topic's group id in the pod spec.
     pub group_id_sources: Vec<TopicPropertySource>,
-    /// Links to [`MirrordKafkaClientProperties`] in the operator's namespace.
-    pub client_properties: String,
+    /// Links to [`MirrordKafkaClientConfig`] in the operator's namespace.
+    pub client_config: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -81,12 +81,12 @@ pub struct DirectEnvVar {
     kind = "MirrordKafkaTemporaryTopic",
     namespaced,
     printcolumn = r#"{"name":"NAME", "type":"string", "description":"Name of the topic.", "jsonPath":".spec.name"}"#,
-    printcolumn = r#"{"name":"CLIENT-PROPERTIES", "type":"string", "description":"Name of MirrordKafkaClientProperties to use when creating Kafka client.", "jsonPath":".spec.clientProperties"}"#
+    printcolumn = r#"{"name":"CLIENT-CONFIG", "type":"string", "description":"Name of MirrordKafkaClientProperties to use when creating Kafka client.", "jsonPath":".spec.clientConfig"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordKafkaTemporaryTopicSpec {
     /// Name of the topic.
     pub name: String,
-    /// Links to [`MirrordKafkaClientProperties`] resource living in the same namespace.
-    pub client_properties: String,
+    /// Links to [`MirrordKafkaClientConfigSpec`] resource living in the same namespace.
+    pub client_config: String,
 }

@@ -27,7 +27,7 @@ use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
 use crate::crd::{
-    kafka::{MirrordKafkaClientProperties, MirrordKafkaTemporaryTopic, MirrordKafkaTopicsConsumer},
+    kafka::{MirrordKafkaClientConfig, MirrordKafkaTemporaryTopic, MirrordKafkaTopicsConsumer},
     MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
 };
 
@@ -222,7 +222,7 @@ impl OperatorSetup for Operator {
 
         if self.kafka_splitting {
             writer.write_all(b"---\n")?;
-            MirrordKafkaClientProperties::crd().to_writer(&mut writer)?;
+            MirrordKafkaClientConfig::crd().to_writer(&mut writer)?;
 
             writer.write_all(b"---\n")?;
             MirrordKafkaTemporaryTopic::crd().to_writer(&mut writer)?;
@@ -521,8 +521,8 @@ impl OperatorRole {
             },
             // Allow the operator to list+get mirrord policies.
             PolicyRule {
-                api_groups: Some(vec!["policies.mirrord.metalbear.co".to_owned()]),
-                resources: Some(vec![MirrordPolicy::plural(&()).to_string()]),
+                api_groups: Some(vec![MirrordPolicy::group(&()).into_owned()]),
+                resources: Some(vec![MirrordPolicy::plural(&()).into_owned()]),
                 verbs: vec!["list".to_owned(), "get".to_owned()],
                 ..Default::default()
             },
@@ -561,8 +561,8 @@ impl OperatorRole {
                     ..Default::default()
                 },
                 PolicyRule {
-                    api_groups: Some(vec![MirrordKafkaClientProperties::group(&()).into_owned()]),
-                    resources: Some(vec![MirrordKafkaClientProperties::plural(&()).into_owned()]),
+                    api_groups: Some(vec![MirrordKafkaClientConfig::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordKafkaClientConfig::plural(&()).into_owned()]),
                     verbs: ["get", "list", "watch"]
                         .into_iter()
                         .map(String::from)
@@ -585,8 +585,11 @@ impl OperatorRole {
             rules.extend([
                 // Allow the SQS controller to update queue registry status.
                 PolicyRule {
-                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
-                    resources: Some(vec!["mirrordworkloadqueueregistries/status".to_string()]),
+                    api_groups: Some(vec![MirrordWorkloadQueueRegistry::group(&()).into_owned()]),
+                    resources: Some(vec![format!(
+                        "{}/status",
+                        MirrordWorkloadQueueRegistry::plural(&())
+                    )]),
                     verbs: vec![
                         // For setting the status in the SQS controller.
                         "update".to_owned(),
@@ -595,15 +598,15 @@ impl OperatorRole {
                 },
                 // Allow the operator to list mirrord queue registries.
                 PolicyRule {
-                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
-                    resources: Some(vec![MirrordWorkloadQueueRegistry::plural(&()).to_string()]),
+                    api_groups: Some(vec![MirrordWorkloadQueueRegistry::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordWorkloadQueueRegistry::plural(&()).into_owned()]),
                     verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
                     ..Default::default()
                 },
                 // Allow the operator to control mirrord SQS session objects.
                 PolicyRule {
-                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
-                    resources: Some(vec![MirrordSqsSession::plural(&()).to_string()]),
+                    api_groups: Some(vec![MirrordSqsSession::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordSqsSession::plural(&()).into_owned()]),
                     verbs: vec![
                         "create".to_owned(),
                         "watch".to_owned(),
@@ -615,10 +618,10 @@ impl OperatorRole {
                     ],
                     ..Default::default()
                 },
-                // Allow the SQS controller to update queue registry status.
+                // Allow the SQS controller to update SQS session status.
                 PolicyRule {
-                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
-                    resources: Some(vec!["mirrordsqssessions/status".to_string()]),
+                    api_groups: Some(vec![MirrordSqsSession::group(&()).into_owned()]),
+                    resources: Some(vec![format!("{}/status", MirrordSqsSession::plural(&()))]),
                     verbs: vec![
                         // For setting the status in the SQS controller.
                         "update".to_owned(),
