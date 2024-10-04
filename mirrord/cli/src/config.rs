@@ -341,7 +341,7 @@ impl TargetParams {
 }
 
 #[derive(Args, Debug)]
-#[command(group(ArgGroup::new("port-forward").args(["port_mappings", "reverse_port_mappings"]).required(true)))]
+#[command(group(ArgGroup::new("port-forward").args(["port_mapping", "reverse_port_mapping"]).required(true)))]
 pub(super) struct PortForwardArgs {
     /// Parameters for the target
     #[clap(flatten)]
@@ -397,8 +397,8 @@ pub(super) struct PortForwardArgs {
     /// Otherwise, the remote is assumed to be a hostname and lookup is performed in the cluster
     /// after a connection is made to the target.
     /// Multiple forwarding mappings are each passed with -L.
-    #[arg(short = 'L', long)]
-    pub port_mappings: Vec<AddrPortMapping>,
+    #[arg(short = 'L', long, alias = "port-mappings")]
+    pub port_mapping: Vec<AddrPortMapping>,
 
     /// Mappings for reverse port forwarding.
     /// Expected format is: '-R \[remote_port:\]local_port'.
@@ -407,7 +407,7 @@ pub(super) struct PortForwardArgs {
     /// the target:remote_port.
     /// Multiple reverse mappings are each passed with -R.
     #[arg(short = 'R', long)]
-    pub reverse_port_mappings: Vec<PortOnlyMapping>,
+    pub reverse_port_mapping: Vec<PortOnlyMapping>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
