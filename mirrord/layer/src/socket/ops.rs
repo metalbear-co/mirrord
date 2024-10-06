@@ -23,7 +23,6 @@ use mirrord_intproxy_protocol::{
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
-    RemoteResult,
 };
 use nix::{
     fcntl::OFlag,
@@ -41,6 +40,7 @@ use crate::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
     file::{self, OPEN_FILES},
+    non_blocking_listener,
 };
 
 /// Holds the pair of [`IpAddr`] with their hostnames, resolved remotely through
@@ -417,53 +417,6 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     }
 }
 
-fn non_blocking_connect_watcher(
-    sockfd: RawFd,
-    remote_address: SocketAddress,
-    responses: impl Iterator<Item = HookResult<RemoteResult<OutgoingConnectResponse>>>,
-) {
-    for response in responses {
-        match response {
-            Ok(Ok(OutgoingConnectResponse::InProgress { .. })) => {
-                continue;
-            }
-            Ok(Ok(OutgoingConnectResponse::Connected {
-                layer_address,
-                in_cluster_address,
-            })) => {
-                let connected = Connected {
-                    remote_address,
-                    local_address: in_cluster_address,
-                    layer_address: Some(layer_address),
-                };
-
-                tracing::trace!(?connected, "we are connected");
-
-                if let Ok(mut guard) = SOCKETS.lock() {
-                    if let Some(user_socket_info) = guard.get_mut(&sockfd) {
-                        Arc::get_mut(user_socket_info)
-                            .expect("user_socket_info should be accessible via mutable ref")
-                            .state = SocketState::Connected(connected);
-                    }
-                }
-
-                break;
-            }
-            Err(error) => {
-                tracing::error!(%error, "error reciving response from agent");
-
-                break;
-            }
-            Ok(Err(error)) => {
-                // TODO: Need to handle this case, not sure yet
-                tracing::error!(%error, "recived error from remote connect");
-
-                break;
-            }
-        }
-    }
-}
-
 /// Common logic between Tcp/Udp `connect`, when used for the outgoing traffic feature.
 ///
 /// Sends a hook message that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request
@@ -560,9 +513,11 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
 
                 SOCKETS.lock()?.insert(sockfd, user_socket_info);
 
-                std::thread::spawn(move || {
-                    non_blocking_connect_watcher(sockfd, remote_address, responses)
-                });
+                let _ = non_blocking_listener().tx.lock()?.send((
+                    sockfd,
+                    remote_address,
+                    Box::new(responses),
+                ));
 
                 Detour::Success(connect_result)
             }

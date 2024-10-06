@@ -93,12 +93,14 @@ use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use proxy_connection::ProxyConnection;
 use setup::LayerSetup;
-use socket::SOCKETS;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
-    common::make_proxy_request_with_response, debugger_ports::DebuggerPorts, detour::DetourGuard,
+    common::make_proxy_request_with_response,
+    debugger_ports::DebuggerPorts,
+    detour::DetourGuard,
     load::LoadType,
+    socket::{NonBlockingListener, SOCKETS},
 };
 
 mod common;
@@ -145,6 +147,14 @@ const TRACE_ONLY_ENV: &str = "MIRRORD_LAYER_TRACE_ONLY";
 /// Should not be used directly. Use [`common::make_proxy_request_with_response`] or
 /// [`common::make_proxy_request_no_response`] functions instead.
 static mut PROXY_CONNECTION: OnceLock<ProxyConnection> = OnceLock::new();
+
+static NON_BLOCKING_LISTENER: OnceLock<NonBlockingListener> = OnceLock::new();
+
+fn non_blocking_listener() -> &'static NonBlockingListener {
+    NON_BLOCKING_LISTENER
+        .get()
+        .expect("layer is not initialized")
+}
 
 static SETUP: OnceLock<LayerSetup> = OnceLock::new();
 
@@ -348,6 +358,13 @@ fn layer_start(mut config: LayerConfig) {
         .to_process_info(&config);
     let state = LayerSetup::new(config, debugger_ports, local_hostname);
     SETUP.set(state).unwrap();
+
+    NON_BLOCKING_LISTENER
+        .set(
+            NonBlockingListener::new()
+                .expect("unable to spawn NonBlockingListener background task"),
+        )
+        .unwrap();
 
     let state = setup();
     enable_hooks(state);
