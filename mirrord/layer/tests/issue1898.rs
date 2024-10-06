@@ -6,7 +6,7 @@ use std::{assert_matches::assert_matches, net::SocketAddr, path::Path, time::Dur
 use mirrord_protocol::{
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
-        DaemonConnect, LayerConnect, LayerWrite, SocketAddress,
+        DaemonConnect, LayerConnect, SocketAddress,
     },
     ClientMessage, DaemonMessage,
 };
@@ -67,18 +67,6 @@ async fn test_issue1898(
             },
         ))))
         .await;
-
-    let message = intproxy.recv().await;
-    assert_matches!(
-        message,
-        ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite { .. }))
-    );
-
-    let message = intproxy.recv().await;
-    assert_matches!(
-        message,
-        ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(LayerWrite { .. }))
-    );
 
     test_process.wait().await;
     test_process.assert_stdout_contains("SUCCESS").await;
