@@ -4242,6 +4242,7 @@ dependencies = [
  "mirrord-config",
  "mirrord-console",
  "mirrord-intproxy",
+ "mirrord-intproxy-protocol",
  "mirrord-kube",
  "mirrord-layer",
  "mirrord-operator",

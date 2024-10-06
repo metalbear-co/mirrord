@@ -42,7 +42,7 @@ use crate::{
 
 mod http;
 mod interceptor;
-mod port_subscription_ext;
+pub mod port_subscription_ext;
 mod subscriptions;
 
 /// Creates and binds a new [`TcpSocket`].

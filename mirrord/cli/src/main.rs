@@ -3,7 +3,10 @@
 #![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{sync::LazyLock, time::Duration};
+use std::{
+    collections::HashMap, env::vars, ffi::CString, net::SocketAddr, os::unix::ffi::OsStrExt,
+    sync::LazyLock, time::Duration,
+};
 
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
@@ -11,7 +14,6 @@ use config::*;
 use connection::create_and_connect;
 use container::container_command;
 use diagnose::diagnose_command;
-use exec::execvp;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
@@ -31,11 +33,14 @@ use mirrord_config::{
     },
     LayerConfig, LayerFileConfig, MIRRORD_CONFIG_FILE_ENV,
 };
+use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_kube::api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker};
 use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{messages::EXEC_CONTAINER_BINARY, Progress, ProgressTracker};
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use nix::errno::Errno;
 use operator::operator_command;
-use port_forward::PortForwarder;
+use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
 use semver::{Version, VersionReq};
 use serde_json::json;
@@ -98,18 +103,24 @@ where
     // Stop confusion with layer
     std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
 
-    // Set environment variables from agent + layer settings.
-    for (key, value) in &execution_info.environment {
-        std::env::set_var(key, value);
-    }
+    // Collect environment variables curretn local vars and add those from agent + layer settings.
+    let mut env_vars: HashMap<String, String> = vars().collect();
+    env_vars.extend(execution_info.environment.clone());
 
     for key in &execution_info.env_to_unset {
-        std::env::remove_var(key);
+        env_vars.remove(key);
     }
 
     let mut binary_args = args.binary_args.clone();
     // Put original executable in argv[0] even if actually running patched version.
     binary_args.insert(0, args.binary.clone());
+
+    // since execvpe doesn't exist on macOS, resolve path with which and use execve
+    let binary_path = match which(&binary) {
+        Ok(pathbuf) => pathbuf,
+        Err(error) => return Err(CliError::BinaryWhichError(binary, error.to_string())),
+    };
+    let path = CString::new(binary_path.as_os_str().as_bytes())?;
 
     sub_progress.success(Some("ready to launch process"));
 
@@ -124,21 +135,31 @@ where
     );
     sub_progress_config.success(Some("config summary"));
 
+    let args = binary_args
+        .clone()
+        .into_iter()
+        .map(CString::new)
+        .collect::<Result<Vec<_>, _>>()?;
+    // env vars should be formatted as "varname=value" CStrings
+    let env = env_vars
+        .into_iter()
+        .map(|(k, v)| CString::new(format!("{k}={v}")))
+        .collect::<Result<Vec<_>, _>>()?;
+
     // The execve hook is not yet active and does not hijack this call.
-    let err = execvp(binary.clone(), binary_args.clone());
-    error!("Couldn't execute {:?}", err);
+    let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
+        .expect_err("call to execve cannot succeed");
+    error!("Couldn't execute {:?}", errno);
     analytics.set_error(AnalyticsError::BinaryExecuteFailed);
 
     // Kills the intproxy, freeing the agent.
     execution_info.stop().await;
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    if let exec::Error::Errno(errno) = err {
-        if Into::<i32>::into(errno) == 86 {
-            // "Bad CPU type in executable"
-            if _did_sip_patch {
-                return Err(CliError::RosettaMissing(binary));
-            }
+    if errno == Errno::from_raw(86) {
+        // "Bad CPU type in executable"
+        if _did_sip_patch {
+            return Err(CliError::RosettaMissing(binary));
         }
     }
 
@@ -333,6 +354,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
 
+    // set_var used here as mirrord needs these values
     for (name, value) in args.params.as_env_vars()? {
         std::env::set_var(name, value);
     }
@@ -453,8 +475,49 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
 }
 
 async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()> {
+    fn hash_port_mappings(
+        args: &PortForwardArgs,
+    ) -> Result<HashMap<SocketAddr, (RemoteAddr, u16)>, PortForwardError> {
+        let port_mappings = &args.port_mapping;
+        let mut mappings: HashMap<SocketAddr, (RemoteAddr, u16)> =
+            HashMap::with_capacity(port_mappings.len());
+        for mapping in port_mappings {
+            if mappings
+                .insert(mapping.local, mapping.remote.clone())
+                .is_some()
+            {
+                // two mappings shared a key thus keys were not unique
+                return Err(PortForwardError::PortMapSetupError(mapping.local));
+            }
+        }
+        Ok(mappings)
+    }
+
+    fn hash_rev_port_mappings(
+        args: &PortForwardArgs,
+    ) -> Result<HashMap<RemotePort, LocalPort>, PortForwardError> {
+        let port_mappings = &args.reverse_port_mapping;
+        let mut mappings: HashMap<RemotePort, LocalPort> =
+            HashMap::with_capacity(port_mappings.len());
+        for mapping in port_mappings {
+            // check destinations are unique
+            if mappings.insert(mapping.remote, mapping.local).is_some() {
+                // two mappings shared a key thus keys were not unique
+                return Err(PortForwardError::ReversePortMapSetupError(mapping.remote));
+            }
+        }
+        Ok(mappings)
+    }
+
     let mut progress = ProgressTracker::from_env("mirrord port-forward");
     progress.warning("Port forwarding is currently an unstable feature and subject to change. See https://github.com/metalbear-co/mirrord/issues/2640 for more info.");
+
+    // validate that mappings have unique local ports and reverse mappings have unique remote ports
+    // before we do any more setup, keeping the hashmaps for calling PortForwarder/Reverse
+    // it would be nicer to do this with clap but we're limited by the derive interface
+    let port_mappings = hash_port_mappings(args)?;
+    let rev_port_mappings = hash_rev_port_mappings(args)?;
+
     if !args.disable_version_check {
         prompt_outdated_version(&progress).await;
     }
@@ -515,11 +578,51 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
     for warning in context.get_warnings() {
         progress.warning(warning);
     }
-
-    let (_connection_info, connection) =
+    let (connection_info, connection) =
         create_and_connect(&config, &mut progress, &mut analytics).await?;
-    let mut port_forward = PortForwarder::new(connection, args.port_mappings.clone()).await?;
-    port_forward.run().await?;
+
+    // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
+    // error print-outs
+    let agent_conn = AgentConnection::new(&config, Some(connection_info), &mut analytics)
+        .await
+        .map_err(|agent_con_error| match agent_con_error {
+            AgentConnectionError::Io(error) => CliError::PortForwardingSetupError(error.into()),
+            AgentConnectionError::Operator(operator_api_error) => operator_api_error.into(),
+            AgentConnectionError::Kube(kube_api_error) => {
+                CliError::auth_exec_error_or(kube_api_error, CliError::PortForwardingSetupError)
+            }
+            AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
+            AgentConnectionError::NoConnectionMethod => CliError::PortForwardingNoConnectionMethod,
+        })?;
+    let connection_2 = connection::AgentConnection {
+        sender: agent_conn.agent_tx,
+        receiver: agent_conn.agent_rx,
+    };
+
+    let _ = tokio::try_join!(
+        async {
+            if !args.port_mapping.is_empty() {
+                let mut port_forward = PortForwarder::new(connection, port_mappings).await?;
+                port_forward.run().await.map_err(|error| error.into())
+            } else {
+                Ok::<(), CliError>(())
+            }
+        },
+        async {
+            if !args.reverse_port_mapping.is_empty() {
+                let mut port_forward = ReversePortForwarder::new(
+                    connection_2,
+                    rev_port_mappings,
+                    config.feature.network.incoming,
+                )
+                .await?;
+                port_forward.run().await.map_err(|error| error.into())
+            } else {
+                Ok::<(), CliError>(())
+            }
+        }
+    )?;
+
     Ok(())
 }
 

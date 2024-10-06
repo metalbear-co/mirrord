@@ -24,13 +24,13 @@ use crate::{
 };
 
 pub mod agent_conn;
-mod background_tasks;
+pub mod background_tasks;
 pub mod error;
 mod layer_conn;
 mod layer_initializer;
-mod main_tasks;
+pub mod main_tasks;
 mod ping_pong;
-mod proxies;
+pub mod proxies;
 mod remote_resources;
 mod request_queue;
 
