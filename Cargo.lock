@@ -4448,6 +4448,7 @@ name = "mirrord-intproxy-protocol"
 version = "3.118.1"
 dependencies = [
  "bincode",
+ "bitflags 2.6.0",
  "mirrord-protocol",
  "thiserror",
  "tokio",

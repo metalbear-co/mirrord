@@ -8,7 +8,8 @@ use std::{
     net::{IpAddr, SocketAddr},
 };
 
-use bincode::{Decode, Encode};
+use bincode::{BorrowDecode, Decode, Encode};
+use bitflags::bitflags;
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::*,
@@ -117,6 +118,40 @@ impl fmt::Display for NetProtocol {
     }
 }
 
+bitflags! {
+    #[derive(Debug)]
+    pub struct OutgoingConnectFlags: u8 {
+        const NONBLOCK = 0x0001;
+    }
+}
+
+impl<'de> BorrowDecode<'de> for OutgoingConnectFlags {
+    fn borrow_decode<D>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError>
+    where
+        D: bincode::de::BorrowDecoder<'de>,
+    {
+        BorrowDecode::borrow_decode(decoder).map(OutgoingConnectFlags::from_bits_retain)
+    }
+}
+
+impl Encode for OutgoingConnectFlags {
+    fn encode<E>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError>
+    where
+        E: bincode::enc::Encoder,
+    {
+        self.bits().encode(encoder)
+    }
+}
+
+impl Decode for OutgoingConnectFlags {
+    fn decode<D>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError>
+    where
+        D: bincode::de::Decoder,
+    {
+        Decode::decode(decoder).map(OutgoingConnectFlags::from_bits_retain)
+    }
+}
+
 /// A request to initiate a new outgoing connection.
 #[derive(Encode, Decode, Debug)]
 pub struct OutgoingConnectRequest {
@@ -124,6 +159,8 @@ pub struct OutgoingConnectRequest {
     pub remote_address: SocketAddress,
     /// The protocol stack the user application wants to use.
     pub protocol: NetProtocol,
+    /// Any flags that intproxy should be aware of
+    pub flags: OutgoingConnectFlags,
 }
 
 /// Requests related to incoming connections.

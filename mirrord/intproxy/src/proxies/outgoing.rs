@@ -3,8 +3,8 @@
 use std::{collections::HashMap, fmt, io};
 
 use mirrord_intproxy_protocol::{
-    LayerId, MessageId, NetProtocol, OutgoingConnectRequest, OutgoingConnectResponse,
-    ProxyToLayerMessage,
+    LayerId, MessageId, NetProtocol, OutgoingConnectFlags, OutgoingConnectRequest,
+    OutgoingConnectResponse, ProxyToLayerMessage,
 };
 use mirrord_protocol::{
     outgoing::{tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing, DaemonConnect, DaemonRead},
@@ -214,7 +214,9 @@ impl OutgoingProxy {
     ) {
         self.queue(request.protocol).insert(message_id, layer_id);
 
-        if matches!(request.protocol, NetProtocol::Stream) {
+        if matches!(request.protocol, NetProtocol::Stream)
+            && request.flags.contains(OutgoingConnectFlags::NONBLOCK)
+        {
             let response: RemoteResult<_> = try {
                 let prepared_socket = request
                     .protocol
