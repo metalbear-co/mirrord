@@ -314,27 +314,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86fdf8605db99b54d3cd748a44c6d04df638eb5dafb219b135d0149bd0db01f6"
 
 [[package]]
-name = "apple-bundles"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abb7c27ee2ca7826adfdc84228cd4c5a84ab57b0a11d269d1d7cd0615238e5a2"
-dependencies = [
- "anyhow",
- "plist",
- "simple-file-manifest",
- "walkdir",
-]
-
-[[package]]
 name = "apple-codesign"
 version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "329820aac7259ca0529d3cc21dd3b4c11651225dfce9e0ce25b121b23f923164"
+source = "git+https://github.com/metalbear-co/apple-platform-rs-mini#6d05370d2815a82795cd0ce675f98ec20ec87e0d"
 dependencies = [
  "anyhow",
- "apple-bundles",
- "apple-flat-package",
- "apple-xar",
  "base64 0.21.7",
  "bcder",
  "bitflags 2.6.0",
@@ -373,10 +357,7 @@ dependencies = [
  "regex",
  "reqwest 0.11.27",
  "ring",
- "rsa",
  "scroll",
- "security-framework",
- "security-framework-sys",
  "semver 1.0.23",
  "serde",
  "serde_json",
@@ -393,8 +374,6 @@ dependencies = [
  "tungstenite 0.21.0",
  "uuid",
  "walkdir",
- "widestring",
- "windows-sys 0.52.0",
  "x509",
  "x509-certificate",
  "xml-rs",
@@ -402,51 +381,6 @@ dependencies = [
  "zeroize",
  "zip",
  "zip_structs",
-]
-
-[[package]]
-name = "apple-flat-package"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6adc520e05304de5ec383487786fa20e9c636fe972e59719cdd93621a2db6f1"
-dependencies = [
- "apple-xar",
- "cpio-archive",
- "flate2",
- "scroll",
- "serde",
- "serde-xml-rs",
- "thiserror",
-]
-
-[[package]]
-name = "apple-xar"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "844e00dc1e665b3cf0bba745aa9c6464292ca512db0c11384511586701eb0335"
-dependencies = [
- "base64 0.21.7",
- "bcder",
- "bzip2",
- "chrono",
- "cryptographic-message-syntax",
- "digest",
- "flate2",
- "log",
- "md-5",
- "rand",
- "reqwest 0.11.27",
- "scroll",
- "serde",
- "serde-xml-rs",
- "sha1",
- "sha2",
- "signature",
- "thiserror",
- "url",
- "x509-certificate",
- "xml-rs",
- "xz2",
 ]
 
 [[package]]
@@ -1409,27 +1343,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bzip2"
-version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdb116a6ef3f6c3698828873ad02c3014b3c85cadb88496095628e3ef1e347f8"
-dependencies = [
- "bzip2-sys",
- "libc",
-]
-
-[[package]]
-name = "bzip2-sys"
-version = "0.1.11+1.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "736a955f3fa7875102d57c82b8cac37ec45224a07fd32d58f9f7a186b6cd4cdc"
-dependencies = [
- "cc",
- "libc",
- "pkg-config",
-]
-
-[[package]]
 name = "c2rust-bitfields"
 version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1733,18 +1646,6 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
-
-[[package]]
-name = "cpio-archive"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63d5133d716d3d82da8c76367ddb0ab1733e2629f1462e4f39947e13b8b4b741"
-dependencies = [
- "chrono",
- "is_executable",
- "simple-file-manifest",
- "thiserror",
-]
 
 [[package]]
 name = "cpufeatures"
@@ -3441,15 +3342,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7655c9839580ee829dfacba1d1278c2b7883e50a277ff7541299489d6bdfdc45"
 
 [[package]]
-name = "is_executable"
-version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ba3d8548b8b04dafdf2f4cc6f5e379db766d0a6d9aac233ad4c9a92ea892233"
-dependencies = [
- "winapi",
-]
-
-[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3750,9 +3642,6 @@ name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
-dependencies = [
- "spin",
-]
 
 [[package]]
 name = "lazycell"
@@ -4628,23 +4517,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num-bigint-dig"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc84195820f291c7697304f3cbdadd1cb7199c0efc917ff5eafd71225c136151"
-dependencies = [
- "byteorder",
- "lazy_static",
- "libm",
- "num-integer",
- "num-iter",
- "num-traits",
- "rand",
- "smallvec",
- "zeroize",
-]
-
-[[package]]
 name = "num-complex"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4707,7 +4579,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
- "libm",
 ]
 
 [[package]]
@@ -5817,26 +5688,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rsa"
-version = "0.9.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d0e5124fcb30e76a7e79bfee683a2746db83784b86289f6251b54b7950a0dfc"
-dependencies = [
- "const-oid",
- "digest",
- "num-bigint-dig",
- "num-integer",
- "num-traits",
- "pkcs1",
- "pkcs8",
- "rand_core",
- "signature",
- "spki",
- "subtle",
- "zeroize",
-]
-
-[[package]]
 name = "rstest"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6274,18 +6125,6 @@ checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
  "ordered-float",
  "serde",
-]
-
-[[package]]
-name = "serde-xml-rs"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb3aa78ecda1ebc9ec9847d5d3aba7d618823446a049ba2491940506da6e2782"
-dependencies = [
- "log",
- "serde",
- "thiserror",
- "xml-rs",
 ]
 
 [[package]]
