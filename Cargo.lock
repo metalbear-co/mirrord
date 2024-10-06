@@ -3641,7 +3641,7 @@ dependencies = [
 
 [[package]]
 name = "issue1898"
-version = "3.118.0"
+version = "3.118.1"
 dependencies = [
  "async-std",
  "libc",
