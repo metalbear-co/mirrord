@@ -122,4 +122,5 @@ strip = "debuginfo"
 lto = false
 
 [patch.crates-io]
+# Don't use tonic 0.11!
 containerd-client = { git = "https://github.com/containerd/rust-extensions.git", package = "containerd-client" }
