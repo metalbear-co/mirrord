@@ -42,7 +42,7 @@ pub struct MirrordKafkaClientProperty {
 /// # Concurrent splitting
 ///
 /// Concurrent Kafka splitting sessions are allowed, as long as they use the same topic id or their
-/// topics' `nameSources` have no overlap.
+/// topics' `nameSources` do not overlap.
 ///
 /// # Example
 ///
@@ -94,7 +94,11 @@ pub struct MirrordKafkaClientProperty {
     group = "queues.mirrord.metalbear.co",
     version = "v1alpha",
     kind = "MirrordKafkaTopicsConsumer",
-    namespaced
+    namespaced,
+    printcolumn = r#"{"name":"CONSUMER-NAME", "type":"string", "description":"Name of the topic consumer workload.", "jsonPath":".spec.consumerName"}"#,
+    printcolumn = r#"{"name":"CONSUMER-KIND", "type":"string", "description":"Kind of the topic consumer workload.", "jsonPath":".spec.consumerKind"}"#,
+    printcolumn = r#"{"name":"CONSUMER-API-VERSION", "type":"string", "description":"Api version of the topic consumer workload.", "jsonPath":".spec.consumerApiVersion"}"#,
+    printcolumn = r#"{"name":"CONSUMER-RESTART-TIMEOUT", "type":"string", "description":"Timeout for consumer workload restart.", "jsonPath":".spec.consumerRestartTimeout"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordKafkaTopicsConsumerSpec {
