@@ -23,7 +23,7 @@ use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::error;
+use tracing::{error, Level};
 
 use crate::{body_chunks::BodyExt as _, ConnectionId, Port, RemoteResult, RequestId};
 
@@ -614,6 +614,7 @@ impl HttpResponseFallback {
         }
     }
 
+    #[tracing::instrument(level = Level::TRACE, err(level = Level::WARN))]
     pub fn into_hyper<E>(self) -> Result<Response<BoxBody<Bytes, E>>, http::Error>
     where
         E: From<hyper::Error>,
@@ -698,6 +699,7 @@ impl HttpResponse<InternalHttpBody> {
     /// and we also need some extra parameters.
     ///
     /// So this is our alternative implementation to `From<Response<Incoming>>`.
+    #[tracing::instrument(level = Level::TRACE, err(level = Level::WARN))]
     pub async fn from_hyper_response(
         response: Response<Incoming>,
         port: Port,
@@ -796,6 +798,7 @@ impl HttpResponse<Vec<u8>> {
     /// and we also need some extra parameters.
     ///
     /// So this is our alternative implementation to `From<Response<Incoming>>`.
+    #[tracing::instrument(level = Level::TRACE, err(level = Level::WARN))]
     pub async fn from_hyper_response(
         response: Response<Incoming>,
         port: Port,
@@ -885,6 +888,7 @@ impl HttpResponse<Vec<u8>> {
 }
 
 impl HttpResponse<ReceiverStreamBody> {
+    #[tracing::instrument(level = Level::TRACE, err(level = Level::WARN))]
     pub async fn from_hyper_response(
         response: Response<Incoming>,
         port: Port,
@@ -934,6 +938,7 @@ impl HttpResponse<ReceiverStreamBody> {
         })
     }
 
+    #[tracing::instrument(level = Level::TRACE, ret)]
     pub fn response_from_request(
         request: HttpRequest<StreamingBody>,
         status: StatusCode,

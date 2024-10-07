@@ -8,6 +8,7 @@ use std::{
 };
 
 use bytes::BytesMut;
+use exponential_backoff::Backoff;
 use hyper::{upgrade::OnUpgrade, StatusCode, Version};
 use hyper_util::rt::TokioIo;
 use mirrord_protocol::tcp::{
@@ -18,8 +19,9 @@ use thiserror::Error;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpSocket, TcpStream},
-    time,
+    time::{self, sleep},
 };
+use tracing::Level;
 
 use super::http::HttpSender;
 use crate::background_tasks::{BackgroundTask, MessageBus};
@@ -211,11 +213,14 @@ impl HttpConnection {
     ///
     /// See [`HttpResponseFallback::response_from_request`] for notes on picking the correct
     /// [`HttpResponseFallback`] variant.
+    #[tracing::instrument(level = Level::TRACE, skip(self, response), err(level = Level::WARN))]
     async fn handle_response(
         &self,
         request: HttpRequestFallback,
         response: InterceptorResult<hyper::Response<hyper::body::Incoming>>,
     ) -> InterceptorResult<(HttpResponseFallback, Option<OnUpgrade>)> {
+        // TODO(alex) [high] 1: Could drill down the error here to `is_reset` from http2
+        // crate.
         match response {
             Err(InterceptorError::Hyper(e)) if e.is_closed() => {
                 tracing::warn!(
@@ -313,26 +318,7 @@ impl HttpConnection {
                     }
                 };
 
-                Ok(result
-                    .map(|response| (response, upgrade))
-                    .unwrap_or_else(|e| {
-                        tracing::error!(
-                            "Failed to read response to filtered http request: {e:?}. \
-                            Please consider reporting this issue on \
-                            https://github.com/metalbear-co/mirrord/issues/new?labels=bug&template=bug_report.yml"
-                        );
-
-                        (
-                            HttpResponseFallback::response_from_request(
-                                request,
-                                StatusCode::BAD_GATEWAY,
-                                "mirrord",
-                                self.agent_protocol_version.as_ref(),
-                            ),
-                            None,
-                        )
-                    })
-                )
+                Ok(result.map(|response| (response, upgrade))?)
             }
         }
     }
@@ -340,27 +326,39 @@ impl HttpConnection {
     /// Sends the given [`HttpRequestFallback`] to the server.
     /// If the HTTP connection with server is closed too soon, starts a new connection and retries
     /// once. Returns [`HttpResponseFallback`] from the server.
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     async fn send(
         &mut self,
         request: HttpRequestFallback,
     ) -> InterceptorResult<(HttpResponseFallback, Option<OnUpgrade>)> {
-        let response = self.sender.send(request.clone()).await;
-        let response = self.handle_response(request, response).await;
+        let attempts = 5;
+        let min = Duration::from_millis(10);
+        let max = Duration::from_millis(250);
 
-        let Err(InterceptorError::ConnectionClosedTooSoon(request)) = response else {
-            return response;
-        };
+        for duration in Backoff::new(attempts, min, max) {
+            let response = self.sender.send(request.clone()).await;
+            match self.handle_response(request.clone(), response).await {
+                Ok(response) => return Ok(response),
+                Err(fail) => {
+                    tracing::warn!("Request {request:?} connection was closed too soon, retrying.");
+                    match duration {
+                        Some(duration) => {
+                            sleep(duration).await;
 
-        tracing::trace!("Request {request:?} connection was closed too soon, retrying once");
+                            // Create a new connection for this second attempt.
+                            let socket = super::bind_similar(self.peer)?;
+                            let stream = socket.connect(self.peer).await?;
+                            let new_sender =
+                                super::http::handshake(request.version(), stream).await?;
+                            self.sender = new_sender;
+                        }
+                        None => return Err(fail),
+                    }
+                }
+            }
+        }
 
-        // Create a new connection for this second attempt.
-        let socket = super::bind_similar(self.peer)?;
-        let stream = socket.connect(self.peer).await?;
-        let new_sender = super::http::handshake(request.version(), stream).await?;
-        self.sender = new_sender;
-
-        let response = self.sender.send(request.clone()).await;
-        self.handle_response(request, response).await
+        Err(InterceptorError::UnexpectedHttpRequest)
     }
 
     /// Proxies HTTP messages until an HTTP upgrade happens or the [`MessageBus`] closes.
