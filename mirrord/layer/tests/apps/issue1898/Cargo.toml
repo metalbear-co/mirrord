@@ -17,6 +17,7 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-libc.workspace = true
+async-global-executor = "2"
 async-std = "1"
-thread-async = { git = "https://github.com/DmitryDodzin/thread-async.git" }
+libc.workspace = true
+

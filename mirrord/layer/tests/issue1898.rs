@@ -31,7 +31,15 @@ async fn test_issue1898(
     let address = "1.2.3.4:80".parse::<SocketAddr>().unwrap();
     let second_address = "2.3.4.5:80".parse::<SocketAddr>().unwrap();
 
-    let message = intproxy.recv().await;
+    let mut message = intproxy.recv().await;
+
+    if matches!(
+        message,
+        ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(_))
+    ) {
+        message = intproxy.recv().await;
+    }
+
     assert_matches!(
         message,
         ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect { remote_address }))
@@ -51,7 +59,15 @@ async fn test_issue1898(
         .await;
 
     // Second
-    let message = intproxy.recv().await;
+    let mut message = intproxy.recv().await;
+
+    if matches!(
+        message,
+        ClientMessage::TcpOutgoing(LayerTcpOutgoing::Write(_))
+    ) {
+        message = intproxy.recv().await;
+    }
+
     assert_matches!(
         message,
         ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect { remote_address }))

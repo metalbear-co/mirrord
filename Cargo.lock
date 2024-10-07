@@ -3479,9 +3479,9 @@ dependencies = [
 name = "issue1898"
 version = "3.118.1"
 dependencies = [
+ "async-global-executor",
  "async-std",
  "libc",
- "thread-async",
 ]
 
 [[package]]
@@ -6885,14 +6885,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.77",
-]
-
-[[package]]
-name = "thread-async"
-version = "0.1.0"
-source = "git+https://github.com/DmitryDodzin/thread-async.git#ae66804f5be25a67ec836134f6d20a8cf7506e32"
-dependencies = [
- "pin-project-lite",
 ]
 
 [[package]]

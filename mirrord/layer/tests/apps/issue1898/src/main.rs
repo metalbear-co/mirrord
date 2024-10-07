@@ -4,7 +4,6 @@ use std::{
 };
 
 use async_std::net::TcpStream as AsyncTcpStream;
-use thread_async::ThreadFutureExt;
 
 fn main() {
     println!("test issue 1898: START");
@@ -12,7 +11,15 @@ fn main() {
     let socket_addr: SocketAddr = "1.2.3.4:80".parse().unwrap();
     let second_socket_addr: SocketAddr = "2.3.4.5:80".parse().unwrap();
 
-    let async_stream = AsyncTcpStream::connect(socket_addr).spawn_thread_await();
+    let async_stream = async_global_executor::spawn(async move {
+        let stream = AsyncTcpStream::connect(socket_addr)
+            .await
+            .expect("sync tcp stream was not created");
+
+        stream
+            .shutdown(Shutdown::Both)
+            .expect("unable to shutdown sync tcp stream");
+    });
 
     assert!(!async_stream.is_finished());
 
@@ -25,12 +32,7 @@ fn main() {
         .shutdown(Shutdown::Both)
         .expect("unable to shutdown sync tcp stream");
 
-    async_stream
-        .join()
-        .expect("unable to join async connect")
-        .expect("sync tcp stream was not created")
-        .shutdown(Shutdown::Both)
-        .expect("unable to shutdown sync tcp stream");
+    async_global_executor::block_on(async_stream);
 
     println!("test issue 1898: SUCCESS");
 }
