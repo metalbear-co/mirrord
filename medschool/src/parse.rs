@@ -207,8 +207,9 @@ fn dfs_fields<'a, const MAX_RECURSION_LEVEL: usize>(
     recursion_level: &mut usize,
 ) -> Vec<String> {
     if *recursion_level >= MAX_RECURSION_LEVEL {
-        return vec!["Recursion limit reached".to_string()];
+        panic!("recursion limit {MAX_RECURSION_LEVEL} reached");
     }
+
     // increment the recursion level as we're going deeper into the tree
     types // get the type of the field from the types set to recurse into it's fields
         .get(&field.ty)
