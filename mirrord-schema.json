@@ -828,7 +828,7 @@
           ]
         },
         "tls_enable": {
-          "description": "<!--${internal}-->\n\nWhether to use a tls or plain connection",
+          "description": "<!--${internal}-->\n\nWhether to use TLS or a plain TCP connection.",
           "type": [
             "boolean",
             "null"

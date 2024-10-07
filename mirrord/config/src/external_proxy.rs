@@ -6,7 +6,6 @@ use serde::Serialize;
 
 use crate::config::source::MirrordConfigSource;
 
-pub static MIRRORD_EXTERNAL_TLS_ENABLE_ENV: &str = "MIRRORD_EXTERNAL_TLS_ENABLE";
 pub static MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV: &str = "MIRRORD_EXTERNAL_TLS_CERTIFICATE";
 pub static MIRRORD_EXTERNAL_TLS_KEY_ENV: &str = "MIRRORD_EXTERNAL_TLS_KEY";
 
@@ -31,7 +30,7 @@ pub struct ExternalProxyConfig {
     /// <!--${internal}-->
     ///
     /// Whether to use TLS or a plain TCP connection.
-    #[config(env = MIRRORD_EXTERNAL_TLS_ENABLE_ENV, default = true)]
+    #[config(default = true)]
     pub tls_enable: bool,
 
     /// <!--${internal}-->
