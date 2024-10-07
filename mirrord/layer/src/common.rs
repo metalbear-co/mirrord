@@ -16,6 +16,30 @@ use crate::{
     PROXY_CONNECTION,
 };
 
+pub fn queue_proxy_response_handler<T>(
+    request_id: u64,
+    handler: impl FnOnce(T::Response) + 'static,
+) -> HookResult<()>
+where
+    T: IsLayerRequestWithResponse + Debug,
+    T::Response: Debug + 'static,
+{
+    unsafe {
+        PROXY_CONNECTION
+            .get()
+            .ok_or(HookError::CannotGetProxyConnection)?
+            .queue_handler(request_id, move |response| {
+                match T::try_unwrap_response(response) {
+                    Ok(response) => handler(response),
+                    Err(error) => {
+                        tracing::error!(?error, "temp error queue_proxy_response_handler")
+                    }
+                }
+            })
+            .map_err(Into::into)
+    }
+}
+
 /// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
 /// Blocks until the proxy responds.
 pub fn make_proxy_request_with_response<T>(request: T) -> HookResult<T::Response>
@@ -34,6 +58,23 @@ where
 }
 
 /// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
+/// Blocks until the proxy responds.
+pub fn make_proxy_request_with_response_and_id<T>(request: T) -> HookResult<(u64, T::Response)>
+where
+    T: IsLayerRequestWithResponse + Debug,
+    T::Response: Debug,
+{
+    // SAFETY: mutation happens only on initialization.
+    unsafe {
+        PROXY_CONNECTION
+            .get()
+            .ok_or(HookError::CannotGetProxyConnection)?
+            .make_request_with_response_and_id(request)
+            .map_err(Into::into)
+    }
+}
+
+/// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
 /// Blocks until the request is sent.
 pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
     request: T,
@@ -46,36 +87,6 @@ pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
             .make_request_no_response(request)
             .map_err(Into::into)
     }
-}
-
-fn proxy_receive_into_response<T: IsLayerRequestWithResponse>(
-    response_id: u64,
-) -> HookResult<T::Response> {
-    // // SAFETY: mutation happens only on initialization.
-    unsafe {
-        PROXY_CONNECTION
-            .get()
-            .ok_or(HookError::CannotGetProxyConnection)?
-            .receive_into_response::<T>(response_id)
-            .map_err(Into::into)
-    }
-}
-
-pub fn make_proxy_request_with_response_iterator<'r, T>(
-    request: T,
-) -> Box<dyn Iterator<Item = HookResult<T::Response>> + Send + 'r>
-where
-    T: IsLayerRequestWithResponse + Debug,
-    T::Response: Debug + Send + 'r,
-{
-    let response_id = match make_proxy_request_no_response(request) {
-        Err(error) => return Box::new(std::iter::once(HookResult::Err(error))),
-        Ok(response_id) => response_id,
-    };
-
-    Box::new(std::iter::from_fn(move || {
-        Some(proxy_receive_into_response::<T>(response_id))
-    }))
 }
 
 /// Converts raw pointer values `P` to some other type.

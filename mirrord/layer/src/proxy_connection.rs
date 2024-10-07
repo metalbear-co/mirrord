@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
-    fmt::Debug,
-    io,
+    fmt, io,
     net::{SocketAddr, TcpStream},
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -116,19 +115,52 @@ impl ProxyConnection {
     #[mirrord_layer_macro::instrument(level = "trace", skip(self), ret)]
     pub fn make_request_with_response<T>(&self, request: T) -> Result<T::Response>
     where
-        T: IsLayerRequestWithResponse + Debug,
-        T::Response: Debug,
+        T: IsLayerRequestWithResponse + fmt::Debug,
+        T::Response: fmt::Debug,
     {
         let response_id = self.send(request.wrap())?;
         self.receive_into_response::<T>(response_id)
     }
 
     #[mirrord_layer_macro::instrument(level = "trace", skip(self), ret)]
-    pub fn make_request_no_response<T: IsLayerRequest + Debug>(
+    pub fn make_request_with_response_and_id<T>(
+        &self,
+        request: T,
+    ) -> Result<(MessageId, T::Response)>
+    where
+        T: IsLayerRequestWithResponse + fmt::Debug,
+        T::Response: fmt::Debug,
+    {
+        let response_id = self.send(request.wrap())?;
+        self.receive_into_response::<T>(response_id)
+            .map(|response| (response_id, response))
+    }
+
+    #[mirrord_layer_macro::instrument(level = "trace", skip(self), ret)]
+    pub fn make_request_no_response<T: IsLayerRequest + fmt::Debug>(
         &self,
         request: T,
     ) -> Result<MessageId> {
         self.send(request.wrap())
+    }
+
+    #[mirrord_layer_macro::instrument(level = "trace", skip(self, handler), ret)]
+    pub fn queue_handler(
+        &self,
+        response_id: MessageId,
+        handler: impl FnOnce(ProxyToLayerMessage) + 'static,
+    ) -> Result<()> {
+        let mut guard = self.responses.lock()?;
+
+        if let Some(response) = guard.outstanding_responses.remove(&response_id) {
+            handler(response);
+        } else {
+            guard
+                .outstanding_handlers
+                .insert(response_id, Box::new(handler));
+        }
+
+        Ok(())
     }
 
     pub fn layer_id(&self) -> LayerId {
@@ -140,10 +172,10 @@ impl ProxyConnection {
     }
 }
 
-#[derive(Debug)]
 struct ResponseManager {
     receiver: SyncDecoder<LocalMessage<ProxyToLayerMessage>, TcpStream>,
     outstanding_responses: HashMap<u64, ProxyToLayerMessage>,
+    outstanding_handlers: HashMap<u64, Box<dyn FnOnce(ProxyToLayerMessage)>>,
 }
 
 impl ResponseManager {
@@ -151,6 +183,7 @@ impl ResponseManager {
         Self {
             receiver,
             outstanding_responses: Default::default(),
+            outstanding_handlers: Default::default(),
         }
     }
 
@@ -169,8 +202,25 @@ impl ResponseManager {
                 break Ok(response.inner);
             }
 
-            self.outstanding_responses
-                .insert(response.message_id, response.inner);
+            if let Some(handler) = self.outstanding_handlers.remove(&response.message_id) {
+                handler(response.inner);
+            } else {
+                self.outstanding_responses
+                    .insert(response.message_id, response.inner);
+            }
         }
+    }
+}
+
+impl fmt::Debug for ResponseManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ResponseManager")
+            .field("receiver", &self.receiver)
+            .field("outstanding_responses", &self.outstanding_responses)
+            .field(
+                "outstanding_handlers",
+                &format!("HashMap({})", self.outstanding_responses.len()),
+            )
+            .finish()
     }
 }

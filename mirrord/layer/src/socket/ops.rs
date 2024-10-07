@@ -40,7 +40,6 @@ use crate::{
     detour::{Detour, OnceLockExt, OptionDetourExt, OptionExt},
     error::HookError,
     file::{self, OPEN_FILES},
-    non_blocking_listener,
 };
 
 /// Holds the pair of [`IpAddr`] with their hostnames, resolved remotely through
@@ -417,6 +416,39 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     }
 }
 
+fn non_blocking_connect_callback(
+    sockfd: RawFd,
+    remote_address: SocketAddress,
+    response: RemoteResult<OutgoingConnectResponse>,
+) {
+    match response {
+        Ok(OutgoingConnectResponse::Connected {
+            layer_address,
+            in_cluster_address,
+        }) => {
+            let connected = Connected {
+                remote_address,
+                local_address: in_cluster_address,
+                layer_address: Some(layer_address),
+            };
+
+            tracing::trace!(?connected, "we are connected");
+
+            if let Ok(mut guard) = SOCKETS.lock() {
+                if let Some(user_socket_info) = guard.get_mut(&sockfd) {
+                    Arc::get_mut(user_socket_info)
+                        .expect("user_socket_info should be accessible via mutable ref")
+                        .state = SocketState::Connected(connected);
+                }
+            }
+        }
+        Err(error) => {
+            tracing::error!(%error, "error reciving response from agent");
+        }
+        _ => todo!(),
+    }
+}
+
 /// Common logic between Tcp/Udp `connect`, when used for the outgoing traffic feature.
 ///
 /// Sends a hook message that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request
@@ -442,12 +474,9 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
             flags,
         };
 
-        let mut responses = common::make_proxy_request_with_response_iterator(request);
+        let (response_id, response) = common::make_proxy_request_with_response_and_id(request)?;
 
-        match responses
-            .next()
-            .expect("response iter will respolve or block")?
-        {
+        match response {
             Ok(OutgoingConnectResponse::Connected {
                 layer_address,
                 in_cluster_address,
@@ -513,11 +542,10 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
 
                 SOCKETS.lock()?.insert(sockfd, user_socket_info);
 
-                let _ = non_blocking_listener().tx.lock()?.send((
-                    sockfd,
-                    remote_address,
-                    Box::new(responses),
-                ));
+                common::queue_proxy_response_handler::<OutgoingConnectRequest>(
+                    response_id,
+                    move |response| non_blocking_connect_callback(sockfd, remote_address, response),
+                )?;
 
                 Detour::Success(connect_result)
             }

@@ -5,8 +5,7 @@ use std::{
     net::{SocketAddr, ToSocketAddrs},
     os::unix::io::RawFd,
     str::FromStr,
-    sync::{mpsc, Arc, LazyLock, Mutex},
-    thread::JoinHandle,
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use base64::prelude::*;
@@ -18,7 +17,7 @@ use mirrord_config::feature::network::{
     filter::{AddressFilter, ProtocolAndAddressFilter, ProtocolFilter},
     outgoing::{OutgoingConfig, OutgoingFilterConfig},
 };
-use mirrord_intproxy_protocol::{NetProtocol, OutgoingConnectResponse, PortUnsubscribe};
+use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
 use mirrord_protocol::{
     outgoing::SocketAddress, DnsLookupError, RemoteResult, ResolveErrorKindInternal, ResponseError,
 };
@@ -552,81 +551,5 @@ impl SocketAddrExt for SocketAddr {
     fn try_from_raw(raw_address: *const sockaddr, address_length: socklen_t) -> Detour<SocketAddr> {
         SockAddr::try_from_raw(raw_address, address_length)
             .and_then(|address| address.as_socket().bypass(Bypass::AddressConversion))
-    }
-}
-
-pub type NonBlockingMessage = (
-    RawFd,
-    SocketAddress,
-    Box<dyn Iterator<Item = HookResult<RemoteResult<OutgoingConnectResponse>>> + Send>,
-);
-
-#[derive(Debug)]
-pub struct NonBlockingListener {
-    pub tx: Mutex<mpsc::Sender<NonBlockingMessage>>,
-    _handle: JoinHandle<()>,
-}
-
-impl NonBlockingListener {
-    pub fn new() -> std::io::Result<Self> {
-        let (tx, rx) = mpsc::channel();
-
-        let _handle = std::thread::spawn(move || {
-            while let Ok((sockfd, remote_address, responses)) = rx.recv() {
-                Self::non_blocking_connect_watcher(sockfd, remote_address, responses)
-            }
-        });
-
-        Ok(NonBlockingListener {
-            tx: Mutex::new(tx),
-            _handle,
-        })
-    }
-
-    fn non_blocking_connect_watcher(
-        sockfd: RawFd,
-        remote_address: SocketAddress,
-        responses: impl Iterator<Item = HookResult<RemoteResult<OutgoingConnectResponse>>>,
-    ) {
-        for response in responses {
-            match response {
-                Ok(Ok(OutgoingConnectResponse::InProgress { .. })) => {
-                    continue;
-                }
-                Ok(Ok(OutgoingConnectResponse::Connected {
-                    layer_address,
-                    in_cluster_address,
-                })) => {
-                    let connected = Connected {
-                        remote_address,
-                        local_address: in_cluster_address,
-                        layer_address: Some(layer_address),
-                    };
-
-                    tracing::trace!(?connected, "we are connected");
-
-                    if let Ok(mut guard) = SOCKETS.lock() {
-                        if let Some(user_socket_info) = guard.get_mut(&sockfd) {
-                            Arc::get_mut(user_socket_info)
-                                .expect("user_socket_info should be accessible via mutable ref")
-                                .state = SocketState::Connected(connected);
-                        }
-                    }
-
-                    break;
-                }
-                Err(error) => {
-                    tracing::error!(%error, "error reciving response from agent");
-
-                    break;
-                }
-                Ok(Err(error)) => {
-                    // TODO: Need to handle this case, not sure yet
-                    tracing::error!(%error, "recived error from remote connect");
-
-                    break;
-                }
-            }
-        }
     }
 }
