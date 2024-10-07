@@ -1,4 +1,3 @@
-use futures::TryFutureExt;
 use k8s_cri::v1::{runtime_service_client::RuntimeServiceClient, ContainerStatusRequest};
 use serde::Deserialize;
 use tokio::net::UnixStream;
@@ -31,8 +30,12 @@ impl ContainerRuntime for CriOContainer {
     async fn get_info(&self) -> ContainerRuntimeResult<ContainerInfo> {
         let channel = Endpoint::try_from("http://localhost")
             .map_err(ContainerRuntimeError::crio)?
-            .connect_with_connector(service_fn(move |_: Uri| {
-                UnixStream::connect(CRIO_DEFAULT_SOCK_PATH).inspect_err(|err| error!("{err:?}"))
+            .connect_with_connector(service_fn(move |_: Uri| async {
+                Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(
+                    UnixStream::connect(CRIO_DEFAULT_SOCK_PATH)
+                        .await
+                        .inspect_err(|err| error!("{err:?}"))?,
+                ))
             }))
             .await
             .map_err(ContainerRuntimeError::crio)?;
