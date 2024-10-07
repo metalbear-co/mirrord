@@ -335,8 +335,10 @@ impl HttpConnection {
         let min = Duration::from_millis(10);
         let max = Duration::from_millis(250);
 
+        // Retry to handle this request a few times.
         for duration in Backoff::new(attempts, min, max) {
             let response = self.sender.send(request.clone()).await;
+
             match self.handle_response(request.clone(), response).await {
                 Ok(response) => return Ok(response),
                 Err(fail) => {
@@ -358,7 +360,7 @@ impl HttpConnection {
             }
         }
 
-        Err(InterceptorError::UnexpectedHttpRequest)
+        unreachable!("You could only get here if the retry loop never ran!")
     }
 
     /// Proxies HTTP messages until an HTTP upgrade happens or the [`MessageBus`] closes.

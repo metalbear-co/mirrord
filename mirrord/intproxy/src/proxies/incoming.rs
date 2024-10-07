@@ -555,7 +555,7 @@ impl BackgroundTask for IncomingProxy {
                                             frames.frames.into_iter().map(From::from).for_each(|frame| body.push(frame));
                                         },
                                         Err(error) => {
-                                            debug!(%error, "Error while receving streamed response frames");
+                                            debug!(%error, "Error while receiving streamed response frames");
                                             let res = ChunkedResponse::Error(ChunkedHttpError { connection_id: key.0, request_id: key.1 });
                                             message_bus.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(res))).await;
                                             continue;
