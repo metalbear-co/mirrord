@@ -131,11 +131,17 @@ impl AgentConnection {
 
                 let stream = socket.connect(proxy_addr).await?;
 
-                if let (Some(tls_certificate), Some(client_tls_certificate), Some(client_tls_key)) = (
-                    config.external_proxy.tls_certificate.as_ref(),
-                    config.internal_proxy.client_tls_certificate.as_ref(),
-                    config.internal_proxy.client_tls_key.as_ref(),
-                ) {
+                if config.external_proxy.tls_enable
+                    && let (
+                        Some(tls_certificate),
+                        Some(client_tls_certificate),
+                        Some(client_tls_key),
+                    ) = (
+                        config.external_proxy.tls_certificate.as_ref(),
+                        config.internal_proxy.client_tls_certificate.as_ref(),
+                        config.internal_proxy.client_tls_key.as_ref(),
+                    )
+                {
                     wrap_connection_with_tls(
                         stream,
                         proxy_addr.ip(),

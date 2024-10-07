@@ -29,6 +29,12 @@ pub static MIRRORD_EXTERNAL_TLS_KEY_ENV: &str = "MIRRORD_EXTERNAL_TLS_KEY";
 pub struct ExternalProxyConfig {
     /// <!--${internal}-->
     ///
+    /// Whether to use TLS or a plain TCP connection.
+    #[config(default = true)]
+    pub tls_enable: bool,
+
+    /// <!--${internal}-->
+    ///
     /// Certificate path to be used for wrapping external proxy tcp listener with a tcp acceptor
     /// (self-signed one will be generated automaticaly if not specified)
     #[config(env = MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV)]
