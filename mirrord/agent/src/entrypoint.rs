@@ -477,7 +477,7 @@ impl ClientConnectionHandler {
             ClientMessage::ReadyForLogs => {
                 self.ready_for_logs = true;
             }
-            ClientMessage::Vpn(message) => {
+            ClientMessage::Vpn(_message) => {
                 unreachable!("VPN is not supported");
                 // self.vpn_api.layer_message(message).await?;
             }
