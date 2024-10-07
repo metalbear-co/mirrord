@@ -2,13 +2,15 @@
 use std::{
     env,
     ffi::{c_void, CStr, CString},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::OnceLock,
 };
 
 use libc::{c_char, c_int, pid_t};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
-use mirrord_sip::{sip_patch, SipError, MIRRORD_PATCH_DIR};
+use mirrord_sip::{
+    sip_patch, SipError, MIRRORD_TEMP_BIN_DIR_CANONIC_PATHBUF, MIRRORD_TEMP_BIN_DIR_PATH_BUF,
+};
 use null_terminated::Nul;
 use tracing::{trace, warn};
 
@@ -61,19 +63,26 @@ pub(crate) unsafe fn enable_macos_hooks(
 /// Check if the file that is to be executed has SIP and patch it if it does.
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
-    let patch_binaries = PATCH_BINARIES.get().expect("patch binaries not set");
-    match sip_patch(path, patch_binaries) {
+    let patch_binaries: Vec<_> = PATCH_BINARIES
+        .get()
+        .expect("patch binaries not set")
+        .iter()
+        .map(|y| y.into())
+        .collect();
+    match sip_patch(Path::new(path), patch_binaries.as_ref()) {
         Ok(None) => Bypass(NoSipDetected(path.to_string())),
-        Ok(Some(new_path)) => Success(new_path),
+        Ok(Some(new_path)) => Success(new_path.to_string_lossy().to_string()),
         Err(SipError::FileNotFound(non_existing_bin)) => {
             trace!(
-                "The application wants to execute {}, SIP check got FileNotFound for {}. \
+                "The application wants to execute {}, SIP check got FileNotFound for {:?}. \
                 If the file actually exists and should have been found, make sure it is excluded \
                 from FS ops.",
                 path,
                 non_existing_bin
             );
-            Bypass(ExecOnNonExistingFile(non_existing_bin))
+            Bypass(ExecOnNonExistingFile(
+                non_existing_bin.to_string_lossy().to_string(),
+            ))
         }
         Err(sip_error) => {
             warn!(
@@ -107,27 +116,27 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
         }
         let arg_str: &str = arg.checked_into()?;
         trace!("exec arg: {arg_str}");
+        let arg_path = Path::new(arg_str);
 
-        // SAFETY: We only slice after we find the string in the path
-        // so it must be valid
-        #[allow(clippy::indexing_slicing)]
-        let stripped = arg_str
-            .find(MIRRORD_PATCH_DIR)
-            .map(|index| &arg_str[(MIRRORD_PATCH_DIR.len() + index)..])
+        let leading_slash = Path::new("/");
+        let stripped: PathBuf = arg_path
+            .strip_prefix(MIRRORD_TEMP_BIN_DIR_PATH_BUF.to_owned()).map(|x| leading_slash.join(x))
+            // If /var/folders... not a prefix, check /private/var/folers...
+            .or(arg_path.strip_prefix(MIRRORD_TEMP_BIN_DIR_CANONIC_PATHBUF.to_owned()).map(|x| leading_slash.join(x)))
             .inspect(|original_path| {
                 trace!(
-                    "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {}.",
+                    "Intercepted mirrord's temp dir in argv: {}. Replacing with original path: {:?}.",
                     arg_str,
                     original_path
                 );
             })
-            .unwrap_or(arg_str) // No temp-dir prefix found, use arg as is.
-            // As the string slice we get here is a slice of memory allocated and managed by
+            .unwrap_or(arg_path.to_owned()) // No temp-dir prefix found, use arg as is.
+            // As the path we get here is a slice of memory allocated and managed by
             // the user app, we copy the data and create new CStrings out of the copy
             // without consuming the original data.
             .to_owned();
 
-        c_string_vec.push(CString::new(stripped)?)
+        c_string_vec.push(CString::new(stripped.to_string_lossy().to_string())?);
     }
     Success(c_string_vec)
 }
@@ -174,16 +183,18 @@ pub(crate) unsafe fn patch_sip_for_new_process(
         .unwrap_or_default();
     trace!("Executable {} called execve/posix_spawn", calling_exe);
 
-    let path_str = path.checked_into()?;
+    let mut path_str: String = path.checked_into()?;
     // If an application is trying to run an executable from our tmp dir, strip our tmp dir from the
     // path. The file might not even exist in our tmp dir, and the application is expecting it there
     // only because it somehow found out about its own patched location in our tmp dir.
     // If original path is SIP, and actually exists in our dir that patched executable will be used.
-    let path_str = strip_mirrord_path(path_str).unwrap_or(path_str);
-    let path_c_string = patch_if_sip(path_str)
+    if let Some(s) = strip_mirrord_path(Path::new(&path_str)).map(|x| Path::new("/").join(x)) {
+        path_str = s.to_string_lossy().to_string();
+    };
+    let path_c_string = patch_if_sip(&path_str)
         .and_then(|new_path| Success(CString::new(new_path)?))
         // Continue also on error, use original path, don't bypass yet, try cleaning argv.
-        .unwrap_or(CString::new(path_str.to_string())?);
+        .unwrap_or(CString::new(path_str)?);
 
     let argv_arr = Nul::new_unchecked(argv);
     let envp_arr = Nul::new_unchecked(envp);
@@ -238,15 +249,14 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
     let res = FN__NSGET_EXECUTABLE_PATH(path, buflen);
     if res == 0 {
         let path_buf_detour = CheckedInto::<PathBuf>::checked_into(path as *const c_char);
-        if let Bypass(FileOperationInMirrordBinTempDir(later_ptr)) = path_buf_detour {
+        if let Bypass(FileOperationInMirrordBinTempDir((prefix_len, stripped_len))) =
+            path_buf_detour
+        {
             // SAFETY: If we're here, the original function was passed this pointer and was
             //         successful, so this pointer must be valid.
-            let old_len = *buflen;
 
             // SAFETY:  `later_ptr` is a pointer to a later char in the same buffer.
-            let prefix_len = later_ptr.offset_from(path);
-
-            let stripped_len = old_len - prefix_len as u32;
+            let later_ptr = path.wrapping_add(prefix_len);
 
             // SAFETY:
             // - can read `stripped_len` bytes from `path_cstring` because it's its length.
@@ -258,7 +268,7 @@ pub(crate) unsafe extern "C" fn _nsget_executable_path_detour(
             // SAFETY:
             // - We call the original function before this, so if it's not a valid pointer we should
             //   not get back 0, and then this code is not executed.
-            *buflen = stripped_len;
+            *buflen = stripped_len as u32;
 
             // If the buffer is long enough for the path, it is long enough for the stripped
             // path.
@@ -281,9 +291,9 @@ pub(crate) unsafe extern "C" fn dlopen_detour(
     // we hold the guard manually for tracing/internal code
     let guard = crate::detour::DetourGuard::new();
     let detour: Detour<PathBuf> = raw_path.checked_into();
-    let raw_path = if let Bypass(FileOperationInMirrordBinTempDir(ptr)) = detour {
+    let raw_path = if let Bypass(FileOperationInMirrordBinTempDir((prefix_len, _))) = detour {
         trace!("dlopen called with a path inside our patch dir, switching with fixed pointer.");
-        ptr
+        raw_path.wrapping_add(prefix_len)
     } else {
         trace!("dlopen called on path {detour:?}.");
         raw_path
