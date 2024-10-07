@@ -281,7 +281,7 @@ fn dfs_fields<'a, const MAX_RECURSION_LEVEL: usize>(
 #[tracing::instrument(level = "trace", ret)]
 pub fn resolve_references(types: HashSet<PartialType>) -> Option<PartialType> {
     /// Maximum recursion level for safety.
-    const MAX_RECURSION_LEVEL: usize = 10;
+    const MAX_RECURSION_LEVEL: usize = 16;
     // Cache to perform memoization between recursive calls so we don't have to resolve the same
     // type multiple times. Mapping between `ident` -> `resolved_docs`.
     // For example, if we have a types [`A`, `B`, `C`] and A has a field of type `B` and `B` has a

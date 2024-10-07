@@ -1246,13 +1246,13 @@ will be used, and your local application will not receive any messages from that
         }
       },
       "third-queue": {
-        "queue_type": "kafka_topic",
+        "queue_type": "Kafka",
         "message_filter": {
           "who": "*you$"
         }
       },
       "fourth-queue": {
-        "queue_type": "kafka_topic",
+        "queue_type": "Kafka",
         "message_filter": {
           "wows": "so wows",
           "coolz": "^very .*"
