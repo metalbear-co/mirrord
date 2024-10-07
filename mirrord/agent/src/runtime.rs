@@ -10,7 +10,6 @@ use containerd_client::{
     with_namespace,
 };
 use enum_dispatch::enum_dispatch;
-use futures::FutureExt;
 use oci_spec::runtime::Spec;
 use tokio::net::UnixStream;
 use tonic::transport::{Endpoint, Uri};
@@ -153,9 +152,12 @@ async fn connect(path: impl AsRef<std::path::Path>) -> ContainerRuntimeResult<Ch
     Endpoint::try_from("http://localhost")
         .map_err(ContainerRuntimeError::containerd)?
         .connect_with_connector(service_fn(move |_: Uri| {
-            Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(
-                UnixStream::connect(path.clone()).await?,
-            ))
+            let path = path.clone();
+            async {
+                Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(
+                    UnixStream::connect(path).await?,
+                ))
+            }
         }))
         .await
         .map_err(ContainerRuntimeError::containerd)
