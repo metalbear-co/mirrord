@@ -30,7 +30,7 @@ pub static MIRRORD_EXTERNAL_TLS_KEY_ENV: &str = "MIRRORD_EXTERNAL_TLS_KEY";
 pub struct ExternalProxyConfig {
     /// <!--${internal}-->
     ///
-    /// Whether to use a tls or plain connection
+    /// Whether to use TLS or a plain TCP connection.
     #[config(env = MIRRORD_EXTERNAL_TLS_ENABLE_ENV, default = true)]
     pub tls_enable: bool,
 
