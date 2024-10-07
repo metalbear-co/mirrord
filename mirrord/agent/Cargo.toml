@@ -19,6 +19,7 @@ workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+# Don't use tonic 0.11! (patched in main Cargo.toml)
 containerd-client = "0.5"
 tokio = { workspace = true, features = [
     "rt",
@@ -61,10 +62,10 @@ fancy-regex = { workspace = true }
 dashmap = { version = "5" }
 oci-spec = "0.6.0"
 async-trait = "0.1"
-tonic = "0.11"
+tonic = "0.12"
 tower = "0.4"
 http = "1"
-k8s-cri = "0.8"
+k8s-cri = "0.9"
 semver.workspace = true
 tokio-rustls = "0.26"
 x509-parser = "0.16"

@@ -26,7 +26,7 @@ resolver = "2"
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.118.0"
+version = "3.119.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -120,3 +120,7 @@ private_intra_doc_links = "allow"
 strip = "debuginfo"
 # Enabling LTO causes this issue https://github.com/metalbear-co/mirrord/issues/906
 lto = false
+
+[patch.crates-io]
+# Don't use tonic 0.11!
+containerd-client = { git = "https://github.com/containerd/rust-extensions.git", package = "containerd-client" }

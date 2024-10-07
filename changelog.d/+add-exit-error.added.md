@@ -1,1 +1,0 @@
-internal proxy now logs exit error explicitly

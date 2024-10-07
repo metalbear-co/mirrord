@@ -8,6 +8,72 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.119.0](https://github.com/metalbear-co/mirrord/tree/3.119.0) - 2024-10-07
+
+
+### Added
+
+- Add reverse port forwarding which can be used to proxy data from a remote
+  port on the target pod to a local one -
+  if only one port is specified, it will be used for both.
+  ```
+  mirrord port-forward [options] -R [remote_port:]local_port
+  ```
+
+  To use the incoming network mode and filters from a config file, use -f as
+  normal:
+  ```
+  mirrord port-forward [options] -R [remote_port:]local_port -f
+  config_file.toml
+  ``` [#2609](https://github.com/metalbear-co/mirrord/issues/2609)
+
+
+### Changed
+
+- Dependency tree does not contain tonic 0.11.
+- Use forked version of apple-codesign to remove RSA dependency
+
+
+### Fixed
+
+- Collect and pass environment variables to the process to be executed locally
+  instead of setting them for the entire local environment, which was causing
+  interference with analytics instrumentation.
+  [#2783](https://github.com/metalbear-co/mirrord/issues/2783)
+- Don't drop RSTs, makes long-lived connections drop on steal start
+  [#2794](https://github.com/metalbear-co/mirrord/issues/2794)
+
+## [3.118.1](https://github.com/metalbear-co/mirrord/tree/3.118.1) - 2024-10-02
+
+
+### Added
+
+- Internal proxy now explicitly logs exit error.
+
+
+### Changed
+
+- Enabled readlink hook by default.
+  [#2518](https://github.com/metalbear-co/mirrord/issues/2518)
+- Prompt user for intproxy logs (when intproxy crashes).
+  Adds `.log` as a file type for intproxy default log file.
+  [#2750](https://github.com/metalbear-co/mirrord/issues/2750)
+- Refactor how mirrord gets a target when the operator is enabled, and warn
+  when randomly selecting a container in multi-container situations (if the
+  user did not specify a container).
+
+
+### Fixed
+
+- Handle cases where target pod has IPv6
+  [#2788](https://github.com/metalbear-co/mirrord/issues/2788)
+
+
+### Internal
+
+- Fix CI failures due to "externally-managed-environment" error
+- Run go mod tidy on all go stuff
+
 ## [3.118.0](https://github.com/metalbear-co/mirrord/tree/3.118.0) - 2024-09-22
 
 
