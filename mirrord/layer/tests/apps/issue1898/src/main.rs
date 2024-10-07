@@ -16,7 +16,7 @@ fn main() {
 
     assert!(!async_stream.is_finished());
 
-    std::thread::sleep(Duration::from_millis(10));
+    std::thread::sleep(Duration::from_millis(100));
 
     let stream =
         SyncTcpStream::connect(second_socket_addr).expect("sync tcp stream was not created");
