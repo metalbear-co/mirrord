@@ -120,3 +120,6 @@ private_intra_doc_links = "allow"
 strip = "debuginfo"
 # Enabling LTO causes this issue https://github.com/metalbear-co/mirrord/issues/906
 lto = false
+
+[patch.crates-io]
+containerd-client = { git = "https://github.com/containerd/rust-extensions.git", package = "containerd-client" }

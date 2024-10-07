@@ -20,7 +20,7 @@ workspace = true
 
 [dependencies]
 # Don't use tonic 0.11!
-containerd-client = { git = "https://github.com/metalbear-co/rust-extensions.git", package = "containerd-client", branch = "update-tonic" }
+containerd-client = "0.5"
 tokio = { workspace = true, features = [
     "rt",
     "net",

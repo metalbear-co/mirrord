@@ -1549,7 +1549,7 @@ checksum = "7782af8f90fe69a4bb41e460abe1727d493403d8b2cc43201a3a3e906b24379f"
 [[package]]
 name = "containerd-client"
 version = "0.5.0"
-source = "git+https://github.com/metalbear-co/rust-extensions.git?branch=update-tonic#af86309813b5ba0e64f7edefa390fcac1d7c0981"
+source = "git+https://github.com/containerd/rust-extensions.git#3f541b9454f2be062dcd2a5605b87633662ff300"
 dependencies = [
  "hyper-util",
  "prost",
