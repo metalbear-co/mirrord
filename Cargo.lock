@@ -3477,10 +3477,11 @@ dependencies = [
 
 [[package]]
 name = "issue1898"
-version = "3.118.1"
+version = "3.119.0"
 dependencies = [
  "async-global-executor",
  "async-std",
+ "futures-lite",
  "libc",
 ]
 

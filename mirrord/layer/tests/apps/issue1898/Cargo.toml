@@ -19,5 +19,6 @@ workspace = true
 [dependencies]
 async-global-executor = "2"
 async-std = "1"
+futures-lite = "2"
 libc.workspace = true
 

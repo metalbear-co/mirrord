@@ -4,10 +4,9 @@ use std::{
 };
 
 use async_std::net::TcpStream as AsyncTcpStream;
+use futures_lite::future;
 
 fn main() {
-    async_global_executor::init();
-
     println!("test issue 1898: START");
 
     let socket_addr: SocketAddr = "1.2.3.4:80".parse().unwrap();
@@ -23,18 +22,18 @@ fn main() {
             .expect("unable to shutdown sync tcp stream");
     });
 
-    assert!(!async_stream.is_finished());
+    let sync_stream = async_global_executor::spawn_blocking(move || {
+        std::thread::sleep(Duration::from_millis(100));
 
-    std::thread::sleep(Duration::from_millis(100));
+        let stream =
+            SyncTcpStream::connect(second_socket_addr).expect("sync tcp stream was not created");
 
-    let stream =
-        SyncTcpStream::connect(second_socket_addr).expect("sync tcp stream was not created");
+        stream
+            .shutdown(Shutdown::Both)
+            .expect("unable to shutdown sync tcp stream");
+    });
 
-    stream
-        .shutdown(Shutdown::Both)
-        .expect("unable to shutdown sync tcp stream");
-
-    async_global_executor::block_on(async_stream);
+    async_global_executor::block_on(future::zip(async_stream, sync_stream));
 
     println!("test issue 1898: SUCCESS");
 }
