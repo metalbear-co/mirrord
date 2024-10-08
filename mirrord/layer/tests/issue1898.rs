@@ -84,6 +84,14 @@ async fn test_issue1898(
         ))))
         .await;
 
+    tokio::spawn(async move {
+        loop {
+            if intproxy.try_recv().await.is_none() {
+                break;
+            }
+        }
+    });
+
     test_process.wait().await;
     test_process.assert_stdout_contains("SUCCESS").await;
 
