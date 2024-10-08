@@ -1549,7 +1549,8 @@ checksum = "013b6c2c3a14d678f38cd23994b02da3a1a1b6a5d1eedddfe63a5a5f11b13a81"
 [[package]]
 name = "containerd-client"
 version = "0.6.0"
-source = "git+https://github.com/containerd/rust-extensions.git#304d67069b7e79cd3ddf264aa90a7def6a949604"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce8bbfa492159a878a45bbd8fbd8d5a6fb2a4d6bd74836204a324523ba3233e0"
 dependencies = [
  "hyper-util",
  "prost",
@@ -3509,7 +3510,7 @@ dependencies = [
 [[package]]
 name = "kube"
 version = "0.95.0"
-source = "git+https://github.com/kube-rs/kube#3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb"
+source = "git+https://github.com/kube-rs/kube?rev=3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb#3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -3521,7 +3522,7 @@ dependencies = [
 [[package]]
 name = "kube-client"
 version = "0.95.0"
-source = "git+https://github.com/kube-rs/kube#3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb"
+source = "git+https://github.com/kube-rs/kube?rev=3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb#3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -3562,7 +3563,7 @@ dependencies = [
 [[package]]
 name = "kube-core"
 version = "0.95.0"
-source = "git+https://github.com/kube-rs/kube#3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb"
+source = "git+https://github.com/kube-rs/kube?rev=3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb#3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb"
 dependencies = [
  "chrono",
  "form_urlencoded",
@@ -3579,7 +3580,7 @@ dependencies = [
 [[package]]
 name = "kube-derive"
 version = "0.95.0"
-source = "git+https://github.com/kube-rs/kube#3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb"
+source = "git+https://github.com/kube-rs/kube?rev=3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb#3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3591,7 +3592,7 @@ dependencies = [
 [[package]]
 name = "kube-runtime"
 version = "0.95.0"
-source = "git+https://github.com/kube-rs/kube#3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb"
+source = "git+https://github.com/kube-rs/kube?rev=3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb#3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb"
 dependencies = [
  "ahash",
  "async-broadcast",
