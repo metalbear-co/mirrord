@@ -360,7 +360,11 @@ impl HttpConnection {
             }
         }
 
-        unreachable!("You could only get here if the retry loop never ran!")
+        unreachable!(
+            "BUG: You could only get here if the retry loop never ran!\
+            Please report this to us at \
+            https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml"
+        )
     }
 
     /// Proxies HTTP messages until an HTTP upgrade happens or the [`MessageBus`] closes.
