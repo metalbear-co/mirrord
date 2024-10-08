@@ -125,12 +125,11 @@ impl RuntimeData {
             .and_then(|spec| spec.pod_ips.as_ref())
             .ok_or_else(|| KubeApiError::missing_field(pod, ".status.podIPs"))?
             .iter()
-            .filter_map(|pod_ip| pod_ip.ip.as_ref())
             .filter_map(|pod_ip| {
-                pod_ip
+                pod_ip.ip
                     .parse::<Ipv4Addr>()
                     .inspect_err(|e| {
-                        tracing::warn!("failed to parse pod IP {pod_ip}: {e:?}");
+                        tracing::warn!("failed to parse pod IP {ip}: {e:?}", ip = pod_ip.ip);
                     })
                     .ok()
             })

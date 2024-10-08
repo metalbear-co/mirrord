@@ -88,7 +88,7 @@ impl ContainerVariant for PodVariant<'_> {
             secrets
                 .iter()
                 .map(|secret| LocalObjectReference {
-                    name: Some(secret.name.to_string()),
+                    name: secret.name.to_string(),
                 })
                 .collect()
         });
