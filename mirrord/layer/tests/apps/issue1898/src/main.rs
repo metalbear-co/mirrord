@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use async_std::net::TcpStream as AsyncTcpStream;
+use async_std::{net::TcpStream as AsyncTcpStream, task::sleep};
 use futures_lite::future;
 
 fn main() {
@@ -12,21 +12,20 @@ fn main() {
     let socket_addr: SocketAddr = "1.2.3.4:80".parse().unwrap();
     let second_socket_addr: SocketAddr = "2.3.4.5:80".parse().unwrap();
 
-    let async_stream = async_global_executor::spawn(async move {
-        let stream = AsyncTcpStream::connect(socket_addr)
-            .await
-            .expect("sync tcp stream was not created");
+    let sync_stream = async_global_executor::spawn_blocking(move || {
+        let stream = SyncTcpStream::connect(socket_addr).expect("sync tcp stream was not created");
 
         stream
             .shutdown(Shutdown::Both)
             .expect("unable to shutdown sync tcp stream");
     });
 
-    let sync_stream = async_global_executor::spawn_blocking(move || {
-        std::thread::sleep(Duration::from_millis(100));
+    let async_stream = async_global_executor::spawn(async move {
+        sleep(Duration::from_millis(300)).await;
 
-        let stream =
-            SyncTcpStream::connect(second_socket_addr).expect("sync tcp stream was not created");
+        let stream = AsyncTcpStream::connect(second_socket_addr)
+            .await
+            .expect("sync tcp stream was not created");
 
         stream
             .shutdown(Shutdown::Both)
