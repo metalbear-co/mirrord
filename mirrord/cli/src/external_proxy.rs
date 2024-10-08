@@ -39,7 +39,7 @@ use mirrord_intproxy::agent_conn::{AgentConnection, ConnectionTlsError};
 use mirrord_protocol::DaemonCodec;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::server::TlsStream;
-use tokio_util::sync::CancellationToken;
+use tokio_util::{either::Either, sync::CancellationToken};
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
@@ -59,7 +59,7 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
     Ok(())
 }
 
-pub async fn proxy(watch: drain::Watch) -> Result<()> {
+pub async fn proxy(listen_port: u16, watch: drain::Watch) -> Result<()> {
     let config = LayerConfig::from_env()?;
 
     tracing::info!(?config, "external_proxy starting");
@@ -103,12 +103,14 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
     let tls_acceptor = create_external_proxy_tls_acceptor(&config).await?;
     let listener = create_listen_socket(SocketAddr::new(
         local_ip().unwrap_or_else(|_| Ipv4Addr::UNSPECIFIED.into()),
-        0,
+        listen_port,
     ))
     .map_err(ExternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(ExternalProxyError::ListenerSetup)?;
 
-    unsafe { detach_io() }.map_err(ExternalProxyError::SetSid)?;
+    if let Err(error) = unsafe { detach_io() }.map_err(ExternalProxyError::SetSid) {
+        tracing::warn!(%error, "unable to detach io");
+    }
 
     let cancellation_token = CancellationToken::new();
     let connections = Arc::new(AtomicUsize::new(0));
@@ -133,7 +135,10 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
                     connections.fetch_add(1, Ordering::Relaxed);
 
                     let fut = async move {
-                        let stream = tls_acceptor.accept(stream).await?;
+                        let stream = match tls_acceptor {
+                            Some(tls_acceptor) => Either::Right(tls_acceptor.accept(stream).await?),
+                            None => Either::Left(stream)
+                        };
 
                         handle_connection(stream, peer_addr, agent_conn, connection_cancelation_token).await;
 
@@ -180,7 +185,11 @@ pub async fn proxy(watch: drain::Watch) -> Result<()> {
 
 async fn create_external_proxy_tls_acceptor(
     config: &LayerConfig,
-) -> Result<tokio_rustls::TlsAcceptor, ExternalProxyError> {
+) -> Result<Option<tokio_rustls::TlsAcceptor>, ExternalProxyError> {
+    if !config.external_proxy.tls_enable {
+        return Ok(None);
+    }
+
     let (Some(client_tls_certificate), Some(tls_certificate), Some(tls_key)) = (
         config.internal_proxy.client_tls_certificate.as_ref(),
         config.external_proxy.tls_certificate.as_ref(),
@@ -229,12 +238,12 @@ async fn create_external_proxy_tls_acceptor(
         .with_single_cert(tls_certificate, tls_keys)
         .map_err(ConnectionTlsError::ServerConfig)?;
 
-    Ok(tokio_rustls::TlsAcceptor::from(Arc::new(tls_config)))
+    Ok(Some(tokio_rustls::TlsAcceptor::from(Arc::new(tls_config))))
 }
 
 #[tracing::instrument(level = Level::TRACE, skip(agent_conn))]
 async fn handle_connection(
-    stream: TlsStream<TcpStream>,
+    stream: Either<TcpStream, TlsStream<TcpStream>>,
     peer_addr: SocketAddr,
     mut agent_conn: AgentConnection,
     cancellation_token: CancellationToken,

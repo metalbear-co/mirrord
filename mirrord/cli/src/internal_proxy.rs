@@ -93,7 +93,7 @@ fn setup_file_tracing(config: &LayerConfig) -> Result<(), InternalProxyError> {
 
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
-pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError> {
+pub(crate) async fn proxy(listen_port: u16, watch: drain::Watch) -> Result<(), InternalProxyError> {
     let config = LayerConfig::from_env()?;
 
     tracing::info!(?config, "internal_proxy starting");
@@ -138,7 +138,7 @@ pub(crate) async fn proxy(watch: drain::Watch) -> Result<(), InternalProxyError>
     let agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
 
     // Let it assign address for us then print it for the user.
-    let listener = create_listen_socket(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
+    let listener = create_listen_socket(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), listen_port))
         .map_err(InternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
 

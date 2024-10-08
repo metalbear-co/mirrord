@@ -1,4 +1,4 @@
-#![feature(map_try_insert, try_blocks)]
+#![feature(map_try_insert, let_chains, try_blocks)]
 #![warn(clippy::indexing_slicing)]
 
 use std::{collections::HashMap, time::Duration};
