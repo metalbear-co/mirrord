@@ -6,6 +6,8 @@ use std::{
 use async_std::net::TcpStream as AsyncTcpStream;
 
 fn main() {
+    async_global_executor::init();
+
     println!("test issue 1898: START");
 
     let socket_addr: SocketAddr = "1.2.3.4:80".parse().unwrap();
