@@ -93,12 +93,11 @@ use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use proxy_connection::ProxyConnection;
 use setup::LayerSetup;
-use socket::SOCKETS;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
     common::make_proxy_request_with_response, debugger_ports::DebuggerPorts, detour::DetourGuard,
-    load::LoadType,
+    load::LoadType, socket::SOCKETS,
 };
 
 mod common;

@@ -19,7 +19,7 @@ use mirrord_config::feature::network::{
 };
 use mirrord_intproxy_protocol::{NetProtocol, PortUnsubscribe};
 use mirrord_protocol::{
-    outgoing::SocketAddress, DnsLookupError, ResolveErrorKindInternal, ResponseError,
+    outgoing::SocketAddress, DnsLookupError, RemoteResult, ResolveErrorKindInternal, ResponseError,
 };
 use socket2::SockAddr;
 use tracing::warn;
@@ -150,6 +150,7 @@ pub struct Bound {
 pub enum SocketState {
     #[default]
     Initialized,
+    Connecting,
     Bound(Bound),
     Listening(Bound),
     Connected(Connected),

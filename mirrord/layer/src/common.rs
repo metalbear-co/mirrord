@@ -16,6 +16,30 @@ use crate::{
     PROXY_CONNECTION,
 };
 
+pub fn queue_proxy_response_handler<T>(
+    request_id: u64,
+    handler: impl FnOnce(T::Response) + 'static,
+) -> HookResult<()>
+where
+    T: IsLayerRequestWithResponse + Debug,
+    T::Response: Debug + 'static,
+{
+    unsafe {
+        PROXY_CONNECTION
+            .get()
+            .ok_or(HookError::CannotGetProxyConnection)?
+            .queue_handler(request_id, move |response| {
+                match T::try_unwrap_response(response) {
+                    Ok(response) => handler(response),
+                    Err(error) => {
+                        tracing::error!(?error, "temp error queue_proxy_response_handler")
+                    }
+                }
+            })
+            .map_err(Into::into)
+    }
+}
+
 /// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
 /// Blocks until the proxy responds.
 pub fn make_proxy_request_with_response<T>(request: T) -> HookResult<T::Response>
@@ -29,6 +53,23 @@ where
             .get()
             .ok_or(HookError::CannotGetProxyConnection)?
             .make_request_with_response(request)
+            .map_err(Into::into)
+    }
+}
+
+/// Makes a request to the internal proxy using global [`PROXY_CONNECTION`].
+/// Blocks until the proxy responds.
+pub fn make_proxy_request_with_response_and_id<T>(request: T) -> HookResult<(u64, T::Response)>
+where
+    T: IsLayerRequestWithResponse + Debug,
+    T::Response: Debug,
+{
+    // SAFETY: mutation happens only on initialization.
+    unsafe {
+        PROXY_CONNECTION
+            .get()
+            .ok_or(HookError::CannotGetProxyConnection)?
+            .make_request_with_response_and_id(request)
             .map_err(Into::into)
     }
 }

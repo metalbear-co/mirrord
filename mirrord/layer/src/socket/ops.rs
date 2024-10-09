@@ -17,14 +17,17 @@ use errno::set_errno;
 use libc::{c_int, c_void, hostent, sockaddr, socklen_t, AF_UNIX};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
-    ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
-    OutgoingConnectResponse, PortSubscribe,
+    ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectFlags,
+    OutgoingConnectRequest, OutgoingConnectResponse, PortSubscribe,
 };
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
-use nix::sys::socket::{sockopt, SockaddrLike, SockaddrStorage};
+use nix::{
+    fcntl::OFlag,
+    sys::socket::{sockopt, SockaddrLike, SockaddrStorage},
+};
 use socket2::SockAddr;
 #[cfg(debug_assertions)]
 use tracing::Level;
@@ -283,7 +286,7 @@ pub(super) fn bind(
         .lock()?
         .iter()
         .any(|(_, socket)| match &socket.state {
-            SocketState::Initialized | SocketState::Connected(_) => false,
+            SocketState::Initialized | SocketState::Connecting | SocketState::Connected(_) => false,
             SocketState::Bound(bound) | SocketState::Listening(bound) => {
                 bound.requested_address == requested_address
             }
@@ -409,6 +412,39 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
     }
 }
 
+fn non_blocking_connect_callback(
+    sockfd: RawFd,
+    remote_address: SocketAddress,
+    response: RemoteResult<OutgoingConnectResponse>,
+) {
+    match response {
+        Ok(OutgoingConnectResponse::Connected {
+            layer_address,
+            in_cluster_address,
+        }) => {
+            let connected = Connected {
+                remote_address,
+                local_address: in_cluster_address,
+                layer_address: Some(layer_address),
+            };
+
+            tracing::trace!(?connected, "we are connected");
+
+            if let Ok(mut guard) = SOCKETS.lock() {
+                if let Some(user_socket_info) = guard.get_mut(&sockfd) {
+                    Arc::get_mut(user_socket_info)
+                        .expect("user_socket_info should be accessible via mutable ref")
+                        .state = SocketState::Connected(connected);
+                }
+            }
+        }
+        Err(error) => {
+            tracing::error!(%error, "error reciving response from agent");
+        }
+        _ => todo!(),
+    }
+}
+
 /// Common logic between Tcp/Udp `connect`, when used for the outgoing traffic feature.
 ///
 /// Sends a hook message that will be handled by `(Tcp|Udp)OutgoingHandler`, starting the request
@@ -421,55 +457,96 @@ fn connect_outgoing<const CALL_CONNECT: bool>(
     remote_address: SockAddr,
     mut user_socket_info: Arc<UserSocket>,
     protocol: NetProtocol,
+    flags: OutgoingConnectFlags,
 ) -> Detour<ConnectResult> {
     // Closure that performs the connection with mirrord messaging.
     let remote_connection = |remote_address: SockAddr| {
         // Prepare this socket to be intercepted.
-        let remote_address = SocketAddress::try_from(remote_address).unwrap();
+        let remote_address = SocketAddress::try_from(remote_address)?;
 
         let request = OutgoingConnectRequest {
             remote_address: remote_address.clone(),
             protocol,
+            flags,
         };
-        let response = common::make_proxy_request_with_response(request)??;
 
-        let OutgoingConnectResponse {
-            layer_address,
-            in_cluster_address,
-        } = response;
+        let (response_id, response) = common::make_proxy_request_with_response_and_id(request)?;
 
-        // Connect to the interceptor socket that is listening.
-        let connect_result: ConnectResult = if CALL_CONNECT {
-            let layer_address = SockAddr::try_from(layer_address.clone())?;
+        match response {
+            Ok(OutgoingConnectResponse::Connected {
+                layer_address,
+                in_cluster_address,
+            }) => {
+                // Connect to the interceptor socket that is listening.
+                let connect_result: ConnectResult = if CALL_CONNECT {
+                    let layer_address = SockAddr::try_from(layer_address.clone())?;
 
-            unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }.into()
-        } else {
-            ConnectResult {
-                result: 0,
-                error: None,
+                    unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }
+                        .into()
+                } else {
+                    ConnectResult {
+                        result: 0,
+                        error: None,
+                    }
+                };
+
+                if connect_result.is_failure() {
+                    tracing::error!(?connect_result, "connect -> Failed call to libc::connect");
+
+                    Err(io::Error::last_os_error())?
+                }
+
+                let connected = Connected {
+                    remote_address,
+                    local_address: in_cluster_address,
+                    layer_address: Some(layer_address),
+                };
+
+                tracing::trace!(?connected, "we are connected");
+
+                Arc::get_mut(&mut user_socket_info)
+                    .expect("user_socket_info should be accessible via mutable ref")
+                    .state = SocketState::Connected(connected);
+
+                SOCKETS.lock()?.insert(sockfd, user_socket_info);
+
+                Detour::Success(connect_result)
             }
-        };
+            Ok(OutgoingConnectResponse::InProgress { layer_address }) => {
+                // Connect to the interceptor socket that is listening.
+                let connect_result: ConnectResult = if CALL_CONNECT {
+                    let layer_address = SockAddr::try_from(layer_address.clone())?;
 
-        if connect_result.is_failure() {
-            error!(
-                "connect -> Failed call to libc::connect with {:#?}",
-                connect_result,
-            );
-            Err(io::Error::last_os_error())?
+                    unsafe { FN_CONNECT(sockfd, layer_address.as_ptr(), layer_address.len()) }
+                        .into()
+                } else {
+                    ConnectResult {
+                        result: 0,
+                        error: None,
+                    }
+                };
+
+                if connect_result.is_failure() {
+                    tracing::error!(?connect_result, "connect -> Failed call to libc::connect");
+
+                    Err(io::Error::last_os_error())?
+                }
+
+                Arc::get_mut(&mut user_socket_info)
+                    .expect("user_socket_info should be accessible via mutable ref")
+                    .state = SocketState::Connecting;
+
+                SOCKETS.lock()?.insert(sockfd, user_socket_info);
+
+                common::queue_proxy_response_handler::<OutgoingConnectRequest>(
+                    response_id,
+                    move |response| non_blocking_connect_callback(sockfd, remote_address, response),
+                )?;
+
+                Detour::Success(connect_result)
+            }
+            Err(err) => Detour::Error(err.into()),
         }
-
-        let connected = Connected {
-            remote_address,
-            local_address: in_cluster_address,
-            layer_address: Some(layer_address),
-        };
-
-        trace!("we are connected {connected:#?}");
-
-        Arc::get_mut(&mut user_socket_info).unwrap().state = SocketState::Connected(connected);
-        SOCKETS.lock()?.insert(sockfd, user_socket_info);
-
-        Detour::Success(connect_result)
     };
 
     if remote_address.is_unix() {
@@ -565,7 +642,17 @@ pub(super) fn connect(
 
     let unix_streams = crate::setup().remote_unix_streams();
 
-    trace!("in connect {:#?}", SOCKETS);
+    let socket_fd_flags = nix::fcntl::fcntl(sockfd, nix::fcntl::FcntlArg::F_GETFL)
+        .map(OFlag::from_bits_truncate)
+        .map_err(io::Error::from)?;
+
+    let mut outgoing_flags = OutgoingConnectFlags::empty();
+
+    if socket_fd_flags.contains(OFlag::O_NONBLOCK) {
+        outgoing_flags |= OutgoingConnectFlags::NONBLOCK;
+    }
+
+    tracing::debug!(flags = ?socket_fd_flags, sockets = ?SOCKETS, "in connect");
 
     let user_socket_info = match SOCKETS.lock()?.remove(&sockfd) {
         Some(socket) => socket,
@@ -643,10 +730,11 @@ pub(super) fn connect(
             remote_address,
             user_socket_info,
             NetProtocol::Datagrams,
+            outgoing_flags,
         ),
 
         NetProtocol::Stream => match user_socket_info.state {
-            SocketState::Initialized | SocketState::Bound(..)
+            SocketState::Initialized | SocketState::Connecting | SocketState::Bound(..)
                 if (optional_ip_address.is_some() && enabled_tcp_outgoing)
                     || (remote_address.is_unix() && !unix_streams.is_empty()) =>
             {
@@ -655,6 +743,7 @@ pub(super) fn connect(
                     remote_address,
                     user_socket_info,
                     NetProtocol::Stream,
+                    outgoing_flags,
                 )
             }
 
@@ -1297,6 +1386,7 @@ pub(super) fn send_to(
             destination,
             user_socket_info,
             NetProtocol::Datagrams,
+            OutgoingConnectFlags::empty(),
         )?;
 
         let layer_address: SockAddr = SOCKETS
@@ -1390,6 +1480,7 @@ pub(super) fn sendmsg(
             destination,
             user_socket_info,
             NetProtocol::Datagrams,
+            OutgoingConnectFlags::empty(),
         )?;
 
         let layer_address: SockAddr = SOCKETS

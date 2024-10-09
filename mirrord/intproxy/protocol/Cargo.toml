@@ -22,6 +22,7 @@ workspace = true
 mirrord-protocol = { path = "../../protocol" }
 
 bincode.workspace = true
+bitflags = "2"
 thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 

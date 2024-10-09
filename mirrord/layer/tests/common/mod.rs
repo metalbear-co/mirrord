@@ -735,6 +735,7 @@ pub enum Application {
     RustIssue1458PortNot53,
     RustIssue1776,
     RustIssue1776PortNot53,
+    RustIssue1898,
     RustIssue1899,
     RustIssue2001,
     RustDnsResolve,
@@ -874,6 +875,13 @@ impl Application {
                     "../../target/debug/issue1776portnot53"
                 )
             }
+            Application::RustIssue1898 => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/issue1898"
+                )
+            }
             Application::RustIssue1899 => {
                 format!(
                     "{}/{}",
@@ -1008,6 +1016,7 @@ impl Application {
             | Application::RustIssue1458PortNot53
             | Application::RustIssue1776
             | Application::RustIssue1776PortNot53
+            | Application::RustIssue1898
             | Application::RustIssue1899
             | Application::RustIssue2001
             | Application::RustDnsResolve
@@ -1095,6 +1104,7 @@ impl Application {
             | Application::RustIssue1458PortNot53
             | Application::RustIssue1776
             | Application::RustIssue1776PortNot53
+            | Application::RustIssue1898
             | Application::RustIssue1899
             | Application::RustIssue2001
             | Application::RustListenPorts
