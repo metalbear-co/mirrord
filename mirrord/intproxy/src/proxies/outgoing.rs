@@ -212,8 +212,6 @@ impl OutgoingProxy {
         request: OutgoingConnectRequest,
         message_bus: &mut MessageBus<Self>,
     ) {
-        self.queue(request.protocol).insert(message_id, layer_id);
-
         if matches!(request.protocol, NetProtocol::Stream)
             && request.flags.contains(OutgoingConnectFlags::NONBLOCK)
         {
@@ -244,6 +242,8 @@ impl OutgoingProxy {
                 return;
             }
         }
+
+        self.queue(request.protocol).insert(message_id, layer_id);
 
         let msg = request.protocol.wrap_agent_connect(request.remote_address);
         message_bus.send(ProxyMessage::ToAgent(msg)).await;
