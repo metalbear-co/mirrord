@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.119.1](https://github.com/metalbear-co/mirrord/tree/3.119.1) - 2024-10-09
+
+
+### Changed
+
+- Allow setting port for int/extproxy from the command line.
+
+
+### Fixed
+
+- Use new kube rs to support empty user
+  [#2803](https://github.com/metalbear-co/mirrord/issues/2803)
+- Allow using IPv6 sockets with mirrord
+  [#2807](https://github.com/metalbear-co/mirrord/issues/2807)
+
 ## [3.119.0](https://github.com/metalbear-co/mirrord/tree/3.119.0) - 2024-10-07
 
 
