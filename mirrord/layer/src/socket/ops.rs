@@ -258,8 +258,8 @@ pub(super) fn bind(
     }
 
     // To handle #1458, we don't ignore port `0` for UDP.
-    if (is_ignored_tcp_port(&requested_address, incoming_config)
-        && matches!(socket.kind, SocketKind::Tcp(_)))
+    if (matches!(socket.kind, SocketKind::Tcp(_)))
+        && is_ignored_tcp_port(&requested_address, incoming_config)
         || crate::setup().is_debugger_port(&requested_address)
         || incoming_config.ignore_ports.contains(&requested_port)
     {
