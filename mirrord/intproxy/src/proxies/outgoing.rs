@@ -87,7 +87,7 @@ pub struct OutgoingProxy {
     txs: HashMap<InterceptorId, TaskSender<Interceptor>>,
     /// For managing [`Interceptor`] tasks.
     background_tasks: BackgroundTasks<InterceptorId, Vec<u8>, io::Error>,
-    /// For storing [`PreparedSocket`]s before agent reply is recived
+    /// For storing [`PreparedSocket`]s before agent reply is received
     connecting_sockets: HashMap<(MessageId, LayerId), PreparedSocket>,
 }
 

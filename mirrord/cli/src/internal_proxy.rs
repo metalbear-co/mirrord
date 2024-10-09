@@ -48,7 +48,7 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
     Ok(())
 }
 
-// Setting up default logging for intproxy.
+/// Setting up default logging for intproxy.
 fn setup_file_tracing(config: &LayerConfig) -> Result<(), InternalProxyError> {
     let log_destination = config
         .internal_proxy
