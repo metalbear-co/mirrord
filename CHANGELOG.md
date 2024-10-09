@@ -18,10 +18,11 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Fixed
 
-- Use new kube rs to support empty user
+- Use new kube rs to support empty user.
   [#2803](https://github.com/metalbear-co/mirrord/issues/2803)
-- Allow using IPv6 sockets with mirrord
+- Allow using IPv6 sockets with mirrord.
   [#2807](https://github.com/metalbear-co/mirrord/issues/2807)
+- Fix mirrord making double bind of port 0 fail.
 
 ## [3.119.0](https://github.com/metalbear-co/mirrord/tree/3.119.0) - 2024-10-07
 
