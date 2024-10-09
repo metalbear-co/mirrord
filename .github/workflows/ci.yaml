@@ -34,8 +34,8 @@ on:
   workflow_dispatch:
   push:
   pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [ main ]
+    types: [ opened, synchronize, reopened, ready_for_review ]
 
 # Cancel previous runs on the same PR.
 concurrency:
@@ -252,7 +252,7 @@ jobs:
 
   integration_tests:
     runs-on: ubuntu-24.04
-    needs: [changed_files]
+    needs: [ changed_files ]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
@@ -344,6 +344,9 @@ jobs:
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue2438
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/rebind0
           cargo build
       - run: ./scripts/build_c_apps.sh
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
@@ -495,9 +498,9 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        container-runtime: ["docker", "containerd"]
+        container-runtime: [ "docker", "containerd" ]
     name: e2e
-    needs: [test_agent_image, changed_files]
+    needs: [ test_agent_image, changed_files ]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
@@ -577,14 +580,14 @@ jobs:
   # which checks if the branch is a release branch
   intellij_e2e_on_release_branch:
     # requires test_agent to have image to download
-    needs: [build_mirrord_on_release_branch, test_agent_image]
+    needs: [ build_mirrord_on_release_branch, test_agent_image ]
     uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
 
   vscode_e2e_on_release_branch:
     # requires test_agent to have image to download
-    needs: [build_mirrord_on_release_branch, test_agent_image]
+    needs: [ build_mirrord_on_release_branch, test_agent_image ]
     uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
