@@ -1,38 +1,42 @@
 use std::{
+    io::Write,
     net::{Shutdown, SocketAddr, TcpStream as SyncTcpStream},
-    time::Duration,
 };
 
-use async_std::{net::TcpStream as AsyncTcpStream, task::sleep};
-use futures_lite::future;
+use tokio::{io::AsyncWriteExt, net::TcpStream as AsyncTcpStream, task};
 
-fn main() {
+#[tokio::main]
+async fn main() {
     println!("test issue 1898: START");
 
-    let socket_addr: SocketAddr = "1.2.3.4:80".parse().unwrap();
-    let second_socket_addr: SocketAddr = "2.3.4.5:80".parse().unwrap();
+    let socket_addr_1: SocketAddr = "1.2.3.4:80".parse().unwrap();
+    let socket_addr_2: SocketAddr = "2.3.4.5:80".parse().unwrap();
 
-    let sync_stream = async_global_executor::spawn_blocking(move || {
-        let stream = SyncTcpStream::connect(socket_addr).expect("sync tcp stream was not created");
-
+    let handle_1 = task::spawn_blocking(move || {
+        let mut stream = SyncTcpStream::connect(socket_addr_1).expect("sync tcp connect failed");
+        stream
+            .write_all(b"hello")
+            .expect("failed to write data via sync tcp stream");
         stream
             .shutdown(Shutdown::Both)
-            .expect("unable to shutdown sync tcp stream");
+            .expect("failed to shutdown sync tcp stream");
     });
 
-    let async_stream = async_global_executor::spawn(async move {
-        sleep(Duration::from_millis(300)).await;
-
-        let stream = AsyncTcpStream::connect(second_socket_addr)
+    let handle_2 = task::spawn(async move {
+        let mut stream = AsyncTcpStream::connect(socket_addr_2)
             .await
-            .expect("sync tcp stream was not created");
-
+            .expect("async tcp connect failed");
         stream
-            .shutdown(Shutdown::Both)
-            .expect("unable to shutdown sync tcp stream");
+            .write_all(b"hello")
+            .await
+            .expect("failed to write data via async tcp stream");
+        stream
+            .shutdown()
+            .await
+            .expect("failed to shutdown async tcp stream");
     });
 
-    async_global_executor::block_on(future::zip(async_stream, sync_stream));
+    tokio::try_join!(handle_1, handle_2).expect("one of the connect methods failed");
 
     println!("test issue 1898: SUCCESS");
 }

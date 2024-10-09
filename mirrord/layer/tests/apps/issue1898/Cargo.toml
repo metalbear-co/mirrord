@@ -17,8 +17,5 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-async-global-executor = "2"
-async-std = "1"
-futures-lite = "2"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }
 libc.workspace = true
-
