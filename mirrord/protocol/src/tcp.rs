@@ -594,7 +594,10 @@ pub type ReceiverStreamBody = StreamBody<ReceiverStream<hyper::Result<Frame<Byte
 pub enum HttpResponseFallback {
     Framed(HttpResponse<InternalHttpBody>),
     Fallback(HttpResponse<Vec<u8>>),
-    Streamed(HttpResponse<ReceiverStreamBody>),
+    Streamed(
+        HttpResponse<ReceiverStreamBody>,
+        Option<HttpRequestFallback>,
+    ),
 }
 
 impl HttpResponseFallback {
@@ -602,7 +605,7 @@ impl HttpResponseFallback {
         match self {
             HttpResponseFallback::Framed(req) => req.connection_id,
             HttpResponseFallback::Fallback(req) => req.connection_id,
-            HttpResponseFallback::Streamed(req) => req.connection_id,
+            HttpResponseFallback::Streamed(req, _) => req.connection_id,
         }
     }
 
@@ -610,7 +613,7 @@ impl HttpResponseFallback {
         match self {
             HttpResponseFallback::Framed(req) => req.request_id,
             HttpResponseFallback::Fallback(req) => req.request_id,
-            HttpResponseFallback::Streamed(req) => req.request_id,
+            HttpResponseFallback::Streamed(req, _) => req.request_id,
         }
     }
 
@@ -622,7 +625,7 @@ impl HttpResponseFallback {
         match self {
             HttpResponseFallback::Framed(req) => req.internal_response.try_into(),
             HttpResponseFallback::Fallback(req) => req.internal_response.try_into(),
-            HttpResponseFallback::Streamed(req) => req.internal_response.try_into(),
+            HttpResponseFallback::Streamed(req, _) => req.internal_response.try_into(),
         }
     }
 
@@ -647,7 +650,7 @@ impl HttpResponseFallback {
             .map(|version| HTTP_CHUNKED_RESPONSE_VERSION.matches(version))
             .unwrap_or(false);
 
-        match request {
+        match request.clone() {
             // We received `DaemonTcp::HttpRequestFramed` from the agent,
             // so we know it supports `LayerTcpSteal::HttpResponseFramed` (both were introduced in
             // the same `mirrord_protocol` version).
@@ -663,11 +666,16 @@ impl HttpResponseFallback {
 
             // We received `DaemonTcp::HttpRequestChunked` and the agent supports
             // `LayerTcpSteal::HttpResponseChunked`.
-            HttpRequestFallback::Streamed(request) if agent_supports_streaming_response => {
+            HttpRequestFallback::Streamed(streamed_request)
+                if agent_supports_streaming_response =>
+            {
                 HttpResponseFallback::Streamed(
                     HttpResponse::<ReceiverStreamBody>::response_from_request(
-                        request, status, message,
+                        streamed_request,
+                        status,
+                        message,
                     ),
+                    Some(request),
                 )
             }
 

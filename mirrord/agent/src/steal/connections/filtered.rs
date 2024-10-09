@@ -26,6 +26,7 @@ use tokio::{
     task::{self, JoinHandle},
 };
 use tokio_util::sync::{CancellationToken, DropGuard};
+use tracing::Level;
 
 use super::{ConnectionMessageIn, ConnectionMessageOut, ConnectionTaskError};
 use crate::{
@@ -457,7 +458,7 @@ where
 
     /// Matches the given [`Request`] against [`Self::filters`] and state of [`Self::subscribed`].
     #[tracing::instrument(
-        level = "trace",
+        level = Level::DEBUG,
         name = "match_request_with_filter",
         skip(self, request),
         fields(
@@ -474,13 +475,14 @@ where
             .find(|client_id| self.subscribed.get(client_id).copied().unwrap_or(true))
     }
 
+    // TODO(alex) [high] 1: This never gets called for the missing requests!
     /// Sends the given [`Response`] to the [`FilteringService`] via [`oneshot::Sender`] from
     /// [`Self::blocked_requests`].
     ///
     /// If there is no blocked request for the given ([`ClientId`], [`RequestId`]) combination or
     /// the HTTP connection is dead, does nothing.
     #[tracing::instrument(
-        level = "trace",
+        level = Level::DEBUG,
         name = "handle_filtered_request_response",
         skip(self, response),
         fields(
@@ -496,7 +498,7 @@ where
         response: Response<DynamicBody>,
     ) {
         let Some(tx) = self.blocked_requests.remove(&(client_id, request_id)) else {
-            tracing::trace!(
+            tracing::warn!(
                 client_id,
                 request_id,
                 ?response,
@@ -514,7 +516,7 @@ where
             })
             .is_err()
         {
-            tracing::trace!(
+            tracing::warn!(
                 client_id,
                 request_id,
                 connection_id = self.connection_id,
@@ -530,7 +532,7 @@ where
     /// If there is no blocked request for the given ([`ClientId`], [`RequestId`]) combination or
     /// the HTTP connection is dead, does nothing.
     #[tracing::instrument(
-        level = "trace",
+        level = Level::DEBUG,
         name = "handle_filtered_request_response_failure",
         skip(self),
         fields(
@@ -544,7 +546,7 @@ where
             .remove(&(client_id, request_id))
             .is_some();
         if !removed {
-            tracing::trace!(
+            tracing::warn!(
                 client_id,
                 request_id,
                 connection_id = self.connection_id,
@@ -554,7 +556,7 @@ where
     }
 
     /// Handles a [`Request`] intercepted by the [`FilteringService`].
-    #[tracing::instrument(level = "trace", skip(self, request, tx), ret, err(Debug))]
+    #[tracing::instrument(level = Level::INFO, skip(self, tx), fields(?request = request.request), ret, err(level = Level::WARN))]
     async fn handle_request(
         &mut self,
         mut request: ExtractedRequest,
@@ -566,6 +568,8 @@ where
                 unchanged: request.request,
             });
 
+            tracing::warn!("The request shall pass!");
+
             return Ok(());
         };
 
@@ -576,6 +580,7 @@ where
                 connection_id: self.connection_id,
             })
             .await?;
+            tracing::info!("It's the first time!");
         }
 
         let id = self.next_request_id;
@@ -593,6 +598,9 @@ where
         self.blocked_requests
             .insert((client_id, id), request.response_tx);
 
+        let request_ids = self.blocked_requests.keys();
+        tracing::debug!(?request_ids, "ids for stuff");
+
         Ok(())
     }
 
@@ -602,6 +610,7 @@ where
     ///
     /// Returns raw data sent by stealer clients after all their HTTP responses (to catch the case
     /// when the client starts sending data immediately after the `101 SWITCHING PROTOCOLS`).
+    #[tracing::instrument(level = Level::TRACE, skip_all, ret, err)]
     async fn run_until_http_ends(
         &mut self,
         tx: Sender<ConnectionMessageOut>,

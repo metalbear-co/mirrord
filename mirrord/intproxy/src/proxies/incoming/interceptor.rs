@@ -122,6 +122,7 @@ impl BackgroundTask for Interceptor {
     type MessageIn = MessageIn;
     type MessageOut = MessageOut;
 
+    #[tracing::instrument(level = Level::DEBUG, skip_all, err)]
     async fn run(self, message_bus: &mut MessageBus<Self>) -> InterceptorResult<(), Self::Error> {
         let mut stream = self.socket.connect(self.peer).await?;
 
@@ -156,7 +157,9 @@ impl BackgroundTask for Interceptor {
             peer: self.peer,
             agent_protocol_version: self.agent_protocol_version.clone(),
         };
-        let (response, on_upgrade) = http_conn.send(request).await?;
+        let (response, on_upgrade) = http_conn.send(request).await.inspect_err(|fail| {
+            tracing::error!(?fail, "Failed getting a filtered http response!")
+        })?;
         message_bus.send(MessageOut::Http(response)).await;
 
         let raw = if let Some(on_upgrade) = on_upgrade {
@@ -213,7 +216,7 @@ impl HttpConnection {
     ///
     /// See [`HttpResponseFallback::response_from_request`] for notes on picking the correct
     /// [`HttpResponseFallback`] variant.
-    #[tracing::instrument(level = Level::TRACE, skip(self, response), err(level = Level::WARN))]
+    #[tracing::instrument(level = Level::DEBUG, skip(self, response), err(level = Level::WARN))]
     async fn handle_response(
         &self,
         request: HttpRequestFallback,
@@ -304,7 +307,9 @@ impl HttpConnection {
                             request.request_id(),
                         )
                         .await
-                        .map(HttpResponseFallback::Streamed)
+                        .map(|response| {
+                            HttpResponseFallback::Streamed(response, Some(request.clone()))
+                        })
                     }
                     HttpRequestFallback::Streamed(..) => {
                         HttpResponse::<InternalHttpBody>::from_hyper_response(
@@ -326,23 +331,29 @@ impl HttpConnection {
     /// Sends the given [`HttpRequestFallback`] to the server.
     /// If the HTTP connection with server is closed too soon, starts a new connection and retries
     /// once. Returns [`HttpResponseFallback`] from the server.
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    #[tracing::instrument(level = Level::DEBUG, skip(self), ret, err)]
     async fn send(
         &mut self,
         request: HttpRequestFallback,
     ) -> InterceptorResult<(HttpResponseFallback, Option<OnUpgrade>)> {
-        let attempts = 5;
+        let attempts = 10;
         let min = Duration::from_millis(10);
         let max = Duration::from_millis(250);
 
         // Retry to handle this request a few times.
+        let mut retry = 0;
         for duration in Backoff::new(attempts, min, max) {
             let response = self.sender.send(request.clone()).await;
 
             match self.handle_response(request.clone(), response).await {
                 Ok(response) => return Ok(response),
                 Err(fail) => {
-                    tracing::warn!("Request {request:?} connection was closed too soon, retrying.");
+                    tracing::warn!(
+                        ?fail,
+                        ?request,
+                        ?retry,
+                        "Request connection was closed too soon, retrying."
+                    );
                     match duration {
                         Some(duration) => {
                             sleep(duration).await;
@@ -353,6 +364,7 @@ impl HttpConnection {
                             let new_sender =
                                 super::http::handshake(request.version(), stream).await?;
                             self.sender = new_sender;
+                            retry += 1;
                         }
                         None => return Err(fail),
                     }
@@ -372,6 +384,7 @@ impl HttpConnection {
     ///
     /// When an HTTP upgrade happens, the underlying [`TcpStream`] is reclaimed, wrapped
     /// in a [`RawConnection`] and returned. When [`MessageBus`] closes, [`None`] is returned.
+    #[tracing::instrument(level = Level::DEBUG, skip_all, ret, err)]
     async fn run(
         mut self,
         message_bus: &mut MessageBus<Interceptor>,
@@ -389,8 +402,10 @@ impl HttpConnection {
                 }
 
                 MessageIn::Http(req) => {
-                    let (res, on_upgrade) = self.send(req).await?;
-                    println!("{} has upgrade: {}", res.request_id(), on_upgrade.is_some());
+                    let (res, on_upgrade) = self.send(req).await.inspect_err(|fail| {
+                        tracing::error!(?fail, "Failed getting a filtered http response!")
+                    })?;
+                    tracing::debug!("{} has upgrade: {}", res.request_id(), on_upgrade.is_some());
                     message_bus.send(MessageOut::Http(res)).await;
 
                     if let Some(on_upgrade) = on_upgrade {
@@ -416,6 +431,7 @@ impl HttpConnection {
 
 /// Utilized by the [`Interceptor`] when it acts as a TCP proxy.
 /// See [`RawConnection::run`] for usage.
+#[derive(Debug)]
 struct RawConnection {
     /// Connection between the [`Interceptor`] and the server.
     stream: TcpStream,
