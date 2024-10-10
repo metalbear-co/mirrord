@@ -4128,6 +4128,7 @@ dependencies = [
  "bytes",
  "exponential-backoff",
  "futures",
+ "h2 0.4.6",
  "http-body-util",
  "hyper 1.4.1",
  "hyper-util",

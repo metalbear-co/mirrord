@@ -327,7 +327,10 @@ where
 pub enum HttpRequestFallback {
     Framed(HttpRequest<InternalHttpBody>),
     Fallback(HttpRequest<Vec<u8>>),
-    Streamed(HttpRequest<StreamingBody>),
+    Streamed {
+        request: HttpRequest<StreamingBody>,
+        retries: u32,
+    },
 }
 
 #[derive(Debug)]
@@ -392,7 +395,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.connection_id,
             HttpRequestFallback::Fallback(req) => req.connection_id,
-            HttpRequestFallback::Streamed(req) => req.connection_id,
+            HttpRequestFallback::Streamed { request: req, .. } => req.connection_id,
         }
     }
 
@@ -400,7 +403,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.port,
             HttpRequestFallback::Fallback(req) => req.port,
-            HttpRequestFallback::Streamed(req) => req.port,
+            HttpRequestFallback::Streamed { request: req, .. } => req.port,
         }
     }
 
@@ -408,7 +411,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.request_id,
             HttpRequestFallback::Fallback(req) => req.request_id,
-            HttpRequestFallback::Streamed(req) => req.request_id,
+            HttpRequestFallback::Streamed { request: req, .. } => req.request_id,
         }
     }
 
@@ -416,7 +419,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.version(),
             HttpRequestFallback::Fallback(req) => req.version(),
-            HttpRequestFallback::Streamed(req) => req.version(),
+            HttpRequestFallback::Streamed { request: req, .. } => req.version(),
         }
     }
 
@@ -427,7 +430,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.internal_request.into(),
             HttpRequestFallback::Fallback(req) => req.internal_request.into(),
-            HttpRequestFallback::Streamed(req) => req.internal_request.into(),
+            HttpRequestFallback::Streamed { request: req, .. } => req.internal_request.into(),
         }
     }
 }
@@ -594,6 +597,12 @@ pub type ReceiverStreamBody = StreamBody<ReceiverStream<hyper::Result<Frame<Byte
 pub enum HttpResponseFallback {
     Framed(HttpResponse<InternalHttpBody>),
     Fallback(HttpResponse<Vec<u8>>),
+
+    /// Holds the [`HttpResponse`] that we're supposed to send back to the agent.
+    ///
+    /// It also holds the original http request [`HttpRequestFallback`], so we can retry
+    /// if our hyper server sent us a
+    /// [`RST_STREAM`][https://docs.rs/h2/latest/h2/struct.Error.html#method.is_reset].
     Streamed(
         HttpResponse<ReceiverStreamBody>,
         Option<HttpRequestFallback>,
@@ -666,24 +675,23 @@ impl HttpResponseFallback {
 
             // We received `DaemonTcp::HttpRequestChunked` and the agent supports
             // `LayerTcpSteal::HttpResponseChunked`.
-            HttpRequestFallback::Streamed(streamed_request)
-                if agent_supports_streaming_response =>
-            {
-                HttpResponseFallback::Streamed(
-                    HttpResponse::<ReceiverStreamBody>::response_from_request(
-                        streamed_request,
-                        status,
-                        message,
-                    ),
-                    Some(request),
-                )
-            }
+            HttpRequestFallback::Streamed {
+                request: streamed_request,
+                ..
+            } if agent_supports_streaming_response => HttpResponseFallback::Streamed(
+                HttpResponse::<ReceiverStreamBody>::response_from_request(
+                    streamed_request,
+                    status,
+                    message,
+                ),
+                Some(request),
+            ),
 
             // We received `DaemonTcp::HttpRequestChunked` from the agent,
             // but the agent does not support `LayerTcpSteal::HttpResponseChunked`.
             // However, it must support the older `LayerTcpSteal::HttpResponseFramed`
             // variant (was introduced before `DaemonTcp::HttpRequestChunked`).
-            HttpRequestFallback::Streamed(request) => HttpResponseFallback::Framed(
+            HttpRequestFallback::Streamed { request, .. } => HttpResponseFallback::Framed(
                 HttpResponse::<InternalHttpBody>::response_from_request(request, status, message),
             ),
         }

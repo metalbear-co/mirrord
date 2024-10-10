@@ -14,6 +14,8 @@ use tracing::Level;
 
 use super::interceptor::{InterceptorError, InterceptorResult};
 
+pub(super) const RETRY_ON_RESET_ATTEMPTS: u32 = 10;
+
 /// Handles the differences between hyper's HTTP/1 and HTTP/2 connections.
 pub enum HttpSender {
     V1(http1::SendRequest<BoxBody<Bytes, Infallible>>),

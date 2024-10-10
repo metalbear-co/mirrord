@@ -475,7 +475,6 @@ where
             .find(|client_id| self.subscribed.get(client_id).copied().unwrap_or(true))
     }
 
-    // TODO(alex) [high] 1: This never gets called for the missing requests!
     /// Sends the given [`Response`] to the [`FilteringService`] via [`oneshot::Sender`] from
     /// [`Self::blocked_requests`].
     ///

@@ -33,6 +33,7 @@ tokio.workspace = true
 tracing.workspace = true
 tokio-stream.workspace = true
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
+h2 = "0.4"
 hyper-util.workspace = true
 http-body-util.workspace = true
 bytes.workspace = true

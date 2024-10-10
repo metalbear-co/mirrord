@@ -2,6 +2,7 @@
 //! intercepted connection.
 
 use std::{
+    error::Error,
     io::{self, ErrorKind},
     net::SocketAddr,
     time::Duration,
@@ -24,7 +25,10 @@ use tokio::{
 use tracing::Level;
 
 use super::http::HttpSender;
-use crate::background_tasks::{BackgroundTask, MessageBus};
+use crate::{
+    background_tasks::{BackgroundTask, MessageBus},
+    proxies::incoming::http::RETRY_ON_RESET_ATTEMPTS,
+};
 
 /// Messages consumed by the [`Interceptor`] when it runs as a [`BackgroundTask`].
 pub enum MessageIn {
@@ -63,7 +67,7 @@ pub enum InterceptorError {
     Io(#[from] io::Error),
     /// Hyper failed.
     #[error("hyper failed: {0}")]
-    Hyper(#[from] hyper::Error),
+    Hyper(hyper::Error),
     /// The layer closed connection too soon to send a request.
     #[error("connection closed too soon")]
     ConnectionClosedTooSoon(HttpRequestFallback),
@@ -77,6 +81,26 @@ pub enum InterceptorError {
     /// Occurs when [`Interceptor`] receives [`MessageIn::Http`], but it acts as a TCP proxy.
     #[error("received an HTTP request, but expected raw bytes")]
     UnexpectedHttpRequest,
+
+    #[error("HTTP2 `RST_STREAM` received, we should retry the hyper connection!")]
+    Reset,
+
+    #[error("HTTP2 reached the maximun amount of retries!")]
+    MaxRetries,
+}
+
+impl From<hyper::Error> for InterceptorError {
+    fn from(hyper_fail: hyper::Error) -> Self {
+        if hyper_fail
+            .source()
+            .and_then(|source| source.downcast_ref::<h2::Error>())
+            .is_some_and(h2::Error::is_reset)
+        {
+            Self::Reset
+        } else {
+            Self::Hyper(hyper_fail)
+        }
+    }
 }
 
 pub type InterceptorResult<T, E = InterceptorError> = core::result::Result<T, E>;
@@ -222,8 +246,6 @@ impl HttpConnection {
         request: HttpRequestFallback,
         response: InterceptorResult<hyper::Response<hyper::body::Incoming>>,
     ) -> InterceptorResult<(HttpResponseFallback, Option<OnUpgrade>)> {
-        // TODO(alex) [high] 1: Could drill down the error here to `is_reset` from http2
-        // crate.
         match response {
             Err(InterceptorError::Hyper(e)) if e.is_closed() => {
                 tracing::warn!(
@@ -253,10 +275,10 @@ impl HttpConnection {
                 ))
             }
 
-            Err(err) => {
-                tracing::warn!("Request to local application failed with: {err:?}.");
+            Err(fail) => {
+                tracing::warn!(?fail, "Request to local application failed!");
                 let body_message = format!(
-                    "mirrord tried to forward the request to the local application and got {err:?}"
+                    "mirrord tried to forward the request to the local application and got {fail:?}"
                 );
                 Ok((
                     HttpResponseFallback::response_from_request(
@@ -297,7 +319,7 @@ impl HttpConnection {
                         .await
                         .map(HttpResponseFallback::Fallback)
                     }
-                    HttpRequestFallback::Streamed(..)
+                    HttpRequestFallback::Streamed { .. }
                         if self.agent_supports_streaming_response() =>
                     {
                         HttpResponse::<ReceiverStreamBody>::from_hyper_response(
@@ -311,7 +333,7 @@ impl HttpConnection {
                             HttpResponseFallback::Streamed(response, Some(request.clone()))
                         })
                     }
-                    HttpRequestFallback::Streamed(..) => {
+                    HttpRequestFallback::Streamed { .. } => {
                         HttpResponse::<InternalHttpBody>::from_hyper_response(
                             res,
                             self.peer.port(),
@@ -329,31 +351,26 @@ impl HttpConnection {
     }
 
     /// Sends the given [`HttpRequestFallback`] to the server.
-    /// If the HTTP connection with server is closed too soon, starts a new connection and retries
-    /// once. Returns [`HttpResponseFallback`] from the server.
+    /// If the HTTP connection with server is closed too soon, starts a new connection
+    /// and retries using a [`Backoff`].
+    ///
+    /// Returns [`HttpResponseFallback`] from the server.
     #[tracing::instrument(level = Level::DEBUG, skip(self), ret, err)]
     async fn send(
         &mut self,
         request: HttpRequestFallback,
     ) -> InterceptorResult<(HttpResponseFallback, Option<OnUpgrade>)> {
-        let attempts = 10;
         let min = Duration::from_millis(10);
         let max = Duration::from_millis(250);
 
         // Retry to handle this request a few times.
-        let mut retry = 0;
-        for duration in Backoff::new(attempts, min, max) {
+        for duration in Backoff::new(RETRY_ON_RESET_ATTEMPTS, min, max) {
             let response = self.sender.send(request.clone()).await;
 
             match self.handle_response(request.clone(), response).await {
                 Ok(response) => return Ok(response),
-                Err(fail) => {
-                    tracing::warn!(
-                        ?fail,
-                        ?request,
-                        ?retry,
-                        "Request connection was closed too soon, retrying."
-                    );
+                Err(InterceptorError::Reset) => {
+                    tracing::warn!(?request, "Request connection was reset, retrying.");
                     match duration {
                         Some(duration) => {
                             sleep(duration).await;
@@ -364,16 +381,16 @@ impl HttpConnection {
                             let new_sender =
                                 super::http::handshake(request.version(), stream).await?;
                             self.sender = new_sender;
-                            retry += 1;
                         }
-                        None => return Err(fail),
+                        None => return Err(InterceptorError::MaxRetries),
                     }
                 }
+                Err(fail) => return Err(fail),
             }
         }
 
         unreachable!(
-            "BUG: You could only get here if the retry loop never ran!\
+            "BUG: You should only get here if the retry loop never ran!\
             Please report this to us at \
             https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml"
         )
@@ -721,8 +738,8 @@ mod test {
 
         let (tx, rx) = tokio::sync::mpsc::channel(12);
         sender
-            .send(MessageIn::Http(HttpRequestFallback::Streamed(
-                HttpRequest {
+            .send(MessageIn::Http(HttpRequestFallback::Streamed {
+                request: HttpRequest {
                     internal_request: InternalHttpRequest {
                         method: Method::POST,
                         uri: "/".parse().unwrap(),
@@ -734,7 +751,8 @@ mod test {
                     request_id: 2,
                     port: 3,
                 },
-            )))
+                retries: 0,
+            }))
             .await;
         let (connection, _peer_addr) = listener.accept().await.unwrap();
 

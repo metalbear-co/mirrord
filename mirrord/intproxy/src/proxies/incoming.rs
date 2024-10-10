@@ -2,14 +2,16 @@
 
 use std::{
     collections::{hash_map::Entry, HashMap},
+    error::Error,
     fmt, io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
 use bytes::Bytes;
 use futures::StreamExt;
+use http::RETRY_ON_RESET_ATTEMPTS;
 use http_body_util::StreamBody;
-use hyper::{body::Frame, HeaderMap, Method, Uri};
+use hyper::body::Frame;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
     MessageId, PortSubscribe, PortSubscription, PortUnsubscribe, ProxyToLayerMessage,
@@ -18,9 +20,9 @@ use mirrord_protocol::{
     body_chunks::BodyExt,
     tcp::{
         ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, ChunkedResponse, DaemonTcp, HttpRequest,
-        HttpRequestFallback, HttpResponse, HttpResponseFallback, InternalHttpBody,
-        InternalHttpBodyFrame, InternalHttpRequest, InternalHttpResponse, LayerTcpSteal,
-        NewTcpConnection, ReceiverStreamBody, StreamingBody, TcpData,
+        HttpRequestFallback, HttpResponse, HttpResponseFallback, InternalHttpBodyFrame,
+        InternalHttpRequest, InternalHttpResponse, LayerTcpSteal, NewTcpConnection,
+        ReceiverStreamBody, StreamingBody, TcpData,
     },
     ClientMessage, ConnectionId, RequestId, ResponseError,
 };
@@ -296,9 +298,6 @@ impl IncomingProxy {
                 }
             }
             DaemonTcp::HttpRequest(req) => {
-                // TODO(alex) [high] 3: How we're sending the request initially
-                // (this part works). What I want from here is a way to send the failed
-                // request again in `handle_streamed`.
                 let req = HttpRequestFallback::Fallback(req);
                 let interceptor = self.get_interceptor_for_http_request(&req)?;
                 if let Some(interceptor) = interceptor {
@@ -333,7 +332,10 @@ impl IncomingProxy {
 
                         self.request_body_txs.insert(key, tx.clone());
 
-                        let http_req = HttpRequestFallback::Streamed(http_req);
+                        let http_req = HttpRequestFallback::Streamed {
+                            request: http_req,
+                            retries: 0,
+                        };
                         let interceptor = self.get_interceptor_for_http_request(&http_req)?;
                         if let Some(interceptor) = interceptor {
                             interceptor.send(http_req).await;
@@ -553,39 +555,12 @@ impl BackgroundTask for IncomingProxy {
                             MessageOut::Http(HttpResponseFallback::Framed(res)) => {
                                 ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(res))
                             },
-                            MessageOut::Http(HttpResponseFallback::Streamed(response, og_request)) => {
-                                match self.handle_streamed(response, og_request).await {
+                            MessageOut::Http(HttpResponseFallback::Streamed(response, request)) => {
+                                match self.streamed_http_response(response, request).await {
                                     Some(response) => response,
                                     None => continue,
                                 }
                             }
-                            // MessageOut::Http(HttpResponseFallback::Streamed(mut response)) => {
-                            //     let mut body = vec![];
-                            //     let key = (response.connection_id, response.request_id);
-
-                            //     match response.internal_response.body.next_frames(false).await {
-                            //             Ok(frames) => {
-                            //                 frames.frames.into_iter().map(From::from).for_each(|frame| body.push(frame));
-                            //             },
-                            //             Err(fail) => {
-                            //                 // TODO(alex) [high] 2: This is where we don't return a response back to the agent.
-                            //                 tracing::warn!(?fail, "Error while receiving streamed response frames");
-                            //                 // let response = ChunkedResponse::Error(ChunkedHttpError { connection_id: key.0, request_id: key.1 });
-                            //                 // message_bus.send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(response))).await;
-                            //                 continue;
-                            //             },
-                            //     }
-
-                            //     self.response_body_rxs.insert(key, StreamNotifyClose::new(response.internal_response.body));
-
-                            //     let internal_response = InternalHttpResponse {
-                            //         status: response.internal_response.status, version: response.internal_response.version, headers: response.internal_response.headers, body
-                            //     };
-                            //     let response = ChunkedResponse::Start(HttpResponse {
-                            //         port: response.port , connection_id: response.connection_id, request_id: response.request_id, internal_response
-                            //     });
-                            //     ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(response))
-                            // },
                         };
                         message_bus.send(msg).await;
                     },
@@ -596,11 +571,16 @@ impl BackgroundTask for IncomingProxy {
 }
 
 impl IncomingProxy {
+    /// Sends back the streamed http response to the agent.
+    ///
+    /// If we cannot get the next frame of the streamed body, then we retry the whole
+    /// process, by sending the original `request` again through the http `interceptor` to
+    /// our hyper handler.
     #[tracing::instrument(level = Level::DEBUG, skip(self), ret)]
-    async fn handle_streamed(
+    async fn streamed_http_response(
         &mut self,
         mut response: HttpResponse<StreamBody<ReceiverStream<Result<Frame<Bytes>, hyper::Error>>>>,
-        og_request: Option<HttpRequestFallback>,
+        request: Option<HttpRequestFallback>,
     ) -> Option<ClientMessage> {
         let mut body = vec![];
         let key = (response.connection_id, response.request_id);
@@ -612,74 +592,59 @@ impl IncomingProxy {
                     .into_iter()
                     .map(From::from)
                     .for_each(|frame| body.push(frame));
-            }
-            Err(fail) => {
-                // TODO(alex) [high] 2: This is where we don't return a response back to the agent.
-                // The response here is valid, it
-                tracing::warn!(?fail, "Error while receiving streamed response frames");
-                // let response = ChunkedResponse::Error(ChunkedHttpError { connection_id: key.0,
-                // request_id: key.1 }); message_bus.
-                // send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(response))).
-                // await;
-                let request_still_lives = self
-                    .request_body_txs
-                    .remove(&(response.connection_id, response.request_id));
 
-                // request_still_lives.send()
-                let inter = self.interceptors.keys();
-                let inter_id = InterceptorId(response.connection_id);
-                let inter_handle = self.interceptors.get(&inter_id).unwrap();
+                self.response_body_rxs
+                    .insert(key, StreamNotifyClose::new(response.internal_response.body));
 
-                let mut fake_headers = HeaderMap::new();
-                fake_headers.insert("content-type", "application/grpc".parse().unwrap());
-                fake_headers.insert("content-type", "application/grpc".parse().unwrap());
-                fake_headers.insert("local", "meow".parse().unwrap());
-                fake_headers.insert("index", "666".parse().unwrap());
-                let http_request_to_resend = HttpRequestFallback::Framed(HttpRequest {
-                    internal_request: InternalHttpRequest {
-                        method: Method::POST,
-                        uri: Uri::from_static(
-                            "http://192.168.49.2:30071/grpc.examples.echo.Echo/UnaryEcho",
-                        ),
-                        headers: fake_headers,
-                        version: hyper::Version::HTTP_2,
-                        body: InternalHttpBody::from_bytes("".as_bytes()),
-                    },
+                let internal_response = InternalHttpResponse {
+                    status: response.internal_response.status,
+                    version: response.internal_response.version,
+                    headers: response.internal_response.headers,
+                    body,
+                };
+                let response = ChunkedResponse::Start(HttpResponse {
+                    port: response.port,
                     connection_id: response.connection_id,
                     request_id: response.request_id,
-                    port: response.port,
+                    internal_response,
                 });
+                Some(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
+                    response,
+                )))
+            }
+            Err(fail) => {
+                tracing::warn!(?fail, "Error while receiving streamed response frames");
 
-                if let Some(og) = og_request {
-                    inter_handle.tx.send(og).await;
-                    tracing::info!(
-                        ?request_still_lives,
-                        ?inter,
-                        "The request is still here! we can retrieve it!"
-                    );
+                // Retry on `RST_STREAM` error.
+                if fail
+                    .source()
+                    .and_then(|source| source.downcast_ref::<h2::Error>())
+                    .is_some_and(|h2_fail| h2_fail.is_reset())
+                {
+                    let interceptor = self
+                        .interceptors
+                        .get(&InterceptorId(response.connection_id))?;
+
+                    if let Some(HttpRequestFallback::Streamed { request, retries }) = request
+                        && retries < RETRY_ON_RESET_ATTEMPTS
+                    {
+                        tracing::trace!(
+                            ?request,
+                            ?retries,
+                            "`RST_STREAM` from hyper, retrying the request."
+                        );
+                        interceptor
+                            .tx
+                            .send(HttpRequestFallback::Streamed {
+                                request,
+                                retries: retries + 1,
+                            })
+                            .await;
+                    }
                 }
 
                 return None;
             }
         }
-
-        self.response_body_rxs
-            .insert(key, StreamNotifyClose::new(response.internal_response.body));
-
-        let internal_response = InternalHttpResponse {
-            status: response.internal_response.status,
-            version: response.internal_response.version,
-            headers: response.internal_response.headers,
-            body,
-        };
-        let response = ChunkedResponse::Start(HttpResponse {
-            port: response.port,
-            connection_id: response.connection_id,
-            request_id: response.request_id,
-            internal_response,
-        });
-        Some(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
-            response,
-        )))
     }
 }
