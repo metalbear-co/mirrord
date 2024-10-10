@@ -546,6 +546,7 @@ impl CollectAnalytics for &LayerConfig {
         (&self.target).collect_analytics(analytics);
         (&self.agent).collect_analytics(analytics);
         (&self.feature).collect_analytics(analytics);
+        (&self.experimental).collect_analytics(analytics);
     }
 }
 
