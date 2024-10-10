@@ -602,7 +602,7 @@ pub enum HttpResponseFallback {
     ///
     /// It also holds the original http request [`HttpRequestFallback`], so we can retry
     /// if our hyper server sent us a
-    /// [`RST_STREAM`][https://docs.rs/h2/latest/h2/struct.Error.html#method.is_reset].
+    /// [`RST_STREAM`](https://docs.rs/h2/latest/h2/struct.Error.html#method.is_reset).
     Streamed(
         HttpResponse<ReceiverStreamBody>,
         Option<HttpRequestFallback>,
