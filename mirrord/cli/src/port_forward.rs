@@ -870,7 +870,7 @@ enum IncomingMode {
 }
 
 impl IncomingMode {
-    /// Creates a new instance from the given [`LayerConfig`].
+    /// Creates a new instance from the given [`IncomingConfig`].
     fn new(config: &IncomingConfig) -> Self {
         if !config.is_steal() {
             return Self::Mirror;
