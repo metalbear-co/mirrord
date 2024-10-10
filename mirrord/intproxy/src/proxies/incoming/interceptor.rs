@@ -82,9 +82,17 @@ pub enum InterceptorError {
     #[error("received an HTTP request, but expected raw bytes")]
     UnexpectedHttpRequest,
 
+    /// We dig into the [`hyper::Error`] to try and see if it's an [`h2::Error`], checking
+    /// for [`h2::Error::is_reset`].
+    ///
+    /// [`hyper::Error`] mentions that `source` is not a guaranteed thing we can check for,
+    /// so if you see any weird behavior, check that the [`h2`] crate is in sync with
+    /// whatever hyper changed (for errors).
     #[error("HTTP2 `RST_STREAM` received, we should retry the hyper connection!")]
     Reset,
 
+    /// We have reached the max number of attempts that we can retry our http connection,
+    /// due to a `RST_STREAM`, or when the connection has been closed too soon.
     #[error("HTTP2 reached the maximun amount of retries!")]
     MaxRetries,
 }
@@ -351,8 +359,10 @@ impl HttpConnection {
     }
 
     /// Sends the given [`HttpRequestFallback`] to the server.
-    /// If the HTTP connection with server is closed too soon, starts a new connection
-    /// and retries using a [`Backoff`].
+    ///
+    /// If we get a `RST_STREAM` error from the server, or the connection was closed too
+    /// soon starts a new connection and retries using a [`Backoff`] until we reach
+    /// [`RETRY_ON_RESET_ATTEMPTS`].
     ///
     /// Returns [`HttpResponseFallback`] from the server.
     #[tracing::instrument(level = Level::DEBUG, skip(self), ret, err)]
@@ -369,8 +379,12 @@ impl HttpConnection {
 
             match self.handle_response(request.clone(), response).await {
                 Ok(response) => return Ok(response),
-                Err(InterceptorError::Reset) => {
-                    tracing::warn!(?request, "Request connection was reset, retrying.");
+                Err(InterceptorError::Reset)
+                | Err(InterceptorError::ConnectionClosedTooSoon(_)) => {
+                    tracing::warn!(
+                        ?request,
+                        "`RST_STREAM` request connection was reset, retrying."
+                    );
                     match duration {
                         Some(duration) => {
                             sleep(duration).await;

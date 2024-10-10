@@ -2,7 +2,6 @@
 
 use std::{
     collections::{hash_map::Entry, HashMap},
-    error::Error,
     fmt, io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
@@ -576,6 +575,7 @@ impl IncomingProxy {
     /// If we cannot get the next frame of the streamed body, then we retry the whole
     /// process, by sending the original `request` again through the http `interceptor` to
     /// our hyper handler.
+    #[allow(clippy::type_complexity)]
     #[tracing::instrument(level = Level::DEBUG, skip(self), ret)]
     async fn streamed_http_response(
         &mut self,
@@ -585,7 +585,13 @@ impl IncomingProxy {
         let mut body = vec![];
         let key = (response.connection_id, response.request_id);
 
-        match response.internal_response.body.next_frames(false).await {
+        match response
+            .internal_response
+            .body
+            .next_frames(false)
+            .await
+            .map_err(InterceptorError::from)
+        {
             Ok(frames) => {
                 frames
                     .frames
@@ -612,38 +618,36 @@ impl IncomingProxy {
                     response,
                 )))
             }
-            Err(fail) => {
-                tracing::warn!(?fail, "Error while receiving streamed response frames");
+            // Retry on `RST_STREAM` error.
+            Err(InterceptorError::Reset) => {
+                tracing::warn!("`RST_STREAM` received in the response, retrying!");
 
-                // Retry on `RST_STREAM` error.
-                if fail
-                    .source()
-                    .and_then(|source| source.downcast_ref::<h2::Error>())
-                    .is_some_and(|h2_fail| h2_fail.is_reset())
+                let interceptor = self
+                    .interceptors
+                    .get(&InterceptorId(response.connection_id))?;
+
+                if let Some(HttpRequestFallback::Streamed { request, retries }) = request
+                    && retries < RETRY_ON_RESET_ATTEMPTS
                 {
-                    let interceptor = self
-                        .interceptors
-                        .get(&InterceptorId(response.connection_id))?;
-
-                    if let Some(HttpRequestFallback::Streamed { request, retries }) = request
-                        && retries < RETRY_ON_RESET_ATTEMPTS
-                    {
-                        tracing::trace!(
-                            ?request,
-                            ?retries,
-                            "`RST_STREAM` from hyper, retrying the request."
-                        );
-                        interceptor
-                            .tx
-                            .send(HttpRequestFallback::Streamed {
-                                request,
-                                retries: retries + 1,
-                            })
-                            .await;
-                    }
+                    tracing::trace!(
+                        ?request,
+                        ?retries,
+                        "`RST_STREAM` from hyper, retrying the request."
+                    );
+                    interceptor
+                        .tx
+                        .send(HttpRequestFallback::Streamed {
+                            request,
+                            retries: retries + 1,
+                        })
+                        .await;
                 }
 
-                return None;
+                None
+            }
+            Err(fail) => {
+                tracing::warn!(?fail, "Something went wrong, skipping this response!");
+                None
             }
         }
     }
