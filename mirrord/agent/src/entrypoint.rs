@@ -795,7 +795,8 @@ pub async fn main() -> Result<()> {
                 tracing_subscriber::fmt::layer()
                     .with_thread_ids(true)
                     .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-                    .compact(),
+                    .pretty()
+                    .with_line_number(true),
             )
             .with(tracing_subscriber::EnvFilter::from_default_env())
             .init();

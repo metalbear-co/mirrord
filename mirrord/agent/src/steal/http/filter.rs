@@ -1,5 +1,6 @@
 use fancy_regex::Regex;
 use hyper::Request;
+use tracing::Level;
 
 /// Currently supported filtering criterias.
 #[derive(Debug)]
@@ -43,6 +44,7 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
 
 impl HttpFilter {
     /// Checks whether the given [`Request`] matches this filter.
+    #[tracing::instrument(level = Level::TRACE, skip(request), ret(level = "DEBUG"))]
     pub fn matches<T>(&self, request: &mut Request<T>) -> bool {
         match self {
             Self::Header(filter) => {
@@ -115,11 +117,12 @@ impl HttpFilter {
 /// [`HeaderMap`](hyper::http::header::HeaderMap) entries formatted like `k: v` (format expected by
 /// [`HttpFilter::Header`]). Computed and cached in [`Request::extensions`] the first time
 /// [`HttpFilter::matches`] is called on the [`Request`].
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct NormalizedHeaders(Vec<String>);
 
 impl NormalizedHeaders {
     /// Checks whether any header in this set matches the given [`Regex`].
+    #[tracing::instrument(level = Level::TRACE, ret)]
     fn has_match(&self, regex: &Regex) -> bool {
         self.0.iter().any(|header| {
             regex
@@ -127,7 +130,7 @@ impl NormalizedHeaders {
                 .inspect_err(|error| {
                     tracing::error!(header, ?regex, ?error, "Error while matching header");
                 })
-                .unwrap_or(false)
+                .unwrap_or_default()
         })
     }
 }
