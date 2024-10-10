@@ -146,11 +146,23 @@ pub struct Bound {
     address: SocketAddr,
 }
 
+#[derive(Debug, Clone, Copy, Encode, Decode)]
+pub struct BoundLocally {
+    /// Address originally requested by the user for `bind`.
+    requested_address: SocketAddr,
+
+    /// Actual bound address that we use to communicate between the user's listener socket and our
+    /// interceptor socket.
+    mapped_port: u16,
+}
+
 #[derive(Debug, Default, Clone, Encode, Decode)]
 pub enum SocketState {
     #[default]
     Initialized,
     Bound(Bound),
+    /// `bind` was `Bypass`ed due to the port.
+    IgnoredForIncoming(BoundLocally),
     Listening(Bound),
     Connected(Connected),
 }
@@ -489,8 +501,8 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
 }
 
 #[inline]
-fn is_ignored_port(addr: &SocketAddr) -> bool {
-    addr.port() == 0
+fn is_ignored_port(port: u16) -> bool {
+    port == 0
 }
 
 /// Fill in the sockaddr structure for the given address.
