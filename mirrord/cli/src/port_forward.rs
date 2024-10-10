@@ -5,7 +5,10 @@ use std::{
 };
 
 use futures::StreamExt;
-use mirrord_config::feature::network::incoming::IncomingConfig;
+use mirrord_config::feature::network::incoming::{
+    http_filter::{HttpFilterConfig, InnerFilter},
+    IncomingConfig,
+};
 use mirrord_intproxy::{
     background_tasks::{BackgroundTasks, TaskError, TaskSender, TaskUpdate},
     error::IntProxyError,
@@ -877,21 +880,72 @@ impl IncomingMode {
 
         let ports = { http_filter_config.ports.iter().copied().collect() };
 
-        let filter = match (
-            &http_filter_config.path_filter,
-            &http_filter_config.header_filter,
-        ) {
-            (Some(path), None) => StealHttpFilter::Filter(HttpFilter::Path(
+        // Matching all fields to make this check future-proof.
+        let filter = match http_filter_config {
+            HttpFilterConfig {
+                path_filter: Some(path),
+                header_filter: None,
+                all_of: None,
+                any_of: None,
+                ports: _ports,
+            } => StealHttpFilter::Filter(HttpFilter::Path(
                 Filter::new(path.into()).expect("invalid filter expression"),
             )),
-            (None, Some(header)) => StealHttpFilter::Filter(HttpFilter::Header(
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: Some(header),
+                all_of: None,
+                any_of: None,
+                ports: _ports,
+            } => StealHttpFilter::Filter(HttpFilter::Header(
                 Filter::new(header.into()).expect("invalid filter expression"),
             )),
-            (None, None) => StealHttpFilter::None,
-            _ => panic!("multiple HTTP filters specified"),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                all_of: Some(filters),
+                any_of: None,
+                ports: _ports,
+            } => StealHttpFilter::Filter(Self::make_composite_filter(true, filters)),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                all_of: None,
+                any_of: Some(filters),
+                ports: _ports,
+            } => StealHttpFilter::Filter(Self::make_composite_filter(false, filters)),
+
+            HttpFilterConfig {
+                path_filter: None,
+                header_filter: None,
+                all_of: None,
+                any_of: None,
+                ports: _ports,
+            } => StealHttpFilter::None,
+
+            _ => panic!("multiple HTTP filters specified, this is a bug"),
         };
 
         Self::Steal(StealHttpSettings { filter, ports })
+    }
+
+    fn make_composite_filter(all: bool, filters: &[InnerFilter]) -> HttpFilter {
+        let filters = filters
+            .iter()
+            .map(|filter| match filter {
+                InnerFilter::Path { path } => {
+                    HttpFilter::Path(Filter::new(path.clone()).expect("invalid filter expression"))
+                }
+                InnerFilter::Header { header } => HttpFilter::Header(
+                    Filter::new(header.clone()).expect("invalid filter expression"),
+                ),
+            })
+            .collect();
+
+        HttpFilter::Composite { all, filters }
     }
 
     /// Returns [`PortSubscription`] request to be used for the given port.

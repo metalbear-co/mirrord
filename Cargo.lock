@@ -2331,7 +2331,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "libc",
 ]
@@ -3329,7 +3329,7 @@ checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
 
 [[package]]
 name = "issue1317"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "actix-web",
  "env_logger 0.11.5",
@@ -3339,7 +3339,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "errno 0.3.9",
  "libc",
@@ -3348,7 +3348,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776portnot53"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "libc",
  "socket2",
@@ -3356,14 +3356,14 @@ dependencies = [
 
 [[package]]
 name = "issue1899"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "issue2001"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "libc",
 ]
@@ -3690,7 +3690,7 @@ checksum = "78b3ae25bc7c8c38cec158d1f2757ee79e9b3740fbc7ccf0e59e4b08d793fa89"
 
 [[package]]
 name = "listen_ports"
-version = "3.119.0"
+version = "3.119.1"
 
 [[package]]
 name = "local-channel"
@@ -3928,7 +3928,7 @@ checksum = "c9be0862c1b3f26a88803c4a49de6889c10e608b3ee9344e6ef5b45fb37ad3d1"
 
 [[package]]
 name = "mirrord"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "actix-codec",
  "clap",
@@ -3961,7 +3961,7 @@ dependencies = [
  "rcgen",
  "regex",
  "reqwest 0.12.8",
- "rstest 0.21.0",
+ "rstest",
  "rustls 0.23.14",
  "rustls-pemfile 2.2.0",
  "semver 1.0.23",
@@ -3983,7 +3983,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -4017,7 +4017,7 @@ dependencies = [
  "rawsocket",
  "rcgen",
  "regex",
- "rstest 0.21.0",
+ "rstest",
  "rustls 0.23.14",
  "semver 1.0.23",
  "serde",
@@ -4040,7 +4040,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "assert-json-diff",
  "base64 0.22.1",
@@ -4054,7 +4054,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "bcder",
  "chrono",
@@ -4075,7 +4075,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "bimap",
  "bitflags 2.6.0",
@@ -4084,7 +4084,7 @@ dependencies = [
  "mirrord-analytics",
  "mirrord-config-derive",
  "nom",
- "rstest 0.21.0",
+ "rstest",
  "schemars",
  "serde",
  "serde_json",
@@ -4097,7 +4097,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4107,7 +4107,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "bincode",
  "drain",
@@ -4123,7 +4123,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "bytes",
  "exponential-backoff",
@@ -4152,7 +4152,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy-protocol"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "bincode",
  "mirrord-protocol",
@@ -4162,7 +4162,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "actix-codec",
  "async-stream",
@@ -4179,7 +4179,7 @@ dependencies = [
  "pin-project-lite",
  "rand",
  "regex",
- "rstest 0.23.0",
+ "rstest",
  "serde",
  "serde_json",
  "shellexpand",
@@ -4192,7 +4192,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "actix-codec",
  "base64 0.22.1",
@@ -4224,10 +4224,11 @@ dependencies = [
  "rand",
  "regex",
  "resolv-conf",
- "rstest 0.23.0",
+ "rstest",
  "serde_json",
  "socket2",
  "syscalls",
+ "tempfile",
  "test-cdylib",
  "tests",
  "thiserror",
@@ -4240,7 +4241,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4249,7 +4250,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4259,7 +4260,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -4279,7 +4280,7 @@ dependencies = [
  "mirrord-protocol",
  "rand",
  "reqwest 0.12.8",
- "rstest 0.21.0",
+ "rstest",
  "schemars",
  "semver 1.0.23",
  "serde",
@@ -4293,7 +4294,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "enum_dispatch",
  "indicatif",
@@ -4327,7 +4328,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "apple-codesign",
  "object 0.36.5",
@@ -4340,7 +4341,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-vpn"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "futures",
  "ipnet",
@@ -4670,7 +4671,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.119.0"
+version = "3.119.1"
 
 [[package]]
 name = "outref"
@@ -5689,19 +5690,7 @@ checksum = "9afd55a67069d6e434a95161415f5beeada95a01c7b815508a82dcb0e1593682"
 dependencies = [
  "futures",
  "futures-timer",
- "rstest_macros 0.21.0",
- "rustc_version",
-]
-
-[[package]]
-name = "rstest"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a2c585be59b6b5dd66a9d2084aa1d8bd52fbdb806eafdeffb52791147862035"
-dependencies = [
- "futures",
- "futures-timer",
- "rstest_macros 0.23.0",
+ "rstest_macros",
  "rustc_version",
 ]
 
@@ -5724,33 +5713,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "rstest_macros"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "825ea780781b15345a146be27eaefb05085e337e869bff01b4306a4fd4a9ad5a"
-dependencies = [
- "cfg-if",
- "glob",
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "regex",
- "relative-path",
- "rustc_version",
- "syn 2.0.79",
- "unicode-ident",
-]
-
-[[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "libc",
 ]
@@ -5766,7 +5737,7 @@ dependencies = [
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.119.0"
+version = "3.119.1"
 dependencies = [
  "tokio",
 ]
@@ -6732,7 +6703,7 @@ dependencies = [
  "rand",
  "regex",
  "reqwest 0.12.8",
- "rstest 0.21.0",
+ "rstest",
  "rustls 0.23.14",
  "serde",
  "serde_json",
