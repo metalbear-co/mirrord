@@ -26,7 +26,10 @@ use k8s_openapi::{
 use kube::{CustomResourceExt, Resource};
 use thiserror::Error;
 
-use crate::crd::{MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd};
+use crate::crd::{
+    kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
+    MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
+};
 
 pub static OPERATOR_NAME: &str = "mirrord-operator";
 /// 443 is standard port for APIService, do not change this value
@@ -90,6 +93,7 @@ pub struct SetupOptions {
     pub image: String,
     pub aws_role_arn: Option<String>,
     pub sqs_splitting: bool,
+    pub kafka_splitting: bool,
 }
 
 #[derive(Debug)]
@@ -106,6 +110,7 @@ pub struct Operator {
     client_ca_role: OperatorClientCaRole,
     client_ca_role_binding: OperatorClientCaRoleBinding,
     sqs_splitting: bool,
+    kafka_splitting: bool,
 }
 
 impl Operator {
@@ -116,6 +121,7 @@ impl Operator {
             image,
             aws_role_arn,
             sqs_splitting,
+            kafka_splitting,
         } = options;
 
         let (license_secret, license_key) = match license {
@@ -127,7 +133,7 @@ impl Operator {
 
         let service_account = OperatorServiceAccount::new(&namespace, aws_role_arn);
 
-        let role = OperatorRole::new(sqs_splitting);
+        let role = OperatorRole::new(sqs_splitting, kafka_splitting);
         let role_binding = OperatorRoleBinding::new(&role, &service_account);
         let user_cluster_role = OperatorClusterUserRole::new();
 
@@ -142,6 +148,7 @@ impl Operator {
             license_key,
             image,
             sqs_splitting,
+            kafka_splitting,
         );
 
         let service = OperatorService::new(&namespace);
@@ -161,6 +168,7 @@ impl Operator {
             client_ca_role,
             client_ca_role_binding,
             sqs_splitting,
+            kafka_splitting,
         }
     }
 }
@@ -212,6 +220,17 @@ impl OperatorSetup for Operator {
             MirrordSqsSession::crd().to_writer(&mut writer)?;
         }
 
+        if self.kafka_splitting {
+            writer.write_all(b"---\n")?;
+            MirrordKafkaClientConfig::crd().to_writer(&mut writer)?;
+
+            writer.write_all(b"---\n")?;
+            MirrordKafkaEphemeralTopic::crd().to_writer(&mut writer)?;
+
+            writer.write_all(b"---\n")?;
+            MirrordKafkaTopicsConsumer::crd().to_writer(&mut writer)?;
+        }
+
         Ok(())
     }
 }
@@ -252,6 +271,7 @@ impl OperatorDeployment {
         license_key: Option<String>,
         image: String,
         sqs_splitting: bool,
+        kafka_splitting: bool,
     ) -> Self {
         let mut envs = vec![
             EnvVar {
@@ -315,6 +335,14 @@ impl OperatorDeployment {
             envs.push(EnvVar {
                 name: "OPERATOR_SQS_SPLITTING".to_owned(),
                 value: Some("true".to_string()),
+                value_from: None,
+            });
+        }
+
+        if kafka_splitting {
+            envs.push(EnvVar {
+                name: "OPERATOR_KAFKA_SPLITTING".into(),
+                value: Some("true".into()),
                 value_from: None,
             });
         }
@@ -437,7 +465,7 @@ impl OperatorServiceAccount {
 pub struct OperatorRole(ClusterRole);
 
 impl OperatorRole {
-    pub fn new(sqs_splitting: bool) -> Self {
+    pub fn new(sqs_splitting: bool, kafka_splitting: bool) -> Self {
         let mut rules = vec![
             PolicyRule {
                 api_groups: Some(vec![
@@ -461,20 +489,6 @@ impl OperatorRole {
                     "statefulsets/scale".to_owned(),
                 ]),
                 verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
-                ..Default::default()
-            },
-            // For SQS controller to temporarily change deployments to use changed queues.
-            PolicyRule {
-                api_groups: Some(vec!["apps".to_owned()]),
-                resources: Some(vec!["deployments".to_owned()]),
-                verbs: vec!["patch".to_owned()],
-                ..Default::default()
-            },
-            // For SQS controller to temporarily change Argo Rollouts to use changed queues.
-            PolicyRule {
-                api_groups: Some(vec!["argoproj.io".to_owned()]),
-                resources: Some(vec!["rollouts".to_owned()]),
-                verbs: vec!["patch".to_owned()],
                 ..Default::default()
             },
             PolicyRule {
@@ -507,35 +521,92 @@ impl OperatorRole {
             },
             // Allow the operator to list+get mirrord policies.
             PolicyRule {
-                api_groups: Some(vec!["policies.mirrord.metalbear.co".to_owned()]),
-                resources: Some(vec![MirrordPolicy::plural(&()).to_string()]),
+                api_groups: Some(vec![MirrordPolicy::group(&()).into_owned()]),
+                resources: Some(vec![MirrordPolicy::plural(&()).into_owned()]),
                 verbs: vec!["list".to_owned(), "get".to_owned()],
                 ..Default::default()
             },
         ];
-        if sqs_splitting {
+
+        if sqs_splitting || kafka_splitting {
             rules.extend([
-                // Allow the operator to list mirrord queue registries.
+                // For SQS/Kafka controller to temporarily change deployments to use changed
+                // queues.
                 PolicyRule {
-                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
-                    resources: Some(vec![MirrordWorkloadQueueRegistry::plural(&()).to_string()]),
-                    verbs: vec!["list".to_owned()],
+                    api_groups: Some(vec!["apps".to_owned()]),
+                    resources: Some(vec!["deployments".to_owned()]),
+                    verbs: vec!["patch".to_owned()],
                     ..Default::default()
                 },
+                // For SQS/Kafka controller to temporarily change Argo Rollouts to use changed
+                // queues.
+                PolicyRule {
+                    api_groups: Some(vec!["argoproj.io".to_owned()]),
+                    resources: Some(vec!["rollouts".to_owned()]),
+                    verbs: vec!["patch".to_owned()],
+                    ..Default::default()
+                },
+            ]);
+        }
+
+        if kafka_splitting {
+            rules.extend([
+                PolicyRule {
+                    api_groups: Some(vec![MirrordKafkaEphemeralTopic::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordKafkaEphemeralTopic::plural(&()).into_owned()]),
+                    verbs: ["get", "list", "watch", "create", "delete"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                    ..Default::default()
+                },
+                PolicyRule {
+                    api_groups: Some(vec![MirrordKafkaClientConfig::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordKafkaClientConfig::plural(&()).into_owned()]),
+                    verbs: ["get", "list", "watch"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                    ..Default::default()
+                },
+                PolicyRule {
+                    api_groups: Some(vec![MirrordKafkaTopicsConsumer::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordKafkaTopicsConsumer::plural(&()).into_owned()]),
+                    verbs: ["get", "list", "watch"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                    ..Default::default()
+                },
+            ]);
+        }
+
+        if sqs_splitting {
+            rules.extend([
                 // Allow the SQS controller to update queue registry status.
                 PolicyRule {
-                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
-                    resources: Some(vec!["mirrordworkloadqueueregistries/status".to_string()]),
+                    api_groups: Some(vec![MirrordWorkloadQueueRegistry::group(&()).into_owned()]),
+                    resources: Some(vec![format!(
+                        "{}/status",
+                        MirrordWorkloadQueueRegistry::plural(&())
+                    )]),
                     verbs: vec![
                         // For setting the status in the SQS controller.
                         "update".to_owned(),
                     ],
                     ..Default::default()
                 },
+                // Allow the operator to list mirrord queue registries.
+                PolicyRule {
+                    api_groups: Some(vec![MirrordWorkloadQueueRegistry::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordWorkloadQueueRegistry::plural(&()).into_owned()]),
+                    verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
+                    ..Default::default()
+                },
                 // Allow the operator to control mirrord SQS session objects.
                 PolicyRule {
-                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
-                    resources: Some(vec![MirrordSqsSession::plural(&()).to_string()]),
+                    api_groups: Some(vec![MirrordSqsSession::group(&()).into_owned()]),
+                    resources: Some(vec![MirrordSqsSession::plural(&()).into_owned()]),
                     verbs: vec![
                         "create".to_owned(),
                         "watch".to_owned(),
@@ -547,10 +618,10 @@ impl OperatorRole {
                     ],
                     ..Default::default()
                 },
-                // Allow the SQS controller to update queue registry status.
+                // Allow the SQS controller to update SQS session status.
                 PolicyRule {
-                    api_groups: Some(vec!["queues.mirrord.metalbear.co".to_owned()]),
-                    resources: Some(vec!["mirrordsqssessions/status".to_string()]),
+                    api_groups: Some(vec![MirrordSqsSession::group(&()).into_owned()]),
+                    resources: Some(vec![format!("{}/status", MirrordSqsSession::plural(&()))]),
                     verbs: vec![
                         // For setting the status in the SQS controller.
                         "update".to_owned(),
@@ -559,6 +630,7 @@ impl OperatorRole {
                 },
             ]);
         }
+
         let role = ClusterRole {
             metadata: ObjectMeta {
                 name: Some(OPERATOR_ROLE_NAME.to_owned()),
@@ -582,7 +654,7 @@ impl OperatorRole {
 
 impl Default for OperatorRole {
     fn default() -> Self {
-        Self::new(false)
+        Self::new(false, false)
     }
 }
 

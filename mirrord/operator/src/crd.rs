@@ -7,7 +7,7 @@ use kube::{CustomResource, Resource};
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
 use mirrord_config::{
-    feature::split_queues::{SplitQueuesConfig, SqsMessageFilter},
+    feature::split_queues::{QueueMessageFilter, SplitQueuesConfig},
     target::{Target, TargetConfig},
 };
 use schemars::JsonSchema;
@@ -19,6 +19,7 @@ use self::label_selector::LabelSelector;
 use crate::client::error::OperatorApiError;
 use crate::types::LicenseInfoOwned;
 
+pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
 
@@ -261,8 +262,9 @@ pub enum OperatorFeatures {
 pub enum NewOperatorFeature {
     ProxyApi,
     CopyTarget,
-    SqsQueueSplitting,
     SessionManagement,
+    SqsQueueSplitting,
+    KafkaQueueSplitting,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -275,9 +277,10 @@ impl Display for NewOperatorFeature {
         let name = match self {
             NewOperatorFeature::ProxyApi => "proxy API",
             NewOperatorFeature::CopyTarget => "copy target",
-            NewOperatorFeature::SqsQueueSplitting => "SQS queue splitting",
-            NewOperatorFeature::Unknown => "unknown feature",
             NewOperatorFeature::SessionManagement => "session management",
+            NewOperatorFeature::SqsQueueSplitting => "SQS queue splitting",
+            NewOperatorFeature::KafkaQueueSplitting => "Kafka queue splitting",
+            NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
     }
@@ -642,7 +645,7 @@ pub struct MirrordSqsSessionSpec {
     /// For each queue_id, a mapping from attribute name, to attribute value regex.
     /// The queue_id for a queue is determined at the queue registry. It is not (necessarily)
     /// The name of the queue on AWS.
-    pub queue_filters: HashMap<QueueId, SqsMessageFilter>,
+    pub queue_filters: HashMap<QueueId, QueueMessageFilter>,
 
     /// The target of this session.
     pub queue_consumer: QueueConsumer,
