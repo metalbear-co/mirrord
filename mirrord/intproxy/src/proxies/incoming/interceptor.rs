@@ -154,7 +154,7 @@ impl BackgroundTask for Interceptor {
     type MessageIn = MessageIn;
     type MessageOut = MessageOut;
 
-    #[tracing::instrument(level = Level::DEBUG, skip_all, err)]
+    #[tracing::instrument(level = Level::TRACE, skip_all, err)]
     async fn run(self, message_bus: &mut MessageBus<Self>) -> InterceptorResult<(), Self::Error> {
         let mut stream = self.socket.connect(self.peer).await?;
 
@@ -248,7 +248,7 @@ impl HttpConnection {
     ///
     /// See [`HttpResponseFallback::response_from_request`] for notes on picking the correct
     /// [`HttpResponseFallback`] variant.
-    #[tracing::instrument(level = Level::DEBUG, skip(self, response), err(level = Level::WARN))]
+    #[tracing::instrument(level = Level::TRACE, skip(self, response), err(level = Level::WARN))]
     async fn handle_response(
         &self,
         request: HttpRequestFallback,
@@ -365,7 +365,7 @@ impl HttpConnection {
     /// [`RETRY_ON_RESET_ATTEMPTS`].
     ///
     /// Returns [`HttpResponseFallback`] from the server.
-    #[tracing::instrument(level = Level::DEBUG, skip(self), ret, err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     async fn send(
         &mut self,
         request: HttpRequestFallback,
@@ -415,7 +415,7 @@ impl HttpConnection {
     ///
     /// When an HTTP upgrade happens, the underlying [`TcpStream`] is reclaimed, wrapped
     /// in a [`RawConnection`] and returned. When [`MessageBus`] closes, [`None`] is returned.
-    #[tracing::instrument(level = Level::DEBUG, skip_all, ret, err)]
+    #[tracing::instrument(level = Level::TRACE, skip_all, ret, err)]
     async fn run(
         mut self,
         message_bus: &mut MessageBus<Interceptor>,

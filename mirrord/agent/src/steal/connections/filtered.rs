@@ -458,7 +458,7 @@ where
 
     /// Matches the given [`Request`] against [`Self::filters`] and state of [`Self::subscribed`].
     #[tracing::instrument(
-        level = Level::DEBUG,
+        level = Level::TRACE,
         name = "match_request_with_filter",
         skip(self, request),
         fields(
@@ -481,7 +481,7 @@ where
     /// If there is no blocked request for the given ([`ClientId`], [`RequestId`]) combination or
     /// the HTTP connection is dead, does nothing.
     #[tracing::instrument(
-        level = Level::DEBUG,
+        level = Level::TRACE,
         name = "handle_filtered_request_response",
         skip(self, response),
         fields(
@@ -531,7 +531,7 @@ where
     /// If there is no blocked request for the given ([`ClientId`], [`RequestId`]) combination or
     /// the HTTP connection is dead, does nothing.
     #[tracing::instrument(
-        level = Level::DEBUG,
+        level = Level::TRACE,
         name = "handle_filtered_request_response_failure",
         skip(self),
         fields(
@@ -555,7 +555,13 @@ where
     }
 
     /// Handles a [`Request`] intercepted by the [`FilteringService`].
-    #[tracing::instrument(level = Level::INFO, skip(self, tx), fields(?request = request.request), ret, err(level = Level::WARN))]
+    #[tracing::instrument(
+        level = Level::TRACE,
+        skip(self, tx),
+        fields(?request = request.request),
+        ret,
+        err(level = Level::WARN)
+    )]
     async fn handle_request(
         &mut self,
         mut request: ExtractedRequest,
@@ -579,7 +585,6 @@ where
                 connection_id: self.connection_id,
             })
             .await?;
-            tracing::info!("It's the first time!");
         }
 
         let id = self.next_request_id;
@@ -596,9 +601,6 @@ where
 
         self.blocked_requests
             .insert((client_id, id), request.response_tx);
-
-        let request_ids = self.blocked_requests.keys();
-        tracing::debug!(?request_ids, "ids for stuff");
 
         Ok(())
     }

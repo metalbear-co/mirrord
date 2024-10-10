@@ -122,7 +122,7 @@ struct NormalizedHeaders(Vec<String>);
 
 impl NormalizedHeaders {
     /// Checks whether any header in this set matches the given [`Regex`].
-    #[tracing::instrument(level = Level::DEBUG, ret)]
+    #[tracing::instrument(level = Level::TRACE, ret)]
     fn has_match(&self, regex: &Regex) -> bool {
         self.0.iter().any(|header| {
             regex

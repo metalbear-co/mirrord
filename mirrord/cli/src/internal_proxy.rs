@@ -86,11 +86,11 @@ pub(crate) async fn proxy(listen_port: u16, watch: drain::Watch) -> Result<(), I
         .internal_proxy
         .log_level
         .as_deref()
-        .unwrap_or("mirrord=debug,hyper=debug");
+        .unwrap_or("mirrord=info,info");
 
     tracing_subscriber::fmt()
         .with_writer(output_file)
-        .with_ansi(true)
+        .with_ansi(false)
         .with_env_filter(EnvFilter::builder().parse_lossy(log_level))
         .pretty()
         .init();

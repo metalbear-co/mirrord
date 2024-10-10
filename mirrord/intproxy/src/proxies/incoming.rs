@@ -55,7 +55,7 @@ mod subscriptions;
 /// # Exception
 ///
 /// If the given `addr` is unspecified, this function binds to localhost.
-#[tracing::instrument(level = Level::DEBUG, ret, err)]
+#[tracing::instrument(level = Level::TRACE, ret, err)]
 fn bind_similar(addr: SocketAddr) -> io::Result<TcpSocket> {
     match addr.ip() {
         IpAddr::V4(Ipv4Addr::UNSPECIFIED) => {
@@ -576,7 +576,7 @@ impl IncomingProxy {
     /// process, by sending the original `request` again through the http `interceptor` to
     /// our hyper handler.
     #[allow(clippy::type_complexity)]
-    #[tracing::instrument(level = Level::DEBUG, skip(self), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
     async fn streamed_http_response(
         &mut self,
         mut response: HttpResponse<StreamBody<ReceiverStream<Result<Frame<Bytes>, hyper::Error>>>>,
