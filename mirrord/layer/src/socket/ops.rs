@@ -174,13 +174,7 @@ fn bind_similar_address(sockfd: c_int, requested_address: &SocketAddr) -> Detour
 
 /// Checks if given TCP port needs to be ignored
 /// based on http_filter/ports logic
-fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
-    let mapped_port = crate::setup()
-        .incoming_config()
-        .port_mapping
-        .get_by_left(&addr.port())
-        .copied()
-        .unwrap_or_else(|| addr.port());
+fn is_ignored_tcp_port(original_port: u16, mapped_port: u16, config: &IncomingConfig) -> bool {
     let http_filter_used = config.mode == IncomingMode::Steal && config.http_filter.is_filter_set();
 
     // this is a bit weird but it makes more sense configured ports are the remote port
@@ -198,30 +192,7 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
         .map(|ports| !ports.contains(&mapped_port))
         .unwrap_or(http_filter_used);
 
-    if http_filter_used && not_a_filtered_port && config.ports.is_none() {
-        // User specified a filter that does not include this port, and did not specify any
-        // unfiltered ports.
-        // It's plausible that the user did not know the port has to be in either port list to be
-        // stolen when an HTTP filter is set, so show a warning.
-        let port_text = if mapped_port != addr.port() {
-            format!(
-                "Remote port {mapped_port} (mapped from local port {})",
-                addr.port()
-            )
-        } else {
-            format!("Port {mapped_port}")
-        };
-        warn!(
-            "{port_text} was not included in the filtered ports, and also not in the non-filtered \
-            ports, and will therefore be bound locally. If this is intentional, ignore this \
-            warning. If you want the http filter to apply to this port, add it to \
-            `feature.network.incoming.http_filter.ports`. \
-            If you want to steal all the traffic of this port, add it to \
-            `feature.network.incoming.ports`."
-        );
-    }
-
-    is_ignored_port(addr) || (not_stolen_with_filter && not_whitelisted)
+    is_ignored_port(original_port) || (not_stolen_with_filter && not_whitelisted)
 }
 
 /// If the socket is not found in [`SOCKETS`], bypass.
@@ -257,13 +228,28 @@ pub(super) fn bind(
         return Detour::Bypass(Bypass::IgnoreLocalhost(requested_port));
     }
 
+    let mapped_port = crate::setup()
+        .incoming_config()
+        .port_mapping
+        .get_by_left(&requested_port)
+        .copied()
+        .unwrap_or(requested_port);
+
+    // TODO: this call could be for an outgoing connection.
+    //  Ignoring should be done on listen for incoming connections, on connect for outgoing.
     // To handle #1458, we don't ignore port `0` for UDP.
     if (matches!(socket.kind, SocketKind::Tcp(_)))
-        && is_ignored_tcp_port(&requested_address, incoming_config)
+        && is_ignored_tcp_port(requested_port, mapped_port, incoming_config)
         || crate::setup().is_debugger_port(&requested_address)
         || incoming_config.ignore_ports.contains(&requested_port)
     {
-        Err(Bypass::Port(requested_address.port()))?;
+        Arc::get_mut(&mut socket).unwrap().state = SocketState::IgnoredForIncoming(BoundLocally {
+            requested_address,
+            mapped_port,
+        });
+
+        SOCKETS.lock()?.insert(sockfd, socket);
+        return Detour::Bypass(Bypass::Port(requested_port));
     }
 
     // Check that the domain matches the requested address.
@@ -285,7 +271,9 @@ pub(super) fn bind(
             .lock()?
             .iter()
             .any(|(_, socket)| match &socket.state {
-                SocketState::Initialized | SocketState::Connected(_) => false,
+                SocketState::Initialized
+                | SocketState::Connected(_)
+                | SocketState::IgnoredForIncoming(_) => false,
                 SocketState::Bound(bound) | SocketState::Listening(bound) => {
                     bound.requested_address == requested_address
                 }
@@ -343,6 +331,44 @@ pub(super) fn bind(
     Detour::Success(0)
 }
 
+/// Warn the user if they are filtering HTTP, and it looks like they might have intended to also
+/// steal another port unfiltered, but didn't know they had to set `feature.network.incoming.ports`
+/// for that.
+fn warn_if_listening_locally_on_non_filtered_port(
+    mapped_port: u16,
+    original_port: u16,
+    config: &IncomingConfig,
+) {
+    let http_filter_used = config.mode == IncomingMode::Steal && config.http_filter.is_filter_set();
+
+    // Filter port selection is done on mapped ports, not original.
+    // see https://github.com/metalbear-co/mirrord/issues/2397
+    let not_a_filtered_port = !config.http_filter.ports.contains(&mapped_port);
+
+    if http_filter_used && not_a_filtered_port && config.ports.is_none() {
+        // User specified a filter that does not include this port, and did not specify any
+        // unfiltered ports.
+        // It's plausible that the user did not know the port has to be in either port list to be
+        // stolen when an HTTP filter is set, so show a warning.
+        let port_text = if mapped_port != original_port {
+            format!(
+                "Remote port {mapped_port} (mapped from local port {})",
+                original_port
+            )
+        } else {
+            format!("Port {mapped_port}")
+        };
+        warn!(
+            "{port_text} was not included in the filtered ports, and also not in the non-filtered \
+            ports, and will therefore be bound locally. If this is intentional, ignore this \
+            warning. If you want the http filter to apply to this port, add it to \
+            `feature.network.incoming.http_filter.ports`. \
+            If you want to steal all the traffic of this port, add it to \
+            `feature.network.incoming.ports`."
+        );
+    }
+}
+
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
 #[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
@@ -360,20 +386,19 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
         return Detour::Bypass(Bypass::DisabledIncoming);
     }
 
-    if setup.targetless() {
-        warn!(
-            "Listening while running targetless. A targetless agent is not exposed by \
-        any service. Therefore, letting this port bind happen locally instead of on the \
-        cluster.",
-        );
-        return Detour::Bypass(Bypass::BindWhenTargetless);
-    }
-
     match socket.state {
         SocketState::Bound(Bound {
             requested_address,
             address,
         }) => {
+            if setup.targetless() {
+                warn!(
+                    "Listening while running targetless. A targetless agent is not exposed by \
+                    any service. Therefore, listening locally instead of on the cluster.",
+                );
+                return Detour::Bypass(Bypass::BindWhenTargetless);
+            }
+
             let listen_result = unsafe { FN_LISTEN(sockfd, backlog) };
             if listen_result != 0 {
                 let error = io::Error::last_os_error();
@@ -406,6 +431,17 @@ pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
             SOCKETS.lock()?.insert(sockfd, socket);
 
             Detour::Success(listen_result)
+        }
+        SocketState::IgnoredForIncoming(BoundLocally {
+            requested_address,
+            mapped_port,
+        }) => {
+            warn_if_listening_locally_on_non_filtered_port(
+                mapped_port,
+                requested_address.port(),
+                setup.incoming_config(),
+            );
+            Detour::Bypass(Bypass::Port(requested_address.port()))
         }
         _ => Detour::Bypass(Bypass::InvalidState(sockfd)),
     }
@@ -612,7 +648,7 @@ pub(super) fn connect(
             }
         }
 
-        if is_ignored_port(&ip_address) || crate::setup().is_debugger_port(&ip_address) {
+        if is_ignored_port(ip_address.port()) || crate::setup().is_debugger_port(&ip_address) {
             return Detour::Bypass(Bypass::Port(ip_address.port()));
         }
     } else if remote_address.is_unix() {
