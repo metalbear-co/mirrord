@@ -4217,6 +4217,7 @@ dependencies = [
  "serde_json",
  "socket2",
  "syscalls",
+ "tempfile",
  "test-cdylib",
  "tests",
  "thiserror",
