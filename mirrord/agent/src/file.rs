@@ -72,7 +72,6 @@ pub fn get_root_path_from_optional_pid(pid: Option<u64>) -> PathBuf {
 
 /// Resolve a path that might contain symlinks from a specific container to a path accessible from
 /// the root host
-#[tracing::instrument(level = "trace")]
 pub fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt::Debug>(
     path: P,
     root_path: R,
@@ -231,7 +230,6 @@ impl FileManager {
         })
     }
 
-    #[tracing::instrument(level = "trace")]
     pub fn new(pid: Option<u64>) -> Self {
         let root_path = get_root_path_from_optional_pid(pid);
         trace!("Agent root path >> {root_path:?}");
@@ -242,7 +240,6 @@ impl FileManager {
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     fn open(
         &mut self,
         path: PathBuf,
@@ -269,7 +266,6 @@ impl FileManager {
         Ok(OpenFileResponse { fd })
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     fn open_relative(
         &mut self,
         relative_fd: u64,
@@ -306,7 +302,6 @@ impl FileManager {
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn read(&mut self, fd: u64, buffer_size: u64) -> RemoteResult<ReadFileResponse> {
         self.open_files
             .get_mut(&fd)
@@ -339,7 +334,6 @@ impl FileManager {
     ///
     /// `fgets` is only supposed to read `buffer_size`, so we limit moving the file's position based
     /// on it (even though we return the full `Vec` of bytes).
-    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn read_line(
         &mut self,
         fd: u64,
@@ -376,7 +370,6 @@ impl FileManager {
             })
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn read_limited(
         &mut self,
         fd: u64,
@@ -411,7 +404,6 @@ impl FileManager {
     }
 
     /// Handles our `readlink_detour` with [`std::fs::read_link`].
-    #[tracing::instrument(level = Level::TRACE, skip_all)]
     pub(crate) fn read_link(&mut self, path: PathBuf) -> RemoteResult<ReadLinkFileResponse> {
         let path = path
             .strip_prefix("/")
@@ -424,7 +416,6 @@ impl FileManager {
             .map_err(ResponseError::from)
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn write_limited(
         &mut self,
         fd: u64,
@@ -451,12 +442,6 @@ impl FileManager {
     }
 
     pub(crate) fn seek(&mut self, fd: u64, seek_from: SeekFrom) -> RemoteResult<SeekFileResponse> {
-        trace!(
-            "FileManager::seek -> fd {:#?} | seek_from {:#?}",
-            fd,
-            seek_from
-        );
-
         self.open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
@@ -541,7 +526,6 @@ impl FileManager {
             .map_err(ResponseError::from)
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn xstat(
         &mut self,
         path: Option<PathBuf>,
@@ -600,7 +584,6 @@ impl FileManager {
         .map_err(ResponseError::from)
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn xstatfs(&mut self, fd: u64) -> RemoteResult<XstatFsResponse> {
         let target = self
             .open_files
@@ -619,7 +602,6 @@ impl FileManager {
         })
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn fdopen_dir(&mut self, fd: u64) -> RemoteResult<OpenDirResponse> {
         let path = match self
             .open_files
@@ -714,7 +696,6 @@ impl FileManager {
         }
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
     pub(crate) fn read_dir(&mut self, fd: u64) -> RemoteResult<ReadDirResponse> {
         let dir_stream = self.get_dir_stream(fd)?;
         let result = if let Some(offset_entry_pair) = dir_stream.next() {
@@ -731,7 +712,6 @@ impl FileManager {
     /// Instead of returning just 1 [`DirEntryInternal`] from a `readdir` call (which in
     /// Rust means advancing the [`read_dir`](std::fs::read_dir) iterator), we return
     /// an iterator with (at most) `amount` items.
-    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
     pub(crate) fn read_dir_batch(
         &mut self,
         fd: u64,
