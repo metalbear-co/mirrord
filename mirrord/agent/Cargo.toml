@@ -28,7 +28,7 @@ tokio = { workspace = true, features = [
     "process",
     "signal",
 ] }
-procfs = "0.16.0"
+procfs = "0.17.0"
 serde.workspace = true
 serde_json.workspace = true
 pnet = "0.35"
@@ -43,7 +43,7 @@ tokio-stream.workspace = true
 thiserror.workspace = true
 hickory-resolver.workspace = true
 num-traits.workspace = true
-bollard = "0.16"
+bollard = "0.17"
 tokio-util.workspace = true
 rand.workspace = true
 streammap-ext.workspace = true
@@ -58,11 +58,11 @@ hyper = { workspace = true, features = ["full"] }
 hyper-util.workspace = true
 httparse = "1"
 fancy-regex = { workspace = true }
-dashmap = { version = "5" }
-oci-spec = "0.6.0"
+dashmap = { version = "6" }
+oci-spec = "0.7.0"
 async-trait = "0.1"
 tonic = "0.12"
-tower = "0.4"
+tower = "0.5"
 http = "1"
 k8s-cri = "0.9"
 semver.workspace = true
@@ -78,7 +78,7 @@ rawsocket = { git = "https://github.com/metalbear-co/rawsocket.git" }
 
 
 [dev-dependencies]
-rstest = "0.21"
-mockall = "0.12" # 0.11.3 is broken
+rstest = "0.23"
+mockall = "0.13"
 test_bin = "0.4"
 rcgen = "0.13"
