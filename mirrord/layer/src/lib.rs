@@ -40,18 +40,18 @@
 //! When run with mirrord, this is what's going to happen:
 //!
 //! 1. We intercept the call to [`libc::open`] using our `open_detour` hook, which calls
-//!  [`file::ops::open`];
+//!    [`file::ops::open`];
 //!
 //! 2. [`file::ops::open`] sends an open file message to `mirrord-agent`;
 //!
 //! 3. `mirrore-agent` tries to open `/tmp/hello.txt` in the remote context it's running, and
-//! returns the result of the operation back to `mirrord-layer`;
+//!    returns the result of the operation back to `mirrord-layer`;
 //!
 //! 4. We handle the mapping of the remote file (the one we have open in `mirrord-agent`), and a
-//! local file (temporarily created);
+//!    local file (temporarily created);
 //!
 //! 5. And finally, we return the expected result (type) to your Node.js application, as if it had
-//! just called [`libc::open`].
+//!    just called [`libc::open`].
 //!
 //! Your application will get an fd that is valid in the context of mirrord, and calls to other file
 //! functions (like [`libc::read`]), will work just fine, operating on the remote file.
@@ -313,7 +313,7 @@ fn init_tracing() {
 /// 4. Replaces the [`libc`] calls with our hooks with [`enable_hooks`];
 ///
 /// 5. Fetches remote environment from the agent (if enabled with
-/// [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
+///     [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
 fn layer_start(mut config: LayerConfig) {
     if config.target.path.is_none() {
         // Use localwithoverrides on targetless regardless of user config.
