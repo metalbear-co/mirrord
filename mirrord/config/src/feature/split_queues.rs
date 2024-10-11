@@ -18,26 +18,26 @@ pub type QueueId = String;
 ///         "queue_type": "SQS",
 ///         "message_filter": {
 ///           "wows": "so wows",
-///           "coolz": "^very .*"
+///           "coolz": "^very"
 ///         }
 ///       },
 ///       "second-queue": {
 ///         "queue_type": "SQS",
 ///         "message_filter": {
-///           "who": "*you$"
+///           "who": "you$"
 ///         }
 ///       },
 ///       "third-queue": {
 ///         "queue_type": "Kafka",
 ///         "message_filter": {
-///           "who": "*you$"
+///           "who": "you$"
 ///         }
 ///       },
 ///       "fourth-queue": {
 ///         "queue_type": "Kafka",
 ///         "message_filter": {
 ///           "wows": "so wows",
-///           "coolz": "^very .*"
+///           "coolz": "^very"
 ///         }
 ///       },
 ///     }
