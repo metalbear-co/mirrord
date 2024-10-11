@@ -28,7 +28,7 @@ pub struct FramesFut<'a, B> {
     no_wait: bool,
 }
 
-impl<B> Future for FramesFut<B>
+impl<B> Future for FramesFut<'_, B>
 where
     B: Body<Data = Bytes, Error = hyper::Error> + Unpin,
 {
