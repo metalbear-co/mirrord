@@ -75,8 +75,7 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "str xzr, [sp, 0x50]",
         "ret",
         asmcgocall = sym FN_ASMCGOCALL,
-        syscall_handler = sym mirrord_syscall_handler,
-        options(noreturn)
+        syscall_handler = sym mirrord_syscall_handler
     )
 }
 

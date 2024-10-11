@@ -103,8 +103,7 @@ unsafe extern "C" fn go_rawsyscall_detour() {
         "mov    QWORD PTR [rsp+0x38], 0x0",
         "xorps  xmm15, xmm15",
         "mov    r14, QWORD PTR FS:[0xfffffff8]",
-        "ret",
-        options(noreturn)
+        "ret"
     );
 }
 
@@ -189,8 +188,7 @@ unsafe extern "C" fn go_syscall6_detour() {
         "mov    QWORD PTR [rsp+0x50], 0x0",
         "xorps  xmm15, xmm15",
         "mov    r14, QWORD PTR FS:[0xfffffff8]",
-        "ret",
-        options(noreturn)
+        "ret"
     );
 }
 
@@ -269,8 +267,7 @@ unsafe extern "C" fn go_syscall_detour() {
         "mov    QWORD PTR [rsp+0x38], 0x0",
         "xorps  xmm15,xmm15",
         "mov    r14, QWORD PTR FS:[0xfffffff8]",
-        "ret",
-        options(noreturn)
+        "ret"
     );
 }
 
@@ -290,8 +287,7 @@ unsafe extern "C" fn gosave_systemstack_switch() {
         "jz     4f",
         "call   go_runtime_abort",
         "4:",
-        "ret",
-        options(noreturn)
+        "ret"
     );
 }
 
@@ -299,7 +295,7 @@ unsafe extern "C" fn gosave_systemstack_switch() {
 #[no_mangle]
 #[naked]
 unsafe extern "C" fn go_runtime_abort() {
-    naked_asm!("int 0x3", "jmp go_runtime_abort", options(noreturn));
+    naked_asm!("int 0x3", "jmp go_runtime_abort");
 }
 
 /// Syscall & Rawsyscall handler - supports upto 4 params, used for socket,
@@ -490,8 +486,7 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "mov    rcx, 0x0",
         "xorps  xmm15, xmm15",
         "mov    r14, QWORD PTR FS:[0xfffffff8]",
-        "ret",
-        options(noreturn)
+        "ret"
     )
 }
 
