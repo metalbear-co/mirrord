@@ -231,9 +231,11 @@ mod main {
     /// E.g. if the original binary is in `/bin/original/binary`, and it has 2 rpath entries:
     /// - `@loader_path/.`
     /// - `@loader_path/../lib`
+    ///
     /// We'll add to the binary at the output path the following rpath entries:
     /// - `/bin/original/.`
     /// - `/bin/original/../lib`
+    ///
     /// So the output binary has all 4 entries.
     fn add_rpath_entries(
         original_entries: &[&str],
@@ -558,8 +560,9 @@ mod main {
         Ok(output)
     }
 
-    /// Check if the file that the user wants to execute is a SIP protected binary (or a script
-    /// starting with a shebang that leads to a SIP protected binary).
+    /// Check if the file that the user wants to execute is a SIP protected binary
+    ///
+    /// (or a script starting with a shebang that leads to a SIP protected binary).
     /// If it is, create a non-protected version of the file and return `Ok(Some(patched_path)`.
     /// If it is not, `Ok(None)`.
     /// Propagate errors.

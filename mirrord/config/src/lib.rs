@@ -343,9 +343,9 @@ impl LayerConfig {
     ///
     /// Fills `context` with the warnings.
     ///
-    /// - `ide`: Identifies if this is being called from an IDE context, when using
-    /// `mirrord verify-config`. Turns some _target missing_ errors into warnings, as the target can
-    /// be selected after `verify-config` is run.
+    /// - `ide`: Identifies if this is being called from an IDE context, when using `mirrord
+    ///   verify-config`. Turns some _target missing_ errors into warnings, as the target can be
+    ///   selected after `verify-config` is run.
     pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
         if self.agent.ephemeral && self.agent.namespace.is_some() {
             context.add_warning(

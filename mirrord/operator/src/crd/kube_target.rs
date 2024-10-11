@@ -30,10 +30,10 @@ pub struct UnknownTargetType(pub String);
 /// [`Deserialize`] is _manually-ish_ implemented to handle the `Unknown` variant.
 ///
 /// [`Deserialize`] happens in two steps:
-/// 1. deserialize the type as a [`serde_json::Value`], where an error here means an
-/// an actual deserialization issue;
+/// 1. deserialize the type as a [`serde_json::Value`], where an error here means an an actual
+///    deserialization issue;
 /// 2. convert the [`serde_json::Value`] into a [`Target`], turning an error into
-/// [`KubeTarget::Unknown`].
+///    [`KubeTarget::Unknown`].
 #[derive(Serialize, Clone, Debug, JsonSchema)]
 #[serde(untagged)]
 pub enum KubeTarget {

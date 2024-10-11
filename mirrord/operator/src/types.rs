@@ -21,6 +21,7 @@ pub const MIRRORD_CLI_VERSION_HEADER: &str = "x-mirrord-cli-version";
 /// Sent with each request to the mirrord operator (if available) except:
 /// 1. Initial GET on the operator resource
 /// 2. User certificate request
+///
 /// Required for making the target connection request.
 pub const CLIENT_CERT_HEADER: &str = "x-client-der";
 
