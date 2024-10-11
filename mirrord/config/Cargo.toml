@@ -33,6 +33,7 @@ ipnet = "2.8"
 bitflags = "2"
 k8s-openapi = { workspace = true, features = ["schemars", "earliest"] }
 tera = "1"
+fancy-regex.workspace = true
 
 [dev-dependencies]
-rstest = "0.21"
+rstest = "0.23"

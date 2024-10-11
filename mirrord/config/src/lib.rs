@@ -522,6 +522,7 @@ impl LayerConfig {
 
         self.feature.network.dns.verify(context)?;
         self.feature.network.outgoing.verify(context)?;
+        self.feature.split_queues.verify(context)?;
 
         if self.experimental.readlink {
             context.add_warning(
