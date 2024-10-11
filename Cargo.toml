@@ -26,7 +26,7 @@ resolver = "2"
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.118.1"
+version = "3.119.1"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -67,7 +67,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 futures = "0.3"
 thiserror = "1"
-k8s-openapi = { version = "0.22", features = ["earliest"] }
+k8s-openapi = { version = "0.23", features = ["earliest"] }
 reqwest = { version = "0.12", default-features = false, features = [
     "blocking",
     "rustls-tls-native-roots",
@@ -75,7 +75,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "socks",
     "http2",
 ] }
-kube = { version = "0.93.1", default-features = false, features = [
+kube = { version = "0.95.0", git = "https://github.com/kube-rs/kube", rev = "3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb", default-features = false, features = [
     "runtime",
     "derive",
     "client",

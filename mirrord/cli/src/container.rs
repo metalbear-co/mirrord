@@ -228,8 +228,9 @@ pub(crate) async fn container_command(
         progress.warning(warning);
     }
 
-    let _internal_proxy_tls_guards = if config.internal_proxy.client_tls_certificate.is_none()
-        || config.internal_proxy.client_tls_key.is_none()
+    let _internal_proxy_tls_guards = if config.external_proxy.tls_enable
+        && (config.internal_proxy.client_tls_certificate.is_none()
+            || config.internal_proxy.client_tls_key.is_none())
     {
         let (internal_proxy_cert, internal_proxy_key) =
             create_self_signed_certificate(vec!["intproxy".to_owned()])?;
@@ -248,8 +249,9 @@ pub(crate) async fn container_command(
         None
     };
 
-    let _external_proxy_tls_guards = if config.external_proxy.tls_certificate.is_none()
-        || config.external_proxy.tls_key.is_none()
+    let _external_proxy_tls_guards = if config.external_proxy.tls_enable
+        && (config.external_proxy.tls_certificate.is_none()
+            || config.external_proxy.tls_key.is_none())
     {
         let external_proxy_subject_alt_names = local_ip()
             .map(|item| item.to_string())

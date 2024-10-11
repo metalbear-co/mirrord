@@ -169,7 +169,7 @@ impl SinglePortForwarder {
                 error = error_future.as_mut() => {
 
                     if retry_strategy.peek().is_none() || error.is_none() {
-                        tracing::warn!(?connect_info, "fininsed retry strategy closing connection");
+                        tracing::warn!(?connect_info, "finished retry strategy, closing connection");
 
                         break;
                     }
