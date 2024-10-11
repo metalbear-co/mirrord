@@ -36,4 +36,4 @@ tera = "1"
 fancy-regex.workspace = true
 
 [dev-dependencies]
-rstest = "0.21"
+rstest = "0.23"

@@ -36,7 +36,7 @@ mirrord-vpn = { path = "../vpn" }
 
 actix-codec.workspace = true
 clap.workspace = true
-tun2 = { version = "2", features = ["async"] }
+tun2 = { version = "3", features = ["async"] }
 tracing.workspace = true
 serde_json.workspace = true
 serde.workspace = true
@@ -68,7 +68,7 @@ tokio-rustls = "0.26"
 tokio-stream = { workspace = true, features = ["net"] }
 tokio-retry = "0.3"
 regex.workspace = true
-mid = "2.1.0"
+mid = "3.0.0"
 rand.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -79,4 +79,4 @@ mirrord-sip = { path = "../sip" }
 mirrord-layer = { artifact = "cdylib", path = "../layer" }
 
 [dev-dependencies]
-rstest = "0.21"
+rstest = "0.23"
