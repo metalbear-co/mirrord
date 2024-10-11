@@ -1,5 +1,4 @@
 #![feature(slice_concat_trait)]
-#![feature(lazy_cell)]
 #![warn(clippy::indexing_slicing)]
 //! <!--${internal}-->
 //! To generate the `mirrord-schema.json` file see

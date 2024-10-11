@@ -1,6 +1,5 @@
 #![feature(const_trait_impl)]
 #![feature(io_error_more)]
-#![feature(lazy_cell)]
 #![warn(clippy::indexing_slicing)]
 
 pub mod body_chunks;

@@ -294,7 +294,7 @@ pub enum SeekFromInternal {
     Current(i64),
 }
 
-impl const From<SeekFromInternal> for SeekFrom {
+impl From<SeekFromInternal> for SeekFrom {
     fn from(seek_from: SeekFromInternal) -> Self {
         match seek_from {
             SeekFromInternal::Start(start) => SeekFrom::Start(start),
@@ -304,7 +304,7 @@ impl const From<SeekFromInternal> for SeekFrom {
     }
 }
 
-impl const From<SeekFrom> for SeekFromInternal {
+impl From<SeekFrom> for SeekFromInternal {
     fn from(seek_from: SeekFrom) -> Self {
         match seek_from {
             SeekFrom::Start(start) => SeekFromInternal::Start(start),

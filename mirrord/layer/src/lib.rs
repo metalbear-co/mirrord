@@ -5,7 +5,6 @@
 #![feature(try_trait_v2)]
 #![feature(try_trait_v2_residual)]
 #![feature(c_size_t)]
-#![feature(lazy_cell)]
 #![feature(once_cell_try)]
 #![feature(vec_into_raw_parts)]
 #![allow(rustdoc::private_intra_doc_links)]
@@ -247,6 +246,7 @@ fn load_only_layer_start(config: &LayerConfig) {
     unsafe {
         // SAFETY
         // Called only from library constructor.
+        #[allow(static_mut_refs)]
         PROXY_CONNECTION
             .set(new_connection)
             .expect("setting PROXY_CONNECTION singleton")
@@ -368,6 +368,7 @@ fn layer_start(mut config: LayerConfig) {
         return;
     }
 
+    #[allow(static_mut_refs)]
     unsafe {
         let address = setup().proxy_address();
         let new_connection = ProxyConnection::new(
@@ -618,6 +619,7 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     match res.cmp(&0) {
         Ordering::Equal => {
             tracing::debug!("Child process initializing layer.");
+            #[allow(static_mut_refs)]
             let parent_connection = match unsafe { PROXY_CONNECTION.take() } {
                 Some(conn) => conn,
                 None => {
@@ -635,6 +637,7 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
                     .expect("PROXY_CONNECTION_TIMEOUT should be set by now!"),
             )
             .expect("failed to establish proxy connection for child");
+            #[allow(static_mut_refs)]
             PROXY_CONNECTION
                 .set(new_connection)
                 .expect("Failed setting PROXY_CONNECTION in child fork");

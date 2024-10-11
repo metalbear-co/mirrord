@@ -13,15 +13,15 @@ RUN cargo install cargo-chef
 FROM chef AS planner
 
 COPY . /build/
-RUN cargo +nightly-2024-04-15 chef prepare --recipe-path recipe.json
+RUN cargo +nightly-2024-10-11 chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 
 COPY --from=planner /build/recipe.json recipe.json
-RUN cargo +nightly-2024-04-15 chef cook --release --zigbuild --target $(cat /.platform) --recipe-path recipe.json
+RUN cargo +nightly-2024-10-11 chef cook --release --zigbuild --target $(cat /.platform) --recipe-path recipe.json
 
 COPY . /build/
-RUN cargo +nightly-2024-04-15 zigbuild -p mirrord -p mirrord-layer -Z bindeps --target $(cat /.platform) --release --locked
+RUN cargo +nightly-2024-10-11 zigbuild -p mirrord -p mirrord-layer -Z bindeps --target $(cat /.platform) --release --locked
 RUN cp /build/target/$(cat /.platform)/release/mirrord /mirrord
 RUN cp /build/target/$(cat /.platform)/release/libmirrord_layer.so /libmirrord_layer.so
 

@@ -949,7 +949,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
   onto `KubernetesAPI`.
 - Split off pod template to a separate `ContainerVariant` implementation used
   inside of `JobVariant` and `JobTargetedVariant`.
-- Updates to rust nightly-2024-04-15. Also fixes some pointer
+- Updates to rust nightly-2024-10-11. Also fixes some pointer
   copy_from_nonoverlapping issues.
 
 
