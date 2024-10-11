@@ -126,7 +126,6 @@ pub fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt:
 
 impl FileManager {
     /// Executes the request and returns the response.
-    #[tracing::instrument(level = "trace", skip(self))]
     pub fn handle_message(&mut self, request: FileRequest) -> Result<Option<FileResponse>> {
         Ok(match request {
             FileRequest::Open(OpenFileRequest { path, open_options }) => {
@@ -642,7 +641,6 @@ impl FileManager {
         Ok(OpenDirResponse { fd })
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn get_dir_stream(&mut self, fd: u64) -> RemoteResult<&mut Enumerate<ReadDir>> {
         self.dir_streams
             .get_mut(&fd)
@@ -689,7 +687,6 @@ impl FileManager {
     /// The possible remote errors are:
     /// [`ResponseError::NotFound`] if there is not such fd here.
     /// [`ResponseError::NotDirectory`] if the fd points to a file with a non-directory file type.
-    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn get_or_create_getdents64_stream(
         &mut self,
         fd: u64,
@@ -755,7 +752,6 @@ impl FileManager {
     /// where the last one stopped.
     /// After writing all entries, all future calls return 0 entries.
     /// The caller keeps calling until getting 0.
-    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn getdents64(
         &mut self,
         fd: u64,
