@@ -3476,19 +3476,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b1fb8864823fad91877e6caea0baca82e49e8db50f8e5c9f9a453e27d3330fc"
 dependencies = [
- "jsonptr 0.4.7",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
-name = "json-patch"
-version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "863726d7afb6bc2590eeff7135d923545e5e964f004c2ccf8716c25e70a86f08"
-dependencies = [
- "jsonptr 0.6.3",
+ "jsonptr",
  "serde",
  "serde_json",
  "thiserror",
@@ -3516,16 +3504,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c6e529149475ca0b2820835d3dce8fcc41c6b943ca608d32f35b449255e4627"
 dependencies = [
  "fluent-uri",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jsonptr"
-version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5dea2b27dd239b2556ed7a25ba842fe47fd602e7fc7433c2a8d6106d4d9edd70"
-dependencies = [
  "serde",
  "serde_json",
 ]
@@ -3646,7 +3624,7 @@ dependencies = [
  "chrono",
  "form_urlencoded",
  "http 1.1.0",
- "json-patch 2.0.0",
+ "json-patch",
  "k8s-openapi",
  "schemars",
  "serde",
@@ -3682,8 +3660,8 @@ dependencies = [
  "educe",
  "futures",
  "hashbrown 0.14.5",
- "json-patch 2.0.0",
- "jsonptr 0.4.7",
+ "json-patch",
+ "jsonptr",
  "k8s-openapi",
  "kube-client",
  "parking_lot",
@@ -6773,8 +6751,8 @@ dependencies = [
  "http-body-util",
  "hyper 1.4.1",
  "hyper-util",
- "json-patch 3.0.1",
- "jsonptr 0.6.3",
+ "json-patch",
+ "jsonptr",
  "k8s-openapi",
  "kube",
  "mirrord",
