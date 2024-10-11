@@ -24,7 +24,7 @@ use crate::{
 /// go's stack limit), so we need to switch to system stack.
 #[naked]
 unsafe extern "C" fn go_rawsyscall_detour() {
-    asm!(
+    naked_asm!(
         // push the arguments of Rawsyscall from the stack to preserved registers
         "mov rbx, QWORD PTR [rsp+0x10]",
         "mov r10, QWORD PTR [rsp+0x18]",
@@ -111,7 +111,7 @@ unsafe extern "C" fn go_rawsyscall_detour() {
 /// [Naked function] hook for Syscall6
 #[naked]
 unsafe extern "C" fn go_syscall6_detour() {
-    asm!(
+    naked_asm!(
         "mov rax, QWORD PTR [rsp+0x8]",
         "mov rbx, QWORD PTR [rsp+0x10]",
         "mov r10, QWORD PTR [rsp+0x18]",
@@ -197,7 +197,7 @@ unsafe extern "C" fn go_syscall6_detour() {
 /// [Naked function] hook for Syscall
 #[naked]
 unsafe extern "C" fn go_syscall_detour() {
-    asm!(
+    naked_asm!(
         "mov rax, QWORD PTR [rsp+0x8]",
         "mov rbx, QWORD PTR [rsp+0x10]",
         "mov r10, QWORD PTR [rsp+0x18]",
@@ -278,7 +278,7 @@ unsafe extern "C" fn go_syscall_detour() {
 #[no_mangle]
 #[naked]
 unsafe extern "C" fn gosave_systemstack_switch() {
-    asm!(
+    naked_asm!(
         "lea    r9, [rip+0xdd9]",
         "mov    QWORD PTR [r14+0x40],r9",
         "lea    r9, [rsp+0x8]",
@@ -299,7 +299,7 @@ unsafe extern "C" fn gosave_systemstack_switch() {
 #[no_mangle]
 #[naked]
 unsafe extern "C" fn go_runtime_abort() {
-    asm!("int 0x3", "jmp go_runtime_abort", options(noreturn));
+    naked_asm!("int 0x3", "jmp go_runtime_abort", options(noreturn));
 }
 
 /// Syscall & Rawsyscall handler - supports upto 4 params, used for socket,
@@ -393,7 +393,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
 /// so syscall6 handler need to handle syscall3 detours as well.
 #[naked]
 unsafe extern "C" fn go_syscall_new_detour() {
-    asm!(
+    naked_asm!(
         // Save rdi in r10
         "mov r10, rdi",
         // Save r9 in r11

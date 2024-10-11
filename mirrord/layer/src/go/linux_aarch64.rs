@@ -39,7 +39,7 @@ unsafe extern "C" fn mirrord_syscall_handler(syscall_struct: *const SyscallArgs)
 // We're using asmcogcall to avoid re-implementing it and doing it badly.
 #[naked]
 unsafe extern "C" fn go_syscall_new_detour() {
-    asm!(
+    naked_asm!(
         // save fp and lr to stack and reserve that memory.
         // if we don't do it and remember to load it back before ret
         // we will have unfortunate results
