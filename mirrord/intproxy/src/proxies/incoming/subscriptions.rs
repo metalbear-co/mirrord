@@ -119,7 +119,7 @@ impl Subscription {
 
     /// Removed a source from this subscription.
     /// If this source is the last one, returns [`Err`] with a message to be sent to the agent.
-    fn remove_source(mut self, listening_on: SocketAddr) -> Result<Self, ClientMessage> {
+    fn remove_source(mut self, listening_on: SocketAddr) -> Result<Self, Box<ClientMessage>> {
         let queue_size = self.queued_sources.len();
         self.queued_sources
             .retain(|source| source.request.listening_on != listening_on);
@@ -136,11 +136,12 @@ impl Subscription {
                 self.active_source = next_in_queue;
                 Ok(self)
             }
-            None => Err(self
-                .active_source
-                .request
-                .subscription
-                .wrap_agent_unsubscribe()),
+            None => Err(Box::new(
+                self.active_source
+                    .request
+                    .subscription
+                    .wrap_agent_unsubscribe(),
+            )),
         }
     }
 }
@@ -222,7 +223,7 @@ impl SubscriptionsManager {
                 self.subscriptions.insert(request.port, subscription);
                 None
             }
-            Err(message) => Some(message),
+            Err(message) => Some(*message),
         }
     }
 
@@ -287,7 +288,7 @@ impl SubscriptionsManager {
                         self.subscriptions.insert(port, subscription);
                         None
                     }
-                    Err(message) => Some(message),
+                    Err(message) => Some(*message),
                 }
             })
             .collect()

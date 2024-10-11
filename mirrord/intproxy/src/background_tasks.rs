@@ -182,6 +182,8 @@ pub enum TaskUpdate<MOut, Err> {
     Finished(Result<(), TaskError<Err>>),
 }
 
+/// A struct that can be used to send messages to a [`BackgroundTask`] registered
+///
 /// A struct that can be used to send messages to a [`BackgroundTask`] registered in the
 /// [`BackgroundTasks`] struct. Dropping this sender will close the channel of messages consumed by
 /// the task (see [`MessageBus`]). This should trigger task exit.

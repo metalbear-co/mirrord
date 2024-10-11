@@ -101,7 +101,7 @@ impl VpnAgent {
         self.tx
             .send(request)
             .await
-            .map_err(VpnError::ClientMessageDropped)
+            .map_err(|_| VpnError::ClientMessageDropped)
     }
 
     pub async fn send_and_get_response<T>(
@@ -109,7 +109,10 @@ impl VpnAgent {
         request: ClientMessage,
         response_filter: impl Fn(DaemonMessage) -> Option<T>,
     ) -> Result<Option<T>, VpnError> {
-        self.tx.send(request).await?;
+        self.tx
+            .send(request)
+            .await
+            .map_err(|_| VpnError::ClientMessageDropped)?;
 
         self.next()
             .await
