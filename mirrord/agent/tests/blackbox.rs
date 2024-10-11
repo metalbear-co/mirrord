@@ -21,6 +21,8 @@ mod tests {
     #[tokio::test]
     async fn sanity() {
         let mut bin = get_test_bin("mirrord-agent");
+        // we do wait, not sure what's happened
+        #[allow(clippy::zombie_processes)]
         let child = bin
             .arg("-t")
             .arg("2")
