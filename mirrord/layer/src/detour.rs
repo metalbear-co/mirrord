@@ -366,6 +366,15 @@ impl<S> Detour<S> {
             Detour::Error(e) => Detour::Error(e),
         }
     }
+
+    #[inline]
+    pub fn inspect_err<O: FnOnce(&HookError)>(self, op: O) -> Detour<S> {
+        match self {
+            Detour::Error(ref e) => op(e),
+            _ => (),
+        }
+        self
+    }
 }
 
 impl<S> Detour<S>

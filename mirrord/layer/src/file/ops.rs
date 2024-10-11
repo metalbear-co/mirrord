@@ -11,7 +11,7 @@ use mirrord_protocol::{
         ReadLinkFileRequest, ReadLinkFileResponse, SeekFileResponse, WriteFileResponse,
         XstatFsResponse, XstatResponse,
     },
-    ResponseError,
+    ErrorKindInternal, RemoteIOError, ResponseError,
 };
 use rand::distributions::{Alphanumeric, DistString};
 use tracing::{error, trace, Level};
@@ -176,7 +176,7 @@ fn close_remote_file_on_failure(fd: u64) -> Result<()> {
 /// [`open`] is also used by other _open-ish_ functions, and it takes care of **creating** the
 /// _local_ and _remote_ file association, plus **inserting** it into the storage for
 /// [`OPEN_FILES`].
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
     let path = path?;
 
@@ -186,7 +186,23 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
 
     ensure_not_ignored!(path, open_options.is_write());
 
-    let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)?;
+    let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)
+        .inspect_err(|fail| {
+            if let HookError::ResponseError(ResponseError::RemoteIO(RemoteIOError {
+                kind: ErrorKindInternal::PermissionDenied,
+                ..
+            })) = fail
+                && path.ends_with("resolv.conf")
+            {
+                tracing::error!(
+                    ?fail,
+                    "Failed to open `resolv.conf` from the remote pod, DNS will not work!\
+                    \n- This may be caused due to the mirrord agent lacking privileges\
+                    to access the target container's `/etc/resolv.conf`. 
+                    "
+                );
+            }
+        })?;
 
     // TODO: Need a way to say "open a directory", right now `is_dir` always returns false.
     // This requires having a fake directory name (`/fake`, for example), instead of just converting
