@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:5411527b77fe5a87712a4fd98d0bfdab52eca117 AS chef
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9 AS chef
 ARG TARGETARCH
 WORKDIR /build
 

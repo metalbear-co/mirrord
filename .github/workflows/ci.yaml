@@ -202,7 +202,7 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     container:
-      image: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32
+      image: ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9
     steps:
       - uses: actions/checkout@v4
       - uses: arduino/setup-protoc@v1

@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:5411527b77fe5a87712a4fd98d0bfdab52eca117 AS chef
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9 AS chef
 ARG TARGETARCH
 WORKDIR /app
 
@@ -46,7 +46,7 @@ RUN sed -i '/members = \[/,/\]/c\members = [\n    "mirrord/*",\n]' /app/Cargo.to
 RUN cargo +nightly-2024-10-11 zigbuild -Z bindeps --manifest-path /app/mirrord/agent/Cargo.toml --target $(cat /.platform) --release
 RUN cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
 
-FROM ghcr.io/metalbear-co/ci-agent-runtime:latest
+FROM ghcr.io/metalbear-co/ci-agent-runtime:4d3398bec3ed3d1e228276b335a1e865fc277aae81e95d51f4ed267551f92f3a
 COPY --from=builder /mirrord-agent /
 
 CMD ["./mirrord-agent"]
