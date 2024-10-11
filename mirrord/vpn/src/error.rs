@@ -2,6 +2,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum VpnError {
+    #[error("vpn failed because of bad response from agent: {0}")]
+    AgentErrorResponse(#[from] mirrord_protocol::ResponseError),
+
     #[error("vpn failed because of unexpected response from agent")]
     AgentUnexpectedResponse,
 
