@@ -1,4 +1,4 @@
-use std::arch::asm;
+use std::arch::naked_asm;
 
 use errno::errno;
 use tracing::trace;
