@@ -1,5 +1,7 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
+//! Note the case of IPv6 in IPv4 which requires special care to do right
+//! https://github.com/metalbear-co/mirrord/pull/2829
 use std::{
     collections::HashMap,
     net::{SocketAddr, ToSocketAddrs},
