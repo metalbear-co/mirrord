@@ -47,4 +47,4 @@ base64.workspace = true
 http-body.workspace = true
 hyper = "1"
 rstest = "*"
-tower = "0.4"
+tower = "0.5"

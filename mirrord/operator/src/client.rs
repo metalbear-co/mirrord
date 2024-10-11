@@ -449,10 +449,17 @@ where
                 .spec
                 .require_feature(NewOperatorFeature::CopyTarget)?
         }
-        if config.feature.split_queues.is_set() {
+
+        if config.feature.split_queues.sqs().next().is_some() {
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::SqsQueueSplitting)?;
+        }
+
+        if config.feature.split_queues.kafka().next().is_some() {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::KafkaQueueSplitting)?;
         }
 
         Ok(())
