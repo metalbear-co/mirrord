@@ -409,14 +409,14 @@ unsafe extern "C" fn go_syscall_new_detour() {
         // for any case, store it there in case it isn't stored
         "mov qword ptr fs:[0xfffffff8], rdi",
         "cmp rdi, 0x0",
-        "jz 1f",
+        "jz 2f",
         "mov rax, qword ptr [rdi + 0x30]",
         "mov rsi, qword ptr [rax + 0x50]",
         "cmp rdi, rsi",
-        "jz 1f",
+        "jz 2f",
         "mov rsi, qword ptr [rax]",
         "cmp rdi, rsi",
-        "jz 1f",
+        "jz 2f",
         "call gosave_systemstack_switch",
         "mov qword ptr FS:[0xfffffff8], rsi",
         "mov rsp, qword ptr [RSI + 0x38]",
@@ -443,7 +443,7 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "mov rsp, rsi",
         // Regular flow
         "cmp    rax, -0xfff",
-        "jbe    2f",
+        "jbe    3f",
         "neg    rax",
         "mov    rcx, rax",
         "mov    rax, -0x1",
@@ -453,7 +453,7 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "ret",
         // same as `nosave` in the asmcgocall.
         // calls the abi handler, when we have no g
-        "1:",
+        "2:",
         "sub    rsp, 0x40",
         "and    rsp, -0x10",
         "mov    QWORD PTR [rsp+0x30], 0x0",
@@ -472,7 +472,7 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "mov    rsp, rsi",
         // Regular flow
         "cmp    rax, -0xfff",
-        "jbe    2f",
+        "jbe    3f",
         "neg    rax",
         "mov    rcx, rax",
         "mov    rax, -0x1",
@@ -480,7 +480,7 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "xorps  xmm15, xmm15",
         "mov    r14, QWORD PTR FS:[0xfffffff8]",
         "ret",
-        "2:",
+        "3:",
         // RAX already contains return value
         "mov    rbx, 0x0",
         "mov    rcx, 0x0",

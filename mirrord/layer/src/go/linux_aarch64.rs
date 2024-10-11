@@ -60,7 +60,7 @@ unsafe extern "C" fn go_syscall_new_detour() {
         // check return code
         "cmn x0, 0xfff",
         // jump to success if return code == 0
-        "b.cc 1f",
+        "b.cc 2f",
         // syscall fail flow
         "mov x4, -0x1",
         "str x4, [sp, 0x40]",
@@ -69,7 +69,7 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "str x0, [sp, 0x50]",
         "ret",
         // syscall success
-        "1:",
+        "2:",
         "str x0, [sp, 0x40]",
         "str x1, [sp, 0x48]",
         "str xzr, [sp, 0x50]",
