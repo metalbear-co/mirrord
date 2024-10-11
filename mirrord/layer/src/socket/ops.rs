@@ -569,7 +569,7 @@ pub(super) fn connect(
     let is_ipv4_in_ipv6 = remote_address
         .as_socket()
         .as_ref()
-        .map(|addr| addr.to_canonical().is_ipv6())
+        .map(|addr| addr.ip().to_canonical().is_ipv6())
         .unwrap_or(false);
     let unix_streams = crate::setup().remote_unix_streams();
 
