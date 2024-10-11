@@ -150,7 +150,6 @@ pub enum QueueFilter {
 
 impl CollectAnalytics for &SplitQueuesConfig {
     fn collect_analytics(&self, analytics: &mut Analytics) {
-        analytics.add("queue_count", self.0.len());
         analytics.add("sqs_queue_count", self.sqs().count());
         analytics.add("kafka_queue_count", self.kafka().count());
     }
