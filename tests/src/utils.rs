@@ -690,6 +690,7 @@ impl Drop for ResourceGuard {
 }
 
 /// A service deployed to the kubernetes cluster.
+///
 /// Service is meant as in "Microservice", not as in the Kubernetes resource called Service.
 /// This includes a Deployment resource, a Service resource and optionally a Namespace.
 pub struct KubeService {
@@ -1036,7 +1037,9 @@ pub async fn service(
     .await
 }
 
-/// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
+/// Create a new [`KubeService`] and related Kubernetes resources.
+///
+/// The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
 /// This behavior can be changed, see [`PRESERVE_FAILED_ENV_NAME`].
 /// * `randomize_name` - whether a random suffix should be added to the end of the resource names

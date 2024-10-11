@@ -1,4 +1,5 @@
 //! Logic for managing background tasks in the internal proxy.
+//!
 //! The proxy utilizes multiple background tasks to split the code into more self-contained parts.
 //! Structs in this module aim to ease managing their state.
 //!

@@ -954,9 +954,8 @@ pub(super) fn getaddrinfo(
         .rev()
         .map(Box::new)
         .map(Box::into_raw)
-        .map(|raw| {
+        .inspect(|&raw| {
             managed_addr_info.insert(raw as usize);
-            raw
         })
         .reduce(|current, previous| {
             // Safety: These pointers were just allocated using `Box::new`, so they should be

@@ -38,6 +38,7 @@ mod main {
     };
 
     /// Where patched files are stored, relative to the temp dir (`/tmp/mirrord-bin/...`).
+    ///
     /// We added some random characaters to the end so we'll be able to identify dir better
     /// in situations where $TMPDIR changes between exec's, leading to strip not working
     /// https://github.com/metalbear-co/mirrord/issues/2500#issuecomment-2160026642

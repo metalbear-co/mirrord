@@ -72,6 +72,7 @@ pub struct ProcessInfo {
 pub struct LayerId(pub u64);
 
 /// A layer's request to start a new session with the internal proxy.
+///
 /// Contains info about layer's state.
 /// This should be the first message sent by the layer after opening a new connection to the
 /// internal proxy.

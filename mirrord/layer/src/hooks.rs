@@ -5,7 +5,7 @@ use tracing::trace;
 
 use crate::{LayerError, Result};
 
-static GUM: LazyLock<Gum> = LazyLock::new(|| Gum::obtain());
+static GUM: LazyLock<Gum> = LazyLock::new(Gum::obtain);
 
 /// Struct for managing the hooks using Frida.
 pub(crate) struct HookManager {
