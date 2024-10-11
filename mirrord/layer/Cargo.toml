@@ -44,7 +44,7 @@ regex.workspace = true
 errno = "0.3"
 socket2.workspace = true
 bytemuck = "1"
-hashbrown = "0.14"
+hashbrown = "0.15"
 exec.workspace = true
 syscalls = { version = "0.6", features = ["full"] }
 null-terminated = "0.3"
@@ -63,7 +63,7 @@ hyper = { workspace = true }
 rstest = "*"
 tempfile = "3"
 test-cdylib = "*"
-tower = "0.4"
+tower = "0.5"
 tokio = { version = "1", features = ["rt", "net", "macros"] }
 tests = { path = "../../tests" }
 flaky_test = "0.2"

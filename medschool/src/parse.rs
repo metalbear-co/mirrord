@@ -207,8 +207,9 @@ fn dfs_fields<'a, const MAX_RECURSION_LEVEL: usize>(
     recursion_level: &mut usize,
 ) -> Vec<String> {
     if *recursion_level >= MAX_RECURSION_LEVEL {
-        return vec!["Recursion limit reached".to_string()];
+        panic!("recursion limit {MAX_RECURSION_LEVEL} reached");
     }
+
     // increment the recursion level as we're going deeper into the tree
     types // get the type of the field from the types set to recurse into it's fields
         .get(&field.ty)
@@ -281,7 +282,7 @@ fn dfs_fields<'a, const MAX_RECURSION_LEVEL: usize>(
 #[tracing::instrument(level = "trace", ret)]
 pub fn resolve_references(types: HashSet<PartialType>) -> Option<PartialType> {
     /// Maximum recursion level for safety.
-    const MAX_RECURSION_LEVEL: usize = 10;
+    const MAX_RECURSION_LEVEL: usize = 16;
     // Cache to perform memoization between recursive calls so we don't have to resolve the same
     // type multiple times. Mapping between `ident` -> `resolved_docs`.
     // For example, if we have a types [`A`, `B`, `C`] and A has a field of type `B` and `B` has a

@@ -1236,13 +1236,26 @@ will be used, and your local application will not receive any messages from that
         "queue_type": "SQS",
         "message_filter": {
           "wows": "so wows",
-          "coolz": "^very .*"
+          "coolz": "^very"
         }
       },
       "second-queue": {
         "queue_type": "SQS",
         "message_filter": {
-          "who": "*you$"
+          "who": "you$"
+        }
+      },
+      "third-queue": {
+        "queue_type": "Kafka",
+        "message_filter": {
+          "who": "you$"
+        }
+      },
+      "fourth-queue": {
+        "queue_type": "Kafka",
+        "message_filter": {
+          "wows": "so wows",
+          "coolz": "^very"
         }
       },
     }
