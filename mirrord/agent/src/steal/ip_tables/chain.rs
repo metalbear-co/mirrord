@@ -67,9 +67,8 @@ where
                 self.chain_size.fetch_add(1, Ordering::Relaxed),
             )
             .map(|_| self.chain_size.load(Ordering::Relaxed))
-            .map_err(|err| {
+            .inspect_err(|_| {
                 self.chain_size.fetch_sub(1, Ordering::Relaxed);
-                err
             })
     }
 

@@ -1,13 +1,12 @@
 use std::{
     self,
-    collections::{hash_map::Entry, HashMap},
-    fs::{read_link, DirEntry, File, OpenOptions, ReadDir},
+    collections::{hash_map::Entry, HashMap, VecDeque},
+    fs::{read_link, File, OpenOptions, ReadDir},
     io::{self, prelude::*, BufReader, SeekFrom},
-    iter::{Enumerate, Map, Peekable},
+    iter::{Enumerate, Peekable},
     ops::RangeInclusive,
     os::unix::{fs::MetadataExt, prelude::FileExt},
     path::{Path, PathBuf},
-    vec::IntoIter,
 };
 
 use faccess::{AccessMode, PathExt};
@@ -23,49 +22,53 @@ pub enum RemoteFile {
     Directory(PathBuf),
 }
 
-// workaround for https://github.com/rust-lang/rust/pull/113169
-// inspired by https://github.com/embassy-rs/embassy/pull/2574/files
-// we comment out the explanation and replace the usages with the definition.
-// `Peekable`: So that we can stop consuming if there is no more place in buf.
-// `Chain`: because `read_dir`'s returned stream does not contain `.` and `..`.
-//        So we chain our own stream with `.` and `..` in it to the one returned by `read_dir`.
-// `IntoIter`: That's our DIY stream with `.` and `..` ^.
-// first `Map`: Converting into DirEntryInternal.
-// second `Map`: logging any errors from the first map.
-// type GetDEnts64Stream = Peekable<
-//     std::iter::Chain<
-//         IntoIter<std::result::Result<DirEntryInternal, io::Error>>,
-//         Map<
-//             Map<
-//                 Enumerate<ReadDir>,
-//                 impl Fn((usize, io::Result<DirEntry>)) -> io::Result<DirEntryInternal>,
-//             >,
-//             impl Fn(io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal>,
-//         >,
-//     >,
-// >;
+fn log_err(entry_res: io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal> {
+    entry_res.inspect_err(|err| error!("Converting DirEntry failed with {err:?}"))
+}
+
+#[derive(Debug)]
+struct GetDEnts64Stream {
+    inner: std::fs::ReadDir,
+    current_and_parent: VecDeque<io::Result<DirEntryInternal>>,
+    current_index: usize,
+}
+
+impl GetDEnts64Stream {
+    fn new(inner: ReadDir, current_and_parent: VecDeque<io::Result<DirEntryInternal>>) -> Self {
+        Self {
+            inner,
+            current_and_parent,
+            current_index: 0,
+        }
+    }
+}
+
+impl Iterator for GetDEnts64Stream {
+    type Item = io::Result<DirEntryInternal>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // first send current and parent entries
+        if let Some(entry) = self.current_and_parent.pop_front() {
+            self.current_index += 1;
+            return Some(entry);
+        }
+
+        let ret = self
+            .inner
+            .next()
+            .map(|i| (self.current_index, i).try_into()) // Convert into DirEntryInternal.
+            .map(log_err);
+        self.current_index += 1;
+        ret
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct FileManager {
     root_path: PathBuf,
     open_files: HashMap<u64, RemoteFile>,
     dir_streams: HashMap<u64, Enumerate<ReadDir>>,
-    // GetDEnts64Stream
-    getdents_streams: HashMap<
-        u64,
-        Peekable<
-            std::iter::Chain<
-                IntoIter<std::result::Result<DirEntryInternal, io::Error>>,
-                Map<
-                    Map<
-                        Enumerate<ReadDir>,
-                        impl Fn((usize, io::Result<DirEntry>)) -> io::Result<DirEntryInternal>,
-                    >,
-                    impl Fn(io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal>,
-                >,
-            >,
-        >,
-    >,
+    getdents_streams: HashMap<u64, Peekable<GetDEnts64Stream>>,
     fds_iter: RangeInclusive<u64>,
 }
 
@@ -90,6 +93,7 @@ pub fn get_root_path_from_optional_pid(pid: Option<u64>) -> PathBuf {
 
 /// Resolve a path that might contain symlinks from a specific container to a path accessible from
 /// the root host
+#[tracing::instrument(level = "trace")]
 pub fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt::Debug>(
     path: P,
     root_path: R,
@@ -143,6 +147,7 @@ pub fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt:
 
 impl FileManager {
     /// Executes the request and returns the response.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub fn handle_message(&mut self, request: FileRequest) -> Result<Option<FileResponse>> {
         Ok(match request {
             FileRequest::Open(OpenFileRequest { path, open_options }) => {
@@ -248,6 +253,7 @@ impl FileManager {
         })
     }
 
+    #[tracing::instrument(level = "trace")]
     pub fn new(pid: Option<u64>) -> Self {
         let root_path = get_root_path_from_optional_pid(pid);
         trace!("Agent root path >> {root_path:?}");
@@ -258,6 +264,7 @@ impl FileManager {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     fn open(
         &mut self,
         path: PathBuf,
@@ -284,6 +291,7 @@ impl FileManager {
         Ok(OpenFileResponse { fd })
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     fn open_relative(
         &mut self,
         relative_fd: u64,
@@ -320,6 +328,7 @@ impl FileManager {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn read(&mut self, fd: u64, buffer_size: u64) -> RemoteResult<ReadFileResponse> {
         self.open_files
             .get_mut(&fd)
@@ -352,6 +361,7 @@ impl FileManager {
     ///
     /// `fgets` is only supposed to read `buffer_size`, so we limit moving the file's position based
     /// on it (even though we return the full `Vec` of bytes).
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn read_line(
         &mut self,
         fd: u64,
@@ -388,6 +398,7 @@ impl FileManager {
             })
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn read_limited(
         &mut self,
         fd: u64,
@@ -422,6 +433,7 @@ impl FileManager {
     }
 
     /// Handles our `readlink_detour` with [`std::fs::read_link`].
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     pub(crate) fn read_link(&mut self, path: PathBuf) -> RemoteResult<ReadLinkFileResponse> {
         let path = path
             .strip_prefix("/")
@@ -434,6 +446,7 @@ impl FileManager {
             .map_err(ResponseError::from)
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn write_limited(
         &mut self,
         fd: u64,
@@ -460,6 +473,12 @@ impl FileManager {
     }
 
     pub(crate) fn seek(&mut self, fd: u64, seek_from: SeekFrom) -> RemoteResult<SeekFileResponse> {
+        trace!(
+            "FileManager::seek -> fd {:#?} | seek_from {:#?}",
+            fd,
+            seek_from
+        );
+
         self.open_files
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
@@ -544,6 +563,7 @@ impl FileManager {
             .map_err(ResponseError::from)
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn xstat(
         &mut self,
         path: Option<PathBuf>,
@@ -602,6 +622,7 @@ impl FileManager {
         .map_err(ResponseError::from)
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn xstatfs(&mut self, fd: u64) -> RemoteResult<XstatFsResponse> {
         let target = self
             .open_files
@@ -620,6 +641,7 @@ impl FileManager {
         })
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn fdopen_dir(&mut self, fd: u64) -> RemoteResult<OpenDirResponse> {
         let path = match self
             .open_files
@@ -641,14 +663,11 @@ impl FileManager {
         Ok(OpenDirResponse { fd })
     }
 
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn get_dir_stream(&mut self, fd: u64) -> RemoteResult<&mut Enumerate<ReadDir>> {
         self.dir_streams
             .get_mut(&fd)
             .ok_or(ResponseError::NotFound(fd))
-    }
-
-    fn log_err(entry_res: io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal> {
-        entry_res.inspect_err(|err| error!("Converting DirEntry failed with {err:?}"))
     }
 
     fn path_to_dir_entry_internal(
@@ -667,64 +686,48 @@ impl FileManager {
 
     /// Get an iterator that contains entries of the current and parent (if exists) directories,
     /// to chain with the iterator returned by [`std::fs::read_dir`].
-    fn get_current_and_parent_entries(current: &Path) -> IntoIter<io::Result<DirEntryInternal>> {
-        let mut entries = vec![Self::path_to_dir_entry_internal(
+    fn get_current_and_parent_entries(current: &Path) -> VecDeque<io::Result<DirEntryInternal>> {
+        let mut entries = VecDeque::default();
+        entries.push_back(Self::path_to_dir_entry_internal(
             current,
             0,
             ".".to_string(),
-        )];
+        ));
         if let Some(parent) = current.parent() {
-            entries.push(Self::path_to_dir_entry_internal(
+            entries.push_back(Self::path_to_dir_entry_internal(
                 parent,
                 1,
                 "..".to_string(),
             ))
         }
-        entries.into_iter()
+        entries
     }
 
     /// If a stream does not yet exist for this fd, we create and return it.
     /// The possible remote errors are:
     /// [`ResponseError::NotFound`] if there is not such fd here.
     /// [`ResponseError::NotDirectory`] if the fd points to a file with a non-directory file type.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn get_or_create_getdents64_stream(
         &mut self,
         fd: u64,
-    ) -> RemoteResult<&mut Peekable< // GetDEnts64Stream
-    std::iter::Chain<
-        IntoIter<std::result::Result<DirEntryInternal, io::Error>>,
-        Map<
-            Map<
-                Enumerate<ReadDir>,
-                impl Fn((usize, io::Result<DirEntry>)) -> io::Result<DirEntryInternal>,
-            >,
-            impl Fn(io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal>,
-        >,
-    >,
->> {
+    ) -> RemoteResult<&mut Peekable<GetDEnts64Stream>> {
         match self.getdents_streams.entry(fd) {
-            Entry::Vacant(e) => {
-                match self.open_files.get(&fd) {
-                    None => Err(ResponseError::NotFound(fd)),
-                    Some(RemoteFile::File(_file)) => Err(ResponseError::NotDirectory(fd)),
-                    Some(RemoteFile::Directory(dir)) => {
-                        let current_and_parent = Self::get_current_and_parent_entries(dir);
-                        let stream = current_and_parent
-                            .chain(
-                                dir.read_dir()?
-                                    .enumerate()
-                                    .map(TryInto::try_into) // Convert into DirEntryInternal.
-                                    .map(Self::log_err),
-                            )
-                            .peekable();
-                        Ok(e.insert(stream))
-                    }
+            Entry::Vacant(e) => match self.open_files.get(&fd) {
+                None => Err(ResponseError::NotFound(fd)),
+                Some(RemoteFile::File(_file)) => Err(ResponseError::NotDirectory(fd)),
+                Some(RemoteFile::Directory(dir)) => {
+                    let current_and_parent = Self::get_current_and_parent_entries(dir);
+                    let stream =
+                        GetDEnts64Stream::new(dir.read_dir()?, current_and_parent).peekable();
+                    Ok(e.insert(stream))
                 }
-            }
+            },
             Entry::Occupied(existing) => Ok(existing.into_mut()),
         }
     }
 
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
     pub(crate) fn read_dir(&mut self, fd: u64) -> RemoteResult<ReadDirResponse> {
         let dir_stream = self.get_dir_stream(fd)?;
         let result = if let Some(offset_entry_pair) = dir_stream.next() {
@@ -741,6 +744,7 @@ impl FileManager {
     /// Instead of returning just 1 [`DirEntryInternal`] from a `readdir` call (which in
     /// Rust means advancing the [`read_dir`](std::fs::read_dir) iterator), we return
     /// an iterator with (at most) `amount` items.
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
     pub(crate) fn read_dir_batch(
         &mut self,
         fd: u64,
@@ -761,6 +765,7 @@ impl FileManager {
     /// where the last one stopped.
     /// After writing all entries, all future calls return 0 entries.
     /// The caller keeps calling until getting 0.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn getdents64(
         &mut self,
         fd: u64,
