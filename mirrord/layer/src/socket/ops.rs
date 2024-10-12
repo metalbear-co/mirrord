@@ -154,7 +154,9 @@ fn bind_similar_address(sockfd: c_int, requested_address: &SocketAddr) -> Detour
     let addr = requested_address.ip();
     let port = requested_address.port();
 
-    let address = if addr.is_loopback() || addr.is_unspecified() {
+    let canonical_address = addr.to_canonical();
+
+    let address = if canonical_address.is_loopback() || canonical_address.is_unspecified() {
         *requested_address
     } else if addr.is_ipv4() {
         SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)
@@ -253,7 +255,7 @@ pub(super) fn bind(
 
     // we don't use `is_localhost` here since unspecified means to listen
     // on all IPs.
-    if incoming_config.ignore_localhost && requested_address.ip().is_loopback() {
+    if incoming_config.ignore_localhost && requested_address.ip().to_canonical().is_loopback() {
         return Detour::Bypass(Bypass::IgnoreLocalhost(requested_port));
     }
 
@@ -564,7 +566,11 @@ pub(super) fn connect(
 ) -> Detour<ConnectResult> {
     let remote_address = SockAddr::try_from_raw(raw_address, address_length)?;
     let optional_ip_address = remote_address.as_socket();
-
+    let is_ipv4_in_ipv6 = remote_address
+        .as_socket()
+        .as_ref()
+        .map(|addr| addr.ip().to_canonical().is_ipv6())
+        .unwrap_or(false);
     let unix_streams = crate::setup().remote_unix_streams();
 
     trace!("in connect {:#?}", SOCKETS);
@@ -581,7 +587,7 @@ pub(super) fn connect(
                 .family()
                 .map(|family| family as i32)
                 .unwrap_or(-1);
-            if domain != libc::AF_INET && domain != libc::AF_UNIX {
+            if domain != libc::AF_INET && domain != libc::AF_UNIX && !is_ipv4_in_ipv6 {
                 return Detour::Bypass(Bypass::Domain(domain));
             }
             // I really hate it, but nix seems to really make this API bad :()
@@ -603,8 +609,9 @@ pub(super) fn connect(
             return Detour::Success(connect_result);
         }
 
-        let ip = ip_address.ip();
-        if ip.is_loopback() || ip.is_unspecified() {
+        let canonical_ip = ip_address.ip().to_canonical();
+
+        if canonical_ip.is_loopback() || canonical_ip.is_unspecified() {
             if let Some(result) = connect_to_local_address(sockfd, &user_socket_info, ip_address)? {
                 // `result` here is always a success, as error and bypass are returned on the `?`
                 // above.
