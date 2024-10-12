@@ -248,7 +248,7 @@ impl DebuggerPorts {
     /// Return whether the given [SocketAddr] is used by the debugger.
     pub fn contains(&self, addr: &SocketAddr) -> bool {
         let is_localhost = matches!(
-            addr.ip(),
+            addr.ip().to_canonical(),
             IpAddr::V4(Ipv4Addr::LOCALHOST) | IpAddr::V6(Ipv6Addr::LOCALHOST)
         );
         if !is_localhost {

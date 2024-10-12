@@ -1,5 +1,7 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
+//! Note the case of IPv6 in IPv4 which requires special care to do right
+//! <https://github.com/metalbear-co/mirrord/pull/2829>
 use std::{
     collections::HashMap,
     net::{SocketAddr, ToSocketAddrs},
@@ -382,13 +384,13 @@ impl OutgoingSelector {
         // https://github.com/metalbear-co/mirrord/issues/2389 fixed and I don't have time to
         // fully understand or refactor, and the logic is sound (if it's loopback, just connect to
         // it)
-        if address.ip().is_loopback() {
+        if address.ip().to_canonical().is_loopback() {
             return Ok(address);
         }
 
         let cached = REMOTE_DNS_REVERSE_MAPPING
             .lock()?
-            .get(&address.ip())
+            .get(&address.ip().to_canonical())
             .cloned();
         let Some(hostname) = cached else {
             return Ok(address);
@@ -458,7 +460,7 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
                     let _guard = DetourGuard::new();
 
                     match (name.as_str(), *port).to_socket_addrs() {
-                        Ok(addresses) => addresses.map(|addr| addr.ip()).collect(),
+                        Ok(addresses) => addresses.map(|addr| addr.ip().to_canonical()).collect(),
                         Err(e) => {
                             let as_string = e.to_string();
                             if as_string.contains("Temporary failure in name resolution")
@@ -477,12 +479,13 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
                     }
                 };
 
-                Ok(resolved_ips.into_iter().any(|ip| ip == address.ip()))
+                Ok(resolved_ips
+                    .into_iter()
+                    .any(|ip| ip == address.ip().to_canonical()))
             }
-            AddressFilter::Socket(addr) => {
-                Ok(addr.ip().is_unspecified() || addr.ip() == address.ip())
-            }
-            AddressFilter::Subnet(net, _) => Ok(net.contains(&address.ip())),
+            AddressFilter::Socket(addr) => Ok(addr.ip().to_canonical().is_unspecified()
+                || addr.ip().to_canonical() == address.ip().to_canonical()),
+            AddressFilter::Subnet(net, _) => Ok(net.contains(&address.ip().to_canonical())),
             AddressFilter::Port(..) => Ok(true),
         }
     }
