@@ -23,31 +23,49 @@ pub enum RemoteFile {
     Directory(PathBuf),
 }
 
-/// `Peekable`: So that we can stop consuming if there is no more place in buf.
-/// `Chain`: because `read_dir`'s returned stream does not contain `.` and `..`.
-///        So we chain our own stream with `.` and `..` in it to the one returned by `read_dir`.
-/// `IntoIter`: That's our DIY stream with `.` and `..` ^.
-/// first `Map`: Converting into DirEntryInternal.
-/// second `Map`: logging any errors from the first map.
-type GetDEnts64Stream = Peekable<
-    std::iter::Chain<
-        IntoIter<std::result::Result<DirEntryInternal, io::Error>>,
-        Map<
-            Map<
-                Enumerate<ReadDir>,
-                impl Fn((usize, io::Result<DirEntry>)) -> io::Result<DirEntryInternal>,
-            >,
-            impl Fn(io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal>,
-        >,
-    >,
->;
+// workaround for https://github.com/rust-lang/rust/pull/113169
+// inspired by https://github.com/embassy-rs/embassy/pull/2574/files
+// we comment out the explanation and replace the usages with the definition.
+// `Peekable`: So that we can stop consuming if there is no more place in buf.
+// `Chain`: because `read_dir`'s returned stream does not contain `.` and `..`.
+//        So we chain our own stream with `.` and `..` in it to the one returned by `read_dir`.
+// `IntoIter`: That's our DIY stream with `.` and `..` ^.
+// first `Map`: Converting into DirEntryInternal.
+// second `Map`: logging any errors from the first map.
+// type GetDEnts64Stream = Peekable<
+//     std::iter::Chain<
+//         IntoIter<std::result::Result<DirEntryInternal, io::Error>>,
+//         Map<
+//             Map<
+//                 Enumerate<ReadDir>,
+//                 impl Fn((usize, io::Result<DirEntry>)) -> io::Result<DirEntryInternal>,
+//             >,
+//             impl Fn(io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal>,
+//         >,
+//     >,
+// >;
 
 #[derive(Debug)]
 pub(crate) struct FileManager {
     root_path: PathBuf,
     open_files: HashMap<u64, RemoteFile>,
     dir_streams: HashMap<u64, Enumerate<ReadDir>>,
-    getdents_streams: HashMap<u64, GetDEnts64Stream>,
+    // GetDEnts64Stream
+    getdents_streams: HashMap<
+        u64,
+        Peekable<
+            std::iter::Chain<
+                IntoIter<std::result::Result<DirEntryInternal, io::Error>>,
+                Map<
+                    Map<
+                        Enumerate<ReadDir>,
+                        impl Fn((usize, io::Result<DirEntry>)) -> io::Result<DirEntryInternal>,
+                    >,
+                    impl Fn(io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal>,
+                >,
+            >,
+        >,
+    >,
     fds_iter: RangeInclusive<u64>,
 }
 
@@ -672,7 +690,18 @@ impl FileManager {
     pub(crate) fn get_or_create_getdents64_stream(
         &mut self,
         fd: u64,
-    ) -> RemoteResult<&mut GetDEnts64Stream> {
+    ) -> RemoteResult<&mut Peekable< // GetDEnts64Stream
+    std::iter::Chain<
+        IntoIter<std::result::Result<DirEntryInternal, io::Error>>,
+        Map<
+            Map<
+                Enumerate<ReadDir>,
+                impl Fn((usize, io::Result<DirEntry>)) -> io::Result<DirEntryInternal>,
+            >,
+            impl Fn(io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal>,
+        >,
+    >,
+>> {
         match self.getdents_streams.entry(fd) {
             Entry::Vacant(e) => {
                 match self.open_files.get(&fd) {
