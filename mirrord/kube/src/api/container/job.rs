@@ -165,8 +165,18 @@ where
             ("linkerd.io/inject".to_string(), "disabled".to_string()),
         ]));
 
+        let node_selector = config
+            .node_selector
+            .clone()
+            .map(BTreeMap::from_iter)
+            .unwrap_or_default();
+
         pod.labels_mut().extend(labels.clone());
         pod.annotations_mut().extend(annotations.clone());
+
+        if let Some(spec) = pod.spec.as_mut() {
+          spec.node_selector = Some(node_selector);
+        }
 
         Job {
             metadata: ObjectMeta {

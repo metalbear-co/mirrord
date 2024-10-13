@@ -327,6 +327,8 @@ pub struct AgentConfig {
     /// ```
     pub annotations: Option<HashMap<String, String>>,
 
+    pub node_selector: Option<HashMap<String, String>>,
+
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
