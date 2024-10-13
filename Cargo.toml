@@ -26,7 +26,7 @@ resolver = "2"
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.119.1"
+version = "3.120.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -75,7 +75,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "socks",
     "http2",
 ] }
-kube = { version = "0.95.0", git = "https://github.com/kube-rs/kube", rev = "3c3939f3988f8b8be7d1dbb9326565f3fd1d31eb", default-features = false, features = [
+kube = { version = "0.96.0", default-features = false, features = [
     "runtime",
     "derive",
     "client",

@@ -1545,6 +1545,7 @@
           ],
           "properties": {
             "message_filter": {
+              "description": "A filter is a mapping between message attribute names and regexes they should match. The local application will only receive messages that match **all** of the given patterns. This means, only messages that have **all** of the attributes in the filter, with values of those attributes matching the respective patterns.",
               "type": "object",
               "additionalProperties": {
                 "type": "string"
@@ -1554,6 +1555,29 @@
               "type": "string",
               "enum": [
                 "SQS"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Kafka.",
+          "type": "object",
+          "required": [
+            "message_filter",
+            "queue_type"
+          ],
+          "properties": {
+            "message_filter": {
+              "description": "A filter is a mapping between message header names and regexes they should match. The local application will only receive messages that match **all** of the given patterns. This means, only messages that have **all** of the headers in the filter, with values of those headers matching the respective patterns.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "queue_type": {
+              "type": "string",
+              "enum": [
+                "Kafka"
               ]
             }
           }
@@ -1581,11 +1605,8 @@
       "additionalProperties": false
     },
     "SplitQueuesConfig": {
-      "description": "```json { \"feature\": { \"split_queues\": { \"first-queue\": { \"queue_type\": \"SQS\", \"message_filter\": { \"wows\": \"so wows\", \"coolz\": \"^very .*\" } }, \"second-queue\": { \"queue_type\": \"SQS\", \"message_filter\": { \"who\": \"*you$\" } }, } } } ```",
-      "type": [
-        "object",
-        "null"
-      ],
+      "description": "```json { \"feature\": { \"split_queues\": { \"first-queue\": { \"queue_type\": \"SQS\", \"message_filter\": { \"wows\": \"so wows\", \"coolz\": \"^very\" } }, \"second-queue\": { \"queue_type\": \"SQS\", \"message_filter\": { \"who\": \"you$\" } }, \"third-queue\": { \"queue_type\": \"Kafka\", \"message_filter\": { \"who\": \"you$\" } }, \"fourth-queue\": { \"queue_type\": \"Kafka\", \"message_filter\": { \"wows\": \"so wows\", \"coolz\": \"^very\" } }, } } } ```",
+      "type": "object",
       "additionalProperties": {
         "$ref": "#/definitions/QueueFilter"
       }

@@ -7,6 +7,8 @@ use std::error::Error;
 
 use thiserror::Error;
 
+use crate::feature::split_queues::QueueSplittingVerificationError;
+
 /// <!--${internal}-->
 /// Error that would be returned from [MirrordConfig::generate_config]
 #[derive(Error, Debug)]
@@ -71,6 +73,9 @@ pub enum ConfigError {
 
     #[error("Target type requires the mirrord-operator, but operator usage was explicitly disabled. Consider enabling mirrord-operator in your mirrord config.")]
     TargetRequiresOperator,
+
+    #[error("Queue splitting config is invalid: {0}")]
+    QueueSplittingVerificationError(#[from] QueueSplittingVerificationError),
 }
 
 impl From<tera::Error> for ConfigError {

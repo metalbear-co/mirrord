@@ -547,48 +547,7 @@ pub(super) enum OperatorCommand {
     ///
     /// NOTE: You don't need to install the operator to use open source mirrord features.
     #[command(override_usage = "mirrord operator setup [OPTIONS] | kubectl apply -f -")]
-    Setup {
-        /// ToS can be read here <https://metalbear.co/legal/terms>
-        #[arg(long)]
-        accept_tos: bool,
-
-        /// A mirrord for Teams license key (online)
-        #[arg(long, allow_hyphen_values(true))]
-        license_key: Option<String>,
-
-        /// Path to a file containing a mirrord for Teams license certificate
-        #[arg(long)]
-        license_path: Option<PathBuf>,
-
-        /// Output Kubernetes specs to file instead of stdout
-        #[arg(short, long)]
-        file: Option<PathBuf>,
-
-        /// Namespace to create the operator in (this doesn't limit the namespaces the operator
-        /// will be able to access)
-        #[arg(short, long, default_value = "mirrord")]
-        namespace: OperatorNamespace,
-
-        /// AWS role ARN for the operator's service account.
-        /// Necessary for enabling SQS queue splitting.
-        /// For successfully running an SQS queue splitting operator the given IAM role must be
-        /// able to create, read from, write to, and delete SQS queues.
-        /// If the queue messages are encrypted using KMS, the operator also needs the
-        /// `kms:Encrypt`, `kms:Decrypt` and `kms:GenerateDataKey` permissions.
-        #[arg(long, visible_alias = "arn")]
-        aws_role_arn: Option<String>,
-
-        /// Enable SQS queue splitting.
-        /// When set, some extra CRDs will be installed on the cluster, and the operator will run
-        /// an SQS splitting component.
-        #[arg(
-            long,
-            visible_alias = "sqs",
-            default_value_t = false,
-            requires = "aws_role_arn"
-        )]
-        sqs_splitting: bool,
-    },
+    Setup(#[clap(flatten)] OperatorSetupParams),
     /// Print operator status
     Status {
         /// Specify config file to use
@@ -600,6 +559,56 @@ pub(super) enum OperatorCommand {
     /// Allows the user to forcefully kill living sessions.
     #[command(subcommand)]
     Session(SessionCommand),
+}
+
+#[derive(Args, Debug)]
+pub(super) struct OperatorSetupParams {
+    /// ToS can be read here <https://metalbear.co/legal/terms>
+    #[arg(long)]
+    pub(super) accept_tos: bool,
+
+    /// A mirrord for Teams license key (online)
+    #[arg(long, allow_hyphen_values(true))]
+    pub(super) license_key: Option<String>,
+
+    /// Path to a file containing a mirrord for Teams license certificate
+    #[arg(long)]
+    pub(super) license_path: Option<PathBuf>,
+
+    /// Output Kubernetes specs to file instead of stdout
+    #[arg(short, long)]
+    pub(super) file: Option<PathBuf>,
+
+    /// Namespace to create the operator in (this doesn't limit the namespaces the operator
+    /// will be able to access)
+    #[arg(short, long, default_value = "mirrord")]
+    pub(super) namespace: OperatorNamespace,
+
+    /// AWS role ARN for the operator's service account.
+    /// Necessary for enabling SQS queue splitting.
+    /// For successfully running an SQS queue splitting operator the given IAM role must be
+    /// able to create, read from, write to, and delete SQS queues.
+    /// If the queue messages are encrypted using KMS, the operator also needs the
+    /// `kms:Encrypt`, `kms:Decrypt` and `kms:GenerateDataKey` permissions.
+    #[arg(long, visible_alias = "arn")]
+    pub(super) aws_role_arn: Option<String>,
+
+    /// Enable SQS queue splitting.
+    /// When set, some extra CRDs will be installed on the cluster, and the operator will run
+    /// an SQS splitting component.
+    #[arg(
+        long,
+        visible_alias = "sqs",
+        default_value_t = false,
+        requires = "aws_role_arn"
+    )]
+    pub(super) sqs_splitting: bool,
+
+    /// Enable Kafka queue splitting.
+    /// When set, some extra CRDs will be installed on the cluster, and the operator will run
+    /// a Kafka splitting component.
+    #[arg(long, visible_alias = "kafka", default_value_t = false)]
+    pub(super) kafka_splitting: bool,
 }
 
 /// `mirrord operator session` family of commands.
