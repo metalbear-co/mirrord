@@ -264,17 +264,6 @@
             "type": "string"
           }
         },
-        "node_selector": {
-          "title": "agent.node_selector {#agent-node_selector}",
-          "description": "Allows setting up custom node selector for the agent Job and Pod.",
-          "type": [
-            "object",
-            "null"
-          ],
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
         "check_out_of_pods": {
           "title": "agent.check_out_of_pods {#agent-check_out_of_pods}",
           "description": "Determine if to check whether there is room for agent job in target node. (Not applicable when using ephemeral containers feature)\n\nCan be disabled if the check takes too long and you are sure there is enough resources on each node",
@@ -412,6 +401,17 @@
             "boolean",
             "null"
           ]
+        },
+        "node_selector": {
+          "title": "agent.node_selector {#agent-node_selector}",
+          "description": "Allows setting up node selector for the agent Job and Pod. ```json { \"node_selector\": { \"kubernetes.io/hostname\": \"node1\" } } ```",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "privileged": {
           "title": "agent.privileged {#agent-privileged}",
