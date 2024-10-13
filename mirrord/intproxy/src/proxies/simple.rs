@@ -401,7 +401,7 @@ mod tests {
     /// Sets up a [`TaskSender`] and [`BackgroundTasks`] for a functioning [`SimpleProxy`].
     ///
     /// - `protocol_version`: allows specifying the version of the protocol to use for
-    /// testing out potential mismatches in messages.
+    ///     testing out potential mismatches in messages.
     async fn setup_proxy(
         protocol_version: Version,
     ) -> (
