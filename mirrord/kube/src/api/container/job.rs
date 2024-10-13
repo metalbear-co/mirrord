@@ -175,7 +175,7 @@ where
         pod.annotations_mut().extend(annotations.clone());
 
         if let Some(spec) = pod.spec.as_mut() {
-          spec.node_selector = Some(node_selector);
+            spec.node_selector = Some(node_selector);
         }
 
         Job {
