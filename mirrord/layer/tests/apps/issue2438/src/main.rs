@@ -7,7 +7,7 @@
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
-    os::fd::{IntoRawFd, FromRawFd},
+    os::fd::{FromRawFd, IntoRawFd},
 };
 
 use nix::sys::socket::{self, AddressFamily, SockFlag, SockType, SockaddrStorage};
