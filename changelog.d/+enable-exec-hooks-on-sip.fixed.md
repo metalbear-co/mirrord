@@ -1,0 +1,1 @@
+Add missing exec hooks on partial load, macOS
