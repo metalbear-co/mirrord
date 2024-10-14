@@ -618,9 +618,9 @@ impl IncomingProxy {
                     response,
                 )))
             }
-            // Retry on `RST_STREAM` error.
-            Err(InterceptorError::Reset) => {
-                tracing::warn!("`RST_STREAM` received in the response, retrying!");
+            // Retry on known errors.
+            Err(error @ InterceptorError::Reset) | Err(error @ InterceptorError::ConnectionClosedTooSoon(..)) => {
+                tracing::warn!(%error, ?request, "Failed to read first frames of streaming HTTP response");
 
                 let interceptor = self
                     .interceptors
