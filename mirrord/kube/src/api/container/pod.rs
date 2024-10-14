@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use k8s_openapi::{
     api::core::v1::{
         Capabilities, Container, EnvVar, HostPathVolumeSource, LocalObjectReference, Pod, PodSpec,
@@ -92,6 +94,11 @@ impl ContainerVariant for PodVariant<'_> {
                 })
                 .collect()
         });
+        let node_selector = agent
+            .node_selector
+            .clone()
+            .map(BTreeMap::from_iter)
+            .unwrap_or_default();
 
         Pod {
             metadata: ObjectMeta {
@@ -118,6 +125,7 @@ impl ContainerVariant for PodVariant<'_> {
                 restart_policy: Some("Never".to_string()),
                 image_pull_secrets,
                 tolerations: Some(tolerations.clone()),
+                node_selector: Some(node_selector),
                 containers: vec![Container {
                     name: "mirrord-agent".to_string(),
                     image: Some(agent.image().to_string()),

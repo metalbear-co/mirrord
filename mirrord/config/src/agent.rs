@@ -329,7 +329,8 @@ pub struct AgentConfig {
 
     /// ### agent.node_selector {#agent-node_selector}
     ///
-    /// Allows setting up custom node selector for the agent Job and Pod.
+    /// Allows setting up custom node selector for the agent Pod. Applies only to targetless runs,
+    /// as targeted agent always runs on the same node as its target container.
     ///
     /// ```json
     /// {
