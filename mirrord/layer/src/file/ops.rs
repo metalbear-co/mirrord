@@ -11,7 +11,7 @@ use mirrord_protocol::{
         ReadLinkFileRequest, ReadLinkFileResponse, SeekFileResponse, WriteFileResponse,
         XstatFsResponse, XstatResponse,
     },
-    ErrorKindInternal, RemoteIOError, ResponseError,
+    ResponseError,
 };
 use rand::distributions::{Alphanumeric, DistString};
 use tracing::{error, trace, Level};
@@ -186,23 +186,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
 
     ensure_not_ignored!(path, open_options.is_write());
 
-    let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)
-        .inspect_err(|fail| {
-            if let HookError::ResponseError(ResponseError::RemoteIO(RemoteIOError {
-                kind: ErrorKindInternal::PermissionDenied,
-                ..
-            })) = fail
-                && path.ends_with("resolv.conf")
-            {
-                tracing::error!(
-                    ?fail,
-                    "Failed to open `resolv.conf` from the remote pod, DNS will not work!\
-                    \n- This may be caused due to the mirrord agent lacking privileges\
-                    to access the target container's `/etc/resolv.conf`. 
-                    "
-                );
-            }
-        })?;
+    let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)?;
 
     // TODO: Need a way to say "open a directory", right now `is_dir` always returns false.
     // This requires having a fake directory name (`/fake`, for example), instead of just converting

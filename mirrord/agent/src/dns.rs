@@ -14,6 +14,7 @@ use tokio::{
     },
 };
 use tokio_util::sync::CancellationToken;
+use tracing::Level;
 
 use crate::{
     error::{AgentError, Result},
@@ -75,7 +76,7 @@ impl DnsWorker {
     ///
     /// We could probably cache results here.
     /// We cannot cache the [`AsyncResolver`] itself, becaues the configuration in `etc` may change.
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
     async fn do_lookup(
         etc_path: PathBuf,
         host: String,
@@ -85,6 +86,7 @@ impl DnsWorker {
         let resolv_conf_path = etc_path.join("resolv.conf");
         let hosts_path = etc_path.join("hosts");
 
+        // TODO(alex) [high] 1: Return an io error here so we can inspect it in mirrord.
         let resolv_conf = fs::read(resolv_conf_path).await?;
         let hosts_conf = fs::read(hosts_path).await?;
 
