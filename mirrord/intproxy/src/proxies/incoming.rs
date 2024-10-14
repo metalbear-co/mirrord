@@ -588,7 +588,7 @@ impl IncomingProxy {
         match response
             .internal_response
             .body
-            .next_frames(false)
+            .next_frames(true)
             .await
             .map_err(InterceptorError::from)
         {

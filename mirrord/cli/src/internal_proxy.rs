@@ -82,11 +82,7 @@ pub(crate) async fn proxy(listen_port: u16, watch: drain::Watch) -> Result<(), I
             InternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
         })?;
 
-    let log_level = config
-        .internal_proxy
-        .log_level
-        .as_deref()
-        .unwrap_or("mirrord=info,info");
+    let log_level = config.internal_proxy.log_level.as_deref().unwrap_or("info");
 
     tracing_subscriber::fmt()
         .with_writer(output_file)
