@@ -8,6 +8,19 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.120.1](https://github.com/metalbear-co/mirrord/tree/3.120.1) - 2024-10-14
+
+
+### Removed
+
+- Remove support for IPv6 sockets with mirrord.
+  [#2836](https://github.com/metalbear-co/mirrord/issues/2836)
+
+
+### Internal
+
+- Update github actions dependencies
+
 ## [3.120.0](https://github.com/metalbear-co/mirrord/tree/3.120.0) - 2024-10-13
 
 
