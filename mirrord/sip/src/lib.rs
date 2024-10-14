@@ -341,7 +341,7 @@ mod main {
         let mut new_contents = String::from("#!") + new_shebang;
         if shebang.start_of_rest_of_file == 0 {
             // trailing newline is needed for scripts without an original shebang
-            new_contents.push_str("\n");
+            new_contents.push('\n');
         }
 
         new_contents.push_str(
@@ -491,7 +491,7 @@ mod main {
 
         // determine if file is object file
         let data = std::fs::read(&complete_path)?;
-        if MachFile::parse(&*data).is_ok() {
+        if MachFile::parse(data.as_ref()).is_ok() {
             // file is an object file
             is_binary_sip(&complete_path, patch_binaries).map(|is_sip| {
                 if is_sip {
