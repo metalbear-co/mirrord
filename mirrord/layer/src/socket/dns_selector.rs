@@ -33,7 +33,7 @@ impl DnsSelector {
                 AddressFilter::Port(..) => true,
                 AddressFilter::Name(filter_name, _) => filter_name == node,
                 AddressFilter::Socket(filter_socket) => {
-                    filter_socket.ip().to_canonical().is_unspecified()
+                    filter_socket.ip().is_unspecified()
                         || Some(filter_socket.ip()) == node.parse().ok()
                 }
                 AddressFilter::Subnet(filter_subnet, _) => {

@@ -75,6 +75,9 @@ pub(crate) enum HookError {
     #[error("mirrord-layer: SIP patch failed with error `{0}`!")]
     FailedSipPatch(#[from] SipError),
 
+    #[error("mirrord-layer: IPv6 can't be used with mirrord")]
+    SocketUnsuportedIpv6,
+
     // `From` implemented below, not with `#[from]` so that when new variants of
     // `SerializationError` are added, they are mapped into different variants of
     // `LayerError`.
@@ -218,6 +221,9 @@ impl From<HookError> for i64 {
             HookError::FileNotFound => {
                 info!("mirrord file not found triggered")
             }
+            HookError::SocketUnsuportedIpv6 => {
+                info!("{fail}")
+            }
             HookError::ProxyError(ref err) => {
                 graceful_exit!(
                     r"Proxy error, connectivity issue or a bug.
@@ -286,6 +292,7 @@ impl From<HookError> for i64 {
             HookError::LocalFileCreation(_) => libc::EINVAL,
             #[cfg(target_os = "macos")]
             HookError::FailedSipPatch(_) => libc::EACCES,
+            HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,
             HookError::UnsupportedSocketType => libc::EAFNOSUPPORT,
             HookError::BadPointer => libc::EFAULT,
             HookError::AddressAlreadyBound(_) => libc::EADDRINUSE,
