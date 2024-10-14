@@ -1,9 +1,4 @@
-use std::{
-    io::{BufRead, BufReader, Cursor, Write},
-    net::SocketAddr,
-    path::Path,
-    time::Duration,
-};
+use std::{io::Write, net::SocketAddr, path::Path, process::Stdio, time::Duration};
 
 use exec::execvp;
 use local_ip_address::local_ip;
@@ -20,7 +15,10 @@ use mirrord_config::{
 };
 use mirrord_progress::{Progress, ProgressTracker, MIRRORD_PROGRESS_ENV};
 use tempfile::NamedTempFile;
-use tokio::process::Command;
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    process::Command,
+};
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::Level;
 
@@ -55,31 +53,26 @@ fn format_command(command: &Command) -> String {
 /// Execute a [`Command`] and read first line from stdout
 #[tracing::instrument(level = Level::TRACE, ret)]
 async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>, ContainerError> {
-    let result = command
-        .output()
-        .await
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(ContainerError::UnableToExecuteCommand)?;
 
-    let reader = BufReader::new(Cursor::new(result.stdout));
+    tracing::warn!(?child, "spawned watch for child");
 
-    reader
+    let stdout = child.stdout.take().expect("stdout should be piped");
+
+    let result = BufReader::new(stdout)
         .lines()
-        .next()
-        .transpose()
-        .map_err(|error| ContainerError::UnableParseCommandStdout(format_command(command), error))?
-        .map(Ok)
-        .or_else(|| {
-            (!result.stderr.is_empty())
-                .then(|| String::from_utf8(result.stderr).ok())
-                .flatten()
-                .map(|message| {
-                    Err(ContainerError::UnsuccesfulCommandOutput(
-                        format_command(command),
-                        message,
-                    ))
-                })
-        })
-        .transpose()
+        .next_line()
+        .await
+        .map_err(|error| ContainerError::UnableParseCommandStdout(format_command(command), error));
+
+    let _ = child.kill().await;
+
+    result
 }
 
 /// Create a temp file with a json serialized [`LayerConfig`] to be loaded by container and external
@@ -154,6 +147,7 @@ async fn create_sidecar_intproxy(
         .into_command_args();
 
     let mut sidecar_container_spawn = Command::new(&runtime_binary);
+
     sidecar_container_spawn.args(sidecar_args);
 
     let sidecar_container_id = exec_and_get_first_line(&mut sidecar_container_spawn)
@@ -173,7 +167,7 @@ async fn create_sidecar_intproxy(
     // intproxy running in sidecar to be used by mirrord-layer in execution container
     let intproxy_address: SocketAddr = loop {
         let mut command = Command::new(&runtime_binary);
-        command.args(["logs", &sidecar_container_id]);
+        command.args(["attach", &sidecar_container_id]);
 
         match exec_and_get_first_line(&mut command).await? {
             Some(line) => {
