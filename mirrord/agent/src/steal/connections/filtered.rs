@@ -559,7 +559,6 @@ where
         level = Level::TRACE,
         skip(self, tx),
         fields(?request = request.request),
-        ret,
         err(level = Level::WARN)
     )]
     async fn handle_request(
