@@ -83,11 +83,6 @@ impl TryFrom<OsSockAddr> for SocketAddress {
 
     fn try_from(addr: OsSockAddr) -> Result<Self, Self::Error> {
         addr.as_socket()
-            .map(|mut socket_addr| {
-                // convert ipv4 in ipv6 to ipv4
-                socket_addr.set_ip(socket_addr.ip().to_canonical());
-                socket_addr
-            })
             .map(SocketAddress::Ip)
             .or_else(|| {
                 addr.as_pathname()
