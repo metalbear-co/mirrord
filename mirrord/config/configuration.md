@@ -167,6 +167,16 @@ Allows setting up custom annotations for the agent Job and Pod.
 }
 ```
 
+### agent.node_selector {#agent-node_selector}
+
+Allows setting up custom node selector for the agent Job and Pod.
+
+```json
+{
+  "node_selector": { "kubernetes.io/hostname": "node1" }
+}
+```
+
 ### agent.check_out_of_pods {#agent-check_out_of_pods}
 
 Determine if to check whether there is room for agent job in target node. (Not applicable

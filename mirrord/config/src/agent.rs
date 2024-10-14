@@ -328,10 +328,12 @@ pub struct AgentConfig {
     pub annotations: Option<HashMap<String, String>>,
 
     /// ### agent.node_selector {#agent-node_selector}
-    /// Allows setting up node selector for the agent Job and Pod.
+    ///
+    /// Allows setting up custom node selector for the agent Job and Pod.
+    ///
     /// ```json
     /// {
-    ///  "node_selector": { "kubernetes.io/hostname": "node1" }
+    ///   "node_selector": { "kubernetes.io/hostname": "node1" }
     /// }
     /// ```
     pub node_selector: Option<HashMap<String, String>>,

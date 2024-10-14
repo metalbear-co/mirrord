@@ -404,7 +404,7 @@
         },
         "node_selector": {
           "title": "agent.node_selector {#agent-node_selector}",
-          "description": "Allows setting up node selector for the agent Job and Pod. ```json { \"node_selector\": { \"kubernetes.io/hostname\": \"node1\" } } ```",
+          "description": "Allows setting up custom node selector for the agent Job and Pod.\n\n```json { \"node_selector\": { \"kubernetes.io/hostname\": \"node1\" } } ```",
           "type": [
             "object",
             "null"
