@@ -8,6 +8,30 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.120.0](https://github.com/metalbear-co/mirrord/tree/3.120.0) - 2024-10-13
+
+
+### Added
+
+- Added Kafka splitting feature.
+  [#2601](https://github.com/metalbear-co/mirrord/issues/2601)
+
+
+### Changed
+
+- Add analytics about usage of experimental features
+- Add option to have logs when running ext commands
+- update dependencies
+
+
+### Fixed
+
+- Fixed a bug where `all_of` and `any_of` HTTP filters were stealing all HTTP
+  traffic. [#2817](https://github.com/metalbear-co/mirrord/issues/2817)
+- Handle IPv4 in IPv6, should help with regressions related to allowing
+  AF_INET6 [#2827](https://github.com/metalbear-co/mirrord/issues/2827)
+
+
 ## [3.119.1](https://github.com/metalbear-co/mirrord/tree/3.119.1) - 2024-10-09
 
 
@@ -41,7 +65,9 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
   ```
   mirrord port-forward [options] -R [remote_port:]local_port -f
   config_file.toml
-  ``` [#2609](https://github.com/metalbear-co/mirrord/issues/2609)
+  ```
+
+  [#2609](https://github.com/metalbear-co/mirrord/issues/2609)
 
 
 ### Changed
