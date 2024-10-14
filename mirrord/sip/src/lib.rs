@@ -338,8 +338,12 @@ mod main {
         let contents = data
             .get(shebang.start_of_rest_of_file..)
             .expect("original shebang size exceeds file size");
-        // trailing newline is needed for scripts without a shebang
-        let mut new_contents = String::from("#!") + new_shebang + "\n";
+        let mut new_contents = String::from("#!") + new_shebang;
+        if shebang.start_of_rest_of_file == 0 {
+            // trailing newline is needed for scripts without an original shebang
+            new_contents.push_str("\n");
+        }
+
         new_contents.push_str(
             from_utf8(contents)
                 .map_err(|_utf| UnlikelyError("Can't read script contents as utf8".to_string()))?,
@@ -497,7 +501,7 @@ mod main {
                 }
             })
         } else {
-            // find shebang or insert one
+            // find shebang or use the default from $SHELL
             let shebang = match read_shebang_from_file(&complete_path)? {
                 Some(shebang) => shebang,
                 None => ScriptShebang {
