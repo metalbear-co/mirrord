@@ -1,6 +1,8 @@
+#[cfg(target_os = "macos")]
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
+    path::Path,
     time::Duration,
 };
 
@@ -272,17 +274,19 @@ impl MirrordExecution {
         let patched_path = executable
             .and_then(|exe| {
                 sip_patch(
-                    exe,
-                    &config
+                    Path::new(exe),
+                    config
                         .sip_binaries
                         .clone()
-                        .map(|x| x.to_vec())
-                        .unwrap_or_default(),
+                        .map(|x| x.to_vec().iter().map(|y| y.into()).collect::<Vec<_>>())
+                        .unwrap_or_default()
+                        .as_ref(),
                 )
                 .transpose() // We transpose twice to propagate a possible error out of this
                              // closure.
             })
-            .transpose()?;
+            .transpose()?
+            .map(|x| x.to_string_lossy().to_string());
 
         #[cfg(not(target_os = "macos"))]
         let patched_path = None;

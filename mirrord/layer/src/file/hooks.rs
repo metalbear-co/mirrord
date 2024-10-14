@@ -59,8 +59,10 @@ fn update_ptr_from_bypass(ptr: *const c_char, bypass: &Bypass) -> *const c_char 
         // inside mirrord's temp bin dir. The detour has returned us the original path of the file
         // (stripped mirrord's dir path), so now we carry out the operation locally, on the stripped
         // path.
-        #[cfg(target_os = "macos")]
-        Bypass::FileOperationInMirrordBinTempDir(stripped_ptr) => *stripped_ptr,
+        Bypass::FileOperationInMirrordBinTempDir((prefix_len, _)) => {
+            // add length of path to strip to ptr to obtain new pointer
+            ptr.wrapping_add(*prefix_len)
+        }
         Bypass::RelativePath(path) | Bypass::IgnoredFile(path) => path.as_ptr(),
         _ => ptr,
     }
