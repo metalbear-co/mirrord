@@ -10,10 +10,7 @@ mod main {
     use std::{
         env::{self, var},
         ffi::OsStr,
-        io::{
-            ErrorKind::{self, AlreadyExists},
-            Read,
-        },
+        io::{self, ErrorKind::AlreadyExists, Read},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
         path::{Path, PathBuf},
         str::from_utf8,
@@ -386,11 +383,13 @@ mod main {
     }
 
     /// Including '#!', just until whitespace, no arguments.
+    /// will not be called on object files
     fn read_shebang_from_file<P: AsRef<Path>>(path: P) -> Result<Option<ScriptShebang>> {
         let mut f = std::fs::File::open(path)?;
         let mut buffer = String::new();
         match f.read_to_string(&mut buffer) {
             Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::InvalidData => return Ok(None),
             Err(e) => return Err(SipError::IO(e)),
         }
 
@@ -486,9 +485,20 @@ mod main {
             return Ok(NoSip);
         }
 
-        let result = read_shebang_from_file(&complete_path);
-        if let Ok(option) = result {
-            let shebang = match option {
+        // determine if file is object file
+        let data = std::fs::read(&complete_path)?;
+        if MachFile::parse(&*data).is_ok() {
+            // file is an object file
+            is_binary_sip(&complete_path, patch_binaries).map(|is_sip| {
+                if is_sip {
+                    SipBinary(complete_path)
+                } else {
+                    NoSip
+                }
+            })
+        } else {
+            // find shebang or insert one
+            let shebang = match read_shebang_from_file(&complete_path)? {
                 Some(shebang) => shebang,
                 None => ScriptShebang {
                     interpreter_path: PathBuf::from(
@@ -512,20 +522,6 @@ mod main {
                     NoSip
                 }
             })
-        } else {
-            match result {
-                Err(SipError::IO(e)) if e.kind() == ErrorKind::InvalidData => {
-                    // file could not be converted to string, check if binary
-                    is_binary_sip(&complete_path, patch_binaries).map(|is_sip| {
-                        if is_sip {
-                            SipBinary(complete_path)
-                        } else {
-                            NoSip
-                        }
-                    })
-                }
-                _ => Err(result.unwrap_err()),
-            }
         }
     }
 
