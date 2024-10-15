@@ -1,11 +1,16 @@
+#![cfg(target_os = "macos")] // linux github runners don't have ipv6, which we require for these tests
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{path::Path, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use mirrord_protocol::{
+    file::{OpenFileResponse, ReadFileResponse},
     tcp::{DaemonTcp, LayerTcp},
-    ClientMessage, DaemonMessage,
+    ClientMessage, DaemonMessage, FileRequest, FileResponse,
 };
 use rand::Rng;
 use rstest::rstest;
@@ -125,6 +130,29 @@ async fn handle_port_subscriptions(mut intproxy: TestIntProxy) {
                     .await;
             }
             ClientMessage::Tcp(LayerTcp::PortUnsubscribe(..)) => {}
+            ClientMessage::FileRequest(FileRequest::Open(open)) => {
+                assert_eq!(open.path, PathBuf::from("/etc/hostname"));
+                intproxy
+                    .send(DaemonMessage::File(FileResponse::Open(Ok(
+                        OpenFileResponse { fd: 1222 },
+                    ))))
+                    .await;
+            }
+            ClientMessage::FileRequest(FileRequest::Close(close)) => {
+                assert_eq!(close.fd, 1222);
+            }
+            ClientMessage::FileRequest(FileRequest::Read(read)) => {
+                assert_eq!(read.remote_fd, 1222);
+                let hostname = b"mirrord-dummy";
+                intproxy
+                    .send(DaemonMessage::File(FileResponse::Read(Ok(
+                        ReadFileResponse {
+                            bytes: hostname.into(),
+                            read_amount: hostname.len() as u64,
+                        },
+                    ))))
+                    .await;
+            }
             other => panic!("unexpected message received from intproxy: {other:?}"),
         }
     }
