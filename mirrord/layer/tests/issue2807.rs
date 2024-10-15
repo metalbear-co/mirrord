@@ -45,7 +45,7 @@ async fn test_issue2807_without_ipv6_ignore(
         .await
         .expect("failed to saving layer config to tmp file");
 
-    let (mut test_process, mut intproxy) = application
+    let (mut test_process, intproxy) = application
         .start_process_with_layer(
             dylib_path,
             Default::default(),
@@ -88,7 +88,7 @@ async fn test_issue2807_with_ipv6_ignore(
         .await
         .expect("failed to saving layer config to tmp file");
 
-    let (mut test_process, mut intproxy) = application
+    let (mut test_process, intproxy) = application
         .start_process_with_layer(
             dylib_path,
             Default::default(),
