@@ -68,6 +68,7 @@ pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
     // it.
     const BYPASS_BINARIES: &[&str] = &[
         "/uname",
+        "/xcrun"
     ];
     if BYPASS_BINARIES.iter().any(|bin| path.ends_with(bin)) {
         return Bypass(NoSipDetected(path.to_string()));
