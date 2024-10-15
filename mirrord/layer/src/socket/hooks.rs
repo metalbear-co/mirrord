@@ -8,6 +8,7 @@ use std::{
 
 use errno::{set_errno, Errno};
 use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
+use mirrord_config::experimental::ExperimentalConfig;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 
 #[cfg(target_os = "macos")]
@@ -475,7 +476,22 @@ unsafe extern "C" fn dns_configuration_free_detour(config: *mut dns_config_t) {
         .for_each(|resolver| free_dns_resolver_t(resolver));
 }
 
-pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled_remote_dns: bool) {
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn getifaddrs_detour(ifaddrs: *mut *mut libc::ifaddrs) -> c_int {
+    match getifaddrs() {
+        Ok(got_ifaddrs) => {
+            *ifaddrs = got_ifaddrs;
+            0
+        }
+        Err(error) => error.into(),
+    }
+}
+
+pub(crate) unsafe fn enable_socket_hooks(
+    hook_manager: &mut HookManager,
+    enabled_remote_dns: bool,
+    experimental: &ExperimentalConfig,
+) {
     replace!(hook_manager, "socket", socket_detour, FnSocket, FN_SOCKET);
 
     replace!(
@@ -623,6 +639,16 @@ pub(crate) unsafe fn enable_socket_hooks(hook_manager: &mut HookManager, enabled
                 dns_configuration_free_detour,
                 FnDns_configuration_free,
                 FN_DNS_CONFIGURATION_FREE
+            );
+        }
+
+        if experimental.remove_ipv6_interfaces {
+            replace!(
+                hook_manager,
+                "getifaddrs",
+                getifaddrs_detour,
+                FnGetifaddrs,
+                FN_GETIFADDRS
             );
         }
     }
