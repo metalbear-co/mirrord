@@ -187,21 +187,24 @@ impl DnsApi {
 
     /// Returns the result of the oldest outstanding DNS request issued with this struct (see
     /// [`Self::make_request`]).
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     pub(crate) async fn recv(&mut self) -> Result<GetAddrInfoResponse, AgentError> {
         let Some(response) = self.responses.next().await else {
             return future::pending().await;
         };
 
-        match response? {
-            Ok(lookup) => Ok(GetAddrInfoResponse(Ok(lookup))),
-            Err(ResponseError::DnsLookup(err)) => {
-                Ok(GetAddrInfoResponse(Err(ResponseError::DnsLookup(err))))
-            }
-            Err(..) => Ok(GetAddrInfoResponse(Err(ResponseError::DnsLookup(
-                DnsLookupError {
-                    kind: ResolveErrorKindInternal::Unknown,
-                },
-            )))),
-        }
+        tracing::info!(?response);
+
+        let response = response?.map_err(|fail| match fail {
+            ResponseError::RemoteIO(remote_ioerror) => ResponseError::DnsLookup(DnsLookupError {
+                kind: remote_ioerror.kind.into(),
+            }),
+            fail @ ResponseError::DnsLookup(_) => fail,
+            _ => ResponseError::DnsLookup(DnsLookupError {
+                kind: ResolveErrorKindInternal::Unknown,
+            }),
+        });
+
+        Ok(GetAddrInfoResponse(response))
     }
 }

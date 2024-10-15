@@ -126,7 +126,7 @@ pub(crate) enum HookError {
 /// handling [`ProxyToLayerMessage`](mirrord_intproxy_protocol::ProxyToLayerMessage).
 #[derive(Error, Debug)]
 pub(crate) enum LayerError {
-    #[error("mirrord-layer: Failed while getting a response!")]
+    #[error(transparent)]
     ResponseError(#[from] ResponseError),
 
     #[error("mirrord-layer: Frida failed with `{0}`!")]

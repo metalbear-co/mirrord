@@ -152,7 +152,7 @@ pub struct RemoteIOError {
 /// Our internal version of Rust's `std::io::Error` that can be passed between mirrord-layer and
 /// mirrord-agent.
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
-#[error("Failed performing `getaddrinfo` with {kind:?}!")]
+#[error("Failed performing `getaddrinfo` with: {kind}!")]
 pub struct DnsLookupError {
     pub kind: ResolveErrorKindInternal,
 }
@@ -239,6 +239,28 @@ pub enum ResolveErrorKindInternal {
     PermissionDenied,
 }
 
+impl core::fmt::Display for ResolveErrorKindInternal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let pretty_fail = match self {
+            ResolveErrorKindInternal::Message(message) => message.to_string(),
+            ResolveErrorKindInternal::NoConnections => "no connections".to_string(),
+            ResolveErrorKindInternal::NoRecordsFound(records) => records.to_string(),
+            ResolveErrorKindInternal::Proto => "protocol".to_string(),
+            ResolveErrorKindInternal::Timeout => "timeout".to_string(),
+            ResolveErrorKindInternal::Unknown => "unknown".to_string(),
+            ResolveErrorKindInternal::NotFound => "the agent could not find a DNS related \
+                 file, such as `/etc/resolv.conf` or `/etc/hosts`"
+                .to_string(),
+            ResolveErrorKindInternal::PermissionDenied => "the agent lacks sufficient \
+                permissions to open or read a DNS related file, such as \
+                `/etc/resolv.conf` or `/etc/hosts`"
+                .to_string(),
+        };
+
+        write!(f, "{pretty_fail}")
+    }
+}
+
 impl From<io::ErrorKind> for ErrorKindInternal {
     fn from(error_kind: io::ErrorKind) -> Self {
         match error_kind {
@@ -289,7 +311,6 @@ impl From<io::ErrorKind> for ErrorKindInternal {
 
 impl From<ResolveErrorKind> for ResolveErrorKindInternal {
     fn from(error_kind: ResolveErrorKind) -> Self {
-        println!("{error_kind:?}");
         match error_kind {
             ResolveErrorKind::Message(message) => {
                 ResolveErrorKindInternal::Message(message.to_string())
@@ -313,6 +334,16 @@ impl From<ResolveErrorKind> for ResolveErrorKindInternal {
                 warn!(?error_kind, "unknown error kind");
                 ResolveErrorKindInternal::Unknown
             }
+        }
+    }
+}
+
+impl From<ErrorKindInternal> for ResolveErrorKindInternal {
+    fn from(kind: ErrorKindInternal) -> Self {
+        match kind {
+            ErrorKindInternal::NotFound => Self::NotFound,
+            ErrorKindInternal::PermissionDenied => Self::PermissionDenied,
+            _ => Self::Unknown,
         }
     }
 }
