@@ -619,7 +619,8 @@ impl IncomingProxy {
                 )))
             }
             // Retry on known errors.
-            Err(error @ InterceptorError::Reset) | Err(error @ InterceptorError::ConnectionClosedTooSoon(..)) => {
+            Err(error @ InterceptorError::Reset)
+            | Err(error @ InterceptorError::ConnectionClosedTooSoon(..)) => {
                 tracing::warn!(%error, ?request, "Failed to read first frames of streaming HTTP response");
 
                 let interceptor = self
