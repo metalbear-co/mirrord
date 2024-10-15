@@ -870,6 +870,8 @@ mod test {
                     .source()
                     .and_then(|source| source.downcast_ref::<h2::Error>())
                     .is_some_and(h2::Error::is_go_away));
+            } else {
+                panic!("The request is supposed to fail with `GO_AWAY`, something is wrong if it didn't!");
             }
         });
 
