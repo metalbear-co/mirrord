@@ -88,7 +88,7 @@ pub enum InterceptorError {
     /// [`hyper::Error`] mentions that `source` is not a guaranteed thing we can check for,
     /// so if you see any weird behavior, check that the [`h2`] crate is in sync with
     /// whatever hyper changed (for errors).
-    #[error("HTTP2 `RST_STREAM` received, we should retry the hyper connection!")]
+    #[error("HTTP2 `RST_STREAM` received")]
     Reset,
 
     /// We have reached the max number of attempts that we can retry our http connection,
