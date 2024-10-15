@@ -982,9 +982,8 @@ pub(super) fn getaddrinfo(
         .rev()
         .map(Box::new)
         .map(Box::into_raw)
-        .map(|raw| {
+        .inspect(|&raw| {
             managed_addr_info.insert(raw as usize);
-            raw
         })
         .reduce(|current, previous| {
             // Safety: These pointers were just allocated using `Box::new`, so they should be
@@ -1095,6 +1094,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
     ips_ptrs.push(ptr::null_mut());
 
     // Need long-lived values so we can take pointers to them.
+    #[allow(static_mut_refs)]
     unsafe {
         GETHOSTBYNAME_HOSTNAME.replace(host_name);
         GETHOSTBYNAME_ALIASES_STR.replace(aliases);
@@ -1111,7 +1111,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
             GETHOSTBYNAME_ADDRESSES_PTR.as_ref().unwrap().as_ptr() as *mut *mut libc::c_char;
     }
 
-    Detour::Success(unsafe { std::ptr::addr_of!(GETHOSTBYNAME_HOSTENT) as _ })
+    Detour::Success(std::ptr::addr_of!(GETHOSTBYNAME_HOSTENT) as _)
 }
 
 /// Resolve hostname from remote host with caching for the result

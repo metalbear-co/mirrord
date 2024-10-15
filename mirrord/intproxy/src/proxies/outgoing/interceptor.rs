@@ -34,8 +34,8 @@ impl BackgroundTask for Interceptor {
     ///
     /// # Notes
     ///
-    /// 1. When the peer shuts down writing, a single 0-sized read is sent through
-    /// the [`MessageBus`]. This is to notify the agent about the shutdown condition.
+    /// 1. When the peer shuts down writing, a single 0-sized read is sent through the
+    ///    [`MessageBus`]. This is to notify the agent about the shutdown condition.
     ///
     /// 2. A 0-sized read received from the [`MessageBus`] is treated as a shutdown on the agent
     ///    side. Connection with the peer is shut down as well.

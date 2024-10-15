@@ -336,7 +336,9 @@ where
     }
 }
 
-/// Get a vector of namespaces from an optional namespace. If the given namespace is Some, then
+/// Get a vector of namespaces from an optional namespace.
+///
+/// If the given namespace is Some, then
 /// fetch its Namespace object, and return a vector only with that.
 /// If the namespace is None - return all namespaces.
 pub async fn get_namespaces(

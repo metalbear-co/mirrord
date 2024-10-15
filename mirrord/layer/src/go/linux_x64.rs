@@ -1,4 +1,4 @@
-use std::arch::asm;
+use std::arch::naked_asm;
 
 use errno::errno;
 use tracing::trace;
@@ -24,7 +24,7 @@ use crate::{
 /// go's stack limit), so we need to switch to system stack.
 #[naked]
 unsafe extern "C" fn go_rawsyscall_detour() {
-    asm!(
+    naked_asm!(
         // push the arguments of Rawsyscall from the stack to preserved registers
         "mov rbx, QWORD PTR [rsp+0x10]",
         "mov r10, QWORD PTR [rsp+0x18]",
@@ -103,15 +103,14 @@ unsafe extern "C" fn go_rawsyscall_detour() {
         "mov    QWORD PTR [rsp+0x38], 0x0",
         "xorps  xmm15, xmm15",
         "mov    r14, QWORD PTR FS:[0xfffffff8]",
-        "ret",
-        options(noreturn)
+        "ret"
     );
 }
 
 /// [Naked function] hook for Syscall6
 #[naked]
 unsafe extern "C" fn go_syscall6_detour() {
-    asm!(
+    naked_asm!(
         "mov rax, QWORD PTR [rsp+0x8]",
         "mov rbx, QWORD PTR [rsp+0x10]",
         "mov r10, QWORD PTR [rsp+0x18]",
@@ -189,15 +188,14 @@ unsafe extern "C" fn go_syscall6_detour() {
         "mov    QWORD PTR [rsp+0x50], 0x0",
         "xorps  xmm15, xmm15",
         "mov    r14, QWORD PTR FS:[0xfffffff8]",
-        "ret",
-        options(noreturn)
+        "ret"
     );
 }
 
 /// [Naked function] hook for Syscall
 #[naked]
 unsafe extern "C" fn go_syscall_detour() {
-    asm!(
+    naked_asm!(
         "mov rax, QWORD PTR [rsp+0x8]",
         "mov rbx, QWORD PTR [rsp+0x10]",
         "mov r10, QWORD PTR [rsp+0x18]",
@@ -269,8 +267,7 @@ unsafe extern "C" fn go_syscall_detour() {
         "mov    QWORD PTR [rsp+0x38], 0x0",
         "xorps  xmm15,xmm15",
         "mov    r14, QWORD PTR FS:[0xfffffff8]",
-        "ret",
-        options(noreturn)
+        "ret"
     );
 }
 
@@ -278,7 +275,7 @@ unsafe extern "C" fn go_syscall_detour() {
 #[no_mangle]
 #[naked]
 unsafe extern "C" fn gosave_systemstack_switch() {
-    asm!(
+    naked_asm!(
         "lea    r9, [rip+0xdd9]",
         "mov    QWORD PTR [r14+0x40],r9",
         "lea    r9, [rsp+0x8]",
@@ -290,8 +287,7 @@ unsafe extern "C" fn gosave_systemstack_switch() {
         "jz     4f",
         "call   go_runtime_abort",
         "4:",
-        "ret",
-        options(noreturn)
+        "ret"
     );
 }
 
@@ -299,7 +295,7 @@ unsafe extern "C" fn gosave_systemstack_switch() {
 #[no_mangle]
 #[naked]
 unsafe extern "C" fn go_runtime_abort() {
-    asm!("int 0x3", "jmp go_runtime_abort", options(noreturn));
+    naked_asm!("int 0x3", "jmp go_runtime_abort");
 }
 
 /// Syscall & Rawsyscall handler - supports upto 4 params, used for socket,
@@ -393,7 +389,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
 /// so syscall6 handler need to handle syscall3 detours as well.
 #[naked]
 unsafe extern "C" fn go_syscall_new_detour() {
-    asm!(
+    naked_asm!(
         // Save rdi in r10
         "mov r10, rdi",
         // Save r9 in r11
@@ -413,14 +409,14 @@ unsafe extern "C" fn go_syscall_new_detour() {
         // for any case, store it there in case it isn't stored
         "mov qword ptr fs:[0xfffffff8], rdi",
         "cmp rdi, 0x0",
-        "jz 1f",
+        "jz 2f",
         "mov rax, qword ptr [rdi + 0x30]",
         "mov rsi, qword ptr [rax + 0x50]",
         "cmp rdi, rsi",
-        "jz 1f",
+        "jz 2f",
         "mov rsi, qword ptr [rax]",
         "cmp rdi, rsi",
-        "jz 1f",
+        "jz 2f",
         "call gosave_systemstack_switch",
         "mov qword ptr FS:[0xfffffff8], rsi",
         "mov rsp, qword ptr [RSI + 0x38]",
@@ -447,7 +443,7 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "mov rsp, rsi",
         // Regular flow
         "cmp    rax, -0xfff",
-        "jbe    2f",
+        "jbe    3f",
         "neg    rax",
         "mov    rcx, rax",
         "mov    rax, -0x1",
@@ -457,7 +453,7 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "ret",
         // same as `nosave` in the asmcgocall.
         // calls the abi handler, when we have no g
-        "1:",
+        "2:",
         "sub    rsp, 0x40",
         "and    rsp, -0x10",
         "mov    QWORD PTR [rsp+0x30], 0x0",
@@ -476,7 +472,7 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "mov    rsp, rsi",
         // Regular flow
         "cmp    rax, -0xfff",
-        "jbe    2f",
+        "jbe    3f",
         "neg    rax",
         "mov    rcx, rax",
         "mov    rax, -0x1",
@@ -484,14 +480,13 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "xorps  xmm15, xmm15",
         "mov    r14, QWORD PTR FS:[0xfffffff8]",
         "ret",
-        "2:",
+        "3:",
         // RAX already contains return value
         "mov    rbx, 0x0",
         "mov    rcx, 0x0",
         "xorps  xmm15, xmm15",
         "mov    r14, QWORD PTR FS:[0xfffffff8]",
-        "ret",
-        options(noreturn)
+        "ret"
     )
 }
 

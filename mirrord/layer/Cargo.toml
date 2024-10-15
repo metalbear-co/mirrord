@@ -31,7 +31,7 @@ bincode.workspace = true
 nix = { workspace = true, features = ["net", "process", "signal"]}
 tracing.workspace = true
 tracing-subscriber.workspace = true
-frida-gum = { version = "0.13", features = ["auto-download"] }
+frida-gum = { version = "0.14", features = ["auto-download"] }
 
 serde_json.workspace = true
 
@@ -72,4 +72,4 @@ actix-codec.workspace = true
 tokio-stream.workspace = true
 
 [lib]
-crate_type = ["cdylib"]
+crate-type = ["cdylib"]

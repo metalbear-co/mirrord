@@ -28,7 +28,6 @@ tokio = { workspace = true, features = [
     "process",
     "signal",
 ] }
-procfs = "0.17.0"
 serde.workspace = true
 serde_json.workspace = true
 pnet = "0.35"
@@ -75,7 +74,7 @@ socket2.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624" }
 rawsocket = { git = "https://github.com/metalbear-co/rawsocket.git" }
-
+procfs = "0.17.0"
 
 [dev-dependencies]
 rstest = "0.23"

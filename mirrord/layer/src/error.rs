@@ -191,7 +191,7 @@ impl From<SerializationError> for HookError {
 }
 
 // Cannot have a generic `From<T>` implementation for this error, so explicitly implemented here.
-impl<'a, T> From<std::sync::PoisonError<std::sync::MutexGuard<'a, T>>> for HookError {
+impl<T> From<std::sync::PoisonError<std::sync::MutexGuard<'_, T>>> for HookError {
     fn from(_: std::sync::PoisonError<std::sync::MutexGuard<T>>) -> Self {
         HookError::LockError
     }
