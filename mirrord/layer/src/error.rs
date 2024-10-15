@@ -8,7 +8,7 @@ use mirrord_protocol::{ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
 use thiserror::Error;
-use tracing::{error, info};
+use tracing::{error, info, Level};
 
 use crate::{graceful_exit, proxy_connection::ProxyError};
 
@@ -41,7 +41,7 @@ mod ignore_codes {
 /// These errors are converted to [`libc`] error codes, and are also used to [`set_errno`].
 #[derive(Error, Debug)]
 pub(crate) enum HookError {
-    #[error("mirrord-layer: Failed while getting a response!")]
+    #[error(transparent)]
     ResponseError(#[from] ResponseError),
 
     #[error("mirrord-layer: DNS does not resolve!")]

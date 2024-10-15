@@ -8,7 +8,7 @@ use std::{
 use bincode::{Decode, Encode};
 use hickory_resolver::error::{ResolveError, ResolveErrorKind};
 use thiserror::Error;
-use tracing::warn;
+use tracing::{warn, Level};
 
 use crate::{
     outgoing::SocketAddress,
@@ -44,7 +44,7 @@ pub enum ResponseError {
     #[error("IO failed for remote operation with `{0}!")]
     RemoteIO(RemoteIOError),
 
-    #[error("IO failed for remote operation with `{0}!")]
+    #[error(transparent)]
     DnsLookup(DnsLookupError),
 
     #[error("Remote operation failed with `{0}`")]
@@ -158,6 +158,7 @@ pub struct DnsLookupError {
 }
 
 impl From<io::Error> for ResponseError {
+    #[tracing::instrument(level = Level::DEBUG, ret)]
     fn from(io_error: io::Error) -> Self {
         Self::RemoteIO(RemoteIOError {
             raw_os_error: io_error.raw_os_error(),
@@ -167,6 +168,7 @@ impl From<io::Error> for ResponseError {
 }
 
 impl From<ResolveError> for ResponseError {
+    #[tracing::instrument(level = Level::DEBUG, ret)]
     fn from(fail: ResolveError) -> Self {
         match fail.kind().to_owned() {
             ResolveErrorKind::Io(io_fail) => io_fail.into(),
@@ -233,6 +235,8 @@ pub enum ResolveErrorKindInternal {
     Timeout,
     // Unknown is for uncovered cases (enum is non-exhaustive)
     Unknown,
+    NotFound,
+    PermissionDenied,
 }
 
 impl From<io::ErrorKind> for ErrorKindInternal {
@@ -285,6 +289,7 @@ impl From<io::ErrorKind> for ErrorKindInternal {
 
 impl From<ResolveErrorKind> for ResolveErrorKindInternal {
     fn from(error_kind: ResolveErrorKind) -> Self {
+        println!("{error_kind:?}");
         match error_kind {
             ResolveErrorKind::Message(message) => {
                 ResolveErrorKindInternal::Message(message.to_string())
@@ -296,8 +301,16 @@ impl From<ResolveErrorKind> for ResolveErrorKindInternal {
             }
             ResolveErrorKind::Proto(_) => ResolveErrorKindInternal::Proto,
             ResolveErrorKind::Timeout => ResolveErrorKindInternal::Timeout,
+            ResolveErrorKind::Io(fail) => match fail.kind() {
+                io::ErrorKind::NotFound => ResolveErrorKindInternal::NotFound,
+                io::ErrorKind::PermissionDenied => ResolveErrorKindInternal::PermissionDenied,
+                other => {
+                    warn!(?other, "unknown IO error");
+                    ResolveErrorKindInternal::Unknown
+                }
+            },
             _ => {
-                warn!("unknown error kind: {:?}", error_kind);
+                warn!(?error_kind, "unknown error kind");
                 ResolveErrorKindInternal::Unknown
             }
         }

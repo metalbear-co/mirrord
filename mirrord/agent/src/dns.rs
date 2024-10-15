@@ -87,7 +87,7 @@ impl DnsWorker {
         let hosts_path = etc_path.join("hosts");
 
         // TODO(alex) [high] 1: Return an io error here so we can inspect it in mirrord.
-        let resolv_conf = fs::read(resolv_conf_path).await?;
+        let resolv_conf = fs::read("/meow/meow").await?;
         let hosts_conf = fs::read(hosts_path).await?;
 
         let (config, mut options) = parse_resolv_conf(resolv_conf)?;
@@ -112,12 +112,16 @@ impl DnsWorker {
     }
 
     /// Handles the given [`DnsCommand`] in a separate [`tokio::task`].
+    #[tracing::instrument(level = Level::DEBUG, skip(self))]
     fn handle_message(&self, message: DnsCommand) {
         let etc_path = self.etc_path.clone();
         let timeout = self.timeout;
         let attempts = self.attempts;
         let lookup_future = async move {
-            let result = Self::do_lookup(etc_path, message.request.node, attempts, timeout).await;
+            let result = Self::do_lookup(etc_path, message.request.node, attempts, timeout)
+                .await
+                .inspect_err(|fail| tracing::error!(?fail, "DNS lookup failed!"));
+            tracing::debug!(?result, "DNS RESULT!");
             if let Err(result) = message.response_tx.send(result) {
                 tracing::error!(?result, "Failed to send query response");
             }
