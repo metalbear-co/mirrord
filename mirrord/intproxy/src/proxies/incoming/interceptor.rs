@@ -373,41 +373,43 @@ impl HttpConnection {
         let min = Duration::from_millis(10);
         let max = Duration::from_millis(250);
 
+        let mut backoffs = Backoff::new(RETRY_ON_RESET_ATTEMPTS, min, max)
+            .into_iter()
+            .flatten();
+
         // Retry to handle this request a few times.
-        for duration in Backoff::new(RETRY_ON_RESET_ATTEMPTS, min, max) {
+        loop {
             let response = self.sender.send(request.clone()).await;
 
             match self.handle_response(request.clone(), response).await {
                 Ok(response) => return Ok(response),
-                Err(InterceptorError::Reset)
-                | Err(InterceptorError::ConnectionClosedTooSoon(_)) => {
+
+                Err(error @ InterceptorError::Reset)
+                | Err(error @ InterceptorError::ConnectionClosedTooSoon(_)) => {
                     tracing::warn!(
                         ?request,
-                        "`RST_STREAM` request connection was reset, retrying."
+                        %error,
+                        "Either the connection closed or we got a reset, retrying!"
                     );
-                    match duration {
-                        Some(duration) => {
-                            sleep(duration).await;
 
-                            // Create a new connection for this second attempt.
-                            let socket = super::bind_similar(self.peer)?;
-                            let stream = socket.connect(self.peer).await?;
-                            let new_sender =
-                                super::http::handshake(request.version(), stream).await?;
-                            self.sender = new_sender;
-                        }
-                        None => return Err(InterceptorError::MaxRetries),
-                    }
+                    let Some(backoff) = backoffs.next() else {
+                        break;
+                    };
+
+                    sleep(backoff).await;
+
+                    // Create a new connection for the next attempt.
+                    let socket = super::bind_similar(self.peer)?;
+                    let stream = socket.connect(self.peer).await?;
+                    let new_sender = super::http::handshake(request.version(), stream).await?;
+                    self.sender = new_sender;
                 }
+
                 Err(fail) => return Err(fail),
             }
         }
 
-        unreachable!(
-            "BUG: You should only get here if the retry loop never ran!\
-            Please report this to us at \
-            https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml"
-        )
+        Err(InterceptorError::MaxRetries)
     }
 
     /// Proxies HTTP messages until an HTTP upgrade happens or the [`MessageBus`] closes.
@@ -535,6 +537,7 @@ mod test {
 
     use bytes::Bytes;
     use futures::future::FutureExt;
+    use h2::Reason;
     use http_body_util::{BodyExt, Empty};
     use hyper::{
         body::Incoming,
@@ -830,5 +833,11 @@ mod test {
 
             }
         }
+    }
+
+    #[test]
+    fn foo() {
+        // TODO(alex) [high] 1: How do I force hyper to reset?
+        let h2_fail = h2::Error::from(Reason::ENHANCE_YOUR_CALM);
     }
 }
