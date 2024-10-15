@@ -64,7 +64,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
     let stdout = child.stdout.take().expect("stdout should be piped");
     let stderr = child.stderr.take().expect("stdout should be piped");
 
-    let result = tokio::time::timeout(Duration::from_secs(15), async {
+    let result = tokio::time::timeout(Duration::from_secs(30), async {
         BufReader::new(stdout)
             .lines()
             .next_line()
