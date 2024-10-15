@@ -871,7 +871,14 @@ mod test {
                     .and_then(|source| source.downcast_ref::<h2::Error>())
                     .is_some_and(h2::Error::is_go_away));
             } else {
-                panic!("The request is supposed to fail with `GO_AWAY`, something is wrong if it didn't!");
+                panic!(
+                    r"The request is supposed to fail with `GO_AWAY`! 
+                    Something is wrong if it didn't!
+
+                    >> If you're seeing this error, the cause is likely that `hyper` and `h2`
+                    versions are out of sync, and we can't have that due to our use of
+                    `downcast_ref` on some `h2` errors!"
+                );
             }
         });
 
