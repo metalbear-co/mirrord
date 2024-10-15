@@ -99,6 +99,8 @@ fancy-regex = { version = "0.13" }
 enum_dispatch = "0.3"
 
 
+# If you update `hyper`, check that `h2` version is compatible in `intproxy/Cargo.toml`.
+# There is a test for this: `cargo test -p mirrord-intproxy hyper_and_h2_versions_in_sync`
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1" }
 http-body = "1"
