@@ -53,15 +53,6 @@ async fn test_issue2807_without_ipv6_ignore(
         )
         .await;
 
-    match intproxy.recv().await {
-        ClientMessage::Tcp(LayerTcp::PortSubscribe(port)) => {
-            intproxy
-                .send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(port))))
-                .await;
-        }
-        other => panic!("unexpected message received from intproxy: {other:?}"),
-    };
-
     let handle = tokio::spawn(handle_port_subscriptions(intproxy));
 
     test_process.wait_assert_fail().await;
@@ -104,15 +95,6 @@ async fn test_issue2807_with_ipv6_ignore(
             Some(config_path.to_str().unwrap()),
         )
         .await;
-
-    match intproxy.recv().await {
-        ClientMessage::Tcp(LayerTcp::PortSubscribe(port)) => {
-            intproxy
-                .send(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(port))))
-                .await;
-        }
-        other => panic!("unexpected message received from intproxy: {other:?}"),
-    };
 
     let handle = tokio::spawn(handle_port_subscriptions(intproxy));
 
