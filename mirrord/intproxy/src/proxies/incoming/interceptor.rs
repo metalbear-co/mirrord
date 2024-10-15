@@ -93,7 +93,7 @@ pub enum InterceptorError {
 
     /// We have reached the max number of attempts that we can retry our http connection,
     /// due to a `RST_STREAM`, or when the connection has been closed too soon.
-    #[error("HTTP2 reached the maximun amount of retries!")]
+    #[error("HTTP2 reached the maximum amount of retries!")]
     MaxRetries,
 }
 
