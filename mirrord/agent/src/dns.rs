@@ -120,7 +120,7 @@ impl DnsWorker {
             let result = Self::do_lookup(etc_path, message.request.node, attempts, timeout)
                 .await
                 .inspect_err(|fail| tracing::error!(?fail, "DNS lookup failed!"));
-            tracing::debug!(?result, "DNS RESULT!");
+
             if let Err(result) = message.response_tx.send(result) {
                 tracing::error!(?result, "Failed to send query response");
             }
