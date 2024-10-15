@@ -44,3 +44,6 @@ tokio-rustls = "0.26"
 rustls.workspace = true
 rustls-pemfile = "2"
 exponential-backoff = "2"
+
+[dev-dependencies]
+reqwest.workspace = true

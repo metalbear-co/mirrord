@@ -533,12 +533,14 @@ impl RawConnection {
 
 #[cfg(test)]
 mod test {
-    use std::sync::{Arc, Mutex};
+    use std::{
+        convert::Infallible,
+        sync::{Arc, Mutex},
+    };
 
     use bytes::Bytes;
     use futures::future::FutureExt;
-    use h2::Reason;
-    use http_body_util::{BodyExt, Empty};
+    use http_body_util::{BodyExt, Empty, Full};
     use hyper::{
         body::Incoming,
         header::{HeaderValue, CONNECTION, UPGRADE},
@@ -547,7 +549,7 @@ mod test {
         upgrade::Upgraded,
         Method, Request, Response,
     };
-    use hyper_util::rt::TokioIo;
+    use hyper_util::rt::{TokioExecutor, TokioIo};
     use mirrord_protocol::tcp::{HttpRequest, InternalHttpRequest, StreamingBody};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
@@ -835,9 +837,45 @@ mod test {
         }
     }
 
-    #[test]
-    fn foo() {
-        // TODO(alex) [high] 1: How do I force hyper to reset?
-        let h2_fail = h2::Error::from(Reason::ENHANCE_YOUR_CALM);
+    /// Checks that [`hyper`] and [`h2`] crate versions are in sync with each other.
+    ///
+    /// As we use `source.downcast_ref::<h2::Error>` to drill down on [`h2`] errors from
+    /// [`hyper`], we need these two crates to stay in sync, otherwise we could always
+    /// fail some of our checks that rely on this `downcast` working.
+    ///
+    /// Even though we're using [`h2::Error::is_reset`] in intproxy, this test can be
+    /// for any error, and thus here we do it for [`h2::Error::is_go_away`] which is
+    /// easier to trigger.
+    #[tokio::test]
+    async fn hyper_and_h2_versions_in_sync() {
+        let notify = Arc::new(Notify::new());
+        let wait_notify = notify.clone();
+
+        tokio::spawn(async move {
+            let listener = TcpListener::bind("127.0.0.1:6666").await.unwrap();
+
+            notify.notify_waiters();
+            let (io, _) = listener.accept().await.unwrap();
+
+            if let Err(fail) = hyper::server::conn::http2::Builder::new(TokioExecutor::default())
+                .serve_connection(
+                    TokioIo::new(io),
+                    service_fn(|_| async move {
+                        Ok::<_, Infallible>(Response::new(Full::new(Bytes::from("Heresy!"))))
+                    }),
+                )
+                .await
+            {
+                assert!(fail
+                    .source()
+                    .and_then(|source| source.downcast_ref::<h2::Error>())
+                    .is_some_and(h2::Error::is_go_away));
+            }
+        });
+
+        // Wait for the listener to be ready for our connection.
+        wait_notify.notified().await;
+
+        assert!(reqwest::get("https://127.0.0.1:6666").await.is_err());
     }
 }

@@ -4198,6 +4198,7 @@ dependencies = [
  "mirrord-operator",
  "mirrord-protocol",
  "rand",
+ "reqwest 0.12.8",
  "rustls 0.23.14",
  "rustls-pemfile 2.2.0",
  "semver 1.0.23",
