@@ -70,7 +70,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
             .next_line()
             .await
             .map_err(|error| {
-                ContainerError::UnableParseCommandStdout(format_command(command), error)
+                ContainerError::UnableReadCommandStdout(format_command(command), error)
             })
     })
     .await;
@@ -88,7 +88,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
                 .read_to_string(&mut stderr_buffer)
                 .await
                 .map_err(|error| {
-                    ContainerError::UnableParseCommandStderr(format_command(command), error)
+                    ContainerError::UnableReadCommandStderr(format_command(command), error)
                 })?;
 
             if stderr_len > 0 {
@@ -99,7 +99,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
             } else {
                 return Err(ContainerError::UnsuccesfulCommandOutput(
                     format_command(command),
-                    "stderr and stdout were empty".into(),
+                    "stdout and stderr were empty".into(),
                 ));
             }
         }

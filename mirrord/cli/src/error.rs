@@ -60,13 +60,13 @@ pub(crate) enum ContainerError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     UnableToExecuteCommand(std::io::Error),
 
-    #[error("Failed parse command stdout: {0}")]
+    #[error("Failed read command stdout: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
-    UnableParseCommandStdout(String, std::io::Error),
+    UnableReadCommandStdout(String, std::io::Error),
 
-    #[error("Failed parse command stderr: {0}")]
+    #[error("Failed read command stderr: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
-    UnableParseCommandStderr(String, std::io::Error),
+    UnableReadCommandStderr(String, std::io::Error),
 
     #[error("Command failed to execute command [{0}]: {1}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
