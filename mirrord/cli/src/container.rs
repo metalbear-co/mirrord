@@ -16,10 +16,9 @@ use mirrord_config::{
 use mirrord_progress::{Progress, ProgressTracker, MIRRORD_PROGRESS_ENV};
 use tempfile::NamedTempFile;
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     process::Command,
 };
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::Level;
 
 use crate::{
@@ -63,16 +62,49 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
     tracing::warn!(?child, "spawned watch for child");
 
     let stdout = child.stdout.take().expect("stdout should be piped");
+    let stderr = child.stderr.take().expect("stdout should be piped");
 
-    let result = BufReader::new(stdout)
-        .lines()
-        .next_line()
-        .await
-        .map_err(|error| ContainerError::UnableParseCommandStdout(format_command(command), error));
+    let result = tokio::time::timeout(Duration::from_secs(15), async {
+        BufReader::new(stdout)
+            .lines()
+            .next_line()
+            .await
+            .map_err(|error| {
+                ContainerError::UnableParseCommandStdout(format_command(command), error)
+            })
+    })
+    .await;
 
     let _ = child.kill().await;
 
-    result
+    match result {
+        Err(error) => Err(ContainerError::UnsuccesfulCommandOutput(
+            format_command(command),
+            error.to_string(),
+        )),
+        Ok(Err(_)) | Ok(Ok(None)) => {
+            let mut stderr_buffer = String::new();
+            let stderr_len = BufReader::new(stderr)
+                .read_to_string(&mut stderr_buffer)
+                .await
+                .map_err(|error| {
+                    ContainerError::UnableParseCommandStderr(format_command(command), error)
+                })?;
+
+            if stderr_len > 0 {
+                return Err(ContainerError::UnsuccesfulCommandOutput(
+                    format_command(command),
+                    stderr_buffer,
+                ));
+            } else {
+                return Err(ContainerError::UnsuccesfulCommandOutput(
+                    format_command(command),
+                    "stderr and stdout were empty".into(),
+                ));
+            }
+        }
+        Ok(result) => result,
+    }
 }
 
 /// Create a temp file with a json serialized [`LayerConfig`] to be loaded by container and external
@@ -159,31 +191,21 @@ async fn create_sidecar_intproxy(
             )
         })?;
 
-    let mut retry_strategy = ExponentialBackoff::from_millis(100)
-        .max_delay(Duration::from_secs(10))
-        .map(jitter);
-
     // After spawning sidecar with -d flag it prints container_id, now we need the address of
     // intproxy running in sidecar to be used by mirrord-layer in execution container
-    let intproxy_address: SocketAddr = loop {
-        let mut command = Command::new(&runtime_binary);
-        command.args(["attach", &sidecar_container_id]);
+    let intproxy_address: SocketAddr = {
+        let mut attach_command = Command::new(&runtime_binary);
+        attach_command.args(["logs", "-f", &sidecar_container_id]);
 
-        match exec_and_get_first_line(&mut command).await? {
-            Some(line) => {
-                break line
-                    .parse()
-                    .map_err(ContainerError::UnableParseProxySocketAddr)?;
-            }
+        match exec_and_get_first_line(&mut attach_command).await? {
+            Some(line) => line
+                .parse()
+                .map_err(ContainerError::UnableParseProxySocketAddr)?,
             None => {
-                let backoff_timeout = retry_strategy.next().ok_or_else(|| {
-                    ContainerError::UnsuccesfulCommandOutput(
-                        format_command(&command),
-                        "stdout and stderr were empty and retry max delay exceeded".to_owned(),
-                    )
-                })?;
-
-                tokio::time::sleep(backoff_timeout).await
+                return Err(ContainerError::UnsuccesfulCommandOutput(
+                    format_command(&attach_command),
+                    "stdout and stderr were empty".into(),
+                ))
             }
         }
     };
