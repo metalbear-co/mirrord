@@ -86,8 +86,7 @@ impl DnsWorker {
         let resolv_conf_path = etc_path.join("resolv.conf");
         let hosts_path = etc_path.join("hosts");
 
-        // TODO(alex) [high] 1: Return an io error here so we can inspect it in mirrord.
-        let resolv_conf = fs::read("/meow/meow").await?;
+        let resolv_conf = fs::read(resolv_conf_path).await?;
         let hosts_conf = fs::read(hosts_path).await?;
 
         let (config, mut options) = parse_resolv_conf(resolv_conf)?;
@@ -112,7 +111,7 @@ impl DnsWorker {
     }
 
     /// Handles the given [`DnsCommand`] in a separate [`tokio::task`].
-    #[tracing::instrument(level = Level::DEBUG, skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     fn handle_message(&self, message: DnsCommand) {
         let etc_path = self.etc_path.clone();
         let timeout = self.timeout;
@@ -192,8 +191,6 @@ impl DnsApi {
         let Some(response) = self.responses.next().await else {
             return future::pending().await;
         };
-
-        tracing::info!(?response);
 
         let response = response?.map_err(|fail| match fail {
             ResponseError::RemoteIO(remote_ioerror) => ResponseError::DnsLookup(DnsLookupError {

@@ -151,6 +151,9 @@ pub struct RemoteIOError {
 
 /// Our internal version of Rust's `std::io::Error` that can be passed between mirrord-layer and
 /// mirrord-agent.
+///
+/// [`ResolveErrorKindInternal`] has a nice [`core::fmt::Display`] implementation that
+/// should be user friendly, and can be appended to the generic error message here.
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 #[error("Failed performing `getaddrinfo` with: {kind}!")]
 pub struct DnsLookupError {
@@ -158,7 +161,7 @@ pub struct DnsLookupError {
 }
 
 impl From<io::Error> for ResponseError {
-    #[tracing::instrument(level = Level::DEBUG, ret)]
+    #[tracing::instrument(level = Level::TRACE, ret)]
     fn from(io_error: io::Error) -> Self {
         Self::RemoteIO(RemoteIOError {
             raw_os_error: io_error.raw_os_error(),
@@ -168,7 +171,7 @@ impl From<io::Error> for ResponseError {
 }
 
 impl From<ResolveError> for ResponseError {
-    #[tracing::instrument(level = Level::DEBUG, ret)]
+    #[tracing::instrument(level = Level::TRACE, ret)]
     fn from(fail: ResolveError) -> Self {
         match fail.kind().to_owned() {
             ResolveErrorKind::Io(io_fail) => io_fail.into(),
