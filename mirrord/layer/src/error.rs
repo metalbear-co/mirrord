@@ -8,7 +8,7 @@ use mirrord_protocol::{ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
 use thiserror::Error;
-use tracing::{error, info, Level};
+use tracing::{error, info};
 
 use crate::{graceful_exit, proxy_connection::ProxyError};
 
