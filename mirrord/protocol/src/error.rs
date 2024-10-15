@@ -244,23 +244,26 @@ pub enum ResolveErrorKindInternal {
 
 impl core::fmt::Display for ResolveErrorKindInternal {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let pretty_fail = match self {
-            ResolveErrorKindInternal::Message(message) => message.to_string(),
-            ResolveErrorKindInternal::NoConnections => "no connections".to_string(),
-            ResolveErrorKindInternal::NoRecordsFound(records) => records.to_string(),
-            ResolveErrorKindInternal::Proto => "protocol".to_string(),
-            ResolveErrorKindInternal::Timeout => "timeout".to_string(),
-            ResolveErrorKindInternal::Unknown => "unknown".to_string(),
-            ResolveErrorKindInternal::NotFound => "the agent could not find a DNS related \
-                 file, such as `/etc/resolv.conf` or `/etc/hosts`"
-                .to_string(),
-            ResolveErrorKindInternal::PermissionDenied => "the agent lacks sufficient \
-                permissions to open or read a DNS related file, such as \
+        match self {
+            ResolveErrorKindInternal::Message(message) => write!(f, "{message}"),
+            ResolveErrorKindInternal::NoConnections => write!(f, "no connections"),
+            ResolveErrorKindInternal::NoRecordsFound(records) => {
+                write!(f, "no records found {records}")
+            }
+            ResolveErrorKindInternal::Proto => write!(f, "protocol"),
+            ResolveErrorKindInternal::Timeout => write!(f, "timeout"),
+            ResolveErrorKindInternal::Unknown => write!(f, "unknown"),
+            ResolveErrorKindInternal::NotFound => write!(
+                f,
+                "the agent could not find a DNS related file, such as \
                 `/etc/resolv.conf` or `/etc/hosts`"
-                .to_string(),
-        };
-
-        write!(f, "{pretty_fail}")
+            ),
+            ResolveErrorKindInternal::PermissionDenied => write!(
+                f,
+                "the agent lacks sufficient permissions to open or read a DNS related \
+                file, such as `/etc/resolv.conf` or `/etc/hosts`"
+            ),
+        }
     }
 }
 
