@@ -753,6 +753,14 @@
             "null"
           ]
         },
+        "hide_ipv6_interfaces": {
+          "title": "_experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}",
+          "description": "Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "readlink": {
           "title": "_experimental_ readlink {#experimental-readlink}",
           "description": "Enables the `readlink` hook.",
