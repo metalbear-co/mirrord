@@ -133,6 +133,7 @@ pub struct TestProcess {
     stderr_task: Option<JoinHandle<()>>,
     stdout_task: Option<JoinHandle<()>>,
     error_capture: Regex,
+    warn_capture: Regex,
     // Keeps tempdir existing while process is running.
     _tempdir: Option<TempDir>,
 }
@@ -186,6 +187,20 @@ impl TestProcess {
     pub async fn assert_no_error_in_stderr(&self) {
         assert!(!self
             .error_capture
+            .is_match(&self.stderr_data.read().await)
+            .unwrap());
+    }
+
+    pub async fn assert_no_warn_in_stdout(&self) {
+        assert!(!self
+            .warn_capture
+            .is_match(&self.stdout_data.read().await)
+            .unwrap());
+    }
+
+    pub async fn assert_no_warn_in_stderr(&self) {
+        assert!(!self
+            .warn_capture
             .is_match(&self.stderr_data.read().await)
             .unwrap());
     }
@@ -324,10 +339,12 @@ impl TestProcess {
         }));
 
         let error_capture = Regex::new(r"^.*ERROR[^\w_-]").unwrap();
+        let warn_capture = Regex::new(r"WARN").unwrap();
 
         TestProcess {
             child,
             error_capture,
+            warn_capture,
             stderr_data,
             stdout_data,
             stderr_task,
