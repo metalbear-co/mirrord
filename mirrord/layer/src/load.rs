@@ -37,7 +37,7 @@ static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "jspawnhelper",
         "strip",
         "dsymutil",
-
+        "xcrun"
     ])
 });
 
