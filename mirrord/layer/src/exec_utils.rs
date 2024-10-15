@@ -62,17 +62,6 @@ pub(crate) unsafe fn enable_macos_hooks(
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
     let patch_binaries = PATCH_BINARIES.get().expect("patch binaries not set");
-    // some binaries don't need to be sip patched, because they don't chain-execute (i.e we don't
-    // care about the commands they run) for example, "go run" needs to be sip patched because
-    // it builds then executes. but gcc never executes the binary, so we don't need to sip patch
-    // it.
-    const BYPASS_BINARIES: &[&str] = &[
-        "/uname",
-        "/xcrun"
-    ];
-    if BYPASS_BINARIES.iter().any(|bin| path.ends_with(bin)) {
-        return Bypass(NoSipDetected(path.to_string()));
-    }
     match sip_patch(path, patch_binaries) {
         Ok(None) => Bypass(NoSipDetected(path.to_string())),
         Ok(Some(new_path)) => Success(new_path),
@@ -144,7 +133,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
 }
 
 /// Verifies that mirrord environment is passed to child process
-fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
+fn intercept_environment(envp_arr: &Nul<*const c_char>, bypass: bool) -> Detour<Argv> {
     let mut c_string_vec = Argv::default();
 
     let mut found_dyld = false;
@@ -156,13 +145,17 @@ fn intercept_environment(envp_arr: &Nul<*const c_char>) -> Detour<Argv> {
         };
 
         if arg_str.split('=').next() == Some("DYLD_INSERT_LIBRARIES") {
+            // drop that env if bypass
+            if bypass {
+                continue;
+            }
             found_dyld = true;
         }
 
         c_string_vec.push(CString::new(arg_str)?)
     }
 
-    if !found_dyld {
+    if !found_dyld && !bypass {
         for (key, value) in crate::setup().env_backup() {
             c_string_vec.push(CString::new(format!("{key}={value}"))?);
         }
@@ -186,21 +179,55 @@ pub(crate) unsafe fn patch_sip_for_new_process(
     trace!("Executable {} called execve/posix_spawn", calling_exe);
 
     let path_str = path.checked_into()?;
+
     // If an application is trying to run an executable from our tmp dir, strip our tmp dir from the
     // path. The file might not even exist in our tmp dir, and the application is expecting it there
     // only because it somehow found out about its own patched location in our tmp dir.
     // If original path is SIP, and actually exists in our dir that patched executable will be used.
     let path_str = strip_mirrord_path(path_str).unwrap_or(path_str);
-    let path_c_string = patch_if_sip(path_str)
-        .and_then(|new_path| Success(CString::new(new_path)?))
-        // Continue also on error, use original path, don't bypass yet, try cleaning argv.
-        .unwrap_or(CString::new(path_str.to_string())?);
+
+    // some binaries don't need to be sip patched, because they don't chain-execute (i.e we don't
+    // care about the commands they run) for example, "go run" needs to be sip patched because
+    // it builds then executes. but gcc never executes the binary, so we don't need to sip patch
+    // it.
+    const BYPASS_BINARIES: &[&str] = &[
+        "/uname",
+        "/as",
+        "/cc",
+        "/ld",
+        "/asm",
+        "/cc1",
+        "/cgo",
+        "/gcc",
+        "/git",
+        "/link",
+        "/clang",
+        "/compile",
+        "/rustc",
+        "/collect2",
+        "/strip",
+        "/dsymutil",
+        "/xcrun",
+    ];
+
+    let bypass_binary = BYPASS_BINARIES
+        .iter()
+        .any(|bypass| path_str.ends_with(bypass));
+    let path_c_string = if bypass_binary {
+        tracing::debug!("Bypassing SIP patch for binary: {path_str}");
+        CString::new(path_str)?
+    } else {
+        patch_if_sip(path_str)
+            .and_then(|new_path| Success(CString::new(new_path)?))
+            // Continue also on error, use original path, don't bypass yet, try cleaning argv.
+            .unwrap_or(CString::new(path_str.to_string())?)
+    };
 
     let argv_arr = Nul::new_unchecked(argv);
     let envp_arr = Nul::new_unchecked(envp);
 
     let argv_vec = intercept_tmp_dir(argv_arr)?;
-    let envp_vec = intercept_environment(envp_arr)?;
+    let envp_vec = intercept_environment(envp_arr, bypass_binary)?;
     Success((path_c_string, argv_vec, envp_vec))
 }
 
