@@ -9,6 +9,7 @@ use crate::{
 };
 
 /// Console logger that sends log messages to the console app using
+///
 /// [`codec`](mirrord_intproxy_protocol::codec). It does not use any additional threads, but simply
 /// sends the log records through a [`SyncEncoder`].
 pub struct ConsoleLogger {

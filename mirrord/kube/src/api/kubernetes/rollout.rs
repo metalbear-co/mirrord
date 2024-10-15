@@ -45,6 +45,7 @@ pub struct RolloutSpec {
 }
 
 /// A reference to some Kubernetes [workload](https://kubernetes.io/docs/concepts/workloads/) managed by an Argo [`Rollout`].
+///
 /// The documentation of Argo do not mention any restrictions no the referenced resource type -
 /// "WorkloadRef holds a references to a workload that provides Pod template".
 ///

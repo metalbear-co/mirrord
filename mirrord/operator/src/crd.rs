@@ -247,6 +247,8 @@ pub struct Session {
 )]
 pub struct SessionSpec;
 
+/// Features supported by operator
+///
 /// Since this enum does not have a variant marked with `#[serde(other)]`, and is present like that
 /// in released clients, existing clients would fail to parse any new variant. This means the
 /// operator can never send anything but the one existing variant, otherwise the client will error
@@ -486,8 +488,10 @@ pub struct QueueNameUpdate {
     pub output_name: String,
 }
 
-/// Details retrieved from K8s resources once the splitter is active, used on filter session
-/// creation to determine the required config changes that make the application use the
+/// Details retrieved from K8s resources once the splitter is active.
+///
+/// used on filter session creation to determine the required
+/// config changes that make the application use the
 /// output queues instead of the original.
 // This status struct is not optimal in that it contains redundant information. This makes the
 // controller's code a bit simpler.

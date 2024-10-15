@@ -28,8 +28,8 @@ use crate::{
 /// }
 /// ```
 ///
-/// - Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331`
-/// will go through the remote pod.
+/// - Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331` will go
+///   through the remote pod.
 /// ```json
 /// {
 ///   "remote": ["google.com:1337", "google.com:7331"]

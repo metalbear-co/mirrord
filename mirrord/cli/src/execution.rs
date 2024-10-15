@@ -81,7 +81,7 @@ where
     stderr_rx: UnboundedReceiver<String>,
 }
 
-impl<'a, P> Drop for DropProgress<'a, P>
+impl<P> Drop for DropProgress<'_, P>
 where
     P: Progress + Send + Sync,
 {

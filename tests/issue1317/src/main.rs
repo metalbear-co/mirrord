@@ -9,9 +9,8 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(|| App::new().service(index).wrap(Logger::default()))
         .bind(("0.0.0.0", 80))
-        .map(|server| {
+        .inspect(|_server| {
             info!("Listener for issue1317: STARTED");
-            server
         })?
         .keep_alive(Duration::from_secs(240))
         .run()

@@ -28,10 +28,10 @@ use http_filter::*;
 /// Incoming traffic supports 2 modes of operation:
 ///
 /// 1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested
-/// listeners;
+///    listeners;
 ///
 /// 2. Steal: Captures the TCP data from a port, and forwards it to the local process, see
-/// [`steal`](##steal);
+///    [`steal`](##steal);
 ///
 /// ### Minimal `incoming` config
 ///
@@ -331,7 +331,7 @@ where
 /// Incoming traffic supports 3 [modes](#feature-network-incoming-mode) of operation:
 ///
 /// 1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested
-/// listeners;
+///    listeners;
 ///
 /// 2. Steal: Captures the TCP data from a port, and forwards it to the local process.
 ///
@@ -471,14 +471,13 @@ impl IncomingConfig {
 /// - `"off"`: Disables the incoming network feature.
 /// - `"steal"`: Supports 2 modes of operation:
 ///
-/// 1. Port traffic stealing: Steals all TCP data from a
-///   port, which is selected whenever the
-/// user listens in a TCP socket (enabling the feature is enough to make this work, no
-/// additional configuration is needed);
+/// 1. Port traffic stealing: Steals all TCP data from a port, which is selected whenever the user
+///    listens in a TCP socket (enabling the feature is enough to make this work, no additional
+///    configuration is needed);
 ///
-/// 2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming
-/// data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and
-/// steals the traffic on the port if it is HTTP;
+/// 2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming data
+///    on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the
+///    traffic on the port if it is HTTP;
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Copy, Debug, JsonSchema, Default)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum IncomingMode {
@@ -495,12 +494,12 @@ pub enum IncomingMode {
     /// Stealer supports 2 modes of operation:
     ///
     /// 1. Port traffic stealing: Steals all TCP data from a port, which is selected whenever the
-    /// user listens in a TCP socket (enabling the feature is enough to make this work, no
-    /// additional configuration is needed);
+    ///    user listens in a TCP socket (enabling the feature is enough to make this work, no
+    ///    additional configuration is needed);
     ///
     /// 2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming
-    /// data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and
-    /// steals the traffic on the port if it is HTTP;
+    ///    data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and
+    ///    steals the traffic on the port if it is HTTP;
     Steal,
 
     /// <!--${internal}-->

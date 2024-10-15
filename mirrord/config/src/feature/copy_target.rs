@@ -1,4 +1,6 @@
-//! Config for the `copy target` feature. [`CopyTargetFileConfig`] does follow the pattern of other
+//! Config for the `copy target` feature.
+//!
+//! [`CopyTargetFileConfig`] does follow the pattern of other
 //! [`feature`](crate::feature) configs by not implementing
 //! [`MirrordToggleableConfig`](crate::util::MirrordToggleableConfig). The reason for this is that
 //! [`ToggleableConfig`](crate::util::ToggleableConfig) is enabled by default. This config should be

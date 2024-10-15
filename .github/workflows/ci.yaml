@@ -34,8 +34,8 @@ on:
   workflow_dispatch:
   push:
   pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [ main ]
+    types: [ opened, synchronize, reopened, ready_for_review ]
 
 # Cancel previous runs on the same PR.
 concurrency:
@@ -151,7 +151,7 @@ jobs:
       - run: rm rust-toolchain.toml
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly-2024-04-15
+          toolchain: nightly-2024-10-11
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
       - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
@@ -193,7 +193,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly-2024-04-15
+          toolchain: nightly-2024-10-11
       # TODO(alex): `no-deps` here due to an issue in `futures-util`.
       - run: cargo doc --document-private-items --no-deps
 
@@ -202,7 +202,7 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     container:
-      image: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32
+      image: ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9
     steps:
       - uses: actions/checkout@v4
       - uses: arduino/setup-protoc@v3
@@ -252,7 +252,7 @@ jobs:
 
   integration_tests:
     runs-on: ubuntu-24.04
-    needs: [changed_files]
+    needs: [ changed_files ]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
@@ -345,6 +345,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/issue2438
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/rebind0
+          cargo build
       - run: ./scripts/build_c_apps.sh
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
       - name: mirrord protocol UT
@@ -384,7 +387,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-          toolchain: nightly-2024-04-15
+          toolchain: nightly-2024-10-11
       - name: Install Protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -463,6 +466,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/issue2438
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/rebind0
+          cargo build
       - run: ./scripts/build_c_apps.sh
       # For the `java_temurin_sip` test.
       - uses: sdkman/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
@@ -493,9 +499,9 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        container-runtime: ["docker", "containerd"]
+        container-runtime: [ "docker", "containerd" ]
     name: e2e
-    needs: [test_agent_image, changed_files]
+    needs: [ test_agent_image, changed_files ]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
@@ -575,14 +581,14 @@ jobs:
   # which checks if the branch is a release branch
   intellij_e2e_on_release_branch:
     # requires test_agent to have image to download
-    needs: [build_mirrord_on_release_branch, test_agent_image]
+    needs: [ build_mirrord_on_release_branch, test_agent_image ]
     uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
 
   vscode_e2e_on_release_branch:
     # requires test_agent to have image to download
-    needs: [build_mirrord_on_release_branch, test_agent_image]
+    needs: [ build_mirrord_on_release_branch, test_agent_image ]
     uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true

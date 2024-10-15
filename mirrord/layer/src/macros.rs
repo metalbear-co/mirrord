@@ -60,7 +60,9 @@ macro_rules! replace {
     }};
 }
 
-/// Replaces the `$func` [`libc`] function, with the equivalent hook `$detour_function`, by calling
+/// Replaces the `$func` [`libc`] function
+///
+/// Replaces the `$func` [`libc`] function with the equivalent hook `$detour_function`, by calling
 /// `HookManager::hook_export_or_any`. This variant accepts a fallback function to put in the
 /// original function if the hook fails. This is useful in Go when we actually don't hook any libc
 /// but still need to call it.
