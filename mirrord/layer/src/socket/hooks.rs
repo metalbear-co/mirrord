@@ -642,7 +642,7 @@ pub(crate) unsafe fn enable_socket_hooks(
             );
         }
 
-        if experimental.remove_ipv6_interfaces {
+        if experimental.hide_ipv6_interfaces {
             replace!(
                 hook_manager,
                 "getifaddrs",
