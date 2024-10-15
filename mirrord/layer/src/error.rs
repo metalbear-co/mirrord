@@ -75,6 +75,9 @@ pub(crate) enum HookError {
     #[error("mirrord-layer: SIP patch failed with error `{0}`!")]
     FailedSipPatch(#[from] SipError),
 
+    #[error("mirrord-layer: IPv6 can't be used with mirrord")]
+    SocketUnsuportedIpv6,
+
     // `From` implemented below, not with `#[from]` so that when new variants of
     // `SerializationError` are added, they are mapped into different variants of
     // `LayerError`.
@@ -188,7 +191,7 @@ impl From<SerializationError> for HookError {
 }
 
 // Cannot have a generic `From<T>` implementation for this error, so explicitly implemented here.
-impl<'a, T> From<std::sync::PoisonError<std::sync::MutexGuard<'a, T>>> for HookError {
+impl<T> From<std::sync::PoisonError<std::sync::MutexGuard<'_, T>>> for HookError {
     fn from(_: std::sync::PoisonError<std::sync::MutexGuard<T>>) -> Self {
         HookError::LockError
     }
@@ -217,6 +220,9 @@ impl From<HookError> for i64 {
             }
             HookError::FileNotFound => {
                 info!("mirrord file not found triggered")
+            }
+            HookError::SocketUnsuportedIpv6 => {
+                info!("{fail}")
             }
             HookError::ProxyError(ref err) => {
                 graceful_exit!(
@@ -286,6 +292,7 @@ impl From<HookError> for i64 {
             HookError::LocalFileCreation(_) => libc::EINVAL,
             #[cfg(target_os = "macos")]
             HookError::FailedSipPatch(_) => libc::EACCES,
+            HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,
             HookError::UnsupportedSocketType => libc::EAFNOSUPPORT,
             HookError::BadPointer => libc::EFAULT,
             HookError::AddressAlreadyBound(_) => libc::EADDRINUSE,

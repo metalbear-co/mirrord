@@ -38,7 +38,9 @@ pub struct LabelSelectorRequirement {
     pub values: Option<Vec<String>>,
 }
 
-/// A label selector is a label query over a set of resources. The result of matchLabels and
+/// A label selector is a label query over a set of resources.
+///
+/// The result of matchLabels and
 /// matchExpressions are ANDed. An empty label selector matches all objects. A null label selector
 /// matches no objects.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]

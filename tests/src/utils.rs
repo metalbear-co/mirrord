@@ -39,7 +39,6 @@ use tokio::{
     task::JoinHandle,
 };
 
-#[cfg(feature = "operator")]
 pub mod sqs_resources;
 
 const TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
@@ -133,6 +132,7 @@ pub struct TestProcess {
     stderr_task: Option<JoinHandle<()>>,
     stdout_task: Option<JoinHandle<()>>,
     error_capture: Regex,
+    warn_capture: Regex,
     // Keeps tempdir existing while process is running.
     _tempdir: Option<TempDir>,
 }
@@ -186,6 +186,20 @@ impl TestProcess {
     pub async fn assert_no_error_in_stderr(&self) {
         assert!(!self
             .error_capture
+            .is_match(&self.stderr_data.read().await)
+            .unwrap());
+    }
+
+    pub async fn assert_no_warn_in_stdout(&self) {
+        assert!(!self
+            .warn_capture
+            .is_match(&self.stdout_data.read().await)
+            .unwrap());
+    }
+
+    pub async fn assert_no_warn_in_stderr(&self) {
+        assert!(!self
+            .warn_capture
             .is_match(&self.stderr_data.read().await)
             .unwrap());
     }
@@ -324,10 +338,12 @@ impl TestProcess {
         }));
 
         let error_capture = Regex::new(r"^.*ERROR[^\w_-]").unwrap();
+        let warn_capture = Regex::new(r"WARN").unwrap();
 
         TestProcess {
             child,
             error_capture,
+            warn_capture,
             stderr_data,
             stdout_data,
             stderr_task,
@@ -690,6 +706,7 @@ impl Drop for ResourceGuard {
 }
 
 /// A service deployed to the kubernetes cluster.
+///
 /// Service is meant as in "Microservice", not as in the Kubernetes resource called Service.
 /// This includes a Deployment resource, a Service resource and optionally a Namespace.
 pub struct KubeService {
@@ -1036,7 +1053,9 @@ pub async fn service(
     .await
 }
 
-/// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
+/// Create a new [`KubeService`] and related Kubernetes resources.
+///
+/// The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
 /// This behavior can be changed, see [`PRESERVE_FAILED_ENV_NAME`].
 /// * `randomize_name` - whether a random suffix should be added to the end of the resource names

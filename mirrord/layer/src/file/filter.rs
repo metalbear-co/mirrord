@@ -3,7 +3,7 @@
 /// There are 2 ways of setting this up:
 ///
 /// 1. no configuration (default): will bypass file operations for file paths and types that
-/// match [`generate_local_set`];
+///    match [`generate_local_set`];
 ///
 /// 2. Using the overrides for `read_only`, `read_write` and `local`.
 use std::env;

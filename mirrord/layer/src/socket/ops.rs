@@ -24,7 +24,7 @@ use mirrord_protocol::{
     dns::{GetAddrInfoRequest, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
-use nix::sys::socket::{sockopt, SockaddrLike, SockaddrStorage};
+use nix::sys::socket::{sockopt, SockaddrIn, SockaddrIn6, SockaddrLike, SockaddrStorage};
 use socket2::SockAddr;
 #[cfg(debug_assertions)]
 use tracing::Level;
@@ -129,6 +129,10 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
         Ok(())
     }?;
 
+    if domain == libc::AF_INET6 {
+        return Detour::Error(HookError::SocketUnsuportedIpv6);
+    }
+
     let socket_result = unsafe { FN_SOCKET(domain, type_, protocol) };
 
     let socket_fd = if socket_result == -1 {
@@ -198,29 +202,6 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
         .map(|ports| !ports.contains(&mapped_port))
         .unwrap_or(http_filter_used);
 
-    if http_filter_used && not_a_filtered_port && config.ports.is_none() {
-        // User specified a filter that does not include this port, and did not specify any
-        // unfiltered ports.
-        // It's plausible that the user did not know the port has to be in either port list to be
-        // stolen when an HTTP filter is set, so show a warning.
-        let port_text = if mapped_port != addr.port() {
-            format!(
-                "Remote port {mapped_port} (mapped from local port {})",
-                addr.port()
-            )
-        } else {
-            format!("Port {mapped_port}")
-        };
-        warn!(
-            "{port_text} was not included in the filtered ports, and also not in the non-filtered \
-            ports, and will therefore be bound locally. If this is intentional, ignore this \
-            warning. If you want the http filter to apply to this port, add it to \
-            `feature.network.incoming.http_filter.ports`. \
-            If you want to steal all the traffic of this port, add it to \
-            `feature.network.incoming.ports`."
-        );
-    }
-
     is_ignored_port(addr) || (not_stolen_with_filter && not_whitelisted)
 }
 
@@ -258,8 +239,8 @@ pub(super) fn bind(
     }
 
     // To handle #1458, we don't ignore port `0` for UDP.
-    if (is_ignored_tcp_port(&requested_address, incoming_config)
-        && matches!(socket.kind, SocketKind::Tcp(_)))
+    if (matches!(socket.kind, SocketKind::Tcp(_)))
+        && is_ignored_tcp_port(&requested_address, incoming_config)
         || crate::setup().is_debugger_port(&requested_address)
         || incoming_config.ignore_ports.contains(&requested_port)
     {
@@ -343,15 +324,62 @@ pub(super) fn bind(
     Detour::Success(0)
 }
 
+/// Warn the user if they are filtering HTTP, and it looks like they might have intended to also
+/// steal another port unfiltered, but didn't know they had to set `feature.network.incoming.ports`
+/// for that.
+fn warn_on_suspected_unintentional_ignore(sockfd: RawFd) {
+    let incoming_config = crate::setup().incoming_config();
+    let http_filter_used =
+        incoming_config.mode == IncomingMode::Steal && incoming_config.http_filter.is_filter_set();
+
+    // User specified a filter that does not include this port, and did not specify any
+    // unfiltered ports?
+    // It's plausible that the user did not know the port has to be in either port list to be
+    // stolen when an HTTP filter is set, so show a warning.
+    if http_filter_used && incoming_config.ports.is_none() {
+        let port_text = if let Some(port) = nix::sys::socket::getsockname::<SockaddrStorage>(sockfd)
+            .inspect_err(|err| {
+                tracing::debug!(
+                    "Calling getsockname failed. Ignoring as this is not critical. Error: {err:?}."
+                )
+            })
+            .ok()
+            .and_then(|addr_storage| {
+                addr_storage
+                    .as_sockaddr_in()
+                    .map(SockaddrIn::port)
+                    .or_else(|| addr_storage.as_sockaddr_in6().map(SockaddrIn6::port))
+            }) {
+            if let Some(mapped_port) = incoming_config.port_mapping.get_by_left(&port) {
+                format!("Remote port {mapped_port} (mapped from local port {port})",)
+            } else {
+                format!("Port {port}")
+            }
+        } else {
+            // `getsockname` returned an error, or a non-IP address. Not stopping execution on
+            // that, as it does not mean anything else went wrong in this run. Just emitting a
+            // warning without the port number.
+            tracing::debug!("Could not determine the bound port of a socket, for the purpose of displaying it in a warning.");
+            "A port".to_string()
+        };
+        warn!(
+            "{port_text} was not included in the filtered ports, and also not in the non-filtered \
+            ports, and will therefore be bound locally. If this is intentional, ignore this \
+            warning. If you want the http filter to apply to this port, add it to \
+            `feature.network.incoming.http_filter.ports`. \
+            If you want to steal all the traffic of this port, add it to \
+            `feature.network.incoming.ports`."
+        );
+    }
+}
+
 /// Subscribe to the agent on the real port. Messages received from the agent on the real port will
 /// later be routed to the fake local port.
 #[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret)]
 pub(super) fn listen(sockfd: RawFd, backlog: c_int) -> Detour<i32> {
-    let mut socket = {
-        SOCKETS
-            .lock()?
-            .remove(&sockfd)
-            .bypass(Bypass::LocalFdNotFound(sockfd))?
+    let Some(mut socket) = SOCKETS.lock()?.remove(&sockfd) else {
+        warn_on_suspected_unintentional_ignore(sockfd);
+        return Detour::Bypass(Bypass::LocalFdNotFound(sockfd));
     };
 
     let setup = crate::setup();
@@ -954,9 +982,8 @@ pub(super) fn getaddrinfo(
         .rev()
         .map(Box::new)
         .map(Box::into_raw)
-        .map(|raw| {
+        .inspect(|&raw| {
             managed_addr_info.insert(raw as usize);
-            raw
         })
         .reduce(|current, previous| {
             // Safety: These pointers were just allocated using `Box::new`, so they should be
@@ -1067,6 +1094,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
     ips_ptrs.push(ptr::null_mut());
 
     // Need long-lived values so we can take pointers to them.
+    #[allow(static_mut_refs)]
     unsafe {
         GETHOSTBYNAME_HOSTNAME.replace(host_name);
         GETHOSTBYNAME_ALIASES_STR.replace(aliases);
@@ -1083,7 +1111,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
             GETHOSTBYNAME_ADDRESSES_PTR.as_ref().unwrap().as_ptr() as *mut *mut libc::c_char;
     }
 
-    Detour::Success(unsafe { std::ptr::addr_of!(GETHOSTBYNAME_HOSTENT) as _ })
+    Detour::Success(std::ptr::addr_of!(GETHOSTBYNAME_HOSTENT) as _)
 }
 
 /// Resolve hostname from remote host with caching for the result

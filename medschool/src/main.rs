@@ -32,7 +32,7 @@ mod types;
 #[tracing::instrument(level = "trace", ret)]
 pub(crate) fn parse_files(path: PathBuf) -> Result<Vec<syn::File>, DocsError> {
     let mut paths = glob::glob(&format!("{}/**/*.rs", path.to_string_lossy()))?.peekable();
-    paths.peek().ok_or_else(|| DocsError::NoFiles)?;
+    paths.peek().ok_or(DocsError::NoFiles)?;
 
     let mut contents = String::new();
     paths

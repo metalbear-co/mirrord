@@ -34,8 +34,8 @@ on:
   workflow_dispatch:
   push:
   pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [ main ]
+    types: [ opened, synchronize, reopened, ready_for_review ]
 
 # Cancel previous runs on the same PR.
 concurrency:
@@ -144,18 +144,18 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4
-      - uses: arduino/setup-protoc@v1
+      - uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       # Otherwise the arguments to the setup-rust-toolchain action are ignored.
       - run: rm rust-toolchain.toml
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly-2024-04-15
+          toolchain: nightly-2024-10-11
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
-      - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
-      - run: pip3 install cargo-zigbuild # For http mirroring test with Flask.
+      - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
+      - run: pip3 install --break-system-packages cargo-zigbuild # For http mirroring test with Flask.
       - run: cargo fmt --all -- --check
       # x64
       - run: cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
@@ -188,12 +188,12 @@ jobs:
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options -Dwarnings"
     steps:
       - uses: actions/checkout@v4
-      - uses: arduino/setup-protoc@v1
+      - uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly-2024-04-15
+          toolchain: nightly-2024-10-11
       # TODO(alex): `no-deps` here due to an issue in `futures-util`.
       - run: cargo doc --document-private-items --no-deps
 
@@ -202,10 +202,10 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     container:
-      image: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32
+      image: ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9
     steps:
       - uses: actions/checkout@v4
-      - uses: arduino/setup-protoc@v1
+      - uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: test
@@ -217,7 +217,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v2
+      - uses: docker/setup-buildx-action@v3
       - name: build and export
         uses: docker/build-push-action@v6
         with:
@@ -239,7 +239,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v2
+      - uses: docker/setup-buildx-action@v3
       - name: build and export
         uses: docker/build-push-action@v6
         with:
@@ -252,7 +252,7 @@ jobs:
 
   integration_tests:
     runs-on: ubuntu-24.04
-    needs: [changed_files]
+    needs: [ changed_files ]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
@@ -288,10 +288,10 @@ jobs:
         with:
           node-version: 14
       - run: npm install express # For http mirroring test with node.
-      - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
-      - run: pip3 install flask fastapi uvicorn[standard] # For http mirroring test with Flask.
+      - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
+      - run: pip3 install --break-system-packages flask fastapi uvicorn[standard] # For http mirroring test with Flask.
       # don't use "cache" for other Gos since it will try to overwrite and have bad results.
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: "1.21"
           cache-dependency-path: tests/go-e2e/go.sum
@@ -299,7 +299,7 @@ jobs:
           go version
       - run: | # Build Go test apps.
           ./scripts/build_go_apps.sh 21
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
           cache: false
@@ -307,7 +307,7 @@ jobs:
           go version
       - run: | # Build Go test apps.
           ./scripts/build_go_apps.sh 22
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
           cache: false
@@ -344,6 +344,9 @@ jobs:
           cargo build
       - run: |
           cd mirrord/layer/tests/apps/issue2438
+          cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/rebind0
           cargo build
       - run: ./scripts/build_c_apps.sh
       - run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-layer
@@ -384,9 +387,9 @@ jobs:
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-          toolchain: nightly-2024-04-15
+          toolchain: nightly-2024-10-11
       - name: Install Protoc
-        uses: arduino/setup-protoc@v2
+        uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: clippy x64
@@ -411,7 +414,7 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/issue2058
           rustc issue2058.rs --out-dir target
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: "1.21"
           cache-dependency-path: tests/go-e2e/go.sum
@@ -420,7 +423,7 @@ jobs:
       # don't use "cache" for other Gos since it will try to overwrite and have bad results.
       - run: | # Build Go test apps.
           ./scripts/build_go_apps.sh 21
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
           cache: false
@@ -428,7 +431,7 @@ jobs:
           go version
       - run: | # Build Go test apps.
           ./scripts/build_go_apps.sh 22
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
           cache: false
@@ -463,6 +466,9 @@ jobs:
       - run: |
           cd mirrord/layer/tests/apps/issue2438
           cargo build
+      - run: |
+          cd mirrord/layer/tests/apps/rebind0
+          cargo build
       - run: ./scripts/build_c_apps.sh
       # For the `java_temurin_sip` test.
       - uses: sdkman/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
@@ -471,10 +477,8 @@ jobs:
           candidate: java
           version: 17.0.6-tem
       - run: java -version
-      - uses: actions/setup-python@v3 # For http mirroring tests with Flask and FastAPI.
-      - run: pip3 install flask # For http mirroring test with Flask.
-      - run: pip3 install fastapi # For http mirroring test with FastAPI.
-      - run: pip3 install uvicorn[standard] # For http mirroring test with FastAPI.
+      - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
+      - run: pip3 install --break-system-packages flask fastapi uvicorn[standard] # For http mirroring test with Flask.
       - uses: actions/setup-node@v3
         with:
           node-version: 18
@@ -495,9 +499,9 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        container-runtime: ["docker", "containerd"]
+        container-runtime: [ "docker", "containerd" ]
     name: e2e
-    needs: [test_agent_image, changed_files]
+    needs: [ test_agent_image, changed_files ]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
@@ -559,7 +563,7 @@ jobs:
     if: ${{ needs.check_if_release_branch.outputs.release_branch == 'true' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: arduino/setup-protoc@v1
+      - uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -577,14 +581,14 @@ jobs:
   # which checks if the branch is a release branch
   intellij_e2e_on_release_branch:
     # requires test_agent to have image to download
-    needs: [build_mirrord_on_release_branch, test_agent_image]
+    needs: [ build_mirrord_on_release_branch, test_agent_image ]
     uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
 
   vscode_e2e_on_release_branch:
     # requires test_agent to have image to download
-    needs: [build_mirrord_on_release_branch, test_agent_image]
+    needs: [ build_mirrord_on_release_branch, test_agent_image ]
     uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true

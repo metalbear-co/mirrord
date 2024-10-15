@@ -1,5 +1,4 @@
 #![feature(concat_idents)]
-#![feature(lazy_cell)]
 #![feature(try_blocks)]
 
 #[cfg(not(target_os = "macos"))]

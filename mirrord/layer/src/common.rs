@@ -24,6 +24,7 @@ where
     T::Response: Debug,
 {
     // SAFETY: mutation happens only on initialization.
+    #[allow(static_mut_refs)]
     unsafe {
         PROXY_CONNECTION
             .get()
@@ -39,6 +40,7 @@ pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
     request: T,
 ) -> HookResult<MessageId> {
     // SAFETY: mutation happens only on initialization.
+    #[allow(static_mut_refs)]
     unsafe {
         PROXY_CONNECTION
             .get()

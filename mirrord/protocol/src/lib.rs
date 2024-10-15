@@ -1,6 +1,5 @@
 #![feature(const_trait_impl)]
 #![feature(io_error_more)]
-#![feature(lazy_cell)]
 #![warn(clippy::indexing_slicing)]
 
 pub mod body_chunks;
@@ -94,6 +93,8 @@ impl FromStr for MeshVendor {
     }
 }
 
+/// Name of environment variable
+///
 /// Name of environment variable that can be used to provide the agent with a PEM-encoded X509
 /// certificate. Given the certificate, the agent will secure the incoming connections with TLS.
 /// The agent will act as TLS client and will make successful connections only with TLS servers
