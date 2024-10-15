@@ -750,6 +750,7 @@ pub enum Application {
     NodeIssue2283,
     RustIssue2204,
     RustIssue2438,
+    NodeIssue2807,
     // For running applications with the executable and arguments determined at runtime.
     DynamicApp(String, Vec<String>),
 }
@@ -785,7 +786,9 @@ impl Application {
             Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
             Application::ReadLink => String::from("tests/apps/readlink/out.c_test_app"),
             Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
-            Application::NodeHTTP | Application::NodeIssue2283 => String::from("node"),
+            Application::NodeHTTP | Application::NodeIssue2283 | Application::NodeIssue2807 => {
+                String::from("node")
+            }
             Application::JavaTemurinSip => format!(
                 "{}/.sdkman/candidates/java/17.0.6-tem/bin/java",
                 std::env::var("HOME").unwrap(),
@@ -970,6 +973,10 @@ impl Application {
                 app_path.push("issue2883.js");
                 vec![app_path.to_string_lossy().to_string()]
             }
+            Application::NodeIssue2807 => {
+                app_path.push("issue2807.js");
+                vec![app_path.to_string_lossy().to_string()]
+            }
             Application::PythonSelfConnect => {
                 app_path.push("self_connect.py");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
@@ -1105,6 +1112,7 @@ impl Application {
             | Application::NodeIssue2283
             | Application::RustIssue2204
             | Application::RustIssue2438
+            | Application::NodeIssue2807
             | Application::DynamicApp(..) => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,

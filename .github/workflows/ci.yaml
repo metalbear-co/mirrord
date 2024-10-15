@@ -288,6 +288,7 @@ jobs:
         with:
           node-version: 14
       - run: npm install express # For http mirroring test with node.
+      - run: npm install portfinder # For a node specific test
       - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
       - run: pip3 install --break-system-packages flask fastapi uvicorn[standard] # For http mirroring test with Flask.
       # don't use "cache" for other Gos since it will try to overwrite and have bad results.
@@ -477,6 +478,7 @@ jobs:
         with:
           node-version: 18
       - run: npm install express # For http mirroring test with node.
+      - run: npm install portfinder # For a node specific test
       - run: cargo build --target=x86_64-apple-darwin -p mirrord-layer # Build layer lib. The tests load it into the apps.
       - name: mirrord layer tests
         run: cargo test --target=x86_64-apple-darwin -p mirrord-layer

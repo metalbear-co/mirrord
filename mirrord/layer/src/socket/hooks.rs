@@ -641,15 +641,15 @@ pub(crate) unsafe fn enable_socket_hooks(
                 FN_DNS_CONFIGURATION_FREE
             );
         }
+    }
 
-        if experimental.hide_ipv6_interfaces {
-            replace!(
-                hook_manager,
-                "getifaddrs",
-                getifaddrs_detour,
-                FnGetifaddrs,
-                FN_GETIFADDRS
-            );
-        }
+    if experimental.hide_ipv6_interfaces {
+        replace!(
+            hook_manager,
+            "getifaddrs",
+            getifaddrs_detour,
+            FnGetifaddrs,
+            FN_GETIFADDRS
+        );
     }
 }
