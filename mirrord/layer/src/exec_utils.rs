@@ -62,6 +62,16 @@ pub(crate) unsafe fn enable_macos_hooks(
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
     let patch_binaries = PATCH_BINARIES.get().expect("patch binaries not set");
+    // some binaries don't need to be sip patched, because they don't chain-execute (i.e we don't
+    // care about the commands they run) for example, "go run" needs to be sip patched because
+    // it builds then executes. but gcc never executes the binary, so we don't need to sip patch
+    // it.
+    const BYPASS_BINARIES: &[&str] = &[
+        "/uname",
+    ];
+    if BYPASS_BINARIES.iter().any(|bin| path.ends_with(bin)) {
+        return Bypass(NoSipDetected(path.to_string()));
+    }
     match sip_patch(path, patch_binaries) {
         Ok(None) => Bypass(NoSipDetected(path.to_string())),
         Ok(Some(new_path)) => Success(new_path),

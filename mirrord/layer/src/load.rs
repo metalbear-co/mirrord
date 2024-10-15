@@ -27,13 +27,17 @@ static BUILD_TOOL_PROCESSES: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "link",
         "math",
         "cargo",
+        "clang",
+        "compile",
         "hpack",
         "rustc",
-        "compile",
         "collect2",
         "cargo-watch",
         "debugserver",
         "jspawnhelper",
+        "strip",
+        "dsymutil",
+
     ])
 });
 
