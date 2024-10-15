@@ -82,16 +82,13 @@ pub(crate) async fn proxy(listen_port: u16, watch: drain::Watch) -> Result<(), I
             InternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
         })?;
 
-    let log_level = config
-        .internal_proxy
-        .log_level
-        .as_deref()
-        .unwrap_or("mirrord=info");
+    let log_level = config.internal_proxy.log_level.as_deref().unwrap_or("info");
 
     tracing_subscriber::fmt()
         .with_writer(output_file)
         .with_ansi(false)
         .with_env_filter(EnvFilter::builder().parse_lossy(log_level))
+        .pretty()
         .init();
 
     // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
