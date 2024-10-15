@@ -1615,6 +1615,7 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
     // I don't see any reason why we could not do this,
     // I also did not find anything suspicious in glibc [implementation](https://github.com/lattera/glibc/blob/master/sysdeps/gnu/ifaddrs.c).
     if !ipv6_head.is_null() {
+        // Safety: we constructed a valid `libc::ifaddrs` list using pointers received from libc.
         unsafe { libc::freeifaddrs(ipv6_head) };
     }
 
