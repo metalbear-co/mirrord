@@ -33,6 +33,7 @@ client = [
   "dep:mirrord-progress",
   "dep:mirrord-protocol",
   "dep:rand",
+  "dep:tokio",
   "dep:tokio-tungstenite",
   "dep:tracing",
 ]
@@ -40,7 +41,6 @@ crd = [
   "dep:k8s-openapi",
   "dep:kube",
   "dep:mirrord-config",
-  "dep:tokio",
   "dep:serde_json"
 ]
 setup = ["crd", "dep:serde_yaml"]
