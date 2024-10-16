@@ -4095,6 +4095,7 @@ dependencies = [
  "chrono",
  "fs4",
  "home",
+ "k8s-openapi",
  "kube",
  "pem",
  "reqwest 0.12.8",

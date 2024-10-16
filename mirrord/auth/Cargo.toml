@@ -47,3 +47,4 @@ tracing.workspace = true
 
 [dev-dependencies]
 bcder = "0.7"
+k8s-openapi.workspace = true

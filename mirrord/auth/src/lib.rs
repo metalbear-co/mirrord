@@ -2,9 +2,6 @@
 #![doc = include_str!("../README.md")]
 
 pub use pem;
-// Not a direct dependency. This import prevents false positive from
-// `unused_crate_dependencies`.
-use reqwest as _;
 pub use x509_certificate;
 
 /// X509 Certificate abstraction for serialization and deserialization
@@ -18,3 +15,12 @@ pub mod credentials;
 pub mod error;
 /// Public/Private key abstraction for serialization and deserialization
 pub mod key_pair;
+
+mod unused_dependencies_false_positives {
+    //! To silence false positive from `unused_crate_dependencies`.
+    //! See [discussion on GitHub](https://github.com/rust-lang/cargo/issues/12717#issuecomment-1728123462) for reference.
+
+    #[cfg(test)]
+    use k8s_openapi as _;
+    use reqwest as _;
+}
