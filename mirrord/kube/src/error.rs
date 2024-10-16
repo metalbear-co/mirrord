@@ -7,6 +7,8 @@ pub type Result<T, E = KubeApiError> = std::result::Result<T, E>;
 
 #[derive(Debug, Error)]
 pub enum KubeApiError {
+    /// We manually implement `From<kube::Error>` to give a better error in case of
+    /// kube failing due to an invalid certificate.
     #[error(transparent)]
     KubeError(kube::Error),
 
@@ -58,6 +60,8 @@ pub enum KubeApiError {
         String,
     ),
 
+    /// Friendlier version of the invalid certificate error that comes from a
+    /// [`kube::Error::Service`].
     #[error(
         r"Kube API operation failed due to an invalid certificate: `{0}`!
         - Consider enabling `accept_invalid_certificates` in your `mirrord.json`, or;
