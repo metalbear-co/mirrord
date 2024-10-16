@@ -982,7 +982,7 @@ impl Application {
                 vec![app_path.to_string_lossy().to_string()]
             }
             Application::NodeIssue2807 => {
-                app_path.push("issue2807.js");
+                app_path.push("issue2807.mjs");
                 vec![app_path.to_string_lossy().to_string()]
             }
             Application::PythonSelfConnect => {
