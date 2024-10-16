@@ -153,7 +153,7 @@ jobs:
         with:
           toolchain: nightly-2024-10-11
           components: rustfmt, clippy
-          target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
+          target: aarch64-unknown-linux-gnu,aarch64-linux-gnu-gcc,x86_64-unknown-linux-gnu
       - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
       - run: pip3 install --break-system-packages cargo-zigbuild # For http mirroring test with Flask.
       - run: cargo fmt --all -- --check
