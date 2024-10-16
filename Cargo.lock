@@ -6719,7 +6719,9 @@ name = "tests"
 version = "0.1.0"
 dependencies = [
  "aws-config",
+ "aws-credential-types",
  "aws-sdk-sqs",
+ "aws-types",
  "bytes",
  "chrono",
  "fancy-regex",
@@ -6728,9 +6730,12 @@ dependencies = [
  "http-body-util",
  "hyper 1.4.1",
  "hyper-util",
+ "json-patch",
+ "jsonptr",
  "k8s-openapi",
  "kube",
  "mirrord",
+ "mirrord-operator",
  "rand",
  "regex",
  "reqwest 0.12.8",

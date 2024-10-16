@@ -42,7 +42,7 @@ tokio = { workspace = true, features = ["fs"], optional = true  }
 thiserror.workspace = true
 x509-certificate = "0.23.1"
 # not direct dependency, but if we don't put it here it'll use openssl :(
-reqwest = { workspace = true, features=["json", "rustls-tls-native-roots"], default-features = false, optional = true }
+reqwest = { workspace = true, features=["json", "rustls-tls-native-roots"], default-features = false }
 tracing.workspace = true
 
 [dev-dependencies]

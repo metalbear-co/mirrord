@@ -178,7 +178,7 @@ where
 
     let (sender, receiver) = wrap_raw_connection(
         k8s_api
-            .create_connection(agent_connect_info.clone())
+            .create_connection_with_portforward(agent_connect_info.clone())
             .await
             .map_err(|error| {
                 CliError::auth_exec_error_or(error, CliError::AgentConnectionFailed)

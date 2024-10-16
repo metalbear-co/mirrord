@@ -19,6 +19,7 @@ workspace = true
 [features]
 default = []
 incluster = []
+portforwarder = ["dep:pin-project-lite", "dep:tokio-retry"]
 
 [dependencies]
 mirrord-config = { path = "../config"}
@@ -38,8 +39,8 @@ shellexpand = "3"
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-tokio-retry = "0.3"
-pin-project-lite = "0.2"
+tokio-retry = { version = "0.3", optional = true }
+pin-project-lite = { version = "0.2", optional = true }
 
 [dev-dependencies]
 rstest = "*"

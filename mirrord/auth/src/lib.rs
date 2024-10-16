@@ -2,6 +2,9 @@
 #![doc = include_str!("../README.md")]
 
 pub use pem;
+// Not a direct dependency. This import prevents false positive from
+// `unused_crate_dependencies`.
+use reqwest as _;
 pub use x509_certificate;
 
 /// X509 Certificate abstraction for serialization and deserialization
