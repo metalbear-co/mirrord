@@ -4231,6 +4231,7 @@ dependencies = [
  "bytemuck",
  "ctor",
  "errno 0.3.9",
+ "exec",
  "fancy-regex",
  "frida-gum",
  "futures",
