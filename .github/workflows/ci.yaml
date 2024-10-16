@@ -158,11 +158,11 @@ jobs:
       - run: pip3 install --break-system-packages cargo-zigbuild # For http mirroring test with Flask.
       - run: cargo fmt --all -- --check
       # x64
-      - run: cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo-zigbuild clippy +nightly-2024-10-11 --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
       # Check that compiles for the supported linux targets (aarch64)
-      - run: cargo-zigbuild clippy --lib --bins --all-features --target aarch64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
+      - run: cargo-zigbuild clippy +nightly-2024-10-11 --lib --bins --all-features --target aarch64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
       # Check whether `mirrord-operator` crate compiles the way it's used in the operator
-      - run: cargo-zigbuild check -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
+      - run: cargo-zigbuild check +nightly-2024-10-11 -p mirrord-operator --features crd --target x86_64-unknown-linux-gnu
 
   # if the branch is named is `x.x.x`, x ∈ [0, 9], then it's a release branch
   # the output of this test is a boolean indicating if it's a release branch

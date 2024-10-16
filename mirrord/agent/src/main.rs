@@ -1,7 +1,6 @@
 #![feature(hash_extract_if)]
 #![feature(let_chains)]
 #![feature(iterator_try_collect)]
-#![feature(entry_insert)]
 #![cfg_attr(target_os = "linux", feature(tcp_quickack))]
 #![warn(clippy::indexing_slicing)]
 
