@@ -780,10 +780,10 @@ mod tests {
         #[case] expected_value: Option<bool>,
     ) {
         match Cli::parse_from(args).commands {
-            Commands::Exec(params) if args[1] == "exec" => {
+            Commands::Exec(params) if *args.get(1).unwrap() == "exec" => {
                 assert_eq!(params.params.accept_invalid_certificates, expected_value)
             }
-            Commands::PortForward(params) if args[1] == "port-forward" => {
+            Commands::PortForward(params) if *args.get(1).unwrap() == "port-forward" => {
                 assert_eq!(params.accept_invalid_certificates, expected_value)
             }
             other => panic!("unexpected args parsed: {other:?}"),
