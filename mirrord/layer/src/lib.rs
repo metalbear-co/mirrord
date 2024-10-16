@@ -694,8 +694,9 @@ pub(crate) unsafe extern "C" fn uv_fs_close_detour(
 }
 
 #[cfg(test)]
-mod crates_used_in_integration_tests {
+mod deps_used_in_integration_tests {
     //! To silence false positive from `unused_crate_dependencies`.
+    //!
     //! See [discussion on GitHub](https://github.com/rust-lang/cargo/issues/12717#issuecomment-1728123462) for reference.
 
     use actix_codec as _;
