@@ -20,6 +20,6 @@ workspace = true
 
 [dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "macros", "process"] }
-tracing = "0.1"
+tracing.workspace = true
 actix-web = "4"
 env_logger = "0.11"

@@ -18,7 +18,7 @@ reqwest.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "macros", "process"] }
 serde_json.workspace = true
 mirrord = { artifact = "bin", path = "../mirrord/cli" }
-serde = "1"
+serde.workspace = true
 futures.workspace = true
 rstest = "0.23"
 rand = "0.8"
