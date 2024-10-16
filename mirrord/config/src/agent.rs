@@ -327,6 +327,18 @@ pub struct AgentConfig {
     /// ```
     pub annotations: Option<HashMap<String, String>>,
 
+    /// ### agent.node_selector {#agent-node_selector}
+    ///
+    /// Allows setting up custom node selector for the agent Pod. Applies only to targetless runs,
+    /// as targeted agent always runs on the same node as its target container.
+    ///
+    /// ```json
+    /// {
+    ///   "node_selector": { "kubernetes.io/hostname": "node1" }
+    /// }
+    /// ```
+    pub node_selector: Option<HashMap<String, String>>,
+
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
