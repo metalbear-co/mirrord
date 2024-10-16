@@ -45,9 +45,11 @@ errno = "0.3"
 socket2.workspace = true
 bytemuck = "1"
 hashbrown = "0.15"
-syscalls = { version = "0.6", features = ["full"] }
 null-terminated = "0.3"
 base64.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+syscalls = { version = "0.6", features = ["full"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 exec.workspace = true
