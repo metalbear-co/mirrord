@@ -434,6 +434,10 @@ Enables exec hooks on Linux. Enable Linux hooks can fix issues when the applicat
 shares sockets with child commands (e.g Python web servers with reload),
 but the feature is not stable and may cause other issues.
 
+### _experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}
+
+Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.
+
 ### _experimental_ readlink {#experimental-readlink}
 
 Enables the `readlink` hook.
