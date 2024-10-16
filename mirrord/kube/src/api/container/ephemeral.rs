@@ -203,7 +203,7 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
         } = self;
         let mut env = agent_env(agent, params);
 
-        self.runtime_data.mesh.as_ref().map(|mesh_vendor| {
+        if let Some(mesh_vendor) = self.runtime_data.mesh.as_ref() {
             env.push(EnvVar {
                 name: "MIRRORD_AGENT_IN_SERVICE_MESH".into(),
                 value: Some("true".into()),
@@ -216,7 +216,7 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
                     ..Default::default()
                 });
             }
-        });
+        };
 
         KubeEphemeralContainer {
             name: params.name.clone(),
