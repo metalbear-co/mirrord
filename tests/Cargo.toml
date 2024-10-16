@@ -31,7 +31,7 @@ rustls.workspace = true
 
 [dev-dependencies]
 regex.workspace = true
-bytes = "1"
+bytes.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 http-body-util.workspace = true

@@ -1,4 +1,3 @@
-#[cfg(test)]
 mod tests {
     use std::{io::ErrorKind, net::IpAddr, sync::Arc};
 

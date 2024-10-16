@@ -42,8 +42,4 @@ tokio-retry = "0.3"
 pin-project-lite = "0.2"
 
 [dev-dependencies]
-base64.workspace = true
-http-body.workspace = true
-hyper = "1"
 rstest = "*"
-tower = "0.5"

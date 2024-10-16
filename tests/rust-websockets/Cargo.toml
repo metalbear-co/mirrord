@@ -10,4 +10,4 @@ workspace = true
 
 [dependencies]
 axum = { version = "0.7", features = ["ws"] }
-tokio = { version = "1", features = ["rt", "macros"]}
+tokio = { workspace = true, features = ["rt", "macros"]}

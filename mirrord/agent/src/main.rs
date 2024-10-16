@@ -1,7 +1,12 @@
 #![deny(unused_crate_dependencies)]
-#![feature(hash_extract_if, let_chains, iterator_try_collect)]
-#![cfg_attr(target_os = "linux", feature(tcp_quickack))]
+#![cfg_attr(
+    target_os = "linux",
+    feature(tcp_quickack, hash_extract_if, let_chains, iterator_try_collect)
+)]
 #![warn(clippy::indexing_slicing)]
+
+#[cfg(all(target_os = "linux", test))]
+use test_bin as _; // To silence false positive from `unused_crate_dependencies`. See [discussion on GitHub](https://github.com/rust-lang/cargo/issues/12717#issuecomment-1728123462) for reference.
 
 #[cfg(target_os = "linux")]
 mod cli;

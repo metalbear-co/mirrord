@@ -4223,10 +4223,7 @@ version = "3.120.1"
 dependencies = [
  "actix-codec",
  "async-stream",
- "base64 0.22.1",
  "futures",
- "http-body 1.0.1",
- "hyper 1.4.1",
  "k8s-openapi",
  "kube",
  "mirrord-config",
@@ -4242,7 +4239,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-retry",
- "tower 0.5.1",
  "tracing",
 ]
 
