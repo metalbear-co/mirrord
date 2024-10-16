@@ -1,3 +1,4 @@
+#![deny(unused_crate_dependencies)]
 #![feature(const_trait_impl)]
 #![feature(io_error_more)]
 #![warn(clippy::indexing_slicing)]

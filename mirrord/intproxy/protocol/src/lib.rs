@@ -1,3 +1,5 @@
+#![deny(unused_crate_dependencies)]
+
 //! Protocol used in communication between the layer and the internal proxy.
 //! This protocol does not have to be backwards compatible and can be changed freely, as the
 //! internal proxy and the layer are shipped together in a single binary.

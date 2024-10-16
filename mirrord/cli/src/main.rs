@@ -1,5 +1,5 @@
-#![feature(let_chains)]
-#![feature(try_blocks)]
+#![deny(unused_crate_dependencies)]
+#![feature(let_chains, try_blocks)]
 #![warn(clippy::indexing_slicing)]
 
 use std::{

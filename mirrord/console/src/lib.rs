@@ -1,3 +1,4 @@
+#![deny(unused_crate_dependencies)]
 #![warn(clippy::indexing_slicing)]
 
 #[cfg(feature = "async-logger")]

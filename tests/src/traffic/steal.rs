@@ -1,4 +1,3 @@
-#![allow(dead_code, unused)]
 #[cfg(test)]
 mod steal_tests {
     use std::{

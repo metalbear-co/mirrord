@@ -1,3 +1,4 @@
+#![deny(unused_crate_dependencies)]
 #![feature(c_variadic)]
 #![feature(naked_functions)]
 #![feature(io_error_uncategorized)]

@@ -1,3 +1,4 @@
+#![deny(unused_crate_dependencies)]
 #![feature(let_chains)]
 #![feature(try_trait_v2)]
 #![warn(clippy::indexing_slicing)]

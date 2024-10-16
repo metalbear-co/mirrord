@@ -45,7 +45,6 @@ errno = "0.3"
 socket2.workspace = true
 bytemuck = "1"
 hashbrown = "0.15"
-exec.workspace = true
 syscalls = { version = "0.6", features = ["full"] }
 null-terminated = "0.3"
 base64.workspace = true

@@ -1,6 +1,5 @@
-#![feature(hash_extract_if)]
-#![feature(let_chains)]
-#![feature(iterator_try_collect)]
+#![deny(unused_crate_dependencies)]
+#![feature(hash_extract_if, let_chains, iterator_try_collect)]
 #![cfg_attr(target_os = "linux", feature(tcp_quickack))]
 #![warn(clippy::indexing_slicing)]
 
