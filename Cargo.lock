@@ -2387,27 +2387,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
-name = "flaky_test"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "046caa1f23d7f751fc4ead3d6669a77fa5fc6cf6074960ddeb6a0b0a5b83c8da"
-dependencies = [
- "flaky_test_impl",
- "futures-util",
-]
-
-[[package]]
-name = "flaky_test_impl"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85e35909c2f0552fdae5b40f1e95a7da12afb58c1f2f455a12c216c58d869abe"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "flate2"
 version = "1.0.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4250,17 +4229,12 @@ dependencies = [
  "base64 0.22.1",
  "bincode",
  "bytemuck",
- "chrono",
  "ctor",
  "errno 0.3.9",
  "fancy-regex",
- "flaky_test",
  "frida-gum",
  "futures",
  "hashbrown 0.15.0",
- "http-body 1.0.1",
- "hyper 1.4.1",
- "k8s-openapi",
  "libc",
  "mirrord-config",
  "mirrord-console",
@@ -4284,8 +4258,6 @@ dependencies = [
  "tests",
  "thiserror",
  "tokio",
- "tokio-stream",
- "tower 0.5.1",
  "tracing",
  "tracing-subscriber",
 ]

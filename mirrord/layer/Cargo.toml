@@ -55,20 +55,13 @@ resolv-conf = "0.7"
 
 [dev-dependencies]
 mirrord-intproxy = { path = "../intproxy" }
-k8s-openapi.workspace = true
-chrono = { version = "0.4", features = ["clock"] }
-http-body = { workspace = true }
-hyper = { workspace = true }
 rstest = "*"
 tempfile = "3"
 test-cdylib = "*"
-tower = "0.5"
 tokio = { workspace = true, features = ["rt", "net", "macros"] }
 tests = { path = "../../tests" }
-flaky_test = "0.2"
 futures.workspace = true
 actix-codec.workspace = true
-tokio-stream.workspace = true
 
 [lib]
 crate-type = ["cdylib"]
