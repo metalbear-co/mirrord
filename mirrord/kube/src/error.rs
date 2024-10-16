@@ -7,8 +7,8 @@ pub type Result<T, E = KubeApiError> = std::result::Result<T, E>;
 
 #[derive(Debug, Error)]
 pub enum KubeApiError {
-    #[error("Kube failed: {0}")]
-    KubeError(#[from] kube::Error),
+    #[error(transparent)]
+    KubeError(kube::Error),
 
     #[error("Connection to agent failed: {0}")]
     KubeConnectionError(#[from] std::io::Error),
@@ -57,6 +57,13 @@ pub enum KubeApiError {
         /// Should be plural name of the resource
         String,
     ),
+
+    #[error(
+        r"Kube API operation failed due to an invalid certificate: `{0}`!
+        - Consider enabling `accept_invalid_certificates` in your `mirrord.json`, or;
+        - Running `mirrord exec` with the `-c` flag."
+    )]
+    InvalidCertificate(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl KubeApiError {
@@ -125,5 +132,16 @@ impl KubeApiError {
 
     pub fn requires_copy<R: Resource<DynamicType = ()>>() -> Self {
         Self::RequiresCopy(R::plural(&()).into_owned())
+    }
+}
+
+impl From<kube::Error> for KubeApiError {
+    fn from(kube_fail: kube::Error) -> Self {
+        match kube_fail {
+            kube::Error::Service(fail) if fail.to_string().contains("InvalidCertificate") => {
+                Self::InvalidCertificate(fail)
+            }
+            other => Self::KubeError(other),
+        }
     }
 }
