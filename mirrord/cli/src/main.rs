@@ -335,6 +335,7 @@ fn print_config<P>(
 
 async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord exec");
+    progress.warning(&format!("{:?}", args.params.accept_invalid_certificates));
     if !args.params.disable_version_check {
         prompt_outdated_version(&progress).await;
     }
@@ -551,9 +552,15 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
         );
     }
 
-    if args.accept_invalid_certificates {
-        std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
-        warn!("Accepting invalid certificates");
+    if let Some(accept_invalid_certificates) = args.accept_invalid_certificates {
+        let value = if accept_invalid_certificates {
+            warn!("Accepting invalid certificates");
+            "true"
+        } else {
+            "false"
+        };
+
+        std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", value);
     }
 
     if args.ephemeral_container {
@@ -744,6 +751,42 @@ async fn prompt_outdated_version(progress: &ProgressTracker) {
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+    use rstest::rstest;
+
+    use crate::{Cli, Commands};
+
+    /// Verifies that
+    /// [`ExecParams::accept_invalid_certificates`](crate::config::ExecParams::accept_invalid_certificates)
+    /// and [`PortForwardArgs::accept_invalid_certificates`](crate::config::PortForwardArgs::accept_invalid_certificates)
+    /// correctly parse from command line arguments.
+    #[rstest]
+    #[case(&["mirrord", "exec", "-c", "--", "echo", "hello"], Some(true))]
+    #[case(&["mirrord", "exec", "-c=true", "--", "echo", "hello"], Some(true))]
+    #[case(&["mirrord", "exec", "-c=false", "--", "echo", "hello"], Some(false))]
+    #[case(&["mirrord", "exec", "--", "echo", "hello"], None)]
+    #[case(&["mirrord", "port-forward", "-c", "-L", "8080:py-serv:80"], Some(true))]
+    #[case(&["mirrord", "port-forward", "-c=true", "-L", "8080:py-serv:80"], Some(true))]
+    #[case(&["mirrord", "port-forward", "-c=false", "-L", "8080:py-serv:80"], Some(false))]
+    #[case(&["mirrord", "port-forward", "-L", "8080:py-serv:80"], None)]
+    fn parse_accept_invalid_certificates(
+        #[case] args: &[&str],
+        #[case] expected_value: Option<bool>,
+    ) {
+        match Cli::parse_from(args).commands {
+            Commands::Exec(params) if *args.get(1).unwrap() == "exec" => {
+                assert_eq!(params.params.accept_invalid_certificates, expected_value)
+            }
+            Commands::PortForward(params) if *args.get(1).unwrap() == "port-forward" => {
+                assert_eq!(params.accept_invalid_certificates, expected_value)
+            }
+            other => panic!("unexpected args parsed: {other:?}"),
         }
     }
 }

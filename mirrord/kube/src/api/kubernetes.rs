@@ -293,7 +293,7 @@ pub struct AgentKubernetesConnectInfo {
 }
 
 pub async fn create_kube_config<P>(
-    accept_invalid_certificates: bool,
+    accept_invalid_certificates: Option<bool>,
     kubeconfig: Option<P>,
     kube_context: Option<String>,
 ) -> Result<Config>
@@ -318,7 +318,10 @@ where
         // kube or incluster configuration.
         Config::infer().await?
     };
-    config.accept_invalid_certs = accept_invalid_certificates;
+
+    if let Some(accept_invalid_certificates) = accept_invalid_certificates {
+        config.accept_invalid_certs = accept_invalid_certificates;
+    }
 
     Ok(config)
 }
