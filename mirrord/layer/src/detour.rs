@@ -269,7 +269,6 @@ impl<S> Try for Detour<S> {
 impl<S> FromResidual<Detour<convert::Infallible>> for Detour<S> {
     fn from_residual(residual: Detour<convert::Infallible>) -> Self {
         match residual {
-            Detour::Success(_) => unreachable!(),
             Detour::Bypass(b) => Detour::Bypass(b),
             Detour::Error(e) => Detour::Error(e),
         }
@@ -282,7 +281,6 @@ where
 {
     fn from_residual(residual: Result<convert::Infallible, E>) -> Self {
         match residual {
-            Ok(_) => unreachable!(),
             Err(e) => Detour::Error(e.into()),
         }
     }
@@ -291,7 +289,6 @@ where
 impl<S> FromResidual<Result<convert::Infallible, Bypass>> for Detour<S> {
     fn from_residual(residual: Result<convert::Infallible, Bypass>) -> Self {
         match residual {
-            Ok(_) => unreachable!(),
             Err(e) => Detour::Bypass(e),
         }
     }
@@ -300,7 +297,6 @@ impl<S> FromResidual<Result<convert::Infallible, Bypass>> for Detour<S> {
 impl<S> FromResidual<Option<convert::Infallible>> for Detour<S> {
     fn from_residual(residual: Option<convert::Infallible>) -> Self {
         match residual {
-            Some(_) => unreachable!(),
             None => Detour::Bypass(Bypass::EmptyOption),
         }
     }

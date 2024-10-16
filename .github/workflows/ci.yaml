@@ -387,7 +387,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-          toolchain: nightly-2024-10-11
+          toolchain: nightly-2024-09-12
       - name: Install Protoc
         uses: arduino/setup-protoc@v3
         with:

@@ -267,7 +267,6 @@ where
 {
     fn from_residual(error: Result<Infallible, E>) -> Self {
         match error {
-            Ok(_) => unreachable!(),
             Err(err) => NodeCheck::Error(err.into()),
         }
     }
