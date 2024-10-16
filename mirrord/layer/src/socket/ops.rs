@@ -1570,7 +1570,7 @@ pub(super) fn remote_dns_configuration_copy() -> Detour<*mut dns_config_t> {
 }
 
 /// Calls [`libc::getifaddrs`] and removes IPv6 addresses from the list.
-#[mirrord_layer_macro::instrument(level = "trace", ret, err)]
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret, err)]
 pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
     let mut original_head = std::ptr::null_mut();
     let result: i32 = unsafe { FN_GETIFADDRS(&mut original_head) };
