@@ -335,6 +335,7 @@ fn print_config<P>(
 
 async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord exec");
+    progress.warning(&format!("{:?}", args.params.accept_invalid_certificates));
     if !args.params.disable_version_check {
         prompt_outdated_version(&progress).await;
     }
@@ -551,9 +552,15 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
         );
     }
 
-    if args.accept_invalid_certificates {
-        std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", "true");
-        warn!("Accepting invalid certificates");
+    if let Some(accept_invalid_certificates) = args.accept_invalid_certificates {
+        let value = if accept_invalid_certificates {
+            warn!("Accepting invalid certificates");
+            "true"
+        } else {
+            "false"
+        };
+
+        std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", value);
     }
 
     if args.ephemeral_container {
