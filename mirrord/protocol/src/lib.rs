@@ -66,6 +66,7 @@ pub enum MeshVendor {
     Istio,
     Kuma,
     IstioAmbient,
+    IstioCni,
 }
 
 impl fmt::Display for MeshVendor {
@@ -75,6 +76,7 @@ impl fmt::Display for MeshVendor {
             MeshVendor::Istio => write!(f, "istio"),
             MeshVendor::Kuma => write!(f, "kuma"),
             MeshVendor::IstioAmbient => write!(f, "istio-ambient"),
+            MeshVendor::IstioCni => write!(f, "istio-cni"),
         }
     }
 }
