@@ -109,7 +109,7 @@ impl DnsWorker {
         };
 
         let lookup = resolver
-            .inspect_err(|fail| tracing::error!(?fail))?
+            .inspect_err(|fail| tracing::error!(?fail, "Failed to build DNS resolver"))?
             .lookup_ip(host)
             .await
             .inspect(|lookup| tracing::trace!(?lookup, "Lookup finished"))?
