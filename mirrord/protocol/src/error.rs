@@ -155,7 +155,7 @@ pub struct RemoteIOError {
 /// [`ResolveErrorKindInternal`] has a nice [`core::fmt::Display`] implementation that
 /// should be user friendly, and can be appended to the generic error message here.
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
-#[error("Failed performing `getaddrinfo` with: {kind}!")]
+#[error("Failed performing `getaddrinfo`: {kind}")]
 pub struct DnsLookupError {
     pub kind: ResolveErrorKindInternal,
 }
