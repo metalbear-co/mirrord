@@ -191,8 +191,8 @@ pub(crate) enum CliError {
     /// [`kube::Error::Service`].
     #[error("Kube API operation failed due to missing or invalid certificate: {0}")]
     #[diagnostic(help(
-        r"1. Consider enabling `accept_invalid_certificates` in your `mirrord.json`, or;
-          2. Running `mirrord exec` with the `-c` flag."
+        "Consider enabling `accept_invalid_certificates` in your \
+        `mirrord.json`, or running `mirrord exec` with the `-c` flag."
     ))]
     InvalidCertificate(KubeApiError),
 
@@ -398,10 +398,12 @@ pub(crate) enum CliError {
 }
 
 impl CliError {
-    /// If the given [`KubeApiError`] originates from failed authentication command exec, produces
-    /// [`CliError::KubeAuthExecFailed`]. Otherwise, uses the given `fallback` function to
-    /// produce the result.
-    pub fn auth_exec_error_or<F: FnOnce(KubeApiError) -> Self>(
+    /// Here we give more meaning to some errors, instead of just letting them pass as
+    /// whatever [`KubeApiError`] we're getting.
+    ///
+    /// If `error` is not something we're interested in (no need for a special diagnostic message),
+    /// then we turn it into a `fallback` [`CliError`].
+    pub fn friendlier_error_or_else<F: FnOnce(KubeApiError) -> Self>(
         error: KubeApiError,
         fallback: F,
     ) -> Self {
@@ -434,7 +436,7 @@ impl From<OperatorApiError> for CliError {
                 operator_version,
             },
             OperatorApiError::CreateKubeClient(e) => {
-                Self::auth_exec_error_or(e, Self::CreateKubeApiFailed)
+                Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
             OperatorApiError::KubeError {

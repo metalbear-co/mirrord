@@ -162,12 +162,12 @@ where
 
     let k8s_api = KubernetesAPI::create(config)
         .await
-        .map_err(|error| CliError::auth_exec_error_or(error, CliError::CreateAgentFailed))?;
+        .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
 
     k8s_api
         .detect_openshift(progress)
         .await
-        .map_err(|fail| CliError::auth_exec_error_or(fail, CliError::CreateAgentFailed))
+        .map_err(|fail| CliError::friendlier_error_or_else(fail, CliError::CreateAgentFailed))
         .inspect_err(|fail| tracing::debug!(?fail, "Failed to detect OpenShift!"))
         .ok();
 
@@ -177,14 +177,14 @@ where
     )
     .await
     .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
-    .map_err(|error| CliError::auth_exec_error_or(error, CliError::CreateAgentFailed))?;
+    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
 
     let (sender, receiver) = wrap_raw_connection(
         k8s_api
             .create_connection(agent_connect_info.clone())
             .await
             .map_err(|error| {
-                CliError::auth_exec_error_or(error, CliError::AgentConnectionFailed)
+                CliError::friendlier_error_or_else(error, CliError::AgentConnectionFailed)
             })?,
     );
 

@@ -7,8 +7,6 @@ pub type Result<T, E = KubeApiError> = std::result::Result<T, E>;
 
 #[derive(Debug, Error)]
 pub enum KubeApiError {
-    /// We manually implement `From<kube::Error>` to give a better error in case of
-    /// kube failing due to an invalid certificate.
     #[error(transparent)]
     KubeError(#[from] kube::Error),
 

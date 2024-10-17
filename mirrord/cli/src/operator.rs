@@ -142,7 +142,7 @@ async fn get_status_api(config: Option<&Path>) -> Result<Api<MirrordOperatorCrd>
     )
     .await
     .and_then(|config| Client::try_from(config).map_err(From::from))
-    .map_err(|error| CliError::auth_exec_error_or(error, CliError::CreateKubeApiFailed))?;
+    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
 
     Ok(Api::all(client))
 }
