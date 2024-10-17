@@ -76,30 +76,41 @@ impl DnsWorker {
     ///
     /// We could probably cache results here.
     /// We cannot cache the [`AsyncResolver`] itself, becaues the configuration in `etc` may change.
-    #[tracing::instrument(level = Level::TRACE, ret, err)]
+    #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn do_lookup(
         etc_path: PathBuf,
         host: String,
         attempts: usize,
         timeout: Duration,
     ) -> RemoteResult<DnsLookup> {
-        let resolv_conf_path = etc_path.join("resolv.conf");
-        let hosts_path = etc_path.join("hosts");
+        // Prepares the `AsyncResolver` after reading some `/etc` DNS files.
+        //
+        // We care about logging these errors, at an `error!` level.
+        let prepare_resolver = async || {
+            let resolv_conf_path = etc_path.join("resolv.conf");
+            let hosts_path = etc_path.join("hosts");
 
-        let resolv_conf = fs::read(resolv_conf_path).await?;
-        let hosts_conf = fs::read(hosts_path).await?;
+            let resolv_conf = fs::read(resolv_conf_path).await?;
+            let hosts_conf = fs::read(hosts_path).await?;
 
-        let (config, mut options) = parse_resolv_conf(resolv_conf)?;
-        options.server_ordering_strategy =
-            hickory_resolver::config::ServerOrderingStrategy::UserProvidedOrder;
-        options.timeout = timeout;
-        options.attempts = attempts;
-        options.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4Only;
+            let (config, mut options) = parse_resolv_conf(resolv_conf)?;
+            options.server_ordering_strategy =
+                hickory_resolver::config::ServerOrderingStrategy::UserProvidedOrder;
+            options.timeout = timeout;
+            options.attempts = attempts;
+            options.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4Only;
 
-        let mut resolver = AsyncResolver::tokio(config, options);
+            let mut resolver = AsyncResolver::tokio(config, options);
 
-        let hosts = Hosts::default().read_hosts_conf(hosts_conf.as_slice())?;
-        resolver.set_hosts(Some(hosts));
+            let hosts = Hosts::default().read_hosts_conf(hosts_conf.as_slice())?;
+            resolver.set_hosts(Some(hosts));
+
+            Ok::<_, ResponseError>(resolver)
+        };
+
+        let resolver = prepare_resolver()
+            .await
+            .inspect_err(|fail| tracing::error!(?fail))?;
 
         let lookup = resolver
             .lookup_ip(host)
