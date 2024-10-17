@@ -335,7 +335,6 @@ fn print_config<P>(
 
 async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord exec");
-    progress.warning(&format!("{:?}", args.params.accept_invalid_certificates));
     if !args.params.disable_version_check {
         prompt_outdated_version(&progress).await;
     }

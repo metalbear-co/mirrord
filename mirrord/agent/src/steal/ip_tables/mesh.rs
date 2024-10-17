@@ -22,6 +22,7 @@ static TCP_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
 pub(crate) struct MeshRedirect<IPT: IPTables> {
     prerouting: PreroutingRedirect<IPT>,
     output: OutputRedirect<false, IPT>,
+    vendor: MeshVendor,
 }
 
 impl<IPT> MeshRedirect<IPT>
@@ -37,19 +38,31 @@ where
 
         let output = OutputRedirect::create(ipt, IPTABLE_MESH.to_string(), pod_ips)?;
 
-        Ok(MeshRedirect { prerouting, output })
+        Ok(MeshRedirect {
+            prerouting,
+            output,
+            vendor,
+        })
     }
 
-    pub fn load(ipt: Arc<IPT>, _vendor: MeshVendor) -> Result<Self> {
+    pub fn load(ipt: Arc<IPT>, vendor: MeshVendor) -> Result<Self> {
         let prerouting = PreroutingRedirect::load(ipt.clone())?;
         let output = OutputRedirect::load(ipt, IPTABLE_MESH.to_string())?;
 
-        Ok(MeshRedirect { prerouting, output })
+        Ok(MeshRedirect {
+            prerouting,
+            output,
+            vendor,
+        })
     }
 
     fn get_skip_ports(ipt: &IPT, vendor: &MeshVendor) -> Result<Vec<String>> {
         let chain_name = vendor.input_chain();
-        let lookup_regex = vendor.skip_ports_regex();
+        let lookup_regex = if let Some(regex) = vendor.skip_ports_regex() {
+            regex
+        } else {
+            return Ok(vec![]);
+        };
 
         let skipped_ports = ipt
             .list_rules(chain_name)?
@@ -88,9 +101,11 @@ where
     }
 
     async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.prerouting
-            .add_redirect(redirected_port, target_port)
-            .await?;
+        if self.vendor != MeshVendor::IstioCni {
+            self.prerouting
+                .add_redirect(redirected_port, target_port)
+                .await?;
+        }
         self.output
             .add_redirect(redirected_port, target_port)
             .await?;
@@ -99,9 +114,11 @@ where
     }
 
     async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.prerouting
-            .remove_redirect(redirected_port, target_port)
-            .await?;
+        if self.vendor != MeshVendor::IstioCni {
+            self.prerouting
+                .remove_redirect(redirected_port, target_port)
+                .await?;
+        }
         self.output
             .remove_redirect(redirected_port, target_port)
             .await?;
@@ -114,11 +131,16 @@ where
 pub(super) trait MeshVendorExt: Sized {
     fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Option<Self>>;
     fn input_chain(&self) -> &str;
-    fn skip_ports_regex(&self) -> &Regex;
+    fn skip_ports_regex(&self) -> Option<&Regex>;
 }
 
 impl MeshVendorExt for MeshVendor {
     fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Option<Self>> {
+        if let Ok(val) = std::env::var("MIRRORD_AGENT_ISTIO_CNI")
+            && val.to_lowercase() == "true"
+        {
+            return Ok(Some(MeshVendor::IstioCni));
+        }
         let output = ipt.list_rules("OUTPUT")?;
 
         let nat_result = output.iter().find_map(|rule| {
@@ -154,16 +176,17 @@ impl MeshVendorExt for MeshVendor {
     fn input_chain(&self) -> &str {
         match self {
             MeshVendor::Linkerd => "PROXY_INIT_REDIRECT",
-            MeshVendor::Istio | MeshVendor::IstioAmbient => "ISTIO_INBOUND",
+            MeshVendor::Istio | MeshVendor::IstioAmbient | MeshVendor::IstioCni => "ISTIO_INBOUND",
             MeshVendor::Kuma => "KUMA_MESH_INBOUND",
         }
     }
 
-    fn skip_ports_regex(&self) -> &Regex {
+    fn skip_ports_regex(&self) -> Option<&Regex> {
         match self {
-            MeshVendor::Linkerd => &MULTIPORT_SKIP_PORTS_LOOKUP_REGEX,
-            MeshVendor::Istio | MeshVendor::IstioAmbient => &TCP_SKIP_PORTS_LOOKUP_REGEX,
-            MeshVendor::Kuma => &TCP_SKIP_PORTS_LOOKUP_REGEX,
+            MeshVendor::Linkerd => Some(&MULTIPORT_SKIP_PORTS_LOOKUP_REGEX),
+            MeshVendor::Istio | MeshVendor::IstioAmbient => Some(&TCP_SKIP_PORTS_LOOKUP_REGEX),
+            MeshVendor::Kuma => Some(&TCP_SKIP_PORTS_LOOKUP_REGEX),
+            MeshVendor::IstioCni => None,
         }
     }
 }

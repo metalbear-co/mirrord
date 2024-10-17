@@ -174,18 +174,6 @@ impl<'c> EphemeralTargetedVariant<'c> {
 
         command_line.extend(["ephemeral".to_string()]);
 
-        // This is for backward compatabilty but needs to be remove at some point
-        if let Some(mesh) = runtime_data.mesh {
-            command_line.extend([
-                "--mesh".to_string(),
-                match mesh {
-                    MeshVendor::IstioAmbient => MeshVendor::Istio,
-                    mesh => mesh,
-                }
-                .to_string(),
-            ]);
-        }
-
         EphemeralTargetedVariant {
             agent,
             params,
@@ -215,13 +203,20 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
         } = self;
         let mut env = agent_env(agent, params);
 
-        if self.runtime_data.mesh.as_ref().is_some() {
+        if let Some(mesh_vendor) = self.runtime_data.mesh.as_ref() {
             env.push(EnvVar {
                 name: "MIRRORD_AGENT_IN_SERVICE_MESH".into(),
                 value: Some("true".into()),
                 ..Default::default()
             });
-        }
+            if matches!(mesh_vendor, MeshVendor::IstioCni) {
+                env.push(EnvVar {
+                    name: "MIRRORD_AGENT_ISTIO_CNI".into(),
+                    value: Some("true".into()),
+                    ..Default::default()
+                });
+            }
+        };
 
         KubeEphemeralContainer {
             name: params.name.clone(),

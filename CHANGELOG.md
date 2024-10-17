@@ -8,6 +8,43 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.121.0](https://github.com/metalbear-co/mirrord/tree/3.121.0) - 2024-10-17
+
+
+### Added
+
+- Added support for Istio CNI
+  [#2851](https://github.com/metalbear-co/mirrord/issues/2851)
+- Added `nodeSelector` option to agent config.
+
+
+### Changed
+
+- Allowed filtered steal requests to be retried when we get a Reset from
+  hyper(h2).
+
+
+### Fixed
+
+- Fixed an issue where `mirrord exec ... -- npm run serve` in a Vue project was
+  failing with `EAFNOSUPPORT: address family not supported ::1:80`. Added new
+  `.experimental.hide_ipv6_interfaces` configuration entry that allows for
+  hiding local IPv6 interface addresses from the user application.
+  [#2807](https://github.com/metalbear-co/mirrord/issues/2807)
+- Fixed wrong warning being displayed when binding UDP port 0 and filtering HTTP.
+  [#2812](https://github.com/metalbear-co/mirrord/issues/2812)
+- mirrord now respects `insecure-skip-tls-verify` option set in the kubeconfig
+  when `accept_invalid_certificates` is not provided in the mirrord config.
+  [#2825](https://github.com/metalbear-co/mirrord/issues/2825)
+
+
+### Internal
+
+- Downgraded Rust toochain to nightly-2024-09-12.
+  [#downgrade-rust](https://github.com/metalbear-co/mirrord/issues/downgrade-rust)
+- Added integration (regression) test for binding port 0 twice.
+  [#2812](https://github.com/metalbear-co/mirrord/issues/2812)
+
 ## [3.120.1](https://github.com/metalbear-co/mirrord/tree/3.120.1) - 2024-10-14
 
 

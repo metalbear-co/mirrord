@@ -112,6 +112,7 @@ pub fn check_mesh_vendor(pod: &Pod) -> Option<MeshVendor> {
     const ISTIO: [&str; 2] = ["istio-proxy", "istio-init"];
     const LINKERD: [&str; 2] = ["linkerd-proxy", "linkerd-init"];
     const KUMA: [&str; 2] = ["kuma-sidecar", "kuma-init"];
+    const ISTIO_CNI: [&str; 2] = ["istio-proxy", "istio-validation"];
 
     if pod
         .metadata
@@ -125,18 +126,33 @@ pub fn check_mesh_vendor(pod: &Pod) -> Option<MeshVendor> {
     }
 
     let container_statuses = pod.status.as_ref()?.container_statuses.as_ref()?;
+    let container_names = container_statuses
+        .iter()
+        .chain(
+            pod.status
+                .as_ref()?
+                .init_container_statuses
+                .as_ref()?
+                .iter(),
+        )
+        .map(|status| status.name.as_str())
+        .collect::<Vec<&str>>();
 
-    container_statuses.iter().find_map(|status| {
-        if ISTIO.contains(&status.name.as_str()) {
-            Some(MeshVendor::Istio)
-        } else if LINKERD.contains(&status.name.as_str()) {
-            Some(MeshVendor::Linkerd)
-        } else if KUMA.contains(&status.name.as_str()) {
-            Some(MeshVendor::Kuma)
-        } else {
-            None
-        }
-    })
+    // check that all the containers are present
+    // we had a case where istio cni was detected as istio while
+    // the init was only present.
+    // leave old logic for detection to not break existing setups
+    if ISTIO_CNI.iter().all(|name| container_names.contains(name)) {
+        return Some(MeshVendor::IstioCni);
+    } else if ISTIO.iter().any(|name| container_names.contains(name)) {
+        return Some(MeshVendor::Istio);
+    } else if LINKERD.iter().any(|name| container_names.contains(name)) {
+        return Some(MeshVendor::Linkerd);
+    } else if KUMA.iter().any(|name| container_names.contains(name)) {
+        return Some(MeshVendor::Kuma);
+    }
+
+    None
 }
 
 /// Choose container logic:
