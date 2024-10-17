@@ -14,6 +14,7 @@ use tokio::{
     },
 };
 use tokio_util::sync::CancellationToken;
+use tracing::Level;
 
 use crate::{
     error::{AgentError, Result},
@@ -75,32 +76,40 @@ impl DnsWorker {
     ///
     /// We could probably cache results here.
     /// We cannot cache the [`AsyncResolver`] itself, becaues the configuration in `etc` may change.
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn do_lookup(
         etc_path: PathBuf,
         host: String,
         attempts: usize,
         timeout: Duration,
     ) -> RemoteResult<DnsLookup> {
-        let resolv_conf_path = etc_path.join("resolv.conf");
-        let hosts_path = etc_path.join("hosts");
+        // Prepares the `AsyncResolver` after reading some `/etc` DNS files.
+        //
+        // We care about logging these errors, at an `error!` level.
+        let resolver: Result<_, ResponseError> = try {
+            let resolv_conf_path = etc_path.join("resolv.conf");
+            let hosts_path = etc_path.join("hosts");
 
-        let resolv_conf = fs::read(resolv_conf_path).await?;
-        let hosts_conf = fs::read(hosts_path).await?;
+            let resolv_conf = fs::read(resolv_conf_path).await?;
+            let hosts_conf = fs::read(hosts_path).await?;
 
-        let (config, mut options) = parse_resolv_conf(resolv_conf)?;
-        options.server_ordering_strategy =
-            hickory_resolver::config::ServerOrderingStrategy::UserProvidedOrder;
-        options.timeout = timeout;
-        options.attempts = attempts;
-        options.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4Only;
+            let (config, mut options) = parse_resolv_conf(resolv_conf)?;
+            options.server_ordering_strategy =
+                hickory_resolver::config::ServerOrderingStrategy::UserProvidedOrder;
+            options.timeout = timeout;
+            options.attempts = attempts;
+            options.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4Only;
 
-        let mut resolver = AsyncResolver::tokio(config, options);
+            let mut resolver = AsyncResolver::tokio(config, options);
 
-        let hosts = Hosts::default().read_hosts_conf(hosts_conf.as_slice())?;
-        resolver.set_hosts(Some(hosts));
+            let hosts = Hosts::default().read_hosts_conf(hosts_conf.as_slice())?;
+            resolver.set_hosts(Some(hosts));
+
+            resolver
+        };
 
         let lookup = resolver
+            .inspect_err(|fail| tracing::error!(?fail, "Failed to build DNS resolver"))?
             .lookup_ip(host)
             .await
             .inspect(|lookup| tracing::trace!(?lookup, "Lookup finished"))?
@@ -110,12 +119,14 @@ impl DnsWorker {
     }
 
     /// Handles the given [`DnsCommand`] in a separate [`tokio::task`].
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     fn handle_message(&self, message: DnsCommand) {
         let etc_path = self.etc_path.clone();
         let timeout = self.timeout;
         let attempts = self.attempts;
         let lookup_future = async move {
             let result = Self::do_lookup(etc_path, message.request.node, attempts, timeout).await;
+
             if let Err(result) = message.response_tx.send(result) {
                 tracing::error!(?result, "Failed to send query response");
             }
@@ -181,21 +192,22 @@ impl DnsApi {
 
     /// Returns the result of the oldest outstanding DNS request issued with this struct (see
     /// [`Self::make_request`]).
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     pub(crate) async fn recv(&mut self) -> Result<GetAddrInfoResponse, AgentError> {
         let Some(response) = self.responses.next().await else {
             return future::pending().await;
         };
 
-        match response? {
-            Ok(lookup) => Ok(GetAddrInfoResponse(Ok(lookup))),
-            Err(ResponseError::DnsLookup(err)) => {
-                Ok(GetAddrInfoResponse(Err(ResponseError::DnsLookup(err))))
-            }
-            Err(..) => Ok(GetAddrInfoResponse(Err(ResponseError::DnsLookup(
-                DnsLookupError {
-                    kind: ResolveErrorKindInternal::Unknown,
-                },
-            )))),
-        }
+        let response = response?.map_err(|fail| match fail {
+            ResponseError::RemoteIO(remote_ioerror) => ResponseError::DnsLookup(DnsLookupError {
+                kind: remote_ioerror.kind.into(),
+            }),
+            fail @ ResponseError::DnsLookup(_) => fail,
+            _ => ResponseError::DnsLookup(DnsLookupError {
+                kind: ResolveErrorKindInternal::Unknown,
+            }),
+        });
+
+        Ok(GetAddrInfoResponse(response))
     }
 }
