@@ -1,3 +1,4 @@
+#![deny(unused_crate_dependencies)]
 #![feature(c_variadic)]
 #![feature(naked_functions)]
 #![feature(io_error_uncategorized)]
@@ -696,4 +697,19 @@ pub(crate) unsafe extern "C" fn uv_fs_close_detour(
     // does not return to here after calling `FN_UV_FS_CLOSE`.
     close_layer_fd(fd);
     FN_UV_FS_CLOSE(a, b, fd, c)
+}
+
+#[cfg(test)]
+mod deps_used_in_integration_tests {
+    //! To silence false positive from `unused_crate_dependencies`.
+    //!
+    //! See [discussion on GitHub](https://github.com/rust-lang/cargo/issues/12717#issuecomment-1728123462) for reference.
+
+    use actix_codec as _;
+    use futures as _;
+    use mirrord_intproxy as _;
+    use tempfile as _;
+    use test_cdylib as _;
+    use tests as _;
+    use tokio as _;
 }

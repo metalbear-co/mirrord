@@ -1,3 +1,4 @@
+#![deny(unused_crate_dependencies)]
 #![feature(map_try_insert, let_chains)]
 #![warn(clippy::indexing_slicing)]
 

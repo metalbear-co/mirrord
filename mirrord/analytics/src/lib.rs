@@ -1,3 +1,5 @@
+#![deny(unused_crate_dependencies)]
+
 use std::{collections::HashMap, str::FromStr, time::Instant};
 
 use base64::{engine::general_purpose, Engine as _};

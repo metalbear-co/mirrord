@@ -22,12 +22,11 @@ workspace = true
 mirrord-console = { path = "../console", features = ["async-logger"] }
 mirrord-operator = { path = "../operator", features = [
     "client",
-    "license-fetch",
     "setup",
 ] }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
 mirrord-progress = { path = "../progress" }
-mirrord-kube = { path = "../kube" }
+mirrord-kube = { path = "../kube", features = ["portforwarder"] }
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-analytics = { path = "../analytics" }
@@ -36,7 +35,6 @@ mirrord-vpn = { path = "../vpn" }
 
 actix-codec.workspace = true
 clap.workspace = true
-tun2 = { version = "3", features = ["async"] }
 tracing.workspace = true
 serde_json.workspace = true
 serde.workspace = true

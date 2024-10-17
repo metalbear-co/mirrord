@@ -18,7 +18,6 @@ workspace = true
 
 [features]
 default = []
-license-fetch = ["dep:reqwest"]
 client = [
   "crd",
   "dep:base64",
@@ -34,6 +33,7 @@ client = [
   "dep:mirrord-progress",
   "dep:mirrord-protocol",
   "dep:rand",
+  "dep:tokio",
   "dep:tokio-tungstenite",
   "dep:tracing",
 ]
@@ -41,7 +41,6 @@ crd = [
   "dep:k8s-openapi",
   "dep:kube",
   "dep:mirrord-config",
-  "dep:tokio",
   "dep:serde_json"
 ]
 setup = ["crd", "dep:serde_yaml"]
@@ -57,7 +56,7 @@ mirrord-protocol = { path = "../protocol", optional = true }
 
 base64 = { workspace = true, optional = true }
 bincode = { version = "2.0.0-rc.2", features = ["serde"], optional = true }
-chrono = { version = "0.4", features = ["clock", "serde"] }
+chrono = { workspace = true, features = ["clock", "serde"] }
 http = { version = "1", optional = true }
 http-body-util = { workspace = true, optional = true }
 hyper = { workspace = true, optional = true }
@@ -66,7 +65,6 @@ k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, features = ["derive", "ws"], optional = true }
 futures = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
-reqwest = { workspace = true, default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"], optional = true }
 schemars = { version = "0.8", features = ["chrono"] }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }

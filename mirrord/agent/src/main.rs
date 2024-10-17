@@ -1,7 +1,8 @@
-#![feature(hash_extract_if)]
-#![feature(let_chains)]
-#![feature(iterator_try_collect)]
-#![cfg_attr(target_os = "linux", feature(tcp_quickack))]
+#![deny(unused_crate_dependencies)]
+#![cfg_attr(
+    target_os = "linux",
+    feature(tcp_quickack, hash_extract_if, let_chains, iterator_try_collect)
+)]
 #![warn(clippy::indexing_slicing)]
 
 #[cfg(target_os = "linux")]
@@ -48,4 +49,13 @@ async fn main() -> crate::error::Result<()> {
 #[cfg(not(target_os = "linux"))]
 fn main() {
     panic!("This program is only supported on Linux");
+}
+
+#[cfg(all(target_os = "linux", test))]
+mod deps_used_in_integration_tests {
+    //! To silence false positive from `unused_crate_dependencies`.
+    //!
+    //! See [discussion on GitHub](https://github.com/rust-lang/cargo/issues/12717#issuecomment-1728123462) for reference.
+
+    use test_bin as _;
 }
