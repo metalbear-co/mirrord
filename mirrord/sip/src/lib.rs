@@ -8,7 +8,7 @@ mod rpath;
 
 mod main {
     use std::{
-        env::{self, var},
+        env::{self},
         ffi::OsStr,
         io::{self, ErrorKind::AlreadyExists, Read},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
@@ -501,16 +501,14 @@ mod main {
                 }
             })
         } else {
-            // find shebang or use the default from $SHELL
-            let shebang = match read_shebang_from_file(&complete_path)? {
-                Some(shebang) => shebang,
-                None => ScriptShebang {
+            let shebang =
+                read_shebang_from_file(&complete_path)?.unwrap_or_else(|| ScriptShebang {
                     interpreter_path: PathBuf::from(
-                        var("SHELL").expect("$SHELL should be present"),
+                        env::var("SHELL").expect("$SHELL should be present"),
                     ),
                     start_of_rest_of_file: 0,
-                },
-            };
+                });
+
             let interpreter_complete_path = get_complete_path(&shebang.interpreter_path)?;
             if is_in_mirrord_tmp_dir(&interpreter_complete_path)? {
                 return Ok(NoSip);
