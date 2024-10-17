@@ -8,7 +8,7 @@ use std::{
 use bincode::{Decode, Encode};
 use hickory_resolver::error::{ResolveError, ResolveErrorKind};
 use thiserror::Error;
-use tracing::{warn, Level};
+use tracing::warn;
 
 use crate::{
     outgoing::SocketAddress,
