@@ -252,7 +252,7 @@ impl core::fmt::Display for ResolveErrorKindInternal {
             }
             ResolveErrorKindInternal::Proto => write!(f, "protocol"),
             ResolveErrorKindInternal::Timeout => write!(f, "timeout"),
-            ResolveErrorKindInternal::Unknown => write!(f, "unknown"),
+            ResolveErrorKindInternal::Unknown => write!(f, "unknown error"),
             ResolveErrorKindInternal::NotFound => write!(
                 f,
                 "the agent could not find a DNS related file, such as \
