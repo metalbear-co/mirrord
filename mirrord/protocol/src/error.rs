@@ -250,7 +250,7 @@ impl core::fmt::Display for ResolveErrorKindInternal {
             ResolveErrorKindInternal::NoRecordsFound(records) => {
                 write!(f, "no records found {records}")
             }
-            ResolveErrorKindInternal::Proto => write!(f, "protocol"),
+            ResolveErrorKindInternal::Proto => write!(f, "protocol error"),
             ResolveErrorKindInternal::Timeout => write!(f, "timeout"),
             ResolveErrorKindInternal::Unknown => write!(f, "unknown error"),
             ResolveErrorKindInternal::NotFound => write!(
