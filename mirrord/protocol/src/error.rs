@@ -161,7 +161,6 @@ pub struct DnsLookupError {
 }
 
 impl From<io::Error> for ResponseError {
-    #[tracing::instrument(level = Level::TRACE, ret)]
     fn from(io_error: io::Error) -> Self {
         Self::RemoteIO(RemoteIOError {
             raw_os_error: io_error.raw_os_error(),
@@ -171,7 +170,6 @@ impl From<io::Error> for ResponseError {
 }
 
 impl From<ResolveError> for ResponseError {
-    #[tracing::instrument(level = Level::TRACE, ret)]
     fn from(fail: ResolveError) -> Self {
         match fail.kind().to_owned() {
             ResolveErrorKind::Io(io_fail) => io_fail.into(),
