@@ -428,12 +428,7 @@ mod main {
 
     /// Checks if binary is signed with either `RUNTIME` or `RESTRICTED` flags.
     /// The code ignores error to allow smoother fallbacks.
-    fn is_code_signed(path: &Path) -> bool {
-        let data = match std::fs::read(path) {
-            Ok(data) => data,
-            Err(_) => return false,
-        };
-
+    fn is_code_signed(data: &Vec<u8>) -> bool {
         if let Ok(mach) = MachFile::parse(data.as_ref()) {
             for macho in mach.into_iter() {
                 if let Ok(Some(signature)) = macho.code_signature() {
@@ -452,11 +447,11 @@ mod main {
     }
 
     /// SIP check for binaries.
-    fn is_binary_sip(path: &Path, patch_binaries: &[String]) -> Result<bool> {
+    fn is_binary_sip(path: &Path, data: &Vec<u8>, patch_binaries: &[String]) -> Result<bool> {
         // Patch binary if it is in the list of binaries to patch.
         // See `ends_with` docs for understanding better when it returns true.
         Ok(patch_binaries.iter().any(|x| path.ends_with(x))
-            || is_code_signed(path)
+            || is_code_signed(data)
             || (std::fs::metadata(path)?.st_flags() & SF_RESTRICTED) > 0)
     }
 
@@ -493,7 +488,7 @@ mod main {
         let data = std::fs::read(&complete_path)?;
         if MachFile::parse(data.as_ref()).is_ok() {
             // file is an object file
-            is_binary_sip(&complete_path, patch_binaries).map(|is_sip| {
+            is_binary_sip(&complete_path, &data, patch_binaries).map(|is_sip| {
                 if is_sip {
                     SipBinary(complete_path)
                 } else {
@@ -513,7 +508,8 @@ mod main {
             if is_in_mirrord_tmp_dir(&interpreter_complete_path)? {
                 return Ok(NoSip);
             }
-            is_binary_sip(&interpreter_complete_path, patch_binaries).map(|is_sip| {
+            let data = std::fs::read(&interpreter_complete_path)?;
+            is_binary_sip(&interpreter_complete_path, &data, patch_binaries).map(|is_sip| {
                 if is_sip {
                     SipScript {
                         path: complete_path,
