@@ -265,11 +265,8 @@ impl<E> FromResidual<Result<Infallible, E>> for NodeCheck
 where
     E: Into<KubeApiError>,
 {
-    fn from_residual(error: Result<Infallible, E>) -> Self {
-        match error {
-            Ok(_) => unreachable!(),
-            Err(err) => NodeCheck::Error(err.into()),
-        }
+    fn from_residual(Err(err): Result<Infallible, E>) -> Self {
+        NodeCheck::Error(err.into())
     }
 }
 

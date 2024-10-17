@@ -208,6 +208,9 @@ jobs:
       - uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      # the setup rust toolchain action ignores the input if file exists.. so remove it
+      - run: rm rust-toolchain.toml
+      - run: rustup default nightly-2024-10-11
       - name: test
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent
 
@@ -387,7 +390,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-          toolchain: nightly-2024-10-11
+          toolchain: nightly-2024-09-12
       - name: Install Protoc
         uses: arduino/setup-protoc@v3
         with:
