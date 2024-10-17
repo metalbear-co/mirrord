@@ -164,13 +164,12 @@ where
         .await
         .map_err(|error| CliError::auth_exec_error_or(error, CliError::CreateAgentFailed))?;
 
-    if let Err(fail) = k8s_api.detect_openshift(progress).await {
-        tracing::debug!(?fail, "Failed to detect OpenShift");
-
-        if let KubeApiError::InvalidCertificate(fail) = fail {
-            tracing::warn!(fail);
-        }
-    };
+    k8s_api
+        .detect_openshift(progress)
+        .await
+        .map_err(|fail| CliError::auth_exec_error_or(fail, CliError::CreateAgentFailed))
+        .inspect_err(|fail| tracing::debug!(?fail, "Failed to detect OpenShift!"))
+        .ok();
 
     let agent_connect_info = tokio::time::timeout(
         Duration::from_secs(config.agent.startup_timeout),

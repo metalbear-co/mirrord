@@ -187,6 +187,15 @@ pub(crate) enum CliError {
     ))]
     AgentConnectionFailed(KubeApiError),
 
+    /// Friendlier version of the invalid certificate error that comes from a
+    /// [`kube::Error::Service`].
+    #[error("Kube API operation failed due to missing or invalid certificate: {0}")]
+    #[diagnostic(help(
+        r"1. Consider enabling `accept_invalid_certificates` in your `mirrord.json`, or;
+          2. Running `mirrord exec` with the `-c` flag."
+    ))]
+    InvalidCertificate(KubeApiError),
+
     #[error("Failed to communicate with the agent: {0}")]
     #[diagnostic(help("Please check agent status and logs.{GENERAL_HELP}"))]
     InitialAgentCommFailed(String),
@@ -400,7 +409,12 @@ impl CliError {
 
         match error {
             KubeApiError::KubeError(Error::Auth(AuthError::AuthExec(error))) => {
-                Self::KubeAuthExecFailed(error)
+                Self::KubeAuthExecFailed(error.to_owned())
+            }
+            KubeApiError::KubeError(Error::Service(ref fail))
+                if fail.to_string().contains("InvalidCertificate") =>
+            {
+                Self::InvalidCertificate(error)
             }
             error => fallback(error),
         }
