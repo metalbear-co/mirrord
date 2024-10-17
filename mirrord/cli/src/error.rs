@@ -187,6 +187,15 @@ pub(crate) enum CliError {
     ))]
     AgentConnectionFailed(KubeApiError),
 
+    /// Friendlier version of the invalid certificate error that comes from a
+    /// [`kube::Error::Service`].
+    #[error("Kube API operation failed due to missing or invalid certificate: {0}")]
+    #[diagnostic(help(
+        "Consider enabling `accept_invalid_certificates` in your \
+        `mirrord.json`, or running `mirrord exec` with the `-c` flag."
+    ))]
+    InvalidCertificate(KubeApiError),
+
     #[error("Failed to communicate with the agent: {0}")]
     #[diagnostic(help("Please check agent status and logs.{GENERAL_HELP}"))]
     InitialAgentCommFailed(String),
@@ -389,10 +398,12 @@ pub(crate) enum CliError {
 }
 
 impl CliError {
-    /// If the given [`KubeApiError`] originates from failed authentication command exec, produces
-    /// [`CliError::KubeAuthExecFailed`]. Otherwise, uses the given `fallback` function to
-    /// produce the result.
-    pub fn auth_exec_error_or<F: FnOnce(KubeApiError) -> Self>(
+    /// Here we give more meaning to some errors, instead of just letting them pass as
+    /// whatever [`KubeApiError`] we're getting.
+    ///
+    /// If `error` is not something we're interested in (no need for a special diagnostic message),
+    /// then we turn it into a `fallback` [`CliError`].
+    pub fn friendlier_error_or_else<F: FnOnce(KubeApiError) -> Self>(
         error: KubeApiError,
         fallback: F,
     ) -> Self {
@@ -400,7 +411,12 @@ impl CliError {
 
         match error {
             KubeApiError::KubeError(Error::Auth(AuthError::AuthExec(error))) => {
-                Self::KubeAuthExecFailed(error)
+                Self::KubeAuthExecFailed(error.to_owned())
+            }
+            KubeApiError::KubeError(Error::Service(ref fail))
+                if fail.to_string().contains("InvalidCertificate") =>
+            {
+                Self::InvalidCertificate(error)
             }
             error => fallback(error),
         }
@@ -420,7 +436,7 @@ impl From<OperatorApiError> for CliError {
                 operator_version,
             },
             OperatorApiError::CreateKubeClient(e) => {
-                Self::auth_exec_error_or(e, Self::CreateKubeApiFailed)
+                Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
             OperatorApiError::KubeError {
