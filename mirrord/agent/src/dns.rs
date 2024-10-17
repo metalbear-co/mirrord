@@ -86,7 +86,7 @@ impl DnsWorker {
         // Prepares the `AsyncResolver` after reading some `/etc` DNS files.
         //
         // We care about logging these errors, at an `error!` level.
-        let prepare_resolver = async || {
+        let resolver: Result<_, ResponseError> = try {
             let resolv_conf_path = etc_path.join("resolv.conf");
             let hosts_path = etc_path.join("hosts");
 
@@ -105,14 +105,11 @@ impl DnsWorker {
             let hosts = Hosts::default().read_hosts_conf(hosts_conf.as_slice())?;
             resolver.set_hosts(Some(hosts));
 
-            Ok::<_, ResponseError>(resolver)
+            resolver
         };
 
-        let resolver = prepare_resolver()
-            .await
-            .inspect_err(|fail| tracing::error!(?fail))?;
-
         let lookup = resolver
+            .inspect_err(|fail| tracing::error!(?fail))?
             .lookup_ip(host)
             .await
             .inspect(|lookup| tracing::trace!(?lookup, "Lookup finished"))?
