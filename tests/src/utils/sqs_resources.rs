@@ -382,7 +382,7 @@ async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<Resourc
     }
 
     let container_index = container_index.to_string();
-    let path = jsonptr::Pointer::new([
+    let path = jsonptr::PointerBuf::from_tokens([
         "spec",
         "template",
         "spec",
@@ -393,7 +393,8 @@ async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<Resourc
     let env_path = path.clone();
     let value = serde_json::to_value(env).unwrap();
 
-    let label_path = jsonptr::Pointer::new(["metadata", "labels", LOCALSTACK_PATCH_LABEL_NAME]);
+    let label_path =
+        jsonptr::PointerBuf::from_tokens(["metadata", "labels", LOCALSTACK_PATCH_LABEL_NAME]);
 
     let operator_deploy = deploy_api
         .patch(
@@ -410,7 +411,7 @@ async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<Resourc
         .await
         .unwrap();
 
-    let container_name_path = jsonptr::Pointer::new([
+    let container_name_path = jsonptr::PointerBuf::from_tokens([
         "spec",
         "template",
         "spec",
