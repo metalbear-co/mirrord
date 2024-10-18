@@ -388,7 +388,7 @@ async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> Resu
     )
     .await
     .and_then(|config| Client::try_from(config).map_err(From::from))
-    .map_err(|error| CliError::auth_exec_error_or(error, CliError::CreateKubeApiFailed))?;
+    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
 
     let namespace = args
         .namespace
@@ -422,15 +422,13 @@ async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> Resu
             if ALL_TARGETS_SUPPORTED_OPERATOR_VERSION
                 .matches(&api.operator().spec.operator_version) =>
         {
-            seeker
-                .all()
-                .await
-                .map_err(|error| CliError::auth_exec_error_or(error, CliError::ListTargetsFailed))
+            seeker.all().await.map_err(|error| {
+                CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
+            })
         }
-        _ => seeker
-            .all_open_source()
-            .await
-            .map_err(|error| CliError::auth_exec_error_or(error, CliError::ListTargetsFailed)),
+        _ => seeker.all_open_source().await.map_err(|error| {
+            CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
+        }),
     }
 }
 
@@ -593,9 +591,10 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
         .map_err(|agent_con_error| match agent_con_error {
             AgentConnectionError::Io(error) => CliError::PortForwardingSetupError(error.into()),
             AgentConnectionError::Operator(operator_api_error) => operator_api_error.into(),
-            AgentConnectionError::Kube(kube_api_error) => {
-                CliError::auth_exec_error_or(kube_api_error, CliError::PortForwardingSetupError)
-            }
+            AgentConnectionError::Kube(kube_api_error) => CliError::friendlier_error_or_else(
+                kube_api_error,
+                CliError::PortForwardingSetupError,
+            ),
             AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
             AgentConnectionError::NoConnectionMethod => CliError::PortForwardingNoConnectionMethod,
         })?;
