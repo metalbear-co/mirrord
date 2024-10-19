@@ -157,8 +157,8 @@ pub(crate) enum OperatorSetupError {
 
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum CliError {
-    /// Do not construct this variant directly, use [`CliError::auth_exec_error_or`] to allow for
-    /// more granular error detection.
+    /// Do not construct this variant directly, use [`CliError::friendlier_error_or_else`] to allow
+    /// for more granular error detection.
     #[error("Failed to create Kubernetes API client: {0}")]
     #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
     CreateKubeApiFailed(KubeApiError),
@@ -167,8 +167,8 @@ pub(crate) enum CliError {
     #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
     ListTargetsFailed(KubeApiError),
 
-    /// Do not construct this variant directly, use [`CliError::auth_exec_error_or`] to allow for
-    /// more granular error detection.
+    /// Do not construct this variant directly, use [`CliError::friendlier_error_or_else`] to allow
+    /// for more granular error detection.
     #[error("Failed to create mirrord-agent: {0}")]
     #[diagnostic(help(
         r"1. Please check the status of the agent pod, using `kubectl get pods` in the relevant namespace.
@@ -177,8 +177,8 @@ pub(crate) enum CliError {
     ))]
     CreateAgentFailed(KubeApiError),
 
-    /// Do not construct this variant directly, use [`CliError::auth_exec_error_or`] to allow for
-    /// more granular error detection.
+    /// Do not construct this variant directly, use [`CliError::friendlier_error_or_else`] to allow
+    /// for more granular error detection.
     #[error("Failed to connect to the created mirrord-agent: {0}")]
     #[diagnostic(help(
         "Please check the following:
