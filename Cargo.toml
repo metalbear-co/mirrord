@@ -76,7 +76,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "socks",
     "http2",
 ] }
-kube = { version = "0.96.0", default-features = false, features = [
+kube = { git = "https://github.com/kube-rs/kube.git", rev = "ecbdafc214538aadc78ec8447f2fa12d0057492b", default-features = false, features = [
     "runtime",
     "derive",
     "client",

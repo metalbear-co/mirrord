@@ -44,7 +44,7 @@ pub enum ResponseError {
     #[error("IO failed for remote operation with `{0}!")]
     RemoteIO(RemoteIOError),
 
-    #[error("IO failed for remote operation with `{0}!")]
+    #[error(transparent)]
     DnsLookup(DnsLookupError),
 
     #[error("Remote operation failed with `{0}`")]
@@ -151,8 +151,11 @@ pub struct RemoteIOError {
 
 /// Our internal version of Rust's `std::io::Error` that can be passed between mirrord-layer and
 /// mirrord-agent.
+///
+/// [`ResolveErrorKindInternal`] has a nice [`core::fmt::Display`] implementation that
+/// should be user friendly, and can be appended to the generic error message here.
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
-#[error("Failed performing `getaddrinfo` with {kind:?}!")]
+#[error("Failed performing `getaddrinfo`: {kind}")]
 pub struct DnsLookupError {
     pub kind: ResolveErrorKindInternal,
 }
@@ -233,6 +236,33 @@ pub enum ResolveErrorKindInternal {
     Timeout,
     // Unknown is for uncovered cases (enum is non-exhaustive)
     Unknown,
+    NotFound,
+    PermissionDenied,
+}
+
+impl core::fmt::Display for ResolveErrorKindInternal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            ResolveErrorKindInternal::Message(message) => write!(f, "{message}"),
+            ResolveErrorKindInternal::NoConnections => write!(f, "no connections"),
+            ResolveErrorKindInternal::NoRecordsFound(records) => {
+                write!(f, "no records found {records}")
+            }
+            ResolveErrorKindInternal::Proto => write!(f, "protocol error"),
+            ResolveErrorKindInternal::Timeout => write!(f, "timeout"),
+            ResolveErrorKindInternal::Unknown => write!(f, "unknown error"),
+            ResolveErrorKindInternal::NotFound => write!(
+                f,
+                "the agent could not find a DNS related file, such as \
+                `/etc/resolv.conf` or `/etc/hosts`"
+            ),
+            ResolveErrorKindInternal::PermissionDenied => write!(
+                f,
+                "the agent lacks sufficient permissions to open or read a DNS related \
+                file, such as `/etc/resolv.conf` or `/etc/hosts`"
+            ),
+        }
+    }
 }
 
 impl From<io::ErrorKind> for ErrorKindInternal {
@@ -296,10 +326,28 @@ impl From<ResolveErrorKind> for ResolveErrorKindInternal {
             }
             ResolveErrorKind::Proto(_) => ResolveErrorKindInternal::Proto,
             ResolveErrorKind::Timeout => ResolveErrorKindInternal::Timeout,
+            ResolveErrorKind::Io(fail) => match fail.kind() {
+                io::ErrorKind::NotFound => ResolveErrorKindInternal::NotFound,
+                io::ErrorKind::PermissionDenied => ResolveErrorKindInternal::PermissionDenied,
+                other => {
+                    warn!(?other, "unknown IO error");
+                    ResolveErrorKindInternal::Unknown
+                }
+            },
             _ => {
-                warn!("unknown error kind: {:?}", error_kind);
+                warn!(?error_kind, "unknown error kind");
                 ResolveErrorKindInternal::Unknown
             }
+        }
+    }
+}
+
+impl From<ErrorKindInternal> for ResolveErrorKindInternal {
+    fn from(kind: ErrorKindInternal) -> Self {
+        match kind {
+            ErrorKindInternal::NotFound => Self::NotFound,
+            ErrorKindInternal::PermissionDenied => Self::PermissionDenied,
+            _ => Self::Unknown,
         }
     }
 }
