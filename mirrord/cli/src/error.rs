@@ -413,8 +413,10 @@ impl CliError {
             KubeApiError::KubeError(Error::Auth(AuthError::AuthExec(error))) => {
                 Self::KubeAuthExecFailed(error.to_owned())
             }
+            // UGH(alex): Type-erased errors are messy, and this one is especially bad.
+            // See `kube_service_error_dependency_is_in_sync` for a "what's going on here".
             KubeApiError::KubeError(Error::Service(ref fail))
-                if fail.to_string().contains("InvalidCertificate") =>
+                if format!("{fail:?}").contains("InvalidCertificate") =>
             {
                 Self::InvalidCertificate(error)
             }
@@ -478,3 +480,141 @@ impl From<OperatorApiError> for CliError {
 #[derive(Debug, Error)]
 #[error("unsupported runtime version")]
 pub struct UnsupportedRuntimeVariant;
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs, io,
+        net::{Ipv4Addr, SocketAddr},
+        path::PathBuf,
+        sync::Arc,
+    };
+
+    use http_body_util::Full;
+    use hyper::{
+        body::{Bytes, Incoming},
+        service::service_fn,
+        Request, Response,
+    };
+    use hyper_util::{
+        rt::{TokioExecutor, TokioIo},
+        server::conn::auto::Builder,
+    };
+    use k8s_openapi::api::core::v1::Pod;
+    use kube::{api::ListParams, Api};
+    use rustls::{crypto::aws_lc_rs::default_provider, pki_types::CertificateDer, ServerConfig};
+    use tokio::{net::TcpListener, sync::Notify};
+    use tokio_rustls::TlsAcceptor;
+
+    /// With this test we're trying to `assert` that our [`kube`] crate is (somewhat)
+    /// version-synced with [`rustls`]. To give a friendlier error message on kube requests
+    /// when there's a certificate problem, we must dig down into the [`kube::Error`].
+    ///
+    /// Certificate errors come under the [`kube::Error::Service`] variant, which holds
+    /// a very annoying type-erased boxed error. Trying to `downcast` this is messy, so
+    /// instead we check the debug message of the error.
+    ///
+    /// We want this error (or something similar) to happen:
+    ///
+    /// `Service(hyper_util::client::legacy::Error(Connect, Custom { kind: Other, error: Custom {
+    /// kind: InvalidData, error: InvalidCertificate(Expired) } }))`.
+    ///
+    /// The part that we care about is the `InvalidCertificate`, the rest is not relevant.
+    ///
+    /// This test may fail if [`rustls`] changes the `error: InvalidCertificate` message,
+    /// or any of the upper errors change.
+    #[tokio::test]
+    async fn kube_service_error_dependency_is_in_sync() {
+        use kube::{Client, Config};
+
+        let provider = default_provider();
+        provider.install_default().unwrap();
+
+        let notify = Arc::new(Notify::new());
+        let wait_notify = notify.clone();
+
+        tokio::spawn(async move {
+            run_hyper_tls_server(notify).await;
+        });
+
+        // Wait until the server is listening before we start connecting.
+        wait_notify.notified().await;
+
+        let kube_config = Config::new("https://127.0.0.1:9669".parse().unwrap());
+        let client = Client::try_from(kube_config).unwrap();
+
+        // Manage pods
+        let pods: Api<Pod> = Api::default_namespaced(client);
+
+        let lp = ListParams::default().fields(&format!("legend={}", "hank"));
+
+        if let Err(fail) = pods.list(&lp).await {
+            assert!(format!("{fail:?}").contains("InvalidCertificate"),
+                "We were expecting this error {fail:?} to have `InvalidCertificate` but it's {fail}!"
+            );
+        }
+    }
+
+    /// Creates an [`hyper`] server with a broken certificate and a _catch-all_ route on
+    /// `localhost:9669`.
+    ///
+    /// The `.pem` files live in `/mirrord/tests/issue-2824-certs`.
+    async fn run_hyper_tls_server(notify: Arc<Notify>) {
+        let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 9669);
+
+        let incoming = TcpListener::bind(&addr).await.unwrap();
+
+        let mut certs_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        certs_path.push("../..");
+        certs_path.push("tests");
+        certs_path.push("issue-2824-certs");
+
+        println!("{certs_path:?}");
+
+        let cert_file = fs::File::open(certs_path.join("cert.pem")).unwrap();
+        let mut reader = io::BufReader::new(cert_file);
+        let certs = rustls_pemfile::certs(&mut reader)
+            .collect::<io::Result<Vec<CertificateDer<'static>>>>()
+            .unwrap();
+
+        let key_file = fs::File::open(certs_path.join("key.pem")).unwrap();
+        let mut reader = io::BufReader::new(key_file);
+        let key = rustls_pemfile::private_key(&mut reader)
+            .map(|key| key.unwrap())
+            .unwrap();
+
+        // Build TLS configuration.
+        let mut server_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .unwrap();
+
+        server_config.alpn_protocols =
+            vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
+        let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        /// Catch-all handler, we don't care about the response, any request is supposed
+        /// to fail due to `InvalidCertificate`.
+        async fn handle_any_route(
+            _: Request<Incoming>,
+        ) -> Result<Response<Full<Bytes>>, hyper::Error> {
+            Ok(Response::new(Full::default()))
+        }
+
+        let service = service_fn(handle_any_route);
+
+        // We're ready for the client side to start.
+        notify.notify_waiters();
+        let (tcp_stream, _remote_addr) = incoming.accept().await.unwrap();
+
+        let tls_acceptor = tls_acceptor.clone();
+        tokio::spawn(async move {
+            let tls_stream = tls_acceptor.accept(tcp_stream).await.unwrap();
+
+            Builder::new(TokioExecutor::new())
+                .serve_connection(TokioIo::new(tls_stream), service)
+                .await
+                .unwrap();
+        });
+    }
+}
