@@ -523,6 +523,9 @@ mod tests {
     ///
     /// This test may fail if [`rustls`] changes the `error: InvalidCertificate` message,
     /// or any of the upper errors change.
+    ///
+    /// Relying on the `Debug` string version of the error, as the `Display` version is
+    /// just a generic `ServiceError: client error (Connect)`.
     #[tokio::test]
     async fn kube_service_error_dependency_is_in_sync() {
         use kube::{Client, Config};
