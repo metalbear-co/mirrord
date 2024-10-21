@@ -572,7 +572,7 @@ mod tests {
     /// Creates an [`hyper`] server with a broken certificate and a _catch-all_ route on
     /// `localhost:9669`.
     ///
-    /// The `.pem` files live in `/mirrord/tests/issue-2824-certs`.
+    /// The certificate is generated here with [`rcgen::generate_simple_self_signed`].
     async fn run_hyper_tls_server(notify: Arc<Notify>) {
         use rcgen::generate_simple_self_signed;
 
