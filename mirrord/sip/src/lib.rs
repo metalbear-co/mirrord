@@ -339,6 +339,11 @@ mod main {
             .get(shebang.start_of_rest_of_file..)
             .expect("original shebang size exceeds file size");
         let mut new_contents = String::from("#!") + new_shebang;
+        if shebang.start_of_rest_of_file == 0 {
+            // trailing newline is needed for scripts without an original shebang
+            new_contents.push('\n');
+        }
+
         new_contents.push_str(
             from_utf8(contents)
                 .map_err(|_utf| UnlikelyError("Can't read script contents as utf8".to_string()))?,
@@ -382,6 +387,7 @@ mod main {
     }
 
     /// Including '#!', just until whitespace, no arguments.
+    /// will not be called on object files
     fn read_shebang_from_file<P: AsRef<Path>>(path: P) -> Result<Option<ScriptShebang>> {
         let mut f = std::fs::File::open(path)?;
         let mut buffer = String::new();
@@ -422,13 +428,8 @@ mod main {
 
     /// Checks if binary is signed with either `RUNTIME` or `RESTRICTED` flags.
     /// The code ignores error to allow smoother fallbacks.
-    fn is_code_signed(path: &Path) -> bool {
-        let data = match std::fs::read(path) {
-            Ok(data) => data,
-            Err(_) => return false,
-        };
-
-        if let Ok(mach) = MachFile::parse(data.as_ref()) {
+    fn is_code_signed(data: &[u8]) -> bool {
+        if let Ok(mach) = MachFile::parse(data) {
             for macho in mach.into_iter() {
                 if let Ok(Some(signature)) = macho.code_signature() {
                     if let Ok(Some(blob)) = signature.code_directory() {
@@ -446,11 +447,11 @@ mod main {
     }
 
     /// SIP check for binaries.
-    fn is_binary_sip(path: &Path, patch_binaries: &[String]) -> Result<bool> {
+    fn is_binary_sip(path: &Path, data: &[u8], patch_binaries: &[String]) -> Result<bool> {
         // Patch binary if it is in the list of binaries to patch.
         // See `ends_with` docs for understanding better when it returns true.
         Ok(patch_binaries.iter().any(|x| path.ends_with(x))
-            || is_code_signed(path)
+            || is_code_signed(data)
             || (std::fs::metadata(path)?.st_flags() & SF_RESTRICTED) > 0)
     }
 
@@ -483,12 +484,32 @@ mod main {
             return Ok(NoSip);
         }
 
-        if let Some(shebang) = read_shebang_from_file(&complete_path)? {
+        // determine if file is object file
+        let data = std::fs::read(&complete_path)?;
+        if MachFile::parse(data.as_ref()).is_ok() {
+            // file is an object file
+            is_binary_sip(&complete_path, &data, patch_binaries).map(|is_sip| {
+                if is_sip {
+                    SipBinary(complete_path)
+                } else {
+                    NoSip
+                }
+            })
+        } else {
+            let shebang =
+                read_shebang_from_file(&complete_path)?.unwrap_or_else(|| ScriptShebang {
+                    interpreter_path: PathBuf::from(
+                        env::var("SHELL").expect("$SHELL should be present"),
+                    ),
+                    start_of_rest_of_file: 0,
+                });
+
             let interpreter_complete_path = get_complete_path(&shebang.interpreter_path)?;
             if is_in_mirrord_tmp_dir(&interpreter_complete_path)? {
                 return Ok(NoSip);
             }
-            is_binary_sip(&interpreter_complete_path, patch_binaries).map(|is_sip| {
+            let data = std::fs::read(&interpreter_complete_path)?;
+            is_binary_sip(&interpreter_complete_path, &data, patch_binaries).map(|is_sip| {
                 if is_sip {
                     SipScript {
                         path: complete_path,
@@ -496,14 +517,6 @@ mod main {
                     }
                 } else {
                     // The interpreter the shebang points to is not protected.
-                    NoSip
-                }
-            })
-        } else {
-            is_binary_sip(&complete_path, patch_binaries).map(|is_sip| {
-                if is_sip {
-                    SipBinary(complete_path)
-                } else {
                     NoSip
                 }
             })
@@ -699,6 +712,11 @@ mod main {
         #[test]
         fn sip_patch_for_script_with_shebang() {
             test_patch_script("#!/usr/bin/env bash\necho hello\n")
+        }
+
+        #[test]
+        fn sip_patch_for_script_with_no_shebang() {
+            test_patch_script("echo hello\n")
         }
 
         #[test]
