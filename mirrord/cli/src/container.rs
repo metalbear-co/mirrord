@@ -78,7 +78,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
     let _ = child.kill().await;
 
     match result {
-        Err(error) => Err(ContainerError::UnsuccesfulCommandOutput(
+        Err(error) => Err(ContainerError::UnsuccesfulCommandExecute(
             format_command(command),
             error.to_string(),
         )),
