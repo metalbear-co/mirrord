@@ -8,7 +8,7 @@ mod rpath;
 
 mod main {
     use std::{
-        env::{self},
+        env,
         ffi::OsStr,
         io::{self, ErrorKind::AlreadyExists, Read},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
