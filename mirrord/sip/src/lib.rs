@@ -428,8 +428,8 @@ mod main {
 
     /// Checks if binary is signed with either `RUNTIME` or `RESTRICTED` flags.
     /// The code ignores error to allow smoother fallbacks.
-    fn is_code_signed(data: &Vec<u8>) -> bool {
-        if let Ok(mach) = MachFile::parse(data.as_ref()) {
+    fn is_code_signed(data: &[u8]) -> bool {
+        if let Ok(mach) = MachFile::parse(data) {
             for macho in mach.into_iter() {
                 if let Ok(Some(signature)) = macho.code_signature() {
                     if let Ok(Some(blob)) = signature.code_directory() {
@@ -447,7 +447,7 @@ mod main {
     }
 
     /// SIP check for binaries.
-    fn is_binary_sip(path: &Path, data: &Vec<u8>, patch_binaries: &[String]) -> Result<bool> {
+    fn is_binary_sip(path: &Path, data: &[u8], patch_binaries: &[String]) -> Result<bool> {
         // Patch binary if it is in the list of binaries to patch.
         // See `ends_with` docs for understanding better when it returns true.
         Ok(patch_binaries.iter().any(|x| path.ends_with(x))
