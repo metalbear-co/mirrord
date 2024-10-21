@@ -165,8 +165,8 @@ pub(crate) enum OperatorSetupError {
 
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum CliError {
-    /// Do not construct this variant directly, use [`CliError::auth_exec_error_or`] to allow for
-    /// more granular error detection.
+    /// Do not construct this variant directly, use [`CliError::friendlier_error_or_else`] to allow
+    /// for more granular error detection.
     #[error("Failed to create Kubernetes API client: {0}")]
     #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
     CreateKubeApiFailed(KubeApiError),
@@ -175,8 +175,8 @@ pub(crate) enum CliError {
     #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
     ListTargetsFailed(KubeApiError),
 
-    /// Do not construct this variant directly, use [`CliError::auth_exec_error_or`] to allow for
-    /// more granular error detection.
+    /// Do not construct this variant directly, use [`CliError::friendlier_error_or_else`] to allow
+    /// for more granular error detection.
     #[error("Failed to create mirrord-agent: {0}")]
     #[diagnostic(help(
         r"1. Please check the status of the agent pod, using `kubectl get pods` in the relevant namespace.
@@ -185,8 +185,8 @@ pub(crate) enum CliError {
     ))]
     CreateAgentFailed(KubeApiError),
 
-    /// Do not construct this variant directly, use [`CliError::auth_exec_error_or`] to allow for
-    /// more granular error detection.
+    /// Do not construct this variant directly, use [`CliError::friendlier_error_or_else`] to allow
+    /// for more granular error detection.
     #[error("Failed to connect to the created mirrord-agent: {0}")]
     #[diagnostic(help(
         "Please check the following:
@@ -194,6 +194,15 @@ pub(crate) enum CliError {
     2. (OSS only) You have sufficient permissions to port forward to the agent.{GENERAL_HELP}"
     ))]
     AgentConnectionFailed(KubeApiError),
+
+    /// Friendlier version of the invalid certificate error that comes from a
+    /// [`kube::Error::Service`].
+    #[error("Kube API operation failed due to missing or invalid certificate: {0}")]
+    #[diagnostic(help(
+        "Consider enabling `accept_invalid_certificates` in your \
+        `mirrord.json`, or running `mirrord exec` with the `-c` flag."
+    ))]
+    InvalidCertificate(KubeApiError),
 
     #[error("Failed to communicate with the agent: {0}")]
     #[diagnostic(help("Please check agent status and logs.{GENERAL_HELP}"))]
@@ -397,10 +406,12 @@ pub(crate) enum CliError {
 }
 
 impl CliError {
-    /// If the given [`KubeApiError`] originates from failed authentication command exec, produces
-    /// [`CliError::KubeAuthExecFailed`]. Otherwise, uses the given `fallback` function to
-    /// produce the result.
-    pub fn auth_exec_error_or<F: FnOnce(KubeApiError) -> Self>(
+    /// Here we give more meaning to some errors, instead of just letting them pass as
+    /// whatever [`KubeApiError`] we're getting.
+    ///
+    /// If `error` is not something we're interested in (no need for a special diagnostic message),
+    /// then we turn it into a `fallback` [`CliError`].
+    pub fn friendlier_error_or_else<F: FnOnce(KubeApiError) -> Self>(
         error: KubeApiError,
         fallback: F,
     ) -> Self {
@@ -408,7 +419,14 @@ impl CliError {
 
         match error {
             KubeApiError::KubeError(Error::Auth(AuthError::AuthExec(error))) => {
-                Self::KubeAuthExecFailed(error)
+                Self::KubeAuthExecFailed(error.to_owned())
+            }
+            // UGH(alex): Type-erased errors are messy, and this one is especially bad.
+            // See `kube_service_error_dependency_is_in_sync` for a "what's going on here".
+            KubeApiError::KubeError(Error::Service(ref fail))
+                if format!("{fail:?}").contains("InvalidCertificate") =>
+            {
+                Self::InvalidCertificate(error)
             }
             error => fallback(error),
         }
@@ -428,7 +446,7 @@ impl From<OperatorApiError> for CliError {
                 operator_version,
             },
             OperatorApiError::CreateKubeClient(e) => {
-                Self::auth_exec_error_or(e, Self::CreateKubeApiFailed)
+                Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
             OperatorApiError::KubeError {
@@ -470,3 +488,138 @@ impl From<OperatorApiError> for CliError {
 #[derive(Debug, Error)]
 #[error("unsupported runtime version")]
 pub struct UnsupportedRuntimeVariant;
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        net::{Ipv4Addr, SocketAddr},
+        sync::Arc,
+    };
+
+    use http_body_util::Full;
+    use hyper::{
+        body::{Bytes, Incoming},
+        service::service_fn,
+        Request, Response,
+    };
+    use hyper_util::{
+        rt::{TokioExecutor, TokioIo},
+        server::conn::auto::Builder,
+    };
+    use k8s_openapi::api::core::v1::Pod;
+    use kube::{api::ListParams, Api};
+    use rustls::{
+        crypto::aws_lc_rs::default_provider,
+        pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
+        ServerConfig,
+    };
+    use tokio::{net::TcpListener, sync::Notify};
+    use tokio_rustls::TlsAcceptor;
+
+    /// With this test we're trying to `assert` that our [`kube`] crate is (somewhat)
+    /// version-synced with [`rustls`]. To give a friendlier error message on kube requests
+    /// when there's a certificate problem, we must dig down into the [`kube::Error`].
+    ///
+    /// Certificate errors come under the [`kube::Error::Service`] variant, which holds
+    /// a very annoying type-erased boxed error. Trying to `downcast` this is messy, so
+    /// instead we check the debug message of the error.
+    ///
+    /// We want this error (or something similar) to happen:
+    ///
+    /// `Service(hyper_util::client::legacy::Error(Connect, Custom { kind: Other, error: Custom {
+    /// kind: InvalidData, error: InvalidCertificate(Expired) } }))`.
+    ///
+    /// The part that we care about is the `InvalidCertificate`, the rest is not relevant.
+    ///
+    /// This test may fail if [`rustls`] changes the `error: InvalidCertificate` message,
+    /// or any of the upper errors change.
+    ///
+    /// Relying on the `Debug` string version of the error, as the `Display` version is
+    /// just a generic `ServiceError: client error (Connect)`.
+    #[tokio::test]
+    async fn kube_service_error_dependency_is_in_sync() {
+        use kube::{Client, Config};
+
+        let provider = default_provider();
+        provider.install_default().unwrap();
+
+        let notify = Arc::new(Notify::new());
+        let wait_notify = notify.clone();
+
+        tokio::spawn(async move {
+            run_hyper_tls_server(notify).await;
+        });
+
+        // Wait until the server is listening before we start connecting.
+        wait_notify.notified().await;
+
+        let kube_config = Config::new("https://127.0.0.1:9669".parse().unwrap());
+        let client = Client::try_from(kube_config).unwrap();
+
+        // Manage pods
+        let pods: Api<Pod> = Api::default_namespaced(client);
+
+        let lp = ListParams::default().fields(&format!("legend={}", "hank"));
+
+        let list = pods.list(&lp).await;
+        assert!(
+            list.as_ref()
+                .is_err_and(|fail| { format!("{fail:?}").contains("InvalidCertificate") }),
+            "We were expecting an error with `InvalidCertificate`, but got {list:?}!"
+        );
+    }
+
+    /// Creates an [`hyper`] server with a broken certificate and a _catch-all_ route on
+    /// `localhost:9669`.
+    ///
+    /// The certificate is generated here with [`rcgen::generate_simple_self_signed`].
+    async fn run_hyper_tls_server(notify: Arc<Notify>) {
+        use rcgen::generate_simple_self_signed;
+
+        let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 9669);
+
+        let incoming = TcpListener::bind(&addr).await.unwrap();
+
+        // Generate a certificate that should not work with kube.
+        let cert_key = generate_simple_self_signed(vec!["mieszko.i".to_string()]).unwrap();
+        let cert_pem = cert_key.cert.pem().into_bytes();
+        let cert = CertificateDer::from_pem_slice(&cert_pem).unwrap();
+
+        let key_pem = cert_key.key_pair.serialize_pem().into_bytes();
+        let key = PrivateKeyDer::from_pem_slice(&key_pem).unwrap();
+
+        // Build TLS configuration.
+        let mut server_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(vec![cert], key)
+            .unwrap();
+
+        server_config.alpn_protocols =
+            vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
+        let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        /// Catch-all handler, we don't care about the response, any request is supposed
+        /// to fail due to `InvalidCertificate`.
+        async fn handle_any_route(
+            _: Request<Incoming>,
+        ) -> Result<Response<Full<Bytes>>, hyper::Error> {
+            Ok(Response::new(Full::default()))
+        }
+
+        let service = service_fn(handle_any_route);
+
+        // We're ready for the client side to start.
+        notify.notify_waiters();
+        let (tcp_stream, _remote_addr) = incoming.accept().await.unwrap();
+
+        let tls_acceptor = tls_acceptor.clone();
+        tokio::spawn(async move {
+            let tls_stream = tls_acceptor.accept(tcp_stream).await.unwrap();
+
+            Builder::new(TokioExecutor::new())
+                .serve_connection(TokioIo::new(tls_stream), service)
+                .await
+                .unwrap();
+        });
+    }
+}

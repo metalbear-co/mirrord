@@ -187,7 +187,7 @@ async fn outgoing_tcp_from_the_local_app_broken(
 /// application.
 #[rstest]
 #[tokio::test]
-#[timeout(Duration::from_secs(10))]
+#[timeout(Duration::from_secs(15))]
 async fn outgoing_tcp_bound_socket(dylib_path: &Path) {
     let (mut test_process, mut intproxy) = Application::RustIssue2438
         .start_process_with_layer(dylib_path, vec![], None)

@@ -80,3 +80,8 @@ mirrord-layer = { artifact = "cdylib", path = "../layer" }
 
 [dev-dependencies]
 rstest = "0.23"
+hyper.workspace = true
+hyper-util = { workspace = true, "features" = ["server"] }
+http-body.workspace = true
+http-body-util.workspace = true
+kube.workspace = true

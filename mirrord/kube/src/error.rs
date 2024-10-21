@@ -7,7 +7,7 @@ pub type Result<T, E = KubeApiError> = std::result::Result<T, E>;
 
 #[derive(Debug, Error)]
 pub enum KubeApiError {
-    #[error("Kube failed: {0}")]
+    #[error(transparent)]
     KubeError(#[from] kube::Error),
 
     #[error("Connection to agent failed: {0}")]
