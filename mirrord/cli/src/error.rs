@@ -484,9 +484,7 @@ pub struct UnsupportedRuntimeVariant;
 #[cfg(test)]
 mod tests {
     use std::{
-        fs, io,
         net::{Ipv4Addr, SocketAddr},
-        path::PathBuf,
         sync::Arc,
     };
 
@@ -502,7 +500,11 @@ mod tests {
     };
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::ListParams, Api};
-    use rustls::{crypto::aws_lc_rs::default_provider, pki_types::CertificateDer, ServerConfig};
+    use rustls::{
+        crypto::aws_lc_rs::default_provider,
+        pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
+        ServerConfig,
+    };
     use tokio::{net::TcpListener, sync::Notify};
     use tokio_rustls::TlsAcceptor;
 
@@ -551,11 +553,12 @@ mod tests {
 
         let lp = ListParams::default().fields(&format!("legend={}", "hank"));
 
-        if let Err(fail) = pods.list(&lp).await {
-            assert!(format!("{fail:?}").contains("InvalidCertificate"),
-                "We were expecting this error {fail:?} to have `InvalidCertificate` but it's {fail}!"
-            );
-        }
+        let list = pods.list(&lp).await;
+        assert!(
+            list.as_ref()
+                .is_err_and(|fail| { format!("{fail:?}").contains("InvalidCertificate") }),
+            "We were expecting an error with `InvalidCertificate`, but got {list:?}!"
+        );
     }
 
     /// Creates an [`hyper`] server with a broken certificate and a _catch-all_ route on
@@ -563,33 +566,24 @@ mod tests {
     ///
     /// The `.pem` files live in `/mirrord/tests/issue-2824-certs`.
     async fn run_hyper_tls_server(notify: Arc<Notify>) {
+        use rcgen::generate_simple_self_signed;
+
         let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 9669);
 
         let incoming = TcpListener::bind(&addr).await.unwrap();
 
-        let mut certs_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        certs_path.push("../..");
-        certs_path.push("tests");
-        certs_path.push("issue-2824-certs");
+        // Generate a certificate that should not work with kube.
+        let cert_key = generate_simple_self_signed(vec!["mieszko.i".to_string()]).unwrap();
+        let cert_pem = cert_key.cert.pem().into_bytes();
+        let cert = CertificateDer::from_pem_slice(&cert_pem).unwrap();
 
-        println!("{certs_path:?}");
-
-        let cert_file = fs::File::open(certs_path.join("cert.pem")).unwrap();
-        let mut reader = io::BufReader::new(cert_file);
-        let certs = rustls_pemfile::certs(&mut reader)
-            .collect::<io::Result<Vec<CertificateDer<'static>>>>()
-            .unwrap();
-
-        let key_file = fs::File::open(certs_path.join("key.pem")).unwrap();
-        let mut reader = io::BufReader::new(key_file);
-        let key = rustls_pemfile::private_key(&mut reader)
-            .map(|key| key.unwrap())
-            .unwrap();
+        let key_pem = cert_key.key_pair.serialize_pem().into_bytes();
+        let key = PrivateKeyDer::from_pem_slice(&key_pem).unwrap();
 
         // Build TLS configuration.
         let mut server_config = ServerConfig::builder()
             .with_no_client_auth()
-            .with_single_cert(certs, key)
+            .with_single_cert(vec![cert], key)
             .unwrap();
 
         server_config.alpn_protocols =
