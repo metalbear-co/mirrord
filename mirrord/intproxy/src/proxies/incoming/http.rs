@@ -10,8 +10,11 @@ use hyper::{
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use mirrord_protocol::tcp::HttpRequestFallback;
 use tokio::net::TcpStream;
+use tracing::Level;
 
 use super::interceptor::{InterceptorError, InterceptorResult};
+
+pub(super) const RETRY_ON_RESET_ATTEMPTS: u32 = 10;
 
 /// Handles the differences between hyper's HTTP/1 and HTTP/2 connections.
 pub enum HttpSender {
@@ -25,6 +28,7 @@ pub enum HttpSender {
 /// # Returns
 ///
 /// [`HttpSender`] that can be used to send HTTP requests to the peer.
+#[tracing::instrument(level = Level::TRACE, skip(target_stream), err(level = Level::WARN))]
 pub async fn handshake(
     version: Version,
     target_stream: TcpStream,
@@ -51,6 +55,7 @@ pub async fn handshake(
 }
 
 impl HttpSender {
+    #[tracing::instrument(level = Level::TRACE, skip(self), err(level = Level::WARN))]
     pub async fn send(
         &mut self,
         req: HttpRequestFallback,

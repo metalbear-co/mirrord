@@ -23,7 +23,7 @@ use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::error;
+use tracing::{error, Level};
 
 use crate::{body_chunks::BodyExt as _, ConnectionId, Port, RemoteResult, RequestId};
 
@@ -327,7 +327,10 @@ where
 pub enum HttpRequestFallback {
     Framed(HttpRequest<InternalHttpBody>),
     Fallback(HttpRequest<Vec<u8>>),
-    Streamed(HttpRequest<StreamingBody>),
+    Streamed {
+        request: HttpRequest<StreamingBody>,
+        retries: u32,
+    },
 }
 
 #[derive(Debug)]
@@ -392,7 +395,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.connection_id,
             HttpRequestFallback::Fallback(req) => req.connection_id,
-            HttpRequestFallback::Streamed(req) => req.connection_id,
+            HttpRequestFallback::Streamed { request: req, .. } => req.connection_id,
         }
     }
 
@@ -400,7 +403,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.port,
             HttpRequestFallback::Fallback(req) => req.port,
-            HttpRequestFallback::Streamed(req) => req.port,
+            HttpRequestFallback::Streamed { request: req, .. } => req.port,
         }
     }
 
@@ -408,7 +411,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.request_id,
             HttpRequestFallback::Fallback(req) => req.request_id,
-            HttpRequestFallback::Streamed(req) => req.request_id,
+            HttpRequestFallback::Streamed { request: req, .. } => req.request_id,
         }
     }
 
@@ -416,7 +419,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.version(),
             HttpRequestFallback::Fallback(req) => req.version(),
-            HttpRequestFallback::Streamed(req) => req.version(),
+            HttpRequestFallback::Streamed { request: req, .. } => req.version(),
         }
     }
 
@@ -427,7 +430,7 @@ impl HttpRequestFallback {
         match self {
             HttpRequestFallback::Framed(req) => req.internal_request.into(),
             HttpRequestFallback::Fallback(req) => req.internal_request.into(),
-            HttpRequestFallback::Streamed(req) => req.internal_request.into(),
+            HttpRequestFallback::Streamed { request: req, .. } => req.internal_request.into(),
         }
     }
 }
@@ -594,7 +597,16 @@ pub type ReceiverStreamBody = StreamBody<ReceiverStream<hyper::Result<Frame<Byte
 pub enum HttpResponseFallback {
     Framed(HttpResponse<InternalHttpBody>),
     Fallback(HttpResponse<Vec<u8>>),
-    Streamed(HttpResponse<ReceiverStreamBody>),
+
+    /// Holds the [`HttpResponse`] that we're supposed to send back to the agent.
+    ///
+    /// It also holds the original http request [`HttpRequestFallback`], so we can retry
+    /// if our hyper server sent us a
+    /// [`RST_STREAM`](https://docs.rs/h2/latest/h2/struct.Error.html#method.is_reset).
+    Streamed(
+        HttpResponse<ReceiverStreamBody>,
+        Option<HttpRequestFallback>,
+    ),
 }
 
 impl HttpResponseFallback {
@@ -602,7 +614,7 @@ impl HttpResponseFallback {
         match self {
             HttpResponseFallback::Framed(req) => req.connection_id,
             HttpResponseFallback::Fallback(req) => req.connection_id,
-            HttpResponseFallback::Streamed(req) => req.connection_id,
+            HttpResponseFallback::Streamed(req, _) => req.connection_id,
         }
     }
 
@@ -610,10 +622,11 @@ impl HttpResponseFallback {
         match self {
             HttpResponseFallback::Framed(req) => req.request_id,
             HttpResponseFallback::Fallback(req) => req.request_id,
-            HttpResponseFallback::Streamed(req) => req.request_id,
+            HttpResponseFallback::Streamed(req, _) => req.request_id,
         }
     }
 
+    #[tracing::instrument(level = Level::TRACE, err(level = Level::WARN))]
     pub fn into_hyper<E>(self) -> Result<Response<BoxBody<Bytes, E>>, http::Error>
     where
         E: From<hyper::Error>,
@@ -621,7 +634,7 @@ impl HttpResponseFallback {
         match self {
             HttpResponseFallback::Framed(req) => req.internal_response.try_into(),
             HttpResponseFallback::Fallback(req) => req.internal_response.try_into(),
-            HttpResponseFallback::Streamed(req) => req.internal_response.try_into(),
+            HttpResponseFallback::Streamed(req, _) => req.internal_response.try_into(),
         }
     }
 
@@ -646,7 +659,7 @@ impl HttpResponseFallback {
             .map(|version| HTTP_CHUNKED_RESPONSE_VERSION.matches(version))
             .unwrap_or(false);
 
-        match request {
+        match request.clone() {
             // We received `DaemonTcp::HttpRequestFramed` from the agent,
             // so we know it supports `LayerTcpSteal::HttpResponseFramed` (both were introduced in
             // the same `mirrord_protocol` version).
@@ -662,19 +675,23 @@ impl HttpResponseFallback {
 
             // We received `DaemonTcp::HttpRequestChunked` and the agent supports
             // `LayerTcpSteal::HttpResponseChunked`.
-            HttpRequestFallback::Streamed(request) if agent_supports_streaming_response => {
-                HttpResponseFallback::Streamed(
-                    HttpResponse::<ReceiverStreamBody>::response_from_request(
-                        request, status, message,
-                    ),
-                )
-            }
+            HttpRequestFallback::Streamed {
+                request: streamed_request,
+                ..
+            } if agent_supports_streaming_response => HttpResponseFallback::Streamed(
+                HttpResponse::<ReceiverStreamBody>::response_from_request(
+                    streamed_request,
+                    status,
+                    message,
+                ),
+                Some(request),
+            ),
 
             // We received `DaemonTcp::HttpRequestChunked` from the agent,
             // but the agent does not support `LayerTcpSteal::HttpResponseChunked`.
             // However, it must support the older `LayerTcpSteal::HttpResponseFramed`
             // variant (was introduced before `DaemonTcp::HttpRequestChunked`).
-            HttpRequestFallback::Streamed(request) => HttpResponseFallback::Framed(
+            HttpRequestFallback::Streamed { request, .. } => HttpResponseFallback::Framed(
                 HttpResponse::<InternalHttpBody>::response_from_request(request, status, message),
             ),
         }
@@ -698,6 +715,7 @@ impl HttpResponse<InternalHttpBody> {
     /// and we also need some extra parameters.
     ///
     /// So this is our alternative implementation to `From<Response<Incoming>>`.
+    #[tracing::instrument(level = Level::TRACE, err(level = Level::WARN))]
     pub async fn from_hyper_response(
         response: Response<Incoming>,
         port: Port,
@@ -796,6 +814,7 @@ impl HttpResponse<Vec<u8>> {
     /// and we also need some extra parameters.
     ///
     /// So this is our alternative implementation to `From<Response<Incoming>>`.
+    #[tracing::instrument(level = Level::TRACE, err(level = Level::WARN))]
     pub async fn from_hyper_response(
         response: Response<Incoming>,
         port: Port,
@@ -885,6 +904,7 @@ impl HttpResponse<Vec<u8>> {
 }
 
 impl HttpResponse<ReceiverStreamBody> {
+    #[tracing::instrument(level = Level::TRACE, err(level = Level::WARN))]
     pub async fn from_hyper_response(
         response: Response<Incoming>,
         port: Port,
@@ -934,6 +954,7 @@ impl HttpResponse<ReceiverStreamBody> {
         })
     }
 
+    #[tracing::instrument(level = Level::TRACE, ret)]
     pub fn response_from_request(
         request: HttpRequest<StreamingBody>,
         status: StatusCode,

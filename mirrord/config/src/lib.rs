@@ -1,5 +1,4 @@
 #![feature(slice_concat_trait)]
-#![feature(lazy_cell)]
 #![warn(clippy::indexing_slicing)]
 //! <!--${internal}-->
 //! To generate the `mirrord-schema.json` file see
@@ -174,9 +173,9 @@ pub struct LayerConfig {
     /// Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed
     /// certificates).
     ///
-    /// Defaults to `false`.
-    #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES", default = false)]
-    pub accept_invalid_certificates: bool,
+    /// If not provided, mirrord will use value from the kubeconfig.
+    #[config(env = "MIRRORD_ACCEPT_INVALID_CERTIFICATES")]
+    pub accept_invalid_certificates: Option<bool>,
 
     /// ## skip_processes {#root-skip_processes}
     ///
@@ -344,9 +343,9 @@ impl LayerConfig {
     ///
     /// Fills `context` with the warnings.
     ///
-    /// - `ide`: Identifies if this is being called from an IDE context, when using
-    /// `mirrord verify-config`. Turns some _target missing_ errors into warnings, as the target can
-    /// be selected after `verify-config` is run.
+    /// - `ide`: Identifies if this is being called from an IDE context, when using `mirrord
+    ///   verify-config`. Turns some _target missing_ errors into warnings, as the target can be
+    ///   selected after `verify-config` is run.
     pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
         if self.agent.ephemeral && self.agent.namespace.is_some() {
             context.add_warning(
@@ -539,10 +538,9 @@ impl LayerConfig {
 
 impl CollectAnalytics for &LayerConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
-        analytics.add(
-            "accept_invalid_certificates",
-            self.accept_invalid_certificates,
-        );
+        if let Some(value) = self.accept_invalid_certificates {
+            analytics.add("accept_invalid_certificates", value);
+        };
         analytics.add("use_kubeconfig", self.kubeconfig.is_some());
         (&self.target).collect_analytics(analytics);
         (&self.agent).collect_analytics(analytics);

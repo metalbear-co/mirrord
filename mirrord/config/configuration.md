@@ -130,7 +130,7 @@ configuration file containing all fields.
 Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed
 certificates).
 
-Defaults to `false`.
+If not provided, mirrord will use value from the kubeconfig.
 
 ## agent {#root-agent}
 
@@ -316,6 +316,17 @@ Defaults to `false`.
 
 Needed if your mesh uses nftables instead of iptables-legacy,
 
+### agent.node_selector {#agent-node_selector}
+
+Allows setting up custom node selector for the agent Pod. Applies only to targetless runs,
+as targeted agent always runs on the same node as its target container.
+
+```json
+{
+  "node_selector": { "kubernetes.io/hostname": "node1" }
+}
+```
+
 ### agent.privileged {#agent-privileged}
 
 Run the mirror agent as privileged container.
@@ -422,6 +433,10 @@ This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application
 shares sockets with child commands (e.g Python web servers with reload),
 but the feature is not stable and may cause other issues.
+
+### _experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}
+
+Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.
 
 ### _experimental_ readlink {#experimental-readlink}
 
@@ -681,7 +696,7 @@ Case insensitive.
 2. `"read_only"` - List of patterns that should be read only remotely.
 3. `"local"` - List of patterns that should be read locally.
 4. `"not_found"` - List of patters that should never be read nor written. These files should be
-treated as non-existent.
+   treated as non-existent.
 4. `"mapping"` - Map of patterns and their corresponding replacers. The replacement happens before any specific behavior as defined above or mode (uses [`Regex::replace`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace))
 
 The logic for choosing the behavior is as follows:
@@ -689,9 +704,9 @@ The logic for choosing the behavior is as follows:
 
 1. Check agains "mapping" if path needs to be replaced, if matched then continue to next step
    with new path after replacements otherwise continue as usual.
-2. Check if one of the patterns match the file path, do the corresponding action. There's
-no specified order if two lists match the same path, we will use the first one (and we
-do not guarantee what is first).
+2. Check if one of the patterns match the file path, do the corresponding action. There's no
+   specified order if two lists match the same path, we will use the first one (and we do not
+   guarantee what is first).
 
     **Warning**: Specifying the same path in two lists is unsupported and can lead to undefined
     behaviour.
@@ -827,11 +842,11 @@ Resolve DNS via the remote pod.
 Defaults to `true`.
 
 Mind that:
-- DNS resolving can be done in multiple ways. Some frameworks use
-`getaddrinfo`/`gethostbyname` functions, while others communicate directly with the DNS server
-at port `53` and perform a sort of manual resolution. Just enabling the `dns` feature in mirrord
-might not be enough. If you see an address resolution error, try enabling the
-[`fs`](#feature-fs) feature, and setting `read_only: ["/etc/resolv.conf"]`.
+- DNS resolving can be done in multiple ways. Some frameworks use `getaddrinfo`/`gethostbyname`
+  functions, while others communicate directly with the DNS server at port `53` and perform a
+  sort of manual resolution. Just enabling the `dns` feature in mirrord might not be enough. If
+  you see an address resolution error, try enabling the [`fs`](#feature-fs) feature, and setting
+  `read_only: ["/etc/resolv.conf"]`.
 - DNS filter currently works only with frameworks that use `getaddrinfo`/`gethostbyname`
   functions.
 
@@ -865,8 +880,8 @@ Takes a list of values, such as:
 }
 ```
 
-- Only queries for hostname `google.com` with service port `1337` or `7331`
-will go through the remote pod.
+- Only queries for hostname `google.com` with service port `1337` or `7331` will go through the
+  remote pod.
 
 ```json
 {
@@ -902,7 +917,7 @@ details.
 Incoming traffic supports 3 [modes](#feature-network-incoming-mode) of operation:
 
 1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested
-listeners;
+   listeners;
 
 2. Steal: Captures the TCP data from a port, and forwards it to the local process.
 
@@ -1086,14 +1101,13 @@ Can be set to either `"mirror"` (default), `"steal"` or `"off"`.
 - `"off"`: Disables the incoming network feature.
 - `"steal"`: Supports 2 modes of operation:
 
-1. Port traffic stealing: Steals all TCP data from a
-  port, which is selected whenever the
-user listens in a TCP socket (enabling the feature is enough to make this work, no
-additional configuration is needed);
+1. Port traffic stealing: Steals all TCP data from a port, which is selected whenever the user
+   listens in a TCP socket (enabling the feature is enough to make this work, no additional
+   configuration is needed);
 
-2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming
-data on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and
-steals the traffic on the port if it is HTTP;
+2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming data
+   on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the
+   traffic on the port if it is HTTP;
 
 #### feature.network.incoming.on_concurrent_steal {#feature-network-incoming-on_concurrent_steal}
 
@@ -1168,8 +1182,8 @@ Takes a list of values, such as:
 }
 ```
 
-- Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331`
-will go through the remote pod.
+- Only UDP and TCP traffic on resolved address of `google.com` on port `1337` and `7331` will go
+  through the remote pod.
 ```json
 {
   "remote": ["google.com:1337", "google.com:7331"]

@@ -41,7 +41,7 @@ mod ignore_codes {
 /// These errors are converted to [`libc`] error codes, and are also used to [`set_errno`].
 #[derive(Error, Debug)]
 pub(crate) enum HookError {
-    #[error("mirrord-layer: Failed while getting a response!")]
+    #[error("mirrord-layer: `{0}`")]
     ResponseError(#[from] ResponseError),
 
     #[error("mirrord-layer: DNS does not resolve!")]
@@ -126,7 +126,7 @@ pub(crate) enum HookError {
 /// handling [`ProxyToLayerMessage`](mirrord_intproxy_protocol::ProxyToLayerMessage).
 #[derive(Error, Debug)]
 pub(crate) enum LayerError {
-    #[error("mirrord-layer: Failed while getting a response!")]
+    #[error("mirrord-layer: `{0}`")]
     ResponseError(#[from] ResponseError),
 
     #[error("mirrord-layer: Frida failed with `{0}`!")]
@@ -191,7 +191,7 @@ impl From<SerializationError> for HookError {
 }
 
 // Cannot have a generic `From<T>` implementation for this error, so explicitly implemented here.
-impl<'a, T> From<std::sync::PoisonError<std::sync::MutexGuard<'a, T>>> for HookError {
+impl<T> From<std::sync::PoisonError<std::sync::MutexGuard<'_, T>>> for HookError {
     fn from(_: std::sync::PoisonError<std::sync::MutexGuard<T>>) -> Self {
         HookError::LockError
     }

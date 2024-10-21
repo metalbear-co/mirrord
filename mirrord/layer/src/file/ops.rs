@@ -176,7 +176,7 @@ fn close_remote_file_on_failure(fd: u64) -> Result<()> {
 /// [`open`] is also used by other _open-ish_ functions, and it takes care of **creating** the
 /// _local_ and _remote_ file association, plus **inserting** it into the storage for
 /// [`OPEN_FILES`].
-#[mirrord_layer_macro::instrument(level = "trace", ret)]
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
     let path = path?;
 

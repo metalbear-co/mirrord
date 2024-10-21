@@ -1,4 +1,3 @@
-#![cfg(target_os = "macos")]
 use std::{
     env,
     ffi::{c_void, CStr, CString},

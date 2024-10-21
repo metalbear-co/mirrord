@@ -6,7 +6,7 @@
   "properties": {
     "accept_invalid_certificates": {
       "title": "accept_invalid_certificates {#root-accept_invalid_certificates}",
-      "description": "Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed certificates).\n\nDefaults to `false`.",
+      "description": "Controls whether or not mirrord accepts invalid TLS certificates (e.g. self-signed certificates).\n\nIf not provided, mirrord will use value from the kubeconfig.",
       "type": [
         "boolean",
         "null"
@@ -402,6 +402,17 @@
             "null"
           ]
         },
+        "node_selector": {
+          "title": "agent.node_selector {#agent-node_selector}",
+          "description": "Allows setting up custom node selector for the agent Pod. Applies only to targetless runs, as targeted agent always runs on the same node as its target container.\n\n```json { \"node_selector\": { \"kubernetes.io/hostname\": \"node1\" } } ```",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
         "privileged": {
           "title": "agent.privileged {#agent-privileged}",
           "description": "Run the mirror agent as privileged container. Defaults to `false`.\n\nMight be needed in strict environments such as Bottlerocket.",
@@ -748,6 +759,14 @@
         "enable_exec_hooks_linux": {
           "title": "_experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}",
           "description": "Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application shares sockets with child commands (e.g Python web servers with reload), but the feature is not stable and may cause other issues.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "hide_ipv6_interfaces": {
+          "title": "_experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}",
+          "description": "Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.",
           "type": [
             "boolean",
             "null"

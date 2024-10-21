@@ -36,6 +36,12 @@ pub struct ExperimentalConfig {
     /// but the feature is not stable and may cause other issues.
     #[config(default = true)]
     pub enable_exec_hooks_linux: bool,
+
+    /// ### _experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}
+    ///
+    /// Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.
+    #[config(default = false)]
+    pub hide_ipv6_interfaces: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -44,5 +50,6 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("readlink", self.readlink);
         analytics.add("trust_any_certificate", self.trust_any_certificate);
         analytics.add("enable_exec_hooks_linux", self.enable_exec_hooks_linux);
+        analytics.add("hide_ipv6_interfaces", self.hide_ipv6_interfaces);
     }
 }

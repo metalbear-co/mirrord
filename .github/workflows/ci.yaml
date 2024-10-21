@@ -151,7 +151,7 @@ jobs:
       - run: rm rust-toolchain.toml
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly-2024-04-15
+          toolchain: nightly-2024-10-11
           components: rustfmt, clippy
           target: aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu
       - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
@@ -193,7 +193,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly-2024-04-15
+          toolchain: nightly-2024-10-11
       # TODO(alex): `no-deps` here due to an issue in `futures-util`.
       - run: cargo doc --document-private-items --no-deps
 
@@ -202,12 +202,15 @@ jobs:
     needs: changed_files
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     container:
-      image: ghcr.io/metalbear-co/ci-agent-build:f8330d35a2a4b9132138f6fa9a3f3f80768c7c32
+      image: ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9
     steps:
       - uses: actions/checkout@v4
       - uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      # the setup rust toolchain action ignores the input if file exists.. so remove it
+      - run: rm rust-toolchain.toml
+      - run: rustup default nightly-2024-10-11
       - name: test
         run: cargo test --target x86_64-unknown-linux-gnu -p mirrord-agent
 
@@ -387,7 +390,7 @@ jobs:
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-          toolchain: nightly-2024-04-15
+          toolchain: nightly-2024-09-12
       - name: Install Protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -483,6 +486,7 @@ jobs:
         with:
           node-version: 18
       - run: npm install express # For http mirroring test with node.
+      - run: npm install portfinder # For a node specific test
       - run: cargo build --target=x86_64-apple-darwin -p mirrord-layer # Build layer lib. The tests load it into the apps.
       - name: mirrord layer tests
         run: cargo test --target=x86_64-apple-darwin -p mirrord-layer
@@ -558,7 +562,7 @@ jobs:
   # building concurrently can run faster the release ide tests
   build_mirrord_on_release_branch:
     runs-on: ubuntu-24.04
-    name: build mirrord
+    name: build mirrord CLI
     needs: check_if_release_branch
     if: ${{ needs.check_if_release_branch.outputs.release_branch == 'true' }}
     steps:
@@ -567,8 +571,8 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - run: cargo build --manifest-path=./Cargo.toml
-      - name: upload layer
+      - run: cargo build --manifest-path=./Cargo.toml -p mirrord
+      - name: upload mirrord CLI
         uses: actions/upload-artifact@v4
         with:
           name: mirrord-artifacts

@@ -57,7 +57,7 @@ pub struct PartialField<'a> {
 
 /// Converts a [`syn::Field`] into [`PartialField`], using
 /// [`get_ident_from_field_skipping_generics`] to get the field type.
-impl<'a> TryFrom<syn::Field> for PartialField<'a> {
+impl TryFrom<syn::Field> for PartialField<'_> {
     type Error = ();
 
     #[tracing::instrument(level = "trace", ret)]

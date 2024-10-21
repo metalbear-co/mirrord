@@ -1,5 +1,4 @@
 #![doc = include_str!("../README.md")]
-#![feature(lazy_cell)]
 
 pub use pem;
 pub use x509_certificate;

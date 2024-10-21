@@ -1,4 +1,4 @@
-#[cfg(test)]
+#![cfg(test)]
 
 mod env_tests {
     use std::time::Duration;

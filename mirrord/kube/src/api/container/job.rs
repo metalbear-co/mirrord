@@ -282,6 +282,7 @@ mod test {
                     "spec": {
                         "restartPolicy": "Never",
                         "imagePullSecrets": agent.image_pull_secrets,
+                        "nodeSelector": {},
                         "tolerations": *DEFAULT_TOLERATIONS,
                         "containers": [
                             {
@@ -400,6 +401,7 @@ mod test {
                             }
                         ],
                         "imagePullSecrets": agent.image_pull_secrets,
+                        "nodeSelector": {},
                         "tolerations": *DEFAULT_TOLERATIONS,
                         "containers": [
                             {

@@ -27,7 +27,7 @@ resolver = "2"
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.120.1"
+version = "3.121.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -76,7 +76,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "socks",
     "http2",
 ] }
-kube = { version = "0.96.0", default-features = false, features = [
+kube = { git = "https://github.com/kube-rs/kube.git", rev = "ecbdafc214538aadc78ec8447f2fa12d0057492b", default-features = false, features = [
     "runtime",
     "derive",
     "client",
@@ -99,6 +99,8 @@ fancy-regex = { version = "0.13" }
 enum_dispatch = "0.3"
 
 
+# If you update `hyper`, check that `h2` version is compatible in `intproxy/Cargo.toml`.
+# There is a test for this: `cargo test -p mirrord-intproxy hyper_and_h2_versions_in_sync`
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1" }
 http-body = "1"

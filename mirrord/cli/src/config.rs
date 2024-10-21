@@ -162,8 +162,8 @@ pub(super) struct ExecParams {
     pub agent_startup_timeout: Option<u16>,
 
     /// Accept/reject invalid certificates.
-    #[arg(short = 'c', long)]
-    pub accept_invalid_certificates: bool,
+    #[arg(short = 'c', long, default_missing_value="true", num_args=0..=1, require_equals=true)]
+    pub accept_invalid_certificates: Option<bool>,
 
     /// Use an Ephemeral Container to mirror traffic.
     #[arg(short, long)]
@@ -266,9 +266,15 @@ impl ExecParams {
             envs.insert("MIRRORD_REMOTE_DNS".into(), "false".into());
         }
 
-        if self.accept_invalid_certificates {
-            envs.insert("MIRRORD_ACCEPT_INVALID_CERTIFICATES".into(), "true".into());
-            tracing::warn!("Accepting invalid certificates");
+        if let Some(accept_invalid_certificates) = self.accept_invalid_certificates {
+            let value = if accept_invalid_certificates {
+                tracing::warn!("Accepting invalid certificates");
+                "true"
+            } else {
+                "false"
+            };
+
+            envs.insert("MIRRORD_ACCEPT_INVALID_CERTIFICATES".into(), value.into());
         }
 
         if self.ephemeral_container {
@@ -374,8 +380,8 @@ pub(super) struct PortForwardArgs {
     pub agent_startup_timeout: Option<u16>,
 
     /// Accept/reject invalid certificates
-    #[arg(short = 'c', long)]
-    pub accept_invalid_certificates: bool,
+    #[arg(short = 'c', long, default_missing_value="true", num_args=0..=1, require_equals=true)]
+    pub accept_invalid_certificates: Option<bool>,
 
     /// Use an Ephemeral Container to mirror traffic
     #[arg(short, long)]

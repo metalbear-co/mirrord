@@ -27,10 +27,10 @@ pub mod stateful_set;
 /// It has 3 implementations based on `CHECKED`, which indicates if this target has been
 /// checked with [`ResolvedTarget::assert_valid_mirrord_target`].
 ///
-/// 1. A generic implementation with helper methods for getting strings such as names,
-/// types and so on;
+/// 1. A generic implementation with helper methods for getting strings such as names, types and so
+///    on;
 /// 2. `CHECKED = false` that may be used to build the struct, and to call
-/// `assert_valid_mirrord_target` (along with the generic methods);
+///    `assert_valid_mirrord_target` (along with the generic methods);
 /// 3. `CHECKED = true` which is how we get a connection url for the target;
 #[derive(Debug, Clone)]
 pub enum ResolvedTarget<const CHECKED: bool> {

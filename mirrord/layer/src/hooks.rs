@@ -5,11 +5,11 @@ use tracing::trace;
 
 use crate::{LayerError, Result};
 
-static GUM: LazyLock<Gum> = LazyLock::new(|| unsafe { Gum::obtain() });
+static GUM: LazyLock<Gum> = LazyLock::new(Gum::obtain);
 
 /// Struct for managing the hooks using Frida.
-pub(crate) struct HookManager<'a> {
-    interceptor: Interceptor<'a>,
+pub(crate) struct HookManager {
+    interceptor: Interceptor,
     modules: Vec<String>,
 }
 
@@ -28,7 +28,7 @@ fn get_export_by_name(module: Option<&str>, symbol: &str) -> Result<NativePointe
         .ok_or_else(|| LayerError::NoExportName(symbol.to_string()))
 }
 
-impl<'a> HookManager<'a> {
+impl HookManager {
     /// Hook the first function exported from a lib that is in modules and is hooked succesfully
     fn hook_any_lib_export(
         &mut self,
@@ -116,7 +116,7 @@ impl<'a> HookManager<'a> {
     }
 }
 
-impl<'a> Default for HookManager<'a> {
+impl Default for HookManager {
     fn default() -> Self {
         let mut interceptor = Interceptor::obtain(&GUM);
         interceptor.begin_transaction();
@@ -128,7 +128,7 @@ impl<'a> Default for HookManager<'a> {
     }
 }
 
-impl<'a> Drop for HookManager<'a> {
+impl Drop for HookManager {
     fn drop(&mut self) {
         self.interceptor.end_transaction()
     }

@@ -293,7 +293,7 @@ pub struct AgentKubernetesConnectInfo {
 }
 
 pub async fn create_kube_config<P>(
-    accept_invalid_certificates: bool,
+    accept_invalid_certificates: Option<bool>,
     kubeconfig: Option<P>,
     kube_context: Option<String>,
 ) -> Result<Config>
@@ -318,7 +318,10 @@ where
         // kube or incluster configuration.
         Config::infer().await?
     };
-    config.accept_invalid_certs = accept_invalid_certificates;
+
+    if let Some(accept_invalid_certificates) = accept_invalid_certificates {
+        config.accept_invalid_certs = accept_invalid_certificates;
+    }
 
     Ok(config)
 }
@@ -336,7 +339,9 @@ where
     }
 }
 
-/// Get a vector of namespaces from an optional namespace. If the given namespace is Some, then
+/// Get a vector of namespaces from an optional namespace.
+///
+/// If the given namespace is Some, then
 /// fetch its Namespace object, and return a vector only with that.
 /// If the namespace is None - return all namespaces.
 pub async fn get_namespaces(

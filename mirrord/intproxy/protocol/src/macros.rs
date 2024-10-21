@@ -32,9 +32,10 @@ macro_rules! bind_nested {
     ($bind_to: ident, $variant: path) => { $variant($bind_to) };
 }
 
-/// A helper macro for implementing [`IsLayerRequest`](super::IsLayerRequest) and
-/// [`IsLayerRequestWithResponse`](super::IsLayerRequestWithResponse) traits. Accepts arguments in
-/// two forms, see invocations in [`protocol`](crate) for
+/// A helper macro for implementing [`IsLayerRequest`](super::IsLayerRequest)
+///
+/// and [`IsLayerRequestWithResponse`](super::IsLayerRequestWithResponse) traits. Accepts arguments
+/// in two forms, see invocations in [`protocol`](crate) for
 /// [`OpenFileRequest`](mirrord_protocol::file::OpenFileRequest) and
 /// [`CloseFileRequest`](mirrord_protocol::file::CloseFileRequest) below in this file. Invocation
 /// for [`OpenFileRequest`](mirrord_protocol::file::OpenFileRequest) generates both

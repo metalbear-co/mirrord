@@ -5,7 +5,6 @@
 #![feature(try_trait_v2)]
 #![feature(try_trait_v2_residual)]
 #![feature(c_size_t)]
-#![feature(lazy_cell)]
 #![feature(once_cell_try)]
 #![feature(vec_into_raw_parts)]
 #![allow(rustdoc::private_intra_doc_links)]
@@ -41,18 +40,18 @@
 //! When run with mirrord, this is what's going to happen:
 //!
 //! 1. We intercept the call to [`libc::open`] using our `open_detour` hook, which calls
-//!  [`file::ops::open`];
+//!    [`file::ops::open`];
 //!
 //! 2. [`file::ops::open`] sends an open file message to `mirrord-agent`;
 //!
 //! 3. `mirrore-agent` tries to open `/tmp/hello.txt` in the remote context it's running, and
-//! returns the result of the operation back to `mirrord-layer`;
+//!    returns the result of the operation back to `mirrord-layer`;
 //!
 //! 4. We handle the mapping of the remote file (the one we have open in `mirrord-agent`), and a
-//! local file (temporarily created);
+//!    local file (temporarily created);
 //!
 //! 5. And finally, we return the expected result (type) to your Node.js application, as if it had
-//! just called [`libc::open`].
+//!    just called [`libc::open`].
 //!
 //! Your application will get an fd that is valid in the context of mirrord, and calls to other file
 //! functions (like [`libc::read`]), will work just fine, operating on the remote file.
@@ -247,6 +246,7 @@ fn load_only_layer_start(config: &LayerConfig) {
     unsafe {
         // SAFETY
         // Called only from library constructor.
+        #[allow(static_mut_refs)]
         PROXY_CONNECTION
             .set(new_connection)
             .expect("setting PROXY_CONNECTION singleton")
@@ -313,7 +313,7 @@ fn init_tracing() {
 /// 4. Replaces the [`libc`] calls with our hooks with [`enable_hooks`];
 ///
 /// 5. Fetches remote environment from the agent (if enabled with
-/// [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
+///     [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
 fn layer_start(mut config: LayerConfig) {
     if config.target.path.is_none() {
         // Use localwithoverrides on targetless regardless of user config.
@@ -368,6 +368,7 @@ fn layer_start(mut config: LayerConfig) {
         return;
     }
 
+    #[allow(static_mut_refs)]
     unsafe {
         let address = setup().proxy_address();
         let new_connection = ProxyConnection::new(
@@ -535,7 +536,13 @@ fn enable_hooks(state: &LayerSetup) {
         replace!(&mut hook_manager, "fork", fork_detour, FnFork, FN_FORK);
     };
 
-    unsafe { socket::hooks::enable_socket_hooks(&mut hook_manager, enabled_remote_dns) };
+    unsafe {
+        socket::hooks::enable_socket_hooks(
+            &mut hook_manager,
+            enabled_remote_dns,
+            state.experimental(),
+        )
+    };
 
     if cfg!(target_os = "macos") || state.experimental().enable_exec_hooks_linux {
         unsafe { exec_hooks::hooks::enable_exec_hooks(&mut hook_manager) };
@@ -618,6 +625,7 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
     match res.cmp(&0) {
         Ordering::Equal => {
             tracing::debug!("Child process initializing layer.");
+            #[allow(static_mut_refs)]
             let parent_connection = match unsafe { PROXY_CONNECTION.take() } {
                 Some(conn) => conn,
                 None => {
@@ -635,6 +643,7 @@ pub(crate) unsafe extern "C" fn fork_detour() -> pid_t {
                     .expect("PROXY_CONNECTION_TIMEOUT should be set by now!"),
             )
             .expect("failed to establish proxy connection for child");
+            #[allow(static_mut_refs)]
             PROXY_CONNECTION
                 .set(new_connection)
                 .expect("Failed setting PROXY_CONNECTION in child fork");

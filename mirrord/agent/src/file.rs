@@ -1,13 +1,12 @@
 use std::{
     self,
-    collections::{hash_map::Entry, HashMap},
-    fs::{read_link, DirEntry, File, OpenOptions, ReadDir},
+    collections::{hash_map::Entry, HashMap, VecDeque},
+    fs::{read_link, File, OpenOptions, ReadDir},
     io::{self, prelude::*, BufReader, SeekFrom},
-    iter::{Enumerate, Map, Peekable},
+    iter::{Enumerate, Peekable},
     ops::RangeInclusive,
     os::unix::{fs::MetadataExt, prelude::FileExt},
     path::{Path, PathBuf},
-    vec::IntoIter,
 };
 
 use faccess::{AccessMode, PathExt};
@@ -23,31 +22,53 @@ pub enum RemoteFile {
     Directory(PathBuf),
 }
 
-/// `Peekable`: So that we can stop consuming if there is no more place in buf.
-/// `Chain`: because `read_dir`'s returned stream does not contain `.` and `..`.
-///        So we chain our own stream with `.` and `..` in it to the one returned by `read_dir`.
-/// `IntoIter`: That's our DIY stream with `.` and `..` ^.
-/// first `Map`: Converting into DirEntryInternal.
-/// second `Map`: logging any errors from the first map.
-type GetDEnts64Stream = Peekable<
-    std::iter::Chain<
-        IntoIter<std::result::Result<DirEntryInternal, io::Error>>,
-        Map<
-            Map<
-                Enumerate<ReadDir>,
-                impl Fn((usize, io::Result<DirEntry>)) -> io::Result<DirEntryInternal>,
-            >,
-            impl Fn(io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal>,
-        >,
-    >,
->;
+fn log_err(entry_res: io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal> {
+    entry_res.inspect_err(|err| error!("Converting DirEntry failed with {err:?}"))
+}
+
+#[derive(Debug)]
+struct GetDEnts64Stream {
+    inner: std::fs::ReadDir,
+    current_and_parent: VecDeque<io::Result<DirEntryInternal>>,
+    current_index: usize,
+}
+
+impl GetDEnts64Stream {
+    fn new(inner: ReadDir, current_and_parent: VecDeque<io::Result<DirEntryInternal>>) -> Self {
+        Self {
+            inner,
+            current_and_parent,
+            current_index: 0,
+        }
+    }
+}
+
+impl Iterator for GetDEnts64Stream {
+    type Item = io::Result<DirEntryInternal>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // first send current and parent entries
+        if let Some(entry) = self.current_and_parent.pop_front() {
+            self.current_index += 1;
+            return Some(entry);
+        }
+
+        let ret = self
+            .inner
+            .next()
+            .map(|i| (self.current_index, i).try_into()) // Convert into DirEntryInternal.
+            .map(log_err);
+        self.current_index += 1;
+        ret
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct FileManager {
     root_path: PathBuf,
     open_files: HashMap<u64, RemoteFile>,
     dir_streams: HashMap<u64, Enumerate<ReadDir>>,
-    getdents_streams: HashMap<u64, GetDEnts64Stream>,
+    getdents_streams: HashMap<u64, Peekable<GetDEnts64Stream>>,
     fds_iter: RangeInclusive<u64>,
 }
 
@@ -649,10 +670,6 @@ impl FileManager {
             .ok_or(ResponseError::NotFound(fd))
     }
 
-    fn log_err(entry_res: io::Result<DirEntryInternal>) -> io::Result<DirEntryInternal> {
-        entry_res.inspect_err(|err| error!("Converting DirEntry failed with {err:?}"))
-    }
-
     fn path_to_dir_entry_internal(
         path: &Path,
         position: u64,
@@ -669,20 +686,21 @@ impl FileManager {
 
     /// Get an iterator that contains entries of the current and parent (if exists) directories,
     /// to chain with the iterator returned by [`std::fs::read_dir`].
-    fn get_current_and_parent_entries(current: &Path) -> IntoIter<io::Result<DirEntryInternal>> {
-        let mut entries = vec![Self::path_to_dir_entry_internal(
+    fn get_current_and_parent_entries(current: &Path) -> VecDeque<io::Result<DirEntryInternal>> {
+        let mut entries = VecDeque::default();
+        entries.push_back(Self::path_to_dir_entry_internal(
             current,
             0,
             ".".to_string(),
-        )];
+        ));
         if let Some(parent) = current.parent() {
-            entries.push(Self::path_to_dir_entry_internal(
+            entries.push_back(Self::path_to_dir_entry_internal(
                 parent,
                 1,
                 "..".to_string(),
             ))
         }
-        entries.into_iter()
+        entries
     }
 
     /// If a stream does not yet exist for this fd, we create and return it.
@@ -693,26 +711,18 @@ impl FileManager {
     pub(crate) fn get_or_create_getdents64_stream(
         &mut self,
         fd: u64,
-    ) -> RemoteResult<&mut GetDEnts64Stream> {
+    ) -> RemoteResult<&mut Peekable<GetDEnts64Stream>> {
         match self.getdents_streams.entry(fd) {
-            Entry::Vacant(e) => {
-                match self.open_files.get(&fd) {
-                    None => Err(ResponseError::NotFound(fd)),
-                    Some(RemoteFile::File(_file)) => Err(ResponseError::NotDirectory(fd)),
-                    Some(RemoteFile::Directory(dir)) => {
-                        let current_and_parent = Self::get_current_and_parent_entries(dir);
-                        let stream = current_and_parent
-                            .chain(
-                                dir.read_dir()?
-                                    .enumerate()
-                                    .map(TryInto::try_into) // Convert into DirEntryInternal.
-                                    .map(Self::log_err),
-                            )
-                            .peekable();
-                        Ok(e.insert(stream))
-                    }
+            Entry::Vacant(e) => match self.open_files.get(&fd) {
+                None => Err(ResponseError::NotFound(fd)),
+                Some(RemoteFile::File(_file)) => Err(ResponseError::NotDirectory(fd)),
+                Some(RemoteFile::Directory(dir)) => {
+                    let current_and_parent = Self::get_current_and_parent_entries(dir);
+                    let stream =
+                        GetDEnts64Stream::new(dir.read_dir()?, current_and_parent).peekable();
+                    Ok(e.insert(stream))
                 }
-            }
+            },
             Entry::Occupied(existing) => Ok(existing.into_mut()),
         }
     }

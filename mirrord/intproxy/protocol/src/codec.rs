@@ -1,4 +1,5 @@
 //! Custom codec used in `layer <-> proxy` communication.
+//!
 //! Supports both synchronous (required by the layer) and asynchronous (convenient for the proxy)
 //! IO. Asynchronous IO is feature-gated with the `codec-async` feature.
 //!
