@@ -1,1 +1,0 @@
-mirrord now skips injections into `bazel-real`, considering it a build tool.
