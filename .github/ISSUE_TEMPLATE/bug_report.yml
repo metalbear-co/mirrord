@@ -7,6 +7,7 @@ body:
       value: |
         Thank you for taking the time to fill out this bug report!
         Please fill out the form below...
+
   - type: textarea
     id: description
     attributes:
@@ -15,44 +16,99 @@ body:
       placeholder: The bug is...
     validations:
       required: true
+
   - type: textarea
     id: reproduce
     attributes:
       label: Steps to Reproduce
-      description: Provide steps to reproduce this bug.
+      description: |
+        Provide steps to reproduce this bug.
+        If this bug is related to you application not functioning correctly with mirrord,
+        we would appreciate providing a link to repository with minimal reproducible example.
       placeholder: |
         1.
         2.
         3.
     validations:
       required: true
+
   - type: textarea
     id: debug
     attributes:
       label: Backtrace
       description: If your bug produces a backtrace, please include it here.
       render: shell
+
   - type: textarea
     id: layer-logs
     attributes:
       label: mirrord layer logs
-      description: If possible, reproduce the bug with the environment variable RUST_LOG set to 'trace', and attach the printed logs.
+      description: |
+        If possible, reproduce the bug and attach the relevant `mirrord-layer` logs.
+        You can enable them by setting `RUST_LOG` environment variable to `mirrord=trace`.
+        You will find them in your application's STDERR.
       render: shell
+
   - type: textarea
     id: intproxy-logs
     attributes:
-      label: Internal proxy logs
+      label: mirrord intproxy logs
       description: |
-        Please attach the relevant `mirrord-intproxy` logs. You can find them in your `/tmp` directory (by default).
-        The default log file looks like `/tmp/mirrord-intproxy-1727386366-5rqqf2x`.
-        You can change this default with the `internal_proxy.log_destination` mirrord config.
+        If possible, reproduce the bug and attach the relevant `mirrord-intproxy` logs.
+        You can enable them by setting `internal_proxy.log_level` to `mirrord=trace` in your mirrord config.
+        By default, `mirrord-intproxy` logs are dumped to a file in the `/tmp` directory (complete path looks like `/tmp/mirrord-intproxy-1727386366-5rqqf2x.log`).
+        You can override logs destination in the `internal_proxy.log_destination` mirrord config entry.
       render: shell
+
+  - type: textarea
+    id: agent-logs
+    attributes:
+      label: mirrord agent logs
+      description: |
+        If possible, reproduce the bug and attach the relevant `mirrord-agent` logs.
+        You can enable them by setting `agent.log_level` to `mirrord=trace` in your mirrord config.
+        You can fetch them from agent's pod (or ephemeral container, depending on your agent config).
+      render: shell
+
+  - type: textarea
+    id: mirrord-config
+    attributes:
+      label: mirrord config
+      description: If you were using a custom mirrord config, please attach it here.
+      render: json
+
+  - type: input
+    id: cli-version
+    attributes:
+      label: |
+        Version of your mirrord CLI.
+
+  - type: input
+    id: agent-version
+    attributes:
+      label: Version of your mirrord-agent.
+
+  - type: input
+    id: operator-version
+    attributes:
+      label: |
+        Version of your mirrord-operator (if relevant).
+        You can check it using `mirrord operator status` command.
+
+  - type: input
+    id: plugin-name
+    attributes:
+      label: |
+        Kind and version of plugin you were using (if relevant).
+        For example "IntelliJ, 3.63.0" or "VSCode, 3.60.0"
+
   - type: input
     id: os_version
     attributes:
       label: Your operating system and version
     validations:
       required: true
+
   - type: input
     id: binary_type
     attributes:
@@ -60,11 +116,13 @@ body:
       description: What process are you trying to run with mirrord? Please run `file $(which <process name>)` for best results.
     validations:
       required: true
+
   - type: input
     id: binary_version
     attributes:
       label: Local process version
       description: What's the version of the process you're trying to run with mirrord?
+
   - type: textarea
     id: additional-info
     attributes:
