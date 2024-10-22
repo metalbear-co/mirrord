@@ -310,7 +310,7 @@ pub(crate) unsafe extern "C" fn openat_detour(
     open_flags: c_int,
     mut args: ...
 ) -> RawFd {
-    let mode: libc::mode_t = args.arg();
+    let mode: c_int = args.arg();
 
     let guard = DetourGuard::new();
     if guard.is_none() {
