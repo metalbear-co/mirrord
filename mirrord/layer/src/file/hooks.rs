@@ -308,12 +308,13 @@ pub(crate) unsafe extern "C" fn openat_detour(
     fd: RawFd,
     raw_path: *const c_char,
     open_flags: c_int,
+    mode: c_int,
 ) -> RawFd {
     let open_options = OpenOptionsInternalExt::from_flags(open_flags);
 
     openat(fd, raw_path.checked_into(), open_options).unwrap_or_bypass_with(|bypass| {
         let raw_path = update_ptr_from_bypass(raw_path, &bypass);
-        FN_OPENAT(fd, raw_path, open_flags)
+        FN_OPENAT(fd, raw_path, open_flags, mode)
     })
 }
 
