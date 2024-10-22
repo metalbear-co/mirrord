@@ -24,7 +24,7 @@ body:
       description: |
         Provide steps to reproduce this bug.
         If this bug is related to you application not functioning correctly with mirrord,
-        we would appreciate providing a link to repository with minimal reproducible example.
+        we would appreciate providing a link to a repository with a minimal reproducible example.
       placeholder: |
         1.
         2.
@@ -45,7 +45,7 @@ body:
       label: mirrord layer logs
       description: |
         If possible, reproduce the bug and attach the relevant `mirrord-layer` logs.
-        You can enable them by setting `RUST_LOG` environment variable to `mirrord=trace`.
+        You can enable them by setting the `RUST_LOG` environment variable to `mirrord=trace`.
         You will find them in your application's STDERR.
       render: shell
 
@@ -55,7 +55,7 @@ body:
       label: mirrord intproxy logs
       description: |
         If possible, reproduce the bug and attach the relevant `mirrord-intproxy` logs.
-        You can enable them by setting `internal_proxy.log_level` to `mirrord=trace` in your mirrord config.
+        You can enable them by setting [`internal_proxy.log_level`](https://mirrord.dev/docs/reference/configuration/#internal_proxy-log_level) to `mirrord=trace` in your mirrord config.
         By default, `mirrord-intproxy` logs are dumped to a file in the `/tmp` directory (complete path looks like `/tmp/mirrord-intproxy-1727386366-5rqqf2x.log`).
         You can override logs destination in the `internal_proxy.log_destination` mirrord config entry.
       render: shell
