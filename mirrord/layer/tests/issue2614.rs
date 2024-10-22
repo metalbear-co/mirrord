@@ -18,14 +18,13 @@ pub use common::*;
 #[timeout(Duration::from_secs(60))]
 async fn test_issue2614(dylib_path: &Path) {
     let tmpdir = tempfile::tempdir().unwrap();
-    let file_path = tmpdir.path().join(format!(
-        "testfile-{}",
-        thread_rng().gen::<u64>().to_string()
-    ));
+    let file_path = tmpdir
+        .path()
+        .join(format!("testfile-{}", thread_rng().gen::<u64>(),));
     let application = Application::Go23Open {
         path: file_path.to_str().unwrap().into(),
         flags: libc::O_CREAT | libc::O_RDWR,
-        mode: 0444,
+        mode: libc::S_IRUSR | libc::S_IRGRP | libc::S_IROTH,
     };
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, vec![("MIRRORD_FILE_MODE", "local")], None)
@@ -41,7 +40,7 @@ async fn test_issue2614(dylib_path: &Path) {
     let permissions = tokio::fs::metadata(file_path).await.unwrap().permissions();
     assert_eq!(
         permissions.mode() & 0b111111111,
-        0444,
+        libc::S_IRUSR | libc::S_IRGRP | libc::S_IROTH,
         "test app created file with unexpected permissions"
     )
 }
