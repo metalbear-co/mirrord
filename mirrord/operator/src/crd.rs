@@ -666,11 +666,11 @@ pub struct MirrordSqsSessionSpec {
 #[kube(
     group = "operator.metalbear.co",
     version = "v1",
-    kind = "OperatorUser",
-    root = "OperatorUser"
+    kind = "MirrordOperatorUser",
+    root = "MirrordOperatorUser"
 )]
 #[serde(rename_all = "camelCase")]
-pub struct OperatorUserSpec {
+pub struct MirrordOperatorUserSpec {
     /// Unique ID.
     pub user_id: String,
     /// Last seen local username.
