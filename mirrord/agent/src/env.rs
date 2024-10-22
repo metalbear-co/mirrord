@@ -61,6 +61,7 @@ impl EnvFilter {
                 WildMatch::new("RUST_LOG"),
                 WildMatch::new("_JAVA_OPTIONS"),
                 WildMatch::new("DOTNET_EnableDiagnostics"),
+                WildMatch::new("CATALINA_HOME"),
             ];
 
             for selector in &filter_env_vars {
