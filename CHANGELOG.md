@@ -8,6 +8,30 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.121.1](https://github.com/metalbear-co/mirrord/tree/3.121.1) - 2024-10-22
+
+
+### Changed
+
+- Improve error logging and reporting when a getaddrinfo-adjacent failure
+  happens due to IO in the agent.
+  [#2287](https://github.com/metalbear-co/mirrord/issues/2287)
+- Improve error checking for InvalidCertificate errors in mirrord-cli.
+  [#2824](https://github.com/metalbear-co/mirrord/issues/2824)
+- Ignore CATALINA_HOME env by default
+- Skip mirrord injections into `bazel-real`, considering it a build tool.
+
+
+### Fixed
+
+- Fix a bug where file mode was ignored when Go applications were creating
+  local files. [#2614](https://github.com/metalbear-co/mirrord/issues/2614)
+- Update mirrord-container sidecar logs command to improve printing of errors.
+  [#2726](https://github.com/metalbear-co/mirrord/issues/2726)
+- Fix SIP detection on scripts with no shebang, SIP of default interpreter is
+  now used [#2797](https://github.com/metalbear-co/mirrord/issues/2797)
+- Bump dependencies, fix empty user in a kube context
+
 ## [3.121.0](https://github.com/metalbear-co/mirrord/tree/3.121.0) - 2024-10-17
 
 
