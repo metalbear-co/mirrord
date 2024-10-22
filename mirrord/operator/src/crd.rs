@@ -3,6 +3,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
+use chrono::{DateTime, Utc};
 use kube::{CustomResource, Resource};
 use kube_target::{KubeTarget, UnknownTargetType};
 pub use mirrord_config::feature::split_queues::QueueId;
@@ -658,4 +659,32 @@ pub struct MirrordSqsSessionSpec {
     // The Kubernetes API can't deal with 64 bit numbers (with most significant bit set)
     // so we save that field as a (HEX) string even though its source is a u64
     pub session_id: String,
+}
+
+/// Describes an operator user.
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    group = "operator.metalbear.co",
+    version = "v1",
+    kind = "OperatorUser",
+    root = "OperatorUser"
+)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorUserSpec {
+    /// Unique ID.
+    pub user_id: String,
+    /// Last seen local username.
+    pub local_username: String,
+    /// Last seen hostname.
+    pub hostname: String,
+    /// Last seen Kubernetes username.
+    pub k8s_username: String,
+    /// Most recent session activity.
+    pub last_seen: DateTime<Utc>,
+    /// Total session count.
+    pub total_sessions_count: u64,
+    /// Total session duration.
+    pub total_sessions_duration: u64,
+    /// Last session target.
+    pub last_target: TargetCrd,
 }
