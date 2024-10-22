@@ -80,27 +80,24 @@ body:
   - type: input
     id: cli-version
     attributes:
-      label: |
-        Version of your mirrord CLI.
+      label: mirrord CLI version
 
   - type: input
     id: agent-version
     attributes:
-      label: Version of your mirrord-agent.
+      label: mirrord-agent version
 
   - type: input
     id: operator-version
     attributes:
-      label: |
-        Version of your mirrord-operator (if relevant).
-        You can check it using `mirrord operator status` command.
+      label: mirrord-operator version (if relevant)
+      description: You can check it using `mirrord operator status` command.
 
   - type: input
     id: plugin-name
     attributes:
-      label: |
-        Kind and version of plugin you were using (if relevant).
-        For example "IntelliJ, 3.63.0" or "VSCode, 3.60.0"
+      label: plugin kind and version (if relevant)
+      description: For example "IntelliJ, 3.63.0" or "VSCode, 3.60.0".
 
   - type: input
     id: os_version
