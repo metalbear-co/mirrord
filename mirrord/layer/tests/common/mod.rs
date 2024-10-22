@@ -752,6 +752,15 @@ pub enum Application {
     RustIssue2438,
     NodeIssue2807,
     RustRebind0,
+    /// Go application that simply opens a file.
+    Go23Open {
+        /// Path to the file, accepted as `-p` param.
+        path: String,
+        /// Flags to use when opening the file, accepted as `-f` param.
+        flags: i32,
+        /// Mode to use when opening the file, accepted as `-m` param.
+        mode: u32,
+    },
     // For running applications with the executable and arguments determined at runtime.
     DynamicApp(String, Vec<String>),
 }
@@ -923,6 +932,7 @@ impl Application {
             ),
             Application::RustIssue2058 => String::from("tests/apps/issue2058/target/issue2058"),
             Application::RustIssue2204 => String::from("tests/apps/issue2204/target/issue2204"),
+            Application::Go23Open { .. } => String::from("tests/apps/open_go/23.go_test_app"),
             Application::DynamicApp(exe, _) => exe.clone(),
         }
     }
@@ -1051,6 +1061,16 @@ impl Application {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
+            Application::Go23Open { path, flags, mode } => {
+                vec![
+                    "-p".to_string(),
+                    path.clone(),
+                    "-f".to_string(),
+                    flags.to_string(),
+                    "-m".to_string(),
+                    mode.to_string(),
+                ]
+            }
             Application::DynamicApp(_, args) => args.to_owned(),
         }
     }
@@ -1123,6 +1143,7 @@ impl Application {
             | Application::RustIssue2438
             | Application::NodeIssue2807
             | Application::RustRebind0
+            | Application::Go23Open { .. }
             | Application::DynamicApp(..) => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,

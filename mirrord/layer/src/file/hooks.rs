@@ -303,18 +303,26 @@ pub(crate) unsafe extern "C" fn dirfd_detour(dirp: *mut DIR) -> c_int {
 /// If `fd == AT_FDCWD`, the current working directory is used, and the behavior is the same as
 /// `open_detour`.
 /// `fd` for a file descriptor with the `O_DIRECTORY` flag.
-#[hook_guard_fn]
+#[hook_fn]
 pub(crate) unsafe extern "C" fn openat_detour(
     fd: RawFd,
     raw_path: *const c_char,
     open_flags: c_int,
+    mut args: ...
 ) -> RawFd {
-    let open_options = OpenOptionsInternalExt::from_flags(open_flags);
+    let mode: c_int = args.arg();
 
-    openat(fd, raw_path.checked_into(), open_options).unwrap_or_bypass_with(|bypass| {
-        let raw_path = update_ptr_from_bypass(raw_path, &bypass);
-        FN_OPENAT(fd, raw_path, open_flags)
-    })
+    let guard = DetourGuard::new();
+    if guard.is_none() {
+        FN_OPENAT(fd, raw_path, open_flags, mode)
+    } else {
+        let open_options = OpenOptionsInternalExt::from_flags(open_flags);
+
+        openat(fd, raw_path.checked_into(), open_options).unwrap_or_bypass_with(|bypass| {
+            let raw_path = update_ptr_from_bypass(raw_path, &bypass);
+            FN_OPENAT(fd, raw_path, open_flags, mode)
+        })
+    }
 }
 
 /// Equivalent to `open_detour`, **except** when `raw_path` specifies a relative path.
