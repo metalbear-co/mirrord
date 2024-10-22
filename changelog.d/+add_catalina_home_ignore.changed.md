@@ -1,0 +1,1 @@
+Ignore CATALINA_HOME env by default
