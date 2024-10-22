@@ -11,7 +11,8 @@ mod common;
 
 pub use common::*;
 
-/// Verify that issue [#2614](https://github.com/metalbear-co/mirrord/issues/2614) is fixed.
+/// Verify that issue [#2614](https://github.com/metalbear-co/mirrord/issues/2614) is fixed
+/// and the file open mode is honoured on bypass.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
