@@ -21,8 +21,5 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
-	defer func() {
-		fd.Close()
-	}()
+	fd.Close()
 }
