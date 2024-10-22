@@ -674,11 +674,11 @@ pub struct MirrordOperatorUserSpec {
     /// Unique ID.
     pub user_id: String,
     /// Last seen local username.
-    pub local_username: String,
+    pub last_username: String,
     /// Last seen hostname.
-    pub hostname: String,
+    pub last_hostname: String,
     /// Last seen Kubernetes username.
-    pub k8s_username: String,
+    pub last_k8s_username: String,
     /// Most recent session activity.
     pub last_seen: DateTime<Utc>,
     /// Total session count.
