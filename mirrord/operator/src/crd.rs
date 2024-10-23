@@ -683,8 +683,8 @@ pub struct MirrordOperatorUserSpec {
     pub last_seen: DateTime<Utc>,
     /// Total session count.
     pub total_sessions_count: u64,
-    /// Total session duration (in seconds).
-    pub total_sessions_duration: u64,
-    /// Last session target.
+    /// Total session duration.
+    pub total_sessions_duration_seconds: u64,
+    /// Last session's target.
     pub last_target: TargetCrd,
 }
