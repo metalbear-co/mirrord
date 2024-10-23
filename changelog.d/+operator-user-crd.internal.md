@@ -1,0 +1,1 @@
+Added CRD for `MirrordOperatorUser`, adjusted operator setup.

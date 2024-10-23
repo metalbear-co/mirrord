@@ -28,7 +28,7 @@ use thiserror::Error;
 
 use crate::crd::{
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
-    MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
+    MirrordOperatorUser, MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
 };
 
 pub static OPERATOR_NAME: &str = "mirrord-operator";
@@ -787,6 +787,7 @@ impl OperatorClusterUserRole {
                         "mirrordoperators".to_owned(),
                         "targets".to_owned(),
                         "targets/port-locks".to_owned(),
+                        MirrordOperatorUser::plural(&()).into_owned(),
                     ]),
                     verbs: vec!["get".to_owned(), "list".to_owned()],
                     ..Default::default()
