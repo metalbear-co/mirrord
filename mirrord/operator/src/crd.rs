@@ -686,5 +686,5 @@ pub struct MirrordOperatorUserSpec {
     /// Total session duration.
     pub total_sessions_duration_seconds: u64,
     /// Last session's target.
-    pub last_target: TargetCrd,
+    pub last_target: String,
 }
