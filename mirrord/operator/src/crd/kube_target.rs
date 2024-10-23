@@ -56,13 +56,6 @@ impl KubeTarget {
             KubeTarget::Unknown(unknown) => Err(UnknownTargetType(unknown.clone())),
         }
     }
-
-    pub fn into_known(self) -> Result<Target, UnknownTargetType> {
-        match self {
-            KubeTarget::Known(target) => Ok(target),
-            KubeTarget::Unknown(unknown) => Err(UnknownTargetType(unknown)),
-        }
-    }
 }
 
 impl TryFrom<KubeTarget> for Target {
