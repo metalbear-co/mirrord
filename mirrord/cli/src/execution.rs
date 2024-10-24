@@ -154,7 +154,7 @@ impl MirrordExecution {
     /// # Internal proxy
     ///
     /// The internal proxy will be killed as soon as this struct is dropped.
-    /// It **does not** hapen when you `exec` into user binary, because Rust destructors are not
+    /// It **does not** happen when you `exec` into user binary, because Rust destructors are not
     /// run. The whole process is instantly replaced by the OS.
     ///
     /// Therefore, everything should work fine when you create [`MirrordExecution`] with this
