@@ -67,3 +67,41 @@ where
     progress.success(Some("layer extracted"));
     Ok(file_path)
 }
+
+/// Extract the arm64 compiled layer for the shim to use (MacOS arm64 only).
+/// If prefix is true, add a random prefix to the file name that identifies the specific build
+/// of the layer. This is useful for debug purposes usually.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub(crate) fn extract_arm64<P>(
+    // dest_dir: Option<String>,
+    progress: &P,
+    prefix: bool,
+) -> Result<PathBuf>
+where
+    P: Progress + Send + Sync,
+{
+    let mut progress = progress.subtask("extracting arm64 layer library");
+    let extension = Path::new(env!("MIRRORD_MACOS_ARM64_LIBRARY"))
+        .extension()
+        .unwrap()
+        .to_str()
+        .unwrap();
+
+    let file_name = if prefix {
+        format!("{}-libmirrord_layer_arm64.{extension}", const_random!(u64))
+    } else {
+        format!("libmirrord_layer_arm64.{extension}")
+    };
+
+    let file_path = temp_dir().as_path().join(file_name);
+    if !file_path.exists() {
+        let mut file = File::create(&file_path)
+            .map_err(|e| CliError::LayerExtractError(file_path.clone(), e))?;
+        let bytes = include_bytes!(env!("MIRRORD_MACOS_ARM64_LIBRARY"));
+        file.write_all(bytes).unwrap();
+        debug!("Extracted arm64 layer library to {:?}", &file_path);
+    }
+
+    progress.success(Some("arm64 layer library extracted"));
+    Ok(file_path)
+}
