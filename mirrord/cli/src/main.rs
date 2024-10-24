@@ -151,9 +151,6 @@ where
     error!("Couldn't execute {:?}", errno);
     analytics.set_error(AnalyticsError::BinaryExecuteFailed);
 
-    // Kills the intproxy, freeing the agent.
-    execution_info.stop().await;
-
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     if errno == Errno::from_raw(86) {
         // "Bad CPU type in executable"

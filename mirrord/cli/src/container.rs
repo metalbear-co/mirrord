@@ -384,8 +384,5 @@ pub(crate) async fn container_command(
 
     analytics.set_error(AnalyticsError::BinaryExecuteFailed);
 
-    // Kills the intproxy, freeing the agent.
-    execution_info.stop().await;
-
     Ok(())
 }
