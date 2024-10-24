@@ -52,8 +52,11 @@ pub(crate) const INJECTION_ENV_VAR: &str = LINUX_INJECTION_ENV_VAR;
 #[cfg(target_os = "macos")]
 pub(crate) const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 
-/// Struct for holding the execution information
-/// What agent to connect to, what environment variables to set
+/// Struct for holding the execution information.
+///
+/// 1. Environment to set in the user process,
+/// 2. Environment to unset in the user process,
+/// 3. Path to the patched binary to `exec` into (SIP, only on macOS).
 #[derive(Debug, Serialize)]
 pub(crate) struct MirrordExecution {
     pub environment: HashMap<String, String>,
@@ -146,8 +149,19 @@ where
 }
 
 impl MirrordExecution {
-    /// Starts the internal proxy (`intproxy`), and mirrord-layer, even if a bogus binary
-    /// was passed by the user.
+    /// Makes agent connection and starts the internal proxy child process.
+    ///
+    /// # Internal proxy
+    ///
+    /// The internal proxy will be killed as soon as this struct is dropped.
+    /// It **does not** hapen when you `exec` into user binary, because Rust destructors are not
+    /// run. The whole process is instantly replaced by the OS.
+    ///
+    /// Therefore, everything should work fine when you create [`MirrordExecution`] with this
+    /// function and then either:
+    /// 1. Drop this struct when an error occurs,
+    /// 2. Successfully `exec`,
+    /// 3. Wait for intproxy exit with [`MirrordExecution::wait`].
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     pub(crate) async fn start<P>(
         config: &LayerConfig,
@@ -219,7 +233,8 @@ impl MirrordExecution {
             .arg("intproxy")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .stdin(std::process::Stdio::null());
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true);
 
         proxy_command.env(
             AGENT_CONNECT_INFO_ENV_KEY,
@@ -536,14 +551,5 @@ impl MirrordExecution {
             .map_err(CliError::InternalProxyWaitError)?;
 
         Ok(())
-    }
-
-    /// Kills the child process, stopping the internal proxy, and completing the agent.
-    ///
-    /// Used when mirrord execution fails inside `execvp`.
-    pub async fn stop(self) {
-        let Self { mut child, .. } = self;
-
-        let _ = child.start_kill();
     }
 }
