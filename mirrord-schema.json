@@ -1433,7 +1433,7 @@
       "properties": {
         "filter": {
           "title": "feature.network.outgoing.filter {#feature.network.outgoing.filter}",
-          "description": "Unstable: the precise syntax of this config is subject to change.",
+          "description": "Filters that are used to send specific traffic from either the remote pod or the local app",
           "anyOf": [
             {
               "$ref": "#/definitions/OutgoingFilterConfig"
