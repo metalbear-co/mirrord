@@ -217,7 +217,6 @@ pub(super) fn bind(
     let requested_address = SocketAddr::try_from_raw(raw_address, address_length)?;
     let requested_port = requested_address.port();
     let incoming_config = crate::setup().incoming_config();
-
     let mut socket = {
         SOCKETS
             .lock()?
@@ -275,6 +274,22 @@ pub(super) fn bind(
         Err(HookError::AddressAlreadyBound(requested_address))?;
     }
 
+    #[cfg(target_os = "macos")]
+    unsafe {
+        let experimental = crate::setup().experimental();
+        if experimental.disable_reuseaddr {
+            tracing::debug!("here!!");
+            let socket = socket2::Socket::from_raw_fd(sockfd);
+            if let Err(e) = socket.set_reuse_address(false) {
+                tracing::debug!(?e, "Failed to set SO_REUSEADDR to false");
+            }
+            if let Err(e) = socket.set_reuse_port(false) {
+                tracing::debug!(?e, "Failed to set SE_REUSEPORT to false");
+            }
+            // get ownership of fd back
+            let _ = socket.into_raw_fd();
+        }
+    }
     // Try to bind a port from listen ports, if no configuration
     // try to bind the requested port, if not available get a random port
     // if there's configuration and binding fails with the requested port
