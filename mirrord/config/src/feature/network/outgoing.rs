@@ -114,8 +114,8 @@ pub struct OutgoingConfig {
 
     /// #### feature.network.outgoing.filter {#feature.network.outgoing.filter}
     ///
-    /// Unstable: the precise syntax of this config is subject to change.
-    #[config(default, unstable)]
+    /// Filters that are used to send specific traffic from either the remote pod or the local app
+    #[config(default)]
     pub filter: Option<OutgoingFilterConfig>,
 
     /// #### feature.network.outgoing.unix_streams {#feature.network.outgoing.unix_streams}
