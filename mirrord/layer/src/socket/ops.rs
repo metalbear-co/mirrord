@@ -275,19 +275,20 @@ pub(super) fn bind(
     }
 
     #[cfg(target_os = "macos")]
-    unsafe {
+    {
         let experimental = crate::setup().experimental();
         if experimental.disable_reuseaddr {
-            tracing::debug!("here!!");
-            let socket = socket2::Socket::from_raw_fd(sockfd);
-            if let Err(e) = socket.set_reuse_address(false) {
+            let fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
+            if let Err(e) =
+                nix::sys::socket::setsockopt(&fd, nix::sys::socket::sockopt::ReuseAddr, &false)
+            {
                 tracing::debug!(?e, "Failed to set SO_REUSEADDR to false");
             }
-            if let Err(e) = socket.set_reuse_port(false) {
+            if let Err(e) =
+                nix::sys::socket::setsockopt(&fd, nix::sys::socket::sockopt::ReusePort, &false)
+            {
                 tracing::debug!(?e, "Failed to set SE_REUSEPORT to false");
             }
-            // get ownership of fd back
-            let _ = socket.into_raw_fd();
         }
     }
     // Try to bind a port from listen ports, if no configuration
