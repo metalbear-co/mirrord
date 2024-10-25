@@ -81,7 +81,7 @@ where
     P: Progress + Send + Sync,
 {
     let mut progress = progress.subtask("extracting arm64 layer library");
-    let extension = Path::new(env!("MIRRORD_MACOS_ARM64_LIBRARY"))
+    let extension = Path::new(env!("MIRRORD_LAYER_FILE_MACOS_ARM64"))
         .extension()
         .unwrap()
         .to_str()
@@ -97,7 +97,7 @@ where
     if !file_path.exists() {
         let mut file = File::create(&file_path)
             .map_err(|e| CliError::LayerExtractError(file_path.clone(), e))?;
-        let bytes = include_bytes!(env!("MIRRORD_MACOS_ARM64_LIBRARY"));
+        let bytes = include_bytes!(env!("MIRRORD_LAYER_FILE_MACOS_ARM64"));
         file.write_all(bytes).unwrap();
         debug!("Extracted arm64 layer library to {:?}", &file_path);
     }
