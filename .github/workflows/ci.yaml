@@ -382,6 +382,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_TEST_USE_EXISTING_LIB: ../../target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
+      MIRRORD_LAYER_FILE_MACOS_ARM64: ../../target/aarch64-apple-darwin/debug/libmirrord_layer.dylib
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
