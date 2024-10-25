@@ -95,7 +95,7 @@ jobs:
       - name: build macOS arm cli with universal dylib
         env:
           MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
-          MIRRORD_LAYER_FILE_MACOS_ARM64: target/aarch64-apple-darwin/release/libmirrord_layer.dylib
+          MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/aarch64-apple-darwin/release/libmirrord_layer.dylib
         run: cargo +nightly-2024-09-12 build --release -p mirrord --target=aarch64-apple-darwin
       - name: build macOS x86-64 cli with universal dylib
         env:
