@@ -1163,8 +1163,6 @@ The `remote` and `local` config for this feature are **mutually** exclusive.
 
 #### feature.network.outgoing.filter {#feature.network.outgoing.filter}
 
-Unstable: the precise syntax of this config is subject to change.
-
 List of addresses/ports/subnets that should be sent through either the remote pod or local app,
 depending how you set this up with either `remote` or `local`.
 
