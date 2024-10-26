@@ -48,7 +48,7 @@ pub struct ExperimentalConfig {
     /// Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors.
     /// On macOS the application can use the same address many times but then we don't steal it
     /// correctly. This probably should be on by default but we want to gradually roll it out.
-    /// https://github.com/metalbear-co/mirrord/issues/2819
+    /// <https://github.com/metalbear-co/mirrord/issues/2819>
     /// This option applies only on macOS.
     #[config(default = false)]
     pub disable_reuseaddr: bool,
