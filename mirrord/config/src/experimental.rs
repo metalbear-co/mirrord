@@ -42,6 +42,16 @@ pub struct ExperimentalConfig {
     /// Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.
     #[config(default = false)]
     pub hide_ipv6_interfaces: bool,
+
+    /// ### _experimental_ disable_reuseaddr {#experimental-disable_reuseaddr}
+    ///
+    /// Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors.
+    /// On macOS the application can use the same address many times but then we don't steal it
+    /// correctly. This probably should be on by default but we want to gradually roll it out.
+    /// <https://github.com/metalbear-co/mirrord/issues/2819>
+    /// This option applies only on macOS.
+    #[config(default = false)]
+    pub disable_reuseaddr: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -51,5 +61,6 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("trust_any_certificate", self.trust_any_certificate);
         analytics.add("enable_exec_hooks_linux", self.enable_exec_hooks_linux);
         analytics.add("hide_ipv6_interfaces", self.hide_ipv6_interfaces);
+        analytics.add("disable_reuseaddr", self.disable_reuseaddr);
     }
 }

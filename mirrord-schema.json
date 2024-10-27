@@ -756,6 +756,14 @@
       "description": "mirrord Experimental features. This shouldn't be used unless someone from MetalBear/mirrord tells you to.",
       "type": "object",
       "properties": {
+        "disable_reuseaddr": {
+          "title": "_experimental_ disable_reuseaddr {#experimental-disable_reuseaddr}",
+          "description": "Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors. On macOS the application can use the same address many times but then we don't steal it correctly. This probably should be on by default but we want to gradually roll it out. <https://github.com/metalbear-co/mirrord/issues/2819> This option applies only on macOS.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "enable_exec_hooks_linux": {
           "title": "_experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}",
           "description": "Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application shares sockets with child commands (e.g Python web servers with reload), but the feature is not stable and may cause other issues.",
