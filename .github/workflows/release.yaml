@@ -77,7 +77,7 @@ jobs:
         run: |
           cargo +nightly-2024-09-12 build --release -p mirrord-layer --target=aarch64-apple-darwin
           cargo +nightly-2024-09-12 build --release -p mirrord-layer --target=x86_64-apple-darwin
-          clang -arch arm64e -dynamiclib -o target/aarch64-apple-darwin/release/shim.dylib scripts/shim.c
+          clang -arch arm64e -dynamiclib -o target/aarch64-apple-darwin/release/shim.dylib mirrord/layer/shim.c
       - name: Sign layer binaries and code shim
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}

@@ -18,7 +18,7 @@ codesign -f -s - target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
 mkdir -p target/universal-apple-darwin/debug
 
 # create shim to always load arm64 and sign it
-clang -arch arm64e -dynamiclib -o target/universal-apple-darwin/debug/shim.dylib scripts/shim.c
+clang -arch arm64e -dynamiclib -o target/universal-apple-darwin/debug/shim.dylib mirrord/layer/shim.c
 codesign -f -s - target/universal-apple-darwin/debug/shim.dylib
 
 # Create universal binary for mirrord-layer from x86 and shim
