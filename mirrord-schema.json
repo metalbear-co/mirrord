@@ -433,6 +433,14 @@
             }
           ]
         },
+        "service_account": {
+          "title": "agent.service_account {#agent-service_account}",
+          "description": "Allows setting up custom Service Account for the agent Job and Pod.\\\n\n```json { \"service_account\": \"my-service-account\" } ```",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "startup_timeout": {
           "title": "agent.startup_timeout {#agent-startup_timeout}",
           "description": "Controls how long to wait for the agent to finish initialization.\n\nIf initialization takes longer than this value, mirrord exits.\n\nDefaults to `60`.",
