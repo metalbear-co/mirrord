@@ -50,7 +50,7 @@ pub async fn init_tracing_registry(
         .and_then(|s| s.parse().ok())
         .unwrap_or(false);
 
-    if force_log || init_ext_error_handler(command) {
+    if force_log || !init_ext_error_handler(command) {
         tracing_subscriber::registry()
             .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
             .with(tracing_subscriber::EnvFilter::from_default_env())
@@ -60,7 +60,8 @@ pub async fn init_tracing_registry(
     Ok(())
 }
 
-fn default_logfile_path(prefix: &str) -> PathBuf {
+/// Create default log path eg. `/tmp/{prefix}-1730119689-SuRjcAI.log`
+pub fn default_logfile_path(prefix: &str) -> PathBuf {
     let random_name: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(7)
@@ -75,7 +76,10 @@ fn init_proxy_tracing_registry(
     log_destination: &Path,
     log_level: Option<&str>,
 ) -> std::io::Result<()> {
-    if std::env::var("MIRRORD_CONSOLE_ADDR").is_ok() {
+    if std::env::var("MIRRORD_CONSOLE_ADDR")
+        .or(std::env::var("MIRRORD_FORCE_LOG"))
+        .is_ok()
+    {
         return Ok(());
     }
 

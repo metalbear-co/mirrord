@@ -79,6 +79,10 @@ pub(crate) enum ContainerError {
     #[error("Failed get running proxy socket addr: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     UnableParseProxySocketAddr(<SocketAddr as FromStr>::Err),
+
+    #[error("Failed to open log file for intproxy at `{0}`: {1}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    OpenLogFile(String, std::io::Error),
 }
 
 /// Errors that can occur when executing the `mirrord extproxy` command.

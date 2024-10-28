@@ -1,4 +1,10 @@
-use std::{io::Write, net::SocketAddr, path::Path, process::Stdio, time::Duration};
+use std::{
+    io::Write,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    process::Stdio,
+    time::Duration,
+};
 
 use exec::execvp;
 use local_ip_address::local_ip;
@@ -14,10 +20,12 @@ use mirrord_config::{
     LayerConfig, MIRRORD_CONFIG_FILE_ENV,
 };
 use mirrord_progress::{Progress, ProgressTracker, MIRRORD_PROGRESS_ENV};
+use nix::unistd::{fork, ForkResult};
 use tempfile::NamedTempFile;
 use tokio::{
+    fs::OpenOptions,
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
-    process::Command,
+    process::{Child, Command},
 };
 use tracing::Level;
 
@@ -30,7 +38,8 @@ use crate::{
         MirrordExecution, LINUX_INJECTION_ENV_VAR, MIRRORD_CONNECT_TCP_ENV,
         MIRRORD_EXECUTION_KIND_ENV,
     },
-    util::MIRRORD_CONSOLE_ADDR_ENV,
+    logging::default_logfile_path,
+    util::{detach_io, MIRRORD_CONSOLE_ADDR_ENV},
 };
 
 static CONTAINER_EXECUTION_KIND: ExecutionKind = ExecutionKind::Container;
@@ -51,7 +60,9 @@ fn format_command(command: &Command) -> String {
 
 /// Execute a [`Command`] and read first line from stdout
 #[tracing::instrument(level = Level::TRACE, ret)]
-async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>, ContainerError> {
+async fn exec_and_get_first_line(
+    command: &mut Command,
+) -> Result<(Option<String>, Child), ContainerError> {
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -59,10 +70,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
         .spawn()
         .map_err(ContainerError::UnableToExecuteCommand)?;
 
-    tracing::warn!(?child, "spawned watch for child");
-
-    let stdout = child.stdout.take().expect("stdout should be piped");
-    let stderr = child.stderr.take().expect("stdout should be piped");
+    let stdout = child.stdout.as_mut().expect("stdout should be piped");
 
     let result = tokio::time::timeout(Duration::from_secs(30), async {
         BufReader::new(stdout)
@@ -75,8 +83,6 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
     })
     .await;
 
-    let _ = child.kill().await;
-
     match result {
         Err(error) => Err(ContainerError::UnsuccesfulCommandExecute(
             format_command(command),
@@ -84,7 +90,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
         )),
         Ok(Err(_)) | Ok(Ok(None)) => {
             let mut stderr_buffer = String::new();
-            let stderr_len = BufReader::new(stderr)
+            let stderr_len = BufReader::new(child.stderr.take().expect("stdout should be piped"))
                 .read_to_string(&mut stderr_buffer)
                 .await
                 .map_err(|error| {
@@ -103,7 +109,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
                 ));
             }
         }
-        Ok(result) => result,
+        Ok(result) => result.map(|result| (result, child)),
     }
 }
 
@@ -182,14 +188,38 @@ async fn create_sidecar_intproxy(
 
     sidecar_container_spawn.args(sidecar_args);
 
-    let sidecar_container_id = exec_and_get_first_line(&mut sidecar_container_spawn)
-        .await?
-        .ok_or_else(|| {
-            ContainerError::UnsuccesfulCommandOutput(
-                format_command(&sidecar_container_spawn),
-                "stdout and stderr were empty".to_owned(),
+    let (spawn_sidecar, _) = exec_and_get_first_line(&mut sidecar_container_spawn).await?;
+
+    let sidecar_container_id = spawn_sidecar.ok_or_else(|| {
+        ContainerError::UnsuccesfulCommandOutput(
+            format_command(&sidecar_container_spawn),
+            "stdout and stderr were empty".to_owned(),
+        )
+    })?;
+
+    let intproxy_log_destination = config
+        .internal_proxy
+        .log_destination
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_logfile_path("mirrord-intproxy"));
+
+    let mut intproxy_stdout_output_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&intproxy_log_destination)
+        .await
+        .map_err(|fail| {
+            ContainerError::OpenLogFile(
+                intproxy_log_destination.to_string_lossy().to_string(),
+                fail,
             )
         })?;
+
+    let mut intproxy_stderr_output_file = intproxy_stdout_output_file
+        .try_clone()
+        .await
+        .expect("unable to try_clone on log output file");
 
     // After spawning sidecar with -d flag it prints container_id, now we need the address of
     // intproxy running in sidecar to be used by mirrord-layer in execution container
@@ -197,7 +227,32 @@ async fn create_sidecar_intproxy(
         let mut attach_command = Command::new(&runtime_binary);
         attach_command.args(["logs", "-f", &sidecar_container_id]);
 
-        match exec_and_get_first_line(&mut attach_command).await? {
+        let (fist_line, mut child) = exec_and_get_first_line(&mut attach_command).await?;
+
+        match unsafe { fork() } {
+            Ok(ForkResult::Parent { .. }) => {
+                let _ = unsafe { detach_io() };
+
+                let mut stdout = child.stdout.take().expect("stdout should be piped");
+                let mut stderr = child.stderr.take().expect("stderr should be piped");
+
+                let res = tokio::try_join!(
+                    tokio::io::copy(&mut stdout, &mut intproxy_stdout_output_file),
+                    tokio::io::copy(&mut stderr, &mut intproxy_stderr_output_file),
+                    child.wait()
+                );
+
+                if let Err(error) = res {
+                    tracing::error!(?error, ?child, "child stdout pipe end");
+                }
+
+                std::process::exit(0);
+            }
+            Ok(ForkResult::Child) => {}
+            Err(_) => panic!("Fork failed"),
+        }
+
+        match fist_line {
             Some(line) => line
                 .parse()
                 .map_err(ContainerError::UnableParseProxySocketAddr)?,
