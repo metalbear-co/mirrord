@@ -52,72 +52,61 @@ pub(crate) async fn proxy(listen_port: u16, watch: drain::Watch) -> Result<(), I
 
     tracing::info!(?config, "internal_proxy starting");
 
-    let result: Result<(), InternalProxyError> = try {
-        // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
-        // so we assume Linux can be higher and set to that.
-        if let Err(error) = setrlimit(Resource::RLIMIT_NOFILE, 12288, 12288) {
-            warn!(?error, "Failed to set the file descriptor limit");
-        }
-
-        let agent_connect_info = match env::var(AGENT_CONNECT_INFO_ENV_KEY) {
-            Ok(var) => {
-                let deserialized = serde_json::from_str(&var)
-                    .map_err(|e| InternalProxyError::DeseralizeConnectInfo(var, e))?;
-                Some(deserialized)
-            }
-            Err(..) => None,
-        };
-
-        let execution_kind = std::env::var(MIRRORD_EXECUTION_KIND_ENV)
-            .ok()
-            .and_then(|execution_kind| execution_kind.parse().ok())
-            .unwrap_or_default();
-
-        let mut analytics = if config.internal_proxy.container_mode {
-            AnalyticsReporter::only_error(config.telemetry, execution_kind, watch)
-        } else {
-            AnalyticsReporter::new(config.telemetry, execution_kind, watch)
-        };
-        (&config).collect_analytics(analytics.get_mut());
-
-        // The agent is spawned and our parent process already established a connection.
-        // However, the parent process (`exec` or `ext` command) is free to exec/exit as soon as it
-        // reads the TCP listener address from our stdout. We open our own connection with the agent
-        // **before** this happens to ensure that the agent does not prematurely exit.
-        // We also perform initial ping pong round to ensure that k8s runtime actually made
-        // connection with the agent (it's a must, because port forwarding may be done
-        // lazily).
-        let agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
-
-        // Let it assign address for us then print it for the user.
-        let listener =
-            create_listen_socket(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), listen_port))
-                .map_err(InternalProxyError::ListenerSetup)?;
-        print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
-
-        if !config.internal_proxy.container_mode {
-            unsafe { detach_io() }.map_err(InternalProxyError::SetSid)?;
-        }
-
-        let first_connection_timeout =
-            Duration::from_secs(config.internal_proxy.start_idle_timeout);
-        let consecutive_connection_timeout =
-            Duration::from_secs(config.internal_proxy.idle_timeout);
-
-        IntProxy::new_with_connection(agent_conn, listener)
-            .run(first_connection_timeout, consecutive_connection_timeout)
-            .await
-            .map_err(InternalProxyError::from)
-            .inspect_err(|error| {
-                tracing::error!(%error, "Internal proxy encountered an error, exiting");
-            })?
-    };
-
-    if result.is_err() && config.internal_proxy.container_mode {
-        tokio::time::sleep(Duration::from_secs(5)).await;
+    // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
+    // so we assume Linux can be higher and set to that.
+    if let Err(error) = setrlimit(Resource::RLIMIT_NOFILE, 12288, 12288) {
+        warn!(?error, "Failed to set the file descriptor limit");
     }
 
-    result
+    let agent_connect_info = match env::var(AGENT_CONNECT_INFO_ENV_KEY) {
+        Ok(var) => {
+            let deserialized = serde_json::from_str(&var)
+                .map_err(|e| InternalProxyError::DeseralizeConnectInfo(var, e))?;
+            Some(deserialized)
+        }
+        Err(..) => None,
+    };
+
+    let execution_kind = std::env::var(MIRRORD_EXECUTION_KIND_ENV)
+        .ok()
+        .and_then(|execution_kind| execution_kind.parse().ok())
+        .unwrap_or_default();
+
+    let mut analytics = if config.internal_proxy.container_mode {
+        AnalyticsReporter::only_error(config.telemetry, execution_kind, watch)
+    } else {
+        AnalyticsReporter::new(config.telemetry, execution_kind, watch)
+    };
+    (&config).collect_analytics(analytics.get_mut());
+
+    // The agent is spawned and our parent process already established a connection.
+    // However, the parent process (`exec` or `ext` command) is free to exec/exit as soon as it
+    // reads the TCP listener address from our stdout. We open our own connection with the agent
+    // **before** this happens to ensure that the agent does not prematurely exit.
+    // We also perform initial ping pong round to ensure that k8s runtime actually made
+    // connection with the agent (it's a must, because port forwarding may be done
+    // lazily).
+    let agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
+
+    // Let it assign address for us then print it for the user.
+    let listener = create_listen_socket(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), listen_port))
+        .map_err(InternalProxyError::ListenerSetup)?;
+    print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
+
+    if !config.internal_proxy.container_mode {
+        unsafe { detach_io() }.map_err(InternalProxyError::SetSid)?;
+    }
+
+    let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);
+    let consecutive_connection_timeout = Duration::from_secs(config.internal_proxy.idle_timeout);
+
+    IntProxy::new_with_connection(agent_conn, listener)
+        .run(first_connection_timeout, consecutive_connection_timeout)
+        .await
+        .map_err(InternalProxyError::from)
+        .inspect_err(|error| {
+            tracing::error!(%error, "Internal proxy encountered an error, exiting");
+        })
 }
 
 /// Creates a connection with the agent and handles one round of ping pong.
