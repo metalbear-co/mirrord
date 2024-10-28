@@ -72,11 +72,7 @@ where
 /// If prefix is true, add a random prefix to the file name that identifies the specific build
 /// of the layer. This is useful for debug purposes usually.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-pub(crate) fn extract_arm64<P>(
-    // dest_dir: Option<String>,
-    progress: &P,
-    prefix: bool,
-) -> Result<PathBuf>
+pub(crate) fn extract_arm64<P>(progress: &P, prefix: bool) -> Result<PathBuf>
 where
     P: Progress + Send + Sync,
 {
