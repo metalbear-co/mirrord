@@ -315,8 +315,9 @@ fn init_tracing() {
 /// 5. Fetches remote environment from the agent (if enabled with
 ///     [`EnvFileConfig::load_from_process`](mirrord_config::feature::env::EnvFileConfig::load_from_process)).
 fn layer_start(mut config: LayerConfig) {
-    if config.target.path.is_none() {
-        // Use localwithoverrides on targetless regardless of user config.
+    if config.target.path.is_none() && config.feature.fs.mode.ne(&FsModeConfig::Local) {
+        // Use localwithoverrides on targetless regardless of user config, unless fs-mode is already
+        // set to local.
         config.feature.fs.mode = FsModeConfig::LocalWithOverrides;
     }
 
