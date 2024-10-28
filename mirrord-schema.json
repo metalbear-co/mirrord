@@ -413,6 +413,14 @@
             "type": "string"
           }
         },
+        "service_account": {
+          "title": "agent.service_account {#agent-service_account}",
+          "description": "Allows setting up custom Service Account for the agent Job and Pod.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "privileged": {
           "title": "agent.privileged {#agent-privileged}",
           "description": "Run the mirror agent as privileged container. Defaults to `false`.\n\nMight be needed in strict environments such as Bottlerocket.",

@@ -327,6 +327,10 @@ as targeted agent always runs on the same node as its target container.
 }
 ```
 
+### agent.service_account {#agent-service_account}
+
+Allows setting up custom Service Account for the agent Job and Pod.
+
 ### agent.privileged {#agent-privileged}
 
 Run the mirror agent as privileged container.
