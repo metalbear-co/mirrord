@@ -339,6 +339,17 @@ pub struct AgentConfig {
     /// ```
     pub node_selector: Option<HashMap<String, String>>,
 
+    /// ### agent.service_account {#agent-service_account}
+    ///
+    /// Allows setting up custom Service Account for the agent Job and Pod.\
+    ///
+    /// ```json
+    /// {
+    ///   "service_account": "my-service-account"
+    /// }
+    /// ```
+    pub service_account: Option<String>,
+
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
