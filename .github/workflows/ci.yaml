@@ -382,8 +382,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_TEST_USE_EXISTING_LIB: ../../target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
-      # This should be the arm64 layer file path if we were running tests but for linting any existing file is ok
-      MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
+      MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/aarch64-apple-darwin/debug/libmirrord_layer.dylib
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -399,6 +398,9 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: clippy x64
         run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=x86_64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
+      # layer compilation is required for clippy lint because the layer path variable is checked at compile time
+      - name: compile layer for arm 64
+        run: cargo build -p mirrord-layer --target=aarch64-apple-darwin
       - name: clippy aarch64
         run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=aarch64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
       - name: mirrord SIP UT
