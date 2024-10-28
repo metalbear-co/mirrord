@@ -5,9 +5,9 @@
 // Function to be executed when the library is loaded
 __attribute__((constructor))
 void on_library_load() {
-    const char *lib_env = getenv("MIRRORD_MACOS_ARM64_LIBRARY");
+    const char *lib_path = getenv("MIRRORD_MACOS_ARM64_LIBRARY");
 
-    if (lib_env && *lib_env) {
-        dlopen(lib_env, RTLD_LAZY);
+    if (lib_path && *lib_path) {
+        dlopen(lib_path, RTLD_LAZY);
     }
 }

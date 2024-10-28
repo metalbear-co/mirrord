@@ -2,6 +2,7 @@
 use std::process::exit;
 
 fn main() {
+    println!("cargo::rerun-if-env-changed=MIRRORD_LAYER_FILE_MACOS_ARM64");
     if std::env::var("MIRRORD_LAYER_FILE").is_err() {
         println!(
             "cargo:rustc-env=MIRRORD_LAYER_FILE={}",
