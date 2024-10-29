@@ -118,7 +118,7 @@ pub struct OperatorSession {
 impl fmt::Debug for OperatorSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OperatorSession")
-            .field("id", &self.id)
+            .field("id", &format!("{:X}", self.id))
             .field("connect_url", &self.connect_url)
             .field("cert_public_key_data", &self.client_cert.public_key_data())
             .field(
