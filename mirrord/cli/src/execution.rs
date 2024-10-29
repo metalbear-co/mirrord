@@ -28,6 +28,8 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, trace, warn, Level};
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use crate::extract::extract_arm64;
 use crate::{
     connection::{create_and_connect, AgentConnection, AGENT_CONNECT_INFO_ENV_KEY},
     error::CliError,
@@ -213,6 +215,12 @@ impl MirrordExecution {
                 .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
         };
 
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        env_vars.insert(
+            "MIRRORD_MACOS_ARM64_LIBRARY".to_string(),
+            extract_arm64(progress, true)?.to_string_lossy().into(),
+        );
+
         let lib_path: String = lib_path.to_string_lossy().into();
         // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
         // If already exists, we append.
@@ -275,7 +283,7 @@ impl MirrordExecution {
             format!("127.0.0.1:{}", address.port()),
         );
 
-        // Fix <https://github.com/metalbear-co/mirrord/issues/1745>
+        // Fixes <https://github.com/metalbear-co/mirrord/issues/1745>
         // by disabling the fork safety check in the Objective-C runtime.
         #[cfg(target_os = "macos")]
         env_vars.insert(
