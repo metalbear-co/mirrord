@@ -86,7 +86,7 @@ jobs:
       - name: create universal target dir
         run: mkdir -p /tmp/target/universal-apple-darwin/release
       - name: create universal dylib
-        run: lipo -create -output /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/shim.dylib target/x86_64-apple-darwin/release/libmirrord_layer.dylib
+        run: lipo -create -output /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/shim.dylib target/aarch64-apple-darwin/release/libmirrord_layer.dylib target/x86_64-apple-darwin/release/libmirrord_layer.dylib
       - name: Sign layer universal
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
