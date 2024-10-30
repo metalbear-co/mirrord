@@ -59,7 +59,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: x86_64-apple-darwin,aarch64-apple-darwin
-          toolchain: nightly-2024-09-12
+          toolchain: nightly-2024-10-11
           rustflags: ""
       - name: Import Code-Signing Certificates
         uses: Apple-Actions/import-codesign-certs@v3
@@ -75,8 +75,8 @@ jobs:
         # Instead of spoofing an arm64e by changing bits, we now use a code shim compiled as arm64e that loads the arm64 layer 
       - name: build mirrord-layer x86-64, arm and code shim
         run: |
-          cargo +nightly-2024-09-12 build --release -p mirrord-layer --target=aarch64-apple-darwin
-          cargo +nightly-2024-09-12 build --release -p mirrord-layer --target=x86_64-apple-darwin
+          cargo +nightly-2024-10-11 build --release -p mirrord-layer --target=aarch64-apple-darwin
+          cargo +nightly-2024-10-11 build --release -p mirrord-layer --target=x86_64-apple-darwin
           clang -arch arm64e -dynamiclib -o target/aarch64-apple-darwin/release/shim.dylib mirrord/layer/shim.c
       - name: Sign layer binaries and code shim
         env:
@@ -96,11 +96,11 @@ jobs:
         env:
           MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
           MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/aarch64-apple-darwin/release/libmirrord_layer.dylib
-        run: cargo +nightly-2024-09-12 build --release -p mirrord --target=aarch64-apple-darwin
+        run: cargo +nightly-2024-10-11 build --release -p mirrord --target=aarch64-apple-darwin
       - name: build macOS x86-64 cli with universal dylib
         env:
           MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
-        run: cargo +nightly-2024-09-12 build --release -p mirrord --target=x86_64-apple-darwin
+        run: cargo +nightly-2024-10-11 build --release -p mirrord --target=x86_64-apple-darwin
       - name: Sign cli binaries
         env:
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
