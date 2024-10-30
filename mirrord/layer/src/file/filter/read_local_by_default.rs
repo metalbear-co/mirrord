@@ -13,6 +13,7 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r"^.+\.pyc$",
         r"^.+\.py$",
         r"^.+\.jar$",
+        r"^.+\.class$",
         r"^.+\.js$",
         r"^.+\.pth$",
         r"^.+\.plist$",
