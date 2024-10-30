@@ -1,1 +1,0 @@
-Changed debug display of operator session ID. Now it's printed in upper HEX to match operator status display.

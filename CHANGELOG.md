@@ -8,6 +8,43 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.122.0](https://github.com/metalbear-co/mirrord/tree/3.122.0) - 2024-10-30
+
+
+### Added
+
+- Added serviceAccount option to agent config
+  [#2876](https://github.com/metalbear-co/mirrord/issues/2876)
+
+
+### Changed
+
+- Allow targetless mode to run with local fs-mode.
+  [#2368](https://github.com/metalbear-co/mirrord/issues/2368)
+- Remove unstable tags on feature.network.outgoing.filter config
+  [#2862](https://github.com/metalbear-co/mirrord/issues/2862)
+- Add option to have logs when running ext commands
+
+
+### Fixed
+
+- Added experimental disable_reuseaddr to bypass the issue
+  [#2819](https://github.com/metalbear-co/mirrord/issues/2819)
+- `mirrord-intproxy` no longer lingers forever when the user tries to execute a
+  non-existent binary.
+  [#2869](https://github.com/metalbear-co/mirrord/issues/2869)
+
+
+### Internal
+
+- Extended GitHub bug report template.
+  [#2664](https://github.com/metalbear-co/mirrord/issues/2664)
+- Switch building layer on macos arm64 to use code shim.
+  [#2872](https://github.com/metalbear-co/mirrord/issues/2872)
+- Added CRD for `MirrordOperatorUser`, adjusted operator setup.
+- Changed debug display of operator session ID. Now it's printed in upper HEX
+  to match operator status display.
+
 ## [3.121.1](https://github.com/metalbear-co/mirrord/tree/3.121.1) - 2024-10-22
 
 
