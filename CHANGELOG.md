@@ -8,6 +8,19 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.122.1](https://github.com/metalbear-co/mirrord/tree/3.122.1) - 2024-10-30
+
+
+### Changed
+
+- Bump rust version to 2024-10-11 on macOS [match Linux]
+
+
+### Fixed
+
+- Add arm64 layer to macOS fat binary.
+  [#2885](https://github.com/metalbear-co/mirrord/issues/2885)
+
 ## [3.122.0](https://github.com/metalbear-co/mirrord/tree/3.122.0) - 2024-10-30
 
 
