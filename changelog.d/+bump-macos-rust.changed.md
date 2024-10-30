@@ -1,1 +1,0 @@
-Bump rust version to 2024-10-11 on macOS [match Linux]
