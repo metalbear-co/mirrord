@@ -68,8 +68,8 @@ pub(crate) enum HookError {
     #[error("mirrord-layer: Failed converting `to_str` with `{0}`!")]
     Utf8(#[from] std::str::Utf8Error),
 
-    #[error("mirrord-layer: Failed creating local file for `remote_fd` `{0}`!")]
-    LocalFileCreation(u64),
+    #[error("mirrord-layer: Failed creating local file for `remote_fd` `{0}`! with errno `{1}`")]
+    LocalFileCreation(u64, i32),
 
     #[cfg(target_os = "macos")]
     #[error("mirrord-layer: SIP patch failed with error `{0}`!")]

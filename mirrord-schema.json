@@ -811,6 +811,14 @@
             "boolean",
             "null"
           ]
+        },
+        "use_dev_null": {
+          "title": "_experimental_ use_dev_null {#experimental-use_dev_null}",
+          "description": "Uses /dev/null for creating local fake files (should be better than using /tmp)",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "additionalProperties": false
