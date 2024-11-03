@@ -289,7 +289,7 @@ impl From<HookError> for i64 {
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,
             HookError::NullPointer => libc::EINVAL,
-            HookError::LocalFileCreation(_) => libc::EINVAL,
+            HookError::LocalFileCreation(_, err) => err,
             #[cfg(target_os = "macos")]
             HookError::FailedSipPatch(_) => libc::EACCES,
             HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,
