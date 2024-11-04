@@ -56,7 +56,7 @@ pub struct ExperimentalConfig {
     /// ### _experimental_ use_dev_null {#experimental-use_dev_null}
     ///
     /// Uses /dev/null for creating local fake files (should be better than using /tmp)
-    #[config(default = false)]
+    #[config(default = true)]
     pub use_dev_null: bool,
 }
 
