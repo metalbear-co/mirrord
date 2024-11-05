@@ -8,6 +8,22 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.123.0](https://github.com/metalbear-co/mirrord/tree/3.123.0) - 2024-11-05
+
+
+### Changed
+
+- log better errors of local file creation and add option to use alternative
+  way [#2889](https://github.com/metalbear-co/mirrord/issues/2889)
+- add .class to be always local
+
+
+### Fixed
+
+- use /dev/null by default
+  [#2889](https://github.com/metalbear-co/mirrord/issues/2889)
+
+
 ## [3.122.1](https://github.com/metalbear-co/mirrord/tree/3.122.1) - 2024-10-30
 
 
