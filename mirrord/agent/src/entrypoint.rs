@@ -11,7 +11,7 @@ use std::{
 
 use client_connection::AgentTlsConnector;
 use dns::{DnsCommand, DnsWorker};
-use futures::TryFutureExt;
+use futures::{FutureExt, TryFutureExt};
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use sniffer::tcp_capture::RawSocketTcpCapture;
 use tokio::{
@@ -517,14 +517,24 @@ async fn start_agent(args: Args) -> Result<()> {
 
         let watched_task = WatchedTask::new(
             TcpConnectionSniffer::<RawSocketTcpCapture>::TASK_NAME,
-            TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface, is_mesh)
-                .and_then(|sniffer| async move {
-                    let res = sniffer.start(cancellation_token).await;
-                    if let Err(err) = res.as_ref() {
-                        error!("Sniffer failed: {err}");
-                    }
-                    Ok(())
-                }),
+            async move {
+                let res = try {
+                    let sniffer = TcpConnectionSniffer::new(
+                        sniffer_command_rx,
+                        args.network_interface,
+                        is_mesh,
+                    )
+                    .await?;
+
+                    sniffer.start(cancellation_token).await?
+                };
+
+                if let Err(error) = res.as_ref() {
+                    tracing::error!(%error, "Sniffer failed");
+                }
+
+                Ok(())
+            },
         );
         let status = watched_task.status();
         let task = run_thread_in_namespace(
