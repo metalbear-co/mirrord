@@ -19,7 +19,7 @@ pub struct ExperimentalConfig {
 
     /// ### _experimental_ readlink {#experimental-readlink}
     ///
-    /// Enables the `readlink` hook.
+    /// DEPRECATED, WILL BE REMOVED
     #[config(default = false)]
     pub readlink: bool,
 
@@ -40,7 +40,7 @@ pub struct ExperimentalConfig {
     /// ### _experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}
     ///
     /// Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.
-    #[config(default = false)]
+    #[config(default = true)]
     pub hide_ipv6_interfaces: bool,
 
     /// ### _experimental_ disable_reuseaddr {#experimental-disable_reuseaddr}
