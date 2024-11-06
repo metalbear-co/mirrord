@@ -790,7 +790,7 @@
         },
         "readlink": {
           "title": "_experimental_ readlink {#experimental-readlink}",
-          "description": "Enables the `readlink` hook.",
+          "description": "DEPRECATED, WILL BE REMOVED",
           "type": [
             "boolean",
             "null"
