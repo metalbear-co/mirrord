@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.124.0](https://github.com/metalbear-co/mirrord/tree/3.124.0) - 2024-11-06
+
+
+### Changed
+
+- hide ipv6 interfaces by default
+  [#2849](https://github.com/metalbear-co/mirrord/issues/2849)
+
+
+### Fixed
+
+- Make sure agent doesn't send `Close` message when Sniffer fails to load.
+  [#2896](https://github.com/metalbear-co/mirrord/issues/2896)
+
+
 ## [3.123.0](https://github.com/metalbear-co/mirrord/tree/3.123.0) - 2024-11-05
 
 
