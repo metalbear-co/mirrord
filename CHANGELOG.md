@@ -8,6 +8,18 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.124.1](https://github.com/metalbear-co/mirrord/tree/3.124.1) - 2024-11-07
+
+
+### Changed
+
+- Bump dependencies
+
+
+### Fixed
+
+- Fix crash when listing interfaces caused by enabling the new hook by default
+
 ## [3.124.0](https://github.com/metalbear-co/mirrord/tree/3.124.0) - 2024-11-06
 
 
