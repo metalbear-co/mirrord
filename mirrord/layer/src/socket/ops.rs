@@ -14,7 +14,7 @@ use std::{
 };
 
 use errno::set_errno;
-use libc::{c_int, c_void, hostent, ifaddrs, sockaddr, socklen_t, AF_UNIX};
+use libc::{c_int, c_void, hostent, sockaddr, socklen_t, AF_UNIX};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
@@ -1594,15 +1594,24 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
         Err(io::Error::from_raw_os_error(result))?;
     }
 
-    // Currently inspected element of the original interface addresses list.
-    let mut inspected: *mut libc::ifaddrs = original_head;
+    // Count entries for new_list_start malloc
+    let mut entry_count = 0;
+    let mut count_head: *mut libc::ifaddrs = original_head;
+    unsafe {
+        while let Some(_) = count_head.as_mut() {
+            entry_count = entry_count + 1;
+            count_head = count_head.wrapping_add(mem::size_of::<libc::ifaddrs>() as libc::size_t);
+        }
+    }
     // Allocate new list so we can safely free the original list later
     let new_list_start: *mut libc::ifaddrs = unsafe {
-        // TODO: work out how much memory to allocate
-        libc::malloc((mem::size_of::<libc::ifaddrs>() as libc::size_t) * 100) as *mut libc::ifaddrs
+        libc::malloc((mem::size_of::<libc::ifaddrs>() as libc::size_t) * entry_count)
+            as *mut libc::ifaddrs
     };
     // Address to place next new address
     let mut next_new: *mut libc::ifaddrs = new_list_start;
+    // Currently inspected element of the original interface addresses list.
+    let mut inspected: *mut libc::ifaddrs = original_head;
 
     // Safety: we only dereference pointers received from libc. They should be nulls or point to
     // initialized memory.
