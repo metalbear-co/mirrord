@@ -1598,11 +1598,12 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
     let mut entry_count = 0;
     let mut count_head: *mut libc::ifaddrs = original_head;
     unsafe {
-        while let Some(_) = count_head.as_mut() {
+        while let Some(ifaddr) = count_head.as_mut() {
             entry_count = entry_count + 1;
-            count_head = count_head.wrapping_add(mem::size_of::<libc::ifaddrs>() as libc::size_t);
+            count_head = ifaddr.ifa_next;
         }
     }
+
     // Allocate new list so we can safely free the original list later
     let new_list_start: *mut libc::ifaddrs = unsafe {
         libc::malloc((mem::size_of::<libc::ifaddrs>() as libc::size_t) * entry_count)
@@ -1630,9 +1631,7 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
                 tracing::info!(
                     ?interface_name,
                     interface_address = %ipv6,
-                    "Skipping IPv6 interface address from the list returned by libc `getifaddrs`",
-                );
-
+                    "Skipping IPv6 interface address from the list returned by libc `getifaddrs`",);
                 // Move `inspected`.
                 inspected = ifaddr.ifa_next;
                 continue;
