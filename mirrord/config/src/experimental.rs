@@ -40,7 +40,7 @@ pub struct ExperimentalConfig {
     /// ### _experimental_ hide_ipv6_interfaces {#experimental-hide_ipv6_interfaces}
     ///
     /// Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.
-    #[config(default = true)]
+    #[config(default = false)]
     pub hide_ipv6_interfaces: bool,
 
     /// ### _experimental_ disable_reuseaddr {#experimental-disable_reuseaddr}
