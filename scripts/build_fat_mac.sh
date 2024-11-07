@@ -21,8 +21,8 @@ mkdir -p target/universal-apple-darwin/debug
 clang -arch arm64e -dynamiclib -o target/universal-apple-darwin/debug/shim.dylib mirrord/layer/shim.c
 codesign -f -s - target/universal-apple-darwin/debug/shim.dylib
 
-# Create universal binary for mirrord-layer from x86 and shim
-lipo -create -output target/universal-apple-darwin/debug/libmirrord_layer.dylib target/x86_64-apple-darwin/debug/libmirrord_layer.dylib target/universal-apple-darwin/debug/shim.dylib
+# Create universal binary for mirrord-layer from x86 and shim, as well as arm64
+lipo -create -output target/universal-apple-darwin/debug/libmirrord_layer.dylib target/x86_64-apple-darwin/debug/libmirrord_layer.dylib target/universal-apple-darwin/debug/shim.dylib target/aarch64-apple-darwin/debug/libmirrord_layer.dylib
 codesign -f -s - target/universal-apple-darwin/debug/libmirrord_layer.dylib
 
 # build mirrord package - aarch64-apple-darwin target requires MIRRORD_LAYER_FILE_MACOS_ARM64 var

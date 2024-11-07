@@ -68,8 +68,8 @@ pub(crate) enum HookError {
     #[error("mirrord-layer: Failed converting `to_str` with `{0}`!")]
     Utf8(#[from] std::str::Utf8Error),
 
-    #[error("mirrord-layer: Failed creating local file for `remote_fd` `{0}`!")]
-    LocalFileCreation(u64),
+    #[error("mirrord-layer: Failed creating local file for `remote_fd` `{0}`! with errno `{1}`")]
+    LocalFileCreation(u64, i32),
 
     #[cfg(target_os = "macos")]
     #[error("mirrord-layer: SIP patch failed with error `{0}`!")]
@@ -289,7 +289,7 @@ impl From<HookError> for i64 {
             HookError::DNSNoName => libc::EFAULT,
             HookError::Utf8(_) => libc::EINVAL,
             HookError::NullPointer => libc::EINVAL,
-            HookError::LocalFileCreation(_) => libc::EINVAL,
+            HookError::LocalFileCreation(_, err) => err,
             #[cfg(target_os = "macos")]
             HookError::FailedSipPatch(_) => libc::EACCES,
             HookError::SocketUnsuportedIpv6 => libc::EAFNOSUPPORT,

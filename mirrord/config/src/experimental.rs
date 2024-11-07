@@ -19,7 +19,7 @@ pub struct ExperimentalConfig {
 
     /// ### _experimental_ readlink {#experimental-readlink}
     ///
-    /// Enables the `readlink` hook.
+    /// DEPRECATED, WILL BE REMOVED
     #[config(default = false)]
     pub readlink: bool,
 
@@ -52,6 +52,12 @@ pub struct ExperimentalConfig {
     /// This option applies only on macOS.
     #[config(default = false)]
     pub disable_reuseaddr: bool,
+
+    /// ### _experimental_ use_dev_null {#experimental-use_dev_null}
+    ///
+    /// Uses /dev/null for creating local fake files (should be better than using /tmp)
+    #[config(default = true)]
+    pub use_dev_null: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {

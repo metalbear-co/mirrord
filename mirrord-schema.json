@@ -790,7 +790,7 @@
         },
         "readlink": {
           "title": "_experimental_ readlink {#experimental-readlink}",
-          "description": "Enables the `readlink` hook.",
+          "description": "DEPRECATED, WILL BE REMOVED",
           "type": [
             "boolean",
             "null"
@@ -807,6 +807,14 @@
         "trust_any_certificate": {
           "title": "_experimental_ trust_any_certificate {#experimental-trust_any_certificate}",
           "description": "Enables trusting any certificate on macOS, useful for <https://github.com/golang/go/issues/51991#issuecomment-2059588252>",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "use_dev_null": {
+          "title": "_experimental_ use_dev_null {#experimental-use_dev_null}",
+          "description": "Uses /dev/null for creating local fake files (should be better than using /tmp)",
           "type": [
             "boolean",
             "null"
