@@ -502,6 +502,12 @@ impl OperatorRole {
                 ..Default::default()
             },
             PolicyRule {
+                api_groups: Some(vec!["argoproj.io".to_owned()]),
+                resources: Some(vec!["applications".to_owned()]),
+                verbs: vec!["list".to_owned(), "get".to_owned(), "patch".to_owned()],
+                ..Default::default()
+            },
+            PolicyRule {
                 api_groups: Some(vec!["".to_owned(), "batch".to_owned()]),
                 resources: Some(vec!["jobs".to_owned(), "pods".to_owned()]),
                 verbs: vec!["create".to_owned(), "delete".to_owned()],
