@@ -33,6 +33,9 @@ async fn test_issue2807_with_ipv6_ignore(
     let config_path = dir.path().join(format!("{file_id:X}.json"));
 
     let config = serde_json::json!({
+        "experimental": {
+            "hide_ipv6_interfaces": true
+        },
         "feature": {
             "network": {
                 "dns": false
