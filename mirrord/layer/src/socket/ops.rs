@@ -9,12 +9,12 @@ use std::{
         unix::io::RawFd,
     },
     path::PathBuf,
-    ptr,
+    ptr::{self, copy_nonoverlapping},
     sync::{Arc, Mutex, OnceLock},
 };
 
 use errno::set_errno;
-use libc::{c_int, c_void, hostent, sockaddr, socklen_t, AF_UNIX};
+use libc::{c_int, c_void, hostent, ifaddrs, sockaddr, socklen_t, AF_UNIX};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, NetProtocol, OutgoingConnectRequest,
@@ -1594,70 +1594,53 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
         Err(io::Error::from_raw_os_error(result))?;
     }
 
-    // Head of the ipv6 interface addresses list.
-    // Should be freed with `libc::freeifaddrs` before returning.
-    let mut ipv6_head: *mut libc::ifaddrs = std::ptr::null_mut();
     // Currently inspected element of the original interface addresses list.
     let mut inspected: *mut libc::ifaddrs = original_head;
-    // Previously inspected element of the original interface addresses list.
-    let mut previous: *mut libc::ifaddrs = std::ptr::null_mut();
+    // Allocate new list so we can safely free the original list later
+    let new_list_start: *mut libc::ifaddrs = unsafe {
+        // TODO: work out how much memory to allocate
+        libc::malloc((mem::size_of::<libc::ifaddrs>() as libc::size_t) * 100) as *mut libc::ifaddrs
+    };
+    // Address to place next new address
+    let mut next_new: *mut libc::ifaddrs = new_list_start;
 
     // Safety: we only dereference pointers received from libc. They should be nulls or point to
     // initialized memory.
     unsafe {
         while let Some(ifaddr) = inspected.as_mut() {
             let address = SockaddrStorage::from_raw(ifaddr.ifa_addr, None);
-            match address.as_ref().and_then(SockaddrStorage::as_sockaddr_in6) {
-                // If not ipv6, advance to the next interface address in the original list.
-                // Move both `previous` and `inspected`.
-                None => {
-                    previous = inspected;
-                    inspected = ifaddr.ifa_next;
-                    continue;
-                }
-                Some(ipv6) => {
-                    let interface_name = if ifaddr.ifa_name.is_null() {
-                        None
-                    } else {
-                        Some(CStr::from_ptr(ifaddr.ifa_name))
-                    };
+            if let Some(ipv6) = address.as_ref().and_then(SockaddrStorage::as_sockaddr_in6) {
+                // If ipv6, advance to the next interface address in the original list without
+                // adding to new_list.
+                let interface_name = if ifaddr.ifa_name.is_null() {
+                    None
+                } else {
+                    Some(CStr::from_ptr(ifaddr.ifa_name))
+                };
 
-                    tracing::info!(
-                        ?interface_name,
-                        interface_address = %ipv6,
-                        "Removing IPv6 interface address from the list returned by libc `getifaddrs`",
-                    );
-                }
+                tracing::info!(
+                    ?interface_name,
+                    interface_address = %ipv6,
+                    "Skipping IPv6 interface address from the list returned by libc `getifaddrs`",
+                );
+
+                // Move `inspected`.
+                inspected = ifaddr.ifa_next;
+                continue;
             }
 
-            // Fix the original list.
-            match previous.as_mut() {
-                // We're removing an element from the middle of the original list.
-                // `previous` stays as it was, `inspected` is moved to the next interface address.
-                Some(previous_ifaddr) => {
-                    previous_ifaddr.ifa_next = ifaddr.ifa_next;
-                    inspected = ifaddr.ifa_next;
-                }
-                // We're removing the first element of the original list.
-                // `original_head` is moved to the next interface address.
-                None => {
-                    original_head = ifaddr.ifa_next;
-                }
-            }
+            // Append the address to the new list by copying ifaddr to the list head, then moving
+            // head
+            copy_nonoverlapping::<libc::ifaddrs>(inspected, next_new, 1);
+            next_new = next_new.wrapping_add(mem::size_of::<libc::ifaddrs>() as libc::size_t);
 
-            // Make this address a new head of the ipv6 list.
-            ifaddr.ifa_next = ipv6_head;
-            ipv6_head = inspected;
+            // Continue to traverse original list
+            inspected = ifaddr.ifa_next;
         }
     }
 
-    // Hopefully we can safely free partial list after reorganizing.
-    // I don't see any reason why we could not do this,
-    // I also did not find anything suspicious in glibc [implementation](https://github.com/lattera/glibc/blob/master/sysdeps/gnu/ifaddrs.c).
-    if !ipv6_head.is_null() {
-        // Safety: we constructed a valid `libc::ifaddrs` list using pointers received from libc.
-        unsafe { libc::freeifaddrs(ipv6_head) };
-    }
+    // Free the original list
+    unsafe { libc::freeifaddrs(original_head) };
 
-    Ok(original_head)
+    Ok(new_list_start)
 }
