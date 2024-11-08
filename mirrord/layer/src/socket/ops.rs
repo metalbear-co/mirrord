@@ -1599,7 +1599,7 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
     let mut count_head: *mut libc::ifaddrs = original_head;
     unsafe {
         while let Some(ifaddr) = count_head.as_mut() {
-            entry_count = entry_count + 1;
+            entry_count += 1;
             count_head = ifaddr.ifa_next;
         }
     }
@@ -1639,8 +1639,11 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
                     }
 
                     previous_new_entry = next_new;
-                    next_new =
-                        next_new.wrapping_add(mem::size_of::<libc::ifaddrs>() as libc::size_t);
+                    // clippy lint fails on this line but the pointer arithmetic is fine
+                    #[allow(clippy::size_of_in_element_count)]
+                    {
+                        next_new = next_new.wrapping_add(mem::size_of::<libc::ifaddrs>());
+                    }
                 }
                 Some(ipv6) => {
                     let interface_name = if ifaddr.ifa_name.is_null() {
