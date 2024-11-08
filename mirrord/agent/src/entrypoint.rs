@@ -535,10 +535,8 @@ async fn start_agent(args: Args) -> Result<()> {
                     if let Err(err) = res {
                         error!(%err, "Sniffer failed");
                     }
-                } else {
-                    if let Err(error) = sniffer_init_tx.send(false) {
-                        tracing::error!(%error, "Failed to send sniffer init result");
-                    }
+                } else if let Err(error) = sniffer_init_tx.send(false) {
+                    tracing::error!(%error, "Failed to send sniffer init result");
                 }
 
                 Ok(())
