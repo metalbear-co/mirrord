@@ -544,6 +544,10 @@ async fn start_agent(args: Args) -> Result<()> {
             state.container_pid(),
             "net",
         );
+        // failed task causes the agent to exit
+        // so we just check that initialization was successful
+        // then decide whether to store the task or drop it
+        // https://github.com/metalbear-co/mirrord/pull/2910
         match sniffer_init_rx.await {
             Ok(true) => (Some(task), Some(status)),
             Ok(false) => (None, None),
