@@ -514,7 +514,7 @@ async fn start_agent(args: Args) -> Result<()> {
     } else {
         let cancellation_token = cancellation_token.clone();
         let is_mesh = args.is_mesh();
-
+        let (sniffer_init_tx, sniffer_init_rx) = tokio::sync::oneshot::channel::<bool>();
         let watched_task = WatchedTask::new(
             TcpConnectionSniffer::<RawSocketTcpCapture>::TASK_NAME,
             async move {
@@ -523,8 +523,15 @@ async fn start_agent(args: Args) -> Result<()> {
                         .and_then(|sniffer| sniffer.start(cancellation_token))
                         .await;
 
-                if let Err(error) = res {
+                let success = if let Err(error) = res {
                     tracing::error!(%error, "Sniffer failed");
+                    false
+                } else {
+                    true
+                };
+
+                if let Err(_) = sniffer_init_tx.send(success) {
+                    tracing::error!("Failed to send sniffer init result");
                 }
 
                 Ok(())
@@ -537,8 +544,14 @@ async fn start_agent(args: Args) -> Result<()> {
             state.container_pid(),
             "net",
         );
-
-        (Some(task), Some(status))
+        match sniffer_init_rx.await {
+            Ok(true) => (Some(task), Some(status)),
+            Ok(false) => (None, None),
+            Err(err) => {
+                tracing::error!("unexpected error while waiting for sniffer init: {err}");
+                (None, None)
+            }
+        }
     };
 
     let (stealer_task, stealer_status) = if args.mode.is_targetless() {
