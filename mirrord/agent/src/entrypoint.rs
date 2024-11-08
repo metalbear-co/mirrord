@@ -514,6 +514,11 @@ async fn start_agent(args: Args) -> Result<()> {
     } else {
         let cancellation_token = cancellation_token.clone();
         let is_mesh = args.is_mesh();
+        // We're using this to avoid crashing on old kernels when initializing the
+        // `RawSocketTcpCapture`. failed task causes the agent to exit
+        // so we just check that initialization was successful
+        // then decide whether to store the task or drop it
+        // https://github.com/metalbear-co/mirrord/pull/2910
         let (sniffer_init_tx, sniffer_init_rx) = tokio::sync::oneshot::channel::<bool>();
         let watched_task = WatchedTask::new(
             TcpConnectionSniffer::<RawSocketTcpCapture>::TASK_NAME,
@@ -544,10 +549,7 @@ async fn start_agent(args: Args) -> Result<()> {
             state.container_pid(),
             "net",
         );
-        // failed task causes the agent to exit
-        // so we just check that initialization was successful
-        // then decide whether to store the task or drop it
-        // https://github.com/metalbear-co/mirrord/pull/2910
+
         match sniffer_init_rx.await {
             Ok(true) => (Some(task), Some(status)),
             Ok(false) => (None, None),
