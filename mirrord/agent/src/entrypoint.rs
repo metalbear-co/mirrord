@@ -530,8 +530,8 @@ async fn start_agent(args: Args) -> Result<()> {
                     true
                 };
 
-                if let Err(_) = sniffer_init_tx.send(success) {
-                    tracing::error!("Failed to send sniffer init result");
+                if let Err(error) = sniffer_init_tx.send(success) {
+                    tracing::error!(%error, "Failed to send sniffer init result");
                 }
 
                 Ok(())
@@ -547,8 +547,8 @@ async fn start_agent(args: Args) -> Result<()> {
         match sniffer_init_rx.await {
             Ok(true) => (Some(task), Some(status)),
             Ok(false) => (None, None),
-            Err(err) => {
-                tracing::error!("unexpected error while waiting for sniffer init: {err}");
+            Err(error) => {
+                tracing::error!(%error, "unexpected error while waiting for sniffer init");
                 (None, None)
             }
         }
