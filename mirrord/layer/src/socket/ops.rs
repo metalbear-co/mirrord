@@ -1661,13 +1661,8 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
         }
 
         // Ensure that final element in new list doesn't point to another entry
-        match previous_new_entry.as_mut() {
-            Some(prev_addr) => {
-                prev_addr.ifa_next = std::ptr::null_mut();
-            }
-            None => {
-                // inspected is head of list
-            }
+        if let Some(prev_addr) = previous_new_entry.as_mut() {
+            prev_addr.ifa_next = std::ptr::null_mut();
         }
     }
 
