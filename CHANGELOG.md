@@ -8,6 +8,15 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.124.2](https://github.com/metalbear-co/mirrord/tree/3.124.2) - 2024-11-08
+
+
+### Fixed
+
+- Fix agent crash on sniffer failure
+  [#2909](https://github.com/metalbear-co/mirrord/issues/2909)
+- Fix file mapping doesn't affect xstat
+
 ## [3.124.1](https://github.com/metalbear-co/mirrord/tree/3.124.1) - 2024-11-07
 
 
