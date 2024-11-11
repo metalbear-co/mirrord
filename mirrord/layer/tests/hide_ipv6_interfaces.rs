@@ -2,16 +2,8 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{path::Path, time::Duration};
 
-use mirrord_protocol::{
-    file::{OpenFileResponse, ReadFileResponse},
-    tcp::{DaemonTcp, LayerTcp},
-    ClientMessage, DaemonMessage, FileRequest, FileResponse,
-};
 use rand::Rng;
 use rstest::rstest;
 
