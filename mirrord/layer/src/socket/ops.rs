@@ -1605,6 +1605,7 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
     }
 
     // Allocate new list so we can safely free the original list later
+    // Safety: We assume `libc::malloc` is the same allocator as the user's system.
     let new_list_start: *mut libc::ifaddrs = unsafe {
         libc::malloc((mem::size_of::<libc::ifaddrs>() as libc::size_t) * entry_count)
             as *mut libc::ifaddrs
