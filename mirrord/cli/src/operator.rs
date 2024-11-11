@@ -59,6 +59,7 @@ async fn operator_setup(
         aws_role_arn,
         sqs_splitting,
         kafka_splitting,
+        application_auto_pause,
     }: OperatorSetupParams,
 ) -> Result<(), OperatorSetupError> {
     if !accept_tos {
@@ -105,6 +106,7 @@ async fn operator_setup(
             aws_role_arn,
             sqs_splitting,
             kafka_splitting,
+            application_auto_pause,
         });
 
         match file {
