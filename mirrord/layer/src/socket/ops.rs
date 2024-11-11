@@ -1629,21 +1629,12 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
                     // Append the address to the new list by copying ifaddr to the list head, and
                     // setting next of previous then moving head
                     copy_nonoverlapping::<libc::ifaddrs>(inspected, next_new, 1);
-                    match previous_new_entry.as_mut() {
-                        Some(prev_addr) => {
-                            prev_addr.ifa_next = next_new;
-                        }
-                        None => {
-                            // inspected is head of list
-                        }
+                    if let Some(prev_addr) = previous_new_entry.as_mut() {
+                        prev_addr.ifa_next = next_new;
                     }
 
                     previous_new_entry = next_new;
-                    // clippy lint fails on this line but the pointer arithmetic is fine
-                    #[allow(clippy::size_of_in_element_count)]
-                    {
-                        next_new = next_new.wrapping_add(mem::size_of::<libc::ifaddrs>());
-                    }
+                    next_new = next_new.add(1);
                 }
                 Some(ipv6) => {
                     let interface_name = if ifaddr.ifa_name.is_null() {
