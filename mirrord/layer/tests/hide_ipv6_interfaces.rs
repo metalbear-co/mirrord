@@ -11,6 +11,8 @@ mod common;
 
 pub use common::*;
 
+/// Related to issue [#2903](https://github.com/metalbear-co/mirrord/issues/2903)
+///
 /// Verifies the IPv6 interfaces are hidden when feature `hide_ipv6_interfaces` is used
 /// via a call to os.networkInterfaces(), which calls C function getifaddrs()
 #[rstest]
