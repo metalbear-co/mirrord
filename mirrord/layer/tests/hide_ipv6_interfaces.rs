@@ -19,7 +19,7 @@ pub use common::*;
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn check_ipv6s_hidden_with_config(
-    #[values(Application::NodeInterfaceAddrs)] application: Application,
+    #[values(Application::NodeIssue2903)] application: Application,
     dylib_path: &Path,
 ) {
     let dir = tempfile::tempdir().unwrap();
