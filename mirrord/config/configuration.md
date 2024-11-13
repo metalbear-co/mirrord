@@ -355,7 +355,7 @@ Default is
 
 ### agent.service_account {#agent-service_account}
 
-Allows setting up custom Service Account for the agent Job and Pod.\
+Allows setting up custom Service Account for the agent Job and Pod.
 
 ```json
 {
@@ -788,8 +788,8 @@ Will do the next replacements for any io operaton
 `/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml`
 `/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`
 
-- Relative paths: this feature (currently) does not apply mappings to relative
-paths, e.g. `../dev`.
+- Relative paths: this feature (currently) does not apply mappings to relative paths, e.g.
+  `../dev`.
 
 ### feature.fs.mode {#feature-fs-mode}
 
