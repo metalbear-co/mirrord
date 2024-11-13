@@ -13,7 +13,7 @@ use thiserror::Error;
 
 use crate::port_forward::PortForwardError;
 
-pub(crate) type Result<T, E = CliError> = core::result::Result<T, E>;
+pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;
 
 const GENERAL_HELP: &str = r#"
 
@@ -359,6 +359,13 @@ pub(crate) enum CliError {
         Read more here: https://mirrord.dev/docs/overview/quick-start/#operator.{GENERAL_HELP}"
     ))]
     OperatorNotInstalled,
+
+    #[error("mirrord operator status was not found.")]
+    #[diagnostic(help(
+        "Command requires the mirrord operator or operator usage was explicitly enabled in the configuration file.
+        Read more here: https://mirrord.dev/docs/overview/quick-start/#operator.{GENERAL_HELP}"
+    ))]
+    OperatorStatusNotFound,
 
     #[error("mirrord returned a target resource of unknown type: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]

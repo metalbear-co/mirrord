@@ -14,6 +14,7 @@ use mirrord_config::{
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use tracing::Level;
 
 use self::label_selector::LabelSelector;
 #[cfg(feature = "client")]
@@ -322,6 +323,7 @@ pub struct CopyTargetSpec {
 }
 
 impl CopyTargetCrd {
+    #[tracing::instrument(level = Level::DEBUG, ret)]
     pub fn connect_url(&self, use_proxy: bool) -> String {
         let name = self
             .meta()

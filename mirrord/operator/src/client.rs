@@ -1,4 +1,4 @@
-use std::{fmt, ops::Not};
+use std::{any::Any, fmt, ops::Not};
 
 use base64::{engine::general_purpose, Engine};
 use chrono::{DateTime, Utc};
@@ -397,6 +397,7 @@ where
     /// 1. [`MIRRORD_CLI_VERSION_HEADER`]
     /// 2. [`CLIENT_NAME_HEADER`]
     /// 3. [`CLIENT_HOSTNAME_HEADER`]
+    #[tracing::instrument(level = Level::DEBUG, ret, err)]
     async fn base_client_config(layer_config: &LayerConfig) -> OperatorApiResult<Config> {
         let mut client_config = create_kube_config(
             layer_config.accept_invalid_certificates,
@@ -407,6 +408,28 @@ where
         .map_err(KubeApiError::from)
         .map_err(OperatorApiError::CreateKubeClient)?;
 
+        // TODO(alex) [high] 3: For some reason this doesn't reach the operator, even
+        // though the logs show the result of this function with these extra stuff.
+        // I'm running the operator in vscode, and debugging the node app that starts
+        // a queue splitting session.
+        let mut remote_extra = Vec::new();
+        if let Some(split_queues_header) = layer_config.feature.split_queues.is_set().then(|| {
+            let split_queues_json = serde_json::to_vec(&layer_config.feature.split_queues)
+                .expect("Config should've been verified!");
+            (
+                HeaderName::from_static("x-remote-extra-split-queues"),
+                HeaderValue::from_bytes(split_queues_json.as_slice()).expect("Kaboom"),
+            )
+        }) {
+            remote_extra.push(split_queues_header);
+        }
+
+        tracing::info!(?remote_extra, "WOW");
+
+        for extra_header in remote_extra {
+            client_config.headers.push(extra_header);
+        }
+
         client_config.headers.push((
             HeaderName::from_static(MIRRORD_CLI_VERSION_HEADER),
             HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
@@ -414,9 +437,12 @@ where
 
         let UserIdentity { name, hostname } = UserIdentity::load();
 
+        // TODO(alex) [high] 4: This is it, it only works with x-client.
         let headers = [
             (CLIENT_NAME_HEADER, name),
             (CLIENT_HOSTNAME_HEADER, hostname),
+            ("x-client-extra", Some("cats are cool".to_string())),
+            ("x-remote-extra-sqs-stuff", Some("dogs are fun".to_string())),
         ];
         for (name, raw_value) in headers {
             let Some(raw_value) = raw_value else {
@@ -594,6 +620,7 @@ impl OperatorApi<PreparedClientCert> {
 
             copy_subtask.success(Some("target copied"));
 
+            // TODO(alex) [high] 1: Do we send any queue/sqs info here?
             copied.connect_url(use_proxy_api)
         } else {
             let target = target.assert_valid_mirrord_target(self.client()).await?;
@@ -640,8 +667,20 @@ impl OperatorApi<PreparedClientCert> {
                 .and_then(|version| version.parse().ok()),
         };
 
+        let mut remote_extra = Vec::new();
+        if let Some(split_queues_header) = config.feature.split_queues.is_set().then(|| {
+            let split_queues_json = serde_json::to_string(&config.feature.split_queues)
+                .expect("Config should've been verified!");
+            (
+                HeaderName::from_static("x-remote-extra-split_queues"),
+                HeaderValue::from_bytes(split_queues_json.as_bytes()).expect("Kaboom"),
+            )
+        }) {
+            remote_extra.push(split_queues_header);
+        }
+
         let mut connection_subtask = progress.subtask("connecting to the target");
-        let (tx, rx) = Self::connect_target(&self.client, &session).await?;
+        let (tx, rx) = Self::connect_target(&self.client, &session, remote_extra).await?;
         connection_subtask.success(Some("connected to the target"));
 
         Ok(OperatorSessionConnection { session, tx, rx })
@@ -660,7 +699,7 @@ impl OperatorApi<PreparedClientCert> {
     ///
     /// `copy_target` feature is not available for all target types.
     /// Target type compatibility is checked by the operator.
-    #[tracing::instrument(level = "trace", err)]
+    #[tracing::instrument(level = Level::DEBUG, ret, err)]
     async fn copy_target(
         &self,
         target: Target,
@@ -715,7 +754,7 @@ impl OperatorApi<PreparedClientCert> {
     }
 
     /// Connects to the target, reusing the given [`OperatorSession`].
-    #[tracing::instrument(level = Level::TRACE, skip(layer_config, reporter), ret, err)]
+    #[tracing::instrument(level = Level::DEBUG, skip(layer_config, reporter), ret, err)]
     pub async fn connect_in_existing_session<R>(
         layer_config: &LayerConfig,
         session: OperatorSession,
@@ -744,22 +783,41 @@ impl OperatorApi<PreparedClientCert> {
             .map_err(KubeApiError::from)
             .map_err(OperatorApiError::CreateKubeClient)?;
 
-        let (tx, rx) = Self::connect_target(&client, &session).await?;
+        let mut remote_extra = Vec::new();
+        if let Some(split_queues_header) = layer_config.feature.split_queues.is_set().then(|| {
+            let split_queues_json = serde_json::to_string(&layer_config.feature.split_queues)
+                .expect("Config should've been verified!");
+            (
+                HeaderName::from_static("x-remote-extra-split_queues"),
+                HeaderValue::from_bytes(split_queues_json.as_bytes()).expect("Kaboom"),
+            )
+        }) {
+            remote_extra.push(split_queues_header);
+        }
+
+        let (tx, rx) = Self::connect_target(&client, &session, remote_extra).await?;
 
         Ok(OperatorSessionConnection { tx, rx, session })
     }
 
     /// Creates websocket connection to the operator target.
-    #[tracing::instrument(level = Level::TRACE, skip(client), err)]
+    #[tracing::instrument(level = Level::DEBUG, skip(client), err)]
     async fn connect_target(
         client: &Client,
         session: &OperatorSession,
+        remote_extra: Vec<(HeaderName, HeaderValue)>,
     ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
-        let request = Request::builder()
+        // TODO(alex) [high] 2: This is how we're going to be inserting the `x-remote-extra`.
+        let mut request = Request::builder()
             .uri(&session.connect_url)
             .header(SESSION_ID_HEADER, session.id.to_string())
+            .header("x-remote-extra-meow", "cats-cool".to_string())
             .body(vec![])
             .map_err(OperatorApiError::ConnectRequestBuildError)?;
+
+        // for (extra_name, extra_value) in remote_extra {
+        //     request.headers_mut().insert(extra_name, extra_value);
+        // }
 
         let connection = upgrade::connect_ws(client, request)
             .await

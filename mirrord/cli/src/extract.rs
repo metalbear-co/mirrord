@@ -8,7 +8,7 @@ use const_random::const_random;
 use mirrord_progress::Progress;
 use tracing::debug;
 
-use crate::{error::CliError, Result};
+use crate::{error::CliError, CliResult};
 
 /// For some reason loading dylib from $TMPDIR can get the process killed somehow..?
 #[cfg(target_os = "macos")]
@@ -35,7 +35,7 @@ pub(crate) fn extract_library<P>(
     dest_dir: Option<String>,
     progress: &P,
     prefix: bool,
-) -> Result<PathBuf>
+) -> CliResult<PathBuf>
 where
     P: Progress + Send + Sync,
 {
