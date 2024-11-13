@@ -131,6 +131,9 @@ pub struct FsConfig {
     ///
     /// `/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml`
     /// `/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`
+    ///
+    /// - Relative paths: this feature (currently) does not apply mappings to relative
+    /// paths, e.g. `../dev`.
     pub mapping: Option<HashMap<String, String>>,
 }
 

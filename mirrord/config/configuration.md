@@ -327,10 +327,6 @@ as targeted agent always runs on the same node as its target container.
 }
 ```
 
-### agent.service_account {#agent-service_account}
-
-Allows setting up custom Service Account for the agent Job and Pod.
-
 ### agent.privileged {#agent-privileged}
 
 Run the mirror agent as privileged container.
@@ -354,6 +350,16 @@ Default is
     "cpu": "100m",
       "memory": "100Mi"
   }
+}
+```
+
+### agent.service_account {#agent-service_account}
+
+Allows setting up custom Service Account for the agent Job and Pod.\
+
+```json
+{
+  "service_account": "my-service-account"
 }
 ```
 
@@ -432,6 +438,14 @@ Defaults to `"/opt/mirrord/lib/libmirrord_layer.so"`.
 mirrord Experimental features.
 This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 
+### _experimental_ disable_reuseaddr {#experimental-disable_reuseaddr}
+
+Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors.
+On macOS the application can use the same address many times but then we don't steal it
+correctly. This probably should be on by default but we want to gradually roll it out.
+<https://github.com/metalbear-co/mirrord/issues/2819>
+This option applies only on macOS.
+
 ### _experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}
 
 Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application
@@ -444,7 +458,7 @@ Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by
 
 ### _experimental_ readlink {#experimental-readlink}
 
-Enables the `readlink` hook.
+DEPRECATED, WILL BE REMOVED
 
 ### _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
 
@@ -453,6 +467,10 @@ Enables the `readlink` hook.
 ### _experimental_ trust_any_certificate {#experimental-trust_any_certificate}
 
 Enables trusting any certificate on macOS, useful for <https://github.com/golang/go/issues/51991#issuecomment-2059588252>
+
+### _experimental_ use_dev_null {#experimental-use_dev_null}
+
+Uses /dev/null for creating local fake files (should be better than using /tmp)
 
 ## external_proxy {#root-external_proxy}
 
@@ -769,6 +787,9 @@ Will do the next replacements for any io operaton
 
 `/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml`
 `/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`
+
+- Relative paths: this feature (currently) does not apply mappings to relative
+paths, e.g. `../dev`.
 
 ### feature.fs.mode {#feature-fs-mode}
 
@@ -1166,6 +1187,8 @@ The `remote` and `local` config for this feature are **mutually** exclusive.
 ```
 
 #### feature.network.outgoing.filter {#feature.network.outgoing.filter}
+
+Filters that are used to send specific traffic from either the remote pod or the local app
 
 List of addresses/ports/subnets that should be sent through either the remote pod or local app,
 depending how you set this up with either `remote` or `local`.
