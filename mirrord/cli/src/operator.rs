@@ -25,7 +25,7 @@ use crate::{
     config::{OperatorArgs, OperatorCommand},
     error::{CliError, OperatorSetupError},
     util::remove_proxy_env,
-    OperatorSetupParams, CliResult,
+    CliResult, OperatorSetupParams,
 };
 
 mod session;

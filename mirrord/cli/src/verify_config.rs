@@ -201,7 +201,9 @@ enum VerifiedConfig {
 ///   "errors": ["mirrord-config: IO operation failed with `No such file or directory (os error 2)`"]
 /// }
 /// ```
-pub(super) async fn verify_config(VerifyConfigArgs { ide, path }: VerifyConfigArgs) -> CliResult<()> {
+pub(super) async fn verify_config(
+    VerifyConfigArgs { ide, path }: VerifyConfigArgs,
+) -> CliResult<()> {
     let mut config_context = ConfigContext::new(ide);
 
     let layer_config = LayerFileConfig::from_path(path)

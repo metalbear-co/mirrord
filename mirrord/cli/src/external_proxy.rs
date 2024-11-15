@@ -45,7 +45,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
-    error::{ExternalProxyError, CliResult},
+    error::{CliResult, ExternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     internal_proxy::connect_and_ping,
     util::{create_listen_socket, detach_io},
