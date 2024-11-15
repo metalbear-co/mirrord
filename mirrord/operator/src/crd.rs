@@ -14,8 +14,8 @@ use mirrord_config::{
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use tracing::Level;
 
+// use tracing::Level;
 use self::label_selector::LabelSelector;
 #[cfg(feature = "client")]
 use crate::client::error::OperatorApiError;
@@ -228,6 +228,7 @@ pub struct Session {
     pub namespace: Option<String>,
     pub locked_ports: Option<Vec<(u16, String, Option<String>)>>,
     pub user_id: Option<String>,
+    pub sqs: Option<String>,
 }
 
 /// Resource used to access the operator's session management routes.
@@ -323,7 +324,7 @@ pub struct CopyTargetSpec {
 }
 
 impl CopyTargetCrd {
-    #[tracing::instrument(level = Level::DEBUG, ret)]
+    // #[tracing::instrument(level = Level::DEBUG, ret)]
     pub fn connect_url(&self, use_proxy: bool) -> String {
         let name = self
             .meta()

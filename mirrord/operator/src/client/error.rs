@@ -1,6 +1,7 @@
 use std::fmt;
 
 pub use http::Error as HttpError;
+use mirrord_config::config::ConfigError;
 use mirrord_kube::error::KubeApiError;
 use thiserror::Error;
 
@@ -71,6 +72,12 @@ pub enum OperatorApiError {
 
     #[error("mirrord operator failed KubeApi operation: {0}")]
     KubeApi(#[from] KubeApiError),
+
+    #[error(transparent)]
+    SerdeJson(#[from] serde_json::Error),
+
+    #[error("Something went wrong while building a HTTP header from config: {0}")]
+    InvalidHeaderValue(#[from] http::header::InvalidHeaderValue),
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;

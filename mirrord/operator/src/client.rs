@@ -1,4 +1,4 @@
-use std::{any::Any, fmt, ops::Not};
+use std::{fmt, ops::Not};
 
 use base64::{engine::general_purpose, Engine};
 use chrono::{DateTime, Utc};
@@ -34,8 +34,8 @@ use crate::{
         OPERATOR_STATUS_NAME,
     },
     types::{
-        CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, MIRRORD_CLI_VERSION_HEADER,
-        SESSION_ID_HEADER,
+        CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, CLIENT_SQS_HEADER,
+        MIRRORD_CLI_VERSION_HEADER, SESSION_ID_HEADER,
     },
 };
 
@@ -408,28 +408,6 @@ where
         .map_err(KubeApiError::from)
         .map_err(OperatorApiError::CreateKubeClient)?;
 
-        // TODO(alex) [high] 3: For some reason this doesn't reach the operator, even
-        // though the logs show the result of this function with these extra stuff.
-        // I'm running the operator in vscode, and debugging the node app that starts
-        // a queue splitting session.
-        let mut remote_extra = Vec::new();
-        if let Some(split_queues_header) = layer_config.feature.split_queues.is_set().then(|| {
-            let split_queues_json = serde_json::to_vec(&layer_config.feature.split_queues)
-                .expect("Config should've been verified!");
-            (
-                HeaderName::from_static("x-remote-extra-split-queues"),
-                HeaderValue::from_bytes(split_queues_json.as_slice()).expect("Kaboom"),
-            )
-        }) {
-            remote_extra.push(split_queues_header);
-        }
-
-        tracing::info!(?remote_extra, "WOW");
-
-        for extra_header in remote_extra {
-            client_config.headers.push(extra_header);
-        }
-
         client_config.headers.push((
             HeaderName::from_static(MIRRORD_CLI_VERSION_HEADER),
             HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
@@ -437,12 +415,9 @@ where
 
         let UserIdentity { name, hostname } = UserIdentity::load();
 
-        // TODO(alex) [high] 4: This is it, it only works with x-client.
         let headers = [
             (CLIENT_NAME_HEADER, name),
             (CLIENT_HOSTNAME_HEADER, hostname),
-            ("x-client-extra", Some("cats are cool".to_string())),
-            ("x-remote-extra-sqs-stuff", Some("dogs are fun".to_string())),
         ];
         for (name, raw_value) in headers {
             let Some(raw_value) = raw_value else {
@@ -559,11 +534,11 @@ impl OperatorApi<PreparedClientCert> {
     /// connection in the same session with [`OperatorApi::connect_in_existing_session`].
     #[tracing::instrument(
         level = Level::TRACE,
-        skip(config, progress),
+        skip(layer_config, progress),
         fields(
-            target_config = ?config.target,
-            copy_target_config = ?config.feature.copy_target,
-            on_concurrent_steal = ?config.feature.network.incoming.on_concurrent_steal,
+            target_config = ?layer_config.target,
+            copy_target_config = ?layer_config.feature.copy_target,
+            on_concurrent_steal = ?layer_config.feature.network.incoming.on_concurrent_steal,
         ),
         ret,
         err
@@ -571,13 +546,13 @@ impl OperatorApi<PreparedClientCert> {
     pub async fn connect_in_new_session<P>(
         &self,
         target: ResolvedTarget<false>,
-        config: &LayerConfig,
+        layer_config: &LayerConfig,
         progress: &P,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
     {
-        self.check_feature_support(config)?;
+        self.check_feature_support(layer_config)?;
 
         let use_proxy_api = self
             .operator
@@ -586,41 +561,51 @@ impl OperatorApi<PreparedClientCert> {
             .contains(&NewOperatorFeature::ProxyApi);
 
         let is_empty_deployment = target.empty_deployment();
-        let connect_url = if config.feature.copy_target.enabled
+        let connect_url = if layer_config.feature.copy_target.enabled
             // use copy_target for splitting queues
-            || config.feature.split_queues.is_set()
+            || layer_config.feature.split_queues.is_set()
             || is_empty_deployment
         {
             let mut copy_subtask = progress.subtask("copying target");
 
-            if config.feature.copy_target.enabled.not() {
+            if layer_config.feature.copy_target.enabled.not() {
                 if is_empty_deployment.not() {
-                    copy_subtask.info("Creating a copy-target for queue-splitting (even though copy_target was not explicitly set).")
+                    copy_subtask.info(
+                        "Creating a copy-target for queue-splitting (even \
+                        though copy_target was not explicitly set).",
+                    )
                 } else {
-                    copy_subtask.info("Creating a copy-target for deployment (even thought copy_target was not explicitly set).")
+                    copy_subtask.info(
+                        "Creating a copy-target for deployment (even though\
+                         copy_target was not explicitly set).",
+                    )
                 }
             }
 
             // We do not validate the `target` here, it's up to the operator.
-            let target = config.target.path.clone().unwrap_or(Target::Targetless);
-            let scale_down = config.feature.copy_target.scale_down;
-            let namespace = self.target_namespace(config);
+            let target = layer_config
+                .target
+                .path
+                .clone()
+                .unwrap_or(Target::Targetless);
+            let scale_down = layer_config.feature.copy_target.scale_down;
+            let namespace = self.target_namespace(layer_config);
+
+            // TODO(alex) [mid]: Revert this after testing.
             let copied = self
                 .copy_target(
-                    target,
-                    scale_down,
-                    namespace,
-                    config
-                        .feature
-                        .split_queues
-                        .is_set()
-                        .then(|| config.feature.split_queues.clone()),
+                    target, scale_down, namespace,
+                    // layer_config
+                    //     .feature
+                    //     .split_queues
+                    //     .is_set()
+                    //     .then(|| layer_config.feature.split_queues.clone()),
+                    None,
                 )
                 .await?;
 
             copy_subtask.success(Some("target copied"));
 
-            // TODO(alex) [high] 1: Do we send any queue/sqs info here?
             copied.connect_url(use_proxy_api)
         } else {
             let target = target.assert_valid_mirrord_target(self.client()).await?;
@@ -645,7 +630,7 @@ impl OperatorApi<PreparedClientCert> {
 
             target.connect_url(
                 use_proxy_api,
-                config.feature.network.incoming.on_concurrent_steal,
+                layer_config.feature.network.incoming.on_concurrent_steal,
                 &TargetCrd::api_version(&()),
                 &TargetCrd::plural(&()),
                 &TargetCrd::url_path(&(), target.namespace()),
@@ -667,20 +652,8 @@ impl OperatorApi<PreparedClientCert> {
                 .and_then(|version| version.parse().ok()),
         };
 
-        let mut remote_extra = Vec::new();
-        if let Some(split_queues_header) = config.feature.split_queues.is_set().then(|| {
-            let split_queues_json = serde_json::to_string(&config.feature.split_queues)
-                .expect("Config should've been verified!");
-            (
-                HeaderName::from_static("x-remote-extra-split_queues"),
-                HeaderValue::from_bytes(split_queues_json.as_bytes()).expect("Kaboom"),
-            )
-        }) {
-            remote_extra.push(split_queues_header);
-        }
-
         let mut connection_subtask = progress.subtask("connecting to the target");
-        let (tx, rx) = Self::connect_target(&self.client, &session, remote_extra).await?;
+        let (tx, rx) = Self::connect_target(&self.client, &session, layer_config).await?;
         connection_subtask.success(Some("connected to the target"));
 
         Ok(OperatorSessionConnection { session, tx, rx })
@@ -783,42 +756,39 @@ impl OperatorApi<PreparedClientCert> {
             .map_err(KubeApiError::from)
             .map_err(OperatorApiError::CreateKubeClient)?;
 
-        let mut remote_extra = Vec::new();
-        if let Some(split_queues_header) = layer_config.feature.split_queues.is_set().then(|| {
-            let split_queues_json = serde_json::to_string(&layer_config.feature.split_queues)
-                .expect("Config should've been verified!");
-            (
-                HeaderName::from_static("x-remote-extra-split_queues"),
-                HeaderValue::from_bytes(split_queues_json.as_bytes()).expect("Kaboom"),
-            )
-        }) {
-            remote_extra.push(split_queues_header);
-        }
-
-        let (tx, rx) = Self::connect_target(&client, &session, remote_extra).await?;
+        let (tx, rx) = Self::connect_target(&client, &session, layer_config).await?;
 
         Ok(OperatorSessionConnection { tx, rx, session })
     }
 
     /// Creates websocket connection to the operator target.
+    ///
+    /// - `extra_headers`: A [`HeaderMap`] that we insert in the [`Request`] that we're sending to
+    ///   the `connect` in the operator. Helps us include additional info about the target
+    ///   connection that doesn't really fit anywhere else.
     #[tracing::instrument(level = Level::DEBUG, skip(client), err)]
     async fn connect_target(
         client: &Client,
         session: &OperatorSession,
-        remote_extra: Vec<(HeaderName, HeaderValue)>,
+        layer_config: &LayerConfig,
     ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
         // TODO(alex) [high] 2: This is how we're going to be inserting the `x-remote-extra`.
-        let mut request = Request::builder()
+        let request = Request::builder()
             .uri(&session.connect_url)
-            .header(SESSION_ID_HEADER, session.id.to_string())
-            .header("x-remote-extra-meow", "cats-cool".to_string())
+            .header(SESSION_ID_HEADER, session.id.to_string());
+
+        let request = if layer_config.feature.split_queues.is_set() {
+            request.header(
+                HeaderName::from_static(CLIENT_SQS_HEADER),
+                HeaderValue::from_bytes(&serde_json::to_vec(&layer_config.feature.split_queues)?)?,
+            )
+        } else {
+            request
+        };
+
+        let request = request
             .body(vec![])
             .map_err(OperatorApiError::ConnectRequestBuildError)?;
-
-        // for (extra_name, extra_value) in remote_extra {
-        //     request.headers_mut().insert(extra_name, extra_value);
-        // }
-
         let connection = upgrade::connect_ws(client, request)
             .await
             .map_err(|error| OperatorApiError::KubeError {

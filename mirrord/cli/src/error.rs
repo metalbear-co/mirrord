@@ -488,6 +488,8 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorReturnedUnknownTargetType(error.0)
             }
             OperatorApiError::KubeApi(error) => Self::OperatorTargetResolution(error),
+            OperatorApiError::SerdeJson(error) => todo!(),
+            OperatorApiError::InvalidHeaderValue(error) => todo!(),
         }
     }
 }

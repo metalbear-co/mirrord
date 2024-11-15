@@ -16,6 +16,7 @@ use tracing::Level;
 
 use crate::{util::remove_proxy_env, CliError, CliResult};
 
+/// Handles the `mirrord operator status` command.
 pub(super) struct StatusCommandHandler {
     /// Api to talk with session routes in the operator.
     operator_api: OperatorApi<NoClientCert>,
@@ -141,6 +142,9 @@ Operator License
             "Session Duration"
         ]);
 
+        let mut sqs = Table::new();
+        sqs.add_row(row!["Session ID", "SQS"]);
+
         for session in &status.sessions {
             let locked_ports = session
                 .locked_ports
@@ -163,16 +167,25 @@ Operator License
                 .unwrap_or_default();
 
             sessions.add_row(row![
-                session.id.as_deref().unwrap_or(""),
+                session.id.as_deref().unwrap_or_default(),
                 &session.target,
                 session.namespace.as_deref().unwrap_or("N/A"),
                 &session.user,
                 locked_ports,
                 humantime::format_duration(Duration::from_secs(session.duration_secs)),
             ]);
+
+            if let Some(session_sqs) = session.sqs.as_deref() {
+                sqs.add_row(row![session.id.as_deref().unwrap_or_default(), session_sqs]);
+            }
         }
 
         sessions.printstd();
+
+        if sqs.get_row(1).is_some() {
+            println!("Active SQS:");
+            sqs.printstd();
+        }
 
         Ok(())
     }
