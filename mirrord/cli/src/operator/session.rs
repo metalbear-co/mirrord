@@ -11,7 +11,7 @@ use mirrord_operator::{
 use mirrord_progress::{Progress, ProgressTracker};
 use tracing::Level;
 
-use crate::{CliError, CliResult, SessionCommand};
+use crate::{CliError, Result, SessionCommand};
 
 /// Handles the [`SessionCommand`]s that deal with session management in the operator.
 pub(super) struct SessionCommandHandler {
@@ -32,7 +32,7 @@ pub(super) struct SessionCommandHandler {
 impl SessionCommandHandler {
     /// Starts a new handler for [`SessionCommand`]s.
     #[tracing::instrument(level = Level::TRACE)]
-    pub(super) async fn new(command: SessionCommand) -> CliResult<Self> {
+    pub(super) async fn new(command: SessionCommand) -> Result<Self> {
         let mut progress = ProgressTracker::from_env("Operator session action");
 
         let config = LayerConfig::from_env().inspect_err(|error| {
@@ -66,7 +66,7 @@ impl SessionCommandHandler {
     /// Does the actual work of talking to the operator through the kube [`Api`], using
     /// the routes defined in [`SessionCrd`].
     #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
-    pub(super) async fn handle(self) -> CliResult<()> {
+    pub(super) async fn handle(self) -> Result<()> {
         let Self {
             mut progress,
             mut sub_progress,

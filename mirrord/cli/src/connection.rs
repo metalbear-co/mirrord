@@ -17,7 +17,7 @@ use mirrord_protocol::{ClientMessage, DaemonMessage};
 use tokio::sync::mpsc;
 use tracing::Level;
 
-use crate::{CliError, CliResult};
+use crate::{CliError, Result};
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
 
@@ -35,7 +35,7 @@ async fn try_connect_using_operator<P, R>(
     config: &LayerConfig,
     progress: &P,
     analytics: &mut R,
-) -> CliResult<Option<OperatorSessionConnection>>
+) -> Result<Option<OperatorSessionConnection>>
 where
     P: Progress,
     R: Reporter,
@@ -114,7 +114,7 @@ pub(crate) async fn create_and_connect<P, R: Reporter>(
     config: &LayerConfig,
     progress: &mut P,
     analytics: &mut R,
-) -> CliResult<(AgentConnectInfo, AgentConnection)>
+) -> Result<(AgentConnectInfo, AgentConnection)>
 where
     P: Progress + Send + Sync,
 {
@@ -208,7 +208,7 @@ fn user_persistent_random_message_select() -> bool {
         == 0
 }
 
-pub(crate) fn show_multipod_warning<P>(progress: &mut P) -> CliResult<(), CliError>
+pub(crate) fn show_multipod_warning<P>(progress: &mut P) -> Result<(), CliError>
 where
     P: Progress + Send + Sync,
 {
@@ -238,7 +238,7 @@ where
     Ok(())
 }
 
-pub(crate) fn show_http_filter_warning<P>(progress: &mut P) -> CliResult<(), CliError>
+pub(crate) fn show_http_filter_warning<P>(progress: &mut P) -> Result<(), CliError>
 where
     P: Progress + Send + Sync,
 {

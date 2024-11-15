@@ -4,7 +4,7 @@ use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::{LayerConfig, MIRRORD_CONFIG_FILE_ENV};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
-use crate::{config::ExtensionExecArgs, error::CliError, execution::MirrordExecution, CliResult};
+use crate::{config::ExtensionExecArgs, error::CliError, execution::MirrordExecution, Result};
 
 /// Actually facilitate execution after all preparations were complete
 async fn mirrord_exec<P>(
@@ -13,7 +13,7 @@ async fn mirrord_exec<P>(
     config: LayerConfig,
     mut progress: P,
     analytics: &mut AnalyticsReporter,
-) -> CliResult<()>
+) -> Result<()>
 where
     P: Progress + Send + Sync,
 {
@@ -37,7 +37,7 @@ where
 }
 
 /// Facilitate the execution of a process using mirrord by an IDE extension
-pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch) -> CliResult<()> {
+pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch) -> Result<()> {
     let progress = ProgressTracker::try_from_env("mirrord preparing to launch")
         .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
     let mut env: HashMap<String, String> = HashMap::new();

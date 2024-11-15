@@ -64,7 +64,7 @@ mod util;
 mod verify_config;
 mod vpn;
 
-pub(crate) use error::{CliError, CliResult};
+pub(crate) use error::{CliError, Result};
 use verify_config::verify_config;
 
 use crate::util::remove_proxy_env;
@@ -78,7 +78,7 @@ async fn exec_process<P>(
     args: &ExecArgs,
     progress: &P,
     analytics: &mut AnalyticsReporter,
-) -> CliResult<()>
+) -> Result<()>
 where
     P: Progress + Send + Sync,
 {
@@ -138,12 +138,12 @@ where
         .clone()
         .into_iter()
         .map(CString::new)
-        .collect::<CliResult<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, _>>()?;
     // env vars should be formatted as "varname=value" CStrings
     let env = env_vars
         .into_iter()
         .map(|(k, v)| CString::new(format!("{k}={v}")))
-        .collect::<CliResult<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, _>>()?;
 
     // The execve hook is not yet active and does not hijack this call.
     let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
@@ -330,7 +330,7 @@ fn print_config<P>(
     }
 }
 
-async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
+async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
     let progress = ProgressTracker::from_env("mirrord exec");
     if !args.params.disable_version_check {
         prompt_outdated_version(&progress).await;
@@ -377,7 +377,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
 /// Lists targets based on whether or not the operator has been enabled in `layer_config`.
 /// If the operator is enabled (and we can reach it), then we list [`KubeResourceSeeker::all`]
 /// targets, otherwise we list [`KubeResourceSeeker::all_open_source`] only.
-async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> CliResult<Vec<String>> {
+async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<Vec<String>> {
     let client = create_kube_config(
         layer_config.accept_invalid_certificates,
         layer_config.kubeconfig.clone(),
@@ -444,7 +444,7 @@ async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> CliR
 ///  "statefulset/nginx-statefulset/container/nginx"
 /// ]
 /// ```
-async fn print_targets(args: &ListTargetArgs) -> CliResult<()> {
+async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     let mut layer_config = if let Some(config) = &args.config_file {
         let mut cfg_context = ConfigContext::default();
         LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?
@@ -468,10 +468,10 @@ async fn print_targets(args: &ListTargetArgs) -> CliResult<()> {
     Ok(())
 }
 
-async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<()> {
+async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()> {
     fn hash_port_mappings(
         args: &PortForwardArgs,
-    ) -> CliResult<HashMap<SocketAddr, (RemoteAddr, u16)>, PortForwardError> {
+    ) -> Result<HashMap<SocketAddr, (RemoteAddr, u16)>, PortForwardError> {
         let port_mappings = &args.port_mapping;
         let mut mappings: HashMap<SocketAddr, (RemoteAddr, u16)> =
             HashMap::with_capacity(port_mappings.len());
@@ -489,7 +489,7 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
 
     fn hash_rev_port_mappings(
         args: &PortForwardArgs,
-    ) -> CliResult<HashMap<RemotePort, LocalPort>, PortForwardError> {
+    ) -> Result<HashMap<RemotePort, LocalPort>, PortForwardError> {
         let port_mappings = &args.reverse_port_mapping;
         let mut mappings: HashMap<RemotePort, LocalPort> =
             HashMap::with_capacity(port_mappings.len());
@@ -648,7 +648,7 @@ fn main() -> miette::Result<()> {
         .map(|s| s.parse().unwrap_or(false))
         .unwrap_or(false);
 
-    let res: CliResult<(), CliError> = rt.block_on(async move {
+    let res: Result<(), CliError> = rt.block_on(async move {
         if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
             mirrord_console::init_async_logger(&console_addr, watch.clone(), 124).await?;
         } else if force_log || !init_ext_error_handler(&cli.commands) {

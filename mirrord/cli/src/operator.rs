@@ -21,7 +21,7 @@ use crate::{
     config::{OperatorArgs, OperatorCommand},
     error::{CliError, OperatorSetupError},
     util::remove_proxy_env,
-    CliResult, OperatorSetupParams,
+    OperatorSetupParams, Result,
 };
 
 mod session;
@@ -33,7 +33,7 @@ struct OperatorVersionResponse {
 }
 
 /// Fetches latest version of mirrord operator from our API
-async fn get_last_version() -> CliResult<String, reqwest::Error> {
+async fn get_last_version() -> Result<String, reqwest::Error> {
     let client = reqwest::Client::builder().build()?;
     let response: OperatorVersionResponse = client
         .get("https://version.mirrord.dev/v1/operator/version")
@@ -57,7 +57,7 @@ async fn operator_setup(
         sqs_splitting,
         kafka_splitting,
     }: OperatorSetupParams,
-) -> CliResult<(), OperatorSetupError> {
+) -> Result<(), OperatorSetupError> {
     if !accept_tos {
         eprintln!("Please note that mirrord operator installation requires an active subscription for the mirrord Operator provided by MetalBear Tech LTD.\nThe service ToS can be read here - https://metalbear.co/legal/terms\nPass --accept-tos to accept the TOS");
 
@@ -120,7 +120,7 @@ async fn operator_setup(
 }
 
 #[tracing::instrument(level = Level::TRACE, ret)]
-async fn get_status_api(config: Option<&Path>) -> CliResult<Api<MirrordOperatorCrd>> {
+async fn get_status_api(config: Option<&Path>) -> Result<Api<MirrordOperatorCrd>> {
     let layer_config = if let Some(config) = config {
         let mut cfg_context = ConfigContext::default();
         LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?
@@ -145,7 +145,7 @@ async fn get_status_api(config: Option<&Path>) -> CliResult<Api<MirrordOperatorC
 }
 
 /// Handle commands related to the operator `mirrord operator ...`
-pub(crate) async fn operator_command(args: OperatorArgs) -> CliResult<()> {
+pub(crate) async fn operator_command(args: OperatorArgs) -> Result<()> {
     match args.command {
         OperatorCommand::Setup(params) => operator_setup(params).await.map_err(CliError::from),
         OperatorCommand::Status { config_file } => {

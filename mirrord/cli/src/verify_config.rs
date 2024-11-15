@@ -2,7 +2,7 @@
 //! [`VerifyConfig`](crate::Commands::VerifyConfig) enum after checking the config file passed in
 //! `path`. It's used by the IDE plugins to display errors/warnings quickly, without having to start
 //! mirrord-layer.
-use error::CliResult;
+use error::Result;
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     feature::FeatureConfig,
@@ -201,7 +201,7 @@ enum VerifiedConfig {
 ///   "errors": ["mirrord-config: IO operation failed with `No such file or directory (os error 2)`"]
 /// }
 /// ```
-pub(super) async fn verify_config(VerifyConfigArgs { ide, path }: VerifyConfigArgs) -> CliResult<()> {
+pub(super) async fn verify_config(VerifyConfigArgs { ide, path }: VerifyConfigArgs) -> Result<()> {
     let mut config_context = ConfigContext::new(ide);
 
     let layer_config = LayerFileConfig::from_path(path)
