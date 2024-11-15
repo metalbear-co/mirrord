@@ -45,7 +45,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
-    error::{ExternalProxyError, Result},
+    error::{ExternalProxyError, CliResult},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     internal_proxy::connect_and_ping,
     util::{create_listen_socket, detach_io},
@@ -59,7 +59,7 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
     Ok(())
 }
 
-pub async fn proxy(listen_port: u16, watch: drain::Watch) -> Result<()> {
+pub async fn proxy(listen_port: u16, watch: drain::Watch) -> CliResult<()> {
     let config = LayerConfig::from_env()?;
 
     tracing::info!(?config, "external_proxy starting");
@@ -185,7 +185,7 @@ pub async fn proxy(listen_port: u16, watch: drain::Watch) -> Result<()> {
 
 async fn create_external_proxy_tls_acceptor(
     config: &LayerConfig,
-) -> Result<Option<tokio_rustls::TlsAcceptor>, ExternalProxyError> {
+) -> CliResult<Option<tokio_rustls::TlsAcceptor>, ExternalProxyError> {
     if !config.external_proxy.tls_enable {
         return Ok(None);
     }
@@ -205,7 +205,7 @@ async fn create_external_proxy_tls_acceptor(
             })
             .map_err(ExternalProxyError::Tls)?,
     ))
-    .collect::<Result<Vec<_>, _>>()
+    .collect::<CliResult<Vec<_>, _>>()
     .map_err(|error| ConnectionTlsError::ParsingPem(client_tls_certificate.to_path_buf(), error))
     .map_err(ExternalProxyError::Tls)?;
 
@@ -214,7 +214,7 @@ async fn create_external_proxy_tls_acceptor(
             .map_err(|error| ConnectionTlsError::MissingPem(tls_certificate.to_path_buf(), error))
             .map_err(ExternalProxyError::Tls)?,
     ))
-    .collect::<Result<Vec<_>, _>>()
+    .collect::<CliResult<Vec<_>, _>>()
     .map_err(|error| ConnectionTlsError::ParsingPem(tls_certificate.to_path_buf(), error))
     .map_err(ExternalProxyError::Tls)?;
 
