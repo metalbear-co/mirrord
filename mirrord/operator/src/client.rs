@@ -397,7 +397,7 @@ where
     /// 1. [`MIRRORD_CLI_VERSION_HEADER`]
     /// 2. [`CLIENT_NAME_HEADER`]
     /// 3. [`CLIENT_HOSTNAME_HEADER`]
-    #[tracing::instrument(level = Level::DEBUG, ret, err)]
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
     async fn base_client_config(layer_config: &LayerConfig) -> OperatorApiResult<Config> {
         let mut client_config = create_kube_config(
             layer_config.accept_invalid_certificates,
@@ -534,11 +534,11 @@ impl OperatorApi<PreparedClientCert> {
     /// connection in the same session with [`OperatorApi::connect_in_existing_session`].
     #[tracing::instrument(
         level = Level::TRACE,
-        skip(layer_config, progress),
+        skip(config, progress),
         fields(
-            target_config = ?layer_config.target,
-            copy_target_config = ?layer_config.feature.copy_target,
-            on_concurrent_steal = ?layer_config.feature.network.incoming.on_concurrent_steal,
+            target_config = ?config.target,
+            copy_target_config = ?config.feature.copy_target,
+            on_concurrent_steal = ?config.feature.network.incoming.on_concurrent_steal,
         ),
         ret,
         err
@@ -546,13 +546,13 @@ impl OperatorApi<PreparedClientCert> {
     pub async fn connect_in_new_session<P>(
         &self,
         target: ResolvedTarget<false>,
-        layer_config: &LayerConfig,
+        config: &LayerConfig,
         progress: &P,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
     {
-        self.check_feature_support(layer_config)?;
+        self.check_feature_support(config)?;
 
         let use_proxy_api = self
             .operator
@@ -561,14 +561,14 @@ impl OperatorApi<PreparedClientCert> {
             .contains(&NewOperatorFeature::ProxyApi);
 
         let is_empty_deployment = target.empty_deployment();
-        let connect_url = if layer_config.feature.copy_target.enabled
+        let connect_url = if config.feature.copy_target.enabled
             // use copy_target for splitting queues
-            || layer_config.feature.split_queues.is_set()
+            || config.feature.split_queues.is_set()
             || is_empty_deployment
         {
             let mut copy_subtask = progress.subtask("copying target");
 
-            if layer_config.feature.copy_target.enabled.not() {
+            if config.feature.copy_target.enabled.not() {
                 if is_empty_deployment.not() {
                     copy_subtask.info(
                         "Creating a copy-target for queue-splitting (even \
@@ -583,13 +583,9 @@ impl OperatorApi<PreparedClientCert> {
             }
 
             // We do not validate the `target` here, it's up to the operator.
-            let target = layer_config
-                .target
-                .path
-                .clone()
-                .unwrap_or(Target::Targetless);
-            let scale_down = layer_config.feature.copy_target.scale_down;
-            let namespace = self.target_namespace(layer_config);
+            let target = config.target.path.clone().unwrap_or(Target::Targetless);
+            let scale_down = config.feature.copy_target.scale_down;
+            let namespace = self.target_namespace(config);
 
             // TODO(alex) [mid]: Revert this after testing.
             let copied = self
@@ -630,7 +626,7 @@ impl OperatorApi<PreparedClientCert> {
 
             target.connect_url(
                 use_proxy_api,
-                layer_config.feature.network.incoming.on_concurrent_steal,
+                config.feature.network.incoming.on_concurrent_steal,
                 &TargetCrd::api_version(&()),
                 &TargetCrd::plural(&()),
                 &TargetCrd::url_path(&(), target.namespace()),
@@ -653,7 +649,7 @@ impl OperatorApi<PreparedClientCert> {
         };
 
         let mut connection_subtask = progress.subtask("connecting to the target");
-        let (tx, rx) = Self::connect_target(&self.client, &session, layer_config).await?;
+        let (tx, rx) = Self::connect_target(&self.client, &session, config).await?;
         connection_subtask.success(Some("connected to the target"));
 
         Ok(OperatorSessionConnection { session, tx, rx })
@@ -672,7 +668,7 @@ impl OperatorApi<PreparedClientCert> {
     ///
     /// `copy_target` feature is not available for all target types.
     /// Target type compatibility is checked by the operator.
-    #[tracing::instrument(level = Level::DEBUG, ret, err)]
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
     async fn copy_target(
         &self,
         target: Target,
@@ -727,7 +723,7 @@ impl OperatorApi<PreparedClientCert> {
     }
 
     /// Connects to the target, reusing the given [`OperatorSession`].
-    #[tracing::instrument(level = Level::DEBUG, skip(layer_config, reporter), ret, err)]
+    #[tracing::instrument(level = Level::TRACE, skip(layer_config, reporter), ret, err)]
     pub async fn connect_in_existing_session<R>(
         layer_config: &LayerConfig,
         session: OperatorSession,
@@ -766,7 +762,7 @@ impl OperatorApi<PreparedClientCert> {
     /// - `extra_headers`: A [`HeaderMap`] that we insert in the [`Request`] that we're sending to
     ///   the `connect` in the operator. Helps us include additional info about the target
     ///   connection that doesn't really fit anywhere else.
-    #[tracing::instrument(level = Level::DEBUG, skip(client), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(client), err)]
     async fn connect_target(
         client: &Client,
         session: &OperatorSession,
