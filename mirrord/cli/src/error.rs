@@ -13,7 +13,7 @@ use thiserror::Error;
 
 use crate::port_forward::PortForwardError;
 
-pub(crate) type Result<T, E = CliError> = core::result::Result<T, E>;
+pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;
 
 const GENERAL_HELP: &str = r#"
 
