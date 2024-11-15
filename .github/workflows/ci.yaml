@@ -382,6 +382,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     env:
       MIRRORD_TEST_USE_EXISTING_LIB: ../../target/x86_64-apple-darwin/debug/libmirrord_layer.dylib
+      MIRRORD_LAYER_FILE_MACOS_ARM64: /tmp/file.dylib
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -390,13 +391,16 @@ jobs:
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
-          toolchain: nightly-2024-09-12
+          toolchain: nightly-2024-10-11
       - name: Install Protoc
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: clippy x64
         run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=x86_64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
+      # this is required for clippy lint because the layer path variable is checked at compile time
+      - name: create fake layer file for arm 64
+        run: touch /tmp/file.dylib
       - name: clippy aarch64
         run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=aarch64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
       - name: mirrord SIP UT

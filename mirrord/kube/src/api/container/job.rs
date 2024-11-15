@@ -284,6 +284,7 @@ mod test {
                         "imagePullSecrets": agent.image_pull_secrets,
                         "nodeSelector": {},
                         "tolerations": *DEFAULT_TOLERATIONS,
+                        "serviceAccountName": agent.service_account,
                         "containers": [
                             {
                                 "name": "mirrord-agent",
@@ -403,6 +404,7 @@ mod test {
                         "imagePullSecrets": agent.image_pull_secrets,
                         "nodeSelector": {},
                         "tolerations": *DEFAULT_TOLERATIONS,
+                        "serviceAccountName": agent.service_account,
                         "containers": [
                             {
                                 "name": "mirrord-agent",

@@ -702,6 +702,7 @@ pub enum Application {
     EnvBashCat,
     NodeFileOps,
     NodeSpawn,
+    NodeIssue2903,
     Go21Dir,
     Go22Dir,
     Go23Dir,
@@ -817,7 +818,9 @@ impl Application {
                 )
             }
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
-            Application::NodeFileOps | Application::NodeSpawn => String::from("node"),
+            Application::NodeFileOps | Application::NodeSpawn | Application::NodeIssue2903 => {
+                String::from("node")
+            }
             Application::Go21Dir => String::from("tests/apps/dir_go/21.go_test_app"),
             Application::Go22Dir => String::from("tests/apps/dir_go/22.go_test_app"),
             Application::Go23Dir => String::from("tests/apps/dir_go/23.go_test_app"),
@@ -987,6 +990,10 @@ impl Application {
                 app_path.push("node_spawn.mjs");
                 vec![app_path.to_string_lossy().to_string()]
             }
+            Application::NodeIssue2903 => {
+                app_path.push("issue2903.mjs");
+                vec![app_path.to_string_lossy().to_string()]
+            }
             Application::NodeIssue2283 => {
                 app_path.push("issue2883.js");
                 vec![app_path.to_string_lossy().to_string()]
@@ -1097,6 +1104,7 @@ impl Application {
             | Application::EnvBashCat
             | Application::NodeFileOps
             | Application::NodeSpawn
+            | Application::NodeIssue2903
             | Application::BashShebang
             | Application::Fork
             | Application::ReadLink

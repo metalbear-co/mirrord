@@ -9,7 +9,7 @@ use std::{
         unix::io::RawFd,
     },
     path::PathBuf,
-    ptr,
+    ptr::{self, copy_nonoverlapping},
     sync::{Arc, Mutex, OnceLock},
 };
 
@@ -217,7 +217,6 @@ pub(super) fn bind(
     let requested_address = SocketAddr::try_from_raw(raw_address, address_length)?;
     let requested_port = requested_address.port();
     let incoming_config = crate::setup().incoming_config();
-
     let mut socket = {
         SOCKETS
             .lock()?
@@ -275,6 +274,23 @@ pub(super) fn bind(
         Err(HookError::AddressAlreadyBound(requested_address))?;
     }
 
+    #[cfg(target_os = "macos")]
+    {
+        let experimental = crate::setup().experimental();
+        if experimental.disable_reuseaddr {
+            let fd = unsafe { BorrowedFd::borrow_raw(sockfd) };
+            if let Err(e) =
+                nix::sys::socket::setsockopt(&fd, nix::sys::socket::sockopt::ReuseAddr, &false)
+            {
+                tracing::debug!(?e, "Failed to set SO_REUSEADDR to false");
+            }
+            if let Err(e) =
+                nix::sys::socket::setsockopt(&fd, nix::sys::socket::sockopt::ReusePort, &false)
+            {
+                tracing::debug!(?e, "Failed to set SE_REUSEPORT to false");
+            }
+        }
+    }
     // Try to bind a port from listen ports, if no configuration
     // try to bind the requested port, if not available get a random port
     // if there's configuration and binding fails with the requested port
@@ -1578,26 +1594,48 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
         Err(io::Error::from_raw_os_error(result))?;
     }
 
-    // Head of the ipv6 interface addresses list.
-    // Should be freed with `libc::freeifaddrs` before returning.
-    let mut ipv6_head: *mut libc::ifaddrs = std::ptr::null_mut();
+    // Count entries for new_list_start malloc
+    let mut entry_count = 0;
+    let mut count_head: *mut libc::ifaddrs = original_head;
+    unsafe {
+        while let Some(ifaddr) = count_head.as_mut() {
+            entry_count += 1;
+            count_head = ifaddr.ifa_next;
+        }
+    }
+
+    // Allocate new list so we can safely free the original list later
+    // Safety: We assume `libc::malloc` is the same allocator as the user's system.
+    let new_list_start: *mut libc::ifaddrs = unsafe {
+        libc::malloc((mem::size_of::<libc::ifaddrs>() as libc::size_t) * entry_count)
+            as *mut libc::ifaddrs
+    };
+    // Address to place next new address
+    let mut next_new: *mut libc::ifaddrs = new_list_start;
     // Currently inspected element of the original interface addresses list.
     let mut inspected: *mut libc::ifaddrs = original_head;
-    // Previously inspected element of the original interface addresses list.
-    let mut previous: *mut libc::ifaddrs = std::ptr::null_mut();
+    // Previously element that was inserted into new list.
+    let mut previous_new_entry: *mut libc::ifaddrs = std::ptr::null_mut();
 
     // Safety: we only dereference pointers received from libc. They should be nulls or point to
     // initialized memory.
     unsafe {
         while let Some(ifaddr) = inspected.as_mut() {
             let address = SockaddrStorage::from_raw(ifaddr.ifa_addr, None);
+
             match address.as_ref().and_then(SockaddrStorage::as_sockaddr_in6) {
                 // If not ipv6, advance to the next interface address in the original list.
                 // Move both `previous` and `inspected`.
                 None => {
-                    previous = inspected;
-                    inspected = ifaddr.ifa_next;
-                    continue;
+                    // Append the address to the new list by copying ifaddr to the list head, and
+                    // setting next of previous then moving head
+                    copy_nonoverlapping::<libc::ifaddrs>(inspected, next_new, 1);
+                    if let Some(prev_addr) = previous_new_entry.as_mut() {
+                        prev_addr.ifa_next = next_new;
+                    }
+
+                    previous_new_entry = next_new;
+                    next_new = next_new.add(1);
                 }
                 Some(ipv6) => {
                     let interface_name = if ifaddr.ifa_name.is_null() {
@@ -1613,35 +1651,18 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
                     );
                 }
             }
+            inspected = ifaddr.ifa_next;
+            ifaddr.ifa_next = std::ptr::null_mut();
+        }
 
-            // Fix the original list.
-            match previous.as_mut() {
-                // We're removing an element from the middle of the original list.
-                // `previous` stays as it was, `inspected` is moved to the next interface address.
-                Some(previous_ifaddr) => {
-                    previous_ifaddr.ifa_next = ifaddr.ifa_next;
-                    inspected = ifaddr.ifa_next;
-                }
-                // We're removing the first element of the original list.
-                // `original_head` is moved to the next interface address.
-                None => {
-                    original_head = ifaddr.ifa_next;
-                }
-            }
-
-            // Make this address a new head of the ipv6 list.
-            ifaddr.ifa_next = ipv6_head;
-            ipv6_head = inspected;
+        // Ensure that final element in new list doesn't point to another entry
+        if let Some(prev_addr) = previous_new_entry.as_mut() {
+            prev_addr.ifa_next = std::ptr::null_mut();
         }
     }
 
-    // Hopefully we can safely free partial list after reorganizing.
-    // I don't see any reason why we could not do this,
-    // I also did not find anything suspicious in glibc [implementation](https://github.com/lattera/glibc/blob/master/sysdeps/gnu/ifaddrs.c).
-    if !ipv6_head.is_null() {
-        // Safety: we constructed a valid `libc::ifaddrs` list using pointers received from libc.
-        unsafe { libc::freeifaddrs(ipv6_head) };
-    }
+    // Free the original list
+    unsafe { libc::freeifaddrs(original_head) };
 
-    Ok(original_head)
+    Ok(new_list_start)
 }

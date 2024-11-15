@@ -142,6 +142,9 @@ fn get_remote_fd(local_fd: RawFd) -> Detour<u64> {
 /// Create temporary local file to get a valid local fd.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
+    if crate::setup().experimental().use_dev_null {
+        return create_local_devnull_file(remote_fd);
+    }
     let random_string = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
     let file_name = format!("{remote_fd}-{random_string}");
     let file_path = env::temp_dir().join(file_name);
@@ -149,11 +152,28 @@ fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
     let file_path_ptr = file_c_string.as_ptr();
     let local_file_fd: RawFd = unsafe { FN_OPEN(file_path_ptr, O_RDONLY | O_CREAT) };
     if local_file_fd == -1 {
+        let error = errno::errno();
         // Close the remote file if creating a tmp local file failed and we have an invalid local fd
         close_remote_file_on_failure(remote_fd)?;
-        Detour::Error(HookError::LocalFileCreation(remote_fd))
+        Detour::Error(HookError::LocalFileCreation(remote_fd, error.0))
     } else {
         unsafe { unlink(file_path_ptr) };
+        Detour::Success(local_file_fd)
+    }
+}
+
+/// Open /dev/null to get a valid file fd
+#[mirrord_layer_macro::instrument(level = "trace", ret)]
+fn create_local_devnull_file(remote_fd: u64) -> Detour<RawFd> {
+    let file_c_string = CString::new("/dev/null")?;
+    let file_path_ptr = file_c_string.as_ptr();
+    let local_file_fd: RawFd = unsafe { FN_OPEN(file_path_ptr, O_RDONLY) };
+    if local_file_fd == -1 {
+        let error = errno::errno();
+        // Close the remote file if creating a tmp local file failed and we have an invalid local fd
+        close_remote_file_on_failure(remote_fd)?;
+        Detour::Error(HookError::LocalFileCreation(remote_fd, error.0))
+    } else {
         Detour::Success(local_file_fd)
     }
 }
@@ -417,12 +437,13 @@ pub(crate) fn xstat(
     let (path, fd) = match (rawish_path, fd) {
         // fstatat
         (Some(path), Some(fd)) => {
-            let path = path?;
+            let mut path = path?;
             let fd = {
                 if fd == AT_FDCWD {
                     check_relative_paths!(path);
 
-                    ensure_not_ignored!(remap_path!(path.clone()), false);
+                    path = remap_path!(path);
+                    ensure_not_ignored!(path, false);
                     None
                 } else {
                     Some(get_remote_fd(fd)?)

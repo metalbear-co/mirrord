@@ -514,17 +514,33 @@ async fn start_agent(args: Args) -> Result<()> {
     } else {
         let cancellation_token = cancellation_token.clone();
         let is_mesh = args.is_mesh();
-
+        // We're using this to avoid crashing on old kernels when initializing the
+        // `RawSocketTcpCapture`. failed task causes the agent to exit
+        // so we just check that initialization was successful
+        // then decide whether to store the task or drop it
+        // https://github.com/metalbear-co/mirrord/pull/2910
+        let (sniffer_init_tx, sniffer_init_rx) = tokio::sync::oneshot::channel::<bool>();
         let watched_task = WatchedTask::new(
             TcpConnectionSniffer::<RawSocketTcpCapture>::TASK_NAME,
-            TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface, is_mesh)
-                .and_then(|sniffer| async move {
+            async move {
+                if let Ok(sniffer) =
+                    TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface, is_mesh)
+                        .await
+                {
+                    if let Err(error) = sniffer_init_tx.send(true) {
+                        tracing::error!(%error, "Failed to send sniffer init result");
+                    };
+                    // will block from this point on
                     let res = sniffer.start(cancellation_token).await;
-                    if let Err(err) = res.as_ref() {
-                        error!("Sniffer failed: {err}");
+                    if let Err(err) = res {
+                        error!(%err, "Sniffer failed");
                     }
-                    Ok(())
-                }),
+                } else if let Err(error) = sniffer_init_tx.send(false) {
+                    tracing::error!(%error, "Failed to send sniffer init result");
+                }
+
+                Ok(())
+            },
         );
         let status = watched_task.status();
         let task = run_thread_in_namespace(
@@ -534,7 +550,14 @@ async fn start_agent(args: Args) -> Result<()> {
             "net",
         );
 
-        (Some(task), Some(status))
+        match sniffer_init_rx.await {
+            Ok(true) => (Some(task), Some(status)),
+            Ok(false) => (None, None),
+            Err(error) => {
+                tracing::error!(%error, "unexpected error while waiting for sniffer init");
+                (None, None)
+            }
+        }
     };
 
     let (stealer_task, stealer_status) = if args.mode.is_targetless() {
