@@ -22,8 +22,8 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r"^/sys(/|$)",
         r"^/lib(/|$)",
         r"^/etc(/|$)",
-        r"^/usr(/|$).*$",
-        r"^/home(/|$).*$",
+        r"^/usr(/|$)",
+        r"^/home(/|$)",
         r"^/bin(/|$)",
         r"^/sbin(/|$)",
         r"^/dev(/|$)",
@@ -37,7 +37,7 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r"^/home/iojs(/|$)",
         r"^/home/runner(/|$)",
         // dotnet: `/tmp/clr-debug-pipe-1`
-        r"clr-.*-pipe-.*$",
+        r"clr-.*-pipe-",
         // dotnet: `/home/{username}/{project}.pdb`
         r"\.pdb$",
         // dotnet: `/home/{username}/{project}.dll`
@@ -81,10 +81,10 @@ pub fn regex_set_builder() -> RegexSetBuilder {
     .collect();
 
     if let Ok(cwd) = env::current_dir() {
-        patterns.push(format!("{}.*$", cwd.to_string_lossy()));
+        patterns.push(cwd.to_string_lossy());
     }
     if let Ok(executable) = env::current_exe() {
-        patterns.push(format!("{}.*$", executable.to_string_lossy()));
+        patterns.push(executable.to_string_lossy());
     }
 
     RegexSetBuilder::new(patterns)
