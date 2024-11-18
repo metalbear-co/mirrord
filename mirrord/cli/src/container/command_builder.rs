@@ -123,7 +123,7 @@ impl RuntimeCommandBuilder<WithCommand> {
         } = self;
 
         let (runtime_command, runtime_args) = match step.command {
-            ContainerCommand::Run { runtime_args, .. } => ("run".to_owned(), runtime_args),
+            ContainerCommand::Run { runtime_args } => ("run".to_owned(), runtime_args),
         };
 
         (
