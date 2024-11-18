@@ -761,16 +761,14 @@ impl OperatorApi<PreparedClientCert> {
 
     /// Creates websocket connection to the operator target.
     ///
-    /// - `extra_headers`: A [`HeaderMap`] that we insert in the [`Request`] that we're sending to
-    ///   the `connect` in the operator. Helps us include additional info about the target
-    ///   connection that doesn't really fit anywhere else.
+    /// - `layer_config`: Helps us include additional info about the target connection, like sending
+    ///   SQS setup.
     #[tracing::instrument(level = Level::TRACE, skip(client), err)]
     async fn connect_target(
         client: &Client,
         session: &OperatorSession,
         layer_config: &LayerConfig,
     ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
-        // TODO(alex) [high] 2: This is how we're going to be inserting the `x-remote-extra`.
         let request = Request::builder()
             .uri(&session.connect_url)
             .header(SESSION_ID_HEADER, session.id.to_string());
