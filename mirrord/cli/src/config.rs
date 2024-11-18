@@ -802,13 +802,20 @@ impl ContainerCommand {
         let mut publish_ports = Vec::new();
 
         let ContainerCommand::Run { runtime_args } = self;
+
         let unfiltered_runtime_args = std::mem::take(runtime_args);
         let mut unfiltered_runtime_args_iter = unfiltered_runtime_args.into_iter();
 
+        let mut hit_trailing_token = false;
+
         while let Some(runtime_arg) = unfiltered_runtime_args_iter.next() {
             match runtime_arg.as_str() {
-                "-p" | "--publish" => {
+                "-p" | "--publish" if !hit_trailing_token => {
                     publish_ports.extend(unfiltered_runtime_args_iter.next());
+                }
+                "--" => {
+                    hit_trailing_token = true;
+                    runtime_args.push(runtime_arg);
                 }
                 _ => {
                     runtime_args.push(runtime_arg);
