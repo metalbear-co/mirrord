@@ -798,32 +798,16 @@ impl ContainerCommand {
         }
     }
 
-    pub fn extract_publish(&mut self) -> Vec<String> {
-        let mut publish_ports = Vec::new();
-
+    pub fn has_publish(&self) -> bool {
         let ContainerCommand::Run { runtime_args } = self;
-
-        let unfiltered_runtime_args = std::mem::take(runtime_args);
-        let mut unfiltered_runtime_args_iter = unfiltered_runtime_args.into_iter();
 
         let mut hit_trailing_token = false;
 
-        while let Some(runtime_arg) = unfiltered_runtime_args_iter.next() {
-            match runtime_arg.as_str() {
-                "-p" | "--publish" if !hit_trailing_token => {
-                    publish_ports.extend(unfiltered_runtime_args_iter.next());
-                }
-                "--" => {
-                    hit_trailing_token = true;
-                    runtime_args.push(runtime_arg);
-                }
-                _ => {
-                    runtime_args.push(runtime_arg);
-                }
-            }
-        }
+        runtime_args.iter().any(|runtime_arg| {
+            hit_trailing_token = hit_trailing_token || runtime_arg == "--";
 
-        publish_ports
+            !hit_trailing_token && matches!(runtime_arg.as_str(), "-p" | "--publish")
+        })
     }
 }
 

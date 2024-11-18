@@ -57,24 +57,6 @@ impl RuntimeCommandBuilder {
         }
     }
 
-    pub fn add_publish<P>(&mut self, value: P)
-    where
-        P: AsRef<OsStr>,
-    {
-        self.push_arg("-p");
-        self.push_arg(value.as_ref().to_str().unwrap_or_default())
-    }
-
-    pub fn add_port_bindings<I, P>(&mut self, iter: I)
-    where
-        I: IntoIterator<Item = P>,
-        P: AsRef<OsStr>,
-    {
-        for publish in iter {
-            self.add_publish(publish)
-        }
-    }
-
     pub fn add_volume<H, C>(&mut self, host_path: H, container_path: C)
     where
         H: AsRef<Path>,
