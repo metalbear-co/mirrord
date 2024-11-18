@@ -82,8 +82,6 @@ Operator License
 "#
         );
 
-        // TODO(alex) [low] 1: Looks like a backward compat special case, the early return
-        // not being an error here.
         let status = api
             .operator()
             .status

@@ -410,6 +410,9 @@ pub(crate) enum CliError {
 
     #[error("Couldn't resolve binary name '{0}': {1}")]
     BinaryWhichError(String, String),
+
+    #[error(transparent)]
+    InvalidHeaderValue(#[from] http::header::InvalidHeaderValue),
 }
 
 impl CliError {
@@ -488,8 +491,8 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorReturnedUnknownTargetType(error.0)
             }
             OperatorApiError::KubeApi(error) => Self::OperatorTargetResolution(error),
-            OperatorApiError::SerdeJson(error) => todo!(),
-            OperatorApiError::InvalidHeaderValue(error) => todo!(),
+            OperatorApiError::SerdeJson(error) => Self::JsonSerializeError(error),
+            OperatorApiError::InvalidHeaderValue(error) => Self::InvalidHeaderValue(error),
         }
     }
 }

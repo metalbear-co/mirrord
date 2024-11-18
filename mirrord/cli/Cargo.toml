@@ -70,6 +70,7 @@ tokio-retry = "0.3"
 regex.workspace = true
 mid = "3.0.0"
 rand.workspace = true
+http = "1.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
