@@ -411,7 +411,11 @@ pub(crate) enum CliError {
     #[error("Couldn't resolve binary name '{0}': {1}")]
     BinaryWhichError(String, String),
 
-    #[error(transparent)]
+    #[error("Failed converting value into a valid HTTP header: `{0}`")]
+    #[diagnostic(help(
+        "kube API operation tried to insert a value into the request header, \
+        but this value is not supported. {GENERAL_BUG}"
+    ))]
     InvalidHeaderValue(#[from] http::header::InvalidHeaderValue),
 }
 
