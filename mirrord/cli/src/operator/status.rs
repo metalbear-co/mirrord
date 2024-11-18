@@ -14,7 +14,7 @@ use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{row, Table};
 use tracing::Level;
 
-use crate::{util::remove_proxy_env, CliError, Result};
+use crate::{util::remove_proxy_env, CliError, CliResult};
 
 /// Handles the `mirrord operator status` command.
 pub(super) struct StatusCommandHandler {
@@ -24,7 +24,7 @@ pub(super) struct StatusCommandHandler {
 
 impl StatusCommandHandler {
     #[tracing::instrument(level = Level::TRACE, err)]
-    pub(super) async fn new(config_file: Option<PathBuf>) -> Result<Self> {
+    pub(super) async fn new(config_file: Option<PathBuf>) -> CliResult<Self> {
         let mut progress = ProgressTracker::from_env("Operator Status");
 
         let layer_config = if let Some(config) = config_file {
@@ -53,7 +53,7 @@ impl StatusCommandHandler {
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
-    pub(super) async fn handle(self) -> Result<()> {
+    pub(super) async fn handle(self) -> CliResult<()> {
         let Self { operator_api: api } = self;
 
         let MirrordOperatorSpec {

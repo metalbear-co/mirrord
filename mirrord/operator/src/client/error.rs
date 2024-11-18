@@ -1,7 +1,6 @@
 use std::fmt;
 
 pub use http::Error as HttpError;
-use mirrord_config::config::ConfigError;
 use mirrord_kube::error::KubeApiError;
 use thiserror::Error;
 

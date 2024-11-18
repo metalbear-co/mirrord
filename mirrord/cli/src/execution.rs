@@ -35,7 +35,7 @@ use crate::{
     error::CliError,
     extract::extract_library,
     util::remove_proxy_env,
-    Result,
+    CliResult,
 };
 
 /// Env variable mirrord-layer uses to connect to intproxy
@@ -171,7 +171,7 @@ impl MirrordExecution {
         #[cfg(target_os = "macos")] executable: Option<&str>,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
-    ) -> Result<Self>
+    ) -> CliResult<Self>
     where
         P: Progress + Send + Sync,
     {
@@ -325,7 +325,7 @@ impl MirrordExecution {
         })
     }
 
-    async fn get_agent_version(connection: &mut AgentConnection) -> Result<Version> {
+    async fn get_agent_version(connection: &mut AgentConnection) -> CliResult<Version> {
         let Ok(_) = connection
             .sender
             .send(ClientMessage::SwitchProtocolVersion(
@@ -354,7 +354,7 @@ impl MirrordExecution {
         config: &LayerConfig,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
-    ) -> Result<Self>
+    ) -> CliResult<Self>
     where
         P: Progress + Send + Sync,
     {
@@ -447,7 +447,7 @@ impl MirrordExecution {
     async fn fetch_env_vars(
         config: &LayerConfig,
         connection: &mut AgentConnection,
-    ) -> Result<HashMap<String, String>> {
+    ) -> CliResult<HashMap<String, String>> {
         let mut env_vars = HashMap::new();
 
         let (env_vars_exclude, env_vars_include) = match (
@@ -500,7 +500,7 @@ impl MirrordExecution {
         connection: &mut AgentConnection,
         env_vars_filter: HashSet<String>,
         env_vars_select: HashSet<String>,
-    ) -> Result<HashMap<String, String>> {
+    ) -> CliResult<HashMap<String, String>> {
         connection
             .sender
             .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
@@ -552,7 +552,7 @@ impl MirrordExecution {
     /// cleans up the process when the parent process exits, so we need the parent to stay alive
     /// while the internal proxy is running.
     /// See <https://github.com/metalbear-co/mirrord/issues/1211>
-    pub(crate) async fn wait(mut self) -> Result<()> {
+    pub(crate) async fn wait(mut self) -> CliResult<()> {
         self.child
             .wait()
             .await

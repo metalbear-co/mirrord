@@ -25,7 +25,7 @@ use crate::{
     config::{ContainerCommand, ExecParams, RuntimeArgs},
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     container::command_builder::RuntimeCommandBuilder,
-    error::{ContainerError, Result},
+    error::{CliResult, ContainerError},
     execution::{
         MirrordExecution, LINUX_INJECTION_ENV_VAR, MIRRORD_CONNECT_TCP_ENV,
         MIRRORD_EXECUTION_KIND_ENV,
@@ -51,7 +51,9 @@ fn format_command(command: &Command) -> String {
 
 /// Execute a [`Command`] and read first line from stdout
 #[tracing::instrument(level = Level::TRACE, ret)]
-async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>, ContainerError> {
+async fn exec_and_get_first_line(
+    command: &mut Command,
+) -> CliResult<Option<String>, ContainerError> {
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -110,7 +112,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
 /// Create a temp file with a json serialized [`LayerConfig`] to be loaded by container and external
 /// proxy
 #[tracing::instrument(level = Level::TRACE, ret)]
-fn create_composed_config(config: &LayerConfig) -> Result<NamedTempFile, ContainerError> {
+fn create_composed_config(config: &LayerConfig) -> CliResult<NamedTempFile, ContainerError> {
     let mut composed_config_file = tempfile::Builder::new()
         .suffix(".json")
         .tempfile()
@@ -126,7 +128,7 @@ fn create_composed_config(config: &LayerConfig) -> Result<NamedTempFile, Contain
 #[tracing::instrument(level = Level::TRACE, ret)]
 fn create_self_signed_certificate(
     subject_alt_names: Vec<String>,
-) -> Result<(NamedTempFile, NamedTempFile), ContainerError> {
+) -> CliResult<(NamedTempFile, NamedTempFile), ContainerError> {
     let geerated = rcgen::generate_simple_self_signed(subject_alt_names)
         .map_err(ContainerError::SelfSignedCertificate)?;
 
@@ -153,7 +155,7 @@ async fn create_sidecar_intproxy(
     config: &LayerConfig,
     base_command: &RuntimeCommandBuilder,
     connection_info: Vec<(&str, &str)>,
-) -> Result<(String, SocketAddr), ContainerError> {
+) -> CliResult<(String, SocketAddr), ContainerError> {
     let mut sidecar_command = base_command.clone();
 
     sidecar_command.add_env(MIRRORD_INTPROXY_CONTAINER_MODE_ENV, "true");
@@ -219,8 +221,12 @@ pub(crate) async fn container_command(
     runtime_args: RuntimeArgs,
     exec_params: ExecParams,
     watch: drain::Watch,
-) -> Result<()> {
+) -> CliResult<()> {
     let progress = ProgressTracker::from_env("mirrord container");
+
+    if runtime_args.command.has_publish() {
+        progress.warning("mirrord container may have problems with \"-p\" directly container in command, please add to \"contanier.cli_extra_args\" in config if you are planning to publish ports");
+    }
 
     progress.warning("mirrord container is currently an unstable feature");
 
