@@ -155,8 +155,11 @@ async fn create_sidecar_intproxy(
     config: &LayerConfig,
     base_command: &RuntimeCommandBuilder,
     connection_info: Vec<(&str, &str)>,
+    port_bindings: Vec<String>,
 ) -> CliResult<(String, SocketAddr), ContainerError> {
     let mut sidecar_command = base_command.clone();
+
+    sidecar_command.add_port_bindings(port_bindings);
 
     sidecar_command.add_env(MIRRORD_INTPROXY_CONTAINER_MODE_ENV, "true");
     sidecar_command.add_envs(connection_info);
@@ -218,7 +221,7 @@ async fn create_sidecar_intproxy(
 /// Main entry point for the `mirrord container` command.
 /// This spawns: "agent" - "external proxy" - "intproxy sidecar" - "execution container"
 pub(crate) async fn container_command(
-    runtime_args: RuntimeArgs,
+    mut runtime_args: RuntimeArgs,
     exec_params: ExecParams,
     watch: drain::Watch,
 ) -> CliResult<()> {
@@ -365,8 +368,13 @@ pub(crate) async fn container_command(
 
     runtime_command.add_envs(execution_info_env_without_connection_info);
 
-    let (sidecar_container_id, sidecar_intproxy_address) =
-        create_sidecar_intproxy(&config, &runtime_command, connection_info).await?;
+    let (sidecar_container_id, sidecar_intproxy_address) = create_sidecar_intproxy(
+        &config,
+        &runtime_command,
+        connection_info,
+        runtime_args.command.extract_publish(),
+    )
+    .await?;
 
     runtime_command.add_network(format!("container:{sidecar_container_id}"));
     runtime_command.add_volumes_from(sidecar_container_id);

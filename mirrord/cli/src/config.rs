@@ -797,6 +797,27 @@ impl ContainerCommand {
             runtime_args: runtime_args.into_iter().map(T::into).collect(),
         }
     }
+
+    pub fn extract_publish(&mut self) -> Vec<String> {
+        let mut publish_ports = Vec::new();
+
+        let ContainerCommand::Run { runtime_args } = self;
+        let unfiltered_runtime_args = std::mem::take(runtime_args);
+        let mut unfiltered_runtime_args_iter = unfiltered_runtime_args.into_iter();
+
+        while let Some(runtime_arg) = unfiltered_runtime_args_iter.next() {
+            match runtime_arg.as_str() {
+                "-p" | "--publish" => {
+                    publish_ports.extend(unfiltered_runtime_args_iter.next());
+                }
+                _ => {
+                    runtime_args.push(runtime_arg);
+                }
+            }
+        }
+
+        publish_ports
+    }
 }
 
 #[derive(Args, Debug)]
