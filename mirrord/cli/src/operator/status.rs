@@ -141,7 +141,7 @@ Operator License
         ]);
 
         let mut sqs = Table::new();
-        sqs.add_row(row!["Session ID", "SQS"]);
+        sqs.add_row(row!["Session ID", "Queue Message Filters"]);
 
         for session in &status.sessions {
             let locked_ports = session
