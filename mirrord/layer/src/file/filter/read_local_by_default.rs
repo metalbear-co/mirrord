@@ -81,7 +81,12 @@ pub fn regex_set_builder() -> RegexSetBuilder {
     .collect();
 
     if let Ok(cwd) = env::current_dir() {
-        patterns.push(format!("^{}", cwd.to_string_lossy()));
+        patterns.push(format!(
+            "^{}(/|$)",
+            // We trim any trailing '/' and add it above, so that the regex is correct whether
+            // current_dir returns a trailing '/' or not.
+            cwd.to_string_lossy().trim_end_matches('/')
+        ));
     }
     if let Ok(executable) = env::current_exe() {
         patterns.push(format!("{}$", executable.to_string_lossy()));
