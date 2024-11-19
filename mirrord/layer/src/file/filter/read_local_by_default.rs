@@ -46,7 +46,7 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r".*(^|/)jvm\.cfg$",
         // TODO: `node` searches for this file in multiple directories, bypassing some of our
         // ignore regexes, maybe other "project runners" will do the same.
-        r"/package.json$",
+        r"/package\.json$",
         r"/\.yarnrc$",
         r"/\.yarnrc.yml$",
         r"/\.yarnrc.json$",
