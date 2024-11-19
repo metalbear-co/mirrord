@@ -181,7 +181,7 @@ Operator License
         sessions.printstd();
 
         if sqs.get_row(1).is_some() {
-            println!("\nActive SQS:");
+            println!("\nActive SQS-Splitting Sessions:");
             sqs.printstd();
         }
 
