@@ -8,22 +8,22 @@ use regex::RegexSetBuilder;
 /// respectively.
 pub fn regex_set_builder() -> RegexSetBuilder {
     let mut patterns: Vec<String> = [
-        r"^.+\.so$",
-        r"^.+\.d$",
-        r"^.+\.pyc$",
-        r"^.+\.py$",
-        r"^.+\.jar$",
-        r"^.+\.class$",
-        r"^.+\.js$",
-        r"^.+\.pth$",
-        r"^.+\.plist$",
-        r"^.*venv\.cfg$",
+        r".\.so$",
+        r".\.d$",
+        r".\.pyc$",
+        r".\.py$",
+        r".\.jar$",
+        r".\.class$",
+        r".\.js$",
+        r".\.pth$",
+        r".\.plist$",
+        r"venv\.cfg$",
         r"^/proc(/|$)",
         r"^/sys(/|$)",
         r"^/lib(/|$)",
         r"^/etc(/|$)",
-        r"^/usr(/|$).*$",
-        r"^/home(/|$).*$",
+        r"^/usr(/|$)",
+        r"^/home(/|$)",
         r"^/bin(/|$)",
         r"^/sbin(/|$)",
         r"^/dev(/|$)",
@@ -37,16 +37,16 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         r"^/home/iojs(/|$)",
         r"^/home/runner(/|$)",
         // dotnet: `/tmp/clr-debug-pipe-1`
-        r"^.*clr-.*-pipe-.*$",
+        r"clr-.*-pipe-",
         // dotnet: `/home/{username}/{project}.pdb`
-        r"^.*\.pdb$",
+        r"\.pdb$",
         // dotnet: `/home/{username}/{project}.dll`
-        r"^.*\.dll$",
+        r"\.dll$",
         // jvm.cfg or ANYTHING/jvm.cfg
         r".*(^|/)jvm\.cfg$",
         // TODO: `node` searches for this file in multiple directories, bypassing some of our
         // ignore regexes, maybe other "project runners" will do the same.
-        r"^.*/package.json$",
+        r"/package\.json$",
         r"/\.yarnrc$",
         r"/\.yarnrc.yml$",
         r"/\.yarnrc.json$",
@@ -81,10 +81,15 @@ pub fn regex_set_builder() -> RegexSetBuilder {
     .collect();
 
     if let Ok(cwd) = env::current_dir() {
-        patterns.push(format!("^.*{}.*$", cwd.to_string_lossy()));
+        patterns.push(format!(
+            "^{}(/|$)",
+            // We trim any trailing '/' and add it above, so that the regex is correct whether
+            // current_dir returns a trailing '/' or not.
+            cwd.to_string_lossy().trim_end_matches('/')
+        ));
     }
     if let Ok(executable) = env::current_exe() {
-        patterns.push(format!("^.*{}.*$", executable.to_string_lossy()));
+        patterns.push(format!("{}$", executable.to_string_lossy()));
     }
 
     RegexSetBuilder::new(patterns)
