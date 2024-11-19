@@ -10,7 +10,13 @@ use std::{
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
-use mirrord_config::MIRRORD_CONFIG_FILE_ENV;
+use mirrord_config::{
+    feature::env::{
+        MIRRORD_OVERRIDE_ENV_FILE_ENV, MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV,
+        MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV,
+    },
+    MIRRORD_CONFIG_FILE_ENV,
+};
 use mirrord_operator::setup::OperatorNamespace;
 use thiserror::Error;
 
@@ -200,6 +206,10 @@ pub(super) struct ExecParams {
     /// Kube context to use from Kubeconfig
     #[arg(long)]
     pub context: Option<String>,
+
+    /// TODO doc
+    #[arg(long, value_hint = ValueHint::FilePath)]
+    pub env_file: Option<PathBuf>,
 }
 
 impl ExecParams {
@@ -250,14 +260,14 @@ impl ExecParams {
 
         if let Some(override_env_vars_exclude) = &self.override_env_vars_exclude {
             envs.insert(
-                "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE".into(),
+                MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV.into(),
                 override_env_vars_exclude.into(),
             );
         }
 
         if let Some(override_env_vars_include) = &self.override_env_vars_include {
             envs.insert(
-                "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE".into(),
+                MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV.into(),
                 override_env_vars_include.into(),
             );
         }
@@ -305,6 +315,13 @@ impl ExecParams {
             envs.insert(
                 MIRRORD_CONFIG_FILE_ENV.into(),
                 full_path.as_os_str().to_owned(),
+            );
+        }
+
+        if let Some(env_file) = &self.env_file {
+            envs.insert(
+                MIRRORD_OVERRIDE_ENV_FILE_ENV.into(),
+                env_file.as_os_str().to_owned(),
             );
         }
 

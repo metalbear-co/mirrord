@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
@@ -9,6 +9,10 @@ use crate::{
     config::{from_env::FromEnv, source::MirrordConfigSource, ConfigContext, Result},
     util::{MirrordToggleableConfig, VecOrSingle},
 };
+
+pub const MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV: &str = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE";
+pub const MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV: &str = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE";
+pub const MIRRORD_OVERRIDE_ENV_FILE_ENV: &str = "MIRRORD_OVERRIDE_ENV_VARS_FILE";
 
 /// Allows the user to set or override the local process' environment variables with the ones
 /// from the remote pod.
@@ -46,7 +50,7 @@ pub struct EnvConfig {
     ///
     /// Some environment variables are excluded by default (`PATH` for example), including these
     /// requires specifying them with `include`
-    #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE")]
+    #[config(env = MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV)]
     pub include: Option<VecOrSingle<String>>,
 
     /// ### feature.env.exclude {#feature-env-exclude}
@@ -60,7 +64,7 @@ pub struct EnvConfig {
     /// `PATH`, `HOME`, `HOMEPATH`, `CLASSPATH`, `JAVA_EXE`, `JAVA_HOME`, `PYTHONPATH`.
     ///
     /// Can be passed as a list or as a semicolon-delimited string (e.g. `"VAR;OTHER_VAR"`).
-    #[config(env = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")]
+    #[config(env = MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV)]
     pub exclude: Option<VecOrSingle<String>>,
 
     /// ### feature.env.override {#feature-env-override}
@@ -91,21 +95,28 @@ pub struct EnvConfig {
     /// This is case insensitive, meaning if you'd put `AWS_PROFILE` it'd unset both `AWS_PROFILE`
     /// and `Aws_Profile` and other variations.
     pub unset: Option<VecOrSingle<String>>,
+
+    /// TODO doc
+    #[config(env = MIRRORD_OVERRIDE_ENV_FILE_ENV)]
+    pub env_file: Option<PathBuf>,
 }
 
 impl MirrordToggleableConfig for EnvFileConfig {
     fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated> {
         Ok(EnvConfig {
-            include: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_INCLUDE")
+            include: FromEnv::new(MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV)
                 .source_value(context)
                 .transpose()?,
-            exclude: FromEnv::new("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE")
+            exclude: FromEnv::new(MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV)
                 .source_value(context)
                 .transpose()?
                 .or_else(|| Some(VecOrSingle::Single("*".to_owned()))),
             load_from_process: None,
             r#override: None,
             unset: None,
+            env_file: FromEnv::new(MIRRORD_OVERRIDE_ENV_FILE_ENV)
+                .source_value(context)
+                .transpose()?,
         })
     }
 }
@@ -140,6 +151,7 @@ impl CollectAnalytics for &EnvConfig {
                 .map(|v| v.len() as u32)
                 .unwrap_or_default(),
         );
+        analytics.add("env_file_used", self.env_file.is_some());
     }
 }
 
@@ -164,8 +176,8 @@ mod tests {
     ) {
         with_env_vars(
             vec![
-                ("MIRRORD_OVERRIDE_ENV_VARS_INCLUDE", include.0),
-                ("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE", exclude.0),
+                (MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV, include.0),
+                (MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV, exclude.0),
             ],
             || {
                 let mut cfg_context = ConfigContext::default();
@@ -192,8 +204,8 @@ mod tests {
     ) {
         with_env_vars(
             vec![
-                ("MIRRORD_OVERRIDE_ENV_VARS_INCLUDE", include.0),
-                ("MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE", exclude.0),
+                (MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV, include.0),
+                (MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV, exclude.0),
             ],
             || {
                 let mut cfg_context = ConfigContext::default();
