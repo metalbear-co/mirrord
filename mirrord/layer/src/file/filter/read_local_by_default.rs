@@ -81,10 +81,10 @@ pub fn regex_set_builder() -> RegexSetBuilder {
     .collect();
 
     if let Ok(cwd) = env::current_dir() {
-        patterns.push(cwd.to_string_lossy());
+        patterns.push(format!("^{}", cwd.to_string_lossy()));
     }
     if let Ok(executable) = env::current_exe() {
-        patterns.push(executable.to_string_lossy());
+        patterns.push(format!("{}$", executable.to_string_lossy()));
     }
 
     RegexSetBuilder::new(patterns)
