@@ -629,6 +629,12 @@ This option is compatible only with deployment targets.
 Allows the user to set or override the local process' environment variables with the ones
 from the remote pod.
 
+Can be set to one of the options:
+
+1. `false` - Disables the feature, won't have remote environment variables.
+2. `true` - Enables the feature, will obtain remote environment variables.
+3. object - see below (means `true` + additional configuration).
+
 Which environment variables to load from the remote pod are controlled by setting either
 [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).
 
@@ -710,9 +716,9 @@ and `Aws_Profile` and other variations.
 
 Allows the user to specify the default behavior for file operations:
 
-1. `"read"` - Read from the remote file system (default)
+1. `"read"` or `true` - Read from the remote file system (default)
 2. `"write"` - Read/Write from the remote file system.
-3. `"local"` - Read from the local file system.
+3. `"local"` or `false` - Read from the local file system.
 4. `"localwithoverrides"` - perform fs operation locally, unless the path matches a pre-defined
    or user-specified exception.
 
