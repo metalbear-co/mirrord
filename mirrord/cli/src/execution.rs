@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     net::SocketAddr,
     time::Duration,
 };
@@ -473,34 +473,29 @@ impl MirrordExecution {
             (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
         };
 
-        if env_vars_exclude.is_empty() && env_vars_include.is_empty() {
-            return Ok(Default::default());
+        let mut env_vars = if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
+            let communication_timeout =
+                Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into());
+
+            tokio::time::timeout(
+                communication_timeout,
+                Self::get_remote_env(connection, env_vars_exclude, env_vars_include),
+            )
+            .await
+            .map_err(|_| CliError::InitialAgentCommFailed("timeout".to_string()))??
+        } else {
+            Default::default()
+        };
+
+        if let Some(file) = &config.feature.env.env_file {
+            let envs_from_file = envfile::EnvFile::new(file)
+                .map_err(|error| CliError::EnvFileAccessError(file.clone(), error))?
+                .store;
+            env_vars.extend(envs_from_file);
         }
-
-        let communication_timeout =
-            Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into());
-
-        let mut env_vars = tokio::time::timeout(
-            communication_timeout,
-            Self::get_remote_env(connection, env_vars_exclude, env_vars_include),
-        )
-        .await
-        .map_err(|_| CliError::InitialAgentCommFailed("timeout".to_string()))??;
 
         if let Some(overrides) = &config.feature.env.r#override {
             env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
-        }
-
-        if let Some(file) = &config.feature.env.env_file {
-            envfile::EnvFile::new(file)
-                .map_err(|error| CliError::EnvFileAccessError(file.clone(), error))?
-                .store
-                .into_iter()
-                .for_each(|(key, value)| {
-                    if let Entry::Vacant(e) = env_vars.entry(key) {
-                        e.insert(value);
-                    }
-                });
         }
 
         Ok(env_vars)

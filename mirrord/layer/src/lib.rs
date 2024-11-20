@@ -67,7 +67,7 @@ extern crate core;
 
 use std::{
     cmp::Ordering,
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     net::SocketAddr,
     os::unix::process::parent_id,
     panic,
@@ -433,31 +433,26 @@ fn fetch_env_vars() -> HashMap<String, String> {
         (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
     };
 
-    if env_vars_exclude.is_empty() && env_vars_include.is_empty() {
-        return Default::default();
-    }
+    let mut env_vars = (!env_vars_exclude.is_empty() || !env_vars_include.is_empty())
+        .then(|| {
+            make_proxy_request_with_response(GetEnvVarsRequest {
+                env_vars_filter: env_vars_exclude,
+                env_vars_select: env_vars_include,
+            })
+            .expect("failed to make request to proxy")
+            .expect("failed to fetch remote env")
+        })
+        .unwrap_or_default();
 
-    let mut env_vars = make_proxy_request_with_response(GetEnvVarsRequest {
-        env_vars_filter: env_vars_exclude,
-        env_vars_select: env_vars_include,
-    })
-    .expect("failed to make request to proxy")
-    .expect("failed to fetch remote env");
+    if let Some(file) = &setup().env_config().env_file {
+        let envs_from_file = envfile::EnvFile::new(file)
+            .expect("failed to access env file")
+            .store;
+        env_vars.extend(envs_from_file);
+    }
 
     if let Some(overrides) = setup().env_config().r#override.as_ref() {
         env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
-    }
-
-    if let Some(file) = &setup().env_config().env_file {
-        envfile::EnvFile::new(file)
-            .expect("failed to access env file")
-            .store
-            .into_iter()
-            .for_each(|(key, value)| {
-                if let Entry::Vacant(e) = env_vars.entry(key) {
-                    e.insert(value);
-                }
-            });
     }
 
     env_vars
