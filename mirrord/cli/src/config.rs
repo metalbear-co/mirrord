@@ -207,7 +207,7 @@ pub(super) struct ExecParams {
     #[arg(long)]
     pub context: Option<String>,
 
-    /// TODO doc
+    /// Path to env file that should be used for the execution.
     #[arg(long, value_hint = ValueHint::FilePath)]
     pub env_file: Option<PathBuf>,
 }

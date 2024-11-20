@@ -73,6 +73,8 @@ pub struct EnvConfig {
     ///
     /// For example, if the remote pod has an environment variable `REGION=1`, but this is an
     /// undesirable value, it's possible to use `override` to set `REGION=2` (locally) instead.
+    ///
+    /// Environment specified here will also override variables passed via the env file.
     pub r#override: Option<HashMap<String, String>>, // `r#`: `override` is a Rust keyword.
 
     /// ### feature.env.load_from_process {#feature-env-load_from_process}
@@ -96,7 +98,11 @@ pub struct EnvConfig {
     /// and `Aws_Profile` and other variations.
     pub unset: Option<VecOrSingle<String>>,
 
-    /// TODO doc
+    /// ### feature.env_file {#feature-env-file}
+    ///
+    /// Allows for passing environment variables from an env file.
+    ///
+    /// These variables will override environment fetched from the remote target.
     #[config(env = MIRRORD_OVERRIDE_ENV_FILE_ENV)]
     pub env_file: Option<PathBuf>,
 }
