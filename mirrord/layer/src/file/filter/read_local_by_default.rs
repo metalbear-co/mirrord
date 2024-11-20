@@ -73,7 +73,7 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         #[cfg(target_os = "macos")]
         r"^/Network",
         // Any path under the standard temp directory.
-        &format!("^{}", env::temp_dir().to_string_lossy()),
+        &format!("^{}", regex::escape(&env::temp_dir().to_string_lossy())),
         "^/$", // root
     ]
     .iter()
@@ -85,11 +85,11 @@ pub fn regex_set_builder() -> RegexSetBuilder {
             "^{}(/|$)",
             // We trim any trailing '/' and add it above, so that the regex is correct whether
             // current_dir returns a trailing '/' or not.
-            cwd.to_string_lossy().trim_end_matches('/')
+            regex::escape(cwd.to_string_lossy().trim_end_matches('/'))
         ));
     }
     if let Ok(executable) = env::current_exe() {
-        patterns.push(format!("{}$", executable.to_string_lossy()));
+        patterns.push(format!("{}$", regex::escape(&executable.to_string_lossy())));
     }
 
     RegexSetBuilder::new(patterns)
