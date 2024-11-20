@@ -9,11 +9,11 @@ use tokio::signal;
 use crate::{
     config::VpnArgs,
     connection::create_and_connect,
-    error::{CliError, Result},
+    error::{CliError, CliResult},
 };
 
 #[allow(clippy::indexing_slicing)]
-pub async fn vpn_command(args: VpnArgs) -> Result<()> {
+pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord vpn");
 
     let mut analytics = NullReporter::default();

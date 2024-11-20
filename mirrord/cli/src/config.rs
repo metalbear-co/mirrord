@@ -803,6 +803,18 @@ impl ContainerCommand {
             runtime_args: runtime_args.into_iter().map(T::into).collect(),
         }
     }
+
+    pub fn has_publish(&self) -> bool {
+        let ContainerCommand::Run { runtime_args } = self;
+
+        let mut hit_trailing_token = false;
+
+        runtime_args.iter().any(|runtime_arg| {
+            hit_trailing_token = hit_trailing_token || runtime_arg == "--";
+
+            !hit_trailing_token && matches!(runtime_arg.as_str(), "-p" | "--publish")
+        })
+    }
 }
 
 #[derive(Args, Debug)]

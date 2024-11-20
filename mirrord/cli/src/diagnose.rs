@@ -11,15 +11,15 @@ use tokio::{sync::mpsc, time::Instant};
 use tracing::Level;
 
 use crate::{
-    connection::create_and_connect, util::remove_proxy_env, CliError, DiagnoseArgs,
-    DiagnoseCommand, Result,
+    connection::create_and_connect, util::remove_proxy_env, CliError, CliResult, DiagnoseArgs,
+    DiagnoseCommand,
 };
 
 /// Sends a ping the connection and expects a pong.
 async fn ping(
     sender: &mpsc::Sender<ClientMessage>,
     receiver: &mut mpsc::Receiver<DaemonMessage>,
-) -> Result<()> {
+) -> CliResult<()> {
     sender.send(ClientMessage::Ping).await.map_err(|_| {
         CliError::PingPongFailed(
             "failed to send ping message - agent unexpectedly closed connection".to_string(),
@@ -47,7 +47,7 @@ async fn ping(
 
 /// Create a targetless session and run pings to diagnose network latency.
 #[tracing::instrument(level = Level::TRACE, ret)]
-async fn diagnose_latency(config: Option<&Path>) -> Result<()> {
+async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord network diagnosis");
 
     let mut cfg_context = ConfigContext::default();
@@ -98,7 +98,7 @@ async fn diagnose_latency(config: Option<&Path>) -> Result<()> {
 }
 
 /// Handle commands related to the operator `mirrord diagnose ...`
-pub(crate) async fn diagnose_command(args: DiagnoseArgs) -> Result<()> {
+pub(crate) async fn diagnose_command(args: DiagnoseArgs) -> CliResult<()> {
     match args.command {
         DiagnoseCommand::Latency { config_file } => diagnose_latency(config_file.as_deref()).await,
     }
