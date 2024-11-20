@@ -208,6 +208,10 @@ pub(super) struct ExecParams {
     pub context: Option<String>,
 
     /// Path to env file that should be used for the execution.
+    ///
+    /// Allows for passing environment variables from an env file.
+    ///
+    /// These variables will override environment fetched from the remote target.
     #[arg(long, value_hint = ValueHint::FilePath)]
     pub env_file: Option<PathBuf>,
 }
