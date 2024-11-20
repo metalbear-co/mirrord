@@ -12,6 +12,7 @@ use crate::{
 
 /// Allows the user to set or override the local process' environment variables with the ones
 /// from the remote pod.
+///
 /// Can be set to one of the options:
 ///
 /// 1. `false` - Disables the feature, won't have remote environment variables.
