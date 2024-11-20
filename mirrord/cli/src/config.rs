@@ -615,6 +615,12 @@ pub(super) struct OperatorSetupParams {
     /// a Kafka splitting component.
     #[arg(long, visible_alias = "kafka", default_value_t = false)]
     pub(super) kafka_splitting: bool,
+
+    /// Enable argocd Application auto-pause
+    /// When set the operator will temporary pause automated sync for applications whom resources
+    /// are targeted with `scale_down` feature enabled.
+    #[arg(long, default_value_t = false)]
+    pub(super) application_auto_pause: bool,
 }
 
 /// `mirrord operator session` family of commands.
