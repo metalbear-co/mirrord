@@ -16,7 +16,7 @@ use crate::{
 ///
 /// 1. `false` - Disables the feature, won't have remote environment variables.
 /// 2. `true` - Enables the feature, will obtain remote environment variables.
-/// 3. object - see below (means `true`` + additional configuration).
+/// 3.  object - see below (means `true` + additional configuration).
 ///
 /// Which environment variables to load from the remote pod are controlled by setting either
 /// [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).
