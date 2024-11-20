@@ -2218,6 +2218,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "envfile"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fe7fe9d71fc403a41672475b8895d6b817cac0fe23c471e01d36f5af503008c"
+dependencies = [
+ "snailquote",
+]
+
+[[package]]
 name = "envy"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4113,6 +4122,7 @@ dependencies = [
  "clap_complete",
  "const-random",
  "drain",
+ "envfile",
  "exec",
  "futures",
  "http-body 1.0.1",
@@ -4384,6 +4394,7 @@ dependencies = [
  "bytemuck",
  "chrono",
  "ctor",
+ "envfile",
  "errno 0.3.9",
  "exec",
  "fancy-regex",
@@ -6576,6 +6587,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "snailquote"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77c10ec36e3a5cf387fd822263730434205464fbf2b1531054f2f92ee1a7ef4e"
+dependencies = [
+ "unicode_categories",
+]
+
+[[package]]
 name = "socket2"
 version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7565,6 +7585,12 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "unicode_categories"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39ec24b3121d976906ece63c9daad25b85969647682eee313cb5779fdd69e14e"
 
 [[package]]
 name = "unreachable"

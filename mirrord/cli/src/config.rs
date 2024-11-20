@@ -308,7 +308,7 @@ impl ExecParams {
         }
 
         if let Some(config_file) = &self.config_file {
-            // Set canoncialized path to config file, in case forks/children are in different
+            // Set canonicalized path to config file, in case forks/children are in different
             // working directories.
             let full_path = std::fs::canonicalize(config_file)
                 .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.clone(), e))?;
@@ -319,9 +319,13 @@ impl ExecParams {
         }
 
         if let Some(env_file) = &self.env_file {
+            // Set canonicalized path to env file, in case forks/children are in different
+            // working directories.
+            let full_path = std::fs::canonicalize(env_file)
+                .map_err(|e| CliError::EnvFileAccessError(env_file.clone(), e))?;
             envs.insert(
                 MIRRORD_OVERRIDE_ENV_FILE_ENV.into(),
-                env_file.as_os_str().to_owned(),
+                full_path.as_os_str().to_owned(),
             );
         }
 

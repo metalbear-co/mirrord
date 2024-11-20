@@ -244,6 +244,10 @@ pub(crate) enum CliError {
     #[diagnostic(help("Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"))]
     CanonicalizeConfigPathFailed(PathBuf, std::io::Error),
 
+    #[error("Failed to access env file at `{}`: {1}", .0.display())]
+    #[diagnostic(help("Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"))]
+    EnvFileAccessError(PathBuf, std::io::Error),
+
     #[cfg(target_os = "macos")]
     #[error("SIP Error: `{0:#?}`")]
     #[diagnostic(help(
