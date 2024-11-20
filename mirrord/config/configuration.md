@@ -649,6 +649,12 @@ See the environment variables [reference](https://mirrord.dev/docs/reference/env
 }
 ```
 
+### feature.env_file {#feature-env-file}
+
+Allows for passing environment variables from an env file.
+
+These variables will override environment fetched from the remote target.
+
 ### feature.env.exclude {#feature-env-exclude}
 
 Include the remote environment variables in the local process that are **NOT** specified by
@@ -686,6 +692,8 @@ Allows setting or overriding environment variables (locally) with a custom value
 
 For example, if the remote pod has an environment variable `REGION=1`, but this is an
 undesirable value, it's possible to use `override` to set `REGION=2` (locally) instead.
+
+Environment specified here will also override variables passed via the env file.
 
 ### feature.env.unset {#feature-env-unset}
 

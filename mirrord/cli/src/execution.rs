@@ -448,8 +448,6 @@ impl MirrordExecution {
         config: &LayerConfig,
         connection: &mut AgentConnection,
     ) -> CliResult<HashMap<String, String>> {
-        let mut env_vars = HashMap::new();
-
         let (env_vars_exclude, env_vars_include) = match (
             config
                 .feature
@@ -475,20 +473,29 @@ impl MirrordExecution {
             (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
         };
 
-        let communication_timeout =
-            Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into());
+        let mut env_vars = if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
+            let communication_timeout =
+                Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into());
 
-        if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
-            let remote_env = tokio::time::timeout(
+            tokio::time::timeout(
                 communication_timeout,
                 Self::get_remote_env(connection, env_vars_exclude, env_vars_include),
             )
             .await
-            .map_err(|_| CliError::InitialAgentCommFailed("timeout".to_string()))??;
-            env_vars.extend(remote_env);
-            if let Some(overrides) = &config.feature.env.r#override {
-                env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
-            }
+            .map_err(|_| CliError::InitialAgentCommFailed("timeout".to_string()))??
+        } else {
+            Default::default()
+        };
+
+        if let Some(file) = &config.feature.env.env_file {
+            let envs_from_file = envfile::EnvFile::new(file)
+                .map_err(|error| CliError::EnvFileAccessError(file.clone(), error))?
+                .store;
+            env_vars.extend(envs_from_file);
+        }
+
+        if let Some(overrides) = &config.feature.env.r#override {
+            env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
         }
 
         Ok(env_vars)

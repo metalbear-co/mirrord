@@ -97,6 +97,7 @@ num-traits = "0.2"
 regex = { version = "1", features = ["unicode-case"] }
 fancy-regex = { version = "0.13" }
 enum_dispatch = "0.3"
+envfile = "0.2"
 
 
 # If you update `hyper`, check that `h2` version is compatible in `intproxy/Cargo.toml`.

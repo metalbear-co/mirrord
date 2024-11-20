@@ -10,7 +10,13 @@ use std::{
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
-use mirrord_config::MIRRORD_CONFIG_FILE_ENV;
+use mirrord_config::{
+    feature::env::{
+        MIRRORD_OVERRIDE_ENV_FILE_ENV, MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV,
+        MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV,
+    },
+    MIRRORD_CONFIG_FILE_ENV,
+};
 use mirrord_operator::setup::OperatorNamespace;
 use thiserror::Error;
 
@@ -200,6 +206,14 @@ pub(super) struct ExecParams {
     /// Kube context to use from Kubeconfig
     #[arg(long)]
     pub context: Option<String>,
+
+    /// Path to env file that should be used for the execution.
+    ///
+    /// Allows for passing environment variables from an env file.
+    ///
+    /// These variables will override environment fetched from the remote target.
+    #[arg(long, value_hint = ValueHint::FilePath)]
+    pub env_file: Option<PathBuf>,
 }
 
 impl ExecParams {
@@ -250,14 +264,14 @@ impl ExecParams {
 
         if let Some(override_env_vars_exclude) = &self.override_env_vars_exclude {
             envs.insert(
-                "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE".into(),
+                MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV.into(),
                 override_env_vars_exclude.into(),
             );
         }
 
         if let Some(override_env_vars_include) = &self.override_env_vars_include {
             envs.insert(
-                "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE".into(),
+                MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV.into(),
                 override_env_vars_include.into(),
             );
         }
@@ -298,12 +312,23 @@ impl ExecParams {
         }
 
         if let Some(config_file) = &self.config_file {
-            // Set canoncialized path to config file, in case forks/children are in different
+            // Set canonicalized path to config file, in case forks/children are in different
             // working directories.
             let full_path = std::fs::canonicalize(config_file)
                 .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.clone(), e))?;
             envs.insert(
                 MIRRORD_CONFIG_FILE_ENV.into(),
+                full_path.as_os_str().to_owned(),
+            );
+        }
+
+        if let Some(env_file) = &self.env_file {
+            // Set canonicalized path to env file, in case forks/children are in different
+            // working directories.
+            let full_path = std::fs::canonicalize(env_file)
+                .map_err(|e| CliError::EnvFileAccessError(env_file.clone(), e))?;
+            envs.insert(
+                MIRRORD_OVERRIDE_ENV_FILE_ENV.into(),
                 full_path.as_os_str().to_owned(),
             );
         }

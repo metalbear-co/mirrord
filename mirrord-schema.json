@@ -702,6 +702,14 @@
       "description": "Allows the user to set or override the local process' environment variables with the ones from the remote pod.\n\nWhich environment variables to load from the remote pod are controlled by setting either [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).\n\nSee the environment variables [reference](https://mirrord.dev/docs/reference/env/) for more details.\n\n```json { \"feature\": { \"env\": { \"include\": \"DATABASE_USER;PUBLIC_ENV;MY_APP_*\", \"exclude\": \"DATABASE_PASSWORD;SECRET_ENV\", \"override\": { \"DATABASE_CONNECTION\": \"db://localhost:7777/my-db\", \"LOCAL_BEAR\": \"panda\" } } } } ```",
       "type": "object",
       "properties": {
+        "env_file": {
+          "title": "feature.env_file {#feature-env-file}",
+          "description": "Allows for passing environment variables from an env file.\n\nThese variables will override environment fetched from the remote target.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "exclude": {
           "title": "feature.env.exclude {#feature-env-exclude}",
           "description": "Include the remote environment variables in the local process that are **NOT** specified by this option. Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of any character and `*` matches arbitrary many (including zero) occurrences of any character.\n\nSome of the variables that are excluded by default: `PATH`, `HOME`, `HOMEPATH`, `CLASSPATH`, `JAVA_EXE`, `JAVA_HOME`, `PYTHONPATH`.\n\nCan be passed as a list or as a semicolon-delimited string (e.g. `\"VAR;OTHER_VAR\"`).",
@@ -736,7 +744,7 @@
         },
         "override": {
           "title": "feature.env.override {#feature-env-override}",
-          "description": "Allows setting or overriding environment variables (locally) with a custom value.\n\nFor example, if the remote pod has an environment variable `REGION=1`, but this is an undesirable value, it's possible to use `override` to set `REGION=2` (locally) instead.",
+          "description": "Allows setting or overriding environment variables (locally) with a custom value.\n\nFor example, if the remote pod has an environment variable `REGION=1`, but this is an undesirable value, it's possible to use `override` to set `REGION=2` (locally) instead.\n\nEnvironment specified here will also override variables passed via the env file.",
           "type": [
             "object",
             "null"
