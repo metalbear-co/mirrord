@@ -8,6 +8,44 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.125.0](https://github.com/metalbear-co/mirrord/tree/3.125.0) - 2024-11-21
+
+
+### Added
+
+- Added a configuration option that allows for specifying an env file for
+  mirrord execution.
+  [#1913](https://github.com/metalbear-co/mirrord/issues/1913)
+- Added notice that fs mapping does not apply to relative paths.
+  [#2894](https://github.com/metalbear-co/mirrord/issues/2894)
+
+### Changed
+
+- Ignore paths that start with the current dir path, instead of any path that
+  contains the current dir path. Also, ignore only paths that end with the
+  current exe's path, not all that contain it.
+- Print a warning to the user when `-p` is provided as part of `mirrord container`
+  run command, as it may cause issues because of our usage of
+  container type network mode.
+
+
+### Fixed
+
+- Change `getifaddrs` hook to allocate memory for a new list instead of modifying
+  list returned from libc call.
+  [#2903](https://github.com/metalbear-co/mirrord/issues/2903)
+- Read current dir, current exe, and temp dir locally, also when they contain
+  characters with a meaning for regexes, like e.g. paretheses.
+
+
+### Internal
+
+- Add argocd application permissions to operator setup.
+- Add explanation about boolean configurations in env/fs
+- Changes the Result alias to CliResult, and config to layer_config (in some
+  places).
+- build script forwards args to cargo build.
+
 ## [3.124.2](https://github.com/metalbear-co/mirrord/tree/3.124.2) - 2024-11-08
 
 
