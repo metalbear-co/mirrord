@@ -260,6 +260,10 @@ pub(crate) enum CliError {
     #[diagnostic(transparent)]
     OperatorSetupError(#[from] OperatorSetupError),
 
+    #[error("`mirrord operator status` command failed! Could not retrieve operator status API.")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    OperatorStatusNotFound,
+
     #[error("Failed to extract mirrord-layer to `{}`: {1}", .0.display())]
     #[diagnostic(help("{GENERAL_BUG}"))]
     LayerExtractError(PathBuf, std::io::Error),
