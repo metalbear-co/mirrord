@@ -389,7 +389,6 @@ pub struct MirrordPolicySpec {
     pub block: Vec<BlockedFeature>,
 }
 
-
 /// Custom resource for policies that limit what mirrord features users can use.
 /// Non-namespaced version.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
