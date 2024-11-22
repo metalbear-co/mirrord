@@ -389,6 +389,33 @@ pub struct MirrordPolicySpec {
     pub block: Vec<BlockedFeature>,
 }
 
+
+/// Custom resource for policies that limit what mirrord features users can use.
+/// Non-namespaced version.
+#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[kube(
+    // The operator group is handled by the operator, we want policies to be handled by k8s.
+    group = "policies.mirrord.metalbear.co",
+    version = "v1alpha",
+    kind = "ClusterMirrordPolicy"
+)]
+#[serde(rename_all = "camelCase")] // target_path -> targetPath in yaml.
+pub struct ClusterMirrordPolicySpec {
+    /// Specify the targets for which this policy applies, in the pod/my-pod deploy/my-deploy
+    /// notation. Targets can be matched using `*` and `?` where `?` matches exactly one
+    /// occurrence of any character and `*` matches arbitrary many (including zero) occurrences
+    /// of any character. If not specified, this policy does not depend on the target's path.
+    pub target_path: Option<String>,
+
+    /// If specified in a policy, the policy will only apply to targets with labels that match all
+    /// of the selector's rules.
+    pub selector: Option<LabelSelector>,
+
+    // TODO: make the k8s list type be set/map to prevent duplicates.
+    /// List of features and operations blocked by this policy.
+    pub block: Vec<BlockedFeature>,
+}
+
 /// Set where the application reads the name of the queue from, so that mirrord can find that queue,
 /// split it, and temporarily change the name there to the name of the branch queue when splitting.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
