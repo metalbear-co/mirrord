@@ -138,7 +138,7 @@ impl KubeResourceSeeker<'_> {
 
     /// Helper to get the list of a resource type ([`Pod`], [`Deployment`], [`Rollout`], [`Job`],
     /// [`CronJob`], [`StatefulSet`], or whatever satisfies `R`) through the kube api.
-    pub fn list_resource<'s, R>(
+    fn list_resource<'s, R>(
         &self,
         field_selector: Option<&'s str>,
     ) -> impl Stream<Item = Result<R>> + 's

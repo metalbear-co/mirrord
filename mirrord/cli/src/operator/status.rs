@@ -1,15 +1,14 @@
 use std::{path::PathBuf, time::Duration};
 
-use futures::{StreamExt, TryStreamExt};
+use kube::{api::ListParams, Api};
 use mirrord_analytics::NullReporter;
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     LayerConfig, LayerFileConfig,
 };
-use mirrord_kube::api::kubernetes::seeker::KubeResourceSeeker;
 use mirrord_operator::{
-    client::{error::OperatorApiError, NoClientCert, OperatorApi},
-    crd::{MirrordOperatorSpec, MirrordWorkloadQueueRegistry},
+    client::{NoClientCert, OperatorApi},
+    crd::{is_session_ready, MirrordOperatorSpec, MirrordSqsSession, QueueNameUpdate},
     types::LicenseInfoOwned,
 };
 use mirrord_progress::{Progress, ProgressTracker};
@@ -57,8 +56,6 @@ impl StatusCommandHandler {
 
     #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     pub(super) async fn handle(self) -> CliResult<()> {
-        use std::future::ready;
-
         let Self { operator_api: api } = self;
 
         let MirrordOperatorSpec {
@@ -72,7 +69,7 @@ impl StatusCommandHandler {
                     ..
                 },
             ..
-        } = api.operator().spec.clone();
+        } = &api.operator().spec;
 
         let expire_at = expire_at.format("%e-%b-%Y");
 
@@ -179,46 +176,45 @@ Operator License
         sessions.printstd();
         println!();
 
-        let mut reporter = NullReporter::default();
-        let api = api.prepare_client_cert(&mut reporter).await;
-        api.inspect_cert_error(
-            |error| tracing::error!(%error, "failed to prepare client certificate"),
-        );
-
-        let seeker = KubeResourceSeeker {
-            client: api.client(),
-            namespace: Some(default_namespace.as_str()),
-        };
-
-        let mut sqs = Table::new();
-        sqs.add_row(row!["Queue Name", "Consumer"]);
-
-        for sqs_row in seeker
-            .list_resource::<MirrordWorkloadQueueRegistry>(None)
-            .filter(|response| ready(response.is_ok()))
-            .try_collect::<Vec<_>>()
+        let sqs_sessions_api = Api::<MirrordSqsSession>::all(api.client().clone());
+        for (sqs_session_spec, sqs_session_table) in sqs_sessions_api
+            .list(&ListParams::default())
             .await
-            .map_err(OperatorApiError::from)?
+            .map_err(CliError::ListSqsSessions)?
             .into_iter()
-            .filter_map(|sqs| {
-                let status = sqs.status?;
-                let details = status.sqs_details?;
-                let consumer = sqs.spec.consumer;
-                let names = details
-                    .output_queue_names()
-                    .into_iter()
-                    .map(|name| row![name, &consumer]);
-
-                Some(names.collect::<Vec<_>>())
+            .filter(|session| is_session_ready(Some(session)))
+            .filter_map(|session| {
+                Some((
+                    session
+                        .status
+                        .as_ref()?
+                        .get_split_details()?
+                        .clone()
+                        .queue_names
+                        .into_iter(),
+                    session,
+                ))
             })
-            .flatten()
-        {
-            sqs.add_row(sqs_row);
-        }
+            .map(|(split_details, session)| {
+                let mut session_table = Table::new();
+                session_table.add_row(row!["Queue Id", "Original Name", "Output Name"]);
 
-        if sqs.len() > 1 {
-            println!("Active SQS Queues:");
-            sqs.printstd();
+                for (
+                    id,
+                    QueueNameUpdate {
+                        output_name,
+                        original_name,
+                    },
+                ) in split_details
+                {
+                    session_table.add_row(row![id, original_name, output_name]);
+                }
+
+                (session.spec, session_table)
+            })
+        {
+            println!("SQS Queue for {}:", sqs_session_spec.queue_consumer);
+            sqs_session_table.printstd();
         }
 
         Ok(())
