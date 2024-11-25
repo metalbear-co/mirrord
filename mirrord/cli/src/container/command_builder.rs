@@ -1,12 +1,12 @@
 use std::{ffi::OsStr, path::Path};
 
-use crate::config::{ContainerCommand, ContainerRuntime};
+use crate::config::{ContainerRuntime, ContainerRuntimeCommand};
 
 #[derive(Debug, Clone)]
 pub struct Empty;
 #[derive(Debug, Clone)]
 pub struct WithCommand {
-    command: ContainerCommand,
+    command: ContainerRuntimeCommand,
 }
 
 #[derive(Debug, Clone)]
@@ -98,7 +98,10 @@ impl RuntimeCommandBuilder {
         }
     }
 
-    pub fn with_command(self, command: ContainerCommand) -> RuntimeCommandBuilder<WithCommand> {
+    pub fn with_command(
+        self,
+        command: ContainerRuntimeCommand,
+    ) -> RuntimeCommandBuilder<WithCommand> {
         let RuntimeCommandBuilder {
             runtime,
             extra_args,
@@ -107,6 +110,19 @@ impl RuntimeCommandBuilder {
 
         RuntimeCommandBuilder {
             step: WithCommand { command },
+            runtime,
+            extra_args,
+        }
+    }
+
+    pub fn as_extension_result(self) -> RuntimeCommandExtensionParams {
+        let RuntimeCommandBuilder {
+            runtime,
+            extra_args,
+            ..
+        } = self;
+
+        RuntimeCommandExtensionParams {
             runtime,
             extra_args,
         }
@@ -123,7 +139,7 @@ impl RuntimeCommandBuilder<WithCommand> {
         } = self;
 
         let (runtime_command, runtime_args) = match step.command {
-            ContainerCommand::Run { runtime_args } => ("run".to_owned(), runtime_args),
+            ContainerRuntimeCommand::Run { runtime_args } => ("run".to_owned(), runtime_args),
         };
 
         (
@@ -141,4 +157,10 @@ impl RuntimeCommandBuilder<WithCommand> {
 
         (runtime.clone(), std::iter::once(runtime).chain(args))
     }
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct RuntimeCommandExtensionParams {
+    runtime: ContainerRuntime,
+    extra_args: Vec<String>,
 }

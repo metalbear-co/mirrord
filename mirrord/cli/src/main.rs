@@ -11,7 +11,7 @@ use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
 use connection::create_and_connect;
-use container::container_command;
+use container::{container_command, container_ext_command};
 use diagnose::diagnose_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
@@ -43,6 +43,7 @@ use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
 use semver::{Version, VersionReq};
 use serde_json::json;
+use tokio_util::either::Either;
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 use which::which;
@@ -680,10 +681,14 @@ fn main() -> miette::Result<()> {
             }
             Commands::Teams => teams::navigate_to_intro().await,
             Commands::Diagnose(args) => diagnose_command(*args).await?,
-            Commands::Container(args) => {
-                let (runtime_args, exec_params) = args.into_parts();
-                container_command(runtime_args, exec_params, watch).await?
-            }
+            Commands::Container(args) => match args.into_exec_parts() {
+                Either::Left((runtime_args, exec_params)) => {
+                    container_command(runtime_args, exec_params, watch).await?
+                }
+                Either::Right((config_path, target)) => {
+                    container_ext_command(config_path, target, watch).await?
+                }
+            },
             Commands::ExternalProxy { port } => external_proxy::proxy(port, watch).await?,
             Commands::PortForward(args) => port_forward(&args, watch).await?,
             Commands::Vpn(args) => vpn::vpn_command(*args).await?,

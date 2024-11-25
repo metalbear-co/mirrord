@@ -19,6 +19,7 @@ use mirrord_config::{
 };
 use mirrord_operator::setup::OperatorNamespace;
 use thiserror::Error;
+use tokio_util::either::Either;
 
 use crate::error::CliError;
 
@@ -759,7 +760,7 @@ pub(super) enum DiagnoseCommand {
     },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, serde::Serialize)]
 /// Runtimes supported by the `mirrord container` command.
 pub(super) enum ContainerRuntime {
     Docker,
@@ -778,8 +779,12 @@ impl std::fmt::Display for ContainerRuntime {
 }
 
 #[derive(Args, Debug)]
+#[clap(args_conflicts_with_subcommands = true)]
 /// Args for the `mirrord container` command.
 pub(super) struct ContainerArgs {
+    #[clap(subcommand)]
+    pub command: Option<ContainerCommand>,
+
     #[clap(flatten)]
     /// Parameters to be passed to mirrord.
     pub params: ExecParams,
@@ -790,13 +795,67 @@ pub(super) struct ContainerArgs {
 }
 
 impl ContainerArgs {
-    pub fn into_parts(self) -> (RuntimeArgs, ExecParams) {
-        let ContainerArgs { params, exec } = self;
+    pub fn into_exec_parts(
+        self,
+    ) -> Either<(RuntimeArgs, ExecParams), (Option<PathBuf>, Option<String>)> {
+        let ContainerArgs {
+            command,
+            params,
+            exec,
+        } = self;
 
-        let runtime_args =
-            RuntimeArgs::parse_from(std::iter::once("mirrord container --".into()).chain(exec));
+        match command {
+            Some(command) => command.into_exec_parts(),
+            None => {
+                let runtime_args = RuntimeArgs::parse_from(
+                    std::iter::once("mirrord container --".into()).chain(exec),
+                );
 
-        (runtime_args, params)
+                Either::Left((runtime_args, params))
+            }
+        }
+    }
+}
+
+/// Supported command for using mirrord with container runtimes.
+#[derive(Subcommand, Debug)]
+pub(super) enum ContainerCommand {
+    Exec {
+        #[clap(flatten)]
+        /// Parameters to be passed to mirrord.
+        params: ExecParams,
+
+        /// Container command to be executed
+        #[arg(trailing_var_arg = true)]
+        exec: Vec<String>,
+    },
+    Ext {
+        /// Specify config file to use
+        #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
+        config_file: Option<PathBuf>,
+        /// Specify target
+        #[arg(short = 't')]
+        target: Option<String>,
+    },
+}
+
+impl ContainerCommand {
+    pub fn into_exec_parts(
+        self,
+    ) -> Either<(RuntimeArgs, ExecParams), (Option<PathBuf>, Option<String>)> {
+        match self {
+            ContainerCommand::Exec { params, exec } => {
+                let runtime_args = RuntimeArgs::parse_from(
+                    std::iter::once("mirrord container exec --".into()).chain(exec),
+                );
+
+                Either::Left((runtime_args, params))
+            }
+            ContainerCommand::Ext {
+                config_file,
+                target,
+            } => Either::Right((config_file, target)),
+        }
     }
 }
 
@@ -808,12 +867,12 @@ pub struct RuntimeArgs {
 
     #[command(subcommand)]
     /// Command to use with `mirrord container`.
-    pub command: ContainerCommand,
+    pub command: ContainerRuntimeCommand,
 }
 
 /// Supported command for using mirrord with container runtimes.
 #[derive(Subcommand, Debug, Clone)]
-pub(super) enum ContainerCommand {
+pub(super) enum ContainerRuntimeCommand {
     /// Execute a `<RUNTIME> run` command with mirrord loaded.
     Run {
         /// Arguments that will be propogated to underlying `<RUNTIME> run` command.
@@ -822,15 +881,15 @@ pub(super) enum ContainerCommand {
     },
 }
 
-impl ContainerCommand {
+impl ContainerRuntimeCommand {
     pub fn run<T: Into<String>>(runtime_args: impl IntoIterator<Item = T>) -> Self {
-        ContainerCommand::Run {
+        ContainerRuntimeCommand::Run {
             runtime_args: runtime_args.into_iter().map(T::into).collect(),
         }
     }
 
     pub fn has_publish(&self) -> bool {
-        let ContainerCommand::Run { runtime_args } = self;
+        let ContainerRuntimeCommand::Run { runtime_args } = self;
 
         let mut hit_trailing_token = false;
 
