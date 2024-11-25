@@ -46,7 +46,8 @@ impl StatusCommandHandler {
             .inspect_err(|_| {
                 status_progress.failure(Some("failed to get status"));
             })?
-            .ok_or(CliError::OperatorNotInstalled)?;
+            .ok_or(CliError::OperatorNotInstalled)
+            .inspect_err(|_| status_progress.failure(Some("operator not found")))?;
 
         status_progress.success(Some("fetched status"));
         progress.success(None);
