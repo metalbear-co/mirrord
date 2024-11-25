@@ -626,7 +626,7 @@ impl OperatorApi<PreparedClientCert> {
                 &TargetCrd::api_version(&()),
                 &TargetCrd::plural(&()),
                 &TargetCrd::url_path(&(), target.namespace()),
-            )?
+            )
         };
 
         tracing::debug!("connect_url {connect_url:?}");

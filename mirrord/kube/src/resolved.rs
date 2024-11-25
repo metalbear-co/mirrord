@@ -463,17 +463,15 @@ impl ResolvedTarget<true> {
         api_version: &str,
         plural: &str,
         url_path: &str,
-    ) -> Result<String, KubeApiError> {
+    ) -> String {
         let name = self.urlfied_name();
         let namespace = self.namespace().unwrap_or("default");
 
-        let url = if use_proxy {
+        if use_proxy {
             format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?on_concurrent_steal={concurrent_steal}&connect=true")
         } else {
             format!("{url_path}/{name}?on_concurrent_steal={concurrent_steal}&connect=true")
-        };
-
-        Ok(url)
+        }
     }
 
     pub fn urlfied_name(&self) -> String {
