@@ -632,6 +632,8 @@ impl OperatorApi<PreparedClientCert> {
         tracing::debug!("connect_url {connect_url:?}");
 
         let session = OperatorSession {
+            // TODO(alex): Instead of always random here, we should re-use the id from
+            // `CopyTargetCrd`, if applicable.
             id: rand::random(),
             connect_url,
             client_cert: self.client_cert.cert.clone(),

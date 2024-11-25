@@ -197,7 +197,9 @@ Operator License
             })
             .map(|(split_details, session)| {
                 let mut session_table = Table::new();
-                session_table.add_row(row!["Queue Id", "Original Name", "Output Name"]);
+                session_table.add_row(row!["Queue Id", "Original Name", "Output Name", "Filter"]);
+
+                let filters = &session.spec.queue_filters;
 
                 for (
                     id,
@@ -207,7 +209,16 @@ Operator License
                     },
                 ) in split_details
                 {
-                    session_table.add_row(row![id, original_name, output_name]);
+                    if let Some(queue_filters) = filters.get(&id).map(|filters| filters.iter()) {
+                        for (filter_key, filter_value) in queue_filters {
+                            session_table.add_row(row![
+                                id,
+                                original_name,
+                                output_name,
+                                format!("{filter_key}:{filter_value}")
+                            ]);
+                        }
+                    }
                 }
 
                 (session.spec, session_table)
