@@ -38,6 +38,7 @@ pub struct RolloutStatus {
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RolloutSpec {
+    pub replicas: Option<i32>,
     pub selector: LabelSelector,
     #[serde(deserialize_with = "rollout_pod_spec")]
     pub template: Option<PodTemplateSpec>,
