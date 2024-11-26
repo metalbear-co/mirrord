@@ -431,21 +431,14 @@ pub(crate) async fn container_command(
         .status()
         .await;
 
-    let mut exit_code = None;
+    let _ = composed_config_file.close();
 
     match runtime_command_result {
         Err(err) => {
-            tracing::error!("Couldn't execute {:?}", err);
-
             analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+
+            Err(err)
         }
-        Ok(status) if !status.success() => {
-            exit_code = status.code();
-        }
-        _ => {}
+        Ok(status) => Ok(status.code().unwrap_or_default()),
     }
-
-    let _ = composed_config_file.close();
-
-    Ok(exit_code.unwrap_or(0))
 }
