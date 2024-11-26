@@ -289,7 +289,7 @@ impl HttpConnection {
             Err(InterceptorError::Hyper(e)) if e.is_incomplete_message() => {
                 tracing::warn!(
                     "Sending request to local application failed with: {e:?}. \
-                        Connection closed before the message could complete!."
+                        Connection closed before the message could complete!"
                 );
                 tracing::trace!(
                     ?request,
