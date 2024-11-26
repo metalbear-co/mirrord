@@ -35,7 +35,7 @@ use crate::{
     error::CliError,
     extract::extract_library,
     util::remove_proxy_env,
-    Result,
+    CliResult,
 };
 
 /// Env variable mirrord-layer uses to connect to intproxy
@@ -171,7 +171,7 @@ impl MirrordExecution {
         #[cfg(target_os = "macos")] executable: Option<&str>,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
-    ) -> Result<Self>
+    ) -> CliResult<Self>
     where
         P: Progress + Send + Sync,
     {
@@ -325,7 +325,7 @@ impl MirrordExecution {
         })
     }
 
-    async fn get_agent_version(connection: &mut AgentConnection) -> Result<Version> {
+    async fn get_agent_version(connection: &mut AgentConnection) -> CliResult<Version> {
         let Ok(_) = connection
             .sender
             .send(ClientMessage::SwitchProtocolVersion(
@@ -354,7 +354,7 @@ impl MirrordExecution {
         config: &LayerConfig,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
-    ) -> Result<Self>
+    ) -> CliResult<Self>
     where
         P: Progress + Send + Sync,
     {
@@ -447,9 +447,7 @@ impl MirrordExecution {
     async fn fetch_env_vars(
         config: &LayerConfig,
         connection: &mut AgentConnection,
-    ) -> Result<HashMap<String, String>> {
-        let mut env_vars = HashMap::new();
-
+    ) -> CliResult<HashMap<String, String>> {
         let (env_vars_exclude, env_vars_include) = match (
             config
                 .feature
@@ -475,20 +473,29 @@ impl MirrordExecution {
             (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
         };
 
-        let communication_timeout =
-            Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into());
+        let mut env_vars = if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
+            let communication_timeout =
+                Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into());
 
-        if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
-            let remote_env = tokio::time::timeout(
+            tokio::time::timeout(
                 communication_timeout,
                 Self::get_remote_env(connection, env_vars_exclude, env_vars_include),
             )
             .await
-            .map_err(|_| CliError::InitialAgentCommFailed("timeout".to_string()))??;
-            env_vars.extend(remote_env);
-            if let Some(overrides) = &config.feature.env.r#override {
-                env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
-            }
+            .map_err(|_| CliError::InitialAgentCommFailed("timeout".to_string()))??
+        } else {
+            Default::default()
+        };
+
+        if let Some(file) = &config.feature.env.env_file {
+            let envs_from_file = envfile::EnvFile::new(file)
+                .map_err(|error| CliError::EnvFileAccessError(file.clone(), error))?
+                .store;
+            env_vars.extend(envs_from_file);
+        }
+
+        if let Some(overrides) = &config.feature.env.r#override {
+            env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
         }
 
         Ok(env_vars)
@@ -500,7 +507,7 @@ impl MirrordExecution {
         connection: &mut AgentConnection,
         env_vars_filter: HashSet<String>,
         env_vars_select: HashSet<String>,
-    ) -> Result<HashMap<String, String>> {
+    ) -> CliResult<HashMap<String, String>> {
         connection
             .sender
             .send(ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
@@ -552,7 +559,7 @@ impl MirrordExecution {
     /// cleans up the process when the parent process exits, so we need the parent to stay alive
     /// while the internal proxy is running.
     /// See <https://github.com/metalbear-co/mirrord/issues/1211>
-    pub(crate) async fn wait(mut self) -> Result<()> {
+    pub(crate) async fn wait(mut self) -> CliResult<()> {
         self.child
             .wait()
             .await

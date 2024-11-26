@@ -327,10 +327,6 @@ as targeted agent always runs on the same node as its target container.
 }
 ```
 
-### agent.service_account {#agent-service_account}
-
-Allows setting up custom Service Account for the agent Job and Pod.
-
 ### agent.privileged {#agent-privileged}
 
 Run the mirror agent as privileged container.
@@ -354,6 +350,16 @@ Default is
     "cpu": "100m",
       "memory": "100Mi"
   }
+}
+```
+
+### agent.service_account {#agent-service_account}
+
+Allows setting up custom Service Account for the agent Job and Pod.
+
+```json
+{
+  "service_account": "my-service-account"
 }
 ```
 
@@ -432,6 +438,14 @@ Defaults to `"/opt/mirrord/lib/libmirrord_layer.so"`.
 mirrord Experimental features.
 This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 
+### _experimental_ disable_reuseaddr {#experimental-disable_reuseaddr}
+
+Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors.
+On macOS the application can use the same address many times but then we don't steal it
+correctly. This probably should be on by default but we want to gradually roll it out.
+<https://github.com/metalbear-co/mirrord/issues/2819>
+This option applies only on macOS.
+
 ### _experimental_ enable_exec_hooks_linux {#experimental-enable_exec_hooks_linux}
 
 Enables exec hooks on Linux. Enable Linux hooks can fix issues when the application
@@ -444,7 +458,7 @@ Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by
 
 ### _experimental_ readlink {#experimental-readlink}
 
-Enables the `readlink` hook.
+DEPRECATED, WILL BE REMOVED
 
 ### _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
 
@@ -453,6 +467,10 @@ Enables the `readlink` hook.
 ### _experimental_ trust_any_certificate {#experimental-trust_any_certificate}
 
 Enables trusting any certificate on macOS, useful for <https://github.com/golang/go/issues/51991#issuecomment-2059588252>
+
+### _experimental_ use_dev_null {#experimental-use_dev_null}
+
+Uses /dev/null for creating local fake files (should be better than using /tmp)
 
 ## external_proxy {#root-external_proxy}
 
@@ -611,6 +629,12 @@ This option is compatible only with deployment targets.
 Allows the user to set or override the local process' environment variables with the ones
 from the remote pod.
 
+Can be set to one of the options:
+
+1. `false` - Disables the feature, won't have remote environment variables.
+2. `true` - Enables the feature, will obtain remote environment variables.
+3. object - see below (means `true` + additional configuration).
+
 Which environment variables to load from the remote pod are controlled by setting either
 [`include`](#feature-env-include) or [`exclude`](#feature-env-exclude).
 
@@ -630,6 +654,12 @@ See the environment variables [reference](https://mirrord.dev/docs/reference/env
   }
 }
 ```
+
+### feature.env_file {#feature-env-file}
+
+Allows for passing environment variables from an env file.
+
+These variables will override environment fetched from the remote target.
 
 ### feature.env.exclude {#feature-env-exclude}
 
@@ -669,6 +699,8 @@ Allows setting or overriding environment variables (locally) with a custom value
 For example, if the remote pod has an environment variable `REGION=1`, but this is an
 undesirable value, it's possible to use `override` to set `REGION=2` (locally) instead.
 
+Environment specified here will also override variables passed via the env file.
+
 ### feature.env.unset {#feature-env-unset}
 
 Allows unsetting environment variables in the executed process.
@@ -684,9 +716,9 @@ and `Aws_Profile` and other variations.
 
 Allows the user to specify the default behavior for file operations:
 
-1. `"read"` - Read from the remote file system (default)
+1. `"read"` or `true` - Read from the remote file system (default)
 2. `"write"` - Read/Write from the remote file system.
-3. `"local"` - Read from the local file system.
+3. `"local"` or `false` - Read from the local file system.
 4. `"localwithoverrides"` - perform fs operation locally, unless the path matches a pre-defined
    or user-specified exception.
 
@@ -769,6 +801,9 @@ Will do the next replacements for any io operaton
 
 `/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml`
 `/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`
+
+- Relative paths: this feature (currently) does not apply mappings to relative paths, e.g.
+  `../dev`.
 
 ### feature.fs.mode {#feature-fs-mode}
 
@@ -1166,6 +1201,8 @@ The `remote` and `local` config for this feature are **mutually** exclusive.
 ```
 
 #### feature.network.outgoing.filter {#feature.network.outgoing.filter}
+
+Filters that are used to send specific traffic from either the remote pod or the local app
 
 List of addresses/ports/subnets that should be sent through either the remote pod or local app,
 depending how you set this up with either `remote` or `local`.

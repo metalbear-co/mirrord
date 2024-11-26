@@ -63,7 +63,7 @@ mod util;
 mod verify_config;
 mod vpn;
 
-pub(crate) use error::{CliError, Result};
+pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
 use crate::util::remove_proxy_env;
@@ -77,7 +77,7 @@ async fn exec_process<P>(
     args: &ExecArgs,
     progress: &P,
     analytics: &mut AnalyticsReporter,
-) -> Result<()>
+) -> CliResult<()>
 where
     P: Progress + Send + Sync,
 {
@@ -137,12 +137,12 @@ where
         .clone()
         .into_iter()
         .map(CString::new)
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<CliResult<Vec<_>, _>>()?;
     // env vars should be formatted as "varname=value" CStrings
     let env = env_vars
         .into_iter()
         .map(|(k, v)| CString::new(format!("{k}={v}")))
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<CliResult<Vec<_>, _>>()?;
 
     // The execve hook is not yet active and does not hijack this call.
     let errno = nix::unistd::execve(&path, args.as_slice(), env.as_slice())
@@ -329,7 +329,7 @@ fn print_config<P>(
     }
 }
 
-async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
+async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
     let progress = ProgressTracker::from_env("mirrord exec");
     if !args.params.disable_version_check {
         prompt_outdated_version(&progress).await;
@@ -376,7 +376,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> Result<()> {
 /// Lists targets based on whether or not the operator has been enabled in `layer_config`.
 /// If the operator is enabled (and we can reach it), then we list [`KubeResourceSeeker::all`]
 /// targets, otherwise we list [`KubeResourceSeeker::all_open_source`] only.
-async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> Result<Vec<String>> {
+async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> CliResult<Vec<String>> {
     let client = create_kube_config(
         layer_config.accept_invalid_certificates,
         layer_config.kubeconfig.clone(),
@@ -443,7 +443,7 @@ async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> Resu
 ///  "statefulset/nginx-statefulset/container/nginx"
 /// ]
 /// ```
-async fn print_targets(args: &ListTargetArgs) -> Result<()> {
+async fn print_targets(args: &ListTargetArgs) -> CliResult<()> {
     let mut layer_config = if let Some(config) = &args.config_file {
         let mut cfg_context = ConfigContext::default();
         LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?
@@ -467,10 +467,10 @@ async fn print_targets(args: &ListTargetArgs) -> Result<()> {
     Ok(())
 }
 
-async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()> {
+async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<()> {
     fn hash_port_mappings(
         args: &PortForwardArgs,
-    ) -> Result<HashMap<SocketAddr, (RemoteAddr, u16)>, PortForwardError> {
+    ) -> CliResult<HashMap<SocketAddr, (RemoteAddr, u16)>, PortForwardError> {
         let port_mappings = &args.port_mapping;
         let mut mappings: HashMap<SocketAddr, (RemoteAddr, u16)> =
             HashMap::with_capacity(port_mappings.len());
@@ -488,7 +488,7 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> Result<()>
 
     fn hash_rev_port_mappings(
         args: &PortForwardArgs,
-    ) -> Result<HashMap<RemotePort, LocalPort>, PortForwardError> {
+    ) -> CliResult<HashMap<RemotePort, LocalPort>, PortForwardError> {
         let port_mappings = &args.reverse_port_mapping;
         let mut mappings: HashMap<RemotePort, LocalPort> =
             HashMap::with_capacity(port_mappings.len());
@@ -641,7 +641,7 @@ fn main() -> miette::Result<()> {
 
     let (signal, watch) = drain::channel();
 
-    let res: Result<(), CliError> = rt.block_on(async move {
+    let res: CliResult<()> = rt.block_on(async move {
         logging::init_tracing_registry(&cli.commands, watch.clone()).await?;
 
         match cli.commands {

@@ -443,20 +443,20 @@ where
     }
 
     /// Check the operator supports all the operator features required by the user's configuration.
-    fn check_feature_support(&self, config: &LayerConfig) -> OperatorApiResult<()> {
-        if config.feature.copy_target.enabled {
+    fn check_feature_support(&self, layer_config: &LayerConfig) -> OperatorApiResult<()> {
+        if layer_config.feature.copy_target.enabled {
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::CopyTarget)?
         }
 
-        if config.feature.split_queues.sqs().next().is_some() {
+        if layer_config.feature.split_queues.sqs().next().is_some() {
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::SqsQueueSplitting)?;
         }
 
-        if config.feature.split_queues.kafka().next().is_some() {
+        if layer_config.feature.split_queues.kafka().next().is_some() {
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::KafkaQueueSplitting)?;
@@ -511,13 +511,13 @@ where
 
     /// Returns a namespace of the target based on the given [`LayerConfig`] and default namespace
     /// of [`Client`] used by this instance.
-    fn target_namespace<'a>(&'a self, config: &'a LayerConfig) -> &'a str {
-        let namespace_opt = if config.target.path.is_some() {
+    fn target_namespace<'a>(&'a self, layer_config: &'a LayerConfig) -> &'a str {
+        let namespace_opt = if layer_config.target.path.is_some() {
             // Not a targetless run, we use target's namespace.
-            config.target.namespace.as_deref()
+            layer_config.target.namespace.as_deref()
         } else {
             // A targetless run, we use the namespace where the agent should live.
-            config.agent.namespace.as_deref()
+            layer_config.agent.namespace.as_deref()
         };
 
         namespace_opt.unwrap_or(self.client.default_namespace())
@@ -533,11 +533,11 @@ impl OperatorApi<PreparedClientCert> {
     /// connection in the same session with [`OperatorApi::connect_in_existing_session`].
     #[tracing::instrument(
         level = Level::TRACE,
-        skip(config, progress),
+        skip(layer_config, progress),
         fields(
-            target_config = ?config.target,
-            copy_target_config = ?config.feature.copy_target,
-            on_concurrent_steal = ?config.feature.network.incoming.on_concurrent_steal,
+            target_config = ?layer_config.target,
+            copy_target_config = ?layer_config.feature.copy_target,
+            on_concurrent_steal = ?layer_config.feature.network.incoming.on_concurrent_steal,
         ),
         ret,
         err
@@ -545,13 +545,13 @@ impl OperatorApi<PreparedClientCert> {
     pub async fn connect_in_new_session<P>(
         &self,
         target: ResolvedTarget<false>,
-        config: &LayerConfig,
+        layer_config: &LayerConfig,
         progress: &P,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
         P: Progress,
     {
-        self.check_feature_support(config)?;
+        self.check_feature_support(layer_config)?;
 
         let use_proxy_api = self
             .operator
@@ -560,14 +560,14 @@ impl OperatorApi<PreparedClientCert> {
             .contains(&NewOperatorFeature::ProxyApi);
 
         let is_empty_deployment = target.empty_deployment();
-        let connect_url = if config.feature.copy_target.enabled
+        let connect_url = if layer_config.feature.copy_target.enabled
             // use copy_target for splitting queues
-            || config.feature.split_queues.is_set()
+            || layer_config.feature.split_queues.is_set()
             || is_empty_deployment
         {
             let mut copy_subtask = progress.subtask("copying target");
 
-            if config.feature.copy_target.enabled.not() {
+            if layer_config.feature.copy_target.enabled.not() {
                 if is_empty_deployment.not() {
                     copy_subtask.info("Creating a copy-target for queue-splitting (even though copy_target was not explicitly set).")
                 } else {
@@ -576,19 +576,23 @@ impl OperatorApi<PreparedClientCert> {
             }
 
             // We do not validate the `target` here, it's up to the operator.
-            let target = config.target.path.clone().unwrap_or(Target::Targetless);
-            let scale_down = config.feature.copy_target.scale_down;
-            let namespace = self.target_namespace(config);
+            let target = layer_config
+                .target
+                .path
+                .clone()
+                .unwrap_or(Target::Targetless);
+            let scale_down = layer_config.feature.copy_target.scale_down;
+            let namespace = self.target_namespace(layer_config);
             let copied = self
                 .copy_target(
                     target,
                     scale_down,
                     namespace,
-                    config
+                    layer_config
                         .feature
                         .split_queues
                         .is_set()
-                        .then(|| config.feature.split_queues.clone()),
+                        .then(|| layer_config.feature.split_queues.clone()),
                 )
                 .await?;
 
@@ -618,7 +622,7 @@ impl OperatorApi<PreparedClientCert> {
 
             target.connect_url(
                 use_proxy_api,
-                config.feature.network.incoming.on_concurrent_steal,
+                layer_config.feature.network.incoming.on_concurrent_steal,
                 &TargetCrd::api_version(&()),
                 &TargetCrd::plural(&()),
                 &TargetCrd::url_path(&(), target.namespace()),

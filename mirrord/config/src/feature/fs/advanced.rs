@@ -17,9 +17,9 @@ use crate::{
 
 /// Allows the user to specify the default behavior for file operations:
 ///
-/// 1. `"read"` - Read from the remote file system (default)
+/// 1. `"read"` or `true` - Read from the remote file system (default)
 /// 2. `"write"` - Read/Write from the remote file system.
-/// 3. `"local"` - Read from the local file system.
+/// 3. `"local"` or `false` - Read from the local file system.
 /// 4. `"localwithoverrides"` - perform fs operation locally, unless the path matches a pre-defined
 ///    or user-specified exception.
 ///
@@ -131,6 +131,9 @@ pub struct FsConfig {
     ///
     /// `/home/johndoe/dev/tomcat/context.xml` => `/etc/tomcat/context.xml`
     /// `/home/johndoe/dev/config/api/app.conf` => `/mnt/configs/johndoe-api/app.conf`
+    ///
+    /// - Relative paths: this feature (currently) does not apply mappings to relative paths, e.g.
+    ///   `../dev`.
     pub mapping: Option<HashMap<String, String>>,
 }
 

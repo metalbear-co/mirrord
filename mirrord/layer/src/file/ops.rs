@@ -437,12 +437,13 @@ pub(crate) fn xstat(
     let (path, fd) = match (rawish_path, fd) {
         // fstatat
         (Some(path), Some(fd)) => {
-            let path = path?;
+            let mut path = path?;
             let fd = {
                 if fd == AT_FDCWD {
                     check_relative_paths!(path);
 
-                    ensure_not_ignored!(remap_path!(path.clone()), false);
+                    path = remap_path!(path);
+                    ensure_not_ignored!(path, false);
                     None
                 } else {
                     Some(get_remote_fd(fd)?)

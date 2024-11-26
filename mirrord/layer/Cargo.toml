@@ -49,6 +49,7 @@ exec.workspace = true
 syscalls = { version = "0.6", features = ["full"] }
 null-terminated = "0.3"
 base64.workspace = true
+envfile.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

@@ -94,6 +94,7 @@ pub struct SetupOptions {
     pub aws_role_arn: Option<String>,
     pub sqs_splitting: bool,
     pub kafka_splitting: bool,
+    pub application_auto_pause: bool,
 }
 
 #[derive(Debug)]
@@ -122,6 +123,7 @@ impl Operator {
             aws_role_arn,
             sqs_splitting,
             kafka_splitting,
+            application_auto_pause,
         } = options;
 
         let (license_secret, license_key) = match license {
@@ -133,7 +135,7 @@ impl Operator {
 
         let service_account = OperatorServiceAccount::new(&namespace, aws_role_arn);
 
-        let role = OperatorRole::new(sqs_splitting, kafka_splitting);
+        let role = OperatorRole::new(sqs_splitting, kafka_splitting, application_auto_pause);
         let role_binding = OperatorRoleBinding::new(&role, &service_account);
         let user_cluster_role = OperatorClusterUserRole::new();
 
@@ -149,6 +151,7 @@ impl Operator {
             image,
             sqs_splitting,
             kafka_splitting,
+            application_auto_pause,
         );
 
         let service = OperatorService::new(&namespace);
@@ -264,6 +267,7 @@ impl FromStr for OperatorNamespace {
 pub struct OperatorDeployment(Deployment);
 
 impl OperatorDeployment {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         namespace: &OperatorNamespace,
         sa: &OperatorServiceAccount,
@@ -272,6 +276,7 @@ impl OperatorDeployment {
         image: String,
         sqs_splitting: bool,
         kafka_splitting: bool,
+        application_auto_pause: bool,
     ) -> Self {
         let mut envs = vec![
             EnvVar {
@@ -342,6 +347,14 @@ impl OperatorDeployment {
         if kafka_splitting {
             envs.push(EnvVar {
                 name: "OPERATOR_KAFKA_SPLITTING".into(),
+                value: Some("true".into()),
+                value_from: None,
+            });
+        }
+
+        if application_auto_pause {
+            envs.push(EnvVar {
+                name: "OPERATOR_APPLICATION_PAUSE_AUTO_SYNC".into(),
                 value: Some("true".into()),
                 value_from: None,
             });
@@ -465,7 +478,7 @@ impl OperatorServiceAccount {
 pub struct OperatorRole(ClusterRole);
 
 impl OperatorRole {
-    pub fn new(sqs_splitting: bool, kafka_splitting: bool) -> Self {
+    pub fn new(sqs_splitting: bool, kafka_splitting: bool, application_auto_pause: bool) -> Self {
         let mut rules = vec![
             PolicyRule {
                 api_groups: Some(vec![
@@ -631,6 +644,15 @@ impl OperatorRole {
             ]);
         }
 
+        if application_auto_pause {
+            rules.push(PolicyRule {
+                api_groups: Some(vec!["argoproj.io".to_owned()]),
+                resources: Some(vec!["applications".to_owned()]),
+                verbs: vec!["list".to_owned(), "get".to_owned(), "patch".to_owned()],
+                ..Default::default()
+            });
+        }
+
         let role = ClusterRole {
             metadata: ObjectMeta {
                 name: Some(OPERATOR_ROLE_NAME.to_owned()),
@@ -654,7 +676,7 @@ impl OperatorRole {
 
 impl Default for OperatorRole {
     fn default() -> Self {
-        Self::new(false, false)
+        Self::new(false, false, false)
     }
 }
 

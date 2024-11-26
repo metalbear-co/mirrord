@@ -172,8 +172,16 @@ impl TestProcess {
         assert!(self.get_stdout().await.contains(string));
     }
 
+    pub async fn assert_stdout_doesnt_contain(&self, string: &str) {
+        assert!(!self.get_stdout().await.contains(string));
+    }
+
     pub async fn assert_stderr_contains(&self, string: &str) {
         assert!(self.get_stderr().await.contains(string));
+    }
+
+    pub async fn assert_stderr_doesnt_contain(&self, string: &str) {
+        assert!(!self.get_stderr().await.contains(string));
     }
 
     pub async fn assert_no_error_in_stdout(&self) {

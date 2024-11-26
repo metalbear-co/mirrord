@@ -13,7 +13,7 @@ use thiserror::Error;
 
 use crate::port_forward::PortForwardError;
 
-pub(crate) type Result<T, E = CliError> = core::result::Result<T, E>;
+pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;
 
 const GENERAL_HELP: &str = r#"
 
@@ -247,6 +247,10 @@ pub(crate) enum CliError {
     #[error("Failed to get canonical path to mirrord config at `{}`: {1}", .0.display())]
     #[diagnostic(help("Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"))]
     CanonicalizeConfigPathFailed(PathBuf, std::io::Error),
+
+    #[error("Failed to access env file at `{}`: {1}", .0.display())]
+    #[diagnostic(help("Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"))]
+    EnvFileAccessError(PathBuf, std::io::Error),
 
     #[cfg(target_os = "macos")]
     #[error("SIP Error: `{0:#?}`")]

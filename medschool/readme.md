@@ -25,7 +25,7 @@ To generate the `configuration.md` that you see in the
 [docs page](https://mirrord.dev/docs/reference/configuration/) we use the `medschool` tool as such:
 
 ```sh
-cargo run -p medschool -- --input ./mirrord/config/src --output ./configuration.md
+cargo run -p medschool -- --input ./mirrord/config/src --output ./mirrord/config/configuration.md
 ```
 
 You can also use the `--prepend` arg to include a file at the start of the generated markdown file. 

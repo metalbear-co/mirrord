@@ -30,7 +30,7 @@ use tracing::{warn, Level};
 
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
-    error::{InternalProxyError, Result},
+    error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     logging::init_intproxy_tracing_registry,
     util::{create_listen_socket, detach_io},
@@ -46,7 +46,10 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
-pub(crate) async fn proxy(listen_port: u16, watch: drain::Watch) -> Result<(), InternalProxyError> {
+pub(crate) async fn proxy(
+    listen_port: u16,
+    watch: drain::Watch,
+) -> CliResult<(), InternalProxyError> {
     let config = LayerConfig::from_env()?;
     init_intproxy_tracing_registry(&config)?;
 
@@ -115,7 +118,7 @@ pub(crate) async fn connect_and_ping(
     config: &LayerConfig,
     connect_info: Option<AgentConnectInfo>,
     analytics: &mut AnalyticsReporter,
-) -> Result<AgentConnection, InternalProxyError> {
+) -> CliResult<AgentConnection, InternalProxyError> {
     let mut agent_conn = AgentConnection::new(config, connect_info, analytics)
         .await
         .map_err(IntProxyError::from)?;

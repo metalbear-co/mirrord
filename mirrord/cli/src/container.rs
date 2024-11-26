@@ -33,7 +33,7 @@ use crate::{
     config::{ContainerCommand, ExecParams, RuntimeArgs},
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     container::command_builder::RuntimeCommandBuilder,
-    error::{ContainerError, Result},
+    error::{CliResult, ContainerError},
     execution::{
         MirrordExecution, LINUX_INJECTION_ENV_VAR, MIRRORD_CONNECT_TCP_ENV,
         MIRRORD_EXECUTION_KIND_ENV,
@@ -274,8 +274,12 @@ pub(crate) async fn container_command(
     runtime_args: RuntimeArgs,
     exec_params: ExecParams,
     watch: drain::Watch,
-) -> Result<()> {
+) -> CliResult<()> {
     let progress = ProgressTracker::from_env("mirrord container");
+
+    if runtime_args.command.has_publish() {
+        progress.warning("mirrord container may have problems with \"-p\" directly container in command, please add to \"contanier.cli_extra_args\" in config if you are planning to publish ports");
+    }
 
     progress.warning("mirrord container is currently an unstable feature");
 
