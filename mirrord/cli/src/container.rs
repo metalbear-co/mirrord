@@ -255,7 +255,7 @@ pub(crate) async fn container_command(
     runtime_args: RuntimeArgs,
     exec_params: ExecParams,
     watch: drain::Watch,
-) -> CliResult<()> {
+) -> CliResult<i32> {
     let progress = ProgressTracker::from_env("mirrord container");
 
     if runtime_args.command.has_publish() {
@@ -423,7 +423,7 @@ pub(crate) async fn container_command(
         .with_command(runtime_args.command)
         .into_command_args();
 
-    let result = tokio::process::Command::new(binary)
+    let runtime_command_result = Command::new(binary)
         .args(binary_args)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
@@ -431,19 +431,21 @@ pub(crate) async fn container_command(
         .status()
         .await;
 
-    match result {
+    let mut exit_code = None;
+
+    match runtime_command_result {
         Err(err) => {
             tracing::error!("Couldn't execute {:?}", err);
 
             analytics.set_error(AnalyticsError::BinaryExecuteFailed);
         }
         Ok(status) if !status.success() => {
-            todo!()
+            exit_code = status.code();
         }
         _ => {}
     }
 
     let _ = composed_config_file.close();
 
-    Ok(())
+    Ok(exit_code.unwrap_or(0))
 }
