@@ -1,6 +1,9 @@
 use std::{path::PathBuf, time::Duration};
 
-use kube::{api::ListParams, Api};
+use kube::{
+    api::{ListParams, PartialObjectMetaExt},
+    Api, Resource,
+};
 use mirrord_analytics::NullReporter;
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
@@ -177,7 +180,7 @@ Operator License
         println!();
 
         let sqs_sessions_api = Api::<MirrordSqsSession>::all(api.client().clone());
-        for (sqs_session_spec, sqs_session_table) in sqs_sessions_api
+        for (session_id, consumer, sqs_session_table) in sqs_sessions_api
             .list(&ListParams::default())
             .await
             .map_err(CliError::ListSqsSessions)?
@@ -200,6 +203,7 @@ Operator License
                 session_table.add_row(row!["Queue Id", "Original Name", "Output Name", "Filter"]);
 
                 let filters = &session.spec.queue_filters;
+                println!("{session:#?}");
 
                 for (
                     id,
@@ -221,10 +225,19 @@ Operator License
                     }
                 }
 
-                (session.spec, session_table)
+                let session_id = session
+                    .meta()
+                    .labels
+                    .as_ref()
+                    .and_then(|labels| labels.get("mirrord-session").cloned());
+                (session_id, session.spec.queue_consumer, session_table)
             })
         {
-            println!("SQS Queue for {}:", sqs_session_spec.queue_consumer);
+            println!(
+                "SQS Queue Session {} for {}:",
+                session_id.unwrap_or_default(),
+                consumer
+            );
             sqs_session_table.printstd();
         }
 

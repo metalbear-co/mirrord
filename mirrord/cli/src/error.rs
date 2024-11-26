@@ -1,4 +1,4 @@
-use std::{ffi::NulError, net::SocketAddr, path::PathBuf, str::FromStr};
+use std::{ffi::NulError, net::SocketAddr, num::ParseIntError, path::PathBuf, str::FromStr};
 
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
@@ -415,6 +415,9 @@ pub(crate) enum CliError {
 
     #[error("Couldn't resolve binary name '{0}': {1}")]
     BinaryWhichError(String, String),
+
+    #[error(transparent)]
+    ParseInt(ParseIntError),
 }
 
 impl CliError {
@@ -493,6 +496,7 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorReturnedUnknownTargetType(error.0)
             }
             OperatorApiError::KubeApi(error) => Self::OperatorTargetResolution(error),
+            OperatorApiError::ParseInt(error) => Self::ParseInt(error),
         }
     }
 }
