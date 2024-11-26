@@ -256,7 +256,7 @@ pub(crate) async fn container_command(
     exec_params: ExecParams,
     watch: drain::Watch,
 ) -> CliResult<i32> {
-    let progress = ProgressTracker::from_env("mirrord container");
+    let mut progress = ProgressTracker::from_env("mirrord container");
 
     if runtime_args.command.has_publish() {
         progress.warning("mirrord container may have problems with \"-p\" directly container in command, please add to \"contanier.cli_extra_args\" in config if you are planning to publish ports");
@@ -418,6 +418,8 @@ pub(crate) async fn container_command(
         MIRRORD_CONNECT_TCP_ENV,
         sidecar_intproxy_address.to_string(),
     );
+
+    progress.success(None);
 
     let (binary, binary_args) = runtime_command
         .with_command(runtime_args.command)
