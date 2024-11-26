@@ -437,7 +437,7 @@ pub(crate) async fn container_command(
         Err(err) => {
             analytics.set_error(AnalyticsError::BinaryExecuteFailed);
 
-            Err(err)
+            Err(ContainerError::UnableToExecuteCommand(err).into())
         }
         Ok(status) => Ok(status.code().unwrap_or_default()),
     }
