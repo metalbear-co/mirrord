@@ -212,7 +212,7 @@ async fn create_sidecar_intproxy(
                 .unwrap_or_default();
 
         let container_status = container_inspection
-            .and_then(|inspect| inspect.get("State"))
+            .get("State")
             .and_then(|inspect| inspect.get("Status"));
 
         if container_status
