@@ -17,6 +17,10 @@ pub struct RuntimeCommandBuilder<T = Empty> {
 }
 
 impl<T> RuntimeCommandBuilder<T> {
+    pub fn runtime(&self) -> &ContainerRuntime {
+        &self.runtime
+    }
+
     fn push_arg<V>(&mut self, value: V)
     where
         V: Into<String>,
@@ -57,7 +61,7 @@ impl RuntimeCommandBuilder {
         }
     }
 
-    pub fn add_volume<H, C>(&mut self, host_path: H, container_path: C)
+    pub fn add_volume<H, C>(&mut self, host_path: H, container_path: C, readonly: bool)
     where
         H: AsRef<Path>,
         C: AsRef<Path>,
@@ -65,11 +69,20 @@ impl RuntimeCommandBuilder {
         match self.runtime {
             ContainerRuntime::Podman | ContainerRuntime::Docker | ContainerRuntime::Nerdctl => {
                 self.push_arg("-v");
-                self.push_arg(format!(
-                    "{}:{}",
-                    host_path.as_ref().display(),
-                    container_path.as_ref().display()
-                ));
+
+                if readonly {
+                    self.push_arg(format!(
+                        "{}:{}:ro",
+                        host_path.as_ref().display(),
+                        container_path.as_ref().display()
+                    ));
+                } else {
+                    self.push_arg(format!(
+                        "{}:{}",
+                        host_path.as_ref().display(),
+                        container_path.as_ref().display()
+                    ));
+                }
             }
         }
     }
@@ -132,13 +145,5 @@ impl RuntimeCommandBuilder<WithCommand> {
                 .chain(extra_args)
                 .chain(runtime_args),
         )
-    }
-
-    /// Same as [`RuntimeCommandBuilder::<WithCommand>::into_command_args`] execvp expects first arg
-    /// to be binary so we pass the same value as runtime as first element
-    pub fn into_execvp_args(self) -> (String, impl Iterator<Item = String>) {
-        let (runtime, args) = self.into_command_args();
-
-        (runtime.clone(), std::iter::once(runtime).chain(args))
     }
 }
