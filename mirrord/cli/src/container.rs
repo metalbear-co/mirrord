@@ -376,17 +376,14 @@ pub(crate) async fn container_command(
     );
 
     runtime_command.add_env(MIRRORD_CONFIG_FILE_ENV, "/tmp/mirrord-config.json");
-    runtime_command.add_volume(
-        composed_config_file.path(),
-        "/tmp/mirrord-config.json",
-        true,
-    );
+    runtime_command
+        .add_volume::<true, _, _>(composed_config_file.path(), "/tmp/mirrord-config.json");
 
     let mut load_env_and_mount_pem = |env: &str, path: &Path| {
         let container_path = format!("/tmp/{}.pem", env.to_lowercase());
 
         runtime_command.add_env(env, &container_path);
-        runtime_command.add_volume(path, container_path, true);
+        runtime_command.add_volume::<true, _, _>(path, container_path);
     };
 
     if let Some(path) = config.internal_proxy.client_tls_certificate.as_ref() {
