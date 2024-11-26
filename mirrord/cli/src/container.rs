@@ -192,35 +192,40 @@ async fn create_sidecar_intproxy(
             )
         })?;
 
+    // For Docker runtime sometimes the sidecar doesn't start so we double check.
+    // See [#2927](https://github.com/metalbear-co/mirrord/issues/2927)
     if matches!(base_command.runtime(), ContainerRuntime::Docker) {
-        let mut inspect_command = Command::new(&runtime_binary);
-        inspect_command
+        let mut container_inspect_command = Command::new(&runtime_binary);
+        container_inspect_command
             .args(["inspect", &sidecar_container_id])
             .stdout(Stdio::piped());
 
-        let inspect_output = inspect_command.output().await.map_err(|err| {
+        let container_inspect_output = container_inspect_command.output().await.map_err(|err| {
             ContainerError::UnsuccesfulCommandOutput(
-                format_command(&inspect_command),
+                format_command(&container_inspect_command),
                 err.to_string(),
             )
         })?;
 
-        let inspect =
-            serde_json::from_slice::<serde_json::Value>(&inspect_output.stdout).unwrap_or_default();
+        let (container_inspection,) =
+            serde_json::from_slice::<(serde_json::Value,)>(&container_inspect_output.stdout)
+                .unwrap_or_default();
 
-        let status = inspect
-            .get(0)
+        let container_status = container_inspection
             .and_then(|inspect| inspect.get("State"))
             .and_then(|inspect| inspect.get("Status"));
 
-        if status.map(|status| status == "created").unwrap_or(false) {
-            let mut start_command = Command::new(&runtime_binary);
+        if container_status
+            .map(|status| status == "created")
+            .unwrap_or(false)
+        {
+            let mut container_start_command = Command::new(&runtime_binary);
 
-            start_command.args(["start", &sidecar_container_id]);
+            container_start_command.args(["start", &sidecar_container_id]);
 
-            let _ = start_command.status().await.map_err(|err| {
+            let _ = container_start_command.status().await.map_err(|err| {
                 ContainerError::UnsuccesfulCommandOutput(
-                    format_command(&inspect_command),
+                    format_command(&container_start_command),
                     err.to_string(),
                 )
             })?;
