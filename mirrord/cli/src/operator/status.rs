@@ -289,15 +289,16 @@ Operator License
                 "Filter",
             ]);
 
+            // The SQS queue statuses are grouped by queue consumer.
             for (consumer, rows) in sqs {
                 println!("SQS Queue for {consumer}");
 
                 for row in rows {
                     sqs_table.add_row(row);
                 }
-            }
 
-            sqs_table.printstd();
+                sqs_table.printstd();
+            }
         }
 
         Ok(())
