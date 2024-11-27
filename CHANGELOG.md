@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.125.1](https://github.com/metalbear-co/mirrord/tree/3.125.1) - 2024-11-27
+
+
+### Fixed
+
+- Added retry of HTTP requests (intproxy) on hyper's `IncompleteMessage` error.
+
+
+### Internal
+
+- Updated `RolloutSpec` and operator setup.
+- Added `expect_file_open_for_reading` for `/etc/resolv.conf` path in
+  `test_issue2283` test.
+  [#2935](https://github.com/metalbear-co/mirrord/issues/2935)
+
 ## [3.125.0](https://github.com/metalbear-co/mirrord/tree/3.125.0) - 2024-11-21
 
 
