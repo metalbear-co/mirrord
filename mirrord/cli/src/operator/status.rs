@@ -71,6 +71,8 @@ impl StatusCommandHandler {
             filters: &'a HashMap<String, BTreeMap<String, String>>,
         }
 
+        println!("{queues:#?}");
+
         let mut rows: HashMap<QueueConsumer, Vec<Row>> = HashMap::new();
 
         for QueueDisplayInfo {
@@ -98,7 +100,11 @@ impl StatusCommandHandler {
             ) in names.iter()
             {
                 if let Some(filters_by_id) = filters.get(queue_id) {
+                    println!("{filters_by_id:#?}");
+
                     for (filter_key, filter) in filters_by_id.iter() {
+                        println!("{filter_key:#?} {filter}");
+
                         match rows.get_mut(consumer) {
                             Some(consumer_rows) => {
                                 consumer_rows.push(row![
@@ -274,10 +280,12 @@ Operator License
                 "Filter",
             ]);
 
-            for (consumer, row) in sqs {
+            for (consumer, rows) in sqs {
                 println!("SQS Queue for {consumer}");
 
-                sqs_table.add_row(row.first().cloned().unwrap());
+                for row in rows {
+                    sqs_table.add_row(row);
+                }
             }
 
             sqs_table.printstd();
