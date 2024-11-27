@@ -59,19 +59,19 @@ impl StatusCommandHandler {
         Ok(Self { operator_api: api })
     }
 
-    /// SQS rows keyed by consumer (the targeted resource, i.e. pod).
+    /// SQS session status rows keyed by consumer (the targeted resource, i.e. pod).
+    #[tracing::instrument(level = Level::TRACE, ret)]
     fn sqs_rows(
         queues: Iter<MirrordSqsSession>,
         session_id: String,
         user: &String,
     ) -> Option<HashMap<QueueConsumer, Vec<Row>>> {
+        /// The info we need to put in the rows when reporting the SQS status.
         struct QueueDisplayInfo<'a> {
             names: &'a BTreeMap<String, QueueNameUpdate>,
             consumer: &'a QueueConsumer,
             filters: &'a HashMap<String, BTreeMap<String, String>>,
         }
-
-        println!("{queues:#?}");
 
         let mut rows: HashMap<QueueConsumer, Vec<Row>> = HashMap::new();
 
@@ -100,11 +100,7 @@ impl StatusCommandHandler {
             ) in names.iter()
             {
                 if let Some(filters_by_id) = filters.get(queue_id) {
-                    println!("{filters_by_id:#?}");
-
                     for (filter_key, filter) in filters_by_id.iter() {
-                        println!("{filter_key:#?} {filter}");
-
                         match rows.get_mut(consumer) {
                             Some(consumer_rows) => {
                                 consumer_rows.push(row![
