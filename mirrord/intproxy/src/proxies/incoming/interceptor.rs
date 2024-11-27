@@ -71,6 +71,10 @@ pub enum InterceptorError {
     /// The layer closed connection too soon to send a request.
     #[error("connection closed too soon")]
     ConnectionClosedTooSoon(HttpRequestFallback),
+
+    #[error("incomplete message")]
+    IncompleteMessage(HttpRequestFallback),
+
     /// Received a request with an unsupported HTTP version.
     #[error("{0:?} is not supported")]
     UnsupportedHttpVersion(Version),
@@ -282,6 +286,19 @@ impl HttpConnection {
                     None,
                 ))
             }
+            Err(InterceptorError::Hyper(e)) if e.is_incomplete_message() => {
+                tracing::warn!(
+                    "Sending request to local application failed with: {e:?}. \
+                        Connection closed before the message could complete!"
+                );
+                tracing::trace!(
+                    ?request,
+                    "Retrying the request, see \
+                    [https://github.com/hyperium/hyper/issues/2136] for more info."
+                );
+
+                Err(InterceptorError::IncompleteMessage(request))
+            }
 
             Err(fail) => {
                 tracing::warn!(?fail, "Request to local application failed!");
@@ -385,11 +402,13 @@ impl HttpConnection {
                 Ok(response) => return Ok(response),
 
                 Err(error @ InterceptorError::Reset)
-                | Err(error @ InterceptorError::ConnectionClosedTooSoon(_)) => {
+                | Err(error @ InterceptorError::ConnectionClosedTooSoon(_))
+                | Err(error @ InterceptorError::IncompleteMessage(_)) => {
                     tracing::warn!(
                         ?request,
                         %error,
-                        "Either the connection closed or we got a reset, retrying!"
+                        "Either the connection closed, the message is incomplete, \
+                        or we got a reset, retrying!"
                     );
 
                     let Some(backoff) = backoffs.next() else {
