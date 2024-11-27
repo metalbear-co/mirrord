@@ -539,28 +539,21 @@ impl OperatorRole {
                 verbs: vec!["list".to_owned(), "get".to_owned()],
                 ..Default::default()
             },
+            // Allow for patching replicas and environment variables.
+            PolicyRule {
+                api_groups: Some(vec!["apps".to_owned()]),
+                resources: Some(vec!["deployments".to_owned(), "statefulsets".to_owned()]),
+                verbs: vec!["patch".to_owned()],
+                ..Default::default()
+            },
+            // Allow for patching replicas and environment variables.
+            PolicyRule {
+                api_groups: Some(vec!["argoproj.io".to_owned()]),
+                resources: Some(vec!["rollouts".to_owned()]),
+                verbs: vec!["patch".to_owned()],
+                ..Default::default()
+            },
         ];
-
-        if sqs_splitting || kafka_splitting {
-            rules.extend([
-                // For SQS/Kafka controller to temporarily change deployments to use changed
-                // queues.
-                PolicyRule {
-                    api_groups: Some(vec!["apps".to_owned()]),
-                    resources: Some(vec!["deployments".to_owned()]),
-                    verbs: vec!["patch".to_owned()],
-                    ..Default::default()
-                },
-                // For SQS/Kafka controller to temporarily change Argo Rollouts to use changed
-                // queues.
-                PolicyRule {
-                    api_groups: Some(vec!["argoproj.io".to_owned()]),
-                    resources: Some(vec!["rollouts".to_owned()]),
-                    verbs: vec!["patch".to_owned()],
-                    ..Default::default()
-                },
-            ]);
-        }
 
         if kafka_splitting {
             rules.extend([
