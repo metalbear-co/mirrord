@@ -227,6 +227,7 @@ pub struct Session {
     pub namespace: Option<String>,
     pub locked_ports: Option<Vec<(u16, String, Option<String>)>>,
     pub user_id: Option<String>,
+    pub sqs: Option<Vec<MirrordSqsSession>>,
 }
 
 /// Resource used to access the operator's session management routes.
