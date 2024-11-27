@@ -59,7 +59,12 @@ impl StatusCommandHandler {
         Ok(Self { operator_api: api })
     }
 
-    /// SQS session status rows keyed by consumer (the targeted resource, i.e. pod).
+    /// The SQS information we want to display to the user is in a mix of different maps, and
+    /// different parts of a CRD (some info is in the `crd.status`, while others are in
+    /// `crd.spec`). This function digs into those different parts, skipping over pontential
+    /// `None` in some fields that are optional.
+    ///
+    /// Returns the SQS session status rows keyed by consumer (the targeted resource, i.e. pod).
     #[tracing::instrument(level = Level::TRACE, ret)]
     fn sqs_rows(
         queues: Iter<MirrordSqsSession>,
@@ -75,11 +80,13 @@ impl StatusCommandHandler {
 
         let mut rows: HashMap<QueueConsumer, Vec<Row>> = HashMap::new();
 
+        // Loop over the `MirrordSqsSession` crds to build the list of rows.
         for QueueDisplayInfo {
             names,
             consumer,
             filters,
         } in queues.filter_map(|queue| {
+            // Dig into the `MirrordSqsSession` crd and get the meaningful parts.
             Some(QueueDisplayInfo {
                 names: &queue
                     .status
@@ -91,6 +98,8 @@ impl StatusCommandHandler {
                 filters: &queue.spec.queue_filters,
             })
         }) {
+            // From the list of queue names, loop over them so we can match the `QueueId`
+            // of a name with the `QueueId` of a filter.
             for (
                 queue_id,
                 QueueNameUpdate {
@@ -99,8 +108,11 @@ impl StatusCommandHandler {
                 },
             ) in names.iter()
             {
+                // Basically `filter.queue_id == name.queue_id`.
                 if let Some(filters_by_id) = filters.get(queue_id) {
+                    // Loop over the filters and start building the rows.
                     for (filter_key, filter) in filters_by_id.iter() {
+                        // Group rows by the queue `consumer`.
                         match rows.get_mut(consumer) {
                             Some(consumer_rows) => {
                                 consumer_rows.push(row![
@@ -131,6 +143,7 @@ impl StatusCommandHandler {
             }
         }
 
+        // If it's empty, we don't want to display anything.
         rows.is_empty().not().then_some(rows)
     }
 
