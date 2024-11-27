@@ -45,15 +45,6 @@ async fn test_issue2283(
             .answer_file_read("search home\nnameserver 10.0.0.138\n".as_bytes().to_vec())
             .await;
         intproxy.expect_file_close(2136).await;
-
-        intproxy
-            .expect_file_open_for_reading("/etc/hostname", 2137)
-            .await;
-        intproxy.expect_only_file_read(2137).await;
-        intproxy
-            .answer_file_read("metalbear-hostname".as_bytes().to_vec())
-            .await;
-        intproxy.expect_file_close(2137).await;
     }
 
     let message = intproxy.recv().await;
