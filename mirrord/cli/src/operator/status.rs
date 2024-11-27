@@ -6,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-use kube::{api::ListParams, Api, Resource};
 use mirrord_analytics::NullReporter;
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
@@ -14,15 +13,12 @@ use mirrord_config::{
 };
 use mirrord_operator::{
     client::{NoClientCert, OperatorApi},
-    crd::{
-        is_session_ready, MirrordOperatorSpec, MirrordSqsSession, QueueConsumer, QueueId,
-        QueueNameUpdate,
-    },
+    crd::{MirrordOperatorSpec, MirrordSqsSession, QueueConsumer, QueueNameUpdate},
     types::LicenseInfoOwned,
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use prettytable::{row, Row, Table};
-use tracing::{Instrument, Level};
+use tracing::Level;
 
 use crate::{error::CliError, util::remove_proxy_env, CliResult};
 
@@ -66,101 +62,74 @@ impl StatusCommandHandler {
     /// SQS rows keyed by consumer (the targeted resource, i.e. pod).
     fn sqs_rows(
         queues: Iter<MirrordSqsSession>,
-        session_id: &String,
+        session_id: String,
         user: &String,
-    ) -> HashMap<String, Vec<Row>> {
+    ) -> Option<HashMap<QueueConsumer, Vec<Row>>> {
         struct QueueDisplayInfo<'a> {
             names: &'a BTreeMap<String, QueueNameUpdate>,
             consumer: &'a QueueConsumer,
             filters: &'a HashMap<String, BTreeMap<String, String>>,
         }
 
-        queues
-            .filter_map(|queue| {
-                Some(QueueDisplayInfo {
-                    names: &queue
-                        .status
-                        .as_ref()?
-                        .get_split_details()
-                        .as_ref()?
-                        .queue_names,
-                    consumer: &queue.spec.queue_consumer,
-                    filters: &queue.spec.queue_filters,
-                })
+        let mut rows: HashMap<QueueConsumer, Vec<Row>> = HashMap::new();
+
+        for QueueDisplayInfo {
+            names,
+            consumer,
+            filters,
+        } in queues.filter_map(|queue| {
+            Some(QueueDisplayInfo {
+                names: &queue
+                    .status
+                    .as_ref()?
+                    .get_split_details()
+                    .as_ref()?
+                    .queue_names,
+                consumer: &queue.spec.queue_consumer,
+                filters: &queue.spec.queue_filters,
             })
-            .fold(
-                HashMap::new(),
-                |mut rows,
-                 QueueDisplayInfo {
-                     names,
-                     consumer,
-                     filters,
-                 }| {
-                    names.iter().fold(
-                        Vec::new(),
-                        |row_by_name,
-                         (
-                            queue_id,
-                            QueueNameUpdate {
-                                original_name,
-                                output_name,
-                            },
-                        )| {
-                            if let Some(filters_by_id) = filters.get(queue_id) {
-                                filters_by_id.iter().fold(
-                                    Vec::new(),
-                                    |mut fina, (filter_key, filter)| {
-                                        fina.insert(
-                                            consumer.name.clone(),
-                                            vec![row![
-                                                session_id,
-                                                queue_id,
-                                                user,
-                                                original_name,
-                                                output_name,
-                                                format!("{filter_key}:{filter}")
-                                            ]],
-                                        );
-
-                                        fina
-                                    },
-                                )
-                            }
-
-                            row_by_name
-                        },
-                    );
-
-                    rows
+        }) {
+            for (
+                queue_id,
+                QueueNameUpdate {
+                    original_name,
+                    output_name,
                 },
-            )
+            ) in names.iter()
+            {
+                if let Some(filters_by_id) = filters.get(queue_id) {
+                    for (filter_key, filter) in filters_by_id.iter() {
+                        match rows.get_mut(consumer) {
+                            Some(consumer_rows) => {
+                                consumer_rows.push(row![
+                                    session_id,
+                                    queue_id,
+                                    user,
+                                    original_name,
+                                    output_name,
+                                    format!("{filter_key}:{filter}")
+                                ]);
+                            }
+                            None => {
+                                rows.insert(
+                                    consumer.clone(),
+                                    vec![row![
+                                        session_id,
+                                        queue_id,
+                                        user,
+                                        original_name,
+                                        output_name,
+                                        format!("{filter_key}:{filter}")
+                                    ]],
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
-        // for queue in queues {
-        //     for (
-        //         queue_id,
-        //         QueueNameUpdate {
-        //             original_name,
-        //             output_name,
-        //         },
-        //     ) in queue
-        //         .status
-        //         .as_ref()?
-        //         .get_split_details()?
-        //         .queue_names
-        //         .iter()
-        //     {
-        //         for (filter_key, filter) in queue.spec.queue_filters.get(queue_id)? {
-        //             rows.push(row![
-        //                 session_id,
-        //                 queue_id,
-        //                 user,
-        //                 original_name,
-        //                 output_name,
-        //                 format!("{filter_key}:{filter}")
-        //             ]);
-        //         }
-        //     }
-        // }
+        rows.is_empty().not().then_some(rows)
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
@@ -282,7 +251,13 @@ Operator License
                 humantime::format_duration(Duration::from_secs(session.duration_secs)),
             ]);
 
-            sqs_rows = session.sqs.as_ref().map(|sqs| Self::sqs_rows(sqs.iter()))
+            sqs_rows = session.sqs.as_ref().and_then(|sqs| {
+                Self::sqs_rows(
+                    sqs.iter(),
+                    session.id.clone().unwrap_or_default(),
+                    &session.user,
+                )
+            })
         }
 
         sessions.printstd();
@@ -299,75 +274,14 @@ Operator License
                 "Filter",
             ]);
 
-            for (session, row) in sqs {
+            for (consumer, row) in sqs {
+                println!("SQS Queue for {consumer}");
+
                 sqs_table.add_row(row.first().cloned().unwrap());
             }
 
             sqs_table.printstd();
         }
-
-        // let sqs_sessions_api = Api::<MirrordSqsSession>::all(api.client().clone());
-        // for (session_id, consumer, sqs_session_table) in sqs_sessions_api
-        //     .list(&ListParams::default())
-        //     .await
-        //     .map_err(CliError::ListSqsSessions)?
-        //     .into_iter()
-        //     .filter(|session| is_session_ready(Some(session)))
-        //     .filter_map(|session| {
-        //         Some((
-        //             session
-        //                 .status
-        //                 .as_ref()?
-        //                 .get_split_details()?
-        //                 .clone()
-        //                 .queue_names
-        //                 .into_iter(),
-        //             session,
-        //         ))
-        //     })
-        //     .map(|(split_details, session)| {
-        //         let mut session_table = Table::new();
-        //         session_table.add_row(row!["Queue Id", "Original Name", "Output Name",
-        // "Filter"]);
-
-        //         let filters = &session.spec.queue_filters;
-        //         println!("{session:#?}");
-
-        //         for (
-        //             id,
-        //             QueueNameUpdate {
-        //                 output_name,
-        //                 original_name,
-        //             },
-        //         ) in split_details
-        //         {
-        //             if let Some(queue_filters) = filters.get(&id).map(|filters| filters.iter()) {
-        //                 for (filter_key, filter_value) in queue_filters {
-        //                     session_table.add_row(row![
-        //                         id,
-        //                         original_name,
-        //                         output_name,
-        //                         format!("{filter_key}:{filter_value}")
-        //                     ]);
-        //                 }
-        //             }
-        //         }
-
-        //         let session_id = session
-        //             .meta()
-        //             .labels
-        //             .as_ref()
-        //             .and_then(|labels| labels.get("mirrord-session").cloned());
-        //         (session_id, session.spec.queue_consumer, session_table)
-        //     })
-        // {
-        //     println!(
-        //         "SQS Queue Session {} for {}:",
-        //         session_id.unwrap_or_default(),
-        //         consumer
-        //     );
-        //     sqs_session_table.printstd();
-        // }
 
         Ok(())
     }

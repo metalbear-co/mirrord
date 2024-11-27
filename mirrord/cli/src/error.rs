@@ -175,10 +175,6 @@ pub(crate) enum CliError {
     #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
     ListTargetsFailed(KubeApiError),
 
-    #[error("Failed to list mirrord sqs sessions: {0}")]
-    #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
-    ListSqsSessions(kube::Error),
-
     /// Do not construct this variant directly, use [`CliError::friendlier_error_or_else`] to allow
     /// for more granular error detection.
     #[error("Failed to create mirrord-agent: {0}")]
