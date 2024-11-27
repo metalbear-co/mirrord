@@ -1,6 +1,5 @@
 use std::{io::Write, net::SocketAddr, path::Path, process::Stdio, time::Duration};
 
-use exec::execvp;
 use local_ip_address::local_ip;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
@@ -22,7 +21,7 @@ use tokio::{
 use tracing::Level;
 
 use crate::{
-    config::{ContainerCommand, ExecParams, RuntimeArgs},
+    config::{ContainerCommand, ContainerRuntime, ExecParams, RuntimeArgs},
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     container::command_builder::RuntimeCommandBuilder,
     error::{CliResult, ContainerError},
@@ -193,6 +192,46 @@ async fn create_sidecar_intproxy(
             )
         })?;
 
+    // For Docker runtime sometimes the sidecar doesn't start so we double check.
+    // See [#2927](https://github.com/metalbear-co/mirrord/issues/2927)
+    if matches!(base_command.runtime(), ContainerRuntime::Docker) {
+        let mut container_inspect_command = Command::new(&runtime_binary);
+        container_inspect_command
+            .args(["inspect", &sidecar_container_id])
+            .stdout(Stdio::piped());
+
+        let container_inspect_output = container_inspect_command.output().await.map_err(|err| {
+            ContainerError::UnsuccesfulCommandOutput(
+                format_command(&container_inspect_command),
+                err.to_string(),
+            )
+        })?;
+
+        let (container_inspection,) =
+            serde_json::from_slice::<(serde_json::Value,)>(&container_inspect_output.stdout)
+                .unwrap_or_default();
+
+        let container_status = container_inspection
+            .get("State")
+            .and_then(|inspect| inspect.get("Status"));
+
+        if container_status
+            .map(|status| status == "created")
+            .unwrap_or(false)
+        {
+            let mut container_start_command = Command::new(&runtime_binary);
+
+            container_start_command.args(["start", &sidecar_container_id]);
+
+            let _ = container_start_command.status().await.map_err(|err| {
+                ContainerError::UnsuccesfulCommandOutput(
+                    format_command(&container_start_command),
+                    err.to_string(),
+                )
+            })?;
+        }
+    }
+
     // After spawning sidecar with -d flag it prints container_id, now we need the address of
     // intproxy running in sidecar to be used by mirrord-layer in execution container
     let intproxy_address: SocketAddr = {
@@ -221,8 +260,8 @@ pub(crate) async fn container_command(
     runtime_args: RuntimeArgs,
     exec_params: ExecParams,
     watch: drain::Watch,
-) -> CliResult<()> {
-    let progress = ProgressTracker::from_env("mirrord container");
+) -> CliResult<i32> {
+    let mut progress = ProgressTracker::from_env("mirrord container");
 
     if runtime_args.command.has_publish() {
         progress.warning("mirrord container may have problems with \"-p\" directly container in command, please add to \"contanier.cli_extra_args\" in config if you are planning to publish ports");
@@ -342,13 +381,14 @@ pub(crate) async fn container_command(
     );
 
     runtime_command.add_env(MIRRORD_CONFIG_FILE_ENV, "/tmp/mirrord-config.json");
-    runtime_command.add_volume(composed_config_file.path(), "/tmp/mirrord-config.json");
+    runtime_command
+        .add_volume::<true, _, _>(composed_config_file.path(), "/tmp/mirrord-config.json");
 
     let mut load_env_and_mount_pem = |env: &str, path: &Path| {
         let container_path = format!("/tmp/{}.pem", env.to_lowercase());
 
         runtime_command.add_env(env, &container_path);
-        runtime_command.add_volume(path, container_path);
+        runtime_command.add_volume::<true, _, _>(path, container_path);
     };
 
     if let Some(path) = config.internal_proxy.client_tls_certificate.as_ref() {
@@ -381,14 +421,28 @@ pub(crate) async fn container_command(
         sidecar_intproxy_address.to_string(),
     );
 
+    progress.success(None);
+
     let (binary, binary_args) = runtime_command
         .with_command(runtime_args.command)
-        .into_execvp_args();
+        .into_command_args();
 
-    let err = execvp(binary, binary_args);
-    tracing::error!("Couldn't execute {:?}", err);
+    let runtime_command_result = Command::new(binary)
+        .args(binary_args)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .await;
 
-    analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+    let _ = composed_config_file.close();
 
-    Ok(())
+    match runtime_command_result {
+        Err(err) => {
+            analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+
+            Err(ContainerError::UnableToExecuteCommand(err).into())
+        }
+        Ok(status) => Ok(status.code().unwrap_or_default()),
+    }
 }

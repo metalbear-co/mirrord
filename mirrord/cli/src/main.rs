@@ -682,7 +682,11 @@ fn main() -> miette::Result<()> {
             Commands::Diagnose(args) => diagnose_command(*args).await?,
             Commands::Container(args) => {
                 let (runtime_args, exec_params) = args.into_parts();
-                container_command(runtime_args, exec_params, watch).await?
+                let exit_code = container_command(runtime_args, exec_params, watch).await?;
+
+                if exit_code != 0 {
+                    std::process::exit(exit_code);
+                }
             }
             Commands::ExternalProxy { port } => external_proxy::proxy(port, watch).await?,
             Commands::PortForward(args) => port_forward(&args, watch).await?,
