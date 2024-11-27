@@ -11,12 +11,9 @@
 //! or let the [`OperatorApi`](mirrord_operator::client::OperatorApi) handle the connection.
 
 use std::{
-    env,
-    fs::OpenOptions,
-    io,
+    env, io,
     net::{Ipv4Addr, SocketAddr},
-    path::PathBuf,
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
@@ -28,15 +25,14 @@ use mirrord_intproxy::{
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use nix::sys::resource::{setrlimit, Resource};
-use rand::{distributions::Alphanumeric, Rng};
 use tokio::net::TcpListener;
 use tracing::{warn, Level};
-use tracing_subscriber::EnvFilter;
 
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
+    logging::init_intproxy_tracing_registry,
     util::{create_listen_socket, detach_io},
 };
 
@@ -55,44 +51,9 @@ pub(crate) async fn proxy(
     watch: drain::Watch,
 ) -> CliResult<(), InternalProxyError> {
     let config = LayerConfig::from_env()?;
+    init_intproxy_tracing_registry(&config)?;
 
     tracing::info!(?config, "internal_proxy starting");
-
-    // Setting up default logging for intproxy.
-    let log_destination = config
-        .internal_proxy
-        .log_destination
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let random_name: String = rand::thread_rng()
-                .sample_iter(&Alphanumeric)
-                .take(7)
-                .map(char::from)
-                .collect();
-            let timestamp = SystemTime::UNIX_EPOCH.elapsed().unwrap().as_secs();
-
-            PathBuf::from(format!(
-                "/tmp/mirrord-intproxy-{timestamp}-{random_name}.log"
-            ))
-        });
-
-    let output_file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_destination)
-        .map_err(|fail| {
-            InternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
-        })?;
-
-    let log_level = config.internal_proxy.log_level.as_deref().unwrap_or("info");
-
-    tracing_subscriber::fmt()
-        .with_writer(output_file)
-        .with_ansi(false)
-        .with_env_filter(EnvFilter::builder().parse_lossy(log_level))
-        .pretty()
-        .init();
 
     // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
     // so we assume Linux can be higher and set to that.
@@ -125,8 +86,9 @@ pub(crate) async fn proxy(
     // However, the parent process (`exec` or `ext` command) is free to exec/exit as soon as it
     // reads the TCP listener address from our stdout. We open our own connection with the agent
     // **before** this happens to ensure that the agent does not prematurely exit.
-    // We also perform initial ping pong round to ensure that k8s runtime actually made connection
-    // with the agent (it's a must, because port forwarding may be done lazily).
+    // We also perform initial ping pong round to ensure that k8s runtime actually made
+    // connection with the agent (it's a must, because port forwarding may be done
+    // lazily).
     let agent_conn = connect_and_ping(&config, agent_connect_info, &mut analytics).await?;
 
     // Let it assign address for us then print it for the user.
