@@ -1,1 +1,0 @@
-Fixed return type of a function in mirrord-operator client code.
