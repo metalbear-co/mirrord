@@ -230,8 +230,8 @@ async fn create_sidecar_intproxy(
             container_start_command
                 .args(["start", &sidecar_container_id])
                 .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
 
             let _ = container_start_command.status().await.map_err(|err| {
                 ContainerError::UnsuccesfulCommandOutput(
