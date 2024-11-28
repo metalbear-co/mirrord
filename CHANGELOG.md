@@ -8,6 +8,20 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.125.2](https://github.com/metalbear-co/mirrord/tree/3.125.2) - 2024-11-29
+
+
+### Fixed
+
+- Manually call `docker start <sidecar_id>` if after our sidecar `run` command
+  the container hasn't started yet and is in "created" status.
+  [#2927](https://github.com/metalbear-co/mirrord/issues/2927)
+
+
+### Internal
+
+- Fixed return type of a function in mirrord-operator client code.
+
 ## [3.125.1](https://github.com/metalbear-co/mirrord/tree/3.125.1) - 2024-11-27
 
 
