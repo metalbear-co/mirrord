@@ -435,7 +435,9 @@ pub(crate) async fn container_command(
         .status()
         .await;
 
-    let _ = composed_config_file.close();
+    if let Err(err) = composed_config_file.keep() {
+        tracing::warn!(?err, "failed to keep composed config file");
+    }
 
     match runtime_command_result {
         Err(err) => {
