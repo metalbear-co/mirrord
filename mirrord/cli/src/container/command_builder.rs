@@ -17,6 +17,10 @@ pub struct RuntimeCommandBuilder<T = Empty> {
 }
 
 impl<T> RuntimeCommandBuilder<T> {
+    pub(super) fn runtime(&self) -> &ContainerRuntime {
+        &self.runtime
+    }
+
     fn push_arg<V>(&mut self, value: V)
     where
         V: Into<String>,
@@ -34,7 +38,7 @@ impl RuntimeCommandBuilder {
         }
     }
 
-    pub fn add_env<K, V>(&mut self, key: K, value: V)
+    pub(super) fn add_env<K, V>(&mut self, key: K, value: V)
     where
         K: AsRef<OsStr>,
         V: AsRef<OsStr>,
@@ -46,7 +50,7 @@ impl RuntimeCommandBuilder {
         self.push_arg(format!("{key}={value}"))
     }
 
-    pub fn add_envs<I, K, V>(&mut self, iter: I)
+    pub(super) fn add_envs<I, K, V>(&mut self, iter: I)
     where
         I: IntoIterator<Item = (K, V)>,
         K: AsRef<OsStr>,
@@ -57,7 +61,7 @@ impl RuntimeCommandBuilder {
         }
     }
 
-    pub fn add_volume<H, C>(&mut self, host_path: H, container_path: C)
+    pub(super) fn add_volume<const READONLY: bool, H, C>(&mut self, host_path: H, container_path: C)
     where
         H: AsRef<Path>,
         C: AsRef<Path>,
@@ -65,16 +69,25 @@ impl RuntimeCommandBuilder {
         match self.runtime {
             ContainerRuntime::Podman | ContainerRuntime::Docker | ContainerRuntime::Nerdctl => {
                 self.push_arg("-v");
-                self.push_arg(format!(
-                    "{}:{}",
-                    host_path.as_ref().display(),
-                    container_path.as_ref().display()
-                ));
+
+                if READONLY {
+                    self.push_arg(format!(
+                        "{}:{}:ro",
+                        host_path.as_ref().display(),
+                        container_path.as_ref().display()
+                    ));
+                } else {
+                    self.push_arg(format!(
+                        "{}:{}",
+                        host_path.as_ref().display(),
+                        container_path.as_ref().display()
+                    ));
+                }
             }
         }
     }
 
-    pub fn add_volumes_from<V>(&mut self, volumes_from: V)
+    pub(super) fn add_volumes_from<V>(&mut self, volumes_from: V)
     where
         V: Into<String>,
     {
@@ -86,7 +99,7 @@ impl RuntimeCommandBuilder {
         }
     }
 
-    pub fn add_network<N>(&mut self, network: N)
+    pub(super) fn add_network<N>(&mut self, network: N)
     where
         N: Into<String>,
     {
@@ -98,7 +111,7 @@ impl RuntimeCommandBuilder {
         }
     }
 
-    pub fn with_command(
+    pub(super) fn with_command(
         self,
         command: ContainerRuntimeCommand,
     ) -> RuntimeCommandBuilder<WithCommand> {
@@ -131,7 +144,7 @@ impl RuntimeCommandBuilder {
 
 impl RuntimeCommandBuilder<WithCommand> {
     /// Return completed command command with updated arguments
-    pub fn into_command_args(self) -> (String, impl Iterator<Item = String>) {
+    pub(super) fn into_command_args(self) -> (String, impl Iterator<Item = String>) {
         let RuntimeCommandBuilder {
             runtime,
             extra_args,
@@ -148,14 +161,6 @@ impl RuntimeCommandBuilder<WithCommand> {
                 .chain(extra_args)
                 .chain(runtime_args),
         )
-    }
-
-    /// Same as [`RuntimeCommandBuilder::<WithCommand>::into_command_args`] execvp expects first arg
-    /// to be binary so we pass the same value as runtime as first element
-    pub fn into_execvp_args(self) -> (String, impl Iterator<Item = String>) {
-        let (runtime, args) = self.into_command_args();
-
-        (runtime.clone(), std::iter::once(runtime).chain(args))
     }
 }
 

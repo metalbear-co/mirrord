@@ -683,7 +683,11 @@ fn main() -> miette::Result<()> {
             Commands::Diagnose(args) => diagnose_command(*args).await?,
             Commands::Container(args) => match args.into_exec_parts() {
                 Either::Left((runtime_args, exec_params)) => {
-                    container_command(runtime_args, exec_params, watch).await?
+                    let exit_code = container_command(runtime_args, exec_params, watch).await?;
+
+                    if exit_code != 0 {
+                        std::process::exit(exit_code);
+                    }
                 }
                 Either::Right((config_path, target)) => {
                     container_ext_command(config_path, target, watch).await?
