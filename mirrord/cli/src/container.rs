@@ -227,7 +227,11 @@ async fn create_sidecar_intproxy(
         {
             let mut container_start_command = Command::new(&runtime_binary);
 
-            container_start_command.args(["start", &sidecar_container_id]);
+            container_start_command
+                .args(["start", &sidecar_container_id])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
 
             let _ = container_start_command.status().await.map_err(|err| {
                 ContainerError::UnsuccesfulCommandOutput(
