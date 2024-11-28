@@ -632,7 +632,7 @@ impl OperatorApi<PreparedClientCert> {
                     &TargetCrd::api_version(&()),
                     &TargetCrd::plural(&()),
                     &TargetCrd::url_path(&(), target.namespace()),
-                )?,
+                ),
                 None,
             )
         };
