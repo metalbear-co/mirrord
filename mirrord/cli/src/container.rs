@@ -435,7 +435,7 @@ pub(crate) async fn container_command(
         .status()
         .await;
 
-    // Keep the files, since process is going to exit before process is actually ran and uses it
+    // Keep the files, since the process is going to exit before the new process is actually run and uses them
     // perhaps find a way to clean up? (can't wait for container to boot successfuly since when it
     // loads other processes it might need it too)
     if let Some((cert, key)) = _internal_proxy_tls_guards {
