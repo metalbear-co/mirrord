@@ -362,8 +362,8 @@ mod main {
     const SF_RESTRICTED: u32 = 0x00080000; // entitlement required for writing, from stat.h (macos)
 
     /// Extract shebang from file contents.
-    fn get_shebang_from_string(file_contents: &str) -> Option<ScriptShebang> {
-        let rest = file_contents.strip_prefix("#!")?;
+    fn get_shebang_from_string(first_line: &str) -> Option<ScriptShebang> {
+        let rest = first_line.strip_prefix("#!")?;
 
         let mut char_iter = rest.char_indices().skip_while(|(_, c)| c.is_whitespace()); // any whitespace directly after #!
         let (start_of_path, _first_char_of_path) = char_iter.next()?;
@@ -372,11 +372,11 @@ mod main {
         let (interpreter, len_with_whitespace) =
             if let Some((path_len, _next_char)) = path_char_iter.next() {
                 let total_len = path_len + 2; // +2 for #! because the index is in `rest`
-                (file_contents.get(start_of_path + 2..total_len)?, total_len)
+                (first_line.get(start_of_path + 2..total_len)?, total_len)
             } else {
                 // There is no next character after the interpreter, so the whole file is just
                 // magic, whitespace and path.
-                (file_contents.get(start_of_path + 2..)?, file_contents.len())
+                (first_line.get(start_of_path + 2..)?, first_line.len())
             };
         Some(ScriptShebang {
             interpreter_path: PathBuf::from(interpreter),
