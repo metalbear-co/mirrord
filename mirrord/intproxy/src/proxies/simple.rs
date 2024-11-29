@@ -7,9 +7,7 @@ use mirrord_intproxy_protocol::{LayerId, MessageId, ProxyToLayerMessage};
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::{
-        CloseDirRequest, CloseFileRequest, DirEntryInternal, OpenDirResponse, OpenFileResponse,
-        ReadDirBatchRequest, ReadDirBatchResponse, ReadDirRequest, ReadDirResponse,
-        READDIR_BATCH_VERSION,
+        CloseDirRequest, CloseFileRequest, DirEntryInternal, OpenDirResponse, OpenFileResponse, ReadDirBatchRequest, ReadDirBatchResponse, ReadDirRequest, ReadDirResponse, MKDIR_VERSION, READDIR_BATCH_VERSION
     },
     ClientMessage, FileRequest, FileResponse, GetEnvVarsRequest, RemoteResult, ResponseError,
 };
@@ -243,6 +241,31 @@ impl BackgroundTask for SimpleProxy {
                             .await;
                     }
                 }
+                SimpleProxyMessage::FileReq(
+                    message_id,
+                    layer_id,
+                    req @ FileRequest::MakeDir(_),
+                ) => {
+                    if protocol_version
+                        .as_ref()
+                        .is_some_and(|version| MKDIR_VERSION.matches(version))
+                    {
+                        self.file_reqs.insert(message_id, layer_id);
+                        message_bus
+                            .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(req)))
+                            .await;
+                    } else {
+                        message_bus
+                            .send(ToLayer {
+                                message_id,
+                                message: ProxyToLayerMessage::File(FileResponse::MakeDir(Err(
+                                    ResponseError::NotImplemented,
+                                ))),
+                                layer_id,
+                            })
+                            .await;
+                    }
+                },
                 SimpleProxyMessage::FileReq(message_id, layer_id, req) => {
                     self.file_reqs.insert(message_id, layer_id);
                     message_bus

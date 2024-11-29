@@ -347,6 +347,7 @@ pub(crate) fn mkdir(path: Detour<PathBuf>, mode: u32) -> Detour<MakeDirResponse>
 
     let mkdir = MakeDirRequest { path, mode };
 
+    // `NotImplemented` error here means that the protocol doesn't support it.
     match common::make_proxy_request_with_response(mkdir)? {
         Ok(response) => Detour::Success(response),
         Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),

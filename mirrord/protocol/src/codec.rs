@@ -76,7 +76,6 @@ pub enum FileRequest {
     CloseDir(CloseDirRequest),
     GetDEnts64(GetDEnts64Request),
     ReadLink(ReadLinkFileRequest),
-    MakeDir(MakeDirRequest),
 
     /// `readdir` request.
     ///
@@ -84,6 +83,7 @@ pub enum FileRequest {
     /// only. [`ReadDirRequest`]s that come from the layer are transformed into this
     /// batched form when the protocol version supports it. See [`READDIR_BATCH_VERSION`].
     ReadDirBatch(ReadDirBatchRequest),
+    MakeDir(MakeDirRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
