@@ -468,6 +468,27 @@ impl TestIntProxy {
             .unwrap();
     }
 
+    /// Makes a [`FileRequest::MakeDir`] and answers it.
+    pub async fn expect_make_dir(&mut self, dir_name: &str) {
+        // Expecting `mkdir` call with path.
+        assert_matches!(
+            self.recv().await,
+            ClientMessage::FileRequest(FileRequest::MakeDir(
+                mirrord_protocol::file::MakeDirRequest {path, mode: _ }
+            )) if path.to_str().unwrap() == dir_name
+        );
+
+        // Answer `mkdir`.
+        self.codec
+            .send(DaemonMessage::File(
+                mirrord_protocol::FileResponse::MakeDir(Ok(
+                    mirrord_protocol::file::MakeDirResponse { result: 0, errno: 0 },
+                )),
+            ))
+            .await
+            .unwrap();
+    }
+    
     /// Verify that the passed message (not the next message from self.codec!) is a file read.
     /// Return buffer size.
     pub async fn expect_message_file_read(message: ClientMessage, expected_fd: u64) -> u64 {
@@ -743,6 +764,7 @@ pub enum Application {
     RustListenPorts,
     Fork,
     ReadLink,
+    MakeDir,
     OpenFile,
     CIssue2055,
     CIssue2178,
@@ -796,6 +818,7 @@ impl Application {
             Application::PythonFastApiHTTP | Application::PythonIssue864 => String::from("uvicorn"),
             Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
             Application::ReadLink => String::from("tests/apps/readlink/out.c_test_app"),
+            Application::MakeDir => String::from("tests/apps/mkdir/out.c_test_app"),
             Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
             Application::NodeHTTP | Application::NodeIssue2283 | Application::NodeIssue2807 => {
                 String::from("node")
@@ -1032,6 +1055,7 @@ impl Application {
             | Application::Go23FAccessAt
             | Application::Fork
             | Application::ReadLink
+            | Application::MakeDir
             | Application::Realpath
             | Application::RustFileOps
             | Application::RustIssue1123
@@ -1108,6 +1132,7 @@ impl Application {
             | Application::BashShebang
             | Application::Fork
             | Application::ReadLink
+            | Application::MakeDir
             | Application::Realpath
             | Application::Go21Issue834
             | Application::Go22Issue834

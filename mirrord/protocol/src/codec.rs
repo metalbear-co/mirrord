@@ -76,6 +76,7 @@ pub enum FileRequest {
     CloseDir(CloseDirRequest),
     GetDEnts64(GetDEnts64Request),
     ReadLink(ReadLinkFileRequest),
+    MakeDir(MakeDirRequest),
 
     /// `readdir` request.
     ///
@@ -126,6 +127,7 @@ pub enum FileResponse {
     OpenDir(RemoteResult<OpenDirResponse>),
     GetDEnts64(RemoteResult<GetDEnts64Response>),
     ReadLink(RemoteResult<ReadLinkFileResponse>),
+    MakeDir(RemoteResult<MakeDirResponse>),
     ReadDirBatch(RemoteResult<ReadDirBatchResponse>),
 }
 

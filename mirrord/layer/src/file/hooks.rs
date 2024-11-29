@@ -10,18 +10,18 @@ use std::{
     os::unix::{ffi::OsStrExt, io::RawFd},
     ptr, slice,
     time::Duration,
+    os::unix::raw::mode_t
 };
 
 use errno::{set_errno, Errno};
 use libc::{
-    self, c_char, c_int, c_void, dirent, iovec, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
-    AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY,
+    self, c_char, c_int, c_void, dirent, iovec, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS, AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, statx, EBADF, ENOENT, ENOTDIR};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
-    FsMetadataInternal, MetadataInternal, ReadFileResponse, ReadLinkFileResponse, WriteFileResponse,
+    FsMetadataInternal, MetadataInternal, ReadFileResponse, ReadLinkFileResponse, WriteFileResponse, MakeDirResponse
 };
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
@@ -1062,6 +1062,25 @@ pub(crate) unsafe extern "C" fn readlink_detour(
         })
 }
 
+/// Hook for `libc::mkdir`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn mkdir_detour(
+    raw_path: *const c_char,
+    mode: mode_t,
+) -> c_int {
+    mkdir(raw_path.checked_into(), mode).map(|MakeDirResponse {result, errno } | {
+        if result == -1 {
+            set_errno(Errno(errno));
+            -1
+        } else {
+            0
+        }
+    }).unwrap_or_bypass_with(|bypass| {
+        let raw_path = update_ptr_from_bypass(raw_path, &bypass);
+        FN_MKDIR(raw_path, mode)
+    })
+}
+
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
@@ -1136,6 +1155,8 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FN_READLINK
     );
 
+    replace!(hook_manager, "mkdir", mkdir_detour, FnMkdir, FN_MKDIR);
+    
     replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);
 
     replace!(hook_manager, "write", write_detour, FnWrite, FN_WRITE);

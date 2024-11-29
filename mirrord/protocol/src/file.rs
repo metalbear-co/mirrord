@@ -263,6 +263,12 @@ pub struct ReadLinkFileResponse {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct MakeDirResponse {
+    pub result: i32,
+    pub errno: i32,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadLimitedFileRequest {
     pub remote_fd: u64,
     pub buffer_size: u64,
@@ -273,6 +279,12 @@ pub struct ReadLimitedFileRequest {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadLinkFileRequest {
     pub path: PathBuf,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct MakeDirRequest {
+    pub path: PathBuf,
+    pub mode: u32,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

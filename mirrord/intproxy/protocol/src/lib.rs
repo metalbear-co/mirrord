@@ -311,6 +311,13 @@ impl_request!(
 );
 
 impl_request!(
+    req = MakeDirRequest,
+    res = RemoteResult<MakeDirResponse>,
+    req_path = LayerToProxyMessage::File => FileRequest::MakeDir,
+    res_path = ProxyToLayerMessage::File => FileResponse::MakeDir,
+);
+
+impl_request!(
     req = SeekFileRequest,
     res = RemoteResult<SeekFileResponse>,
     req_path = LayerToProxyMessage::File => FileRequest::Seek,

@@ -9,7 +9,7 @@ use mirrord_protocol::{
     file::{
         OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadFileResponse,
         ReadLinkFileRequest, ReadLinkFileResponse, SeekFileResponse, WriteFileResponse,
-        XstatFsResponse, XstatResponse,
+        XstatFsResponse, XstatResponse, MakeDirRequest, MakeDirResponse
     },
     ResponseError,
 };
@@ -331,6 +331,23 @@ pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
 
     // `NotImplemented` error here means that the protocol doesn't support it.
     match common::make_proxy_request_with_response(requesting_path)? {
+        Ok(response) => Detour::Success(response),
+        Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
+        Err(fail) => Detour::Error(fail.into()),
+    }
+}
+
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
+pub(crate) fn mkdir(path: Detour<PathBuf>, mode: u32) -> Detour<MakeDirResponse> {
+    let path = remap_path!(path?);
+
+    check_relative_paths!(path);
+
+    ensure_not_ignored!(path, false);
+
+    let mkdir = MakeDirRequest { path, mode };
+
+    match common::make_proxy_request_with_response(mkdir)? {
         Ok(response) => Detour::Success(response),
         Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
         Err(fail) => Detour::Error(fail.into()),
