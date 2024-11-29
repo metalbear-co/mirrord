@@ -11,7 +11,7 @@ pub use common::*;
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn mkdir(dylib_path: &Path) {
-    let application = Application::ReadLink;
+    let application = Application::MakeDir;
 
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, Default::default(), None)

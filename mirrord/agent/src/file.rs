@@ -10,7 +10,7 @@ use std::{
 };
 
 use faccess::{AccessMode, PathExt};
-use libc::DT_DIR;
+use libc::{mode_t, DT_DIR};
 use mirrord_protocol::{file::*, FileRequest, FileResponse, RemoteResult, ResponseError};
 use tracing::{error, trace, Level};
 
@@ -475,7 +475,7 @@ impl FileManager {
             })
     }
 
-    pub(crate) fn mkdir(&mut self, path: &Path, mode: u16) -> RemoteResult<MakeDirResponse> {
+    pub(crate) fn mkdir(&mut self, path: &Path, mode: mode_t) -> RemoteResult<MakeDirResponse> {
         trace!("FileManager::mkdir -> path {:#?} | mode {:#?}", path, mode);
 
         let path = resolve_path(path, &self.root_path)?;

@@ -4,7 +4,7 @@ use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 #[cfg(target_os = "linux")]
 use libc::{c_char, statx, statx_timestamp};
-use libc::{c_int, iovec, unlink, AT_FDCWD};
+use libc::{c_int, iovec, mode_t, unlink, AT_FDCWD};
 use mirrord_protocol::{
     file::{
         MakeDirRequest, MakeDirResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
@@ -338,7 +338,7 @@ pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
 }
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
-pub(crate) fn mkdir(path: Detour<PathBuf>, mode: u16) -> Detour<MakeDirResponse> {
+pub(crate) fn mkdir(path: Detour<PathBuf>, mode: mode_t) -> Detour<MakeDirResponse> {
     let path = remap_path!(path?);
 
     check_relative_paths!(path);
