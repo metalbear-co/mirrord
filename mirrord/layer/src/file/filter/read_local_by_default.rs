@@ -92,5 +92,10 @@ pub fn regex_set_builder() -> RegexSetBuilder {
         patterns.push(format!("{}$", regex::escape(&executable.to_string_lossy())));
     }
 
+    // Hidden files and directories in $HOME.
+    if let Ok(home) = env::var("HOME") {
+        patterns.push(format!("^{}/\\.", regex::escape(&home)))
+    }
+
     RegexSetBuilder::new(patterns)
 }
