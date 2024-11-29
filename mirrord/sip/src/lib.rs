@@ -361,7 +361,7 @@ mod main {
 
     const SF_RESTRICTED: u32 = 0x00080000; // entitlement required for writing, from stat.h (macos)
 
-    /// Extract shebang from file contents.
+    /// Extract shebang from first line of file.
     fn get_shebang_from_string(first_line: &str) -> Option<ScriptShebang> {
         let rest = first_line.strip_prefix("#!")?;
 
