@@ -7,7 +7,9 @@ use mirrord_intproxy_protocol::{LayerId, MessageId, ProxyToLayerMessage};
 use mirrord_protocol::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::{
-        CloseDirRequest, CloseFileRequest, DirEntryInternal, OpenDirResponse, OpenFileResponse, ReadDirBatchRequest, ReadDirBatchResponse, ReadDirRequest, ReadDirResponse, MKDIR_VERSION, READDIR_BATCH_VERSION
+        CloseDirRequest, CloseFileRequest, DirEntryInternal, OpenDirResponse, OpenFileResponse,
+        ReadDirBatchRequest, ReadDirBatchResponse, ReadDirRequest, ReadDirResponse, MKDIR_VERSION,
+        READDIR_BATCH_VERSION,
     },
     ClientMessage, FileRequest, FileResponse, GetEnvVarsRequest, RemoteResult, ResponseError,
 };
@@ -265,7 +267,7 @@ impl BackgroundTask for SimpleProxy {
                             })
                             .await;
                     }
-                },
+                }
                 SimpleProxyMessage::FileReq(message_id, layer_id, req) => {
                     self.file_reqs.insert(message_id, layer_id);
                     message_bus

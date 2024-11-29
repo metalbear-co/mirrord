@@ -482,13 +482,16 @@ impl TestIntProxy {
         self.codec
             .send(DaemonMessage::File(
                 mirrord_protocol::FileResponse::MakeDir(Ok(
-                    mirrord_protocol::file::MakeDirResponse { result: 0, errno: 0 },
+                    mirrord_protocol::file::MakeDirResponse {
+                        result: 0,
+                        errno: 0,
+                    },
                 )),
             ))
             .await
             .unwrap();
     }
-    
+
     /// Verify that the passed message (not the next message from self.codec!) is a file read.
     /// Return buffer size.
     pub async fn expect_message_file_read(message: ClientMessage, expected_fd: u64) -> u64 {
