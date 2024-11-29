@@ -10,7 +10,7 @@ mod main {
     use std::{
         env,
         ffi::OsStr,
-        io::{self, ErrorKind::AlreadyExists, Read},
+        io::{self, BufRead, ErrorKind::AlreadyExists},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
         path::{Path, PathBuf},
         str::from_utf8,
@@ -343,12 +343,10 @@ mod main {
             // trailing newline is needed for scripts without an original shebang
             new_contents.push('\n');
         }
+        let mut bytes = new_contents.into_bytes();
+        bytes.extend_from_slice(contents);
 
-        new_contents.push_str(
-            from_utf8(contents)
-                .map_err(|_utf| UnlikelyError("Can't read script contents as utf8".to_string()))?,
-        );
-        std::fs::write(&patched_path, new_contents)?;
+        std::fs::write(&patched_path, bytes)?;
 
         // We set the permissions of the patched script to be like those of the original
         // script, but allowing the user to write, so that in the next run, when we are here
@@ -389,15 +387,22 @@ mod main {
     /// Including '#!', just until whitespace, no arguments.
     /// will not be called on object files
     fn read_shebang_from_file<P: AsRef<Path>>(path: P) -> Result<Option<ScriptShebang>> {
-        let mut f = std::fs::File::open(path)?;
-        let mut buffer = String::new();
-        match f.read_to_string(&mut buffer) {
-            Ok(_) => {}
-            Err(e) if e.kind() == io::ErrorKind::InvalidData => return Ok(None),
-            Err(e) => return Err(SipError::IO(e)),
-        }
+        let f = std::fs::File::open(path)?;
+        let reader = io::BufReader::new(f);
+        let mut lines = reader.lines();
+        let Some(first_line_res) = lines.next() else {
+            trace!("No lines in script.");
+            return Ok(None);
+        };
 
-        Ok(get_shebang_from_string(&buffer))
+        match first_line_res {
+            Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+                trace!("First line of file is not utf-8. Can't read a shebang.");
+                Ok(None)
+            }
+            Err(e) => Err(SipError::IO(e)),
+            Ok(line_string) => Ok(get_shebang_from_string(&line_string)),
+        }
     }
 
     #[derive(Debug)]
@@ -496,13 +501,15 @@ mod main {
                 }
             })
         } else {
-            let shebang =
-                read_shebang_from_file(&complete_path)?.unwrap_or_else(|| ScriptShebang {
+            let shebang = read_shebang_from_file(&complete_path)?.unwrap_or_else(|| {
+                trace!("Did not find a shebang, defaulting to $SHELL.");
+                ScriptShebang {
                     interpreter_path: PathBuf::from(
                         env::var("SHELL").expect("$SHELL should be present"),
                     ),
                     start_of_rest_of_file: 0,
-                });
+                }
+            });
 
             let interpreter_complete_path = get_complete_path(&shebang.interpreter_path)?;
             if is_in_mirrord_tmp_dir(&interpreter_complete_path)? {
