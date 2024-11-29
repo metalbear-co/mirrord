@@ -287,7 +287,7 @@ pub struct ReadLinkFileRequest {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct MakeDirRequest {
     pub path: PathBuf,
-    pub mode: u32,
+    pub mode: u16,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

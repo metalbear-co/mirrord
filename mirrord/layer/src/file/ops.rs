@@ -338,7 +338,7 @@ pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
 }
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
-pub(crate) fn mkdir(path: Detour<PathBuf>, mode: u32) -> Detour<MakeDirResponse> {
+pub(crate) fn mkdir(path: Detour<PathBuf>, mode: u16) -> Detour<MakeDirResponse> {
     let path = remap_path!(path?);
 
     check_relative_paths!(path);
