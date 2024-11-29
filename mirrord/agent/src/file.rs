@@ -475,7 +475,7 @@ impl FileManager {
             })
     }
 
-    pub(crate) fn mkdir(&mut self, path: &Path, mode: u32) -> RemoteResult<MakeDirResponse> {
+    pub(crate) fn mkdir(&mut self, path: &Path, mode: u16) -> RemoteResult<MakeDirResponse> {
         trace!("FileManager::mkdir -> path {:#?} | mode {:#?}", path, mode);
 
         let path = resolve_path(path, &self.root_path)?;
