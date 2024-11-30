@@ -474,8 +474,8 @@ impl TestIntProxy {
         assert_matches!(
             self.recv().await,
             ClientMessage::FileRequest(FileRequest::MakeDir(
-                mirrord_protocol::file::MakeDirRequest {path, mode: _ }
-            )) if path.to_str().unwrap() == dir_name
+                mirrord_protocol::file::MakeDirRequest { path, mode }
+            )) if path.to_str().unwrap() == dir_name && mode == 0o777
         );
 
         // Answer `mkdir`.
