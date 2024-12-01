@@ -21,8 +21,8 @@ use libc::{
 use libc::{dirent64, stat64, statx, EBADF, ENOENT, ENOTDIR};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
-    FsMetadataInternal, MakeDirResponse, MetadataInternal, ReadFileResponse, ReadLinkFileResponse,
-    WriteFileResponse,
+    FsMetadataInternal, MakeDirAtResponse, MakeDirResponse, MetadataInternal, ReadFileResponse,
+    ReadLinkFileResponse, WriteFileResponse,
 };
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
@@ -1079,6 +1079,26 @@ pub(crate) unsafe extern "C" fn mkdir_detour(pathname: *const c_char, mode: mode
         })
 }
 
+/// Hook for `libc::mkdirat`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn mkdirat_detour(
+    dirfd: c_int,
+    pathname: *const c_char,
+    mode: mode_t,
+) -> c_int {
+    mkdirat(pathname.checked_into(), mode)
+        .map(|MakeDirAtResponse { result, errno }| {
+            if result == -1 {
+                set_errno(Errno(errno));
+            }
+            result
+        })
+        .unwrap_or_bypass_with(|bypass| {
+            let raw_path = update_ptr_from_bypass(pathname, &bypass);
+            FN_MKDIRAT(dirfd, raw_path, mode)
+        })
+}
+
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
@@ -1154,6 +1174,14 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     );
 
     replace!(hook_manager, "mkdir", mkdir_detour, FnMkdir, FN_MKDIR);
+
+    replace!(
+        hook_manager,
+        "mkdirat",
+        mkdirat_detour,
+        FnMkdirat,
+        FN_MKDIRAT
+    );
 
     replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);
 

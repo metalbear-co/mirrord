@@ -492,6 +492,30 @@ impl TestIntProxy {
             .unwrap();
     }
 
+    /// Makes a [`FileRequest::MakeDirAt`] and answers it.
+    pub async fn expect_make_dir_at(&mut self, dir_name: &str) {
+        // Expecting `mkdir` call with path.
+        assert_matches!(
+            self.recv().await,
+            ClientMessage::FileRequest(FileRequest::MakeDirAt(
+                mirrord_protocol::file::MakeDirAtRequest { path, mode }
+            )) if path.to_str().unwrap() == dir_name && mode == 0o777
+        );
+
+        // Answer `mkdir`.
+        self.codec
+            .send(DaemonMessage::File(
+                mirrord_protocol::FileResponse::MakeDirAt(Ok(
+                    mirrord_protocol::file::MakeDirAtResponse {
+                        result: 0,
+                        errno: 0,
+                    },
+                )),
+            ))
+            .await
+            .unwrap();
+    }
+
     /// Verify that the passed message (not the next message from self.codec!) is a file read.
     /// Return buffer size.
     pub async fn expect_message_file_read(message: ClientMessage, expected_fd: u64) -> u64 {

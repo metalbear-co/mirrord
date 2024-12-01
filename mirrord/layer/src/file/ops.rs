@@ -7,9 +7,9 @@ use libc::{c_char, statx, statx_timestamp};
 use libc::{c_int, iovec, mode_t, unlink, AT_FDCWD};
 use mirrord_protocol::{
     file::{
-        MakeDirRequest, MakeDirResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
-        ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse, SeekFileResponse,
-        WriteFileResponse, XstatFsResponse, XstatResponse,
+        MakeDirAtRequest, MakeDirAtResponse, MakeDirRequest, MakeDirResponse, OpenFileRequest,
+        OpenFileResponse, OpenOptionsInternal, ReadFileResponse, ReadLinkFileRequest,
+        ReadLinkFileResponse, SeekFileResponse, WriteFileResponse, XstatFsResponse, XstatResponse,
     },
     ResponseError,
 };
@@ -346,6 +346,24 @@ pub(crate) fn mkdir(path: Detour<PathBuf>, mode: mode_t) -> Detour<MakeDirRespon
     ensure_not_ignored!(path, false);
 
     let mkdir = MakeDirRequest { path, mode };
+
+    // `NotImplemented` error here means that the protocol doesn't support it.
+    match common::make_proxy_request_with_response(mkdir)? {
+        Ok(response) => Detour::Success(response),
+        Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
+        Err(fail) => Detour::Error(fail.into()),
+    }
+}
+
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
+pub(crate) fn mkdirat(path: Detour<PathBuf>, mode: mode_t) -> Detour<MakeDirAtResponse> {
+    let path = remap_path!(path?);
+
+    check_relative_paths!(path);
+
+    ensure_not_ignored!(path, false);
+
+    let mkdir = MakeDirAtRequest { path, mode };
 
     // `NotImplemented` error here means that the protocol doesn't support it.
     match common::make_proxy_request_with_response(mkdir)? {

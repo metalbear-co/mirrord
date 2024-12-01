@@ -253,6 +253,9 @@ impl FileManager {
             FileRequest::MakeDir(MakeDirRequest { path, mode }) => {
                 Some(FileResponse::MakeDir(self.mkdir(&path, mode)))
             }
+            FileRequest::MakeDirAt(MakeDirAtRequest { path, mode }) => {
+                Some(FileResponse::MakeDirAt(self.mkdirat(&path, mode)))
+            }
         })
     }
 
@@ -486,6 +489,26 @@ impl FileManager {
                 errno: 0,
             }),
             Err(err) => Ok(MakeDirResponse {
+                result: -1,
+                errno: err.raw_os_error().unwrap_or(0),
+            }),
+        }
+    }
+
+    pub(crate) fn mkdirat(&mut self, path: &Path, mode: mode_t) -> RemoteResult<MakeDirAtResponse> {
+        trace!(
+            "FileManager::mkdirat -> path {:#?} | mode {:#?}",
+            path,
+            mode
+        );
+        let path = resolve_path(path, &self.root_path)?;
+
+        match std::fs::create_dir(Path::new(&path)) {
+            Ok(_) => Ok(MakeDirAtResponse {
+                result: 0,
+                errno: 0,
+            }),
+            Err(err) => Ok(MakeDirAtResponse {
                 result: -1,
                 errno: err.raw_os_error().unwrap_or(0),
             }),

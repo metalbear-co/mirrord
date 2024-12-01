@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/fcntl.h>
 
 /// Test `mkdir`.
 ///
@@ -9,9 +10,13 @@
 ///
 int main()
 {
-  char *path = "/test_mkdir_folder";
-  int result = mkdir(path, 0777);
+  char *mkdir_test_path = "/mkdir_test_path";
+  int mkdir_result = mkdir(mkdir_test_path, 0777);
+  assert(mkdir_result == 0);
 
-  assert(result == 0);
+  char *mkdirat_test_path = "/mkdirat_test_path";
+  int mkdirat_result = mkdirat(AT_FDCWD, mkdirat_test_path, 0777);
+  assert(mkdirat_result == 0);
+
   return 0;
 }
