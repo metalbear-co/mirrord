@@ -26,11 +26,11 @@ func main() {
 
 	// TODO: apply golang hooks to make os.Mkdir works
 
-	err = os.Mkdir("/app/test_mkdir", 0755)
-	if err != nil {
-		fmt.Printf("Mkdir error: %s\n", err)
-		os.Exit(-1)
-	}
+	// err = os.Mkdir("/app/test_mkdir", 0755)
+	// if err != nil {
+	// 	fmt.Printf("Mkdir error: %s\n", err)
+	// 	os.Exit(-1)
+	// }
 
 	// let close requests be sent for test
 	time.Sleep(1 * time.Second)
