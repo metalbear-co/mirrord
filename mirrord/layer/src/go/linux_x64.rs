@@ -341,6 +341,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
             }
             libc::SYS_fstat => fstat_detour(param1 as _, param2 as _) as i64,
             libc::SYS_getdents64 => getdents64_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_mkdir => mkdir_detour(param1 as _, param2 as _) as i64,
             _ => {
                 let (Ok(result) | Err(result)) = syscalls::syscall!(
                     syscalls::Sysno::from(syscall as i32),
@@ -357,7 +358,6 @@ unsafe extern "C" fn c_abi_syscall_handler(
                 });
                 result
             }
-            libc::SYS_mkdir => mkdir_detour(param1 as _, param2 as _) as i64,
         },
         _ => {
             let (Ok(result) | Err(result)) = syscalls::syscall!(
