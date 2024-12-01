@@ -129,7 +129,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                     });
                     result
                 }
-                libc::SYS_mkdir => mkdir_detour(param1 as _, param2 as _) as i64
+                libc::SYS_mkdir => mkdir_detour(param1 as _, param2 as _) as i64,
             }
         }
         _ => {
