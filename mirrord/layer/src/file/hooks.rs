@@ -1086,7 +1086,7 @@ pub(crate) unsafe extern "C" fn mkdirat_detour(
     pathname: *const c_char,
     mode: mode_t,
 ) -> c_int {
-    mkdirat(pathname.checked_into(), mode)
+    mkdirat(dirfd, pathname.checked_into(), mode)
         .map(|MakeDirAtResponse { result, errno }| {
             if result == -1 {
                 set_errno(Errno(errno));

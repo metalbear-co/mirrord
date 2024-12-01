@@ -338,14 +338,17 @@ pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
 }
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
-pub(crate) fn mkdir(path: Detour<PathBuf>, mode: mode_t) -> Detour<MakeDirResponse> {
-    let path = remap_path!(path?);
+pub(crate) fn mkdir(pathname: Detour<PathBuf>, mode: mode_t) -> Detour<MakeDirResponse> {
+    let path = remap_path!(pathname?);
 
     check_relative_paths!(path);
 
     ensure_not_ignored!(path, false);
 
-    let mkdir = MakeDirRequest { path, mode };
+    let mkdir = MakeDirRequest {
+        pathname: path,
+        mode,
+    };
 
     // `NotImplemented` error here means that the protocol doesn't support it.
     match common::make_proxy_request_with_response(mkdir)? {
@@ -356,14 +359,22 @@ pub(crate) fn mkdir(path: Detour<PathBuf>, mode: mode_t) -> Detour<MakeDirRespon
 }
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
-pub(crate) fn mkdirat(path: Detour<PathBuf>, mode: mode_t) -> Detour<MakeDirAtResponse> {
-    let path = remap_path!(path?);
+pub(crate) fn mkdirat(
+    dirfd: i32,
+    pathname: Detour<PathBuf>,
+    mode: mode_t,
+) -> Detour<MakeDirAtResponse> {
+    let path = remap_path!(pathname?);
 
     check_relative_paths!(path);
 
     ensure_not_ignored!(path, false);
 
-    let mkdir = MakeDirAtRequest { path, mode };
+    let mkdir = MakeDirAtRequest {
+        dirfd,
+        pathname: path,
+        mode,
+    };
 
     // `NotImplemented` error here means that the protocol doesn't support it.
     match common::make_proxy_request_with_response(mkdir)? {

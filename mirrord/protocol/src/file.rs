@@ -268,7 +268,7 @@ pub struct ReadLinkFileResponse {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct MakeDirRequest {
-    pub path: PathBuf,
+    pub pathname: PathBuf,
     pub mode: mode_t,
 }
 
@@ -280,7 +280,8 @@ pub struct MakeDirResponse {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct MakeDirAtRequest {
-    pub path: PathBuf,
+    pub dirfd: i32,
+    pub pathname: PathBuf,
     pub mode: mode_t,
 }
 

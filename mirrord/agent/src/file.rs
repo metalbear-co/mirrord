@@ -250,12 +250,16 @@ impl FileManager {
             }) => Some(FileResponse::GetDEnts64(
                 self.getdents64(remote_fd, buffer_size),
             )),
-            FileRequest::MakeDir(MakeDirRequest { path, mode }) => {
-                Some(FileResponse::MakeDir(self.mkdir(&path, mode)))
+            FileRequest::MakeDir(MakeDirRequest { pathname, mode }) => {
+                Some(FileResponse::MakeDir(self.mkdir(&pathname, mode)))
             }
-            FileRequest::MakeDirAt(MakeDirAtRequest { path, mode }) => {
-                Some(FileResponse::MakeDirAt(self.mkdirat(&path, mode)))
-            }
+            FileRequest::MakeDirAt(MakeDirAtRequest {
+                dirfd,
+                pathname,
+                mode,
+            }) => Some(FileResponse::MakeDirAt(
+                self.mkdirat(dirfd, &pathname, mode),
+            )),
         })
     }
 
@@ -483,35 +487,64 @@ impl FileManager {
 
         let path = resolve_path(path, &self.root_path)?;
 
-        match std::fs::create_dir(Path::new(&path)) {
-            Ok(_) => Ok(MakeDirResponse {
+        let c_path = match std::ffi::CString::new(path.to_string_lossy().as_bytes()) {
+            Ok(c_path) => c_path,
+            Err(_) => {
+                return Ok(MakeDirResponse {
+                    result: -1,
+                    errno: -1,
+                })
+            } // TODO: check this
+        };
+
+        let result = unsafe { libc::mkdir(c_path.as_ptr(), mode) };
+
+        if result == 0 {
+            Ok(MakeDirResponse {
                 result: 0,
                 errno: 0,
-            }),
-            Err(err) => Ok(MakeDirResponse {
-                result: -1,
-                errno: err.raw_os_error().unwrap_or(0),
-            }),
+            })
+        } else {
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            Ok(MakeDirResponse { result, errno })
         }
     }
 
-    pub(crate) fn mkdirat(&mut self, path: &Path, mode: mode_t) -> RemoteResult<MakeDirAtResponse> {
+    pub(crate) fn mkdirat(
+        &mut self,
+        dirfd: i32,
+        path: &Path,
+        mode: mode_t,
+    ) -> RemoteResult<MakeDirAtResponse> {
         trace!(
-            "FileManager::mkdirat -> path {:#?} | mode {:#?}",
+            "FileManager::mkdirat -> dirfd {:#?} | path {:#?} | mode {:#?}",
+            dirfd,
             path,
             mode
         );
+
         let path = resolve_path(path, &self.root_path)?;
 
-        match std::fs::create_dir(Path::new(&path)) {
-            Ok(_) => Ok(MakeDirAtResponse {
+        let c_path = match std::ffi::CString::new(path.to_string_lossy().as_bytes()) {
+            Ok(c_path) => c_path,
+            Err(_) => {
+                return Ok(MakeDirAtResponse {
+                    result: -1,
+                    errno: -1,
+                })
+            } // TODO: check this
+        };
+
+        let result = unsafe { libc::mkdirat(dirfd, c_path.as_ptr(), mode) };
+
+        if result == 0 {
+            Ok(MakeDirAtResponse {
                 result: 0,
                 errno: 0,
-            }),
-            Err(err) => Ok(MakeDirAtResponse {
-                result: -1,
-                errno: err.raw_os_error().unwrap_or(0),
-            }),
+            })
+        } else {
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            Ok(MakeDirAtResponse { result, errno })
         }
     }
 
