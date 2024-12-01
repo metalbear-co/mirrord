@@ -1065,8 +1065,8 @@ pub(crate) unsafe extern "C" fn readlink_detour(
 
 /// Hook for `libc::mkdir`.
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn mkdir_detour(raw_path: *const c_char, mode: mode_t) -> c_int {
-    mkdir(raw_path.checked_into(), mode)
+pub(crate) unsafe extern "C" fn mkdir_detour(pathname: *const c_char, mode: mode_t) -> c_int {
+    mkdir(pathname.checked_into(), mode)
         .map(|MakeDirResponse { result, errno }| {
             if result == -1 {
                 set_errno(Errno(errno));
@@ -1074,7 +1074,7 @@ pub(crate) unsafe extern "C" fn mkdir_detour(raw_path: *const c_char, mode: mode
             result
         })
         .unwrap_or_bypass_with(|bypass| {
-            let raw_path = update_ptr_from_bypass(raw_path, &bypass);
+            let raw_path = update_ptr_from_bypass(pathname, &bypass);
             FN_MKDIR(raw_path, mode)
         })
 }
