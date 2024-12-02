@@ -128,9 +128,9 @@ pub enum FileResponse {
     OpenDir(RemoteResult<OpenDirResponse>),
     GetDEnts64(RemoteResult<GetDEnts64Response>),
     ReadLink(RemoteResult<ReadLinkFileResponse>),
+    ReadDirBatch(RemoteResult<ReadDirBatchResponse>),
     MakeDir(RemoteResult<MakeDirResponse>),
     MakeDirAt(RemoteResult<MakeDirAtResponse>),
-    ReadDirBatch(RemoteResult<ReadDirBatchResponse>),
 }
 
 /// `-agent` --> `-layer` messages.
