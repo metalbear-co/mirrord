@@ -1,0 +1,1 @@
+Hidden files and directories in `$HOME` directory are now read locally by default.
