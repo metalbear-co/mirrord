@@ -282,7 +282,7 @@ Operator License
         println!();
 
         // The SQS queue statuses are grouped by queue consumer.
-        for (sqs_consumer, sqs_row) in sqs_rows.into_iter() {
+        for (sqs_consumer, sqs_row) in sqs_rows {
             let mut sqs_table = Table::new();
             sqs_table.add_row(row![
                 "Session ID",
