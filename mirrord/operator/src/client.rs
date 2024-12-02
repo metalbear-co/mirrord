@@ -646,7 +646,7 @@ impl OperatorApi<PreparedClientCert> {
                 session_id
                     .map(|id| u64::from_str_radix(&id, 16))
                     .transpose()?
-                    .unwrap_or_else(|| rand::random())
+                    .unwrap_or_else(rand::random)
             },
             connect_url,
             client_cert: self.client_cert.cert.clone(),
