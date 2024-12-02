@@ -1,6 +1,6 @@
 use core::slice::Iter;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{hash_map::Entry, BTreeMap, HashMap},
     ops::Not,
     path::PathBuf,
     time::Duration,
@@ -113,9 +113,9 @@ impl StatusCommandHandler {
                     // Loop over the filters and start building the rows.
                     for (filter_key, filter) in filters_by_id.iter() {
                         // Group rows by the queue `consumer`.
-                        match rows.get_mut(consumer) {
-                            Some(consumer_rows) => {
-                                consumer_rows.push(row![
+                        match rows.entry(consumer.clone()) {
+                            Entry::Occupied(mut consumer_rows) => {
+                                consumer_rows.get_mut().push(row![
                                     session_id,
                                     queue_id,
                                     user,
@@ -124,18 +124,15 @@ impl StatusCommandHandler {
                                     format!("{filter_key}:{filter}")
                                 ]);
                             }
-                            None => {
-                                rows.insert(
-                                    consumer.clone(),
-                                    vec![row![
-                                        session_id,
-                                        queue_id,
-                                        user,
-                                        original_name,
-                                        output_name,
-                                        format!("{filter_key}:{filter}")
-                                    ]],
-                                );
+                            Entry::Vacant(consumer_rows) => {
+                                consumer_rows.insert(vec![row![
+                                    session_id,
+                                    queue_id,
+                                    user,
+                                    original_name,
+                                    output_name,
+                                    format!("{filter_key}:{filter}")
+                                ]]);
                             }
                         }
                     }
@@ -274,7 +271,15 @@ Operator License
                     &session.user,
                 )
             }) {
-                sqs_rows.extend(sqs_in_status);
+                // Merge each session SQS into our map keyed by consumer.
+                for (consumer, rows) in sqs_in_status {
+                    match sqs_rows.entry(consumer) {
+                        Entry::Occupied(mut consumer_rows) => consumer_rows.get_mut().extend(rows),
+                        Entry::Vacant(consumer_rows) => {
+                            consumer_rows.insert(rows);
+                        }
+                    }
+                }
             }
         }
 
