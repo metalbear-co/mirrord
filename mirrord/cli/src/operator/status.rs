@@ -235,7 +235,8 @@ Operator License
             "Session Duration"
         ]);
 
-        let mut sqs_rows = None;
+        let mut sqs_rows: HashMap<QueueConsumer, Vec<Row>> = HashMap::new();
+
         for session in &status.sessions {
             let locked_ports = session
                 .locked_ports
@@ -266,19 +267,22 @@ Operator License
                 humantime::format_duration(Duration::from_secs(session.duration_secs)),
             ]);
 
-            sqs_rows = session.sqs.as_ref().and_then(|sqs| {
+            if let Some(sqs_in_status) = session.sqs.as_ref().and_then(|sqs| {
                 Self::sqs_rows(
                     sqs.iter(),
                     session.id.clone().unwrap_or_default(),
                     &session.user,
                 )
-            })
+            }) {
+                sqs_rows.extend(sqs_in_status);
+            }
         }
 
         sessions.printstd();
         println!();
 
-        if let Some(sqs) = sqs_rows.map(|rows| rows.into_iter()) {
+        // The SQS queue statuses are grouped by queue consumer.
+        for (sqs_consumer, sqs_row) in sqs_rows.into_iter() {
             let mut sqs_table = Table::new();
             sqs_table.add_row(row![
                 "Session ID",
@@ -289,16 +293,13 @@ Operator License
                 "Filter",
             ]);
 
-            // The SQS queue statuses are grouped by queue consumer.
-            for (consumer, rows) in sqs {
-                println!("SQS Queue for {consumer}");
+            println!("SQS Queue for {sqs_consumer}");
 
-                for row in rows {
-                    sqs_table.add_row(row);
-                }
-
-                sqs_table.printstd();
+            for row in sqs_row {
+                sqs_table.add_row(row);
             }
+
+            sqs_table.printstd();
         }
 
         Ok(())
