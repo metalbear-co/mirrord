@@ -531,6 +531,12 @@ impl OperatorApi<PreparedClientCert> {
     /// Starts a new operator session and connects to the target.
     /// Returned [`OperatorSessionConnection::session`] can be later used to create another
     /// connection in the same session with [`OperatorApi::connect_in_existing_session`].
+    ///
+    /// 2 connections are made to the operator (this means that we hit the target's
+    /// `connect_resource` twice):
+    ///
+    /// 1. The 1st one is here;
+    /// 2. The 2nd is on the `AgentConnection::new`;
     #[tracing::instrument(
         level = Level::TRACE,
         skip(layer_config, progress),

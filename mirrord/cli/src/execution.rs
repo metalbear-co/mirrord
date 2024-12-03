@@ -164,6 +164,16 @@ impl MirrordExecution {
     /// 1. Drop this struct when an error occurs,
     /// 2. Successfully `exec`,
     /// 3. Wait for intproxy exit with [`MirrordExecution::wait`].
+    ///
+    /// # `async` shenanigans when using the mirrord operator.
+    ///
+    /// Here we connect a websocket to the operator created agent, and this connection
+    /// might get reset if we don't drive its IO (call `await` on the runtime after the
+    /// websocket is up). This is an issue because we start things with `execv`, so we're
+    /// kinda out of the whole Rust world of nicely dropping things.
+    ///
+    /// tl;dr: In `exec_process`, you need to call and `await` either
+    /// [`tokio::time::sleep`] or [`tokio::task::yield_now`] after calling this function.
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     pub(crate) async fn start<P>(
         config: &LayerConfig,
