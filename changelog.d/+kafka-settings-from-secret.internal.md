@@ -1,0 +1,1 @@
+Add optional `loadFromSecret` field to Kafka client config spec to allow setting properties from a Secret.
