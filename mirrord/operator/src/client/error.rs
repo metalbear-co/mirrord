@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, num::ParseIntError};
 
 pub use http::Error as HttpError;
 use mirrord_kube::error::KubeApiError;
@@ -71,6 +71,9 @@ pub enum OperatorApiError {
 
     #[error("mirrord operator failed KubeApi operation: {0}")]
     KubeApi(#[from] KubeApiError),
+
+    #[error(transparent)]
+    ParseInt(#[from] ParseIntError),
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;

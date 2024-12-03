@@ -227,6 +227,7 @@ pub struct Session {
     pub namespace: Option<String>,
     pub locked_ports: Option<Vec<(u16, String, Option<String>)>>,
     pub user_id: Option<String>,
+    pub sqs: Option<Vec<MirrordSqsSession>>,
 }
 
 /// Resource used to access the operator's session management routes.
@@ -422,7 +423,7 @@ pub enum SplitQueue {
 }
 
 /// A workload that is a consumer of a queue that is being split.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema, Hash)]
 #[serde(rename_all = "camelCase")] // workload_type -> workloadType
 pub struct QueueConsumer {
     pub name: String,
@@ -433,7 +434,7 @@ pub struct QueueConsumer {
 }
 
 /// A workload that is a consumer of a queue that is being split.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema, Hash)]
 pub enum QueueConsumerType {
     Deployment,
 
