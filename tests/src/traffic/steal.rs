@@ -25,7 +25,6 @@ mod steal_tests {
     };
 
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
-    #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
@@ -39,6 +38,39 @@ mod steal_tests {
         )]
         application: Application,
     ) {
+        let service = service.await;
+        let kube_client = kube_client.await;
+        let url = get_service_url(kube_client.clone(), &service).await;
+        let mut flags = vec!["--steal"];
+
+        if cfg!(feature = "ephemeral") {
+            flags.extend(["-e"].into_iter());
+        }
+
+        let mut process = application
+            .run(&service.target, Some(&service.namespace), Some(flags), None)
+            .await;
+
+        process
+            .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+            .await;
+        send_requests(&url, true, Default::default()).await;
+        tokio::time::timeout(Duration::from_secs(40), process.wait())
+            .await
+            .unwrap();
+
+        application.assert(&process).await;
+    }
+
+    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    async fn steal_http_ipv6_traffic(
+        #[future] service: KubeService,
+        #[future] kube_client: Client,
+    ) {
+        let application = Application::PythonFastApiHTTPIPv6;
         let service = service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
