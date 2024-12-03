@@ -1,3 +1,4 @@
+use k8s_openapi::api::core::v1::Secret;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,11 @@ pub struct MirrordKafkaClientConfigSpec {
     ///
     /// The list of all available properties can be found [here](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md).
     pub properties: Vec<MirrordKafkaClientProperty>,
+
+    /// Properties to set from a secret.
+    ///
+    /// The secret is resolved when resolving the rest of the final configuration.
+    pub load_from_secret: Option<Secret>,
 }
 
 /// Property to use when creating operator's Kafka client.
