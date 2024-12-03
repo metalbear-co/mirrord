@@ -90,6 +90,7 @@ fn format_time() -> String {
 pub enum Application {
     PythonFlaskHTTP,
     PythonFastApiHTTP,
+    PythonFastApiHTTPIPv6,
     NodeHTTP,
     NodeHTTP2,
     Go21HTTP,
@@ -394,6 +395,15 @@ impl Application {
                     "app_fastapi:app",
                 ]
             }
+            Application::PythonFastApiHTTPIPv6 => {
+                vec![
+                    "uvicorn",
+                    "--port=80",
+                    "--host=::",
+                    "--app-dir=./python-e2e/",
+                    "app_fastapi:app",
+                ]
+            }
             Application::PythonCloseSocket => {
                 vec!["python3", "-u", "python-e2e/close_socket.py"]
             }
@@ -439,7 +449,7 @@ impl Application {
     }
 
     pub async fn assert(&self, process: &TestProcess) {
-        if let Application::PythonFastApiHTTP = self {
+        if matches!(self, Self::PythonFastApiHTTP | Self::PythonFastApiHTTPIPv6) {
             process.assert_log_level(true, "ERROR").await;
             process.assert_log_level(false, "ERROR").await;
             process.assert_log_level(true, "CRITICAL").await;
