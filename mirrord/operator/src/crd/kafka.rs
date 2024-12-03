@@ -1,4 +1,3 @@
-use k8s_openapi::api::core::v1::Secret;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -11,7 +10,8 @@ use serde::{Deserialize, Serialize};
     version = "v1alpha",
     kind = "MirrordKafkaClientConfig",
     namespaced,
-    printcolumn = r#"{"name":"PARENT", "type":"string", "description":"Name of parent configuration.", "jsonPath":".spec.parent"}"#
+    printcolumn = r#"{"name":"PARENT", "type":"string", "description":"Name of parent configuration.", "jsonPath":".spec.parent"}"#,
+    printcolumn = r#"{"name":"SECRET", "type":"string", "description":"Name of Secret to load from.", "jsonPath":".spec.loadFromSecret"}"#
 )]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordKafkaClientConfigSpec {
@@ -25,10 +25,14 @@ pub struct MirrordKafkaClientConfigSpec {
     /// The list of all available properties can be found [here](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md).
     pub properties: Vec<MirrordKafkaClientProperty>,
 
-    /// Properties to set from a secret.
+    /// Namespace and name of a `Secret` to use as another source of properties.
     ///
-    /// The secret is resolved when resolving the rest of the final configuration.
-    pub load_from_secret: Option<Secret>,
+    /// The secret is fetched and entries in its `.data` field are resolved to properties.
+    /// Properties resolved this way override properties from the parent configuration.
+    /// Properties defined inline in this object override properties resolved from the secret.
+    ///
+    /// Example value: `default/my-secret`
+    pub load_from_secret: Option<String>,
 }
 
 /// Property to use when creating operator's Kafka client.
