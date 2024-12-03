@@ -1,4 +1,4 @@
-use std::{ffi::NulError, net::SocketAddr, path::PathBuf, str::FromStr};
+use std::{ffi::NulError, net::SocketAddr, num::ParseIntError, path::PathBuf, str::FromStr};
 
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
@@ -260,6 +260,10 @@ pub(crate) enum CliError {
     #[diagnostic(transparent)]
     OperatorSetupError(#[from] OperatorSetupError),
 
+    #[error("`mirrord operator status` command failed! Could not retrieve operator status API.")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    OperatorStatusNotFound,
+
     #[error("Failed to extract mirrord-layer to `{}`: {1}", .0.display())]
     #[diagnostic(help("{GENERAL_BUG}"))]
     LayerExtractError(PathBuf, std::io::Error),
@@ -407,6 +411,9 @@ pub(crate) enum CliError {
 
     #[error("Couldn't resolve binary name '{0}': {1}")]
     BinaryWhichError(String, String),
+
+    #[error(transparent)]
+    ParseInt(ParseIntError),
 }
 
 impl CliError {
@@ -485,6 +492,7 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorReturnedUnknownTargetType(error.0)
             }
             OperatorApiError::KubeApi(error) => Self::OperatorTargetResolution(error),
+            OperatorApiError::ParseInt(error) => Self::ParseInt(error),
         }
     }
 }

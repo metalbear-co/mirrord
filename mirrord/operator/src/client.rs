@@ -560,7 +560,7 @@ impl OperatorApi<PreparedClientCert> {
             .contains(&NewOperatorFeature::ProxyApi);
 
         let is_empty_deployment = target.empty_deployment();
-        let connect_url = if layer_config.feature.copy_target.enabled
+        let (connect_url, session_id) = if layer_config.feature.copy_target.enabled
             // use copy_target for splitting queues
             || layer_config.feature.split_queues.is_set()
             || is_empty_deployment
@@ -598,7 +598,12 @@ impl OperatorApi<PreparedClientCert> {
 
             copy_subtask.success(Some("target copied"));
 
-            copied.connect_url(use_proxy_api)
+            (
+                copied.connect_url(use_proxy_api),
+                copied
+                    .status
+                    .and_then(|copy_crd| copy_crd.creator_session.id),
+            )
         } else {
             let target = target.assert_valid_mirrord_target(self.client()).await?;
 
@@ -620,19 +625,27 @@ impl OperatorApi<PreparedClientCert> {
                 }
             }
 
-            target.connect_url(
-                use_proxy_api,
-                layer_config.feature.network.incoming.on_concurrent_steal,
-                &TargetCrd::api_version(&()),
-                &TargetCrd::plural(&()),
-                &TargetCrd::url_path(&(), target.namespace()),
+            (
+                target.connect_url(
+                    use_proxy_api,
+                    layer_config.feature.network.incoming.on_concurrent_steal,
+                    &TargetCrd::api_version(&()),
+                    &TargetCrd::plural(&()),
+                    &TargetCrd::url_path(&(), target.namespace()),
+                ),
+                None,
             )
         };
 
         tracing::debug!("connect_url {connect_url:?}");
 
         let session = OperatorSession {
-            id: rand::random(),
+            // Re-use the `session_id` generated from the `CopyTargetCrd`, or random if
+            // this is not a copy target session.
+            id: session_id
+                .map(|id| u64::from_str_radix(&id, 16))
+                .transpose()?
+                .unwrap_or_else(rand::random),
             connect_url,
             client_cert: self.client_cert.cert.clone(),
             operator_license_fingerprint: self.operator.spec.license.fingerprint.clone(),
