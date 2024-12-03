@@ -640,14 +640,12 @@ impl OperatorApi<PreparedClientCert> {
         tracing::debug!("connect_url {connect_url:?}");
 
         let session = OperatorSession {
-            // TODO(alex): Instead of always random here, we should re-use the id from
-            // `CopyTargetCrd`, if applicable.
-            id: {
-                session_id
-                    .map(|id| u64::from_str_radix(&id, 16))
-                    .transpose()?
-                    .unwrap_or_else(rand::random)
-            },
+            // Re-use the `session_id` generated from the `CopyTargetCrd`, or random if
+            // this is not a copy target session.
+            id: session_id
+                .map(|id| u64::from_str_radix(&id, 16))
+                .transpose()?
+                .unwrap_or_else(rand::random),
             connect_url,
             client_cert: self.client_cert.cert.clone(),
             operator_license_fingerprint: self.operator.spec.license.fingerprint.clone(),
