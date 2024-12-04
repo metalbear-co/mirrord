@@ -44,6 +44,7 @@ static OPERATOR_LICENSE_SECRET_FILE_NAME: &str = "license.pem";
 static OPERATOR_LICENSE_SECRET_VOLUME_NAME: &str = "license-volume";
 static OPERATOR_SERVICE_ACCOUNT_NAME: &str = "mirrord-operator";
 static OPERATOR_SERVICE_NAME: &str = "mirrord-operator";
+static OPERATOR_SECRET_ROLE_NAME: &str = "mirrord-operator-secret-access";
 
 static APP_LABELS: LazyLock<BTreeMap<String, String>> =
     LazyLock::new(|| BTreeMap::from([("app".to_owned(), OPERATOR_NAME.to_owned())]));
@@ -105,6 +106,7 @@ pub struct Operator {
     namespace: OperatorNamespace,
     role: OperatorRole,
     role_binding: OperatorRoleBinding,
+    kafka_secret_role: Option<OperatorSecretRole>,
     service: OperatorService,
     service_account: OperatorServiceAccount,
     user_cluster_role: OperatorClusterUserRole,
@@ -139,6 +141,8 @@ impl Operator {
         let role_binding = OperatorRoleBinding::new(&role, &service_account);
         let user_cluster_role = OperatorClusterUserRole::new();
 
+        let kafka_secret_role = OperatorSecretRole::new(&namespace, kafka_splitting);
+
         let client_ca_role = OperatorClientCaRole::new();
         let client_ca_role_binding =
             OperatorClientCaRoleBinding::new(&client_ca_role, &service_account);
@@ -165,6 +169,7 @@ impl Operator {
             namespace,
             role,
             role_binding,
+            kafka_secret_role,
             service,
             service_account,
             user_cluster_role,
@@ -232,6 +237,11 @@ impl OperatorSetup for Operator {
 
             writer.write_all(b"---\n")?;
             MirrordKafkaTopicsConsumer::crd().to_writer(&mut writer)?;
+
+            if let Some(role) = self.kafka_secret_role.as_ref() {
+                writer.write_all(b"---\n")?;
+                role.to_writer(&mut writer)?;
+            }
         }
 
         Ok(())
@@ -692,6 +702,41 @@ impl OperatorRoleBinding {
 }
 
 #[derive(Debug)]
+pub struct OperatorSecretRole(Role);
+
+impl OperatorSecretRole {
+    pub fn new(namespace: &OperatorNamespace, kafka_splitting: bool) -> Option<Self> {
+        if !kafka_splitting {
+            return None;
+        }
+
+        let rules = vec![
+            // Allow the operator to fetch Secrets in the operator's namespace
+            PolicyRule {
+                api_groups: Some(vec![MirrordKafkaClientConfig::group(&()).into_owned()]),
+                resources: Some(vec!["secrets".to_owned()]),
+                verbs: ["get", "list", "watch"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                ..Default::default()
+            },
+        ];
+
+        let role = Role {
+            metadata: ObjectMeta {
+                name: Some(OPERATOR_SECRET_ROLE_NAME.to_owned()),
+                namespace: Some(namespace.name().to_owned()),
+                ..Default::default()
+            },
+            rules: Some(rules),
+        };
+
+        Some(Self(role))
+    }
+}
+
+#[derive(Debug)]
 pub struct OperatorLicenseSecret(Secret);
 
 impl OperatorLicenseSecret {
@@ -916,5 +961,6 @@ writer_impl![
     OperatorApiService,
     OperatorClusterUserRole,
     OperatorClientCaRole,
-    OperatorClientCaRoleBinding
+    OperatorClientCaRoleBinding,
+    OperatorSecretRole
 ];
