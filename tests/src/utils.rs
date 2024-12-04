@@ -1579,6 +1579,37 @@ pub async fn random_namespace_self_deleting_service(#[future] kube_client: Clien
     .await
 }
 
+/// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
+/// when the returned service is dropped, unless it is dropped during panic.
+/// This behavior can be changed, see [`PRESERVE_FAILED_ENV_NAME`].
+/// * `randomize_name` - whether a random suffix should be added to the end of the resource names
+#[fixture]
+pub async fn ipv6_service(
+    #[default("default")] namespace: &str,
+    #[default("NodePort")] service_type: &str,
+    // #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
+    #[default("docker.io/t4lz/mirrord-pytest:1204")] image: &str,
+    #[default("http-echo")] service_name: &str,
+    #[default(true)] randomize_name: bool,
+    #[future] kube_client: Client,
+) -> KubeService {
+    service_with_env(
+        namespace,
+        service_type,
+        image,
+        service_name,
+        randomize_name,
+        kube_client.await,
+        serde_json::json!([
+            {
+              "name": "HOST",
+              "value": "::"
+            }
+        ]),
+    )
+    .await
+}
+
 pub fn resolve_node_host() -> String {
     if (cfg!(target_os = "linux") && !wsl::is_wsl()) || std::env::var("USE_MINIKUBE").is_ok() {
         let output = std::process::Command::new("minikube")
