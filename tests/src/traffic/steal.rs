@@ -19,9 +19,9 @@ mod steal_tests {
     };
 
     use crate::utils::{
-        config_dir, get_service_host_and_port, get_service_url, http2_service, kube_client,
-        send_request, send_requests, service, tcp_echo_service, websocket_service, Application,
-        KubeService,
+        config_dir, get_service_host_and_port, get_service_url, http2_service, ipv6_service,
+        kube_client, send_request, send_requests, service, tcp_echo_service, websocket_service,
+        Application, KubeService,
     };
 
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
@@ -67,11 +67,11 @@ mod steal_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     async fn steal_http_ipv6_traffic(
-        #[future] service: KubeService,
+        #[future] ipv6_service: KubeService,
         #[future] kube_client: Client,
     ) {
         let application = Application::PythonFastApiHTTPIPv6;
-        let service = service.await;
+        let service = ipv6_service.await;
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut flags = vec!["--steal"];
