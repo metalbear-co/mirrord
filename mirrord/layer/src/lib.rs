@@ -84,7 +84,7 @@ use load::ExecuteArgs;
 #[cfg(target_os = "macos")]
 use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
-    feature::{fs::FsModeConfig, network::incoming::IncomingMode},
+    feature::{env::mapper::EnvVarsRemapper, fs::FsModeConfig, network::incoming::IncomingMode},
     LayerConfig,
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
@@ -453,6 +453,10 @@ fn fetch_env_vars() -> HashMap<String, String> {
 
     if let Some(overrides) = setup().env_config().r#override.as_ref() {
         env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+
+    if let Some(mapping) = setup().env_config().mapping.clone() {
+        env_vars = EnvVarsRemapper::new(mapping, env_vars).remapped();
     }
 
     env_vars
