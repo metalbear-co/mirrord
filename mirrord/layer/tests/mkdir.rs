@@ -18,10 +18,10 @@ async fn mkdir(dylib_path: &Path) {
         .await;
 
     println!("waiting for file request.");
-    intproxy.expect_make_dir("/mkdir_test_path").await;
+    intproxy.expect_make_dir("/mkdir_test_path", 0o777).await;
 
     println!("waiting for file request.");
-    intproxy.expect_make_dir_at("/mkdirat_test_path").await;
+    intproxy.expect_make_dir("/mkdirat_test_path", 0o777).await;
 
     assert_eq!(intproxy.try_recv().await, None);
 

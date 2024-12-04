@@ -14,15 +14,15 @@ use std::{
 
 use errno::{set_errno, Errno};
 use libc::{
-    self, c_char, c_int, c_void, dirent, iovec, mode_t, off_t, size_t, ssize_t, stat, statfs,
-    AT_EACCESS, AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY,
+    self, c_char, c_int, c_void, dirent, iovec, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
+    AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY,
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, statx, EBADF, ENOENT, ENOTDIR};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
-    FsMetadataInternal, MakeDirAtResponse, MakeDirResponse, MetadataInternal, ReadFileResponse,
-    ReadLinkFileResponse, WriteFileResponse,
+    FsMetadataInternal, MakeDirResponse, MetadataInternal, ReadFileResponse, ReadLinkFileResponse,
+    WriteFileResponse,
 };
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
@@ -1065,7 +1065,7 @@ pub(crate) unsafe extern "C" fn readlink_detour(
 
 /// Hook for `libc::mkdir`.
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn mkdir_detour(pathname: *const c_char, mode: mode_t) -> c_int {
+pub(crate) unsafe extern "C" fn mkdir_detour(pathname: *const c_char, mode: u32) -> c_int {
     mkdir(pathname.checked_into(), mode)
         .map(|MakeDirResponse { result, errno }| {
             if result == -1 {
@@ -1084,10 +1084,10 @@ pub(crate) unsafe extern "C" fn mkdir_detour(pathname: *const c_char, mode: mode
 pub(crate) unsafe extern "C" fn mkdirat_detour(
     dirfd: c_int,
     pathname: *const c_char,
-    mode: mode_t,
+    mode: u32,
 ) -> c_int {
     mkdirat(dirfd, pathname.checked_into(), mode)
-        .map(|MakeDirAtResponse { result, errno }| {
+        .map(|MakeDirResponse { result, errno }| {
             if result == -1 {
                 set_errno(Errno(errno));
             }

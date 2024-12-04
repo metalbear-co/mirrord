@@ -469,13 +469,13 @@ impl TestIntProxy {
     }
 
     /// Makes a [`FileRequest::MakeDir`] and answers it.
-    pub async fn expect_make_dir(&mut self, dir_name: &str) {
+    pub async fn expect_make_dir(&mut self, expected_dir_name: &str, expected_mode: u32) {
         // Expecting `mkdir` call with path.
         assert_matches!(
             self.recv().await,
             ClientMessage::FileRequest(FileRequest::MakeDir(
                 mirrord_protocol::file::MakeDirRequest { pathname, mode }
-            )) if pathname.to_str().unwrap() == dir_name && mode == 0o777
+            )) if pathname.to_str().unwrap() == expected_dir_name && mode == expected_mode
         );
 
         // Answer `mkdir`.
@@ -483,30 +483,6 @@ impl TestIntProxy {
             .send(DaemonMessage::File(
                 mirrord_protocol::FileResponse::MakeDir(Ok(
                     mirrord_protocol::file::MakeDirResponse {
-                        result: 0,
-                        errno: 0,
-                    },
-                )),
-            ))
-            .await
-            .unwrap();
-    }
-
-    /// Makes a [`FileRequest::MakeDirAt`] and answers it.
-    pub async fn expect_make_dir_at(&mut self, dir_name: &str) {
-        // Expecting `mkdir` call with path.
-        assert_matches!(
-            self.recv().await,
-            ClientMessage::FileRequest(FileRequest::MakeDirAt(
-                mirrord_protocol::file::MakeDirAtRequest { dirfd: _, pathname, mode }
-            )) if pathname.to_str().unwrap() == dir_name && mode == 0o777
-        );
-
-        // Answer `mkdir`.
-        self.codec
-            .send(DaemonMessage::File(
-                mirrord_protocol::FileResponse::MakeDirAt(Ok(
-                    mirrord_protocol::file::MakeDirAtResponse {
                         result: 0,
                         errno: 0,
                     },

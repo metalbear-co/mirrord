@@ -4,12 +4,12 @@ use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 #[cfg(target_os = "linux")]
 use libc::{c_char, statx, statx_timestamp};
-use libc::{c_int, iovec, mode_t, unlink, AT_FDCWD};
+use libc::{c_int, iovec, unlink, AT_FDCWD};
 use mirrord_protocol::{
     file::{
-        MakeDirAtRequest, MakeDirAtResponse, MakeDirRequest, MakeDirResponse, OpenFileRequest,
-        OpenFileResponse, OpenOptionsInternal, ReadFileResponse, ReadLinkFileRequest,
-        ReadLinkFileResponse, SeekFileResponse, WriteFileResponse, XstatFsResponse, XstatResponse,
+        MakeDirAtRequest, MakeDirRequest, MakeDirResponse, OpenFileRequest, OpenFileResponse,
+        OpenOptionsInternal, ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse,
+        SeekFileResponse, WriteFileResponse, XstatFsResponse, XstatResponse,
     },
     ResponseError,
 };
@@ -338,7 +338,7 @@ pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
 }
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
-pub(crate) fn mkdir(pathname: Detour<PathBuf>, mode: mode_t) -> Detour<MakeDirResponse> {
+pub(crate) fn mkdir(pathname: Detour<PathBuf>, mode: u32) -> Detour<MakeDirResponse> {
     let path = remap_path!(pathname?);
 
     check_relative_paths!(path);
@@ -360,27 +360,32 @@ pub(crate) fn mkdir(pathname: Detour<PathBuf>, mode: mode_t) -> Detour<MakeDirRe
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn mkdirat(
-    dirfd: i32,
+    dirfd: RawFd,
     pathname: Detour<PathBuf>,
-    mode: mode_t,
-) -> Detour<MakeDirAtResponse> {
-    let path = remap_path!(pathname?);
+    mode: u32,
+) -> Detour<MakeDirResponse> {
+    let pathname = pathname?;
 
-    check_relative_paths!(path);
+    if pathname.is_absolute() || dirfd == AT_FDCWD {
+        let path = remap_path!(pathname);
+        mkdir(Detour::Success(path), mode)
+    } else {
+        // Relative path requires special handling, we must identify the relative part (relative to
+        // what).
+        let remote_fd = get_remote_fd(dirfd)?;
 
-    ensure_not_ignored!(path, false);
+        let mkdir: MakeDirAtRequest = MakeDirAtRequest {
+            dirfd: remote_fd,
+            pathname,
+            mode,
+        };
 
-    let mkdir = MakeDirAtRequest {
-        dirfd,
-        pathname: path,
-        mode,
-    };
-
-    // `NotImplemented` error here means that the protocol doesn't support it.
-    match common::make_proxy_request_with_response(mkdir)? {
-        Ok(response) => Detour::Success(response),
-        Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
-        Err(fail) => Detour::Error(fail.into()),
+        // `NotImplemented` error here means that the protocol doesn't support it.
+        match common::make_proxy_request_with_response(mkdir)? {
+            Ok(response) => Detour::Success(response),
+            Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
+            Err(fail) => Detour::Error(fail.into()),
+        }
     }
 }
 

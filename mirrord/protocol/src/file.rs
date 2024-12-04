@@ -10,7 +10,6 @@ use std::{
 };
 
 use bincode::{Decode, Encode};
-use libc::mode_t;
 #[cfg(target_os = "linux")]
 use nix::sys::statfs::Statfs;
 use semver::VersionReq;
@@ -269,7 +268,7 @@ pub struct ReadLinkFileResponse {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct MakeDirRequest {
     pub pathname: PathBuf,
-    pub mode: mode_t,
+    pub mode: u32,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -280,15 +279,9 @@ pub struct MakeDirResponse {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct MakeDirAtRequest {
-    pub dirfd: i32,
+    pub dirfd: u64,
     pub pathname: PathBuf,
-    pub mode: mode_t,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct MakeDirAtResponse {
-    pub result: i32,
-    pub errno: i32,
+    pub mode: u32,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

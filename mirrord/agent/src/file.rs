@@ -1,16 +1,19 @@
 use std::{
     self,
     collections::{hash_map::Entry, HashMap, VecDeque},
-    fs::{read_link, File, OpenOptions, ReadDir},
+    fs::{self, read_link, File, OpenOptions, ReadDir},
     io::{self, prelude::*, BufReader, SeekFrom},
     iter::{Enumerate, Peekable},
-    ops::RangeInclusive,
-    os::unix::{fs::MetadataExt, prelude::FileExt},
+    ops::{Not, RangeInclusive},
+    os::unix::{
+        fs::{MetadataExt, PermissionsExt},
+        prelude::FileExt,
+    },
     path::{Path, PathBuf},
 };
 
 use faccess::{AccessMode, PathExt};
-use libc::{mode_t, DT_DIR};
+use libc::DT_DIR;
 use mirrord_protocol::{file::*, FileRequest, FileResponse, RemoteResult, ResponseError};
 use tracing::{error, trace, Level};
 
@@ -482,40 +485,33 @@ impl FileManager {
             })
     }
 
-    pub(crate) fn mkdir(&mut self, path: &Path, mode: mode_t) -> RemoteResult<MakeDirResponse> {
+    pub(crate) fn mkdir(&mut self, path: &Path, mode: u32) -> RemoteResult<MakeDirResponse> {
         trace!("FileManager::mkdir -> path {:#?} | mode {:#?}", path, mode);
 
         let path = resolve_path(path, &self.root_path)?;
 
-        let c_path = match std::ffi::CString::new(path.to_string_lossy().as_bytes()) {
-            Ok(c_path) => c_path,
-            Err(_) => {
-                return Ok(MakeDirResponse {
-                    result: -1,
-                    errno: -1,
-                })
-            } // TODO: check this
-        };
+        let result = std::fs::create_dir(Path::new(&path));
 
-        let result = unsafe { libc::mkdir(c_path.as_ptr(), mode) };
-
-        if result == 0 {
-            Ok(MakeDirResponse {
-                result: 0,
-                errno: 0,
-            })
-        } else {
+        if result.is_ok().not() {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-            Ok(MakeDirResponse { result, errno })
+            return Ok(MakeDirResponse { result: -1, errno });
         }
+
+        let permissions = fs::Permissions::from_mode(mode);
+        fs::set_permissions(path, permissions)?;
+
+        Ok(MakeDirResponse {
+            result: 0,
+            errno: 0,
+        })
     }
 
     pub(crate) fn mkdirat(
         &mut self,
-        dirfd: i32,
+        dirfd: u64,
         path: &Path,
-        mode: mode_t,
-    ) -> RemoteResult<MakeDirAtResponse> {
+        mode: u32,
+    ) -> RemoteResult<MakeDirResponse> {
         trace!(
             "FileManager::mkdirat -> dirfd {:#?} | path {:#?} | mode {:#?}",
             dirfd,
@@ -523,28 +519,17 @@ impl FileManager {
             mode
         );
 
-        let path = resolve_path(path, &self.root_path)?;
+        let relative_dir = self
+            .open_files
+            .get(&dirfd)
+            .ok_or(ResponseError::NotFound(dirfd))?;
 
-        let c_path = match std::ffi::CString::new(path.to_string_lossy().as_bytes()) {
-            Ok(c_path) => c_path,
-            Err(_) => {
-                return Ok(MakeDirAtResponse {
-                    result: -1,
-                    errno: -1,
-                })
-            } // TODO: check this
-        };
+        if let RemoteFile::Directory(relative_dir) = relative_dir {
+            let path = relative_dir.join(path);
 
-        let result = unsafe { libc::mkdirat(dirfd, c_path.as_ptr(), mode) };
-
-        if result == 0 {
-            Ok(MakeDirAtResponse {
-                result: 0,
-                errno: 0,
-            })
+            self.mkdir(path.as_path(), mode)
         } else {
-            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-            Ok(MakeDirAtResponse { result, errno })
+            Err(ResponseError::NotDirectory(dirfd))
         }
     }
 

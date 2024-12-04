@@ -130,7 +130,7 @@ pub enum FileResponse {
     ReadLink(RemoteResult<ReadLinkFileResponse>),
     ReadDirBatch(RemoteResult<ReadDirBatchResponse>),
     MakeDir(RemoteResult<MakeDirResponse>),
-    MakeDirAt(RemoteResult<MakeDirAtResponse>),
+    MakeDirAt(RemoteResult<MakeDirResponse>),
 }
 
 /// `-agent` --> `-layer` messages.

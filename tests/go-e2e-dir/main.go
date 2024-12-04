@@ -30,6 +30,12 @@ func main() {
 		os.Exit(-1)
 	}
 
+	err = os.Mkdir("test_relative_mkdir", 0755)
+	if err != nil {
+		fmt.Printf("Mkdir (relative path) error: %s\n", err)
+		os.Exit(-1)
+	}
+
 	// let close requests be sent for test
 	time.Sleep(1 * time.Second)
 	os.Exit(0)
