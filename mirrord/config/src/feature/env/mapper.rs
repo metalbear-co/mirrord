@@ -57,6 +57,8 @@ mod tests {
             ("Lech".to_string(), "Legendary".to_string()),
             ("Krakus_I".to_string(), "Legendary".to_string()),
             ("Leszko_I".to_string(), "Legendary".to_string()),
+            ("Leszko_II".to_string(), "Legendary".to_string()),
+            ("Leszko_III".to_string(), "Legendary".to_string()),
             ("Popiel_II".to_string(), "Legendary".to_string()),
         ]
         .into()
@@ -72,7 +74,11 @@ mod tests {
                 "Krak.+".to_string(),
                 "Legendary founder of Krakow".to_string(),
             ),
-            (".+zko_I".to_string(), "Defeated the Hungarians".to_string()),
+            (
+                ".+zko_I$".to_string(),
+                "Defeated the Hungarians".to_string(),
+            ),
+            (".+zko_II.*".to_string(), "Succession".to_string()),
         ]
         .into()
     }
@@ -94,6 +100,13 @@ mod tests {
         assert_eq!(
             Some("Defeated the Hungarians".to_string()),
             remapper.remove("Leszko_I")
+        );
+
+        assert_eq!(Some("Succession".to_string()), remapper.remove("Leszko_II"));
+
+        assert_eq!(
+            Some("Succession".to_string()),
+            remapper.remove("Leszko_III")
         );
 
         assert_eq!(Some("Legendary".to_string()), remapper.remove("Popiel_II"));
