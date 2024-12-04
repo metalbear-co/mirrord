@@ -742,6 +742,17 @@
             "null"
           ]
         },
+        "mapping": {
+          "title": "feature.env.mapping {#feature-env-mapping}",
+          "description": "Specify map of patterns that if matched will replace the value according to specification.\n\n*Capture groups are allowed.*\n\nExample: ```json { \".+_TIMEOUT\": \"10000\" \"LOG_.+_VERBOSITY\": \"debug\" } ```\n\nWill do the next replacements for environment variables that match:\n\n`CONNECTION_TIMEOUT: 500` => `CONNECTION_TIMEOUT: 10000` `LOG_FILE_VERBOSITY: info` => `LOG_FILE_VERBOSITY: debug`",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
         "override": {
           "title": "feature.env.override {#feature-env-override}",
           "description": "Allows setting or overriding environment variables (locally) with a custom value.\n\nFor example, if the remote pod has an environment variable `REGION=1`, but this is an undesirable value, it's possible to use `override` to set `REGION=2` (locally) instead.\n\nEnvironment specified here will also override variables passed via the env file.",
