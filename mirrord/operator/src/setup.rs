@@ -147,7 +147,7 @@ impl Operator {
         let (role, role_binding) = kafka_splitting
             .then(|| {
                 let role = OperatorRole::new(&namespace);
-                let role_binding = OperatorRoleBinding::new(&role, &service_account);
+                let role_binding = OperatorRoleBinding::new(&role, &service_account, &namespace);
                 (role, role_binding)
             })
             .unzip();
@@ -759,10 +759,15 @@ impl OperatorRole {
 pub struct OperatorRoleBinding(RoleBinding);
 
 impl OperatorRoleBinding {
-    pub fn new(role: &OperatorRole, sa: &OperatorServiceAccount) -> Self {
+    pub fn new(
+        role: &OperatorRole,
+        sa: &OperatorServiceAccount,
+        namespace: &OperatorNamespace,
+    ) -> Self {
         let role_binding = RoleBinding {
             metadata: ObjectMeta {
                 name: Some(OPERATOR_ROLE_BINDING_NAME.to_owned()),
+                namespace: Some(namespace.name().to_owned()),
                 ..Default::default()
             },
             role_ref: role.as_role_ref(),
