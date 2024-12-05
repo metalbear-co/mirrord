@@ -126,6 +126,8 @@ tempfile = "3"
 # Used by `cli` and `vpn`.
 tun2 = { version = "4", features = ["async"] }
 
+chrono = "0.4"
+
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 

@@ -31,7 +31,7 @@ client = [
 ]
 
 [dependencies]
-chrono = "0.4"
+chrono.workspace = true
 whoami = { version = "1", optional = true }
 home = { version = "0.5", optional = true }
 pem = "3"
@@ -41,7 +41,7 @@ kube = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["fs"], optional = true  }
-thiserror = "1"
+thiserror.workspace = true
 x509-certificate = "0.23.1"
 # not direct dependency, but if we don't put it here it'll use openssl :(
 reqwest = { workspace = true, features=["json", "rustls-tls-native-roots"], default-features = false, optional = true }
