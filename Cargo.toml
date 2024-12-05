@@ -55,7 +55,7 @@ categories = ["development-tools", "backend", "devtool"]
 
 [workspace.dependencies]
 actix-codec = "0.5"
-bincode = { version = "2.0.0-rc.2", features = ["serde"] }
+bincode = { version = "2.0.0-rc.3", features = ["serde"] }
 bytes = "1"
 tokio = { version = "1" }
 tokio-stream = { version = "0.1", features = ["sync"] }
