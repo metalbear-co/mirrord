@@ -37,7 +37,7 @@ mirrord-vpn = { path = "../vpn" }
 actix-codec.workspace = true
 clap.workspace = true
 envfile.workspace = true
-tun2 = { version = "3", features = ["async"] }
+tun2 = { version = "4", features = ["async"] }
 tracing.workspace = true
 serde_json.workspace = true
 serde.workspace = true
