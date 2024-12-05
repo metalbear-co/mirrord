@@ -4177,7 +4177,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
- "tun2 4.0.0",
+ "tun2",
  "which 7.0.0",
 ]
 
@@ -4558,7 +4558,7 @@ dependencies = [
  "thiserror 2.0.4",
  "tokio",
  "tracing",
- "tun2 3.1.8",
+ "tun2",
 ]
 
 [[package]]
@@ -7427,27 +7427,6 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
-
-[[package]]
-name = "tun2"
-version = "3.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "294ac0e21fef392b8952f1dd538bc5752fd7c2ebfde1c204b0dd09aaa5489cd0"
-dependencies = [
- "bytes",
- "cfg-if",
- "futures",
- "futures-core",
- "ipnet",
- "libc",
- "log",
- "nix 0.29.0",
- "thiserror 1.0.69",
- "tokio",
- "tokio-util",
- "windows-sys 0.59.0",
- "wintun-bindings",
-]
 
 [[package]]
 name = "tun2"

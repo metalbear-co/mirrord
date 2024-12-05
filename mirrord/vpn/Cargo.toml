@@ -30,4 +30,4 @@ serde_yaml.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "process"] }
 tracing.workspace = true
-tun2 = { version = "3", features = ["async"] }
+tun2 = { workspace = true, features = ["async"] }

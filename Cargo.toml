@@ -123,6 +123,9 @@ rstest = "0.23"
 # Used for macos stuff, here to avoid mismatch between the crates that use it.
 tempfile = "3"
 
+# Used by `cli` and `vpn`.
+tun2 = { version = "4", features = ["async"] }
+
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 
