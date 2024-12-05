@@ -31,7 +31,7 @@ bincode.workspace = true
 nix = { workspace = true, features = ["net", "process", "signal"]}
 tracing.workspace = true
 tracing-subscriber.workspace = true
-frida-gum = { version = "0.14", features = ["auto-download"] }
+frida-gum = { version = "0.15", features = ["auto-download"] }
 
 serde_json.workspace = true
 
