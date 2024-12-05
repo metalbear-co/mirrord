@@ -128,11 +128,17 @@ tun2 = { version = "4", features = ["async"] }
 
 chrono = "0.4"
 
-# Used by `kube`.
+# Used by `kube`, `agent`.
 tower = "0.5"
 
 # Used by `agent`.
 pnet = "0.35"
+
+# Used by `agent`.
+tokio-rustls = "0.26"
+
+# Used by `agent`.
+rcgen = "0.13"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"

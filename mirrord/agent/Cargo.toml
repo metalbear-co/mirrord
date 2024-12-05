@@ -48,8 +48,8 @@ rand.workspace = true
 streammap-ext.workspace = true
 libc.workspace = true
 faccess = "0.2"
-bytes = "1.2"
-regex = "1"
+bytes.workspace = true
+regex.workspace = true
 wildmatch = "2"
 enum_dispatch.workspace = true
 http-body-util = { workspace = true }
@@ -61,11 +61,11 @@ dashmap = { version = "6" }
 oci-spec = "0.7.0"
 async-trait = "0.1"
 tonic = "0.12"
-tower = "0.5"
+tower.workspace = true
 http = "1"
 k8s-cri = "0.9"
 semver.workspace = true
-tokio-rustls = "0.26"
+tokio-rustls.workspace = true
 x509-parser = "0.16"
 rustls.workspace = true
 envy = "0.4"
@@ -77,7 +77,7 @@ rawsocket = { git = "https://github.com/metalbear-co/rawsocket.git" }
 procfs = "0.17.0"
 
 [dev-dependencies]
-rstest = "0.23"
+rstest.workspace = true
 mockall = "0.13"
 test_bin = "0.4"
-rcgen = "0.13"
+rcgen.workspace = true
