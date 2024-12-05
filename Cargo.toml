@@ -128,6 +128,8 @@ tun2 = { version = "4", features = ["async"] }
 
 chrono = "0.4"
 
+tower = "0.5"
+
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 
