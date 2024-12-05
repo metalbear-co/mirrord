@@ -3998,7 +3998,7 @@ dependencies = [
  "glob",
  "rand",
  "syn 2.0.90",
- "thiserror 1.0.69",
+ "thiserror 2.0.4",
  "tracing",
  "tracing-subscriber",
 ]
