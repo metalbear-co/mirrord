@@ -154,7 +154,7 @@ pub(crate) enum OperatorSetupError {
     #[diagnostic(help("Please check internet connection.{GENERAL_HELP}"))]
     OperatorVersionCheck(#[from] reqwest::Error),
 
-    #[error("Failed to open output file at `{}`: {1}", .0.display())]
+    #[error("Failed to open output file at `{0}`: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OutputFileOpen(PathBuf, std::io::Error),
 
@@ -240,11 +240,11 @@ pub(crate) enum CliError {
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
     ConfigError(#[from] mirrord_config::config::ConfigError),
 
-    #[error("Failed to get canonical path to mirrord config at `{}`: {1}", .0.display())]
+    #[error("Failed to get canonical path to mirrord config at `{0}`: {1}")]
     #[diagnostic(help("Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"))]
     CanonicalizeConfigPathFailed(PathBuf, std::io::Error),
 
-    #[error("Failed to access env file at `{}`: {1}", .0.display())]
+    #[error("Failed to access env file at `{0}`: {1}")]
     #[diagnostic(help("Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"))]
     EnvFileAccessError(PathBuf, std::io::Error),
 
@@ -264,7 +264,7 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorStatusNotFound,
 
-    #[error("Failed to extract mirrord-layer to `{}`: {1}", .0.display())]
+    #[error("Failed to extract mirrord-layer to `{0}`: {1}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     LayerExtractError(PathBuf, std::io::Error),
 
