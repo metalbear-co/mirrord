@@ -94,7 +94,7 @@ hickory-resolver = { version = "0.24", features = [
 ] }
 tokio-util = { version = "0.7", features = ["net", "codec"] }
 
-# Used by `layer`.
+# Used by `layer`, `intproxy`.
 rand = "0.8"
 streammap-ext = "0.1"
 num-traits = "0.2"
@@ -121,6 +121,9 @@ drain = "0.1"
 base64 = "0.22"
 rustls = "0.23.12" # latest (1.9.0) aws-lc-rs causes troubles https://github.com/metalbear-co/mirrord/issues/2774
 
+# Used by `intproxy`.
+rustls-pemfile = "2"
+
 # Not a mirrord dependency, but basically every crate has it as a `dev-dependency`
 rstest = "0.23"
 
@@ -139,7 +142,7 @@ tower = "0.5"
 # Used by `agent`.
 pnet = "0.35"
 
-# Used by `agent`.
+# Used by `agent`, `intproxy`.
 tokio-rustls = "0.26"
 
 # Used by `agent`.
