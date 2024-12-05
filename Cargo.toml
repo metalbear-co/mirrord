@@ -151,6 +151,15 @@ schemars = { version = "0.8.11" }
 # Used by `config`.
 ipnet = "2.8"
 
+# Used by `macros`.
+proc-macro2 = "1"
+
+# Used by `macros`.
+proc-macro2-diagnostics = "0.10"
+
+# Used by `macros`.
+syn = { version = "2", features = ["full", "extra-traits"] }
+
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 
