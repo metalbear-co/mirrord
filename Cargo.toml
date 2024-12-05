@@ -145,6 +145,12 @@ tokio-rustls = "0.26"
 # Used by `agent`.
 rcgen = "0.13"
 
+# Used by `config`.
+schemars = { version = "0.8.11" }
+
+# Used by `config`.
+ipnet = "2.8"
+
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 
