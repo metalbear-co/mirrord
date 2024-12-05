@@ -33,8 +33,8 @@ hyper.workspace = true
 hyper-util.workspace = true
 http-body-util.workspace = true
 rustls.workspace = true
+rstest.workspace = true
 
-rstest = "0.23"
 futures-util = "0.3"
 wsl = "0.1"
 chrono = "0.4"

@@ -117,6 +117,9 @@ drain = "0.1"
 base64 = "0.22"
 rustls = "0.23.12" # latest (1.9.0) aws-lc-rs causes troubles https://github.com/metalbear-co/mirrord/issues/2774
 
+# Not a mirrord dependency, but basically every crate has it as a `dev-dependency`
+rstest = "0.23"
+
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 

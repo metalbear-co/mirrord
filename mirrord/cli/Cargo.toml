@@ -75,12 +75,11 @@ rand.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
 
-
 [build-dependencies]
 mirrord-layer = { artifact = "cdylib", path = "../layer" }
 
 [dev-dependencies]
-rstest = "0.23"
+rstest.workspace = true
 hyper.workspace = true
 hyper-util = { workspace = true, "features" = ["server"] }
 http-body.workspace = true
