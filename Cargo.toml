@@ -57,6 +57,8 @@ categories = ["development-tools", "backend", "devtool"]
 actix-codec = "0.5"
 bincode = { version = "2.0.0-rc.3", features = ["serde"] }
 bytes = "1"
+
+# Used by `layer`.
 tokio = { version = "1" }
 tokio-stream = { version = "0.1", features = ["sync"] }
 serde = { version = "1", features = ["derive"] }
@@ -91,6 +93,8 @@ hickory-resolver = { version = "0.24", features = [
     "tokio-runtime",
 ] }
 tokio-util = { version = "0.7", features = ["net", "codec"] }
+
+# Used by `layer`.
 rand = "0.8"
 streammap-ext = "0.1"
 num-traits = "0.2"
@@ -120,15 +124,16 @@ rustls = "0.23.12" # latest (1.9.0) aws-lc-rs causes troubles https://github.com
 # Not a mirrord dependency, but basically every crate has it as a `dev-dependency`
 rstest = "0.23"
 
-# Used for macos stuff, here to avoid mismatch between the crates that use it.
+# Used by `layer`.
 tempfile = "3"
 
 # Used by `cli` and `vpn`.
 tun2 = { version = "4", features = ["async"] }
 
+# Used by `layer`.
 chrono = "0.4"
 
-# Used by `kube`, `agent`.
+# Used by `kube`, `agent`, `layer`.
 tower = "0.5"
 
 # Used by `agent`.
