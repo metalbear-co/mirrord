@@ -375,7 +375,7 @@ dependencies = [
  "uuid",
  "walkdir",
  "x509",
- "x509-certificate",
+ "x509-certificate 0.23.1",
  "xml-rs",
  "yasna",
  "zeroize",
@@ -1738,7 +1738,7 @@ dependencies = [
  "reqwest 0.11.27",
  "ring",
  "signature",
- "x509-certificate",
+ "x509-certificate 0.23.1",
 ]
 
 [[package]]
@@ -4270,7 +4270,7 @@ dependencies = [
  "tokio",
  "tracing",
  "whoami",
- "x509-certificate",
+ "x509-certificate 0.24.0",
 ]
 
 [[package]]
@@ -8236,6 +8236,25 @@ name = "x509-certificate"
 version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66534846dec7a11d7c50a74b7cdb208b9a581cad890b7866430d438455847c85"
+dependencies = [
+ "bcder",
+ "bytes",
+ "chrono",
+ "der",
+ "hex",
+ "pem",
+ "ring",
+ "signature",
+ "spki",
+ "thiserror 1.0.69",
+ "zeroize",
+]
+
+[[package]]
+name = "x509-certificate"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e57b9f8bcae7c1f36479821ae826d75050c60ce55146fd86d3553ed2573e2762"
 dependencies = [
  "bcder",
  "bytes",
