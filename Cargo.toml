@@ -160,6 +160,9 @@ proc-macro2-diagnostics = "0.10"
 # Used by `macros`.
 syn = { version = "2", features = ["full", "extra-traits"] }
 
+# Used by `console`.
+miette = "7"
+
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 
