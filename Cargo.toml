@@ -132,7 +132,7 @@ http = { version = "1" }
 # Used by `intproxy`, `cli`.
 rustls-pemfile = "2"
 
-# Not a mirrord dependency, but basically every crate has it as a `dev-dependency`
+# Used by `tests`, `layer`, `cli`, `kube`, `agent`, `config`, `operator`.
 rstest = "0.23"
 
 # Used by `layer`, `tests`, `sip`, `cli`.
