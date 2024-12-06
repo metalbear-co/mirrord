@@ -162,14 +162,17 @@ schemars = { version = "0.8.11" }
 # Used by `config`.
 ipnet = "2.8"
 
-# Used by `macros`.
+# Used by `macros`, `layer-macro`.
 proc-macro2 = "1"
 
 # Used by `macros`.
 proc-macro2-diagnostics = "0.10"
 
-# Used by `macros`.
+# Used by `macros`, `layer-macro`.
 syn = { version = "2", features = ["full", "extra-traits"] }
+
+# Used by `layer-macro`.
+quote = "1"
 
 # Used by `console`.
 miette = "7"
