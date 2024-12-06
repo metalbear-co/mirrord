@@ -112,7 +112,6 @@ hyper-util = { version = "0.1" }
 http-body = "1"
 http-body-util = "0.1"
 libc = "0.2"
-bimap = "0.6"
 socket2 = { version = "0.5", features = ["all"] }
 which = "7"
 semver = "1"
