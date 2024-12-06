@@ -4,7 +4,7 @@
 use std::{
     collections::HashMap,
     fmt::Debug,
-    net::Ipv4Addr,
+    net::IpAddr,
     ops::Not,
     path::PathBuf,
     process::{ExitStatus, Stdio},
@@ -819,6 +819,17 @@ fn deployment_from_json(name: &str, image: &str, env: Value) -> Deployment {
     .expect("Failed creating `deployment` from json spec!")
 }
 
+/// Change the `ipFamilies` and `ipFamilyPolicy` fields to make the service IPv6-only.
+///
+/// # Panics
+///
+/// Will panic if the given service does not have a spec.
+fn set_ipv6_only(service: &mut Service) {
+    let spec = service.spec.as_mut().unwrap();
+    spec.ip_families = Some(vec!["IPv6".to_string()]);
+    spec.ip_family_policy = Some("SingleStack".to_string());
+}
+
 fn service_from_json(name: &str, service_type: &str) -> Service {
     serde_json::from_value(json!({
         "apiVersion": "v1",
@@ -1067,6 +1078,7 @@ pub async fn service(
         randomize_name,
         kube_client.await,
         default_env(),
+        false,
     )
     .await
 }
@@ -1095,6 +1107,7 @@ pub async fn service_with_env(
         randomize_name,
         kube_client,
         env,
+        false,
     )
     .await
 }
@@ -1118,6 +1131,7 @@ async fn internal_service(
     randomize_name: bool,
     kube_client: Client,
     env: Value,
+    ipv6_only: bool,
 ) -> KubeService {
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
 
@@ -1184,7 +1198,10 @@ async fn internal_service(
     watch_resource_exists(&deployment_api, &name).await;
 
     // `Service`
-    let service = service_from_json(&name, service_type);
+    let mut service = service_from_json(&name, service_type);
+    if ipv6_only {
+        set_ipv6_only(&mut service);
+    }
     let service_guard = ResourceGuard::create(
         service_api.clone(),
         name.clone(),
@@ -1593,7 +1610,7 @@ pub async fn ipv6_service(
     #[default(true)] randomize_name: bool,
     #[future] kube_client: Client,
 ) -> KubeService {
-    service_with_env(
+    internal_service(
         namespace,
         service_type,
         image,
@@ -1606,6 +1623,7 @@ pub async fn ipv6_service(
               "value": "::"
             }
         ]),
+        true,
     )
     .await
 }
@@ -1640,12 +1658,15 @@ async fn get_pod_or_node_host(kube_client: Client, name: &str, namespace: &str) 
         .next()
         .and_then(|pod| pod.status)
         .and_then(|status| status.host_ip)
-        .and_then(|ip| {
-            ip.parse::<Ipv4Addr>()
-                .unwrap()
-                .is_private()
-                .not()
-                .then_some(ip)
+        .filter(|ip| {
+            // use this IP only if it's a public one.
+            match ip.parse::<IpAddr>().unwrap() {
+                IpAddr::V4(ip4) => ip4.is_private(),
+                IpAddr::V6(ip6) => {
+                    ip6.is_unicast_link_local() || ip6.is_unique_local() || ip6.is_loopback()
+                }
+            }
+            .not()
         })
         .unwrap_or_else(resolve_node_host)
 }
