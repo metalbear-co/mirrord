@@ -28,9 +28,10 @@ tokio = { workspace = true, features = [
     "process",
     "signal",
 ] }
+
 serde.workspace = true
 serde_json.workspace = true
-pnet.workspace = true
+pnet = "0.35"
 nix = { workspace = true, features = ["mount", "sched", "user"] }
 clap = { workspace = true, features = ["env"] }
 mirrord-protocol = { path = "../protocol" }
@@ -62,7 +63,7 @@ oci-spec = "0.7.0"
 async-trait = "0.1"
 tonic = "0.12"
 tower.workspace = true
-http = "1"
+http.workspace = true
 k8s-cri = "0.9"
 semver.workspace = true
 tokio-rustls.workspace = true

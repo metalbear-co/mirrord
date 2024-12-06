@@ -37,7 +37,7 @@ mirrord-vpn = { path = "../vpn" }
 actix-codec.workspace = true
 clap.workspace = true
 envfile.workspace = true
-tun2 = { version = "4", features = ["async"] }
+tun2 = { workspace = true, features = ["async"] }
 tracing.workspace = true
 serde_json.workspace = true
 serde.workspace = true
@@ -51,7 +51,7 @@ const-random = "0.1.15"
 tokio = { workspace = true, features = ["rt", "net", "macros", "process"] }
 kube.workspace = true
 k8s-openapi.workspace = true
-miette = { version = "7", features = ["fancy"] }
+miette = { workspace = true, features = ["fancy"] }
 thiserror.workspace = true
 humantime = "2"
 nix = { workspace = true, features = ["process", "resource"] }
@@ -62,10 +62,10 @@ prettytable-rs = "0.10"
 clap_complete = "4.4.1"
 rustls.workspace = true
 local-ip-address = "0.6"
-tempfile = "3"
-rcgen = "0.13"
-rustls-pemfile = "2"
-tokio-rustls = "0.26"
+tempfile.workspace = true
+rcgen.workspace = true
+rustls-pemfile.workspace = true
+tokio-rustls.workspace = true
 tokio-stream = { workspace = true, features = ["net"] }
 tokio-retry = "0.3"
 regex.workspace = true

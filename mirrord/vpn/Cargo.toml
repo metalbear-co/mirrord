@@ -22,7 +22,7 @@ mirrord-protocol = { path = "../protocol" }
 futures.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true
-ipnet = "2.9"
+ipnet.workspace = true
 paste = "1"
 pnet_packet = "0.35"
 semver.workspace = true

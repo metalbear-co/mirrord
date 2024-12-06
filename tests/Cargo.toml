@@ -37,9 +37,9 @@ rstest.workspace = true
 
 futures-util = "0.3"
 wsl = "0.1"
-chrono = "0.4"
-tempfile = "3"
-tokio-tungstenite = { version = "0.24" }
+chrono.workspace = true
+tempfile.workspace = true
+tokio-tungstenite.workspace = true
 
 [features]
 default = ["ephemeral", "job", "cli", "targetless"]
