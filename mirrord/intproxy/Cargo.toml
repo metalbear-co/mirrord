@@ -39,10 +39,10 @@ hyper-util.workspace = true
 http-body-util.workspace = true
 bytes.workspace = true
 futures.workspace = true
-rand = "0.8"
-tokio-rustls = "0.26"
+rand.workspace = true
+tokio-rustls.workspace = true
 rustls.workspace = true
-rustls-pemfile = "2"
+rustls-pemfile.workspace = true
 exponential-backoff = "2"
 
 [dev-dependencies]

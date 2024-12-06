@@ -20,7 +20,7 @@ workspace = true
 proc-macro = true
 
 [dependencies]
-proc-macro2 = "1"
-proc-macro2-diagnostics = "0.10"
-syn = { version = "2", features = ["full", "extra-traits"] }
+proc-macro2.workspace = true
+proc-macro2-diagnostics.workspace = true
+syn = { workspace = true, features = ["full", "extra-traits"] }
 semver.workspace = true
