@@ -115,7 +115,6 @@ libc = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 which = "7"
 semver = "1"
-once_cell = "1"
 exec = "0.3"
 drain = "0.1"
 base64 = "0.22"
