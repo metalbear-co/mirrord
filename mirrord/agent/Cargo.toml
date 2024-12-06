@@ -42,7 +42,6 @@ tracing-subscriber.workspace = true
 tokio-stream.workspace = true
 thiserror.workspace = true
 hickory-resolver.workspace = true
-num-traits.workspace = true
 bollard = "0.18"
 tokio-util.workspace = true
 rand.workspace = true

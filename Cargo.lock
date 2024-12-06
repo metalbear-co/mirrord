@@ -4209,7 +4209,6 @@ dependencies = [
  "mirrord-protocol",
  "mockall",
  "nix 0.29.0",
- "num-traits",
  "oci-spec",
  "pnet",
  "procfs",
