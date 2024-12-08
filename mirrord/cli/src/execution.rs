@@ -6,7 +6,8 @@ use std::{
 
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::{
-    config::ConfigError, internal_proxy::MIRRORD_INTPROXY_CONNECT_TCP_ENV, LayerConfig,
+    config::ConfigError, feature::env::mapper::EnvVarsRemapper,
+    internal_proxy::MIRRORD_INTPROXY_CONNECT_TCP_ENV, LayerConfig,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_operator::client::OperatorSession;
@@ -504,8 +505,8 @@ impl MirrordExecution {
             env_vars.extend(envs_from_file);
         }
 
-        if let Some(overrides) = &config.feature.env.r#override {
-            env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
+        if let Some(mapping) = config.feature.env.mapping.clone() {
+            env_vars = EnvVarsRemapper::new(mapping, env_vars).remapped();
         }
 
         Ok(env_vars)
