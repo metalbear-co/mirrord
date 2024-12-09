@@ -93,6 +93,7 @@ hickory-resolver = { version = "0.25.0-alpha.4", features = [
     "serde",
     "tokio-runtime",
 ] }
+hickory-proto = "0.25.0-alpha.4"
 tokio-util = { version = "0.7", features = ["net", "codec"] }
 
 # Used by `layer`, `intproxy`, `tests`, `medschool`, `cli`, `agent`, `operator`.
