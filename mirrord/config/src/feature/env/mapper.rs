@@ -29,20 +29,19 @@ impl EnvVarsRemapper {
     pub fn remapped(self) -> HashMap<String, String> {
         let Self { mapping, env_vars } = self;
 
-        env_vars
-            .into_iter()
-            .fold(HashMap::with_capacity(32), |mut acc, (key, value)| {
-                match mapping
-                    .iter()
-                    .find(|(k, _)| k.is_match(&key).ok().is_some_and(|matched| matched))
-                    .map(|(_, to_value)| to_value.clone())
-                {
-                    Some(to_value) => acc.insert(key, to_value),
-                    None => acc.insert(key, value),
+        env_vars.into_iter().fold(
+            HashMap::with_capacity(32),
+            |mut modified_env_vars, (key, value)| {
+                match mapping.iter().find_map(|(k, new_value)| {
+                    k.captures(&key).ok()??.get(0).map(|_| new_value.clone())
+                }) {
+                    Some(new_value) => modified_env_vars.insert(key, new_value),
+                    None => modified_env_vars.insert(key, value),
                 };
 
-                acc
-            })
+                modified_env_vars
+            },
+        )
     }
 }
 
@@ -60,6 +59,7 @@ mod tests {
             ("Leszko_II".to_string(), "Legendary".to_string()),
             ("Leszko_III".to_string(), "Legendary".to_string()),
             ("Popiel_II".to_string(), "Legendary".to_string()),
+            ("Piast_the_Wheelwright".to_string(), "Legendary".to_string()),
         ]
         .into()
     }
@@ -79,6 +79,10 @@ mod tests {
                 "Defeated the Hungarians".to_string(),
             ),
             (".+zko_II.*".to_string(), "Succession".to_string()),
+            (
+                "([[:alpha:]]|_+)+(Wheel.+)".to_string(),
+                "Legendary founder of the Piast dinasty".to_string(),
+            ),
         ]
         .into()
     }
@@ -110,5 +114,10 @@ mod tests {
         );
 
         assert_eq!(Some("Legendary".to_string()), remapper.remove("Popiel_II"));
+
+        assert_eq!(
+            Some("Legendary founder of the Piast dinasty".to_string()),
+            remapper.remove("Piast_the_Wheelwright")
+        );
     }
 }
