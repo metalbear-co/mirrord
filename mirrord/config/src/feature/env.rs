@@ -125,6 +125,7 @@ pub struct EnvConfig {
     /// {
     ///   ".+_TIMEOUT": "10000"
     ///   "LOG_.+_VERBOSITY": "debug"
+    ///   "(\w+)_(\d+)": "magic-value"
     /// }
     /// ```
     ///
@@ -132,6 +133,7 @@ pub struct EnvConfig {
     ///
     /// `CONNECTION_TIMEOUT: 500` => `CONNECTION_TIMEOUT: 10000`
     /// `LOG_FILE_VERBOSITY: info` => `LOG_FILE_VERBOSITY: debug`
+    /// `DATA_1234: common-value` => `DATA_1234: magic-value`
     pub mapping: Option<HashMap<String, String>>,
 }
 
