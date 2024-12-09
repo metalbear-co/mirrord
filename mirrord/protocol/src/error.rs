@@ -7,7 +7,7 @@ use std::{
 };
 
 use bincode::{Decode, Encode};
-use hickory_resolver::error::{ResolveError, ResolveErrorKind};
+use hickory_resolver::{ResolveError, ResolveErrorKind};
 use semver::VersionReq;
 use thiserror::Error;
 use tracing::warn;
@@ -182,7 +182,7 @@ impl From<io::Error> for ResponseError {
 impl From<ResolveError> for ResponseError {
     fn from(fail: ResolveError) -> Self {
         match fail.kind().to_owned() {
-            ResolveErrorKind::Io(io_fail) => io_fail.into(),
+            ResolveErrorKind::(io_fail) => io_fail.into(),
             other => Self::DnsLookup(DnsLookupError {
                 kind: From::from(other),
             }),
