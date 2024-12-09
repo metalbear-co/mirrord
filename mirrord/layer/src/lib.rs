@@ -451,7 +451,9 @@ fn fetch_env_vars() -> HashMap<String, String> {
         env_vars.extend(envs_from_file);
     }
     if let Some(mapping) = setup().env_config().mapping.clone() {
-        env_vars = EnvVarsRemapper::new(mapping, env_vars).remapped();
+        env_vars = EnvVarsRemapper::new(mapping, env_vars)
+            .expect("Failed creating regex, this should've been caught when verifying config!")
+            .remapped();
     }
 
     if let Some(overrides) = setup().env_config().r#override.as_ref() {

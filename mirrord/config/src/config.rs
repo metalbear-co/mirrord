@@ -76,6 +76,9 @@ pub enum ConfigError {
 
     #[error("Queue splitting config is invalid: {0}")]
     QueueSplittingVerificationError(#[from] QueueSplittingVerificationError),
+
+    #[error("Regex creation failed with: {0}")]
+    Regex(#[from] fancy_regex::Error),
 }
 
 impl From<tera::Error> for ConfigError {

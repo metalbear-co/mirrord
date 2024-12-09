@@ -506,7 +506,9 @@ impl MirrordExecution {
         }
 
         if let Some(mapping) = config.feature.env.mapping.clone() {
-            env_vars = EnvVarsRemapper::new(mapping, env_vars).remapped();
+            env_vars = EnvVarsRemapper::new(mapping, env_vars)
+                .expect("Failed creating regex, this should've been caught when verifying config!")
+                .remapped();
         }
 
         if let Some(overrides) = &config.feature.env.r#override {

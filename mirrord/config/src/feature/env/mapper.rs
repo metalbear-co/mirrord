@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use fancy_regex::Regex;
 use tracing::Level;
 
+use crate::config::ConfigError;
+
 #[derive(Debug)]
 pub struct EnvVarsRemapper {
     mapping: Vec<(Regex, String)>,
@@ -10,19 +12,17 @@ pub struct EnvVarsRemapper {
 }
 
 impl EnvVarsRemapper {
-    #[tracing::instrument(level = Level::TRACE, ret)]
-    pub fn new(mapping: HashMap<String, String>, env_vars: HashMap<String, String>) -> Self {
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
+    pub fn new(
+        mapping: HashMap<String, String>,
+        env_vars: HashMap<String, String>,
+    ) -> Result<Self, ConfigError> {
         let mapping = mapping
             .into_iter()
-            .map(|(pattern, value)| {
-                (
-                    Regex::new(&pattern).expect("Building env vars mapping regex failed"),
-                    value,
-                )
-            })
-            .collect();
+            .map(|(pattern, value)| Ok::<_, fancy_regex::Error>((Regex::new(&pattern)?, value)))
+            .try_collect()?;
 
-        EnvVarsRemapper { mapping, env_vars }
+        Ok(EnvVarsRemapper { mapping, env_vars })
     }
 
     #[tracing::instrument(level = Level::TRACE, ret)]
@@ -47,8 +47,6 @@ impl EnvVarsRemapper {
 
 #[cfg(test)]
 mod tests {
-    use rstest::rstest;
-
     use super::*;
 
     fn env_vars() -> HashMap<String, String> {
@@ -87,9 +85,11 @@ mod tests {
         .into()
     }
 
-    #[rstest]
+    #[test]
     fn simple_mapping() {
-        let mut remapper = EnvVarsRemapper::new(mappings(), env_vars()).remapped();
+        let mut remapper = EnvVarsRemapper::new(mappings(), env_vars())
+            .unwrap()
+            .remapped();
 
         assert_eq!(
             Some("Legendary founder of the great Polish nation".to_string()),
@@ -119,5 +119,14 @@ mod tests {
             Some("Legendary founder of the Piast dinasty".to_string()),
             remapper.remove("Piast_the_Wheelwright")
         );
+    }
+
+    #[test]
+    #[should_panic]
+    fn does_not_accept_invalid_regex() {
+        let mut invalid_mapping = HashMap::new();
+        invalid_mapping.insert("(".to_string(), "Not from Poland".to_string());
+
+        EnvVarsRemapper::new(invalid_mapping, HashMap::new()).unwrap();
     }
 }
