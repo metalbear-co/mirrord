@@ -8,6 +8,41 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.126.0](https://github.com/metalbear-co/mirrord/tree/3.125.3) - 2024-12-06
+
+
+### Added
+
+- Added SQS splitting state to mirrord operator status reporting (requires operator support).
+
+
+### Changed
+
+- Hidden files and directories in `$HOME` directory are now read locally by
+  default.
+
+
+### Fixed
+
+- Can now run cs-installed sbt. We now only need to be able to parse the first
+  line of a script, so we now support scripts like that sbt, which starts with
+  a normal shebang but then has text in a weird encoding, or maybe non-textual
+  data. [#2947](https://github.com/metalbear-co/mirrord/issues/2947)
+- Prevent reverse port forwarding from ending unexpectedly due to
+  unexpected connection end.
+  [#2962](https://github.com/metalbear-co/mirrord/issues/2962)
+- Added a sleep and await on it after websocket connection to drive IO runtime
+  and prevent websocket closing without handshake.
+
+
+### Internal
+
+- Added optional `loadFromSecret` field to Kafka client config spec to allow
+  setting properties from a Secret.
+- Allow the operator to fetch Secrets in the operator namespace.
+- use `Stdio::null()` for "sidecar start" patch added in
+  [#2933](https://github.com/metalbear-co/mirrord/pull/2933).
+
 ## [3.125.2](https://github.com/metalbear-co/mirrord/tree/3.125.2) - 2024-11-29
 
 

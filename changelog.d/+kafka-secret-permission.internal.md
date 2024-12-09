@@ -1,1 +1,0 @@
-Allow the operator to fetch Secrets in the operator namespace with 'mirrord-operator-secret-access' role

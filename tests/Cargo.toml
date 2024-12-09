@@ -24,21 +24,22 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "macros"
 serde_json.workspace = true
 mirrord = { artifact = "bin", path = "../mirrord/cli" }
 mirrord-operator = { path = "../mirrord/operator", features = ["setup", "crd"] }
-serde = "1"
+serde.workspace = true
 futures.workspace = true
-rstest = "0.23"
-rand = "0.8"
-futures-util = "0.3"
-wsl = "0.1"
-chrono = "0.4"
-tempfile = "3"
-bytes = "1"
-tokio-tungstenite = { version = "0.24" }
+rand.workspace = true
+bytes.workspace = true
 fancy-regex.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 http-body-util.workspace = true
 rustls.workspace = true
+rstest.workspace = true
+
+futures-util = "0.3"
+wsl = "0.1"
+chrono.workspace = true
+tempfile.workspace = true
+tokio-tungstenite.workspace = true
 
 [features]
 default = ["ephemeral", "job", "cli", "targetless"]
