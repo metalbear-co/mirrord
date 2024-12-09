@@ -31,19 +31,16 @@ impl EnvVarsRemapper {
     pub fn remapped(self) -> HashMap<String, String> {
         let Self { mapping, env_vars } = self;
 
-        env_vars.into_iter().fold(
-            HashMap::with_capacity(32),
-            |mut modified_env_vars, (key, value)| {
-                match mapping.iter().find_map(|(k, new_value)| {
-                    k.captures(&key).ok()??.get(0).map(|_| new_value.clone())
-                }) {
-                    Some(new_value) => modified_env_vars.insert(key, new_value),
-                    None => modified_env_vars.insert(key, value),
-                };
+    env_vars.iter_mut().for_each(|(name, value)| {
+        let regex_match = mapping
+            .iter()
+            .find(|(regex, _)| regex.is_match(name).unwrap_or(false));
+        if let Some((_, replace_with)) = regex_match {
+            *value = replace_with.clone();
+        }
+    });
 
-                modified_env_vars
-            },
-        )
+    env_vars
     }
 }
 
