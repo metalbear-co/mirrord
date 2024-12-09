@@ -359,9 +359,19 @@ pub struct CopyTargetStatus {
 pub enum BlockedFeature {
     /// Blocks stealing traffic in any way (without or without filter).
     Steal,
+
     /// Blocks stealing traffic without specifying (any) filter. Client can still specify a
     /// filter that matches anything.
     StealWithoutFilter,
+
+    /// Blocks mirroring traffic.
+    Mirror,
+
+    /// So that the operator is able to list all policies with [`kube::Api`],
+    /// even if it doesn't recognize blocked features used in some of them.
+    #[schemars(skip)]
+    #[serde(other, skip_serializing)]
+    Unknown,
 }
 
 /// Custom resource for policies that limit what mirrord features users can use.

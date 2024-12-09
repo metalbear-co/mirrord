@@ -3,10 +3,12 @@ use std::{
     io,
     net::AddrParseError,
     path::StripPrefixError,
+    sync::LazyLock,
 };
 
 use bincode::{Decode, Encode};
 use hickory_resolver::error::{ResolveError, ResolveErrorKind};
+use semver::VersionReq;
 use thiserror::Error;
 use tracing::warn;
 
@@ -81,11 +83,16 @@ fn policy_name_string(policy_name: Option<String>) -> String {
     }
 }
 
+/// Minimal mirrord-protocol version that allows [`BlockedAction::Mirror`].
+pub static MIRROR_BLOCK_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.12.0".parse().expect("Bad Identifier"));
+
 /// All the actions that can be blocked by the operator, to identify the blocked feature in a
 /// [`ResponseError::Forbidden`] message.
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 pub enum BlockedAction {
     Steal(StealType),
+    Mirror(Port),
 }
 
 /// Determines how a blocked action will be displayed to the user in an error.
@@ -106,6 +113,9 @@ impl fmt::Display for BlockedAction {
                     f,
                     "Stealing traffic from port {port} with http request filter: {filter}"
                 )
+            }
+            BlockedAction::Mirror(port) => {
+                write!(f, "Mirroring traffic from port {port}")
             }
         }
     }
