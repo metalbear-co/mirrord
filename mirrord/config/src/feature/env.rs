@@ -39,6 +39,9 @@ pub const MIRRORD_OVERRIDE_ENV_FILE_ENV: &str = "MIRRORD_OVERRIDE_ENV_VARS_FILE"
 ///       "override": {
 ///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
 ///         "LOCAL_BEAR": "panda"
+///       },
+///       "mapping": {
+///         ".+_TIMEOUT": "1000"
 ///       }
 ///     }
 ///   }
