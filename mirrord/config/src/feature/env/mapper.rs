@@ -20,7 +20,12 @@ impl EnvVarsRemapper {
         let mapping = mapping
             .into_iter()
             .map(|(pattern, value)| {
-                Ok::<_, Box<fancy_regex::Error>>((Regex::new(&pattern)?, value))
+                Ok::<_, ConfigError>((
+                    Regex::new(&pattern).map_err(|fail| {
+                        ConfigError::Regex(pattern, value.clone(), Box::new(fail))
+                    })?,
+                    value,
+                ))
             })
             .try_collect()?;
 
@@ -131,6 +136,8 @@ mod tests {
         let mut invalid_mapping = HashMap::new();
         invalid_mapping.insert("(".to_string(), "Not from Poland".to_string());
 
-        EnvVarsRemapper::new(invalid_mapping, HashMap::new()).unwrap();
+        EnvVarsRemapper::new(invalid_mapping, HashMap::new())
+            .inspect_err(|fail| println!("{fail}"))
+            .unwrap();
     }
 }
