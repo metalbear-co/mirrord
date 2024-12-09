@@ -1,0 +1,1 @@
+Update hickory dependency version.
