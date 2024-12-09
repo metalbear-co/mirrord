@@ -509,6 +509,10 @@ impl MirrordExecution {
             env_vars = EnvVarsRemapper::new(mapping, env_vars).remapped();
         }
 
+        if let Some(overrides) = &config.feature.env.r#override {
+            env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
+        }
+
         Ok(env_vars)
     }
 
