@@ -117,6 +117,9 @@ pub static MIRRORD_CONFIG_FILE_ENV: &str = "MIRRORD_CONFIG_FILE";
 ///       "override": {
 ///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
 ///         "LOCAL_BEAR": "panda"
+///       },
+///       "mapping": {
+///         ".+_TIMEOUT": "1000"
 ///       }
 ///     },
 ///     "fs": {
