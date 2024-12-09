@@ -89,8 +89,8 @@ kube = { git = "https://github.com/kube-rs/kube.git", rev = "ecbdafc214538aadc78
     "socks5",
     "http-proxy",
 ] }
-hickory-resolver = { version = "0.24", features = [
-    "serde-config",
+hickory-resolver = { version = "0.25.0-alpha.4", features = [
+    "serde",
     "tokio-runtime",
 ] }
 tokio-util = { version = "0.7", features = ["net", "codec"] }
