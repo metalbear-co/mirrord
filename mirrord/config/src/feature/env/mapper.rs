@@ -5,6 +5,12 @@ use tracing::Level;
 
 use crate::config::ConfigError;
 
+/// Maps an env var found in `env_vars` that matches the regexes specified in `mapping`,
+/// to the user specified value.
+///
+/// In other words: if we have an env var `BEST_LAND=ENGLAND` in `env_vars`, and there's
+/// a [`Regex`] string pair in `mapping` `(".+LAND", "POLAND")`, then we override the var,
+/// resulting in `BEST_LAND=POLAND`.
 #[derive(Debug)]
 pub struct EnvVarsRemapper {
     mapping: Vec<(Regex, String)>,
@@ -12,6 +18,10 @@ pub struct EnvVarsRemapper {
 }
 
 impl EnvVarsRemapper {
+    /// Converts `mapping` into a pair of [`Regex`], `String`.
+    ///
+    /// - `env_vars`: We take ownership of the env vars that were loaded somewhere else
+    /// (for example, from `fetch_env_vars`).
     #[tracing::instrument(level = Level::TRACE, ret, err)]
     pub fn new(
         mapping: HashMap<String, String>,
@@ -34,6 +44,10 @@ impl EnvVarsRemapper {
         Ok(EnvVarsRemapper { mapping, env_vars })
     }
 
+    /// Does the actual mapping of env vars explained in [`EnvVarsRemapper`].
+    ///
+    /// - Returns the `HashMap` of all the env vars that were passed to [`Self::new`], even
+    /// if the ones that did not match any mapping regex.
     #[tracing::instrument(level = Level::TRACE, ret)]
     pub fn remapped(self) -> HashMap<String, String> {
         let Self {
