@@ -29,18 +29,23 @@ impl EnvVarsRemapper {
 
     #[tracing::instrument(level = Level::TRACE, ret)]
     pub fn remapped(self) -> HashMap<String, String> {
-        let Self { mapping, env_vars } = self;
+        let Self {
+            mapping,
+            mut env_vars,
+        } = self;
 
-    env_vars.iter_mut().for_each(|(name, value)| {
-        let regex_match = mapping
-            .iter()
-            .find(|(regex, _)| regex.is_match(name).unwrap_or(false));
-        if let Some((_, replace_with)) = regex_match {
-            *value = replace_with.clone();
-        }
-    });
+        env_vars.iter_mut().for_each(|(name, value)| {
+            // Replaces the value inline.
+            if let Some((_, replace_with)) = mapping
+                .iter()
+                .find(|(regex, _)| regex.is_match(name).unwrap_or(false))
+                .cloned()
+            {
+                *value = replace_with;
+            }
+        });
 
-    env_vars
+        env_vars
     }
 }
 
