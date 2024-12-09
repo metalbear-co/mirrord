@@ -7,7 +7,8 @@ use std::{
 };
 
 use bincode::{Decode, Encode};
-use hickory_resolver::error::{ResolveError, ResolveErrorKind};
+use hickory_proto::ProtoErrorKind;
+use hickory_resolver::{ResolveError, ResolveErrorKind};
 use semver::VersionReq;
 use thiserror::Error;
 use tracing::warn;
@@ -181,12 +182,9 @@ impl From<io::Error> for ResponseError {
 
 impl From<ResolveError> for ResponseError {
     fn from(fail: ResolveError) -> Self {
-        match fail.kind().to_owned() {
-            ResolveErrorKind::Io(io_fail) => io_fail.into(),
-            other => Self::DnsLookup(DnsLookupError {
-                kind: From::from(other),
-            }),
-        }
+        Self::DnsLookup(DnsLookupError {
+            kind: From::from(fail.kind().to_owned()),
+        })
     }
 }
 /// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.
@@ -330,19 +328,21 @@ impl From<ResolveErrorKind> for ResolveErrorKindInternal {
                 ResolveErrorKindInternal::Message(message.to_string())
             }
             ResolveErrorKind::Msg(message) => ResolveErrorKindInternal::Message(message),
-            ResolveErrorKind::NoConnections => ResolveErrorKindInternal::NoConnections,
-            ResolveErrorKind::NoRecordsFound { response_code, .. } => {
-                ResolveErrorKindInternal::NoRecordsFound(response_code.into())
-            }
-            ResolveErrorKind::Proto(_) => ResolveErrorKindInternal::Proto,
-            ResolveErrorKind::Timeout => ResolveErrorKindInternal::Timeout,
-            ResolveErrorKind::Io(fail) => match fail.kind() {
-                io::ErrorKind::NotFound => ResolveErrorKindInternal::NotFound,
-                io::ErrorKind::PermissionDenied => ResolveErrorKindInternal::PermissionDenied,
-                other => {
-                    warn!(?other, "unknown IO error");
-                    ResolveErrorKindInternal::Unknown
+            ResolveErrorKind::Proto(proto_error) => match *proto_error.kind {
+                ProtoErrorKind::NoConnections => ResolveErrorKindInternal::NoConnections,
+                ProtoErrorKind::NoRecordsFound { response_code, .. } => {
+                    ResolveErrorKindInternal::NoRecordsFound(response_code.into())
                 }
+                ProtoErrorKind::Timeout => ResolveErrorKindInternal::Timeout,
+                ProtoErrorKind::Io(fail) => match fail.kind() {
+                    io::ErrorKind::NotFound => ResolveErrorKindInternal::NotFound,
+                    io::ErrorKind::PermissionDenied => ResolveErrorKindInternal::PermissionDenied,
+                    other => {
+                        warn!(?other, "unknown IO error");
+                        ResolveErrorKindInternal::Unknown
+                    }
+                },
+                _ => ResolveErrorKindInternal::Proto,
             },
             _ => {
                 warn!(?error_kind, "unknown error kind");

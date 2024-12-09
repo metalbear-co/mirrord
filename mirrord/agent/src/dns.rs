@@ -1,7 +1,7 @@
 use std::{future, path::PathBuf, time::Duration};
 
 use futures::{stream::FuturesOrdered, StreamExt};
-use hickory_resolver::{system_conf::parse_resolv_conf, AsyncResolver, Hosts};
+use hickory_resolver::{system_conf::parse_resolv_conf, Hosts, Resolver};
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse},
     DnsLookupError, RemoteResult, ResolveErrorKindInternal, ResponseError,
@@ -69,13 +69,13 @@ impl DnsWorker {
         }
     }
 
-    /// Reads `/etc/resolv.conf` and `/etc/hosts` files, then uses [`AsyncResolver`] to resolve
-    /// address of the given `host`.
+    /// Reads `/etc/resolv.conf` and `/etc/hosts` files, then uses [`hickory_resolver::Resolver`] to
+    /// resolve address of the given `host`.
     ///
     /// # TODO
     ///
     /// We could probably cache results here.
-    /// We cannot cache the [`AsyncResolver`] itself, becaues the configuration in `etc` may change.
+    /// We cannot cache the [`Resolver`] itself, becaues the configuration in `etc` may change.
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn do_lookup(
         etc_path: PathBuf,
@@ -83,7 +83,7 @@ impl DnsWorker {
         attempts: usize,
         timeout: Duration,
     ) -> RemoteResult<DnsLookup> {
-        // Prepares the `AsyncResolver` after reading some `/etc` DNS files.
+        // Prepares the `Resolver` after reading some `/etc` DNS files.
         //
         // We care about logging these errors, at an `error!` level.
         let resolver: Result<_, ResponseError> = try {
@@ -100,9 +100,10 @@ impl DnsWorker {
             options.attempts = attempts;
             options.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4Only;
 
-            let mut resolver = AsyncResolver::tokio(config, options);
+            let mut resolver = Resolver::tokio(config, options);
 
-            let hosts = Hosts::default().read_hosts_conf(hosts_conf.as_slice())?;
+            let mut hosts = Hosts::default();
+            hosts.read_hosts_conf(hosts_conf.as_slice())?;
             resolver.set_hosts(Some(hosts));
 
             resolver
