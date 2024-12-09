@@ -77,8 +77,15 @@ pub enum ConfigError {
     #[error("Queue splitting config is invalid: {0}")]
     QueueSplittingVerificationError(#[from] QueueSplittingVerificationError),
 
-    #[error("Regex creation for pattern `{0}: {1}` failed with: `{2}`")]
-    Regex(String, String, Box<fancy_regex::Error>),
+    /// When preparing the `EnvVarsRemapper`, regex creation may fail.
+    #[error(
+        "Regex creation for pattern `{pattern}: {value}` in `config.feature.env.mapping` failed with: `{fail}`"
+    )]
+    Regex {
+        pattern: String,
+        value: String,
+        fail: Box<fancy_regex::Error>,
+    },
 }
 
 impl From<tera::Error> for ConfigError {

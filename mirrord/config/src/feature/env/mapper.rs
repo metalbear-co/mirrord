@@ -21,8 +21,10 @@ impl EnvVarsRemapper {
             .into_iter()
             .map(|(pattern, value)| {
                 Ok::<_, ConfigError>((
-                    Regex::new(&pattern).map_err(|fail| {
-                        ConfigError::Regex(pattern, value.clone(), Box::new(fail))
+                    Regex::new(&pattern).map_err(|fail| ConfigError::Regex {
+                        pattern,
+                        value: value.clone(),
+                        fail: Box::new(fail),
                     })?,
                     value,
                 ))
