@@ -1,11 +1,14 @@
 use std::{
     self,
     collections::{hash_map::Entry, HashMap, VecDeque},
-    fs::{read_link, File, OpenOptions, ReadDir},
+    fs::{self, read_link, File, OpenOptions, ReadDir},
     io::{self, prelude::*, BufReader, SeekFrom},
     iter::{Enumerate, Peekable},
-    ops::RangeInclusive,
-    os::unix::{fs::MetadataExt, prelude::FileExt},
+    ops::{Not, RangeInclusive},
+    os::unix::{
+        fs::{MetadataExt, PermissionsExt},
+        prelude::FileExt,
+    },
     path::{Path, PathBuf},
 };
 
@@ -250,6 +253,16 @@ impl FileManager {
             }) => Some(FileResponse::GetDEnts64(
                 self.getdents64(remote_fd, buffer_size),
             )),
+            FileRequest::MakeDir(MakeDirRequest { pathname, mode }) => {
+                Some(FileResponse::MakeDir(self.mkdir(&pathname, mode)))
+            }
+            FileRequest::MakeDirAt(MakeDirAtRequest {
+                dirfd,
+                pathname,
+                mode,
+            }) => Some(FileResponse::MakeDirAt(
+                self.mkdirat(dirfd, &pathname, mode),
+            )),
         })
     }
 
@@ -470,6 +483,54 @@ impl FileManager {
                     Err(ResponseError::NotFile(fd))
                 }
             })
+    }
+
+    pub(crate) fn mkdir(&mut self, path: &Path, mode: u32) -> RemoteResult<MakeDirResponse> {
+        trace!("FileManager::mkdir -> path {:#?} | mode {:#?}", path, mode);
+
+        let path = resolve_path(path, &self.root_path)?;
+
+        let result = std::fs::create_dir(Path::new(&path));
+
+        if result.is_ok().not() {
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            return Ok(MakeDirResponse { result: -1, errno });
+        }
+
+        let permissions = fs::Permissions::from_mode(mode);
+        fs::set_permissions(path, permissions)?;
+
+        Ok(MakeDirResponse {
+            result: 0,
+            errno: 0,
+        })
+    }
+
+    pub(crate) fn mkdirat(
+        &mut self,
+        dirfd: u64,
+        path: &Path,
+        mode: u32,
+    ) -> RemoteResult<MakeDirResponse> {
+        trace!(
+            "FileManager::mkdirat -> dirfd {:#?} | path {:#?} | mode {:#?}",
+            dirfd,
+            path,
+            mode
+        );
+
+        let relative_dir = self
+            .open_files
+            .get(&dirfd)
+            .ok_or(ResponseError::NotFound(dirfd))?;
+
+        if let RemoteFile::Directory(relative_dir) = relative_dir {
+            let path = relative_dir.join(path);
+
+            self.mkdir(path.as_path(), mode)
+        } else {
+            Err(ResponseError::NotDirectory(dirfd))
+        }
     }
 
     pub(crate) fn seek(&mut self, fd: u64, seek_from: SeekFrom) -> RemoteResult<SeekFileResponse> {

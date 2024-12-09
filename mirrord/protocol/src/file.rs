@@ -18,6 +18,9 @@ use semver::VersionReq;
 pub static READDIR_BATCH_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.9.0".parse().expect("Bad Identifier"));
 
+pub static MKDIR_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.12.0".parse().expect("Bad Identifier"));
+
 /// Internal version of Metadata across operating system (macOS, Linux)
 /// Only mutual attributes
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default)]
@@ -260,6 +263,25 @@ impl fmt::Debug for ReadFileResponse {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadLinkFileResponse {
     pub path: PathBuf,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct MakeDirRequest {
+    pub pathname: PathBuf,
+    pub mode: u32,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct MakeDirResponse {
+    pub result: i32,
+    pub errno: i32,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct MakeDirAtRequest {
+    pub dirfd: u64,
+    pub pathname: PathBuf,
+    pub mode: u32,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

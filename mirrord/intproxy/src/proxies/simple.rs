@@ -8,7 +8,7 @@ use mirrord_protocol::{
     dns::{GetAddrInfoRequest, GetAddrInfoResponse},
     file::{
         CloseDirRequest, CloseFileRequest, DirEntryInternal, OpenDirResponse, OpenFileResponse,
-        ReadDirBatchRequest, ReadDirBatchResponse, ReadDirRequest, ReadDirResponse,
+        ReadDirBatchRequest, ReadDirBatchResponse, ReadDirRequest, ReadDirResponse, MKDIR_VERSION,
         READDIR_BATCH_VERSION,
     },
     ClientMessage, FileRequest, FileResponse, GetEnvVarsRequest, RemoteResult, ResponseError,
@@ -238,6 +238,39 @@ impl BackgroundTask for SimpleProxy {
                                 message: ProxyToLayerMessage::File(FileResponse::ReadLink(Err(
                                     ResponseError::NotImplemented,
                                 ))),
+                                layer_id,
+                            })
+                            .await;
+                    }
+                }
+                SimpleProxyMessage::FileReq(
+                    message_id,
+                    layer_id,
+                    req @ FileRequest::MakeDir(_) | req @ FileRequest::MakeDirAt(_),
+                ) => {
+                    if protocol_version
+                        .as_ref()
+                        .is_some_and(|version| MKDIR_VERSION.matches(version))
+                    {
+                        self.file_reqs.insert(message_id, layer_id);
+                        message_bus
+                            .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(req)))
+                            .await;
+                    } else {
+                        let file_response = match req {
+                            FileRequest::MakeDir(_) => {
+                                FileResponse::MakeDir(Err(ResponseError::NotImplemented))
+                            }
+                            FileRequest::MakeDirAt(_) => {
+                                FileResponse::MakeDirAt(Err(ResponseError::NotImplemented))
+                            }
+                            _ => unreachable!(),
+                        };
+
+                        message_bus
+                            .send(ToLayer {
+                                message_id,
+                                message: ProxyToLayerMessage::File(file_response),
                                 layer_id,
                             })
                             .await;
