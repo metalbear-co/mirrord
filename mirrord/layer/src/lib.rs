@@ -450,13 +450,12 @@ fn fetch_env_vars() -> HashMap<String, String> {
             .store;
         env_vars.extend(envs_from_file);
     }
+    if let Some(mapping) = setup().env_config().mapping.clone() {
+        env_vars = EnvVarsRemapper::new(mapping, env_vars).remapped();
+    }
 
     if let Some(overrides) = setup().env_config().r#override.as_ref() {
         env_vars.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
-    }
-
-    if let Some(mapping) = setup().env_config().mapping.clone() {
-        env_vars = EnvVarsRemapper::new(mapping, env_vars).remapped();
     }
 
     env_vars
