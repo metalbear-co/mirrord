@@ -19,7 +19,9 @@ impl EnvVarsRemapper {
     ) -> Result<Self, ConfigError> {
         let mapping = mapping
             .into_iter()
-            .map(|(pattern, value)| Ok::<_, fancy_regex::Error>((Regex::new(&pattern)?, value)))
+            .map(|(pattern, value)| {
+                Ok::<_, Box<fancy_regex::Error>>((Regex::new(&pattern)?, value))
+            })
             .try_collect()?;
 
         Ok(EnvVarsRemapper { mapping, env_vars })
