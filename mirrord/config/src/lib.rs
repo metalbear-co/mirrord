@@ -1,4 +1,5 @@
 #![feature(slice_concat_trait)]
+#![feature(iterator_try_collect)]
 #![warn(clippy::indexing_slicing)]
 //! <!--${internal}-->
 //! To generate the `mirrord-schema.json` file see
@@ -16,11 +17,15 @@ pub mod internal_proxy;
 pub mod target;
 pub mod util;
 
-use std::{collections::HashSet, ops::Not, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Not,
+    path::Path,
+};
 
 use config::{ConfigContext, ConfigError, MirrordConfig};
 use experimental::ExperimentalConfig;
-use feature::network::outgoing::OutgoingFilterConfig;
+use feature::{env::mapper::EnvVarsRemapper, network::outgoing::OutgoingFilterConfig};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -117,6 +122,9 @@ pub static MIRRORD_CONFIG_FILE_ENV: &str = "MIRRORD_CONFIG_FILE";
 ///       "override": {
 ///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
 ///         "LOCAL_BEAR": "panda"
+///       },
+///       "mapping": {
+///         ".+_TIMEOUT": "1000"
 ///       }
 ///     },
 ///     "fs": {
@@ -513,11 +521,16 @@ impl LayerConfig {
             );
         }
 
+        // Env vars
         if self.feature.env.exclude.is_some() && self.feature.env.include.is_some() {
             return Err(ConfigError::Conflict(
                 "cannot use both `include` and `exclude` filters for environment variables"
                     .to_string(),
             ));
+        }
+
+        if let Some(env_vars_mapping) = self.feature.env.mapping.clone() {
+            EnvVarsRemapper::new(env_vars_mapping, HashMap::new())?;
         }
 
         self.feature.network.dns.verify(context)?;
