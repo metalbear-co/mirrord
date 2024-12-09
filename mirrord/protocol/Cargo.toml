@@ -21,6 +21,7 @@ actix-codec.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
 hickory-resolver.workspace = true
+hickory-proto.workspace = true
 serde.workspace = true
 bincode.workspace = true
 tracing.workspace = true
