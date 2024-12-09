@@ -76,9 +76,9 @@ mod steal_tests {
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut flags = vec!["--steal"];
 
-        if cfg!(feature = "ephemeral") {
-            flags.extend(["-e"].into_iter());
-        }
+        // if cfg!(feature = "ephemeral") {
+        //     flags.extend(["-e"].into_iter());
+        // }
 
         let mut process = application
             .run(&service.target, Some(&service.namespace), Some(flags), None)
