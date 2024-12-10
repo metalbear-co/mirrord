@@ -15,7 +15,6 @@ use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
-use self::label_selector::LabelSelector;
 #[cfg(feature = "client")]
 use crate::client::error::OperatorApiError;
 use crate::types::LicenseInfoOwned;
@@ -23,6 +22,7 @@ use crate::types::LicenseInfoOwned;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
+pub mod policy;
 
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
@@ -351,53 +351,6 @@ impl CopyTargetCrd {
 pub struct CopyTargetStatus {
     /// The session object of the original session that created this CopyTarget
     pub creator_session: Session,
-}
-
-/// Features and operations that can be blocked by a `MirrordPolicy`.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")] // StealWithoutFilter -> steal-without-filter in yaml.
-pub enum BlockedFeature {
-    /// Blocks stealing traffic in any way (without or without filter).
-    Steal,
-
-    /// Blocks stealing traffic without specifying (any) filter. Client can still specify a
-    /// filter that matches anything.
-    StealWithoutFilter,
-
-    /// Blocks mirroring traffic.
-    Mirror,
-
-    /// So that the operator is able to list all policies with [`kube::Api`],
-    /// even if it doesn't recognize blocked features used in some of them.
-    #[schemars(skip)]
-    #[serde(other, skip_serializing)]
-    Unknown,
-}
-
-/// Custom resource for policies that limit what mirrord features users can use.
-#[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[kube(
-    // The operator group is handled by the operator, we want policies to be handled by k8s.
-    group = "policies.mirrord.metalbear.co",
-    version = "v1alpha",
-    kind = "MirrordPolicy",
-    namespaced
-)]
-#[serde(rename_all = "camelCase")] // target_path -> targetPath in yaml.
-pub struct MirrordPolicySpec {
-    /// Specify the targets for which this policy applies, in the pod/my-pod deploy/my-deploy
-    /// notation. Targets can be matched using `*` and `?` where `?` matches exactly one
-    /// occurrence of any character and `*` matches arbitrary many (including zero) occurrences
-    /// of any character. If not specified, this policy does not depend on the target's path.
-    pub target_path: Option<String>,
-
-    /// If specified in a policy, the policy will only apply to targets with labels that match all
-    /// of the selector's rules.
-    pub selector: Option<LabelSelector>,
-
-    // TODO: make the k8s list type be set/map to prevent duplicates.
-    /// List of features and operations blocked by this policy.
-    pub block: Vec<BlockedFeature>,
 }
 
 /// Set where the application reads the name of the queue from, so that mirrord can find that queue,
