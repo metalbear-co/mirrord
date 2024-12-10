@@ -4,6 +4,7 @@ use std::{
     collections::HashMap,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
+    ops::Not,
     os::{
         fd::{BorrowedFd, FromRawFd, IntoRawFd},
         unix::io::RawFd,
@@ -130,7 +131,9 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
     }?;
 
     if domain == libc::AF_INET6 {
-        return Detour::Error(HookError::SocketUnsuportedIpv6);
+        if crate::setup().incoming_config().ipv6.not() {
+            return Detour::Error(HookError::SocketUnsuportedIpv6);
+        }
     }
 
     let socket_result = unsafe { FN_SOCKET(domain, type_, protocol) };
