@@ -724,7 +724,7 @@ impl OperatorRole {
         let rules = vec![
             // Allow the operator to fetch Secrets in the operator's namespace
             PolicyRule {
-                api_groups: Some(vec![MirrordKafkaClientConfig::group(&()).into_owned()]),
+                api_groups: Some(vec!["".to_owned()]),
                 resources: Some(vec!["secrets".to_owned()]),
                 verbs: ["get", "list", "watch"]
                     .into_iter()
