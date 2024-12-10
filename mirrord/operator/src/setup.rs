@@ -410,6 +410,9 @@ impl OperatorDeployment {
             security_context: Some(SecurityContext {
                 allow_privilege_escalation: Some(false),
                 privileged: Some(false),
+                run_as_user: Some(1000),
+                run_as_non_root: Some(true),
+                read_only_root_filesystem: Some(true),
                 ..Default::default()
             }),
             resources: Some(ResourceRequirements {
