@@ -410,6 +410,9 @@ impl OperatorDeployment {
             security_context: Some(SecurityContext {
                 allow_privilege_escalation: Some(false),
                 privileged: Some(false),
+                run_as_user: Some(1000),
+                run_as_non_root: Some(true),
+                read_only_root_filesystem: Some(true),
                 ..Default::default()
             }),
             resources: Some(ResourceRequirements {
@@ -724,7 +727,7 @@ impl OperatorRole {
         let rules = vec![
             // Allow the operator to fetch Secrets in the operator's namespace
             PolicyRule {
-                api_groups: Some(vec![MirrordKafkaClientConfig::group(&()).into_owned()]),
+                api_groups: Some(vec!["".to_owned()]),
                 resources: Some(vec!["secrets".to_owned()]),
                 verbs: ["get", "list", "watch"]
                     .into_iter()

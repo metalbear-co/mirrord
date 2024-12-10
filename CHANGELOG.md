@@ -8,6 +8,31 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.127.0](https://github.com/metalbear-co/mirrord/tree/3.127.0) - 2024-12-10
+
+
+### Added
+
+- `MirrordPolicy` can now block traffic mirroring (requires operator support).
+
+
+### Changed
+
+- Updated dependencies.
+  [#2952](https://github.com/metalbear-co/mirrord/issues/2952)
+
+
+### Fixed
+
+- Fixed link to operator docs.
+
+
+### Internal
+
+- Added `mirrord-protocol` message for rejecting mirror port subscription due
+  to `MirrordPolicy`.
+- Updated hickory dependency version.
+
 ## [3.126.0](https://github.com/metalbear-co/mirrord/tree/3.125.3) - 2024-12-06
 
 
