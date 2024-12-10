@@ -1,8 +1,7 @@
 # Contributing
 
 Before submitting pull request features, please discuss them with us first by opening an issue or a discussion.
-We welcome new/junior/starting developers. Feel free to join to our [Discord channel](https://discord.gg/metalbear) for
-help and guidance.
+We welcome new/junior/starting developers. Feel free to join to our [Discord channel](https://discord.gg/metalbear) for help and guidance.
 
 If you would like to start working on an issue, please comment on the issue on GitHub, so that we can assign you to that
 issue.
@@ -12,10 +11,10 @@ Make sure to take a look at the project's [style guide](STYLE.md).
 # Contents
 
 - [Contents](#contents)
-    - [Getting Started](#getting-started)
-    - [Debugging mirrord](#debugging-mirrord)
-    - [New Hook Guidelines](#new-hook-guidelines)
-    - [Compiling on MacOs](#compliling-on-macos)
+  - [Getting Started](#getting-started)
+  - [Debugging mirrord](#debugging-mirrord)
+  - [New Hook Guidelines](#new-hook-guidelines)
+  - [Compiling on MacOs](#compliling-on-macos)
 
 # Getting Started
 
@@ -32,8 +31,7 @@ The following guide details the steps to setup a local development environment f
 
 ### Setup a Kubernetes cluster
 
-For E2E tests and testing mirrord manually you will need a working Kubernetes cluster. A minimal cluster can be easily
-setup locally using either of the following:
+For E2E tests and testing mirrord manually you will need a working Kubernetes cluster. A minimal cluster can be easily setup locally using either of the following:
 
 - [Minikube](https://minikube.sigs.k8s.io/)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
@@ -53,13 +51,11 @@ minikube start --driver=docker
 
 ### Prepare a cluster
 
-Build mirrord-agent Docker Image.
-
-Make sure
-you're [logged in to GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+ Build mirrord-agent Docker Image.
+ 
+Make sure you're [logged in to GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
 
 Then run:
-
 ```bash
 docker buildx build -t test . --file mirrord/agent/Dockerfile
 ```
@@ -91,25 +87,22 @@ kubectl config use-context minikube
 
 ## E2E Tests
 
-The E2E tests create Kubernetes resources in the cluster that kubectl is configured to use and then run sample apps
-with the mirrord CLI. The mirrord CLI spawns an agent for the target on the cluster, and runs the test app, with the
-layer injected into it. Some test apps need to be compiled before they can be used in the tests
+The E2E tests create Kubernetes resources in the cluster that kubectl is configured to use and then run sample apps 
+with the mirrord CLI. The mirrord CLI spawns an agent for the target on the cluster, and runs the test app, with the 
+layer injected into it. Some test apps need to be compiled before they can be used in the tests 
 ([this should be automated in the future](https://github.com/metalbear-co/mirrord/issues/982)).
 
 The basic command to run the E2E tests is:
-
 ```bash
 cargo test --package tests
 ```
 
 However, when running on macOS a universal binary has to be created first:
-
 ```bash
 scripts/build_fat_mac.sh
 ```
 
 And then in order to use that binary in the tests, run the tests like this:
-
 ```bash
 MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord cargo test -p tests
 ```
@@ -118,8 +111,7 @@ If new tests are added, decorate them with `cfg_attr` attribute macro to define 
 For example, a test which only tests sanity of the ephemeral container feature should be decorated with
 `#[cfg_attr(not(feature = "ephemeral"), ignore)]`
 
-On Linux, running tests may exhaust a large amount of RAM and crash the machine. To prevent this, limit the number of
-concurrent jobs by running the command with e.g. `-j 4`
+On Linux, running tests may exhaust a large amount of RAM and crash the machine. To prevent this, limit the number of concurrent jobs by running the command with e.g. `-j 4`
 
 ### IPv6
 
@@ -139,11 +131,10 @@ In order to test IPv6 on a local cluster on macOS, you can use Kind:
 3. `kind create cluster --config kind-config.yaml`
 4. When you run `kubectl get svc -o wide --all-namespaces` you should see IPv6 addresses.
 
+
 ### Cleanup
 
-The Kubernetes resources created by the E2E tests are automatically deleted when the test exits. However, you can
-preserve resources from failed tests for debugging. To do this, set the `MIRRORD_E2E_PRESERVE_FAILED` variable to any
-value.
+The Kubernetes resources created by the E2E tests are automatically deleted when the test exits. However, you can preserve resources from failed tests for debugging. To do this, set the `MIRRORD_E2E_PRESERVE_FAILED` variable to any value.
 
 ```bash
 MIRRORD_E2E_PRESERVE_FAILED=y cargo test --package tests
@@ -158,11 +149,11 @@ kubectl delete namespaces,deployments,services -l mirrord-e2e-test-resource=true
 ## Integration Tests
 
 The layer's integration tests test the hooks and their logic without actually using a Kubernetes cluster and spawning
-an agent. The integration tests usually execute a test app and load the dynamic library of the layer into them. The
-tests set the layer to connect to a TCP/IP address instead of spawning a new agent. The tests then have to simulate the
+an agent. The integration tests usually execute a test app and load the dynamic library of the layer into them. The 
+tests set the layer to connect to a TCP/IP address instead of spawning a new agent. The tests then have to simulate the 
 agent - they accept the layer's connection, receive the layers messages and answer them as the agent would.
 
-Since they do not need to create Kubernetes resources and spawn agents, the integration tests complete much faster than
+Since they do not need to create Kubernetes resources and spawn agents, the integration tests complete much faster than 
 the E2E tests, especially on GitHub Actions.
 
 Therefore, whenever possible we create integration tests, and only resort to E2E tests when necessary.
@@ -173,19 +164,16 @@ Some test apps need to be compiled before they can be used in the tests
 ([this should be automated in the future](https://github.com/metalbear-co/mirrord/issues/982)).
 
 The basic command to run the integration tests is:
-
 ```bash
 cargo test --package mirrord-layer
 ```
 
 However, when running on macOS a dylib has to be created first:
-
 ```bash
 scripts/build_fat_mac.sh
 ```
 
 And then in order to use that dylib in the tests, run the tests like this:
-
 ```bash
 MIRRORD_TEST_USE_EXISTING_LIB=../../target/universal-apple-darwin/debug/libmirrord_layer.dylib cargo test -p mirrord-layer
 ```
@@ -278,17 +266,14 @@ py-serv-deployment-ff89b5974-x9tjx   1/1     Running   0          3h8m
 
 ### Build and run mirrord
 
-To build this project, you will first need a [Protocol Buffer Compiler](https://grpc.io/docs/protoc-installation/)
-installed.
+To build this project, you will first need a [Protocol Buffer Compiler](https://grpc.io/docs/protoc-installation/) installed.
 
 #### macOS
-
 ```bash
 scripts/build_fat_mac.sh
 ```
 
 #### Linux
-
 ```bash
 cargo build
 ```
@@ -303,34 +288,34 @@ Sample web server - `app.js` (present at `sample/node/app.mjs` in the repo)
   <summary>sample/node/app.mjs</summary>
 
 ```js
-import {Buffer} from "node:buffer";
-import {createServer} from "net";
-import {open, readFile} from "fs/promises";
+import { Buffer } from "node:buffer";
+import { createServer } from "net";
+import { open, readFile } from "fs/promises";
 
 async function debug_file_ops() {
-    try {
-        const readOnlyFile = await open("/var/log/dpkg.log", "r");
-        console.log(">>>>> open readOnlyFile ", readOnlyFile);
+  try {
+    const readOnlyFile = await open("/var/log/dpkg.log", "r");
+    console.log(">>>>> open readOnlyFile ", readOnlyFile);
 
-        let buffer = Buffer.alloc(128);
-        let bufferResult = await readOnlyFile.read(buffer);
-        console.log(">>>>> read readOnlyFile returned with ", bufferResult);
+    let buffer = Buffer.alloc(128);
+    let bufferResult = await readOnlyFile.read(buffer);
+    console.log(">>>>> read readOnlyFile returned with ", bufferResult);
 
-        const sampleFile = await open("/tmp/node_sample.txt", "w+");
-        console.log(">>>>> open file ", sampleFile);
+    const sampleFile = await open("/tmp/node_sample.txt", "w+");
+    console.log(">>>>> open file ", sampleFile);
 
-        const written = await sampleFile.write("mirrord sample node");
-        console.log(">>>>> written ", written, " bytes to file ", sampleFile);
+    const written = await sampleFile.write("mirrord sample node");
+    console.log(">>>>> written ", written, " bytes to file ", sampleFile);
 
-        let sampleBuffer = Buffer.alloc(32);
-        let sampleBufferResult = await sampleFile.read(buffer);
-        console.log(">>>>> read ", sampleBufferResult, " bytes from ", sampleFile);
+    let sampleBuffer = Buffer.alloc(32);
+    let sampleBufferResult = await sampleFile.read(buffer);
+    console.log(">>>>> read ", sampleBufferResult, " bytes from ", sampleFile);
 
-        readOnlyFile.close();
-        sampleFile.close();
-    } catch (fail) {
-        console.error("!!! Failed file operation with ", fail);
-    }
+    readOnlyFile.close();
+    sampleFile.close();
+  } catch (fail) {
+    console.error("!!! Failed file operation with ", fail);
+  }
 }
 
 // debug_file_ops();
@@ -338,34 +323,32 @@ async function debug_file_ops() {
 const server = createServer();
 server.on("connection", handleConnection);
 server.listen(
-    {
-        host: "localhost",
-        port: 80,
-    },
-    function () {
-        console.log("server listening to %j", server.address());
-    }
+  {
+    host: "localhost",
+    port: 80,
+  },
+  function () {
+    console.log("server listening to %j", server.address());
+  }
 );
 
 function handleConnection(conn) {
-    var remoteAddress = conn.remoteAddress + ":" + conn.remotePort;
-    console.log("new client connection from %s", remoteAddress);
-    conn.on("data", onConnData);
-    conn.once("close", onConnClose);
-    conn.on("error", onConnError);
+  var remoteAddress = conn.remoteAddress + ":" + conn.remotePort;
+  console.log("new client connection from %s", remoteAddress);
+  conn.on("data", onConnData);
+  conn.once("close", onConnClose);
+  conn.on("error", onConnError);
 
-    function onConnData(d) {
-        console.log("connection data from %s: %j", remoteAddress, d.toString());
-        conn.write(d);
-    }
-
-    function onConnClose() {
-        console.log("connection from %s closed", remoteAddress);
-    }
-
-    function onConnError(err) {
-        console.log("Connection %s error: %s", remoteAddress, err.message);
-    }
+  function onConnData(d) {
+    console.log("connection data from %s: %j", remoteAddress, d.toString());
+    conn.write(d);
+  }
+  function onConnClose() {
+    console.log("connection from %s closed", remoteAddress);
+  }
+  function onConnError(err) {
+    console.log("Connection %s error: %s", remoteAddress, err.message);
+  }
 }
 
 ```
@@ -375,8 +358,8 @@ function handleConnection(conn) {
 ```bash
 RUST_LOG=debug target/debug/mirrord exec -i test -l debug -c --target pod/py-serv-deployment-ff89b5974-x9tjx node sample/node/app.mjs
 ```
-
 > **Note:** You need to change the pod name here to the name of the pod created on your system.
+
 
 ```
 .
@@ -439,11 +422,9 @@ OK - GET: Request completed
 
 ## mirrord console
 
-Debugging mirrord can get hard since we're running from another app flow, so the fact we're debugging might affect the
-program and make it unusable/buggy (due to sharing stdout with scripts/other applications).
+Debugging mirrord can get hard since we're running from another app flow, so the fact we're debugging might affect the program and make it unusable/buggy (due to sharing stdout with scripts/other applications).
 
-The recommended way to do it is to use `mirrord-console`. It is a small application that receives log information from
-different mirrord instances and prints it, controlled via `RUST_LOG` environment variable.
+The recommended way to do it is to use `mirrord-console`. It is a small application that receives log information from different mirrord instances and prints it, controlled via `RUST_LOG` environment variable.
 
 To use mirrord console, run it:
 `cargo run --bin mirrord-console --features binary`
@@ -461,29 +442,24 @@ To debug it with a debugger:
    ```Rust
        tokio::time::sleep(Duration::from_secs(20)).await;
    ```
-   to [somewhere](https://github.com/metalbear-co/mirrord/blob/fa2af7f1e77a9254fb0908be40b0dae5da53d298/mirrord/cli/src/internal_proxy.rs#L145)
-   in the start of the intproxy code.
+   to [somewhere](https://github.com/metalbear-co/mirrord/blob/fa2af7f1e77a9254fb0908be40b0dae5da53d298/mirrord/cli/src/internal_proxy.rs#L145) in the start of the intproxy code.
 2. Set breakpoints in vscode in the relevant lines of the intproxy code.
 3. Build mirrord.
 4. Run mirrord.
-5. Attach a debugger in vscode to the inproxy process. On macOS you can do that with `Cmd` + `Shift` + `P` ->
-   `LLDB: Attach to Process...` -> type `intproxy` and choose the `mirrord intproxy` process. The sleep you added at the
-   start of the intproxy is time for you to attach the debugger.
+5. Attach a debugger in vscode to the inproxy process. On macOS you can do that with `Cmd` + `Shift` + `P` -> `LLDB: Attach to Process...` -> type `intproxy` and choose the `mirrord intproxy` process. The sleep you added at the start of the intproxy is time for you to attach the debugger.
 
 ## Retrieving Agent Logs
 
-By default, the agent's pod will complete and disappear shortly after the agent exits. In order to be able to retrieve
+By default, the agent's pod will complete and disappear shortly after the agent exits. In order to be able to retrieve 
 the agent's logs after it crashes, set the agent's pod's TTL to a comfortable number of seconds. This configuration can
 be specified either as a command line argument (`--agent-ttl`), environment variable (`MIRRORD_AGENT_TTL`), or in a
 configuration file:
-
 ```toml
 [agent]
 ttl = 30
 ```
 
 Then, when running with some reasonable TTL, you can retrieve the agent log like this:
-
 ```bash
 kubectl logs -l app=mirrord --tail=-1 | less -R
 ```
@@ -491,11 +467,9 @@ kubectl logs -l app=mirrord --tail=-1 | less -R
 This will retrieve the logs from all running mirrord agents, so it is only useful when just one agent pod exists.
 
 If there are currently multiple agent pods running on your cluster, you would have to run
-
 ```bash
 kubectl get pods
 ```
-
 and find the name of the agent pod you're interested in, then run
 
 ```bash
@@ -506,48 +480,36 @@ where you would replace `<YOUR_POD_NAME>` with the name of the pod.
 
 # New Hook Guidelines
 
-Adding a feature to mirrord that introduces a new hook (file system, network) can be tricky and there are a lot of edge
-cases we might need to cover.
+Adding a feature to mirrord that introduces a new hook (file system, network) can be tricky and there are a lot of edge cases we might need to cover. 
 
 In order to have a more structured approach, here’s the flow you should follow when working on such a feature.
 
-1. Start with the use case. Write an example use case of the feature, for example “App needs to read credentials from a
-   file”.
-2. Write a minimal app that implements the use case - so in the case of our example, an app that reads credentials from
-   a file. Start with either Node or Python as those are most common.
-3. Figure out what functions need to be hooked in order for the behavior to be run through the mirrord-agent instead of
-   locally. We suggest using `strace`.
+1. Start with the use case. Write an example use case of the feature, for example “App needs to read credentials from a file”.
+2. Write a minimal app that implements the use case - so in the case of our example, an app that reads credentials from a file. Start with either Node or Python as those are most common.
+3. Figure out what functions need to be hooked in order for the behavior to be run through the mirrord-agent instead of locally. We suggest using `strace`.
 4. Write a doc on how you would hook and handle the cases, for example:
     1. To implement use case “App needs to read credentials from a file*”
     2. I will hook `open` and `read` handling calls only with flags O_RDONLY.
-    3. Once `open` is called, I’ll send a blocking request to the agent to open the remote file, returning the return
-       code of the operation.
-    4. Create an fd using `memfd`. The result will be returned to the local app, and if successful we’ll save that fd
-       into a HashMap that matches between local fd and remote fd/identifier.
-    5. When `read` is called, I will check if the fd being read was previously opened by us, and if it is we’ll send a
-       blocking `read` request to the agent. The result will be sent back to the caller.
+    3. Once `open` is called, I’ll send a blocking request to the agent to open the remote file, returning the return code of the operation. 
+    4. Create an fd using `memfd`. The result will be returned to the local app, and if successful we’ll save that fd into a HashMap that matches between local fd and remote fd/identifier. 
+    5. When `read` is called, I will check if the fd being read was previously opened by us, and if it is we’ll send a blocking `read` request to the agent. The result will be sent back to the caller.
     6. And so on.
 5. This doc should go later on to our mirrord docs for advanced developers so people can understand how stuff works
 6. After approval of the implementation, you can start writing code, and add relevant e2e tests.
 
 # Compliling on MacOS
 
-The `mirrord-agent` crate makes use of the `#[cfg(target_os = "linux")]` attribute to allow the whole repo to compile on
-MacOS when you run `cargo build`.
+The `mirrord-agent` crate makes use of the `#[cfg(target_os = "linux")]` attribute to allow the whole repo to compile on MacOS when you run `cargo build`.
 
 To enable `mirrord-agent` code analysis with rust-analyzer:
-
 1. Install additional targets
-
 ```sh
 rustup target add x86_64-unknown-linux-gnu
 rustup target add aarch64-apple-darwin
 rustup target add x86_64-apple-darwin
 rustup target add aarch64-unknown-linux-gnu
 ```
-
 2. Add additional targets to your local `.cargo/config.toml` block:
-
 ```toml
 [build]
 target = [
@@ -559,15 +521,14 @@ target = [
 ```
 
 If you're using rust-analyzer VSCode extension, put this block in `.vscode/settings.json` as well:
-
 ```json
 {
-  "rust-analyzer.check.targets": [
-    "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
-    "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu"
-  ]
+    "rust-analyzer.check.targets": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu"
+    ]
 }
 ```
 
