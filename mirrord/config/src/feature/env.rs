@@ -10,6 +10,8 @@ use crate::{
     util::{MirrordToggleableConfig, VecOrSingle},
 };
 
+pub mod mapper;
+
 pub const MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV: &str = "MIRRORD_OVERRIDE_ENV_VARS_INCLUDE";
 pub const MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV: &str = "MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE";
 pub const MIRRORD_OVERRIDE_ENV_FILE_ENV: &str = "MIRRORD_OVERRIDE_ENV_VARS_FILE";
@@ -37,6 +39,9 @@ pub const MIRRORD_OVERRIDE_ENV_FILE_ENV: &str = "MIRRORD_OVERRIDE_ENV_VARS_FILE"
 ///       "override": {
 ///         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
 ///         "LOCAL_BEAR": "panda"
+///       },
+///       "mapping": {
+///         ".+_TIMEOUT": "1000"
 ///       }
 ///     }
 ///   }
@@ -111,6 +116,28 @@ pub struct EnvConfig {
     /// These variables will override environment fetched from the remote target.
     #[config(env = MIRRORD_OVERRIDE_ENV_FILE_ENV)]
     pub env_file: Option<PathBuf>,
+
+    /// ### feature.env.mapping {#feature-env-mapping}
+    ///
+    /// Specify map of patterns that if matched will replace the value according to specification.
+    ///
+    /// *Capture groups are allowed.*
+    ///
+    /// Example:
+    /// ```json
+    /// {
+    ///   ".+_TIMEOUT": "10000"
+    ///   "LOG_.+_VERBOSITY": "debug"
+    ///   "(\w+)_(\d+)": "magic-value"
+    /// }
+    /// ```
+    ///
+    /// Will do the next replacements for environment variables that match:
+    ///
+    /// `CONNECTION_TIMEOUT: 500` => `CONNECTION_TIMEOUT: 10000`
+    /// `LOG_FILE_VERBOSITY: info` => `LOG_FILE_VERBOSITY: debug`
+    /// `DATA_1234: common-value` => `DATA_1234: magic-value`
+    pub mapping: Option<HashMap<String, String>>,
 }
 
 impl MirrordToggleableConfig for EnvFileConfig {
@@ -129,6 +156,7 @@ impl MirrordToggleableConfig for EnvFileConfig {
             env_file: FromEnv::new(MIRRORD_OVERRIDE_ENV_FILE_ENV)
                 .source_value(context)
                 .transpose()?,
+            mapping: None,
         })
     }
 }
@@ -164,6 +192,13 @@ impl CollectAnalytics for &EnvConfig {
                 .unwrap_or_default(),
         );
         analytics.add("env_file_used", self.env_file.is_some());
+        analytics.add(
+            "env_mapping_count",
+            self.mapping
+                .as_ref()
+                .map(|v| v.len() as u32)
+                .unwrap_or_default(),
+        );
     }
 }
 
