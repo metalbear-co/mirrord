@@ -81,7 +81,12 @@ mod steal_tests {
         // }
 
         let mut process = application
-            .run(&service.target, Some(&service.namespace), Some(flags), None)
+            .run(
+                &service.target,
+                Some(&service.namespace),
+                Some(flags),
+                Some(vec![("MIRRORD_INCOMING_ENABLE_IPV6", "true")]),
+            )
             .await;
 
         process
