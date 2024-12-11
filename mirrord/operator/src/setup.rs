@@ -357,6 +357,18 @@ impl OperatorDeployment {
             });
         }
 
+        // For downloading and using CA.
+        volumes.push(Volume {
+            name: "tmp".to_string(),
+            empty_dir: Some(Default::default()),
+            ..Default::default()
+        });
+        volume_mounts.push(VolumeMount {
+            mount_path: "/tmp".to_string(),
+            name: "tmp".to_string(),
+            ..Default::default()
+        });
+
         if let Some(license_key) = license_key {
             envs.push(EnvVar {
                 name: "OPERATOR_LICENSE_KEY".to_owned(),
