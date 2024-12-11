@@ -28,7 +28,8 @@ use thiserror::Error;
 
 use crate::crd::{
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
-    MirrordOperatorUser, MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
+    policy::{MirrordClusterPolicy, MirrordPolicy},
+    MirrordOperatorUser, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
 };
 
 pub static OPERATOR_NAME: &str = "mirrord-operator";
@@ -229,6 +230,9 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         MirrordPolicy::crd().to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordClusterPolicy::crd().to_writer(&mut writer)?;
 
         if self.sqs_splitting {
             writer.write_all(b"---\n")?;
@@ -562,8 +566,12 @@ impl OperatorClusterRole {
             },
             // Allow the operator to list+get mirrord policies.
             PolicyRule {
+                // Both namespaced and cluster-wide policies live in the same API group.
                 api_groups: Some(vec![MirrordPolicy::group(&()).into_owned()]),
-                resources: Some(vec![MirrordPolicy::plural(&()).into_owned()]),
+                resources: Some(vec![
+                    MirrordPolicy::plural(&()).into_owned(),
+                    MirrordClusterPolicy::plural(&()).into_owned(),
+                ]),
                 verbs: vec!["list".to_owned(), "get".to_owned()],
                 ..Default::default()
             },
