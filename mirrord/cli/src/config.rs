@@ -646,6 +646,10 @@ pub(super) struct OperatorSetupParams {
     /// are targeted with `scale_down` feature enabled.
     #[arg(long, default_value_t = false)]
     pub(super) application_auto_pause: bool,
+
+    /// Enable prometheus endpoint (http `:9000/metrics`)
+    #[arg(long, default_value_t = false)]
+    pub(super) prometheus_metrics: bool,
 }
 
 /// `mirrord operator session` family of commands.

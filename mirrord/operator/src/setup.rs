@@ -36,6 +36,7 @@ pub static OPERATOR_NAME: &str = "mirrord-operator";
 /// 443 is standard port for APIService, do not change this value
 /// (will require users to add FW rules)
 static OPERATOR_PORT: i32 = 443;
+static OPERATOR_METRICS_PORT: i32 = 9000;
 static OPERATOR_ROLE_NAME: &str = "mirrord-operator";
 static OPERATOR_ROLE_BINDING_NAME: &str = "mirrord-operator";
 static OPERATOR_CLUSTER_ROLE_NAME: &str = "mirrord-operator";
@@ -98,6 +99,7 @@ pub struct SetupOptions {
     pub sqs_splitting: bool,
     pub kafka_splitting: bool,
     pub application_auto_pause: bool,
+    pub prometheus_metrics: bool,
 }
 
 #[derive(Debug)]
@@ -129,6 +131,7 @@ impl Operator {
             sqs_splitting,
             kafka_splitting,
             application_auto_pause,
+            prometheus_metrics,
         } = options;
 
         let (license_secret, license_key) = match license {
@@ -166,6 +169,7 @@ impl Operator {
             sqs_splitting,
             kafka_splitting,
             application_auto_pause,
+            prometheus_metrics,
         );
 
         let service = OperatorService::new(&namespace);
@@ -306,6 +310,7 @@ impl OperatorDeployment {
         sqs_splitting: bool,
         kafka_splitting: bool,
         application_auto_pause: bool,
+        prometheus_metrics: bool,
     ) -> Self {
         let mut envs = vec![
             EnvVar {
@@ -412,16 +417,32 @@ impl OperatorDeployment {
             ..Default::default()
         };
 
+        let mut ports = vec![ContainerPort {
+            name: Some("https".to_owned()),
+            container_port: OPERATOR_PORT,
+            ..Default::default()
+        }];
+
+        if prometheus_metrics {
+            envs.push(EnvVar {
+                name: "OPERATOR_METRICS_ENABLED".into(),
+                value: Some("true".into()),
+                value_from: None,
+            });
+
+            ports.push(ContainerPort {
+                name: Some("metrics".to_owned()),
+                container_port: OPERATOR_METRICS_PORT,
+                ..Default::default()
+            })
+        }
+
         let container = Container {
             name: OPERATOR_NAME.to_owned(),
             image: Some(image),
             image_pull_policy: Some("IfNotPresent".to_owned()),
             env: Some(envs),
-            ports: Some(vec![ContainerPort {
-                name: Some("https".to_owned()),
-                container_port: OPERATOR_PORT,
-                ..Default::default()
-            }]),
+            ports: Some(ports),
             volume_mounts: Some(volume_mounts),
             security_context: Some(SecurityContext {
                 allow_privilege_escalation: Some(false),

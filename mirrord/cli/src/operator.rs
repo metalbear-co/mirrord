@@ -56,6 +56,7 @@ async fn operator_setup(
         sqs_splitting,
         kafka_splitting,
         application_auto_pause,
+        prometheus_metrics,
     }: OperatorSetupParams,
 ) -> CliResult<(), OperatorSetupError> {
     if !accept_tos {
@@ -103,6 +104,7 @@ async fn operator_setup(
             sqs_splitting,
             kafka_splitting,
             application_auto_pause,
+            prometheus_metrics,
         });
 
         match file {
