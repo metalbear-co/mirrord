@@ -40,6 +40,7 @@ use tokio::{
 };
 
 pub mod sqs_resources;
+pub(crate) mod ipv6;
 
 const TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 pub const CONTAINER_NAME: &str = "test";
@@ -733,14 +734,18 @@ impl Drop for ResourceGuard {
 pub struct KubeService {
     pub name: String,
     pub namespace: String,
-    pub target: String,
     guards: Vec<ResourceGuard>,
     namespace_guard: Option<ResourceGuard>,
+    pub pod_name: String,
 }
 
 impl KubeService {
     pub fn deployment_target(&self) -> String {
         format!("deployment/{}", self.name)
+    }
+
+    pub fn pod_container_target(&self) -> String {
+        format!("pod/{}/container/{CONTAINER_NAME}", self.pod_name)
     }
 }
 
@@ -1215,13 +1220,13 @@ async fn internal_service(
     .unwrap();
     watch_resource_exists(&service_api, "default").await;
 
-    let target = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
+    let pod_name = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
         .await
         .unwrap();
 
     let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
 
-    await_condition(pod_api, &target, is_pod_running())
+    await_condition(pod_api, &pod_name, is_pod_running())
         .await
         .unwrap();
 
@@ -1233,7 +1238,7 @@ async fn internal_service(
     KubeService {
         name,
         namespace: namespace.to_string(),
-        target: format!("pod/{target}/container/{CONTAINER_NAME}"),
+        pod_name,
         guards: vec![pod_guard, service_guard],
         namespace_guard,
     }
@@ -1326,13 +1331,13 @@ pub async fn service_for_mirrord_ls(
     .unwrap();
     watch_resource_exists(&service_api, "default").await;
 
-    let target = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
+    let pod_name = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
         .await
         .unwrap();
 
     let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
 
-    await_condition(pod_api, &target, is_pod_running())
+    await_condition(pod_api, &pod_name, is_pod_running())
         .await
         .unwrap();
 
@@ -1344,7 +1349,7 @@ pub async fn service_for_mirrord_ls(
     KubeService {
         name,
         namespace: namespace.to_string(),
-        target: format!("pod/{target}/container/{CONTAINER_NAME}"),
+        pod_name,
         guards: vec![pod_guard, service_guard],
         namespace_guard,
     }
@@ -1595,38 +1600,6 @@ pub async fn random_namespace_self_deleting_service(#[future] kube_client: Clien
         "pytest-echo",
         true,
         kube_client,
-    )
-    .await
-}
-
-/// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
-/// when the returned service is dropped, unless it is dropped during panic.
-/// This behavior can be changed, see [`PRESERVE_FAILED_ENV_NAME`].
-/// * `randomize_name` - whether a random suffix should be added to the end of the resource names
-#[fixture]
-pub async fn ipv6_service(
-    #[default("default")] namespace: &str,
-    #[default("NodePort")] service_type: &str,
-    // #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
-    #[default("docker.io/t4lz/mirrord-pytest:1204")] image: &str,
-    #[default("http-echo")] service_name: &str,
-    #[default(true)] randomize_name: bool,
-    #[future] kube_client: Client,
-) -> KubeService {
-    internal_service(
-        namespace,
-        service_type,
-        image,
-        service_name,
-        randomize_name,
-        kube_client.await,
-        serde_json::json!([
-            {
-              "name": "HOST",
-              "value": "::"
-            }
-        ]),
-        true,
     )
     .await
 }

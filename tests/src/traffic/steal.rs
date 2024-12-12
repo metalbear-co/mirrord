@@ -9,7 +9,10 @@ mod steal_tests {
     };
 
     use futures_util::{SinkExt, StreamExt};
-    use kube::Client;
+    use hyper::{body, client::conn, Request, StatusCode};
+    use hyper_util::rt::TokioIo;
+    use k8s_openapi::api::core::v1::Pod;
+    use kube::{Api, Client};
     use reqwest::{header::HeaderMap, Url};
     use rstest::*;
     use tokio::time::sleep;
@@ -19,7 +22,8 @@ mod steal_tests {
     };
 
     use crate::utils::{
-        config_dir, get_service_host_and_port, get_service_url, http2_service, ipv6_service,
+        config_dir, get_service_host_and_port, get_service_url, http2_service,
+        ipv6::{ipv6_service, portforward_http_requests},
         kube_client, send_request, send_requests, service, tcp_echo_service, websocket_service,
         Application, KubeService,
     };
@@ -48,7 +52,12 @@ mod steal_tests {
         }
 
         let mut process = application
-            .run(&service.target, Some(&service.namespace), Some(flags), None)
+            .run(
+                &service.pod_container_target(),
+                Some(&service.namespace),
+                Some(flags),
+                None,
+            )
             .await;
 
         process
@@ -73,7 +82,7 @@ mod steal_tests {
         let application = Application::PythonFastApiHTTPIPv6;
         let service = ipv6_service.await;
         let kube_client = kube_client.await;
-        let url = get_service_url(kube_client.clone(), &service).await;
+
         let mut flags = vec!["--steal"];
 
         // if cfg!(feature = "ephemeral") {
@@ -82,7 +91,7 @@ mod steal_tests {
 
         let mut process = application
             .run(
-                &service.target,
+                &service.pod_container_target(),
                 Some(&service.namespace),
                 Some(flags),
                 Some(vec![("MIRRORD_INCOMING_ENABLE_IPV6", "true")]),
@@ -92,7 +101,10 @@ mod steal_tests {
         process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
-        send_requests(&url, true, Default::default()).await;
+
+        let api = Api::<Pod>::namespaced(kube_client.clone(), &service.namespace);
+        portforward_http_requests(&api, service).await;
+
         tokio::time::timeout(Duration::from_secs(40), process.wait())
             .await
             .unwrap();
@@ -126,7 +138,7 @@ mod steal_tests {
 
         let mut process = application
             .run(
-                &service.target,
+                &service.pod_container_target(),
                 Some(&service.namespace),
                 Some(flags),
                 Some(vec![("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "true")]),
@@ -162,7 +174,12 @@ mod steal_tests {
         }
 
         let mut process = application
-            .run(&service.target, Some(&service.namespace), Some(flags), None)
+            .run(
+                &service.pod_container_target(),
+                Some(&service.namespace),
+                Some(flags),
+                None,
+            )
             .await;
 
         // Verify that we hooked the socket operations and the agent started stealing.
@@ -245,7 +262,7 @@ mod steal_tests {
 
         let mut process = application
             .run(
-                &service.target,
+                &service.pod_container_target(),
                 Some(&service.namespace),
                 Some(flags),
                 Some(vec![
@@ -325,7 +342,7 @@ mod steal_tests {
 
         let mut client = application
             .run(
-                &service.target,
+                &service.pod_container_target(),
                 Some(&service.namespace),
                 Some(flags),
                 Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
@@ -366,7 +383,7 @@ mod steal_tests {
 
         let mut client = application
             .run(
-                &service.target,
+                &service.pod_container_target(),
                 Some(&service.namespace),
                 None,
                 Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
@@ -407,7 +424,7 @@ mod steal_tests {
 
         let mut client = application
             .run(
-                &service.target,
+                &service.pod_container_target(),
                 Some(&service.namespace),
                 None,
                 Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
@@ -460,7 +477,7 @@ mod steal_tests {
 
         let mut mirrored_process = application
             .run(
-                &service.target,
+                &service.pod_container_target(),
                 Some(&service.namespace),
                 Some(flags),
                 Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
@@ -531,7 +548,7 @@ mod steal_tests {
 
         let mut mirrorded_process = application
             .run(
-                &service.target,
+                &service.pod_container_target(),
                 Some(&service.namespace),
                 Some(flags),
                 Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
@@ -596,7 +613,7 @@ mod steal_tests {
 
         let mut mirrorded_process = application
             .run(
-                &service.target,
+                &service.pod_container_target(),
                 Some(&service.namespace),
                 Some(flags),
                 Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
@@ -666,7 +683,7 @@ mod steal_tests {
 
         let mut mirrorded_process = application
             .run(
-                &service.target,
+                &service.pod_container_target(),
                 Some(&service.namespace),
                 Some(flags),
                 Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
@@ -745,7 +762,7 @@ mod steal_tests {
 
         let mut mirrorded_process = application
             .run(
-                &service.target,
+                &service.pod_container_target(),
                 Some(&service.namespace),
                 Some(vec!["--steal"]),
                 Some(vec![("MIRRORD_HTTP_HEADER_FILTER", "x-filter: yes")]),
