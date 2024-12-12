@@ -81,7 +81,14 @@ mod issue1317_tests {
             .to_string_lossy()
             .to_string();
         let executable = vec![app_path.as_str()];
-        let mut process = run_exec_with_target(executable, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(
+            executable,
+            &service.pod_container_target(),
+            None,
+            None,
+            None,
+        )
+        .await;
 
         process
             .wait_for_line(Duration::from_secs(120), "daemon subscribed")

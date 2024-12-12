@@ -41,7 +41,12 @@ mod http_tests {
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut process = application
-            .run(&service.target, Some(&service.namespace), None, None)
+            .run(
+                &service.pod_container_target(),
+                Some(&service.namespace),
+                None,
+                None,
+            )
             .await;
         process
             .wait_for_line(Duration::from_secs(120), "daemon subscribed")
@@ -80,7 +85,12 @@ mod http_tests {
         let kube_client = kube_client.await;
         let url = get_service_url(kube_client.clone(), &service).await;
         let mut process = application
-            .run(&service.target, Some(&service.namespace), None, None)
+            .run(
+                &service.pod_container_target(),
+                Some(&service.namespace),
+                None,
+                None,
+            )
             .await;
         process
             .wait_for_line(Duration::from_secs(300), "daemon subscribed")
