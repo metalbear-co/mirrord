@@ -650,6 +650,14 @@ pub(super) struct OperatorSetupParams {
     /// Enable prometheus endpoint (http `:9000/metrics`)
     #[arg(long, default_value_t = false)]
     pub(super) prometheus_metrics: bool,
+
+    /// Add annotations to operator pod template. ({key}={value} format)
+    ///
+    /// Example: `mirrord operator setup ... --pod-annotations "prometheus.io/scrape=true"
+    /// --pod-annotations "prometheus.io/path=/metrics" --pod-annotations
+    /// "prometheus.io/port=9000" ...`
+    #[arg(long)]
+    pub(super) pod_annotations: Vec<String>,
 }
 
 /// `mirrord operator session` family of commands.

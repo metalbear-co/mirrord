@@ -100,6 +100,7 @@ pub struct SetupOptions {
     pub kafka_splitting: bool,
     pub application_auto_pause: bool,
     pub prometheus_metrics: bool,
+    pub pod_annotations: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -132,6 +133,7 @@ impl Operator {
             kafka_splitting,
             application_auto_pause,
             prometheus_metrics,
+            pod_annotations,
         } = options;
 
         let (license_secret, license_key) = match license {
@@ -170,6 +172,13 @@ impl Operator {
             kafka_splitting,
             application_auto_pause,
             prometheus_metrics,
+            pod_annotations
+                .into_iter()
+                .filter_map(|annotation| {
+                    let (key, value) = annotation.split_once('=')?;
+                    Some((key.to_owned(), value.to_owned()))
+                })
+                .collect(),
         );
 
         let service = OperatorService::new(&namespace);
@@ -311,6 +320,7 @@ impl OperatorDeployment {
         kafka_splitting: bool,
         application_auto_pause: bool,
         prometheus_metrics: bool,
+        pod_annotations: BTreeMap<String, String>,
     ) -> Self {
         let mut envs = vec![
             EnvVar {
@@ -478,6 +488,7 @@ impl OperatorDeployment {
         let spec = DeploymentSpec {
             template: PodTemplateSpec {
                 metadata: Some(ObjectMeta {
+                    annotations: Some(pod_annotations),
                     labels: Some(APP_LABELS.clone()),
                     ..Default::default()
                 }),

@@ -57,6 +57,7 @@ async fn operator_setup(
         kafka_splitting,
         application_auto_pause,
         prometheus_metrics,
+        pod_annotations,
     }: OperatorSetupParams,
 ) -> CliResult<(), OperatorSetupError> {
     if !accept_tos {
@@ -105,6 +106,7 @@ async fn operator_setup(
             kafka_splitting,
             application_auto_pause,
             prometheus_metrics,
+            pod_annotations,
         });
 
         match file {
