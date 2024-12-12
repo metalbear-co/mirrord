@@ -33,7 +33,7 @@ mod file_ops_tests {
         let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/**")];
         let mut process = run_exec_with_target(
             command,
-            &service.target,
+            &service.pod_container_target(),
             Some(&service.namespace),
             Some(args),
             Some(env),
@@ -63,7 +63,7 @@ mod file_ops_tests {
 
         let mut process = run_exec_with_target(
             python_command,
-            &service.target,
+            &service.pod_container_target(),
             Some(&service.namespace),
             Some(args),
             Some(env),
@@ -97,7 +97,7 @@ mod file_ops_tests {
 
         let mut process = run_exec_with_target(
             python_command,
-            &service.target,
+            &service.pod_container_target(),
             Some(&service.namespace),
             None,
             None,
@@ -117,8 +117,14 @@ mod file_ops_tests {
     pub async fn bash_file_exists(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "exists"];
-        let mut process =
-            run_exec_with_target(bash_command, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(
+            bash_command,
+            &service.pod_container_target(),
+            None,
+            None,
+            None,
+        )
+        .await;
 
         let res = process.wait().await;
         assert!(res.success());
@@ -135,8 +141,14 @@ mod file_ops_tests {
     pub async fn bash_file_read(#[future] service: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "read"];
-        let mut process =
-            run_exec_with_target(bash_command, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(
+            bash_command,
+            &service.pod_container_target(),
+            None,
+            None,
+            None,
+        )
+        .await;
 
         let res = process.wait().await;
         assert!(res.success());
@@ -151,8 +163,14 @@ mod file_ops_tests {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "write"];
         let args = vec!["--rw"];
-        let mut process =
-            run_exec_with_target(bash_command, &service.target, None, Some(args), None).await;
+        let mut process = run_exec_with_target(
+            bash_command,
+            &service.pod_container_target(),
+            None,
+            Some(args),
+            None,
+        )
+        .await;
 
         let res = process.wait().await;
         assert!(res.success());
@@ -183,7 +201,7 @@ mod file_ops_tests {
 
         let mut process = run_exec_with_target(
             command,
-            &service.target,
+            &service.pod_container_target(),
             Some(&service.namespace),
             Some(args),
             None,

@@ -20,6 +20,10 @@ where
 {
     type Value = T;
 
+    /// Returns:
+    /// - `None` if there is no env var with that name.
+    /// - `Some(Err(ConfigError::InvalidValue{...}))` if the value of the env var cannot be parsed.
+    /// - `Some(Ok(...))` if the env var exists and was parsed successfully.
     fn source_value(self, _context: &mut ConfigContext) -> Option<Result<Self::Value>> {
         std::env::var(self.0).ok().map(|var| {
             var.parse::<Self::Value>()
