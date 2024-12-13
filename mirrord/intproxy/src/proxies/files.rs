@@ -89,20 +89,25 @@ impl fmt::Debug for DirData {
 }
 
 /// Additional request data that is saved by [`FilesProxy`] in its [`RequestQueue`].
-/// Allows for handling buffered reads.
+/// Allows for handling buffered reads by marking requests that should be handled in a special way.
 #[derive(Debug, Default)]
 enum AdditionalRequestData {
+    /// Open file that will be buffered.
     OpenBuffered,
 
+    /// Read file that is buffered.
     ReadBuffered {
         /// File descriptor.
         fd: u64,
         /// Read buffer size of the user application.
+        /// The user requested reading this many bytes.
         requested_amount: u64,
-        /// Whether fd position in file
+        /// Whether we should update fd position in file
+        /// (we store it locally).
         update_fd_position: bool,
     },
 
+    /// Seek file that is buffered.
     SeekBuffered {
         /// File descriptor.
         fd: u64,
@@ -115,16 +120,46 @@ enum AdditionalRequestData {
 
 /// For handling all file operations.
 /// Run as a [`BackgroundTask`].
+///
+/// # Directory buffering
+///
+/// To optimize cases where user application traverses large directories,
+/// we use [`FileRequest::ReadDirBatch`] to fetch many entries at once
+/// ([`Self::READDIR_BATCH_SIZE`]).
+///
+/// Excessive entries are cached locally in this proxy and used until depleted.
+///
+/// # File buffering
+///
+/// To optimize cases where user application makes a lot of small reads on remote files,
+/// we change the way of reading readonly files.
+///
+/// 1. When the user requests a read, we fetch at least [`Self::READFILE_CHUNK_SIZE`] bytes. We
+///    return the amount requested by the user and store the whole response as a local buffer.
+/// 2. When the user requests a read again, we try to fulfill the request using only the local
+///    buffer. If it's not possible, we proceed as in point 1
+/// 3. To solve problems with descriptor offset, we only use [`FileRequest::ReadLimited`] to read
+///    buffered files. Descriptor offset value is maintained in this proxy.
 pub struct FilesProxy {
+    /// [`mirrord_protocol`] version negotiated with the agent.
+    /// Determines whether we can use some messages, like [`FileRequest::ReadDirBatch`] or
+    /// [`FileRequest::ReadLink`].
     protocol_version: Option<Version>,
+
+    /// Whether this proxy is configured to buffer readonly files.
     buffer_reads: bool,
 
+    /// Stores metadata of outstanding requests.
     request_queue: RequestQueue<AdditionalRequestData>,
 
-    remote_file_fds: RemoteResources<u64>,
+    /// For tracking remote file descriptors across layer instances (forks).
+    remote_files: RemoteResources<u64>,
+    /// Locally stored data of buffered files.
     files_data: HashMap<u64, FileData>,
 
-    remote_dir_fds: RemoteResources<u64>,
+    /// For tracking remote directory descriptors across layer instances (forks).
+    remote_dirs: RemoteResources<u64>,
+    /// Locally stored data of buffered directories.
     dirs_data: HashMap<u64, DirData>,
 }
 
@@ -142,9 +177,19 @@ impl fmt::Debug for FilesProxy {
 }
 
 impl FilesProxy {
-    const READDIR_BATCH_SIZE: usize = 128;
-    const READFILE_CHUNK_SIZE: u64 = 4096;
+    /// How many directory entries we request at a time.
+    /// Relevant only if [`mirrord_protocol`] version allows for [`FileRequest::ReadDirBatch`].
+    pub const READDIR_BATCH_SIZE: usize = 128;
 
+    /// How many bytes we read a time from readonly files (unless the user requested more).
+    /// Relevant only if [`FilesProxy`] is configured to buffer readonly files.
+    pub const READFILE_CHUNK_SIZE: u64 = 4096;
+
+    /// Creates a new files proxy instance.
+    /// Proxy can be used as a [`BackgroundTask`].
+    ///
+    /// `buffer_reads` determines whether this proxy will execute buffering logic for readonly
+    /// files.
     pub fn new(buffer_reads: bool) -> Self {
         Self {
             protocol_version: Default::default(),
@@ -152,14 +197,15 @@ impl FilesProxy {
 
             request_queue: Default::default(),
 
-            remote_file_fds: Default::default(),
+            remote_files: Default::default(),
             files_data: Default::default(),
 
-            remote_dir_fds: Default::default(),
+            remote_dirs: Default::default(),
             dirs_data: Default::default(),
         }
     }
 
+    /// Returns whether [`mirrord_protocol`] version allows for buffering directories.
     fn buffer_dirs(&self) -> bool {
         self.protocol_version
             .as_ref()
@@ -168,13 +214,13 @@ impl FilesProxy {
 
     #[tracing::instrument(level = Level::DEBUG)]
     fn layer_forked(&mut self, forked: LayerForked) {
-        self.remote_file_fds.clone_all(forked.parent, forked.child);
-        self.remote_dir_fds.clone_all(forked.parent, forked.child);
+        self.remote_files.clone_all(forked.parent, forked.child);
+        self.remote_dirs.clone_all(forked.parent, forked.child);
     }
 
     #[tracing::instrument(level = Level::DEBUG, skip(message_bus))]
     async fn layer_closed(&mut self, closed: LayerClosed, message_bus: &mut MessageBus<Self>) {
-        for fd in self.remote_file_fds.remove_all(closed.id) {
+        for fd in self.remote_files.remove_all(closed.id) {
             self.files_data.remove(&fd);
             message_bus
                 .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(
@@ -183,7 +229,7 @@ impl FilesProxy {
                 .await;
         }
 
-        for remote_fd in self.remote_dir_fds.remove_all(closed.id) {
+        for remote_fd in self.remote_dirs.remove_all(closed.id) {
             self.dirs_data.remove(&remote_fd);
             message_bus
                 .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(
@@ -209,7 +255,7 @@ impl FilesProxy {
         match request {
             // Should trigger remote close only when the fd is closed in all layer instances.
             FileRequest::Close(close) => {
-                if self.remote_file_fds.remove(layer_id, close.fd) {
+                if self.remote_files.remove(layer_id, close.fd) {
                     self.files_data.remove(&close.fd);
                     message_bus
                         .send(ClientMessage::FileRequest(FileRequest::Close(close)))
@@ -219,7 +265,7 @@ impl FilesProxy {
 
             // Should trigger remote close only when the fd is closed in all layer instances.
             FileRequest::CloseDir(close) => {
-                if self.remote_dir_fds.remove(layer_id, close.remote_fd) {
+                if self.remote_dirs.remove(layer_id, close.remote_fd) {
                     self.dirs_data.remove(&close.remote_fd);
                     message_bus
                         .send(ClientMessage::FileRequest(FileRequest::CloseDir(close)))
@@ -460,7 +506,7 @@ impl FilesProxy {
                         ))))
                     })?;
 
-                self.remote_file_fds.add(layer_id, open.fd);
+                self.remote_files.add(layer_id, open.fd);
 
                 if matches!(additional_data, AdditionalRequestData::OpenBuffered) {
                     self.files_data.insert(open.fd, Default::default());
@@ -482,7 +528,7 @@ impl FilesProxy {
                         open.clone()
                     ))))
                 })?;
-                self.remote_dir_fds.add(layer_id, open.fd);
+                self.remote_dirs.add(layer_id, open.fd);
 
                 message_bus
                     .send(ToLayer {
@@ -709,8 +755,8 @@ impl BackgroundTask for FilesProxy {
 
 //     /// Sets up a [`TaskSender`] and [`BackgroundTasks`] for a functioning [`SimpleProxy`].
 //     ///
-//     /// - `protocol_version`: allows specifying the version of the protocol to use for testing out
-//     ///   potential mismatches in messages.
+//     /// - `protocol_version`: allows specifying the version of the protocol to use for testing
+// out     ///   potential mismatches in messages.
 //     async fn setup_proxy(
 //         protocol_version: Version,
 //     ) -> (
