@@ -6,9 +6,11 @@ use serde::Serialize;
 
 use self::{incoming::*, outgoing::*};
 use crate::{
-    config::{ConfigContext, ConfigError},
+    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError},
     util::MirrordToggleableConfig,
 };
+
+const IPV6_ENV_VAR: &str = "MIRRORD_INCOMING_ENABLE_IPV6";
 
 pub mod dns;
 pub mod filter;
@@ -67,14 +69,26 @@ pub struct NetworkConfig {
     /// ### feature.network.dns {#feature-network-dns}
     #[config(toggleable, nested)]
     pub dns: DnsConfig,
+
+    /// ### feature.network.ipv6 {#feature-network-dns}
+    ///
+    /// Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6.
+    #[config(env = IPV6_ENV_VAR)]
+    pub ipv6: bool,
 }
 
 impl MirrordToggleableConfig for NetworkFileConfig {
     fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
+        let ipv6 = FromEnv::new(IPV6_ENV_VAR)
+            .source_value(context)
+            .transpose()?
+            .unwrap_or_default();
+
         Ok(NetworkConfig {
             incoming: IncomingFileConfig::disabled_config(context)?,
             dns: DnsFileConfig::disabled_config(context)?,
             outgoing: OutgoingFileConfig::disabled_config(context)?,
+            ipv6,
         })
     }
 }
