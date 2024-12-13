@@ -5,10 +5,11 @@ use mirrord_intproxy_protocol::{LayerId, MessageId, ProxyToLayerMessage};
 use mirrord_protocol::{
     file::{
         CloseDirRequest, CloseFileRequest, DirEntryInternal, ReadDirBatchRequest, ReadDirResponse,
-        ReadFileResponse, ReadLimitedFileRequest, READDIR_BATCH_VERSION,
+        ReadFileResponse, ReadLimitedFileRequest, SeekFromInternal, READDIR_BATCH_VERSION,
         READLINK_VERSION,
     },
-    ClientMessage, DaemonMessage, FileRequest, FileResponse, ResponseError,
+    ClientMessage, DaemonMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError,
+    ResponseError,
 };
 use semver::Version;
 use thiserror::Error;
@@ -245,7 +246,7 @@ impl FilesProxy {
         self.protocol_version.replace(version);
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(message_bus))]
+    // #[tracing::instrument(level = Level::TRACE, skip(message_bus))]
     async fn file_request(
         &mut self,
         request: FileRequest,
@@ -470,12 +471,36 @@ impl FilesProxy {
             }
 
             // May require storing additional data in the request queue.
-            FileRequest::Seek(seek) => {
-                let additional_data = self
-                    .files_data
-                    .contains_key(&seek.fd)
-                    .then_some(AdditionalRequestData::SeekBuffered { fd: seek.fd })
-                    .unwrap_or_default();
+            FileRequest::Seek(mut seek) => {
+                let additional_data = match (self.files_data.get_mut(&seek.fd), &mut seek.seek_from)
+                {
+                    (Some(data), SeekFromInternal::Current(diff)) => {
+                        let result = u64::try_from(data.fd_position as i128 + *diff as i128);
+                        match result {
+                            Ok(offset) => seek.seek_from = SeekFromInternal::Start(offset),
+                            Err(..) => {
+                                message_bus
+                                    .send(ToLayer {
+                                        message_id,
+                                        layer_id,
+                                        message: ProxyToLayerMessage::File(FileResponse::Seek(
+                                            Err(ResponseError::RemoteIO(RemoteIOError {
+                                                raw_os_error: Some(22), // EINVAL
+                                                kind: ErrorKindInternal::InvalidInput,
+                                            })),
+                                        )),
+                                    })
+                                    .await;
+                                return;
+                            }
+                        }
+
+                        AdditionalRequestData::SeekBuffered { fd: seek.fd }
+                    }
+                    (Some(..), _) => AdditionalRequestData::SeekBuffered { fd: seek.fd },
+                    _ => AdditionalRequestData::Other,
+                };
+
                 self.request_queue
                     .insert_with_data(message_id, layer_id, additional_data);
                 message_bus
