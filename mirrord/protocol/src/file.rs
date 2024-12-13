@@ -15,7 +15,8 @@ use nix::sys::statfs::Statfs;
 use semver::VersionReq;
 
 /// Minimal mirrord-protocol version that allows [`ReadLinkFileRequest`].
-pub static READLINK_VERSION: LazyLock<VersionReq> = LazyLock::new(|| ">=1.6.0".parse().expect("Bad Identifier"));
+pub static READLINK_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.6.0".parse().expect("Bad Identifier"));
 
 /// Minimal mirrord-protocol version that allows [`ReadDirBatchRequest`].
 pub static READDIR_BATCH_VERSION: LazyLock<VersionReq> =

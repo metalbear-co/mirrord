@@ -47,3 +47,4 @@ exponential-backoff = "2"
 
 [dev-dependencies]
 reqwest.workspace = true
+rstest.workspace = true

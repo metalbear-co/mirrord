@@ -7,6 +7,7 @@ use tokio::net::TcpStream;
 /// Messages sent back to the [`IntProxy`](crate::IntProxy) from the main background tasks. See
 /// [`MainTaskId`].
 #[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum ProxyMessage {
     /// Message to be sent to the agent.
     ToAgent(ClientMessage),
@@ -20,7 +21,18 @@ pub enum ProxyMessage {
     NewLayer(NewLayer),
 }
 
+#[cfg(test)]
+impl ProxyMessage {
+    pub fn unwrap_proxy_to_layer_message(self) -> ProxyToLayerMessage {
+        match self {
+            Self::ToLayer(to_layer) => to_layer.message,
+            other => panic!("expected proxy to layer message, found {other:?}"),
+        }
+    }
+}
+
 #[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct ToLayer {
     pub message_id: MessageId,
     pub layer_id: LayerId,
@@ -28,6 +40,7 @@ pub struct ToLayer {
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct FromLayer {
     pub message_id: MessageId,
     pub layer_id: LayerId,
@@ -41,6 +54,16 @@ pub struct NewLayer {
     /// [`LayerId`] of the fork parent.
     pub parent_id: Option<LayerId>,
 }
+
+#[cfg(test)]
+impl PartialEq for NewLayer {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.parent_id == other.parent_id
+    }
+}
+
+#[cfg(test)]
+impl Eq for NewLayer {}
 
 impl From<ClientMessage> for ProxyMessage {
     fn from(value: ClientMessage) -> Self {
