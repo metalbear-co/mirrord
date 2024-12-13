@@ -18,8 +18,6 @@ pub mod http_filter;
 
 use http_filter::*;
 
-const IPV6_ENV_VAR: &str = "MIRRORD_INCOMING_ENABLE_IPV6";
-
 /// ## incoming (network)
 ///
 /// Controls the incoming TCP traffic feature.
@@ -61,8 +59,7 @@ const IPV6_ENV_VAR: &str = "MIRRORD_INCOMING_ENABLE_IPV6";
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
 ///         "ignore_ports": [9999, 10000],
-///         "listen_ports": [[80, 8111]],
-///         "ipv6": false
+///         "listen_ports": [[80, 8111]]
 ///       }
 ///     }
 ///   }
@@ -103,10 +100,6 @@ impl MirrordConfig for IncomingFileConfig {
                     .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
-                ipv6: FromEnv::new(IPV6_ENV_VAR)
-                    .source_value(context)
-                    .transpose()? // error on invalid env var value
-                    .unwrap_or_default(), // if not set either by env or file - set to false.
                 ..Default::default()
             },
             IncomingFileConfig::Advanced(advanced) => IncomingConfig {
@@ -139,11 +132,6 @@ impl MirrordConfig for IncomingFileConfig {
                     .transpose()?
                     .unwrap_or_default(),
                 ports: advanced.ports.map(|ports| ports.into_iter().collect()),
-                ipv6: FromEnv::new(IPV6_ENV_VAR)
-                    .source_value(context)
-                    .transpose()? // error on invalid env var value
-                    .or(advanced.ipv6) // only use file if env var not set.
-                    .unwrap_or_default(), // if not set either by env or file - set to false.
             },
         };
 
@@ -156,11 +144,6 @@ impl MirrordToggleableConfig for IncomingFileConfig {
             .source_value(context)
             .unwrap_or_else(|| Ok(IncomingMode::Off))?;
 
-        let ipv6 = FromEnv::new(IPV6_ENV_VAR)
-            .source_value(context)
-            .transpose()?
-            .unwrap_or_default();
-
         let on_concurrent_steal = FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
             .layer(|layer| Unstable::new("incoming", "on_concurrent_steal", layer))
             .source_value(context)
@@ -171,7 +154,6 @@ impl MirrordToggleableConfig for IncomingFileConfig {
             mode,
             on_concurrent_steal,
             http_filter: HttpFilterFileConfig::disabled_config(context)?,
-            ipv6,
             ..Default::default()
         })
     }
@@ -322,11 +304,6 @@ pub struct IncomingAdvancedFileConfig {
     ///
     /// Mutually exclusive with [`ignore_ports`](###ignore_ports).
     pub ports: Option<Vec<u16>>,
-
-    /// ### ipv6
-    ///
-    /// Enable ipv6 support. Turn on if your applications listens to incoming traffic over IPv6.
-    pub ipv6: Option<bool>,
 }
 
 fn serialize_bi_map<S>(map: &BiMap<u16, u16>, serializer: S) -> Result<S::Ok, S::Error>
@@ -470,11 +447,6 @@ pub struct IncomingConfig {
     /// Mutually exclusive with
     /// [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
     pub ports: Option<HashSet<u16>>,
-
-    /// #### feature.network.incoming.ipv6 {#feature-network-incoming-ipv6}
-    ///
-    /// Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6.
-    pub ipv6: bool,
 }
 
 impl IncomingConfig {
@@ -639,6 +611,5 @@ impl CollectAnalytics for &IncomingConfig {
         analytics.add("ignore_localhost", self.ignore_localhost);
         analytics.add("ignore_ports_count", self.ignore_ports.len());
         analytics.add("http", &self.http_filter);
-        analytics.add("ipv6", self.ipv6);
     }
 }
