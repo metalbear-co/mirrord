@@ -44,10 +44,16 @@ pub struct ContainerParams {
     /// the agent container.
     pub tls_cert: Option<String>,
     pub pod_ips: Option<String>,
+    /// Support IPv6-only clusters
+    pub support_ipv6: bool,
 }
 
 impl ContainerParams {
-    pub fn new(tls_cert: Option<String>, pod_ips: Option<String>) -> ContainerParams {
+    pub fn new(
+        tls_cert: Option<String>,
+        pod_ips: Option<String>,
+        support_ipv6: bool,
+    ) -> ContainerParams {
         let port: u16 = rand::thread_rng().gen_range(30000..=65535);
         let gid: u16 = rand::thread_rng().gen_range(3000..u16::MAX);
 
@@ -64,6 +70,7 @@ impl ContainerParams {
             port,
             tls_cert,
             pod_ips,
+            support_ipv6,
         }
     }
 }
