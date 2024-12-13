@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     mem,
-    net::{Ipv4Addr, SocketAddrV4},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddrV4},
     path::PathBuf,
     sync::{
         atomic::{AtomicU32, Ordering},
@@ -493,11 +493,30 @@ async fn start_agent(args: Args) -> Result<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
 
     // listen for client connections
-    let listener = TcpListener::bind(SocketAddrV4::new(
+    let ipv4_listener_result = TcpListener::bind(SocketAddrV4::new(
         Ipv4Addr::UNSPECIFIED,
         args.communicate_port,
     ))
-    .await?;
+    .await;
+
+    let listener = if args.ipv6 && ipv4_listener_result.is_err() {
+        debug!("IPv6 Support enabled, and IPv4 bind failed, binding IPv6 listener");
+        TcpListener::bind(SocketAddrV4::new(
+            Ipv6Addr::UNSPECIFIED,
+            args.communicate_port,
+        ))
+        .await
+    } else {
+        ipv4_listener_result
+    }?;
+
+    match listener.local_addr() {
+        Ok(addr) => debug!(
+            client_listener_address = addr.to_string(),
+            "Created listener."
+        ),
+        Err(err) => error!(%err, "listener local address error"),
+    }
 
     let state = State::new(&args).await?;
 
