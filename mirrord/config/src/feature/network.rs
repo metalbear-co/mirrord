@@ -98,6 +98,7 @@ impl CollectAnalytics for &NetworkConfig {
         analytics.add("incoming", &self.incoming);
         analytics.add("outgoing", &self.outgoing);
         analytics.add("dns", &self.dns);
+        analytics.add("ipv6", self.ipv6);
     }
 }
 
