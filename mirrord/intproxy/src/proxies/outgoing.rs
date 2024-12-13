@@ -8,7 +8,7 @@ use mirrord_intproxy_protocol::{
 };
 use mirrord_protocol::{
     outgoing::{tcp::DaemonTcpOutgoing, udp::DaemonUdpOutgoing, DaemonConnect, DaemonRead},
-    ConnectionId, RemoteResult, ResponseError,
+    ConnectionId, DaemonMessage, RemoteResult, ResponseError,
 };
 use thiserror::Error;
 use tracing::Level;
@@ -16,9 +16,10 @@ use tracing::Level;
 use self::interceptor::Interceptor;
 use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
+    error::UnexpectedAgentMessage,
     main_tasks::ToLayer,
     proxies::outgoing::net_protocol_ext::NetProtocolExt,
-    request_queue::{RequestQueue, RequestQueueEmpty},
+    request_queue::RequestQueue,
     ProxyMessage,
 };
 
@@ -35,8 +36,8 @@ pub enum OutgoingProxyError {
     ResponseError(#[from] ResponseError),
     /// The agent sent a [`DaemonConnect`] response, but the [`RequestQueue`] for layer's connec
     /// requests was empty. This should never happen.
-    #[error("failed to match connect response: {0}")]
-    RequestQueueEmpty(#[from] RequestQueueEmpty),
+    #[error(transparent)]
+    UnexpectedAgentMessage(#[from] UnexpectedAgentMessage),
     /// The proxy failed to prepare a new local socket for the intercepted connection.
     #[error("failed to prepare local socket: {0}")]
     SocketSetupError(#[from] io::Error),
@@ -142,7 +143,17 @@ impl OutgoingProxy {
         protocol: NetProtocol,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), OutgoingProxyError> {
-        let (message_id, layer_id) = self.queue(protocol).get()?;
+        let (message_id, layer_id) = self.queue(protocol).get().ok_or_else(|| {
+            let message = match protocol {
+                NetProtocol::Datagrams => {
+                    DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(connect.clone()))
+                }
+                NetProtocol::Stream => {
+                    DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(connect.clone()))
+                }
+            };
+            UnexpectedAgentMessage(message)
+        })?;
 
         let connect = match connect {
             Ok(connect) => connect,

@@ -4,6 +4,7 @@
 use std::{collections::HashMap, time::Duration};
 
 use background_tasks::{BackgroundTasks, TaskSender, TaskUpdate};
+use error::UnexpectedAgentMessage;
 use layer_conn::LayerConnection;
 use layer_initializer::LayerInitializer;
 use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
@@ -11,6 +12,7 @@ use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, LocalMessage};
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS};
 use ping_pong::{AgentSentPong, PingPong};
 use proxies::{
+    files::{FilesProxy, FilesProxyMessage},
     incoming::{IncomingProxy, IncomingProxyMessage},
     outgoing::{OutgoingProxy, OutgoingProxyMessage},
     simple::{SimpleProxy, SimpleProxyMessage},
@@ -43,6 +45,7 @@ struct TaskTxs {
     outgoing: TaskSender<OutgoingProxy>,
     incoming: TaskSender<IncomingProxy>,
     ping_pong: TaskSender<PingPong>,
+    files: TaskSender<FilesProxy>,
 }
 
 /// This struct contains logic for proxying between multiple layer instances and one agent.
@@ -65,7 +68,11 @@ impl IntProxy {
     /// Creates a new [`IntProxy`] using existing [`AgentConnection`].
     /// The returned instance will accept connections from the layers using the given
     /// [`TcpListener`].
-    pub fn new_with_connection(agent_conn: AgentConnection, listener: TcpListener) -> Self {
+    pub fn new_with_connection(
+        agent_conn: AgentConnection,
+        listener: TcpListener,
+        buffer_file_reads: bool,
+    ) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
             Default::default();
 
@@ -96,6 +103,11 @@ impl IntProxy {
             MainTaskId::IncomingProxy,
             Self::CHANNEL_SIZE,
         );
+        let files = background_tasks.register(
+            FilesProxy::new(buffer_file_reads),
+            MainTaskId::FilesProxy,
+            Self::CHANNEL_SIZE,
+        );
 
         Self {
             any_connection_accepted: false,
@@ -108,6 +120,7 @@ impl IntProxy {
                 outgoing,
                 incoming,
                 ping_pong,
+                files,
             },
         }
     }
@@ -179,8 +192,8 @@ impl IntProxy {
                     };
 
                     self.task_txs
-                        .simple
-                        .send(SimpleProxyMessage::LayerForked(msg))
+                        .files
+                        .send(FilesProxyMessage::LayerForked(msg))
                         .await;
                     self.task_txs
                         .incoming
@@ -224,8 +237,8 @@ impl IntProxy {
                 let msg = LayerClosed { id: LayerId(id) };
 
                 self.task_txs
-                    .simple
-                    .send(SimpleProxyMessage::LayerClosed(msg))
+                    .files
+                    .send(FilesProxyMessage::LayerClosed(msg))
                     .await;
                 self.task_txs
                     .incoming
@@ -275,8 +288,8 @@ impl IntProxy {
             }
             DaemonMessage::File(msg) => {
                 self.task_txs
-                    .simple
-                    .send(SimpleProxyMessage::FileRes(msg))
+                    .files
+                    .send(FilesProxyMessage::FileRes(msg))
                     .await
             }
             DaemonMessage::GetAddrInfoResponse(msg) => {
@@ -303,10 +316,8 @@ impl IntProxy {
                 }
 
                 self.task_txs
-                    .simple
-                    .send(SimpleProxyMessage::ProtocolVersion(
-                        protocol_version.clone(),
-                    ))
+                    .files
+                    .send(FilesProxyMessage::ProtocolVersion(protocol_version.clone()))
                     .await;
 
                 self.task_txs
@@ -325,7 +336,9 @@ impl IntProxy {
                     .await
             }
             other => {
-                return Err(IntProxyError::UnexpectedAgentMessage(other));
+                return Err(IntProxyError::UnexpectedAgentMessage(
+                    UnexpectedAgentMessage(other),
+                ));
             }
         }
 
@@ -344,8 +357,8 @@ impl IntProxy {
         match message {
             LayerToProxyMessage::File(req) => {
                 self.task_txs
-                    .simple
-                    .send(SimpleProxyMessage::FileReq(message_id, layer_id, req))
+                    .files
+                    .send(FilesProxyMessage::FileReq(message_id, layer_id, req))
                     .await;
             }
             LayerToProxyMessage::GetAddrInfo(req) => {

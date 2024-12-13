@@ -82,6 +82,7 @@ pub enum MainTaskId {
     IncomingProxy,
     PingPong,
     AgentConnection,
+    FilesProxy,
     LayerConnection(LayerId),
 }
 
@@ -95,6 +96,7 @@ impl fmt::Display for MainTaskId {
             Self::AgentConnection => f.write_str("AGENT_CONNECTION"),
             Self::LayerConnection(id) => write!(f, "LAYER_CONNECTION {}", id.0),
             Self::IncomingProxy => f.write_str("INCOMING_PROXY"),
+            Self::FilesProxy => f.write_str("FILES_PROXY"),
         }
     }
 }

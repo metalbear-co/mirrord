@@ -141,7 +141,7 @@ pub(crate) async fn proxy(
     let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);
     let consecutive_connection_timeout = Duration::from_secs(config.internal_proxy.idle_timeout);
 
-    IntProxy::new_with_connection(agent_conn, listener)
+    IntProxy::new_with_connection(agent_conn, listener, config.experimental.buffer_file_reads)
         .run(first_connection_timeout, consecutive_connection_timeout)
         .await
         .map_err(InternalProxyError::from)
