@@ -58,6 +58,14 @@ pub struct ExperimentalConfig {
     /// Uses /dev/null for creating local fake files (should be better than using /tmp)
     #[config(default = true)]
     pub use_dev_null: bool,
+
+    /// ### _experimental_ buffer_file_reads {#experimental-buffer_file_reads}
+    ///
+    /// Allows reading remote readonly files in 4kb chunks and buffering data locally.
+    /// This improves performace when the user application reads data in small portions.
+    /// <https://github.com/metalbear-co/mirrord/issues/2069>
+    #[config(default = false)]
+    pub buffer_file_reads: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -68,5 +76,6 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("enable_exec_hooks_linux", self.enable_exec_hooks_linux);
         analytics.add("hide_ipv6_interfaces", self.hide_ipv6_interfaces);
         analytics.add("disable_reuseaddr", self.disable_reuseaddr);
+        analytics.add("buffer_file_reads", self.buffer_file_reads);
     }
 }

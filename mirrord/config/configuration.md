@@ -77,6 +77,9 @@ configuration file containing all fields.
       "override": {
         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
         "LOCAL_BEAR": "panda"
+      },
+      "mapping": {
+        ".+_TIMEOUT": "1000"
       }
     },
     "fs": {
@@ -438,6 +441,12 @@ Defaults to `"/opt/mirrord/lib/libmirrord_layer.so"`.
 mirrord Experimental features.
 This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 
+### _experimental_ buffer_file_reads {#experimental-buffer_file_reads}
+
+Allows reading remote readonly files in 4kb chunks and buffering data locally.
+This improves performace when the user application reads data in small portions.
+<https://github.com/metalbear-co/mirrord/issues/2069>
+
 ### _experimental_ disable_reuseaddr {#experimental-disable_reuseaddr}
 
 Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors.
@@ -649,6 +658,9 @@ See the environment variables [reference](https://mirrord.dev/docs/reference/env
       "override": {
         "DATABASE_CONNECTION": "db://localhost:7777/my-db",
         "LOCAL_BEAR": "panda"
+      },
+      "mapping": {
+        ".+_TIMEOUT": "1000"
       }
     }
   }
@@ -691,6 +703,27 @@ If set, the variables are fetched after the user application is started.
 
 This setting is meant to resolve issues when using mirrord via the IntelliJ plugin on WSL
 and the remote environment contains a lot of variables.
+
+### feature.env.mapping {#feature-env-mapping}
+
+Specify map of patterns that if matched will replace the value according to specification.
+
+*Capture groups are allowed.*
+
+Example:
+```json
+{
+  ".+_TIMEOUT": "10000"
+  "LOG_.+_VERBOSITY": "debug"
+  "(\w+)_(\d+)": "magic-value"
+}
+```
+
+Will do the next replacements for environment variables that match:
+
+`CONNECTION_TIMEOUT: 500` => `CONNECTION_TIMEOUT: 10000`
+`LOG_FILE_VERBOSITY: info` => `LOG_FILE_VERBOSITY: debug`
+`DATA_1234: common-value` => `DATA_1234: magic-value`
 
 ### feature.env.override {#feature-env-override}
 

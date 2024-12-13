@@ -783,6 +783,14 @@
       "description": "mirrord Experimental features. This shouldn't be used unless someone from MetalBear/mirrord tells you to.",
       "type": "object",
       "properties": {
+        "buffer_file_reads": {
+          "title": "_experimental_ buffer_file_reads {#experimental-buffer_file_reads}",
+          "description": "Allows reading remote readonly files in 4kb chunks and buffering data locally. This improves performace when the user application reads data in small portions. <https://github.com/metalbear-co/mirrord/issues/2069>",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "disable_reuseaddr": {
           "title": "_experimental_ disable_reuseaddr {#experimental-disable_reuseaddr}",
           "description": "Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors. On macOS the application can use the same address many times but then we don't steal it correctly. This probably should be on by default but we want to gradually roll it out. <https://github.com/metalbear-co/mirrord/issues/2819> This option applies only on macOS.",
