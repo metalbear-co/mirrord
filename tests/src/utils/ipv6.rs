@@ -7,11 +7,13 @@ use k8s_openapi::api::core::v1::Pod;
 use kube::{Api, Client};
 use rstest::fixture;
 
-use crate::utils::{internal_service, kube_client, KubeService, PRESERVE_FAILED_ENV_NAME};
+use crate::utils::{internal_service, kube_client, KubeService};
 
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
-/// This behavior can be changed, see [`PRESERVE_FAILED_ENV_NAME`].
+/// This behavior can be changed, see
+/// [`PRESERVE_FAILED_ENV_NAME`](crate::utils::PRESERVE_FAILED_ENV_NAME).
+///
 /// * `randomize_name` - whether a random suffix should be added to the end of the resource names
 #[fixture]
 pub async fn ipv6_service(
