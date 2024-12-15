@@ -8,6 +8,80 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.127.0](https://github.com/metalbear-co/mirrord/tree/3.127.0) - 2024-12-10
+
+
+### Added
+
+- `MirrordPolicy` can now block traffic mirroring (requires operator support).
+
+
+### Changed
+
+- Updated dependencies.
+  [#2952](https://github.com/metalbear-co/mirrord/issues/2952)
+
+
+### Fixed
+
+- Fixed link to operator docs.
+
+
+### Internal
+
+- Added `mirrord-protocol` message for rejecting mirror port subscription due
+  to `MirrordPolicy`.
+- Updated hickory dependency version.
+
+## [3.126.0](https://github.com/metalbear-co/mirrord/tree/3.125.3) - 2024-12-06
+
+
+### Added
+
+- Added SQS splitting state to mirrord operator status reporting (requires operator support).
+
+
+### Changed
+
+- Hidden files and directories in `$HOME` directory are now read locally by
+  default.
+
+
+### Fixed
+
+- Can now run cs-installed sbt. We now only need to be able to parse the first
+  line of a script, so we now support scripts like that sbt, which starts with
+  a normal shebang but then has text in a weird encoding, or maybe non-textual
+  data. [#2947](https://github.com/metalbear-co/mirrord/issues/2947)
+- Prevent reverse port forwarding from ending unexpectedly due to
+  unexpected connection end.
+  [#2962](https://github.com/metalbear-co/mirrord/issues/2962)
+- Added a sleep and await on it after websocket connection to drive IO runtime
+  and prevent websocket closing without handshake.
+
+
+### Internal
+
+- Added optional `loadFromSecret` field to Kafka client config spec to allow
+  setting properties from a Secret.
+- Allow the operator to fetch Secrets in the operator namespace.
+- use `Stdio::null()` for "sidecar start" patch added in
+  [#2933](https://github.com/metalbear-co/mirrord/pull/2933).
+
+## [3.125.2](https://github.com/metalbear-co/mirrord/tree/3.125.2) - 2024-11-29
+
+
+### Fixed
+
+- Manually call `docker start <sidecar_id>` if after our sidecar `run` command
+  the container hasn't started yet and is in "created" status.
+  [#2927](https://github.com/metalbear-co/mirrord/issues/2927)
+
+
+### Internal
+
+- Fixed return type of a function in mirrord-operator client code.
+
 ## [3.125.1](https://github.com/metalbear-co/mirrord/tree/3.125.1) - 2024-11-27
 
 

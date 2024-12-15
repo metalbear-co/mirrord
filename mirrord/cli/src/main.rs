@@ -91,6 +91,12 @@ where
     #[cfg(not(target_os = "macos"))]
     let execution_info = MirrordExecution::start(&config, &mut sub_progress, analytics).await?;
 
+    // This is not being yielded, as this is not proper async, something along those lines.
+    // We need an `await` somewhere in this function to drive our socket IO that happens
+    // in `MirrordExecution::start`. If we don't have this here, then the websocket
+    // connection resets, and in the operator you'll get a websocket error.
+    tokio::time::sleep(Duration::from_micros(1)).await;
+
     #[cfg(target_os = "macos")]
     let (_did_sip_patch, binary) = match execution_info.patched_path {
         None => (false, args.binary.clone()),
@@ -140,6 +146,7 @@ where
         .into_iter()
         .map(CString::new)
         .collect::<CliResult<Vec<_>, _>>()?;
+
     // env vars should be formatted as "varname=value" CStrings
     let env = env_vars
         .into_iter()

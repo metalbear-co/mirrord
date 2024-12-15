@@ -28,12 +28,10 @@ impl From<LookupIp> for DnsLookup {
                     name_labels, rdata, ..
                 } = record.into_parts();
 
-                rdata
-                    .and_then(|rdata| rdata.ip_addr())
-                    .map(|ip| LookupRecord {
-                        name: name_labels.to_string(),
-                        ip,
-                    })
+                rdata.ip_addr().map(|ip| LookupRecord {
+                    name: name_labels.to_string(),
+                    ip,
+                })
             })
             .collect::<Vec<_>>();
 

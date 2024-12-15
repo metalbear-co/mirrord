@@ -1,6 +1,6 @@
 [package]
 name = "mirrord-protocol"
-version = "1.11.6"
+version = "1.12.0"
 authors.workspace = true
 description.workspace = true
 documentation.workspace = true
@@ -21,6 +21,7 @@ actix-codec.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
 hickory-resolver.workspace = true
+hickory-proto.workspace = true
 serde.workspace = true
 bincode.workspace = true
 tracing.workspace = true

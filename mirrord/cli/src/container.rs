@@ -456,7 +456,22 @@ pub(crate) async fn container_command(
         .status()
         .await;
 
-    let _ = composed_config_file.close();
+    // Keep the files, since this process is going to exit before the new process is actually run
+    // and uses them perhaps find a way to clean up? (can't wait for container to boot
+    // successfuly since when it loads other processes it might need it too)
+    if let Some((cert, key)) = _internal_proxy_tls_guards {
+        if let Err(err) = cert.keep() {
+            tracing::warn!(?err, "failed to keep internal proxy certificate");
+        }
+
+        if let Err(err) = key.keep() {
+            tracing::warn!(?err, "failed to keep internal proxy key");
+        }
+    }
+
+    if let Err(err) = composed_config_file.keep() {
+        tracing::warn!(?err, "failed to keep composed config file");
+    }
 
     match runtime_command_result {
         Err(err) => {

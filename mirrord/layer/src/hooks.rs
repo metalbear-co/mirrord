@@ -16,7 +16,8 @@ pub(crate) struct HookManager {
 /// Gets available modules in current process.
 /// NOTE: Gum must be initialized or it will crash.
 fn get_modules() -> Vec<String> {
-    Module::enumerate_modules()
+    Module::obtain(&GUM)
+        .enumerate_modules()
         .iter()
         .map(|m| m.name.clone())
         .collect()
@@ -24,7 +25,8 @@ fn get_modules() -> Vec<String> {
 
 /// Wrapper function that maps it to our error for convinence.
 fn get_export_by_name(module: Option<&str>, symbol: &str) -> Result<NativePointer> {
-    Module::find_export_by_name(module, symbol)
+    Module::obtain(&GUM)
+        .find_export_by_name(module, symbol)
         .ok_or_else(|| LayerError::NoExportName(symbol.to_string()))
 }
 
@@ -83,7 +85,8 @@ impl HookManager {
         symbol: &str,
         detour: *mut libc::c_void,
     ) -> Result<NativePointer> {
-        let function = Module::find_symbol_by_name(module, symbol)
+        let function = Module::obtain(&GUM)
+            .find_symbol_by_name(module, symbol)
             .ok_or_else(|| LayerError::NoSymbolName(symbol.to_string()))?;
 
         // on Go we use `replace_fast` since we don't use the original function.
@@ -112,7 +115,7 @@ impl HookManager {
     pub(crate) fn resolve_symbol_main_module(&self, symbol: &str) -> Option<NativePointer> {
         // This can't fail
         let module = self.modules.first().unwrap().clone();
-        Module::find_symbol_by_name(&module, symbol)
+        Module::obtain(&GUM).find_symbol_by_name(&module, symbol)
     }
 }
 

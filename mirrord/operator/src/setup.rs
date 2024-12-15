@@ -28,7 +28,8 @@ use thiserror::Error;
 
 use crate::crd::{
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
-    MirrordOperatorUser, MirrordPolicy, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
+    policy::{MirrordClusterPolicy, MirrordPolicy},
+    MirrordOperatorUser, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
 };
 
 pub static OPERATOR_NAME: &str = "mirrord-operator";
@@ -37,6 +38,8 @@ pub static OPERATOR_NAME: &str = "mirrord-operator";
 static OPERATOR_PORT: i32 = 443;
 static OPERATOR_ROLE_NAME: &str = "mirrord-operator";
 static OPERATOR_ROLE_BINDING_NAME: &str = "mirrord-operator";
+static OPERATOR_CLUSTER_ROLE_NAME: &str = "mirrord-operator";
+static OPERATOR_CLUSTER_ROLE_BINDING_NAME: &str = "mirrord-operator";
 static OPERATOR_CLIENT_CA_ROLE_NAME: &str = "mirrord-operator-apiserver-authentication";
 static OPERATOR_CLUSTER_USER_ROLE_NAME: &str = "mirrord-operator-user";
 static OPERATOR_LICENSE_SECRET_NAME: &str = "mirrord-operator-license";
@@ -103,8 +106,10 @@ pub struct Operator {
     deployment: OperatorDeployment,
     license_secret: Option<OperatorLicenseSecret>,
     namespace: OperatorNamespace,
-    role: OperatorRole,
-    role_binding: OperatorRoleBinding,
+    cluster_role: OperatorClusterRole,
+    cluster_role_binding: OperatorClusterRoleBinding,
+    role: Option<OperatorRole>,
+    role_binding: Option<OperatorRoleBinding>,
     service: OperatorService,
     service_account: OperatorServiceAccount,
     user_cluster_role: OperatorClusterUserRole,
@@ -135,9 +140,18 @@ impl Operator {
 
         let service_account = OperatorServiceAccount::new(&namespace, aws_role_arn);
 
-        let role = OperatorRole::new(sqs_splitting, kafka_splitting, application_auto_pause);
-        let role_binding = OperatorRoleBinding::new(&role, &service_account);
+        let cluster_role =
+            OperatorClusterRole::new(sqs_splitting, kafka_splitting, application_auto_pause);
+        let cluster_role_binding = OperatorClusterRoleBinding::new(&cluster_role, &service_account);
         let user_cluster_role = OperatorClusterUserRole::new();
+
+        let (role, role_binding) = kafka_splitting
+            .then(|| {
+                let role = OperatorRole::new(&namespace);
+                let role_binding = OperatorRoleBinding::new(&role, &service_account, &namespace);
+                (role, role_binding)
+            })
+            .unzip();
 
         let client_ca_role = OperatorClientCaRole::new();
         let client_ca_role_binding =
@@ -163,6 +177,8 @@ impl Operator {
             deployment,
             license_secret,
             namespace,
+            cluster_role,
+            cluster_role_binding,
             role,
             role_binding,
             service,
@@ -189,7 +205,7 @@ impl OperatorSetup for Operator {
         self.service_account.to_writer(&mut writer)?;
 
         writer.write_all(b"---\n")?;
-        self.role.to_writer(&mut writer)?;
+        self.cluster_role.to_writer(&mut writer)?;
 
         writer.write_all(b"---\n")?;
         self.user_cluster_role.to_writer(&mut writer)?;
@@ -198,7 +214,7 @@ impl OperatorSetup for Operator {
         self.client_ca_role.to_writer(&mut writer)?;
 
         writer.write_all(b"---\n")?;
-        self.role_binding.to_writer(&mut writer)?;
+        self.cluster_role_binding.to_writer(&mut writer)?;
 
         writer.write_all(b"---\n")?;
         self.client_ca_role_binding.to_writer(&mut writer)?;
@@ -214,6 +230,9 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         MirrordPolicy::crd().to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordClusterPolicy::crd().to_writer(&mut writer)?;
 
         if self.sqs_splitting {
             writer.write_all(b"---\n")?;
@@ -232,6 +251,16 @@ impl OperatorSetup for Operator {
 
             writer.write_all(b"---\n")?;
             MirrordKafkaTopicsConsumer::crd().to_writer(&mut writer)?;
+
+            if let Some(role) = self.role.as_ref() {
+                writer.write_all(b"---\n")?;
+                role.to_writer(&mut writer)?;
+            }
+
+            if let Some(role_binding) = self.role_binding.as_ref() {
+                writer.write_all(b"---\n")?;
+                role_binding.to_writer(&mut writer)?;
+            }
         }
 
         Ok(())
@@ -328,6 +357,18 @@ impl OperatorDeployment {
             });
         }
 
+        // For downloading and using CA.
+        volumes.push(Volume {
+            name: "tmp".to_string(),
+            empty_dir: Some(Default::default()),
+            ..Default::default()
+        });
+        volume_mounts.push(VolumeMount {
+            mount_path: "/tmp".to_string(),
+            name: "tmp".to_string(),
+            ..Default::default()
+        });
+
         if let Some(license_key) = license_key {
             envs.push(EnvVar {
                 name: "OPERATOR_LICENSE_KEY".to_owned(),
@@ -385,6 +426,9 @@ impl OperatorDeployment {
             security_context: Some(SecurityContext {
                 allow_privilege_escalation: Some(false),
                 privileged: Some(false),
+                run_as_user: Some(1000),
+                run_as_non_root: Some(true),
+                read_only_root_filesystem: Some(true),
                 ..Default::default()
             }),
             resources: Some(ResourceRequirements {
@@ -475,9 +519,9 @@ impl OperatorServiceAccount {
 }
 
 #[derive(Debug)]
-pub struct OperatorRole(ClusterRole);
+pub struct OperatorClusterRole(ClusterRole);
 
-impl OperatorRole {
+impl OperatorClusterRole {
     pub fn new(sqs_splitting: bool, kafka_splitting: bool, application_auto_pause: bool) -> Self {
         let mut rules = vec![
             PolicyRule {
@@ -534,8 +578,12 @@ impl OperatorRole {
             },
             // Allow the operator to list+get mirrord policies.
             PolicyRule {
+                // Both namespaced and cluster-wide policies live in the same API group.
                 api_groups: Some(vec![MirrordPolicy::group(&()).into_owned()]),
-                resources: Some(vec![MirrordPolicy::plural(&()).into_owned()]),
+                resources: Some(vec![
+                    MirrordPolicy::plural(&()).into_owned(),
+                    MirrordClusterPolicy::plural(&()).into_owned(),
+                ]),
                 verbs: vec!["list".to_owned(), "get".to_owned()],
                 ..Default::default()
             },
@@ -648,14 +696,14 @@ impl OperatorRole {
 
         let role = ClusterRole {
             metadata: ObjectMeta {
-                name: Some(OPERATOR_ROLE_NAME.to_owned()),
+                name: Some(OPERATOR_CLUSTER_ROLE_NAME.to_owned()),
                 ..Default::default()
             },
             rules: Some(rules),
             ..Default::default()
         };
 
-        OperatorRole(role)
+        OperatorClusterRole(role)
     }
 
     fn as_role_ref(&self) -> RoleRef {
@@ -667,20 +715,82 @@ impl OperatorRole {
     }
 }
 
-impl Default for OperatorRole {
+impl Default for OperatorClusterRole {
     fn default() -> Self {
         Self::new(false, false, false)
     }
 }
 
 #[derive(Debug)]
-pub struct OperatorRoleBinding(ClusterRoleBinding);
+pub struct OperatorClusterRoleBinding(ClusterRoleBinding);
 
-impl OperatorRoleBinding {
-    pub fn new(role: &OperatorRole, sa: &OperatorServiceAccount) -> Self {
+impl OperatorClusterRoleBinding {
+    pub fn new(role: &OperatorClusterRole, sa: &OperatorServiceAccount) -> Self {
         let role_binding = ClusterRoleBinding {
             metadata: ObjectMeta {
+                name: Some(OPERATOR_CLUSTER_ROLE_BINDING_NAME.to_owned()),
+                ..Default::default()
+            },
+            role_ref: role.as_role_ref(),
+            subjects: Some(vec![sa.as_subject()]),
+        };
+
+        OperatorClusterRoleBinding(role_binding)
+    }
+}
+
+#[derive(Debug)]
+pub struct OperatorRole(Role);
+
+impl OperatorRole {
+    pub fn new(namespace: &OperatorNamespace) -> Self {
+        let rules = vec![
+            // Allow the operator to fetch Secrets in the operator's namespace
+            PolicyRule {
+                api_groups: Some(vec!["".to_owned()]),
+                resources: Some(vec!["secrets".to_owned()]),
+                verbs: ["get", "list", "watch"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                ..Default::default()
+            },
+        ];
+
+        let role = Role {
+            metadata: ObjectMeta {
+                name: Some(OPERATOR_ROLE_NAME.to_owned()),
+                namespace: Some(namespace.name().to_owned()),
+                ..Default::default()
+            },
+            rules: Some(rules),
+        };
+
+        Self(role)
+    }
+
+    fn as_role_ref(&self) -> RoleRef {
+        RoleRef {
+            api_group: "rbac.authorization.k8s.io".to_owned(),
+            kind: "Role".to_owned(),
+            name: self.0.metadata.name.clone().unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct OperatorRoleBinding(RoleBinding);
+
+impl OperatorRoleBinding {
+    pub fn new(
+        role: &OperatorRole,
+        sa: &OperatorServiceAccount,
+        namespace: &OperatorNamespace,
+    ) -> Self {
+        let role_binding = RoleBinding {
+            metadata: ObjectMeta {
                 name: Some(OPERATOR_ROLE_BINDING_NAME.to_owned()),
+                namespace: Some(namespace.name().to_owned()),
                 ..Default::default()
             },
             role_ref: role.as_role_ref(),
@@ -909,12 +1019,14 @@ writer_impl![
     OperatorNamespace,
     OperatorDeployment,
     OperatorServiceAccount,
-    OperatorRole,
-    OperatorRoleBinding,
+    OperatorClusterRole,
+    OperatorClusterRoleBinding,
     OperatorLicenseSecret,
     OperatorService,
     OperatorApiService,
     OperatorClusterUserRole,
     OperatorClientCaRole,
-    OperatorClientCaRoleBinding
+    OperatorClientCaRoleBinding,
+    OperatorRole,
+    OperatorRoleBinding
 ];

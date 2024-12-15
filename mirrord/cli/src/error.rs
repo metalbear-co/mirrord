@@ -1,4 +1,4 @@
-use std::{ffi::NulError, net::SocketAddr, path::PathBuf, str::FromStr};
+use std::{ffi::NulError, net::SocketAddr, num::ParseIntError, path::PathBuf, str::FromStr};
 
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
@@ -154,7 +154,7 @@ pub(crate) enum OperatorSetupError {
     #[diagnostic(help("Please check internet connection.{GENERAL_HELP}"))]
     OperatorVersionCheck(#[from] reqwest::Error),
 
-    #[error("Failed to open output file at `{}`: {1}", .0.display())]
+    #[error("Failed to open output file at `{0}`: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OutputFileOpen(PathBuf, std::io::Error),
 
@@ -240,11 +240,11 @@ pub(crate) enum CliError {
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
     ConfigError(#[from] mirrord_config::config::ConfigError),
 
-    #[error("Failed to get canonical path to mirrord config at `{}`: {1}", .0.display())]
+    #[error("Failed to get canonical path to mirrord config at `{0}`: {1}")]
     #[diagnostic(help("Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"))]
     CanonicalizeConfigPathFailed(PathBuf, std::io::Error),
 
-    #[error("Failed to access env file at `{}`: {1}", .0.display())]
+    #[error("Failed to access env file at `{0}`: {1}")]
     #[diagnostic(help("Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"))]
     EnvFileAccessError(PathBuf, std::io::Error),
 
@@ -260,7 +260,11 @@ pub(crate) enum CliError {
     #[diagnostic(transparent)]
     OperatorSetupError(#[from] OperatorSetupError),
 
-    #[error("Failed to extract mirrord-layer to `{}`: {1}", .0.display())]
+    #[error("`mirrord operator status` command failed! Could not retrieve operator status API.")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    OperatorStatusNotFound,
+
+    #[error("Failed to extract mirrord-layer to `{0}`: {1}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     LayerExtractError(PathBuf, std::io::Error),
 
@@ -330,7 +334,7 @@ pub(crate) enum CliError {
 
     If you want to run without the operator, please set `\"operator\": false` in the mirrord configuration file.
 
-    Please remember that some features are supported only when using mirrord operator (https://mirrord.dev/docs/overview/teams/#supported-features?utm_source=erropfailed&utm_medium=cli).{GENERAL_HELP}"))]
+    Please remember that some features are supported only when using mirrord operator (https://mirrord.dev/docs/overview/teams?utm_source=erropfailed&utm_medium=cli#supported-features).{GENERAL_HELP}"))]
     OperatorApiFailed(OperatorOperation, kube::Error),
 
     #[error("mirrord operator rejected {0}: {1}")]
@@ -407,6 +411,9 @@ pub(crate) enum CliError {
 
     #[error("Couldn't resolve binary name '{0}': {1}")]
     BinaryWhichError(String, String),
+
+    #[error(transparent)]
+    ParseInt(ParseIntError),
 }
 
 impl CliError {
@@ -485,6 +492,7 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorReturnedUnknownTargetType(error.0)
             }
             OperatorApiError::KubeApi(error) => Self::OperatorTargetResolution(error),
+            OperatorApiError::ParseInt(error) => Self::ParseInt(error),
         }
     }
 }
