@@ -128,7 +128,7 @@ impl RuntimeCommandBuilder {
         }
     }
 
-    pub fn as_extension_result(self) -> RuntimeCommandExtensionParams {
+    pub fn into_extension_result(self) -> RuntimeCommandExtensionParams {
         let RuntimeCommandBuilder {
             runtime,
             extra_args,
