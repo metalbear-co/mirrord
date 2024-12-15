@@ -339,9 +339,13 @@ pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn mkdir(pathname: Detour<PathBuf>, mode: u32) -> Detour<MakeDirResponse> {
-    let path = remap_path!(pathname?);
+    let pathname = pathname?;
 
-    check_relative_paths!(path);
+    // TODO: (validate this) I think mirrord doesn't have a way to get the current working directory
+    // (yet?) so relative paths should be ignored. (Copied from open/openat hook)
+    check_relative_paths!(pathname);
+
+    let path = remap_path!(pathname);
 
     ensure_not_ignored!(path, false);
 
@@ -364,7 +368,7 @@ pub(crate) fn mkdirat(
     pathname: Detour<PathBuf>,
     mode: u32,
 ) -> Detour<MakeDirResponse> {
-    let pathname = pathname?;
+    let pathname: PathBuf = pathname?;
 
     if pathname.is_absolute() || dirfd == AT_FDCWD {
         let path = remap_path!(pathname);
@@ -376,7 +380,7 @@ pub(crate) fn mkdirat(
 
         let mkdir: MakeDirAtRequest = MakeDirAtRequest {
             dirfd: remote_fd,
-            pathname,
+            pathname: pathname.clone(),
             mode,
         };
 
