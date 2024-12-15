@@ -40,6 +40,12 @@ pub struct ContainerConfig {
     #[config(default)]
     pub cli_extra_args: Vec<String>,
 
+    /// ### container.cli_prevent_cleanup {#container-cli_extra_args}
+    ///
+    /// Don't add `--rm` to sidecar command to prevent cleanup.
+    #[config(default)]
+    pub cli_prevent_cleanup: bool,
+
     /// ### container.cli_image_lib_path {#container-cli_image}
     ///
     /// Path of the mirrord-layer lib inside the specified mirrord-cli image.

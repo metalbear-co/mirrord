@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     io::Write,
     net::SocketAddr,
+    ops::Not,
     path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
@@ -166,19 +167,16 @@ async fn create_sidecar_intproxy(
     sidecar_command.add_env(MIRRORD_INTPROXY_CONTAINER_MODE_ENV, "true");
     sidecar_command.add_envs(connection_info);
 
+    let cleanup = config.container.cli_prevent_cleanup.not().then_some("--rm");
+
     let sidecar_container_command = ContainerRuntimeCommand::run(
         config
             .container
             .cli_extra_args
             .iter()
             .map(String::as_str)
-            .chain([
-                "--rm",
-                "-d",
-                &config.container.cli_image,
-                "mirrord",
-                "intproxy",
-            ]),
+            .chain(cleanup)
+            .chain(["-d", &config.container.cli_image, "mirrord", "intproxy"]),
     );
 
     let (runtime_binary, sidecar_args) = sidecar_command
