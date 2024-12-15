@@ -982,11 +982,11 @@ mod tests {
             panic!("cli command didn't parse into container command, got: {result:#?}")
         };
 
-        let (runtime_args, _) = continaer.into_parts();
+        let (runtime_args, _) = continaer.into_exec_parts();
 
         assert_eq!(runtime_args.runtime, ContainerRuntime::Podman);
 
-        let ContainerCommand::Run { runtime_args } = runtime_args.command;
+        let ContainerRuntimeCommand::Run { runtime_args } = runtime_args.command;
 
         assert_eq!(runtime_args, vec!["-it", "--rm", "debian"]);
     }
@@ -1000,11 +1000,11 @@ mod tests {
             panic!("cli command didn't parse into container command, got: {result:#?}")
         };
 
-        let (runtime_args, _) = continaer.into_parts();
+        let (runtime_args, _) = continaer.into_exec_parts();
 
         assert_eq!(runtime_args.runtime, ContainerRuntime::Podman);
 
-        let ContainerCommand::Run { runtime_args } = runtime_args.command;
+        let ContainerRuntimeCommand::Run { runtime_args } = runtime_args.command;
 
         assert_eq!(runtime_args, vec!["-it", "--rm", "debian"]);
     }
