@@ -341,7 +341,7 @@ impl ExecParams {
 #[derive(Args, Debug)]
 pub(super) struct ExecArgs {
     #[clap(flatten)]
-    pub params: ExecParams,
+    pub params: Box<ExecParams>,
 
     /// Binary to execute and connect with the remote pod.
     pub binary: String,
@@ -787,7 +787,7 @@ pub(super) struct ContainerArgs {
 
     #[clap(flatten)]
     /// Parameters to be passed to mirrord.
-    pub params: ExecParams,
+    pub params: Box<ExecParams>,
 
     /// Container command to be executed
     #[arg(trailing_var_arg = true)]
@@ -811,7 +811,7 @@ impl ContainerArgs {
                     std::iter::once("mirrord container --".into()).chain(exec),
                 );
 
-                Either::Left((runtime_args, params))
+                Either::Left((runtime_args, *params))
             }
         }
     }
@@ -823,7 +823,7 @@ pub(super) enum ContainerCommand {
     Exec {
         #[clap(flatten)]
         /// Parameters to be passed to mirrord.
-        params: ExecParams,
+        params: Box<ExecParams>,
 
         /// Container command to be executed
         #[arg(trailing_var_arg = true)]
@@ -849,7 +849,7 @@ impl ContainerCommand {
                     std::iter::once("mirrord container exec --".into()).chain(exec),
                 );
 
-                Either::Left((runtime_args, params))
+                Either::Left((runtime_args, *params))
             }
             ContainerCommand::Ext {
                 config_file,
