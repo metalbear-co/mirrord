@@ -281,7 +281,7 @@ impl FilesProxy {
                     .then_some(AdditionalRequestData::OpenBuffered)
                     .unwrap_or_default();
                 self.request_queue
-                    .insert_with_data(message_id, layer_id, additional_data);
+                    .push_back_with_data(message_id, layer_id, additional_data);
                 message_bus
                     .send(ClientMessage::FileRequest(FileRequest::Open(open)))
                     .await;
@@ -293,7 +293,7 @@ impl FilesProxy {
                     .then_some(AdditionalRequestData::OpenBuffered)
                     .unwrap_or_default();
                 self.request_queue
-                    .insert_with_data(message_id, layer_id, additional_data);
+                    .push_back_with_data(message_id, layer_id, additional_data);
                 message_bus
                     .send(ClientMessage::FileRequest(FileRequest::OpenRelative(open)))
                     .await;
@@ -325,8 +325,11 @@ impl FilesProxy {
                             requested_amount: read.buffer_size,
                             update_fd_position: true,
                         };
-                        self.request_queue
-                            .insert_with_data(message_id, layer_id, additional_data);
+                        self.request_queue.push_back_with_data(
+                            message_id,
+                            layer_id,
+                            additional_data,
+                        );
                         message_bus
                             .send(ClientMessage::FileRequest(FileRequest::ReadLimited(
                                 ReadLimitedFileRequest {
@@ -344,7 +347,7 @@ impl FilesProxy {
 
                 // File is not buffered.
                 None => {
-                    self.request_queue.insert(message_id, layer_id);
+                    self.request_queue.push_back(message_id, layer_id);
                     message_bus
                         .send(ClientMessage::FileRequest(FileRequest::Read(read)))
                         .await;
@@ -376,8 +379,11 @@ impl FilesProxy {
                             requested_amount: read.buffer_size,
                             update_fd_position: false,
                         };
-                        self.request_queue
-                            .insert_with_data(message_id, layer_id, additional_data);
+                        self.request_queue.push_back_with_data(
+                            message_id,
+                            layer_id,
+                            additional_data,
+                        );
                         message_bus
                             .send(ClientMessage::FileRequest(FileRequest::ReadLimited(
                                 ReadLimitedFileRequest {
@@ -395,7 +401,7 @@ impl FilesProxy {
 
                 // File is not buffered.
                 None => {
-                    self.request_queue.insert(message_id, layer_id);
+                    self.request_queue.push_back(message_id, layer_id);
                     message_bus
                         .send(ClientMessage::FileRequest(FileRequest::ReadLimited(read)))
                         .await;
@@ -419,7 +425,7 @@ impl FilesProxy {
                             })
                             .await;
                     } else {
-                        self.request_queue.insert(message_id, layer_id);
+                        self.request_queue.push_back(message_id, layer_id);
                         message_bus
                             .send(ClientMessage::FileRequest(FileRequest::ReadDirBatch(
                                 ReadDirBatchRequest {
@@ -433,7 +439,7 @@ impl FilesProxy {
 
                 // Directory is not buffered.
                 None => {
-                    self.request_queue.insert(message_id, layer_id);
+                    self.request_queue.push_back(message_id, layer_id);
                     message_bus
                         .send(ClientMessage::FileRequest(FileRequest::ReadDir(read_dir)))
                         .await;
@@ -448,7 +454,7 @@ impl FilesProxy {
                     .is_some_and(|version| READLINK_VERSION.matches(version));
 
                 if supported {
-                    self.request_queue.insert(message_id, layer_id);
+                    self.request_queue.push_back(message_id, layer_id);
                     message_bus
                         .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(req)))
                         .await;
@@ -502,7 +508,7 @@ impl FilesProxy {
                 };
 
                 self.request_queue
-                    .insert_with_data(message_id, layer_id, additional_data);
+                    .push_back_with_data(message_id, layer_id, additional_data);
                 message_bus
                     .send(ClientMessage::FileRequest(FileRequest::Seek(seek)))
                     .await;
@@ -510,7 +516,7 @@ impl FilesProxy {
 
             // Doesn't require any special logic.
             other => {
-                self.request_queue.insert(message_id, layer_id);
+                self.request_queue.push_back(message_id, layer_id);
                 message_bus.send(ClientMessage::FileRequest(other)).await;
             }
         }
@@ -526,7 +532,7 @@ impl FilesProxy {
             // Update file maps.
             FileResponse::Open(Ok(open)) => {
                 let (message_id, layer_id, additional_data) =
-                    self.request_queue.get_with_data().ok_or_else(|| {
+                    self.request_queue.pop_front_with_data().ok_or_else(|| {
                         UnexpectedAgentMessage(DaemonMessage::File(FileResponse::Open(Ok(
                             open.clone()
                         ))))
@@ -549,7 +555,7 @@ impl FilesProxy {
 
             // Update dir maps.
             FileResponse::OpenDir(Ok(open)) => {
-                let (message_id, layer_id) = self.request_queue.get().ok_or_else(|| {
+                let (message_id, layer_id) = self.request_queue.pop_front().ok_or_else(|| {
                     UnexpectedAgentMessage(DaemonMessage::File(FileResponse::OpenDir(Ok(
                         open.clone()
                     ))))
@@ -573,7 +579,7 @@ impl FilesProxy {
             // If the file is buffered, update `files_data`.
             FileResponse::ReadLimited(Ok(read)) => {
                 let (message_id, layer_id, additional_data) =
-                    self.request_queue.get_with_data().ok_or_else(|| {
+                    self.request_queue.pop_front_with_data().ok_or_else(|| {
                         UnexpectedAgentMessage(DaemonMessage::File(FileResponse::ReadLimited(Ok(
                             read.clone(),
                         ))))
@@ -641,7 +647,7 @@ impl FilesProxy {
             // If the file is buffered, update `files_data`.
             FileResponse::Seek(Ok(seek)) => {
                 let (message_id, layer_id, additional_data) =
-                    self.request_queue.get_with_data().ok_or_else(|| {
+                    self.request_queue.pop_front_with_data().ok_or_else(|| {
                         UnexpectedAgentMessage(DaemonMessage::File(FileResponse::Seek(Ok(
                             seek.clone()
                         ))))
@@ -676,7 +682,7 @@ impl FilesProxy {
 
             // Store extra entries in `dirs_data`.
             FileResponse::ReadDirBatch(Ok(batch)) => {
-                let (message_id, layer_id) = self.request_queue.get().ok_or_else(|| {
+                let (message_id, layer_id) = self.request_queue.pop_front().ok_or_else(|| {
                     UnexpectedAgentMessage(DaemonMessage::File(FileResponse::ReadDirBatch(Ok(
                         batch.clone(),
                     ))))
@@ -715,7 +721,7 @@ impl FilesProxy {
             other => {
                 let (message_id, layer_id) = self
                     .request_queue
-                    .get()
+                    .pop_front()
                     .ok_or_else(|| UnexpectedAgentMessage(DaemonMessage::File(other.clone())))?;
                 message_bus
                     .send(ToLayer {

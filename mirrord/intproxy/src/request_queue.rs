@@ -44,7 +44,7 @@ impl<T: fmt::Debug> fmt::Debug for RequestQueue<T> {
 impl<T: Default + fmt::Debug> RequestQueue<T> {
     /// Save the request at the end of this queue.
     #[tracing::instrument(level = Level::TRACE)]
-    pub fn insert(&mut self, message_id: MessageId, layer_id: LayerId) {
+    pub fn push_back(&mut self, message_id: MessageId, layer_id: LayerId) {
         self.inner
             .push_back((message_id, layer_id, Default::default()));
     }
@@ -53,20 +53,20 @@ impl<T: Default + fmt::Debug> RequestQueue<T> {
 impl<T: fmt::Debug> RequestQueue<T> {
     /// Retrieve and remove a request from the front of this queue.
     #[tracing::instrument(level = Level::TRACE)]
-    pub fn get(&mut self) -> Option<(MessageId, LayerId)> {
+    pub fn pop_front(&mut self) -> Option<(MessageId, LayerId)> {
         let (message_id, layer_id, _) = self.inner.pop_front()?;
         Some((message_id, layer_id))
     }
 
     /// Save the request at the end of this queue.
     #[tracing::instrument(level = Level::TRACE)]
-    pub fn insert_with_data(&mut self, message_id: MessageId, layer_id: LayerId, data: T) {
+    pub fn push_back_with_data(&mut self, message_id: MessageId, layer_id: LayerId, data: T) {
         self.inner.push_back((message_id, layer_id, data));
     }
 
     /// Retrieve and remove a request from the front of this queue.
     #[tracing::instrument(level = Level::TRACE)]
-    pub fn get_with_data(&mut self) -> Option<(MessageId, LayerId, T)> {
+    pub fn pop_front_with_data(&mut self) -> Option<(MessageId, LayerId, T)> {
         self.inner.pop_front()
     }
 }

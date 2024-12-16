@@ -51,15 +51,16 @@ impl BackgroundTask for SimpleProxy {
 
             match msg {
                 SimpleProxyMessage::AddrInfoReq(message_id, session_id, req) => {
-                    self.addr_info_reqs.insert(message_id, session_id);
+                    self.addr_info_reqs.push_back(message_id, session_id);
                     message_bus
                         .send(ClientMessage::GetAddrInfoRequest(req))
                         .await;
                 }
                 SimpleProxyMessage::AddrInfoRes(res) => {
-                    let (message_id, layer_id) = self.addr_info_reqs.get().ok_or_else(|| {
-                        UnexpectedAgentMessage(DaemonMessage::GetAddrInfoResponse(res.clone()))
-                    })?;
+                    let (message_id, layer_id) =
+                        self.addr_info_reqs.pop_front().ok_or_else(|| {
+                            UnexpectedAgentMessage(DaemonMessage::GetAddrInfoResponse(res.clone()))
+                        })?;
                     message_bus
                         .send(ToLayer {
                             message_id,
@@ -69,15 +70,16 @@ impl BackgroundTask for SimpleProxy {
                         .await;
                 }
                 SimpleProxyMessage::GetEnvReq(message_id, layer_id, req) => {
-                    self.get_env_reqs.insert(message_id, layer_id);
+                    self.get_env_reqs.push_back(message_id, layer_id);
                     message_bus
                         .send(ClientMessage::GetEnvVarsRequest(req))
                         .await;
                 }
                 SimpleProxyMessage::GetEnvRes(res) => {
-                    let (message_id, layer_id) = self.get_env_reqs.get().ok_or_else(|| {
-                        UnexpectedAgentMessage(DaemonMessage::GetEnvVarsResponse(res.clone()))
-                    })?;
+                    let (message_id, layer_id) =
+                        self.get_env_reqs.pop_front().ok_or_else(|| {
+                            UnexpectedAgentMessage(DaemonMessage::GetEnvVarsResponse(res.clone()))
+                        })?;
                     message_bus
                         .send(ToLayer {
                             message_id,

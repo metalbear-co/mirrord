@@ -143,7 +143,7 @@ impl OutgoingProxy {
         protocol: NetProtocol,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), OutgoingProxyError> {
-        let (message_id, layer_id) = self.queue(protocol).get().ok_or_else(|| {
+        let (message_id, layer_id) = self.queue(protocol).pop_front().ok_or_else(|| {
             let message = match protocol {
                 NetProtocol::Datagrams => {
                     DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Connect(connect.clone()))
@@ -214,7 +214,8 @@ impl OutgoingProxy {
         request: OutgoingConnectRequest,
         message_bus: &mut MessageBus<Self>,
     ) {
-        self.queue(request.protocol).insert(message_id, session_id);
+        self.queue(request.protocol)
+            .push_back(message_id, session_id);
 
         let msg = request.protocol.wrap_agent_connect(request.remote_address);
         message_bus.send(ProxyMessage::ToAgent(msg)).await;
