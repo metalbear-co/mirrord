@@ -340,6 +340,7 @@ impl DebuggerPorts {
 
 #[cfg(test)]
 mod test {
+    use mirrord_config::util::testing::with_env_vars;
     use rstest::rstest;
 
     use super::*;
@@ -413,9 +414,34 @@ mod test {
         )
     }
 
+    #[rstest]
+    #[case(("NODE_OPTIONS", Some("--require=/path --inspect-publish-uid=http --inspect=9994")), vec![9994])]
+    #[case(("NODE_OPTIONS", Some("--require=/path --inspect-publish-uid=http --inspect=9994 --inspect-brk=9001")), vec![9994, 9001])]
+    fn detect_nodeinspector_port(#[case] env: (&str, Option<&str>), #[case] ports: Vec<u16>) {
+        let debugger = DebuggerType::NodeInspector;
+        let command = "/Path/to/node /Path/to/node/v20.17.0/bin/npx next dev";
+
+        with_env_vars(vec![env], {
+            || {
+                assert_eq!(
+                    debugger.get_port(
+                        &command
+                            .split_ascii_whitespace()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                    ),
+                    ports
+                )
+            }
+        });
+    }
+
     #[test]
     fn debugger_ports_contain() {
         assert!(DebuggerPorts::Detected(vec![1337]).contains(&"127.0.0.1:1337".parse().unwrap()));
+        assert!(
+            DebuggerPorts::Detected(vec![1337, 1338]).contains(&"127.0.0.1:1337".parse().unwrap())
+        );
         assert!(!DebuggerPorts::Detected(vec![1337]).contains(&"127.0.0.1:1338".parse().unwrap()));
         assert!(!DebuggerPorts::Detected(vec![1337]).contains(&"8.8.8.8:1337".parse().unwrap()));
 

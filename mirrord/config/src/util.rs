@@ -250,7 +250,6 @@ where
     deserializer.deserialize_any(StringOrStruct(PhantomData))
 }
 
-#[cfg(test)]
 pub mod testing {
     use std::{
         env,
