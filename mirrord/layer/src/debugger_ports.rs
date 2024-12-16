@@ -107,8 +107,12 @@ impl FromStr for DebuggerType {
 
 impl DebuggerType {
     /// Retrieves the port used by debugger of this type from the command.
-    /// May return multiple ports when using the inspect flags with node
-    fn get_port(self, args: &[String]) -> Vec<u16> {
+    /// May return multiple ports when using the inspect flags with node.
+    fn get_port<F: FnMut(&str) -> Option<String>>(
+        self,
+        args: &[String],
+        mut get_env: F,
+    ) -> Vec<u16> {
         match self {
             Self::DebugPy => {
                 let is_python = args
@@ -213,7 +217,7 @@ impl DebuggerType {
             Self::NodeInspector => {
                 let is_node = args.first().map(String::as_str).unwrap_or_default().ends_with("node");
 
-                if is_node && let Ok(value) = std::env::var("NODE_OPTIONS") {
+                if is_node && let Some(value) = get_env("NODE_OPTIONS") {
                     // matching specific flags so we avoid matching on, for example,
                     // `--inspect-publish-uid=http`
                     value.split_ascii_whitespace()
@@ -270,7 +274,10 @@ impl DebuggerPorts {
                         })
                         .ok()
                 }) {
-                Some(debugger) => debugger.get_port(&std::env::args().collect::<Vec<_>>()),
+                Some(debugger) => debugger
+                    .get_port(&std::env::args().collect::<Vec<_>>(), |name| {
+                        std::env::var(name).ok()
+                    }),
                 None => vec![],
             };
         if !detected.is_empty() {
@@ -333,7 +340,6 @@ impl DebuggerPorts {
 
 #[cfg(test)]
 mod test {
-    use mirrord_config::util::testing::with_env_vars;
     use rstest::rstest;
 
     use super::*;
@@ -348,7 +354,8 @@ mod test {
                 &command
                     .split_ascii_whitespace()
                     .map(ToString::to_string)
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
+                |_| None
             ),
             vec![57141],
         )
@@ -364,7 +371,8 @@ mod test {
                 &command
                     .split_ascii_whitespace()
                     .map(ToString::to_string)
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
+                |_| None
             ),
             vec![32845],
         )
@@ -380,7 +388,8 @@ mod test {
                 &command
                     .split_ascii_whitespace()
                     .map(ToString::to_string)
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
+                |_| None
             ),
             vec![40905]
         )
@@ -401,7 +410,8 @@ mod test {
                 &command_line
                     .split_ascii_whitespace()
                     .map(ToString::to_string)
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
+                |_| None
             ),
             vec![54898]
         )
@@ -414,19 +424,22 @@ mod test {
         let debugger = DebuggerType::NodeInspector;
         let command = "/Path/to/node /Path/to/node/v20.17.0/bin/npx next dev";
 
-        with_env_vars(vec![env], {
-            || {
-                assert_eq!(
-                    debugger.get_port(
-                        &command
-                            .split_ascii_whitespace()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>()
-                    ),
-                    ports
-                )
-            }
-        });
+        assert_eq!(
+            debugger.get_port(
+                &command
+                    .split_ascii_whitespace()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                |name| {
+                    if name == env.0 {
+                        env.1.map(ToString::to_string)
+                    } else {
+                        None
+                    }
+                }
+            ),
+            ports
+        )
     }
 
     #[test]
