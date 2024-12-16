@@ -109,7 +109,7 @@ impl TestIntProxy {
             let agent_conn = AgentConnection::new_for_raw_address(fake_agent_address)
                 .await
                 .unwrap();
-            let intproxy = IntProxy::new_with_connection(agent_conn, listener, false);
+            let intproxy = IntProxy::new_with_connection(agent_conn, listener, 0);
             intproxy
                 .run(Duration::from_secs(5), Duration::from_secs(5))
                 .await
