@@ -441,12 +441,6 @@ Defaults to `"/opt/mirrord/lib/libmirrord_layer.so"`.
 mirrord Experimental features.
 This shouldn't be used unless someone from MetalBear/mirrord tells you to.
 
-### _experimental_ buffer_file_reads {#experimental-buffer_file_reads}
-
-Allows reading remote readonly files in 4kb chunks and buffering data locally.
-This improves performace when the user application reads data in small portions.
-<https://github.com/metalbear-co/mirrord/issues/2069>
-
 ### _experimental_ disable_reuseaddr {#experimental-disable_reuseaddr}
 
 Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors.
@@ -468,6 +462,16 @@ Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by
 ### _experimental_ readlink {#experimental-readlink}
 
 DEPRECATED, WILL BE REMOVED
+
+### _experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}
+
+Sets buffer size for readonly remote files (in bytes, for example 4096).
+If set, such files will be read in chunks and buffered locally.
+This improves performace when the user application reads data in small portions.
+
+Setting to 0 disables file buffering.
+
+<https://github.com/metalbear-co/mirrord/issues/2069>
 
 ### _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
 

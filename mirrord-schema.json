@@ -783,14 +783,6 @@
       "description": "mirrord Experimental features. This shouldn't be used unless someone from MetalBear/mirrord tells you to.",
       "type": "object",
       "properties": {
-        "buffer_file_reads": {
-          "title": "_experimental_ buffer_file_reads {#experimental-buffer_file_reads}",
-          "description": "Allows reading remote readonly files in 4kb chunks and buffering data locally. This improves performace when the user application reads data in small portions. <https://github.com/metalbear-co/mirrord/issues/2069>",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
         "disable_reuseaddr": {
           "title": "_experimental_ disable_reuseaddr {#experimental-disable_reuseaddr}",
           "description": "Disables the `SO_REUSEADDR` socket option on sockets that mirrord steals/mirrors. On macOS the application can use the same address many times but then we don't steal it correctly. This probably should be on by default but we want to gradually roll it out. <https://github.com/metalbear-co/mirrord/issues/2819> This option applies only on macOS.",
@@ -822,6 +814,16 @@
             "boolean",
             "null"
           ]
+        },
+        "readonly_file_buffer": {
+          "title": "_experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}",
+          "description": "Sets buffer size for readonly remote files (in bytes, for example 4096). If set, such files will be read in chunks and buffered locally. This improves performace when the user application reads data in small portions.\n\nSetting to 0 disables file buffering.\n\n<https://github.com/metalbear-co/mirrord/issues/2069>",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
         },
         "tcp_ping4_mock": {
           "title": "_experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}",
