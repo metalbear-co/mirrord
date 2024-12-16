@@ -80,6 +80,14 @@ pub enum DebuggerType {
     /// @/var/folders/2h/fn_s1t8n0cqfc9x71yq845m40000gn/T/cp_dikq30ybalqwcehe333w2xxhd.argfile
     /// com.example.demo.DemoApplication
     JavaAgent,
+    /// Used in node applications, the flags `--inspect`, `--inspect-brk` and `--inspect-wait`
+    /// invoke the inspector. Invoking them as command line arguments is deprecated, but they are
+    /// set into the NODE_OPTIONS env var as, for example, `--inspect=9230`
+    ///
+    /// the NODE_OPTIONS env var looks like this:
+    /// "NODE_OPTIONS": "--require=<path> --inspect-publish-uid=http --max-old-space-size=9216
+    /// --enable-source-maps --inspect=9994"
+    NodeInspector,
 }
 
 impl FromStr for DebuggerType {
@@ -91,6 +99,7 @@ impl FromStr for DebuggerType {
             "pydevd" => Ok(Self::PyDevD),
             "resharper" => Ok(Self::ReSharper),
             "javaagent" => Ok(Self::JavaAgent),
+            "nodeinspector" => Ok(Self::NodeInspector),
             _ => Err(format!("invalid debugger type: {s}")),
         }
     }
@@ -98,74 +107,134 @@ impl FromStr for DebuggerType {
 
 impl DebuggerType {
     /// Retrieves the port used by debugger of this type from the command.
-    fn get_port(self, args: &[String]) -> Option<u16> {
+    /// May return multiple ports when using the inspect flags with node
+    fn get_port(self, args: &[String]) -> Vec<u16> {
         match self {
             Self::DebugPy => {
-                let is_python = args.first()?.rsplit('/').next()?.starts_with("py");
-                let runs_debugpy = if args.get(1)?.starts_with("-X") {
-                    args.get(3)?.ends_with("debugpy") // newer args layout
+                let is_python = args
+                    .first()
+                    .unwrap_or(&"".to_string())
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .starts_with("py");
+                let runs_debugpy = if args.get(1).unwrap_or(&"".to_string()).starts_with("-X") {
+                    args.get(3).unwrap_or(&"".to_string()).ends_with("debugpy") // newer args layout
                 } else {
-                    args.get(1)?.ends_with("debugpy") // older args layout
+                    args.get(1).unwrap_or(&"".to_string()).ends_with("debugpy") // older args layout
                 };
 
-                if !is_python || !runs_debugpy {
-                    None?
+                if is_python && runs_debugpy {
+                    args.windows(2).find_map(|window| match window {
+                        [opt, val] if opt == "--connect" => val.parse::<SocketAddr>().ok(),
+                        _ => None,
+                    })
+                } else {
+                    None
                 }
-
-                args.windows(2).find_map(|window| match window {
-                    [opt, val] if opt == "--connect" => val.parse::<SocketAddr>().ok(),
-                    _ => None,
-                })
+                .into_iter()
+                .collect::<Vec<_>>()
             }
             Self::PyDevD => {
-                let is_python = args.first()?.rsplit('/').next()?.starts_with("py");
-                let runs_pydevd = args.get(1)?.rsplit('/').next()?.contains("pydevd");
+                let is_python = args
+                    .first()
+                    .unwrap_or(&"".to_string())
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .starts_with("py");
+                let runs_pydevd = args
+                    .get(1)
+                    .unwrap_or(&"".to_string())
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .contains("pydevd");
 
-                if !is_python || !runs_pydevd {
-                    None?
+                if is_python && runs_pydevd {
+                    let client = args.windows(2).find_map(|window| match window {
+                        [opt, val] if opt == "--client" => val.parse::<IpAddr>().ok(),
+                        _ => None,
+                    });
+                    let port = args.windows(2).find_map(|window| match window {
+                        [opt, val] if opt == "--port" => val.parse::<u16>().ok(),
+                        _ => None,
+                    });
+
+                    if let (Some(client), Some(port)) = (client, port) {
+                        SocketAddr::new(client, port).into()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
                 }
-
-                let client = args.windows(2).find_map(|window| match window {
-                    [opt, val] if opt == "--client" => val.parse::<IpAddr>().ok(),
-                    _ => None,
-                })?;
-                let port = args.windows(2).find_map(|window| match window {
-                    [opt, val] if opt == "--port" => val.parse::<u16>().ok(),
-                    _ => None,
-                })?;
-
-                SocketAddr::new(client, port).into()
+                .into_iter()
+                .collect::<Vec<_>>()
             }
             Self::ReSharper => {
-                let is_dotnet = args.first()?.ends_with("dotnet");
-                let runs_debugger = args.get(2)?.contains("Debugger");
+                let is_dotnet = args.first().unwrap_or(&"".to_string()).ends_with("dotnet");
+                let runs_debugger = args.get(2).unwrap_or(&"".to_string()).contains("Debugger");
 
-                if !is_dotnet || !runs_debugger {
-                    None?
+                if is_dotnet && runs_debugger {
+                    args.iter()
+                        .find_map(|arg| arg.strip_prefix("--frontend-port="))
+                        .and_then(|port| port.parse::<u16>().ok())
+                        .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+                } else {
+                    None
                 }
-
-                args.iter()
-                    .find_map(|arg| arg.strip_prefix("--frontend-port="))
-                    .and_then(|port| port.parse::<u16>().ok())
-                    .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+                .into_iter()
+                .collect::<Vec<_>>()
             }
             Self::JavaAgent => {
-                let is_java = args.first()?.ends_with("java");
+                let is_java = args.first().unwrap_or(&"".to_string()).ends_with("java");
 
-                if !is_java {
-                    None?
+                if is_java {
+                    args.iter()
+                        .find_map(|arg| arg.strip_prefix("-agentlib:jdwp=transport=dt_socket"))
+                        .and_then(|agent_lib_args| {
+                            agent_lib_args
+                                .split(',')
+                                .find_map(|arg| arg.strip_prefix("address="))
+                        })
+                        .and_then(|full_address| full_address.split(':').last())
+                        .and_then(|port| port.parse::<u16>().ok())
+                        .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+                } else {
+                    None
                 }
-
-                args.iter()
-                    .find_map(|arg| arg.strip_prefix("-agentlib:jdwp=transport=dt_socket"))
-                    .and_then(|agent_lib_args| agent_lib_args.split(',').find_map(|arg| arg.strip_prefix("address=")))
-                    .and_then(|full_address| full_address.split(':').last())
-                    .and_then(|port| port.parse::<u16>().ok())
-                    .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
-
+                .into_iter()
+                .collect::<Vec<_>>()
             }
-        }
-        .and_then(|addr| match addr.ip() {
+            Self::NodeInspector => {
+                let is_node = args.first().unwrap_or(&"".to_string()).ends_with("node");
+
+                if is_node && let Ok(value) = std::env::var("NODE_OPTIONS") {
+                    // matching specific flags so we avoid matching on, for example,
+                    // `--inspect-publish-uid=http`
+                    let flags = value.split(" --").filter(|s| {
+                        s.contains("inspect=")
+                            || s.contains("inspect-brk=")
+                            || s.contains("inspect-wait=")
+                    });
+                    flags
+                        .filter_map(|flag| {
+                            let vec = flag.split('=').collect::<Vec<_>>();
+                            match vec.as_slice() {
+                                // you can use --inspect, -wait and -brk all together at once -
+                                // we need to ignore them all
+                                &[_flag, port] => port.parse::<u16>().ok(),
+                                _ => None,
+                            }
+                        })
+                        .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+                        .collect::<Vec<SocketAddr>>()
+                } else {
+                    vec![]
+                }
+            }
+        }.iter().filter_map(|addr| match addr.ip() {
             IpAddr::V4(Ipv4Addr::LOCALHOST) | IpAddr::V6(Ipv6Addr::LOCALHOST) => Some(addr.port()),
             other => {
                 warn!(
@@ -174,7 +243,8 @@ impl DebuggerType {
                 );
                 None
             }
-        })
+        }).into_iter()
+        .collect::<Vec<_>>()
     }
 }
 
