@@ -214,13 +214,13 @@ impl FilesProxy {
             .is_some_and(|version| READDIR_BATCH_VERSION.matches(version))
     }
 
-    #[tracing::instrument(level = Level::DEBUG)]
+    #[tracing::instrument(level = Level::TRACE)]
     fn layer_forked(&mut self, forked: LayerForked) {
         self.remote_files.clone_all(forked.parent, forked.child);
         self.remote_dirs.clone_all(forked.parent, forked.child);
     }
 
-    #[tracing::instrument(level = Level::DEBUG, skip(message_bus))]
+    #[tracing::instrument(level = Level::TRACE, skip(message_bus))]
     async fn layer_closed(&mut self, closed: LayerClosed, message_bus: &mut MessageBus<Self>) {
         for fd in self.remote_files.remove_all(closed.id) {
             self.files_data.remove(&fd);
@@ -241,7 +241,7 @@ impl FilesProxy {
         }
     }
 
-    #[tracing::instrument(level = Level::DEBUG)]
+    #[tracing::instrument(level = Level::TRACE)]
     fn protocol_version(&mut self, version: Version) {
         self.protocol_version.replace(version);
     }
