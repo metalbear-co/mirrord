@@ -85,8 +85,8 @@ pub enum DebuggerType {
     /// set into the NODE_OPTIONS env var as, for example, `--inspect=9230`
     ///
     /// the NODE_OPTIONS env var looks like this:
-    /// "NODE_OPTIONS": "--require=<path> --inspect-publish-uid=http --max-old-space-size=9216
-    /// --enable-source-maps --inspect=9994"
+    /// "NODE_OPTIONS": "--require=/Path/to/thing --inspect-publish-uid=http
+    /// --max-old-space-size=9216 --enable-source-maps --inspect=9994"
     NodeInspector,
 }
 
@@ -113,15 +113,16 @@ impl DebuggerType {
             Self::DebugPy => {
                 let is_python = args
                     .first()
-                    .unwrap_or(&"".to_string())
+                    .map(String::as_str)
+                    .unwrap_or_default()
                     .rsplit('/')
                     .next()
                     .unwrap_or_default()
                     .starts_with("py");
-                let runs_debugpy = if args.get(1).unwrap_or(&"".to_string()).starts_with("-X") {
-                    args.get(3).unwrap_or(&"".to_string()).ends_with("debugpy") // newer args layout
+                let runs_debugpy = if args.get(1).map(String::as_str).unwrap_or_default().starts_with("-X") {
+                    args.get(3).map(String::as_str).unwrap_or_default().ends_with("debugpy") // newer args layout
                 } else {
-                    args.get(1).unwrap_or(&"".to_string()).ends_with("debugpy") // older args layout
+                    args.get(1).map(String::as_str).unwrap_or_default().ends_with("debugpy") // older args layout
                 };
 
                 if is_python && runs_debugpy {
@@ -138,14 +139,16 @@ impl DebuggerType {
             Self::PyDevD => {
                 let is_python = args
                     .first()
-                    .unwrap_or(&"".to_string())
+                    .map(String::as_str)
+                    .unwrap_or_default()
                     .rsplit('/')
                     .next()
                     .unwrap_or_default()
                     .starts_with("py");
                 let runs_pydevd = args
                     .get(1)
-                    .unwrap_or(&"".to_string())
+                    .map(String::as_str)
+                    .unwrap_or_default()
                     .rsplit('/')
                     .next()
                     .unwrap_or_default()
@@ -173,8 +176,8 @@ impl DebuggerType {
                 .collect::<Vec<_>>()
             }
             Self::ReSharper => {
-                let is_dotnet = args.first().unwrap_or(&"".to_string()).ends_with("dotnet");
-                let runs_debugger = args.get(2).unwrap_or(&"".to_string()).contains("Debugger");
+                let is_dotnet = args.first().map(String::as_str).unwrap_or_default().ends_with("dotnet");
+                let runs_debugger = args.get(2).map(String::as_str).unwrap_or_default().contains("Debugger");
 
                 if is_dotnet && runs_debugger {
                     args.iter()
@@ -188,7 +191,7 @@ impl DebuggerType {
                 .collect::<Vec<_>>()
             }
             Self::JavaAgent => {
-                let is_java = args.first().unwrap_or(&"".to_string()).ends_with("java");
+                let is_java = args.first().map(String::as_str).unwrap_or_default().ends_with("java");
 
                 if is_java {
                     args.iter()
@@ -208,28 +211,18 @@ impl DebuggerType {
                 .collect::<Vec<_>>()
             }
             Self::NodeInspector => {
-                let is_node = args.first().unwrap_or(&"".to_string()).ends_with("node");
+                let is_node = args.first().map(String::as_str).unwrap_or_default().ends_with("node");
 
                 if is_node && let Ok(value) = std::env::var("NODE_OPTIONS") {
                     // matching specific flags so we avoid matching on, for example,
                     // `--inspect-publish-uid=http`
-                    let flags = value.split(" --").filter(|s| {
-                        s.contains("inspect=")
-                            || s.contains("inspect-brk=")
-                            || s.contains("inspect-wait=")
-                    });
-                    flags
-                        .filter_map(|flag| {
-                            let vec = flag.split('=').collect::<Vec<_>>();
-                            match vec.as_slice() {
-                                // you can use --inspect, -wait and -brk all together at once -
-                                // we need to ignore them all
-                                &[_flag, port] => port.parse::<u16>().ok(),
-                                _ => None,
-                            }
-                        })
-                        .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
-                        .collect::<Vec<SocketAddr>>()
+                    value.split_ascii_whitespace()
+                    .filter_map(|flag| match flag.split_once('=')? {
+                        ("--inspect" | "--inspect-brk" | "--inspect-wait", port) => port.parse::<u16>().ok(),
+                        _ => None,
+                    })
+                    .map(|port| SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port))
+                    .collect::<Vec<_>>()
                 } else {
                     vec![]
                 }
