@@ -43,18 +43,21 @@ pub enum FilesProxyMessage {
 #[error(transparent)]
 pub struct FilesProxyError(#[from] UnexpectedAgentMessage);
 
-/// Locally cached data of a remote file.
+/// Locally cached data of a remote file that is buffered.
 #[derive(Default)]
-struct FileData {
+struct BufferedFileData {
     /// Buffered file contents.
     buffer: Vec<u8>,
-    /// Position of [`Self::buffer`] in file.
+    /// Position of [`Self::buffer`] in the file.
     buffer_position: u64,
-    /// Position of the file descriptor.
+    /// Position of the file descriptor in the file.
+    /// This position is normally managed in the agent,
+    /// but for buffered files we manage it here.
+    /// It's simpler this way.
     fd_position: u64,
 }
 
-impl FileData {
+impl BufferedFileData {
     /// Attempts to read `amount` bytes from [`Self::buffer`], starting from `position` in the file.
     ///
     /// Returns [`None`] when the read does not fit in the buffer in whole.
@@ -65,9 +68,9 @@ impl FileData {
     }
 }
 
-impl fmt::Debug for FileData {
+impl fmt::Debug for BufferedFileData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("FileData")
+        f.debug_struct("BufferedFileData")
             .field("buffer_position", &self.buffer_position)
             .field("buffer_len", &self.buffer.len())
             .field("fd_position", &self.fd_position)
@@ -75,16 +78,16 @@ impl fmt::Debug for FileData {
     }
 }
 
-/// Locally cached data of a remote directory.
+/// Locally cached data of a remote directory that is buffered.
 #[derive(Default)]
-struct DirData {
+struct BufferedDirData {
     /// Buffered entries of this directory.
     buffered_entries: vec::IntoIter<DirEntryInternal>,
 }
 
-impl fmt::Debug for DirData {
+impl fmt::Debug for BufferedDirData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DirData")
+        f.debug_struct("BufferedDirData")
             .field("remaining_buffered_entries", &self.buffered_entries.len())
             .finish()
     }
@@ -157,12 +160,12 @@ pub struct FilesProxy {
     /// For tracking remote file descriptors across layer instances (forks).
     remote_files: RemoteResources<u64>,
     /// Locally stored data of buffered files.
-    files_data: HashMap<u64, FileData>,
+    buffered_files: HashMap<u64, BufferedFileData>,
 
     /// For tracking remote directory descriptors across layer instances (forks).
     remote_dirs: RemoteResources<u64>,
     /// Locally stored data of buffered directories.
-    dirs_data: HashMap<u64, DirData>,
+    buffered_dirs: HashMap<u64, BufferedDirData>,
 }
 
 impl fmt::Debug for FilesProxy {
@@ -170,8 +173,8 @@ impl fmt::Debug for FilesProxy {
         f.debug_struct("FilesProxy")
             .field("buffer_read", &self.buffer_reads)
             .field("buffer_readdir", &self.buffer_dirs())
-            .field("files_data", &self.files_data)
-            .field("dirs_data", &self.dirs_data)
+            .field("buffered_files", &self.buffered_files)
+            .field("buffered_dirs", &self.buffered_dirs)
             .field("protocol_version", &self.protocol_version)
             .field("request_queue", &self.request_queue)
             .finish()
@@ -200,10 +203,10 @@ impl FilesProxy {
             request_queue: Default::default(),
 
             remote_files: Default::default(),
-            files_data: Default::default(),
+            buffered_files: Default::default(),
 
             remote_dirs: Default::default(),
-            dirs_data: Default::default(),
+            buffered_dirs: Default::default(),
         }
     }
 
@@ -223,7 +226,7 @@ impl FilesProxy {
     #[tracing::instrument(level = Level::TRACE, skip(message_bus))]
     async fn layer_closed(&mut self, closed: LayerClosed, message_bus: &mut MessageBus<Self>) {
         for fd in self.remote_files.remove_all(closed.id) {
-            self.files_data.remove(&fd);
+            self.buffered_files.remove(&fd);
             message_bus
                 .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(
                     FileRequest::Close(CloseFileRequest { fd }),
@@ -232,7 +235,7 @@ impl FilesProxy {
         }
 
         for remote_fd in self.remote_dirs.remove_all(closed.id) {
-            self.dirs_data.remove(&remote_fd);
+            self.buffered_dirs.remove(&remote_fd);
             message_bus
                 .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(
                     FileRequest::CloseDir(CloseDirRequest { remote_fd }),
@@ -258,7 +261,7 @@ impl FilesProxy {
             // Should trigger remote close only when the fd is closed in all layer instances.
             FileRequest::Close(close) => {
                 if self.remote_files.remove(layer_id, close.fd) {
-                    self.files_data.remove(&close.fd);
+                    self.buffered_files.remove(&close.fd);
                     message_bus
                         .send(ClientMessage::FileRequest(FileRequest::Close(close)))
                         .await;
@@ -268,7 +271,7 @@ impl FilesProxy {
             // Should trigger remote close only when the fd is closed in all layer instances.
             FileRequest::CloseDir(close) => {
                 if self.remote_dirs.remove(layer_id, close.remote_fd) {
-                    self.dirs_data.remove(&close.remote_fd);
+                    self.buffered_dirs.remove(&close.remote_fd);
                     message_bus
                         .send(ClientMessage::FileRequest(FileRequest::CloseDir(close)))
                         .await;
@@ -300,7 +303,7 @@ impl FilesProxy {
             }
 
             // Try to use local buffer if possible.
-            FileRequest::Read(read) => match self.files_data.get_mut(&read.remote_fd) {
+            FileRequest::Read(read) => match self.buffered_files.get_mut(&read.remote_fd) {
                 // File is buffered.
                 Some(data) => {
                     let from_buffer = data.read_from_buffer(read.buffer_size, data.fd_position);
@@ -355,7 +358,7 @@ impl FilesProxy {
             },
 
             // Try to use local buffer if possible.
-            FileRequest::ReadLimited(read) => match self.files_data.get_mut(&read.remote_fd) {
+            FileRequest::ReadLimited(read) => match self.buffered_files.get_mut(&read.remote_fd) {
                 // File is buffered.
                 Some(data) => {
                     let from_buffer = data.read_from_buffer(read.buffer_size, read.start_from);
@@ -409,7 +412,8 @@ impl FilesProxy {
             },
 
             // Try to use local buffer if possible.
-            FileRequest::ReadDir(read_dir) => match self.dirs_data.get_mut(&read_dir.remote_fd) {
+            FileRequest::ReadDir(read_dir) => match self.buffered_dirs.get_mut(&read_dir.remote_fd)
+            {
                 // Directory is buffered.
                 Some(data) => {
                     if let Some(direntry) = data.buffered_entries.next() {
@@ -478,34 +482,34 @@ impl FilesProxy {
 
             // May require storing additional data in the request queue.
             FileRequest::Seek(mut seek) => {
-                let additional_data = match (self.files_data.get_mut(&seek.fd), &mut seek.seek_from)
-                {
-                    (Some(data), SeekFromInternal::Current(diff)) => {
-                        let result = u64::try_from(data.fd_position as i128 + *diff as i128);
-                        match result {
-                            Ok(offset) => seek.seek_from = SeekFromInternal::Start(offset),
-                            Err(..) => {
-                                message_bus
-                                    .send(ToLayer {
-                                        message_id,
-                                        layer_id,
-                                        message: ProxyToLayerMessage::File(FileResponse::Seek(
-                                            Err(ResponseError::RemoteIO(RemoteIOError {
-                                                raw_os_error: Some(22), // EINVAL
-                                                kind: ErrorKindInternal::InvalidInput,
-                                            })),
-                                        )),
-                                    })
-                                    .await;
-                                return;
+                let additional_data =
+                    match (self.buffered_files.get_mut(&seek.fd), &mut seek.seek_from) {
+                        (Some(data), SeekFromInternal::Current(diff)) => {
+                            let result = u64::try_from(data.fd_position as i128 + *diff as i128);
+                            match result {
+                                Ok(offset) => seek.seek_from = SeekFromInternal::Start(offset),
+                                Err(..) => {
+                                    message_bus
+                                        .send(ToLayer {
+                                            message_id,
+                                            layer_id,
+                                            message: ProxyToLayerMessage::File(FileResponse::Seek(
+                                                Err(ResponseError::RemoteIO(RemoteIOError {
+                                                    raw_os_error: Some(22), // EINVAL
+                                                    kind: ErrorKindInternal::InvalidInput,
+                                                })),
+                                            )),
+                                        })
+                                        .await;
+                                    return;
+                                }
                             }
-                        }
 
-                        AdditionalRequestData::SeekBuffered { fd: seek.fd }
-                    }
-                    (Some(..), _) => AdditionalRequestData::SeekBuffered { fd: seek.fd },
-                    _ => AdditionalRequestData::Other,
-                };
+                            AdditionalRequestData::SeekBuffered { fd: seek.fd }
+                        }
+                        (Some(..), _) => AdditionalRequestData::SeekBuffered { fd: seek.fd },
+                        _ => AdditionalRequestData::Other,
+                    };
 
                 self.request_queue
                     .push_back_with_data(message_id, layer_id, additional_data);
@@ -541,7 +545,7 @@ impl FilesProxy {
                 self.remote_files.add(layer_id, open.fd);
 
                 if matches!(additional_data, AdditionalRequestData::OpenBuffered) {
-                    self.files_data.insert(open.fd, Default::default());
+                    self.buffered_files.insert(open.fd, Default::default());
                 }
 
                 message_bus
@@ -564,7 +568,7 @@ impl FilesProxy {
                 self.remote_dirs.add(layer_id, open.fd);
 
                 if self.buffer_dirs() {
-                    self.dirs_data.insert(open.fd, Default::default());
+                    self.buffered_dirs.insert(open.fd, Default::default());
                 }
 
                 message_bus
@@ -602,7 +606,7 @@ impl FilesProxy {
                     return Ok(());
                 };
 
-                let Some(data) = self.files_data.get_mut(&fd) else {
+                let Some(data) = self.buffered_files.get_mut(&fd) else {
                     // File must have been closed from other thread in user application.
                     message_bus
                         .send(ToLayer {
@@ -654,7 +658,7 @@ impl FilesProxy {
                     })?;
 
                 if let AdditionalRequestData::SeekBuffered { fd } = additional_data {
-                    let Some(data) = self.files_data.get_mut(&fd) else {
+                    let Some(data) = self.buffered_files.get_mut(&fd) else {
                         // File must have been closed from other thread in user application.
                         message_bus
                             .send(ToLayer {
@@ -688,7 +692,7 @@ impl FilesProxy {
                     ))))
                 })?;
 
-                let Some(data) = self.dirs_data.get_mut(&batch.fd) else {
+                let Some(data) = self.buffered_dirs.get_mut(&batch.fd) else {
                     // Directory must have been closed from other thread in user application.
                     message_bus
                         .send(ToLayer {
