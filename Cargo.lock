@@ -4336,6 +4336,7 @@ dependencies = [
  "mirrord-protocol",
  "rand",
  "reqwest 0.12.9",
+ "rstest",
  "rustls 0.23.19",
  "rustls-pemfile 2.2.0",
  "semver 1.0.23",
@@ -4502,7 +4503,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.12.0"
+version = "1.12.1"
 dependencies = [
  "actix-codec",
  "bincode",

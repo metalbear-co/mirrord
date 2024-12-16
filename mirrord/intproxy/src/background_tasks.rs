@@ -166,6 +166,7 @@ where
 
 /// An error that can occur when executing a [`BackgroundTask`].
 #[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum TaskError<Err> {
     /// An internal task error.
     Error(Err),
@@ -180,6 +181,16 @@ pub enum TaskUpdate<MOut, Err> {
     Message(MOut),
     /// The task finished and was deregistered.
     Finished(Result<(), TaskError<Err>>),
+}
+
+#[cfg(test)]
+impl<MOut, Err: fmt::Debug> TaskUpdate<MOut, Err> {
+    pub fn unwrap_message(self) -> MOut {
+        match self {
+            Self::Message(mout) => mout,
+            Self::Finished(res) => panic!("expected a message, got task result: {res:?}"),
+        }
+    }
 }
 
 /// A struct that can be used to send messages to a [`BackgroundTask`] registered

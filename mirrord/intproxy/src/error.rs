@@ -8,10 +8,16 @@ use crate::{
     agent_conn::{AgentChannelError, AgentConnectionError},
     layer_initializer::LayerInitializerError,
     ping_pong::PingPongError,
-    proxies::{incoming::IncomingProxyError, outgoing::OutgoingProxyError},
-    request_queue::RequestQueueEmpty,
+    proxies::{
+        files::FilesProxyError, incoming::IncomingProxyError, outgoing::OutgoingProxyError,
+        simple::SimpleProxyError,
+    },
     MainTaskId,
 };
+
+#[derive(Error, Debug)]
+#[error("agent sent an unexpected message: {0:?}")]
+pub struct UnexpectedAgentMessage(pub DaemonMessage);
 
 #[derive(Error, Debug)]
 pub enum IntProxyError {
@@ -26,8 +32,8 @@ pub enum IntProxyError {
     AgentConnection(#[from] AgentConnectionError),
     #[error("agent closed connection with error: {0}")]
     AgentFailed(String),
-    #[error("agent sent unexpected message: {0:?}")]
-    UnexpectedAgentMessage(DaemonMessage),
+    #[error(transparent)]
+    UnexpectedAgentMessage(#[from] UnexpectedAgentMessage),
 
     #[error("background task {0} exited unexpectedly")]
     TaskExit(MainTaskId),
@@ -43,11 +49,13 @@ pub enum IntProxyError {
     #[error("layer connection failed: {0}")]
     LayerConnection(#[from] CodecError),
     #[error("simple proxy failed: {0}")]
-    SimpleProxy(#[from] RequestQueueEmpty),
+    SimpleProxy(#[from] SimpleProxyError),
     #[error("outgoing proxy failed: {0}")]
     OutgoingProxy(#[from] OutgoingProxyError),
     #[error("incoming proxy failed: {0}")]
     IncomingProxy(#[from] IncomingProxyError),
+    #[error("files proxy failed: {0}")]
+    FilesProxy(#[from] FilesProxyError),
 }
 
 pub type Result<T> = core::result::Result<T, IntProxyError>;
