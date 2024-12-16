@@ -71,7 +71,7 @@ impl IntProxy {
     pub fn new_with_connection(
         agent_conn: AgentConnection,
         listener: TcpListener,
-        buffer_file_reads: bool,
+        file_buffer_size: u64,
     ) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
             Default::default();
@@ -104,7 +104,7 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
         let files = background_tasks.register(
-            FilesProxy::new(buffer_file_reads),
+            FilesProxy::new(file_buffer_size),
             MainTaskId::FilesProxy,
             Self::CHANNEL_SIZE,
         );

@@ -141,13 +141,17 @@ pub(crate) async fn proxy(
     let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);
     let consecutive_connection_timeout = Duration::from_secs(config.internal_proxy.idle_timeout);
 
-    IntProxy::new_with_connection(agent_conn, listener, config.experimental.buffer_file_reads)
-        .run(first_connection_timeout, consecutive_connection_timeout)
-        .await
-        .map_err(InternalProxyError::from)
-        .inspect_err(|error| {
-            tracing::error!(%error, "Internal proxy encountered an error, exiting");
-        })
+    IntProxy::new_with_connection(
+        agent_conn,
+        listener,
+        config.experimental.readonly_file_buffer,
+    )
+    .run(first_connection_timeout, consecutive_connection_timeout)
+    .await
+    .map_err(InternalProxyError::from)
+    .inspect_err(|error| {
+        tracing::error!(%error, "Internal proxy encountered an error, exiting");
+    })
 }
 
 /// Creates a connection with the agent and handles one round of ping pong.

@@ -139,11 +139,13 @@ enum AdditionalRequestData {
 /// To optimize cases where user application makes a lot of small reads on remote files,
 /// we change the way of reading readonly files.
 ///
-/// 1. When the user requests a read, we fetch at least [`Self::READFILE_CHUNK_SIZE`] bytes. We
-///    return the amount requested by the user and store the whole response as a local buffer.
-/// 2. When the user requests a read again, we try to fulfill the request using only the local
+/// 1. When created with [`FilesProxy::new`], this proxy is given a desired file buffer size. Buffer
+///    size 0 disables file buffering.
+/// 2. When the user requests a read, we fetch at least `buffer_size` bytes. We return the amount
+///    requested by the user and store the whole response as a local buffer.
+/// 3. When the user requests a read again, we try to fulfill the request using only the local
 ///    buffer. If it's not possible, we proceed as in point 1
-/// 3. To solve problems with descriptor offset, we only use [`FileRequest::ReadLimited`] to read
+/// 4. To solve problems with descriptor offset, we only use [`FileRequest::ReadLimited`] to read
 ///    buffered files. Descriptor offset value is maintained in this proxy.
 pub struct FilesProxy {
     /// [`mirrord_protocol`] version negotiated with the agent.
@@ -151,8 +153,9 @@ pub struct FilesProxy {
     /// [`FileRequest::ReadLink`].
     protocol_version: Option<Version>,
 
-    /// Whether this proxy is configured to buffer readonly files.
-    buffer_reads: bool,
+    /// Size for readonly files buffer.
+    /// If equal to 0, this proxy does not buffer files.
+    file_buffer_size: u64,
 
     /// Stores metadata of outstanding requests.
     request_queue: RequestQueue<AdditionalRequestData>,
@@ -171,7 +174,7 @@ pub struct FilesProxy {
 impl fmt::Debug for FilesProxy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FilesProxy")
-            .field("buffer_read", &self.buffer_reads)
+            .field("file_buffer_size", &self.file_buffer_size)
             .field("buffer_readdir", &self.buffer_dirs())
             .field("buffered_files", &self.buffered_files)
             .field("buffered_dirs", &self.buffered_dirs)
@@ -186,19 +189,15 @@ impl FilesProxy {
     /// Relevant only if [`mirrord_protocol`] version allows for [`FileRequest::ReadDirBatch`].
     pub const READDIR_BATCH_SIZE: usize = 128;
 
-    /// How many bytes we read a time from readonly files (unless the user requested more).
-    /// Relevant only if [`FilesProxy`] is configured to buffer readonly files.
-    pub const READFILE_CHUNK_SIZE: u64 = 4096;
-
     /// Creates a new files proxy instance.
     /// Proxy can be used as a [`BackgroundTask`].
     ///
-    /// `buffer_reads` determines whether this proxy will execute buffering logic for readonly
-    /// files.
-    pub fn new(buffer_reads: bool) -> Self {
+    /// `file_buffer_size` sets size of the readonly files buffer.
+    /// Size 0 disables buffering.
+    pub fn new(file_buffer_size: u64) -> Self {
         Self {
             protocol_version: Default::default(),
-            buffer_reads,
+            file_buffer_size,
 
             request_queue: Default::default(),
 
@@ -215,6 +214,11 @@ impl FilesProxy {
         self.protocol_version
             .as_ref()
             .is_some_and(|version| READDIR_BATCH_VERSION.matches(version))
+    }
+
+    /// Returns whether this proxy is configured to buffer readonly files.
+    fn buffer_reads(&self) -> bool {
+        self.file_buffer_size > 0
     }
 
     #[tracing::instrument(level = Level::TRACE)]
@@ -280,7 +284,7 @@ impl FilesProxy {
 
             // May require storing additional data in the request queue.
             FileRequest::Open(open) => {
-                let additional_data = (self.buffer_reads && open.open_options.is_read_only())
+                let additional_data = (self.buffer_reads() && open.open_options.is_read_only())
                     .then_some(AdditionalRequestData::OpenBuffered)
                     .unwrap_or_default();
                 self.request_queue
@@ -292,7 +296,7 @@ impl FilesProxy {
 
             // May require storing additional data in the request queue.
             FileRequest::OpenRelative(open) => {
-                let additional_data = (self.buffer_reads && open.open_options.is_read_only())
+                let additional_data = (self.buffer_reads() && open.open_options.is_read_only())
                     .then_some(AdditionalRequestData::OpenBuffered)
                     .unwrap_or_default();
                 self.request_queue
@@ -339,7 +343,7 @@ impl FilesProxy {
                                     remote_fd: read.remote_fd,
                                     buffer_size: std::cmp::max(
                                         read.buffer_size,
-                                        Self::READFILE_CHUNK_SIZE,
+                                        self.file_buffer_size,
                                     ),
                                     start_from: data.fd_position,
                                 },
@@ -393,7 +397,7 @@ impl FilesProxy {
                                     remote_fd: read.remote_fd,
                                     buffer_size: std::cmp::max(
                                         read.buffer_size,
-                                        Self::READFILE_CHUNK_SIZE,
+                                        self.file_buffer_size,
                                     ),
                                     start_from: read.start_from,
                                 },
@@ -803,7 +807,7 @@ mod tests {
     /// - `buffer_reads`: configures buffering readonly files
     async fn setup_proxy(
         protocol_version: Version,
-        buffer_reads: bool,
+        file_buffer_size: u64,
     ) -> (
         TaskSender<FilesProxy>,
         BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
@@ -811,7 +815,11 @@ mod tests {
         let mut tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
             Default::default();
 
-        let proxy = tasks.register(FilesProxy::new(buffer_reads), MainTaskId::FilesProxy, 32);
+        let proxy = tasks.register(
+            FilesProxy::new(file_buffer_size),
+            MainTaskId::FilesProxy,
+            32,
+        );
 
         proxy
             .send(FilesProxyMessage::ProtocolVersion(protocol_version))
@@ -864,7 +872,7 @@ mod tests {
 
     #[tokio::test]
     async fn old_protocol_uses_read_dir_request() {
-        let (proxy, mut tasks) = setup_proxy(Version::new(0, 1, 0), false).await;
+        let (proxy, mut tasks) = setup_proxy(Version::new(0, 1, 0), 0).await;
 
         prepare_dir(&proxy, &mut tasks).await;
 
@@ -917,7 +925,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_protocol_uses_read_dir_batch_request() {
-        let (proxy, mut tasks) = setup_proxy(Version::new(1, 9, 0), false).await;
+        let (proxy, mut tasks) = setup_proxy(Version::new(1, 9, 0), 0).await;
 
         prepare_dir(&proxy, &mut tasks).await;
 
@@ -1068,8 +1076,11 @@ mod tests {
     #[case(false, false)]
     #[tokio::test]
     async fn reading_from_unbuffered_file(#[case] readonly: bool, #[case] buffering_enabled: bool) {
-        let (proxy, mut tasks) =
-            setup_proxy(mirrord_protocol::VERSION.clone(), buffering_enabled).await;
+        let (proxy, mut tasks) = setup_proxy(
+            mirrord_protocol::VERSION.clone(),
+            buffering_enabled.then_some(4096).unwrap_or_default(),
+        )
+        .await;
 
         let fd = open_file(&proxy, &mut tasks, readonly).await;
 
@@ -1121,7 +1132,7 @@ mod tests {
 
     #[tokio::test]
     async fn reading_from_buffered_file() {
-        let (proxy, mut tasks) = setup_proxy(mirrord_protocol::VERSION.clone(), true).await;
+        let (proxy, mut tasks) = setup_proxy(mirrord_protocol::VERSION.clone(), 4096).await;
 
         let fd = open_file(&proxy, &mut tasks, true).await;
         let contents = std::iter::repeat(0_u8..=255).flatten();
@@ -1132,16 +1143,13 @@ mod tests {
             ProxyMessage::ToAgent(ClientMessage::FileRequest(FileRequest::ReadLimited(
                 ReadLimitedFileRequest {
                     remote_fd: fd,
-                    buffer_size: FilesProxy::READFILE_CHUNK_SIZE,
+                    buffer_size: 4096,
                     start_from: 0,
                 }
             ))),
         );
 
-        let data = contents
-            .clone()
-            .take(FilesProxy::READFILE_CHUNK_SIZE as usize)
-            .collect::<Vec<_>>();
+        let data = contents.clone().take(4096).collect::<Vec<_>>();
         let update = respond_to_read_request(&proxy, &mut tasks, data, true)
             .await
             .unwrap_proxy_to_layer_message();
@@ -1178,30 +1186,19 @@ mod tests {
             }))),
         );
 
-        let update = make_read_request(
-            &proxy,
-            &mut tasks,
-            fd,
-            FilesProxy::READFILE_CHUNK_SIZE * 2,
-            None,
-        )
-        .await;
+        let update = make_read_request(&proxy, &mut tasks, fd, 4096 * 2, None).await;
         assert_eq!(
             update,
             ProxyMessage::ToAgent(ClientMessage::FileRequest(FileRequest::ReadLimited(
                 ReadLimitedFileRequest {
                     remote_fd: fd,
-                    buffer_size: FilesProxy::READFILE_CHUNK_SIZE * 2,
+                    buffer_size: 4096 * 2,
                     start_from: 4,
                 }
             ))),
         );
 
-        let data = contents
-            .clone()
-            .skip(4)
-            .take(FilesProxy::READFILE_CHUNK_SIZE as usize)
-            .collect::<Vec<_>>();
+        let data = contents.clone().skip(4).take(4096).collect::<Vec<_>>();
         let update = respond_to_read_request(&proxy, &mut tasks, data.clone(), true)
             .await
             .unwrap_proxy_to_layer_message();
@@ -1209,7 +1206,7 @@ mod tests {
             update,
             ProxyToLayerMessage::File(FileResponse::Read(Ok(ReadFileResponse {
                 bytes: data,
-                read_amount: FilesProxy::READFILE_CHUNK_SIZE,
+                read_amount: 4096,
             }))),
         );
 
@@ -1257,7 +1254,7 @@ mod tests {
 
     #[tokio::test]
     async fn seeking_in_buffered_file() {
-        let (proxy, mut tasks) = setup_proxy(mirrord_protocol::VERSION.clone(), true).await;
+        let (proxy, mut tasks) = setup_proxy(mirrord_protocol::VERSION.clone(), 4096).await;
 
         let fd = open_file(&proxy, &mut tasks, true).await;
         let contents = std::iter::repeat(0_u8..=255).flatten();
@@ -1268,16 +1265,13 @@ mod tests {
             ProxyMessage::ToAgent(ClientMessage::FileRequest(FileRequest::ReadLimited(
                 ReadLimitedFileRequest {
                     remote_fd: fd,
-                    buffer_size: FilesProxy::READFILE_CHUNK_SIZE,
+                    buffer_size: 4096,
                     start_from: 0,
                 }
             ))),
         );
 
-        let data = contents
-            .clone()
-            .take(FilesProxy::READFILE_CHUNK_SIZE as usize)
-            .collect::<Vec<_>>();
+        let data = contents.clone().take(4096).collect::<Vec<_>>();
         let expected = contents.take(20).collect::<Vec<_>>();
         let update = respond_to_read_request(&proxy, &mut tasks, data, true)
             .await
