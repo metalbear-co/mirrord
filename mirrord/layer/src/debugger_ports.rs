@@ -243,7 +243,7 @@ impl DebuggerType {
                 );
                 None
             }
-        }).into_iter()
+        })
         .collect::<Vec<_>>()
     }
 }
@@ -252,7 +252,7 @@ impl DebuggerType {
 /// These should be ignored by the layer.
 #[derive(Debug)]
 pub enum DebuggerPorts {
-    Detected(u16),
+    Detected(Vec<u16>),
     FixedRange(RangeInclusive<u16>),
     None,
 }
@@ -264,23 +264,28 @@ impl DebuggerPorts {
     ///
     /// Log errors (like malformed env variables) but do not panic.
     pub fn from_env() -> Self {
-        let detected = env::var(MIRRORD_DETECT_DEBUGGER_PORT_ENV)
-            .ok()
-            .and_then(|s| {
-                DebuggerType::from_str(&s)
-                    .inspect_err(|e| {
-                        error!(
-                            "Failed to decode debugger type from {} env variable: {}",
-                            MIRRORD_DETECT_DEBUGGER_PORT_ENV, e
-                        )
-                    })
-                    .ok()
-            })
-            .and_then(|d| d.get_port(&std::env::args().collect::<Vec<_>>()));
-        if let Some(port) = detected {
-            env::set_var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV, port.to_string());
+        let detected: Vec<u16> =
+            match env::var(MIRRORD_DETECT_DEBUGGER_PORT_ENV)
+                .ok()
+                .and_then(|s| {
+                    DebuggerType::from_str(&s)
+                        .inspect_err(|e| {
+                            error!(
+                                "Failed to decode debugger type from {} env variable: {}",
+                                MIRRORD_DETECT_DEBUGGER_PORT_ENV, e
+                            )
+                        })
+                        .ok()
+                }) {
+                Some(debugger) => debugger.get_port(&std::env::args().collect::<Vec<_>>()),
+                None => vec![],
+            };
+        if !detected.is_empty() {
+            detected
+                .iter()
+                .for_each(|port| env::set_var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV, port.to_string()));
             env::remove_var(MIRRORD_DETECT_DEBUGGER_PORT_ENV);
-            return Self::Detected(port);
+            return Self::Detected(detected);
         }
 
         let fixed_range = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV)
@@ -326,7 +331,7 @@ impl DebuggerPorts {
         }
 
         match self {
-            Self::Detected(port) => *port == addr.port(),
+            Self::Detected(ports) => ports.contains(&addr.port()),
             Self::FixedRange(range) => range.contains(&addr.port()),
             Self::None => false,
         }
@@ -351,7 +356,7 @@ mod test {
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
             ),
-            Some(57141),
+            vec![57141],
         )
     }
 
@@ -367,7 +372,7 @@ mod test {
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
             ),
-            Some(32845),
+            vec![32845],
         )
     }
 
@@ -383,7 +388,7 @@ mod test {
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
             ),
-            Some(40905)
+            vec![40905]
         )
     }
 
@@ -404,15 +409,15 @@ mod test {
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
             ),
-            Some(54898)
+            vec![54898]
         )
     }
 
     #[test]
     fn debugger_ports_contain() {
-        assert!(DebuggerPorts::Detected(1337).contains(&"127.0.0.1:1337".parse().unwrap()));
-        assert!(!DebuggerPorts::Detected(1337).contains(&"127.0.0.1:1338".parse().unwrap()));
-        assert!(!DebuggerPorts::Detected(1337).contains(&"8.8.8.8:1337".parse().unwrap()));
+        assert!(DebuggerPorts::Detected(vec![1337]).contains(&"127.0.0.1:1337".parse().unwrap()));
+        assert!(!DebuggerPorts::Detected(vec![1337]).contains(&"127.0.0.1:1338".parse().unwrap()));
+        assert!(!DebuggerPorts::Detected(vec![1337]).contains(&"8.8.8.8:1337".parse().unwrap()));
 
         assert!(
             DebuggerPorts::FixedRange(45000..=50000).contains(&"127.0.0.1:47888".parse().unwrap())
