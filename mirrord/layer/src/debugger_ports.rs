@@ -20,8 +20,8 @@ pub const MIRRORD_DETECT_DEBUGGER_PORT_ENV: &str = "MIRRORD_DETECT_DEBUGGER_PORT
 /// be used by the debugger. Used when injecting the layer through IDE. This setting will be ignored
 /// if the layer successfully detects the port at runtime, see [`MIRRORD_DETECT_DEBUGGER_PORT_ENV`].
 ///
-/// Value passed through this variable can represent a single port like '12233' or a range of ports
-/// like `12233-13000`.
+/// Value passed through this variable can represent a single port like '12233', a range of ports
+/// like '12233-13000' or multiple individual ports like '12233,13344,14455'
 pub const MIRRORD_IGNORE_DEBUGGER_PORTS_ENV: &str = "MIRRORD_IGNORE_DEBUGGER_PORTS";
 
 /// Type of debugger which is used to run the user's processes.
