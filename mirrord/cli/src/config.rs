@@ -982,7 +982,9 @@ mod tests {
             panic!("cli command didn't parse into container command, got: {result:#?}")
         };
 
-        let (runtime_args, _) = continaer.into_exec_parts();
+        let Either::Left((runtime_args, _)) = continaer.into_exec_parts() else {
+            panic!("should be left variant")
+        };
 
         assert_eq!(runtime_args.runtime, ContainerRuntime::Podman);
 
@@ -1000,7 +1002,9 @@ mod tests {
             panic!("cli command didn't parse into container command, got: {result:#?}")
         };
 
-        let (runtime_args, _) = continaer.into_exec_parts();
+        let Either::Left((runtime_args, _)) = continaer.into_exec_parts() else {
+            panic!("should be left variant")
+        };
 
         assert_eq!(runtime_args.runtime, ContainerRuntime::Podman);
 
