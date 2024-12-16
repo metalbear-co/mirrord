@@ -250,6 +250,7 @@ impl DebuggerType {
 #[derive(Debug)]
 pub enum DebuggerPorts {
     Detected(Vec<u16>),
+    Multiple(Vec<u16>),
     FixedRange(RangeInclusive<u16>),
     None,
 }
@@ -281,11 +282,32 @@ impl DebuggerPorts {
                 None => vec![],
             };
         if !detected.is_empty() {
+            let mut value = String::new();
             detected
                 .iter()
-                .for_each(|port| env::set_var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV, port.to_string()));
+                .for_each(|port| value.push_str(format!("{port},").as_str()));
+            // remove trailing comma
+            value.pop();
+            env::set_var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV, value);
             env::remove_var(MIRRORD_DETECT_DEBUGGER_PORT_ENV);
             return Self::Detected(detected);
+        }
+
+        let multiple_ports = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV)
+            .ok()
+            .and_then(|s| {
+                s.split(',').map(u16::from_str).collect::<Result<Vec<_>, _>>().inspect_err(|e| {
+                    tracing::debug!(
+                        "Failed to decode individual debugger ports from {} env variable: {}, attempting to decode as range...",
+                        MIRRORD_IGNORE_DEBUGGER_PORTS_ENV,
+                        e
+                    )
+                })
+                .ok()
+            }
+        );
+        if let Some(ports) = multiple_ports {
+            return Self::Multiple(ports);
         }
 
         let fixed_range = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV)
@@ -306,7 +328,7 @@ impl DebuggerPorts {
                     [p1, p2] if p1 <= p2 => Some(p1..=p2),
                     _ => {
                         error!(
-                            "Failed to decode debugger ports from {} env variable: expected a port or a range of ports",
+                            "Failed to decode debugger ports from {} env variable: expected a port, list of ports or range of ports",
                             MIRRORD_IGNORE_DEBUGGER_PORTS_ENV,
                         );
                         None
@@ -331,7 +353,7 @@ impl DebuggerPorts {
         }
 
         match self {
-            Self::Detected(ports) => ports.contains(&addr.port()),
+            Self::Detected(ports) | Self::Multiple(ports) => ports.contains(&addr.port()),
             Self::FixedRange(range) => range.contains(&addr.port()),
             Self::None => false,
         }
