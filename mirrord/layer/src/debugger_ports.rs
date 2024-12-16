@@ -250,7 +250,6 @@ impl DebuggerType {
 #[derive(Debug)]
 pub enum DebuggerPorts {
     Detected(Vec<u16>),
-    Multiple(Vec<u16>),
     FixedRange(RangeInclusive<u16>),
     None,
 }
@@ -282,12 +281,11 @@ impl DebuggerPorts {
                 None => vec![],
             };
         if !detected.is_empty() {
-            let mut value = String::new();
-            detected
+            let value = detected
                 .iter()
-                .for_each(|port| value.push_str(format!("{port},").as_str()));
-            // remove trailing comma
-            value.pop();
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",");
             env::set_var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV, value);
             env::remove_var(MIRRORD_DETECT_DEBUGGER_PORT_ENV);
             return Self::Detected(detected);
@@ -307,7 +305,7 @@ impl DebuggerPorts {
             }
         );
         if let Some(ports) = multiple_ports {
-            return Self::Multiple(ports);
+            return Self::Detected(ports);
         }
 
         let fixed_range = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV)
@@ -353,7 +351,7 @@ impl DebuggerPorts {
         }
 
         match self {
-            Self::Detected(ports) | Self::Multiple(ports) => ports.contains(&addr.port()),
+            Self::Detected(ports) => ports.contains(&addr.port()),
             Self::FixedRange(range) => range.contains(&addr.port()),
             Self::None => false,
         }
