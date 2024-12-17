@@ -43,7 +43,6 @@ use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
 use semver::{Version, VersionReq};
 use serde_json::json;
-use tokio_util::either::Either;
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 use which::which;
@@ -688,16 +687,18 @@ fn main() -> miette::Result<()> {
             }
             Commands::Teams => teams::navigate_to_intro().await,
             Commands::Diagnose(args) => diagnose_command(*args).await?,
-            Commands::Container(args) => match args.into_exec_parts() {
-                Either::Left((runtime_args, exec_params)) => {
+            Commands::Container(args) => match args.into_container_command() {
+                ContainerCommand::Exec(params) => {
+                    let (runtime_args, exec_params) = params.into_parts();
+
                     let exit_code = container_command(runtime_args, exec_params, watch).await?;
 
                     if exit_code != 0 {
                         std::process::exit(exit_code);
                     }
                 }
-                Either::Right((config_path, target)) => {
-                    container_ext_command(config_path, target, watch).await?
+                ContainerCommand::Ext(params) => {
+                    container_ext_command(params.config_file, params.target, watch).await?
                 }
             },
             Commands::ExternalProxy { port } => external_proxy::proxy(port, watch).await?,

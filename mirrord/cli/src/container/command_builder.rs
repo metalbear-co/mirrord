@@ -128,14 +128,15 @@ impl RuntimeCommandBuilder {
         }
     }
 
-    pub fn into_extension_result(self) -> RuntimeCommandExtensionParams {
+    /// Convert to serialzable result for mirrord extensions
+    pub fn into_command_extension_params(self) -> ExtensionRuntimeCommand {
         let RuntimeCommandBuilder {
             runtime,
             extra_args,
             ..
         } = self;
 
-        RuntimeCommandExtensionParams {
+        ExtensionRuntimeCommand {
             runtime,
             extra_args,
         }
@@ -164,8 +165,13 @@ impl RuntimeCommandBuilder<WithCommand> {
     }
 }
 
+/// Information for mirrord extensions to use mirrord container feature but injecting the connection
+/// info into the container manualy by the extension
 #[derive(Debug, serde::Serialize)]
-pub struct RuntimeCommandExtensionParams {
+pub struct ExtensionRuntimeCommand {
+    /// Container runtime to use (should be defaulted to docker)
     runtime: ContainerRuntime,
+
+    /// Run command args that the extension should add to container command
     extra_args: Vec<String>,
 }

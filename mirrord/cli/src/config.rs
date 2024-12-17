@@ -19,7 +19,6 @@ use mirrord_config::{
 };
 use mirrord_operator::setup::OperatorNamespace;
 use thiserror::Error;
-use tokio_util::either::Either;
 
 use crate::error::CliError;
 
@@ -786,6 +785,30 @@ pub(super) struct ContainerArgs {
     pub command: Option<ContainerCommand>,
 
     #[clap(flatten)]
+    pub fallback: ContainerExecCommand,
+}
+
+impl ContainerArgs {
+    pub fn into_container_command(self) -> ContainerCommand {
+        let ContainerArgs { command, fallback } = self;
+
+        match command {
+            Some(command) => command,
+            None => ContainerCommand::Exec(fallback),
+        }
+    }
+}
+
+/// Supported command for using mirrord with container runtimes.
+#[derive(Subcommand, Debug)]
+pub(super) enum ContainerCommand {
+    Exec(ContainerExecCommand),
+    Ext(ContainerExtCommand),
+}
+
+#[derive(Args, Debug)]
+pub struct ContainerExecCommand {
+    #[clap(flatten)]
     /// Parameters to be passed to mirrord.
     pub params: Box<ExecParams>,
 
@@ -794,69 +817,27 @@ pub(super) struct ContainerArgs {
     pub exec: Vec<String>,
 }
 
-impl ContainerArgs {
-    pub fn into_exec_parts(
-        self,
-    ) -> Either<(RuntimeArgs, ExecParams), (Option<PathBuf>, Option<String>)> {
-        let ContainerArgs {
-            command,
-            params,
-            exec,
-        } = self;
+impl ContainerExecCommand {
+    pub fn into_parts(self) -> (RuntimeArgs, ExecParams) {
+        let ContainerExecCommand { params, exec } = self;
 
-        match command {
-            Some(command) => command.into_exec_parts(),
-            None => {
-                let runtime_args = RuntimeArgs::parse_from(
-                    std::iter::once("mirrord container --".into()).chain(exec),
-                );
+        let runtime_args = RuntimeArgs::parse_from(
+            std::iter::once("mirrord container exec --".into()).chain(exec),
+        );
 
-                Either::Left((runtime_args, *params))
-            }
-        }
+        (runtime_args, *params)
     }
 }
 
-/// Supported command for using mirrord with container runtimes.
-#[derive(Subcommand, Debug)]
-pub(super) enum ContainerCommand {
-    Exec {
-        #[clap(flatten)]
-        /// Parameters to be passed to mirrord.
-        params: Box<ExecParams>,
+#[derive(Args, Debug)]
+pub struct ContainerExtCommand {
+    /// Specify config file to use
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
+    pub config_file: Option<PathBuf>,
 
-        /// Container command to be executed
-        #[arg(trailing_var_arg = true)]
-        exec: Vec<String>,
-    },
-    Ext {
-        /// Specify config file to use
-        #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
-        config_file: Option<PathBuf>,
-        /// Specify target
-        #[arg(short = 't')]
-        target: Option<String>,
-    },
-}
-
-impl ContainerCommand {
-    pub fn into_exec_parts(
-        self,
-    ) -> Either<(RuntimeArgs, ExecParams), (Option<PathBuf>, Option<String>)> {
-        match self {
-            ContainerCommand::Exec { params, exec } => {
-                let runtime_args = RuntimeArgs::parse_from(
-                    std::iter::once("mirrord container exec --".into()).chain(exec),
-                );
-
-                Either::Left((runtime_args, *params))
-            }
-            ContainerCommand::Ext {
-                config_file,
-                target,
-            } => Either::Right((config_file, target)),
-        }
-    }
+    /// Specify target
+    #[arg(short = 't')]
+    pub target: Option<String>,
 }
 
 #[derive(Parser, Debug)]

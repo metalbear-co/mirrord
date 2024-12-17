@@ -607,7 +607,7 @@ pub(crate) async fn container_ext_command(
         sidecar_intproxy_address.to_string(),
     );
 
-    let output = serde_json::to_string(&runtime_command.into_extension_result())?;
+    let output = serde_json::to_string(&runtime_command.into_command_extension_params())?;
     progress.success(Some(&output));
     execution_info.wait().await?;
 
