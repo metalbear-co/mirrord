@@ -47,17 +47,31 @@ pub trait PortRedirector {
     async fn next_connection(&mut self) -> Result<(TcpStream, SocketAddr), Self::Error>;
 }
 
-/// Implementation of [`PortRedirector`] that manipulates iptables to steal connections by
-/// redirecting TCP packets to inner [`TcpListener`].
-pub(crate) struct IpTablesRedirector {
+/// A TCP listener, together with an iptables wrapper to set rules that send traffic to the
+/// listener.
+pub(crate) struct IptablesListener {
     /// For altering iptables rules.
     iptables: Option<SafeIpTables<IPTablesWrapper>>,
-    /// Whether exisiting connections should be flushed when adding new redirects.
-    flush_connections: bool,
     /// Port of [`IpTablesRedirector::listener`].
     redirect_to: Port,
     /// Listener to which redirect all connections.
     listener: TcpListener,
+}
+
+/// Implementation of [`PortRedirector`] that manipulates iptables to steal connections by
+/// redirecting TCP packets to inner [`TcpListener`].
+pub(crate) struct IpTablesRedirector {
+    /// Whether existing connections should be flushed when adding new redirects.
+    flush_connections: bool,
+
+    /// TCP listener + iptables, for redirecting IPv4 connections.
+    /// Could be `None` if IPv6 support is enabled and we cannot bind an IPv4 address.
+    iptables_listener: Option<IptablesListener>,
+
+    /// TCP listener + ip6tables, for redirecting IPv6 connections.
+    /// Will only be `Some` if IPv6 support is enabled, and the agent is able to listen on an IPv6
+    /// address.
+    ip6tables_listener: Option<IptablesListener>,
 
     pod_ips: Option<String>,
 }
@@ -67,27 +81,63 @@ impl IpTablesRedirector {
     /// [`Ipv4Addr::UNSPECIFIED`] address and a random port. This listener will be used to accept
     /// redirected connections.
     ///
+    /// If `support_ipv6` is set, will also listen on IPv6, and a fail to listen over IPv4 will be
+    /// accepted.
+    ///
     /// # Note
     ///
     /// Does not yet alter iptables.
     ///
     /// # Params
     ///
-    /// * `flush_connections` - whether exisitng connections should be flushed when adding new
+    /// * `flush_connections` - whether existing connections should be flushed when adding new
     ///   redirects
     pub(crate) async fn new(
         flush_connections: bool,
         pod_ips: Option<String>,
+        support_ipv6: bool,
     ) -> Result<Self, AgentError> {
-        let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await?;
-        let redirect_to = listener.local_addr()?.port();
+        let bind_res = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await;
+        let (iptables_listener, ip6tables_listener) = if support_ipv6 {
+            let listener4 = bind_res
+                .inspect_err(
+                    |err| traceing::debug!(%err, "Could not bind IPv4, continuing with IPv6 only."),
+                )
+                .ok()
+                .and_then(|listener| {
+                    let redirect_to = listener.local_addr()?.port();
+                    Some(IptablesListener {
+                        iptables: None,
+                        redirect_to,
+                        listener,
+                    })
+                });
+            let listener = TcpListener::bind((Ipv6Addr::UNSPECIFIED, 0)).await?;
+            let redirect_to = listener.local_addr()?.port();
+            let listener6 = Some(IptablesListener {
+                iptables: None,
+                redirect_to,
+                listener,
+            });
+            (litener, listener6)
+        } else {
+            let listener = bind_res?;
+            let redirect_to = listener.local_addr()?.port();
+            (
+                Some(IptablesListener {
+                    iptables: None, // populated lazily
+                    listener,
+                    redirect_to,
+                }),
+                None,
+            )
+        };
 
         Ok(Self {
-            iptables: None,
             flush_connections,
-            redirect_to,
-            listener,
             pod_ips,
+            iptables_listener,
+            ip6tables_listener,
         })
     }
 }
