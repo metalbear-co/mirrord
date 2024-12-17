@@ -24,6 +24,10 @@ pub const MIRRORD_DETECT_DEBUGGER_PORT_ENV: &str = "MIRRORD_DETECT_DEBUGGER_PORT
 /// like '12233-13000' or multiple individual ports like '12233,13344,14455'
 pub const MIRRORD_IGNORE_DEBUGGER_PORTS_ENV: &str = "MIRRORD_IGNORE_DEBUGGER_PORTS";
 
+/// The default port used by node's --inspect debugger from the
+/// [node doceumentation](https://nodejs.org/en/learn/getting-started/debugging#enable-inspector)
+pub const NODE_INSPECTOR_DEFAULT_PORT: u16 = 9229;
+
 /// Type of debugger which is used to run the user's processes.
 /// Determines the way we parse the command line arguments the debugger's port.
 /// Logic of processing the arguments is based on examples taken from the IDEs.
@@ -215,9 +219,10 @@ impl DebuggerType {
                 .collect::<Vec<_>>()
             }
             Self::NodeInspector => {
-                let is_node = args.first().map(String::as_str).unwrap_or_default().ends_with("node");
+                let is_node = args.first().map(String::as_str).unwrap_or_default().ends_with("node") 
+                    || args.get(1).map(String::as_str).unwrap_or_default().ends_with("node");
 
-                if is_node && let Some(value) = get_env("NODE_OPTIONS") {
+                let mut res = if is_node && let Some(value) = get_env("NODE_OPTIONS") {
                     // matching specific flags so we avoid matching on, for example,
                     // `--inspect-publish-uid=http`
                     value.split_ascii_whitespace()
@@ -229,7 +234,9 @@ impl DebuggerType {
                     .collect::<Vec<_>>()
                 } else {
                     vec![]
-                }
+                };
+                res.push(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), NODE_INSPECTOR_DEFAULT_PORT));
+                res
             }
         }.iter().filter_map(|addr| match addr.ip() {
             IpAddr::V4(Ipv4Addr::LOCALHOST) | IpAddr::V6(Ipv6Addr::LOCALHOST) => Some(addr.port()),
