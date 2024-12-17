@@ -322,12 +322,17 @@ fn prepare_tls_certs_for_container(
 pub(crate) async fn container_command(
     runtime_args: RuntimeArgs,
     exec_params: ExecParams,
+    warn_about_old_cli_command: bool,
     watch: drain::Watch,
 ) -> CliResult<i32> {
     let mut progress = ProgressTracker::from_env("mirrord container");
 
     if runtime_args.command.has_publish() {
         progress.warning("mirrord container may have problems with \"-p\" directly container in command, please add to \"contanier.cli_extra_args\" in config if you are planning to publish ports");
+    }
+
+    if warn_about_old_cli_command {
+        progress.warning("\"mirrord container docker ...\" is depricated please use \"mirrord container exec docker ...\"");
     }
 
     progress.warning("mirrord container is currently an unstable feature");
@@ -343,9 +348,9 @@ pub(crate) async fn container_command(
 
     let (mut config, mut context) = LayerConfig::from_env_with_warnings()?;
 
+    // Initialize only error analytics, extproxy will be the full AnalyticsReporter.
     let mut analytics =
         AnalyticsReporter::only_error(config.telemetry, CONTAINER_EXECUTION_KIND, watch);
-    (&config).collect_analytics(analytics.get_mut());
 
     config.verify(&mut context)?;
     for warning in context.get_warnings() {
@@ -489,6 +494,7 @@ pub(crate) async fn container_ext_command(
 ) -> CliResult<()> {
     let mut progress = ProgressTracker::try_from_env("mirrord preparing to launch")
         .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
+
     let mut env: HashMap<String, String> = HashMap::new();
 
     if let Some(config_file) = config_file.as_ref() {
@@ -508,6 +514,7 @@ pub(crate) async fn container_ext_command(
     }
     let (mut config, mut context) = LayerConfig::from_env_with_warnings()?;
 
+    // Initialize only error analytics, extproxy will be the full AnalyticsReporter.
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
 
     config.verify(&mut context)?;

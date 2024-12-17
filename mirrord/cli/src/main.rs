@@ -687,20 +687,30 @@ fn main() -> miette::Result<()> {
             }
             Commands::Teams => teams::navigate_to_intro().await,
             Commands::Diagnose(args) => diagnose_command(*args).await?,
-            Commands::Container(args) => match args.into_container_command() {
-                ContainerCommand::Exec(params) => {
-                    let (runtime_args, exec_params) = params.into_parts();
+            Commands::Container(args) => {
+                let warn_about_old_cli_command = args.command.is_none();
 
-                    let exit_code = container_command(runtime_args, exec_params, watch).await?;
+                match args.into_container_command() {
+                    ContainerCommand::Exec(params) => {
+                        let (runtime_args, exec_params) = params.into_parts();
 
-                    if exit_code != 0 {
-                        std::process::exit(exit_code);
+                        let exit_code = container_command(
+                            runtime_args,
+                            exec_params,
+                            warn_about_old_cli_command,
+                            watch,
+                        )
+                        .await?;
+
+                        if exit_code != 0 {
+                            std::process::exit(exit_code);
+                        }
+                    }
+                    ContainerCommand::Ext(params) => {
+                        container_ext_command(params.config_file, params.target, watch).await?
                     }
                 }
-                ContainerCommand::Ext(params) => {
-                    container_ext_command(params.config_file, params.target, watch).await?
-                }
-            },
+            }
             Commands::ExternalProxy { port } => external_proxy::proxy(port, watch).await?,
             Commands::PortForward(args) => port_forward(&args, watch).await?,
             Commands::Vpn(args) => vpn::vpn_command(*args).await?,
