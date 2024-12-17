@@ -225,7 +225,9 @@ impl ClientConnectionHandler {
             state.metrics.clone(),
         );
 
-        let tcp_sniffer_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection).await;
+        let tcp_sniffer_api =
+            Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection, state.metrics.clone())
+                .await;
         let tcp_stealer_api =
             Self::create_stealer_api(id, bg_tasks.stealer, &mut connection).await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
@@ -253,9 +255,10 @@ impl ClientConnectionHandler {
         id: ClientId,
         task: BackgroundTask<SnifferCommand>,
         connection: &mut ClientConnection,
+        metrics: ActorRef<MetricsActor>,
     ) -> Option<TcpSnifferApi> {
         if let BackgroundTask::Running(sniffer_status, sniffer_sender) = task {
-            match TcpSnifferApi::new(id, sniffer_sender, sniffer_status).await {
+            match TcpSnifferApi::new(id, sniffer_sender, sniffer_status, metrics).await {
                 Ok(api) => Some(api),
                 Err(e) => {
                     let message = format!(

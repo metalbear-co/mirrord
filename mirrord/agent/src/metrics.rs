@@ -65,8 +65,10 @@ async fn get_metrics(metrics: Extension<ActorRef<MetricsActor>>) -> Result<Strin
 #[derive(Default)]
 pub(crate) struct MetricsActor {
     enabled: bool,
-    open_fds_count: u64,
-    connected_clients_count: u64,
+    open_fd_count: u64,
+    connected_client_count: u64,
+    port_subscription_count: u64,
+    connection_subscription_count: u64,
 }
 
 impl MetricsActor {
@@ -105,10 +107,18 @@ impl Actor for MetricsActor {
     }
 }
 
-pub(crate) struct MetricsIncrementFd;
-pub(crate) struct MetricsDecrementFd;
-pub(crate) struct MetricsClientConnected;
-pub(crate) struct MetricsClientDisconnected;
+pub(crate) struct MetricsIncFd;
+pub(crate) struct MetricsDecFd;
+
+pub(crate) struct MetricsIncClient;
+pub(crate) struct MetricsDecClient;
+
+pub(crate) struct MetricsIncPortSubscription;
+pub(crate) struct MetricsDecPortSubscription;
+
+pub(crate) struct MetricsIncConnectionSubscription;
+pub(crate) struct MetricsDecConnectionSubscription;
+
 pub(crate) struct MetricsGetAll;
 
 #[derive(Reply, Serialize)]
@@ -117,55 +127,107 @@ pub(crate) struct MetricsGetAllReply {
     connected_clients_count: u64,
 }
 
-impl Message<MetricsIncrementFd> for MetricsActor {
+impl Message<MetricsIncFd> for MetricsActor {
     type Reply = ();
 
     #[tracing::instrument(level = Level::INFO, skip_all)]
     async fn handle(
         &mut self,
-        _: MetricsIncrementFd,
+        _: MetricsIncFd,
         _ctx: Context<'_, Self, Self::Reply>,
     ) -> Self::Reply {
-        self.open_fds_count += 1;
+        self.open_fd_count += 1;
     }
 }
 
-impl Message<MetricsDecrementFd> for MetricsActor {
+impl Message<MetricsDecFd> for MetricsActor {
     type Reply = ();
 
     #[tracing::instrument(level = Level::INFO, skip_all)]
     async fn handle(
         &mut self,
-        _: MetricsDecrementFd,
+        _: MetricsDecFd,
         _ctx: Context<'_, Self, Self::Reply>,
     ) -> Self::Reply {
-        self.open_fds_count = self.open_fds_count.saturating_sub(1);
+        self.open_fd_count = self.open_fd_count.saturating_sub(1);
     }
 }
 
-impl Message<MetricsClientConnected> for MetricsActor {
+impl Message<MetricsIncClient> for MetricsActor {
     type Reply = ();
 
     #[tracing::instrument(level = Level::INFO, skip_all)]
     async fn handle(
         &mut self,
-        _: MetricsClientConnected,
+        _: MetricsIncClient,
         _ctx: Context<'_, Self, Self::Reply>,
     ) -> Self::Reply {
-        self.connected_clients_count += 1;
+        self.connected_client_count += 1;
     }
 }
 
-impl Message<MetricsClientDisconnected> for MetricsActor {
+impl Message<MetricsDecClient> for MetricsActor {
     type Reply = ();
 
     #[tracing::instrument(level = Level::INFO, skip_all)]
     async fn handle(
         &mut self,
-        _: MetricsClientDisconnected,
+        _: MetricsDecClient,
         _ctx: Context<'_, Self, Self::Reply>,
     ) -> Self::Reply {
-        self.connected_clients_count = self.connected_clients_count.saturating_sub(1);
+        self.connected_client_count = self.connected_client_count.saturating_sub(1);
+    }
+}
+
+impl Message<MetricsIncPortSubscription> for MetricsActor {
+    type Reply = ();
+
+    #[tracing::instrument(level = Level::INFO, skip_all)]
+    async fn handle(
+        &mut self,
+        _: MetricsIncPortSubscription,
+        _ctx: Context<'_, Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.port_subscription_count += 1;
+    }
+}
+
+impl Message<MetricsDecPortSubscription> for MetricsActor {
+    type Reply = ();
+
+    #[tracing::instrument(level = Level::INFO, skip_all)]
+    async fn handle(
+        &mut self,
+        _: MetricsDecPortSubscription,
+        _ctx: Context<'_, Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.port_subscription_count = self.port_subscription_count.saturating_sub(1);
+    }
+}
+
+impl Message<MetricsIncConnectionSubscription> for MetricsActor {
+    type Reply = ();
+
+    #[tracing::instrument(level = Level::INFO, skip_all)]
+    async fn handle(
+        &mut self,
+        _: MetricsIncConnectionSubscription,
+        _ctx: Context<'_, Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.connection_subscription_count += 1;
+    }
+}
+
+impl Message<MetricsDecConnectionSubscription> for MetricsActor {
+    type Reply = ();
+
+    #[tracing::instrument(level = Level::INFO, skip_all)]
+    async fn handle(
+        &mut self,
+        _: MetricsDecConnectionSubscription,
+        _ctx: Context<'_, Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.connection_subscription_count = self.connection_subscription_count.saturating_sub(1);
     }
 }
 
@@ -179,8 +241,8 @@ impl Message<MetricsGetAll> for MetricsActor {
         _ctx: Context<'_, Self, Self::Reply>,
     ) -> Self::Reply {
         MetricsGetAllReply {
-            open_fds_count: self.open_fds_count,
-            connected_clients_count: self.connected_clients_count,
+            open_fds_count: self.open_fd_count,
+            connected_clients_count: self.connected_client_count,
         }
     }
 }

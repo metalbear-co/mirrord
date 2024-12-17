@@ -57,10 +57,24 @@ pub struct TcpClose {
 }
 
 /// Messages related to Tcp handler from client.
+///
+/// Part of the `mirror` feature.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum LayerTcp {
+    /// User is interested in mirroring traffic on this `Port`, so add it to the list of
+    /// ports that the sniffer is filtering.
     PortSubscribe(Port),
+
+    /// User is not interested in the connection with `ConnectionId` anymore.
+    ///
+    /// This means that their app has closed the connection they were `listen`ning on.
+    ///
+    /// There is no `ConnectionSubscribe` counter-part of this variant, the subscription
+    /// happens when the sniffer receives an (agent) internal `SniffedConnection`.
     ConnectionUnsubscribe(ConnectionId),
+
+    /// Removes this `Port` from the sniffer's filter, the traffic won't be cloned to mirrord
+    /// anymore.
     PortUnsubscribe(Port),
 }
 

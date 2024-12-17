@@ -17,7 +17,7 @@ use tracing::{error, trace, Level};
 
 use crate::{
     error::Result,
-    metrics::{MetricsActor, MetricsDecrementFd, MetricsIncrementFd},
+    metrics::{MetricsActor, MetricsDecFd, MetricsIncFd},
 };
 
 #[derive(Debug)]
@@ -288,7 +288,7 @@ impl FileManager {
         if self.open_files.insert(fd, remote_file).is_none() {
             let _ = self
                 .metrics
-                .tell(MetricsIncrementFd)
+                .tell(MetricsIncFd)
                 .await
                 .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
         }
@@ -328,7 +328,7 @@ impl FileManager {
             if self.open_files.insert(fd, remote_file).is_none() {
                 let _ = self
                     .metrics
-                    .tell(MetricsIncrementFd)
+                    .tell(MetricsIncFd)
                     .await
                     .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
             }
@@ -544,7 +544,7 @@ impl FileManager {
         } else {
             let _ = self
                 .metrics
-                .tell(MetricsDecrementFd)
+                .tell(MetricsDecFd)
                 .await
                 .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
         }
@@ -561,7 +561,7 @@ impl FileManager {
         } else {
             let _ = self
                 .metrics
-                .tell(MetricsDecrementFd)
+                .tell(MetricsDecFd)
                 .await
                 .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
         }
@@ -691,7 +691,7 @@ impl FileManager {
         if self.dir_streams.insert(fd, dir_stream).is_none() {
             let _ = self
                 .metrics
-                .tell(MetricsIncrementFd)
+                .tell(MetricsIncFd)
                 .await
                 .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
         }

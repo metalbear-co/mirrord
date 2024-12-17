@@ -1,6 +1,7 @@
 use std::ops::RangeInclusive;
 
 use futures::{stream::FuturesUnordered, StreamExt};
+use kameo::actor::ActorRef;
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ConnectionId, LogMessage, Port,
@@ -15,7 +16,15 @@ use tokio_stream::{
 };
 
 use super::messages::{SniffedConnection, SnifferCommand, SnifferCommandInner};
-use crate::{error::AgentError, util::ClientId, watched_task::TaskStatus};
+use crate::{
+    error::AgentError,
+    metrics::{
+        MetricsActor, MetricsDecConnectionSubscription, MetricsDecPortSubscription,
+        MetricsIncPortSubscription,
+    },
+    util::ClientId,
+    watched_task::TaskStatus,
+};
 
 /// Interface used by clients to interact with the
 /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer). Multiple instances of this struct operate
@@ -36,6 +45,7 @@ pub(crate) struct TcpSnifferApi {
     connection_ids_iter: RangeInclusive<ConnectionId>,
     /// [`LayerTcp::PortSubscribe`] requests in progress.
     subscriptions_in_progress: FuturesUnordered<oneshot::Receiver<Port>>,
+    metrics: ActorRef<MetricsActor>,
 }
 
 impl TcpSnifferApi {
@@ -51,10 +61,12 @@ impl TcpSnifferApi {
     ///   [`TcpConnectionSniffer`](super::TcpConnectionSniffer)
     /// * `task_status` - handle to the [`TcpConnectionSniffer`](super::TcpConnectionSniffer) exit
     ///   status
+    /// * `metrics` - used to send agent metrics messages to our metrics actor;
     pub async fn new(
         client_id: ClientId,
         sniffer_sender: Sender<SnifferCommand>,
         mut task_status: TaskStatus,
+        metrics: ActorRef<MetricsActor>,
     ) -> Result<Self, AgentError> {
         let (sender, receiver) = mpsc::channel(Self::CONNECTION_CHANNEL_SIZE);
 
@@ -74,6 +86,7 @@ impl TcpSnifferApi {
             connections: Default::default(),
             connection_ids_iter: (0..=ConnectionId::MAX),
             subscriptions_in_progress: Default::default(),
+            metrics,
         })
     }
 
@@ -158,7 +171,7 @@ impl TcpSnifferApi {
         }
     }
 
-    /// Tansform the given message into a [`SnifferCommand`] and pass it to the connected
+    /// Tansforms a [`LayerTcp`] message into a [`SnifferCommand`] and passes it to the connected
     /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
     pub async fn handle_client_message(&mut self, message: LayerTcp) -> Result<(), AgentError> {
         match message {
@@ -168,16 +181,36 @@ impl TcpSnifferApi {
                     .await?;
                 self.subscriptions_in_progress.push(rx);
 
+                let _ = self
+                    .metrics
+                    .tell(MetricsIncPortSubscription)
+                    .await
+                    .inspect_err(|fail| tracing::trace!(?fail));
+
                 Ok(())
             }
 
             LayerTcp::PortUnsubscribe(port) => {
                 self.send_command(SnifferCommandInner::UnsubscribePort(port))
+                    .await?;
+
+                let _ = self
+                    .metrics
+                    .tell(MetricsDecPortSubscription)
                     .await
+                    .inspect_err(|fail| tracing::trace!(?fail));
+
+                Ok(())
             }
 
             LayerTcp::ConnectionUnsubscribe(connection_id) => {
                 self.connections.remove(&connection_id);
+
+                let _ = self
+                    .metrics
+                    .tell(MetricsDecConnectionSubscription)
+                    .await
+                    .inspect_err(|fail| tracing::trace!(?fail));
 
                 Ok(())
             }
