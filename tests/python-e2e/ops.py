@@ -54,8 +54,8 @@ class FileOpsTest(unittest.TestCase):
         """
         Creates a new directory in "/tmp" and verifies if the directory exists.
         """
-        os.mkdir("/tmp/test")
-        self.assertTrue(os.path.isdir("/tmp/test"))
+        os.mkdir("/tmp/test_mkdir")
+        self.assertTrue(os.path.isdir("/tmp/test_mkdir"))
     
     def test_mkdirat(self):
         """
@@ -64,8 +64,8 @@ class FileOpsTest(unittest.TestCase):
         dir = os.open(
             "/tmp", os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_DIRECTORY
         )
-        os.mkdir("test", dir_fd=dir)
-        self.assertTrue(os.path.isdir("/tmp/test"))
+        os.mkdir("test_mkdirat", dir_fd=dir)
+        self.assertTrue(os.path.isdir("/tmp/test_mkdirat"))
         os.close(dir)
 
     def _create_new_tmp_file(self):

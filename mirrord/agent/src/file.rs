@@ -4,7 +4,7 @@ use std::{
     fs::{self, read_link, File, OpenOptions, ReadDir},
     io::{self, prelude::*, BufReader, SeekFrom},
     iter::{Enumerate, Peekable},
-    ops::{Not, RangeInclusive},
+    ops::RangeInclusive,
     os::unix::{
         fs::{MetadataExt, PermissionsExt},
         prelude::FileExt,
@@ -492,8 +492,8 @@ impl FileManager {
 
         let result = std::fs::create_dir(Path::new(&path));
 
-        if result.is_ok().not() {
-            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        if let Err(err) = &result {
+            let errno = err.raw_os_error().unwrap_or(0);
             return Ok(MakeDirResponse { result: -1, errno });
         }
 
@@ -527,7 +527,20 @@ impl FileManager {
         if let RemoteFile::Directory(relative_dir) = relative_dir {
             let path = relative_dir.join(path);
 
-            self.mkdir(path.as_path(), mode)
+            let result = std::fs::create_dir(Path::new(&path));
+
+            if let Err(err) = &result {
+                let errno = err.raw_os_error().unwrap_or(0);
+                return Ok(MakeDirResponse { result: -1, errno });
+            }
+
+            let permissions = fs::Permissions::from_mode(mode);
+            fs::set_permissions(path, permissions)?;
+
+            Ok(MakeDirResponse {
+                result: 0,
+                errno: 0,
+            })
         } else {
             Err(ResponseError::NotDirectory(dirfd))
         }

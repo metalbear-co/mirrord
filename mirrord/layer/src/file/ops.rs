@@ -341,8 +341,6 @@ pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
 pub(crate) fn mkdir(pathname: Detour<PathBuf>, mode: u32) -> Detour<MakeDirResponse> {
     let pathname = pathname?;
 
-    // TODO: (validate this) I think mirrord doesn't have a way to get the current working directory
-    // (yet?) so relative paths should be ignored. (Copied from open/openat hook)
     check_relative_paths!(pathname);
 
     let path = remap_path!(pathname);
