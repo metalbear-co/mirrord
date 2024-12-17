@@ -59,6 +59,10 @@ pub(super) enum Commands {
     #[command(hide = true, name = "ls")]
     ListTargets(Box<ListTargetArgs>),
 
+    /// mirrord container extension integration.
+    #[command(hide = true, name = "container-ext")]
+    ExtensionContainer(Box<ExtensionContainerArgs>),
+
     /// Extension execution - used by extension to execute binaries.
     #[command(hide = true, name = "ext")]
     ExtensionExec(Box<ExtensionExecArgs>),
@@ -120,8 +124,8 @@ impl core::fmt::Display for FsMode {
     }
 }
 
-#[derive(Args, Debug)]
 /// Parameters to override any values from mirrord-config as part of `exec` or `container` commands.
+#[derive(Args, Debug)]
 pub(super) struct ExecParams {
     /// Parameters for the target
     #[clap(flatten)]
@@ -337,10 +341,11 @@ impl ExecParams {
     }
 }
 
+// `mirrord exec` command
 #[derive(Args, Debug)]
 pub(super) struct ExecArgs {
     #[clap(flatten)]
-    pub params: ExecParams,
+    pub params: Box<ExecParams>,
 
     /// Binary to execute and connect with the remote pod.
     pub binary: String,
@@ -759,7 +764,7 @@ pub(super) enum DiagnoseCommand {
     },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, serde::Serialize)]
 /// Runtimes supported by the `mirrord container` command.
 pub(super) enum ContainerRuntime {
     Docker,
@@ -777,12 +782,13 @@ impl std::fmt::Display for ContainerRuntime {
     }
 }
 
+// `mirrord container` command
 #[derive(Args, Debug)]
-/// Args for the `mirrord container` command.
+#[clap(args_conflicts_with_subcommands = true)]
 pub(super) struct ContainerArgs {
-    #[clap(flatten)]
     /// Parameters to be passed to mirrord.
-    pub params: ExecParams,
+    #[clap(flatten)]
+    pub params: Box<ExecParams>,
 
     /// Container command to be executed
     #[arg(trailing_var_arg = true)]
@@ -790,14 +796,28 @@ pub(super) struct ContainerArgs {
 }
 
 impl ContainerArgs {
+    /// Unpack exec command to inner components [`RuntimeArgs`] and [`ExecParams`]
+    /// (need to parse [`RuntimeArgs`] here just to make clap happy with nested trailing_var_arg)
     pub fn into_parts(self) -> (RuntimeArgs, ExecParams) {
         let ContainerArgs { params, exec } = self;
 
-        let runtime_args =
-            RuntimeArgs::parse_from(std::iter::once("mirrord container --".into()).chain(exec));
+        let runtime_args = RuntimeArgs::parse_from(
+            std::iter::once("mirrord container exec --".into()).chain(exec),
+        );
 
-        (runtime_args, params)
+        (runtime_args, *params)
     }
+}
+
+#[derive(Args, Debug)]
+pub struct ExtensionContainerArgs {
+    /// Specify config file to use
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
+    pub config_file: Option<PathBuf>,
+
+    /// Specify target
+    #[arg(short = 't')]
+    pub target: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -808,12 +828,12 @@ pub struct RuntimeArgs {
 
     #[command(subcommand)]
     /// Command to use with `mirrord container`.
-    pub command: ContainerCommand,
+    pub command: ContainerRuntimeCommand,
 }
 
 /// Supported command for using mirrord with container runtimes.
 #[derive(Subcommand, Debug, Clone)]
-pub(super) enum ContainerCommand {
+pub(super) enum ContainerRuntimeCommand {
     /// Execute a `<RUNTIME> run` command with mirrord loaded.
     Run {
         /// Arguments that will be propogated to underlying `<RUNTIME> run` command.
@@ -822,15 +842,15 @@ pub(super) enum ContainerCommand {
     },
 }
 
-impl ContainerCommand {
+impl ContainerRuntimeCommand {
     pub fn run<T: Into<String>>(runtime_args: impl IntoIterator<Item = T>) -> Self {
-        ContainerCommand::Run {
+        ContainerRuntimeCommand::Run {
             runtime_args: runtime_args.into_iter().map(T::into).collect(),
         }
     }
 
     pub fn has_publish(&self) -> bool {
-        let ContainerCommand::Run { runtime_args } = self;
+        let ContainerRuntimeCommand::Run { runtime_args } = self;
 
         let mut hit_trailing_token = false;
 
@@ -919,15 +939,15 @@ mod tests {
         let command = "mirrord container -t deploy/test podman run -it --rm debian";
         let result = Cli::parse_from(command.split(' '));
 
-        let Commands::Container(continaer) = result.commands else {
+        let Commands::Container(container) = result.commands else {
             panic!("cli command didn't parse into container command, got: {result:#?}")
         };
 
-        let (runtime_args, _) = continaer.into_parts();
+        let (runtime_args, _) = container.into_parts();
 
         assert_eq!(runtime_args.runtime, ContainerRuntime::Podman);
 
-        let ContainerCommand::Run { runtime_args } = runtime_args.command;
+        let ContainerRuntimeCommand::Run { runtime_args } = runtime_args.command;
 
         assert_eq!(runtime_args, vec!["-it", "--rm", "debian"]);
     }
@@ -937,15 +957,15 @@ mod tests {
         let command = "mirrord container -t deploy/test -- podman run -it --rm debian";
         let result = Cli::parse_from(command.split(' '));
 
-        let Commands::Container(continaer) = result.commands else {
+        let Commands::Container(container) = result.commands else {
             panic!("cli command didn't parse into container command, got: {result:#?}")
         };
 
-        let (runtime_args, _) = continaer.into_parts();
+        let (runtime_args, _) = container.into_parts();
 
         assert_eq!(runtime_args.runtime, ContainerRuntime::Podman);
 
-        let ContainerCommand::Run { runtime_args } = runtime_args.command;
+        let ContainerRuntimeCommand::Run { runtime_args } = runtime_args.command;
 
         assert_eq!(runtime_args, vec!["-it", "--rm", "debian"]);
     }

@@ -11,7 +11,7 @@ use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use config::*;
 use connection::create_and_connect;
-use container::container_command;
+use container::{container_command, container_ext_command};
 use diagnose::diagnose_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
@@ -689,11 +689,15 @@ fn main() -> miette::Result<()> {
             Commands::Diagnose(args) => diagnose_command(*args).await?,
             Commands::Container(args) => {
                 let (runtime_args, exec_params) = args.into_parts();
+
                 let exit_code = container_command(runtime_args, exec_params, watch).await?;
 
                 if exit_code != 0 {
                     std::process::exit(exit_code);
                 }
+            }
+            Commands::ExtensionContainer(args) => {
+                container_ext_command(args.config_file, args.target, watch).await?
             }
             Commands::ExternalProxy { port } => external_proxy::proxy(port, watch).await?,
             Commands::PortForward(args) => port_forward(&args, watch).await?,

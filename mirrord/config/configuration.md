@@ -436,6 +436,10 @@ Path of the mirrord-layer lib inside the specified mirrord-cli image.
 
 Defaults to `"/opt/mirrord/lib/libmirrord_layer.so"`.
 
+### container.cli_prevent_cleanup {#container-cli_extra_args}
+
+Don't add `--rm` to sidecar command to prevent cleanup.
+
 ## experimental {#root-experimental}
 
 mirrord Experimental features.
