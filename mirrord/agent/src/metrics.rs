@@ -64,8 +64,18 @@ async fn get_metrics(metrics: Extension<ActorRef<MetricsActor>>) -> Result<Strin
 
 #[derive(Default)]
 pub(crate) struct MetricsActor {
+    enabled: bool,
     open_fds_count: u64,
     connected_clients_count: u64,
+}
+
+impl MetricsActor {
+    pub(crate) fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            ..Default::default()
+        }
+    }
 }
 
 impl Actor for MetricsActor {
@@ -73,21 +83,23 @@ impl Actor for MetricsActor {
 
     #[tracing::instrument(level = Level::INFO, skip_all, ret ,err)]
     async fn on_start(&mut self, metrics: ActorRef<Self>) -> Result<(), BoxError> {
-        let app = Router::new()
-            .route("/metrics", get(get_metrics))
-            .layer(Extension(metrics));
+        if self.enabled {
+            let app = Router::new()
+                .route("/metrics", get(get_metrics))
+                .layer(Extension(metrics));
 
-        let listener = TcpListener::bind("0.0.0.0:9000")
-            .await
-            .map_err(AgentError::from)
-            .inspect_err(|fail| tracing::error!(?fail, "Actor listener!"))?;
+            let listener = TcpListener::bind("0.0.0.0:9000")
+                .await
+                .map_err(AgentError::from)
+                .inspect_err(|fail| tracing::error!(?fail, "Actor listener!"))?;
 
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.inspect_err(|fail| {
-                tracing::error!(%fail, "Could not start agent metrics
+            tokio::spawn(async move {
+                axum::serve(listener, app).await.inspect_err(|fail| {
+                    tracing::error!(%fail, "Could not start agent metrics
         server!")
-            })
-        });
+                })
+            });
+        }
 
         Ok(())
     }

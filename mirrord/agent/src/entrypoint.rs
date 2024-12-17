@@ -13,7 +13,7 @@ use client_connection::AgentTlsConnector;
 use dns::{DnsCommand, DnsWorker};
 use futures::TryFutureExt;
 use kameo::actor::ActorRef;
-use metrics::{MetricsActor, MetricsIncrementFd};
+use metrics::MetricsActor;
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use sniffer::tcp_capture::RawSocketTcpCapture;
 use tokio::{
@@ -71,12 +71,12 @@ struct State {
     /// When present, it is used to secure incoming TCP connections.
     tls_connector: Option<AgentTlsConnector>,
 
-    metrics: Option<ActorRef<MetricsActor>>,
+    metrics: ActorRef<MetricsActor>,
 }
 
 impl State {
     /// Return [`Err`] if container runtime operations failed.
-    pub async fn new(args: &Args, metrics: Option<ActorRef<MetricsActor>>) -> Result<State> {
+    pub async fn new(args: &Args, metrics: ActorRef<MetricsActor>) -> Result<State> {
         let tls_connector = args
             .operator_tls_cert_pem
             .clone()
@@ -222,7 +222,7 @@ impl ClientConnectionHandler {
 
         let file_manager = FileManager::new(
             pid.or_else(|| state.ephemeral.then_some(1)),
-            state.metrics.clone().unwrap(),
+            state.metrics.clone(),
         );
 
         let tcp_sniffer_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection).await;
@@ -500,7 +500,7 @@ impl ClientConnectionHandler {
 async fn start_agent(args: Args) -> Result<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
 
-    let metrics = kameo::spawn(MetricsActor::default());
+    let metrics = kameo::spawn(MetricsActor::new(true));
 
     let listener = TcpListener::bind(SocketAddrV4::new(
         Ipv4Addr::UNSPECIFIED,
@@ -508,7 +508,7 @@ async fn start_agent(args: Args) -> Result<()> {
     ))
     .await?;
 
-    let state = State::new(&args, Some(metrics)).await?;
+    let state = State::new(&args, metrics).await?;
 
     let cancellation_token = CancellationToken::new();
 
@@ -771,7 +771,8 @@ async fn run_child_agent() -> Result<()> {
 async fn start_iptable_guard(args: Args) -> Result<()> {
     debug!("start_iptable_guard -> Initializing iptable-guard.");
 
-    let state = State::new(&args, None).await?;
+    let metrics = kameo::spawn(MetricsActor::new(false));
+    let state = State::new(&args, metrics).await?;
     let pid = state.container_pid();
 
     std::env::set_var(IPTABLE_PREROUTING_ENV, IPTABLE_PREROUTING.as_str());
