@@ -120,8 +120,8 @@ impl core::fmt::Display for FsMode {
     }
 }
 
-#[derive(Args, Debug)]
 /// Parameters to override any values from mirrord-config as part of `exec` or `container` commands.
+#[derive(Args, Debug)]
 pub(super) struct ExecParams {
     /// Parameters for the target
     #[clap(flatten)]
@@ -337,6 +337,7 @@ impl ExecParams {
     }
 }
 
+// `mirrord exec` command
 #[derive(Args, Debug)]
 pub(super) struct ExecArgs {
     #[clap(flatten)]
@@ -777,9 +778,9 @@ impl std::fmt::Display for ContainerRuntime {
     }
 }
 
+// `mirrord container` command
 #[derive(Args, Debug)]
 #[clap(args_conflicts_with_subcommands = true)]
-/// Args for the `mirrord container` command.
 pub(super) struct ContainerArgs {
     #[clap(subcommand)]
     pub command: Option<ContainerCommand>,
@@ -802,14 +803,18 @@ impl ContainerArgs {
 /// Supported command for using mirrord with container runtimes.
 #[derive(Subcommand, Debug)]
 pub(super) enum ContainerCommand {
+    /// Execute container command with mirrord loaded
     Exec(ContainerExecSubcommand),
+
+    /// mirrord extension integration.
+    #[clap(hide = true)]
     Ext(ContainerExtSubcommand),
 }
 
 #[derive(Args, Debug)]
 pub struct ContainerExecSubcommand {
-    #[clap(flatten)]
     /// Parameters to be passed to mirrord.
+    #[clap(flatten)]
     pub params: Box<ExecParams>,
 
     /// Container command to be executed
