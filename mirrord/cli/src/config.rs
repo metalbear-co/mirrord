@@ -806,7 +806,7 @@ pub(super) enum ContainerCommand {
     /// Execute container command with mirrord loaded
     Exec(ContainerExecSubcommand),
 
-    /// mirrord extension integration.
+    /// mirrord container extension integration.
     #[clap(hide = true)]
     Ext(ContainerExtSubcommand),
 }
