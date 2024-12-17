@@ -10,9 +10,7 @@ use std::{
 
 use clap::ValueEnum;
 use local_ip_address::local_ip;
-use mirrord_analytics::{
-    AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
-};
+use mirrord_analytics::{AnalyticsError, AnalyticsReporter, ExecutionKind, Reporter};
 use mirrord_config::{
     external_proxy::{MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV, MIRRORD_EXTERNAL_TLS_KEY_ENV},
     internal_proxy::{
