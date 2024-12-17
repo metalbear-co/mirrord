@@ -492,7 +492,7 @@ pub(crate) async fn container_ext_command(
     let mut env: HashMap<String, String> = HashMap::new();
 
     if let Some(config_file) = config_file.as_ref() {
-        // Set canoncialized path to config file, in case forks/children are in different
+        // Set canoncialized path to config file, in case forks/children processes are in different
         // working directories.
         let full_path = std::fs::canonicalize(config_file)
             .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.into(), e))?;
