@@ -6,7 +6,8 @@ use std::{collections::BTreeMap, time::Duration};
 
 use kube::Api;
 use mirrord_operator::crd::{
-    label_selector::LabelSelector, BlockedFeature, MirrordPolicy, MirrordPolicySpec,
+    label_selector::LabelSelector,
+    policy::{BlockedFeature, MirrordPolicy, MirrordPolicySpec},
 };
 use rstest::{fixture, rstest};
 

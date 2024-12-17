@@ -20,13 +20,13 @@ workspace = true
 # we don't like upstream apple-platform-rs because it depends on RSA which has an open CVE.
 apple-codesign = { git = "https://github.com/metalbear-co/apple-platform-rs-mini", version = "0.27", default-features = false }
 object = "0.36"
-tempfile = "3"
+tempfile.workspace = true
 
-once_cell.workspace = true
+once_cell = "1"
 tracing.workspace = true
 thiserror.workspace = true
 which.workspace = true
 
 
 [dev-dependencies]
-tempfile = "3.3.0"
+tempfile.workspace = true

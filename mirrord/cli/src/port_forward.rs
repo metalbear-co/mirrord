@@ -440,6 +440,7 @@ pub struct ReversePortForwarder {
 
     /// true if Ping has been sent to agent.
     waiting_for_pong: bool,
+    ping_pong_timeout: Instant,
 }
 
 impl ReversePortForwarder {
@@ -480,6 +481,7 @@ impl ReversePortForwarder {
             background_tasks,
             incoming_proxy: incoming,
             waiting_for_pong: false,
+            ping_pong_timeout: Instant::now(),
         })
     }
 
@@ -511,13 +513,14 @@ impl ReversePortForwarder {
 
         loop {
             select! {
-                _ = tokio::time::sleep(Duration::from_secs(30)) => {
+                _ = tokio::time::sleep_until(self.ping_pong_timeout.into()) => {
                     if self.waiting_for_pong {
                         // no pong received before timeout
                         break Err(PortForwardError::AgentError("agent failed to respond to Ping".into()));
                     }
                     self.agent_connection.sender.send(ClientMessage::Ping).await?;
                     self.waiting_for_pong = true;
+                    self.ping_pong_timeout = Instant::now() + Duration::from_secs(30);
                 },
 
                 message = self.agent_connection.receiver.recv() => match message {

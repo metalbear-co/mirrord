@@ -558,6 +558,8 @@ pub(crate) fn statx_logic(
     statx_buf: *mut statx,
 ) -> Detour<c_int> {
     // SAFETY: we don't check pointers passed as arguments to hooked functions
+
+    use std::mem;
     let statx_buf = unsafe { statx_buf.as_mut().ok_or(HookError::BadPointer)? };
 
     if path_name.is_null() {
@@ -606,11 +608,12 @@ pub(crate) fn statx_logic(
     fn nanos_to_statx(nanos: i64) -> statx_timestamp {
         let duration = Duration::from_nanos(nanos.try_into().unwrap_or(0));
 
-        statx_timestamp {
-            tv_sec: duration.as_secs().try_into().unwrap_or(i64::MAX),
-            tv_nsec: duration.subsec_nanos(),
-            __statx_timestamp_pad1: [0],
-        }
+        // Safety: This is just initializing a C-type, we should be fine.
+        let mut result = unsafe { mem::zeroed::<statx_timestamp>() };
+        result.tv_sec = duration.as_secs().try_into().unwrap_or(i64::MAX);
+        result.tv_nsec = duration.subsec_nanos();
+
+        result
     }
 
     /// Converts a device id from [`MetadataInternal`](mirrord_protocol::file::MetadataInternal) to

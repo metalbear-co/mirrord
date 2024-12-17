@@ -145,6 +145,12 @@ impl From<u32> for AnalyticValue {
     }
 }
 
+impl From<u64> for AnalyticValue {
+    fn from(n: u64) -> Self {
+        AnalyticValue::Number(u32::try_from(n).unwrap_or(u32::MAX))
+    }
+}
+
 impl From<usize> for AnalyticValue {
     fn from(n: usize) -> Self {
         AnalyticValue::Number(u32::try_from(n).unwrap_or(u32::MAX))

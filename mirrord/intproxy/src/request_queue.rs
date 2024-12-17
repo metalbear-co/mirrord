@@ -14,44 +14,59 @@
 use std::{collections::VecDeque, fmt};
 
 use mirrord_intproxy_protocol::{LayerId, MessageId};
-use thiserror::Error;
 use tracing::Level;
-
-/// Erorr returned when the proxy attempts to retrieve [`MessageId`] and [`LayerId`] of a request
-/// corresponding to a response received from the agent, but the [`RequestQueue`] is empty. This
-/// error should never happen.
-#[derive(Error, Debug)]
-#[error("request queue is empty")]
-pub struct RequestQueueEmpty;
 
 /// A queue used to match agent responses with layer requests.
 /// A single queue can be used for multiple types of requests only if the agent preserves order
 /// between them.
-#[derive(Default)]
-pub struct RequestQueue {
-    inner: VecDeque<(MessageId, LayerId)>,
+pub struct RequestQueue<T = ()> {
+    inner: VecDeque<(MessageId, LayerId, T)>,
 }
 
-impl fmt::Debug for RequestQueue {
+impl<T> Default for RequestQueue<T> {
+    fn default() -> Self {
+        Self {
+            inner: Default::default(),
+        }
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for RequestQueue<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RequestQueue")
             .field("queue_len", &self.inner.len())
-            .field("front", &self.inner.front().copied())
-            .field("back", &self.inner.back().copied())
+            .field("front", &self.inner.front())
+            .field("back", &self.inner.back())
             .finish()
     }
 }
 
-impl RequestQueue {
+impl<T: Default + fmt::Debug> RequestQueue<T> {
     /// Save the request at the end of this queue.
     #[tracing::instrument(level = Level::TRACE)]
-    pub fn insert(&mut self, message_id: MessageId, layer_id: LayerId) {
-        self.inner.push_back((message_id, layer_id));
+    pub fn push_back(&mut self, message_id: MessageId, layer_id: LayerId) {
+        self.inner
+            .push_back((message_id, layer_id, Default::default()));
+    }
+}
+
+impl<T: fmt::Debug> RequestQueue<T> {
+    /// Retrieve and remove a request from the front of this queue.
+    #[tracing::instrument(level = Level::TRACE)]
+    pub fn pop_front(&mut self) -> Option<(MessageId, LayerId)> {
+        let (message_id, layer_id, _) = self.inner.pop_front()?;
+        Some((message_id, layer_id))
+    }
+
+    /// Save the request at the end of this queue.
+    #[tracing::instrument(level = Level::TRACE)]
+    pub fn push_back_with_data(&mut self, message_id: MessageId, layer_id: LayerId, data: T) {
+        self.inner.push_back((message_id, layer_id, data));
     }
 
     /// Retrieve and remove a request from the front of this queue.
     #[tracing::instrument(level = Level::TRACE)]
-    pub fn get(&mut self) -> Result<(MessageId, LayerId), RequestQueueEmpty> {
-        self.inner.pop_front().ok_or(RequestQueueEmpty)
+    pub fn pop_front_with_data(&mut self) -> Option<(MessageId, LayerId, T)> {
+        self.inner.pop_front()
     }
 }

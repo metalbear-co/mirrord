@@ -512,3 +512,27 @@ If you're using rust-analyzer VSCode extension, put this block in `.vscode/setti
     ]
 }
 ```
+
+You can use `cargo-zigbuild` to run `cargo check` or `clippy` on the agent's code on macOS.
+
+`cargo check`
+
+```shell
+cargo-zigbuild check -p mirrord-agent --target x86_64-unknown-linux-gnu
+```
+
+`clippy` only for the agent
+
+```shell
+cargo-zigbuild clippy --target x86_64-unknown-linux-gnu -p mirrord-agent -- -Wclippy::indexing_slicing -D warnings
+```
+
+`clippy` for all code:
+
+```shell
+cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-gnu --tests -- -Wclippy::indexing_slicing -D warnings
+```
+
+If it doesn't work, try updating `cargo-zigbuild`
+(`cargo install cargo-zigbuild` or maybe `cargo install cargo-zigbuild --force`)
+or via `homebrew` if it was installed via homebrew.
