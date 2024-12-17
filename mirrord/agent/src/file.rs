@@ -10,11 +10,15 @@ use std::{
 };
 
 use faccess::{AccessMode, PathExt};
+use kameo::actor::ActorRef;
 use libc::DT_DIR;
 use mirrord_protocol::{file::*, FileRequest, FileResponse, RemoteResult, ResponseError};
 use tracing::{error, trace, Level};
 
-use crate::error::Result;
+use crate::{
+    error::Result,
+    metrics::{MetricsActor, MetricsDecrementFd, MetricsIncrementFd},
+};
 
 #[derive(Debug)]
 pub enum RemoteFile {
@@ -70,18 +74,7 @@ pub(crate) struct FileManager {
     dir_streams: HashMap<u64, Enumerate<ReadDir>>,
     getdents_streams: HashMap<u64, Peekable<GetDEnts64Stream>>,
     fds_iter: RangeInclusive<u64>,
-}
-
-impl Default for FileManager {
-    fn default() -> Self {
-        Self {
-            root_path: Default::default(),
-            open_files: Default::default(),
-            dir_streams: Default::default(),
-            getdents_streams: Default::default(),
-            fds_iter: (0..=u64::MAX),
-        }
-    }
+    metrics: ActorRef<MetricsActor>,
 }
 
 pub fn get_root_path_from_optional_pid(pid: Option<u64>) -> PathBuf {
@@ -147,8 +140,11 @@ pub fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt:
 
 impl FileManager {
     /// Executes the request and returns the response.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub fn handle_message(&mut self, request: FileRequest) -> Result<Option<FileResponse>> {
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    pub(crate) async fn handle_message(
+        &mut self,
+        request: FileRequest,
+    ) -> Result<Option<FileResponse>> {
         Ok(match request {
             FileRequest::Open(OpenFileRequest { path, open_options }) => {
                 // TODO: maybe not agent error on this?
@@ -156,7 +152,7 @@ impl FileManager {
                     .strip_prefix("/")
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
-                let open_result = self.open(path.into(), open_options);
+                let open_result = self.open(path.into(), open_options).await;
                 Some(FileResponse::Open(open_result))
             }
             FileRequest::OpenRelative(OpenRelativeFileRequest {
@@ -164,7 +160,7 @@ impl FileManager {
                 path,
                 open_options,
             }) => {
-                let open_result = self.open_relative(relative_fd, path, open_options);
+                let open_result = self.open_relative(relative_fd, path, open_options).await;
                 Some(FileResponse::Open(open_result))
             }
             FileRequest::Read(ReadFileRequest {
@@ -202,10 +198,7 @@ impl FileManager {
                 let write_result = self.write_limited(remote_fd, start_from, write_bytes);
                 Some(FileResponse::WriteLimited(write_result))
             }
-            FileRequest::Close(CloseFileRequest { fd }) => {
-                self.close(fd);
-                None
-            }
+            FileRequest::Close(CloseFileRequest { fd }) => self.close(fd).await,
             FileRequest::Access(AccessFileRequest { pathname, mode }) => {
                 let pathname = pathname
                     .strip_prefix("/")
@@ -229,7 +222,7 @@ impl FileManager {
 
             // dir operations
             FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd }) => {
-                let open_dir_result = self.fdopen_dir(remote_fd);
+                let open_dir_result = self.fdopen_dir(remote_fd).await;
                 Some(FileResponse::OpenDir(open_dir_result))
             }
             FileRequest::ReadDir(ReadDirRequest { remote_fd }) => {
@@ -240,10 +233,7 @@ impl FileManager {
                 let read_dir_result = self.read_dir_batch(remote_fd, amount);
                 Some(FileResponse::ReadDirBatch(read_dir_result))
             }
-            FileRequest::CloseDir(CloseDirRequest { remote_fd }) => {
-                self.close_dir(remote_fd);
-                None
-            }
+            FileRequest::CloseDir(CloseDirRequest { remote_fd }) => self.close_dir(remote_fd).await,
             FileRequest::GetDEnts64(GetDEnts64Request {
                 remote_fd,
                 buffer_size,
@@ -253,19 +243,28 @@ impl FileManager {
         })
     }
 
-    #[tracing::instrument(level = "trace")]
-    pub fn new(pid: Option<u64>) -> Self {
+    #[tracing::instrument(level = Level::TRACE)]
+    pub fn new(pid: Option<u64>, metrics: ActorRef<MetricsActor>) -> Self {
         let root_path = get_root_path_from_optional_pid(pid);
         trace!("Agent root path >> {root_path:?}");
+
         Self {
-            open_files: HashMap::new(),
+            metrics,
             root_path,
-            ..Default::default()
+            open_files: Default::default(),
+            dir_streams: Default::default(),
+            getdents_streams: Default::default(),
+            fds_iter: (0..=u64::MAX),
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
-    fn open(
+    // TODO(alex) [mid]: Fails with the wrong error?
+    /*
+    mirrord_agent::file: error: IO failed for remote operation with `Failed performing `getaddrinfo` with Some(2) and kind NotFound!!
+    at mirrord/agent/src/file.rs:261
+    */
+    #[tracing::instrument(level = Level::TRACE, skip(self), err(level = Level::DEBUG))]
+    async fn open(
         &mut self,
         path: PathBuf,
         open_options: OpenOptionsInternal,
@@ -286,13 +285,19 @@ impl FileManager {
             RemoteFile::File(file)
         };
 
-        self.open_files.insert(fd, remote_file);
+        if self.open_files.insert(fd, remote_file).is_none() {
+            let _ = self
+                .metrics
+                .tell(MetricsIncrementFd)
+                .await
+                .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+        }
 
         Ok(OpenFileResponse { fd })
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
-    fn open_relative(
+    #[tracing::instrument(level = Level::TRACE, skip(self), err(level = Level::DEBUG))]
+    async fn open_relative(
         &mut self,
         relative_fd: u64,
         path: PathBuf,
@@ -320,7 +325,13 @@ impl FileManager {
                 RemoteFile::File(file)
             };
 
-            self.open_files.insert(fd, remote_file);
+            if self.open_files.insert(fd, remote_file).is_none() {
+                let _ = self
+                    .metrics
+                    .tell(MetricsIncrementFd)
+                    .await
+                    .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+            }
 
             Ok(OpenFileResponse { fd })
         } else {
@@ -524,20 +535,38 @@ impl FileManager {
             })
     }
 
-    pub(crate) fn close(&mut self, fd: u64) {
-        trace!("FileManager::close -> fd {:#?}", fd,);
-
+    /// Always returns `None`, since we don't return any [`FileResponse`] back to mirrord
+    /// on `close` of an fd.
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    pub(crate) async fn close(&mut self, fd: u64) -> Option<FileResponse> {
         if self.open_files.remove(&fd).is_none() {
-            error!("FileManager::close -> fd {:#?} not found", fd);
+            error!(fd, "fd not found!");
+        } else {
+            let _ = self
+                .metrics
+                .tell(MetricsDecrementFd)
+                .await
+                .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
         }
+
+        None
     }
 
-    pub(crate) fn close_dir(&mut self, fd: u64) {
-        trace!("FileManager::close_dir -> fd {:#?}", fd,);
-
+    /// Always returns `None`, since we don't return any [`FileResponse`] back to mirrord
+    /// on `close_dir` of an fd.
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    pub(crate) async fn close_dir(&mut self, fd: u64) -> Option<FileResponse> {
         if self.dir_streams.remove(&fd).is_none() && self.getdents_streams.remove(&fd).is_none() {
             error!("FileManager::close_dir -> fd {:#?} not found", fd);
+        } else {
+            let _ = self
+                .metrics
+                .tell(MetricsDecrementFd)
+                .await
+                .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
         }
+
+        None
     }
 
     pub(crate) fn access(
@@ -641,8 +670,8 @@ impl FileManager {
         })
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn fdopen_dir(&mut self, fd: u64) -> RemoteResult<OpenDirResponse> {
+    #[tracing::instrument(level = Level::TRACE, skip(self), err(level = Level::DEBUG))]
+    pub(crate) async fn fdopen_dir(&mut self, fd: u64) -> RemoteResult<OpenDirResponse> {
         let path = match self
             .open_files
             .get(&fd)
@@ -658,7 +687,14 @@ impl FileManager {
             .ok_or_else(|| ResponseError::IdsExhausted("fdopen_dir".to_string()))?;
 
         let dir_stream = path.read_dir()?.enumerate();
-        self.dir_streams.insert(fd, dir_stream);
+
+        if self.dir_streams.insert(fd, dir_stream).is_none() {
+            let _ = self
+                .metrics
+                .tell(MetricsIncrementFd)
+                .await
+                .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+        }
 
         Ok(OpenDirResponse { fd })
     }
@@ -707,7 +743,7 @@ impl FileManager {
     /// The possible remote errors are:
     /// [`ResponseError::NotFound`] if there is not such fd here.
     /// [`ResponseError::NotDirectory`] if the fd points to a file with a non-directory file type.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(crate) fn get_or_create_getdents64_stream(
         &mut self,
         fd: u64,
@@ -720,6 +756,7 @@ impl FileManager {
                     let current_and_parent = Self::get_current_and_parent_entries(dir);
                     let stream =
                         GetDEnts64Stream::new(dir.read_dir()?, current_and_parent).peekable();
+                    // TODO(alex) [mid]: Do we also want to count streams of stuffs?
                     Ok(e.insert(stream))
                 }
             },

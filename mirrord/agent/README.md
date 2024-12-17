@@ -6,3 +6,9 @@ Agent part of [mirrord](https://github.com/metalbear-co/mirrord) responsible for
 mirrord-agent is written in Rust for safety, low memory consumption and performance.
 
 mirrord-agent is distributed as a container image (currently only x86) that is published on [GitHub Packages publicly](https://github.com/metalbear-co/mirrord-agent/pkgs/container/mirrord-agent). 
+
+## Enabling prometheus metrics
+
+- If you make any changes to the 5-configmap.yaml file, remember to `kubectl apply` it
+ **before** restarting the `prometheus` deployment.
+

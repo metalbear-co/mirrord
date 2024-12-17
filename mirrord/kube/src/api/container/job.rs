@@ -152,6 +152,8 @@ where
                 "disabled".to_string(),
             ),
             ("app".to_string(), "mirrord".to_string()),
+            ("prometheus.io/scrape".to_string(), "true".to_string()),
+            ("prometheus.io/port".to_string(), "9000".to_string()),
         ]));
 
         let mut annotations = config
@@ -163,6 +165,9 @@ where
         annotations.extend(BTreeMap::from([
             ("sidecar.istio.io/inject".to_string(), "false".to_string()),
             ("linkerd.io/inject".to_string(), "disabled".to_string()),
+            ("prometheus.io/scrape".to_string(), "true".to_string()),
+            // ("prometheus.io/path".to_string(), "/metrics".to_string()),
+            ("prometheus.io/port".to_string(), "9000".to_string()),
         ]));
 
         pod.labels_mut().extend(labels.clone());

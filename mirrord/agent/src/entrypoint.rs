@@ -12,6 +12,8 @@ use std::{
 use client_connection::AgentTlsConnector;
 use dns::{DnsCommand, DnsWorker};
 use futures::TryFutureExt;
+use kameo::actor::ActorRef;
+use metrics::{MetricsActor, MetricsIncrementFd};
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use sniffer::tcp_capture::RawSocketTcpCapture;
 use tokio::{
@@ -24,7 +26,7 @@ use tokio::{
     time::{timeout, Duration},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn, Level};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -68,11 +70,13 @@ struct State {
     ephemeral: bool,
     /// When present, it is used to secure incoming TCP connections.
     tls_connector: Option<AgentTlsConnector>,
+
+    metrics: Option<ActorRef<MetricsActor>>,
 }
 
 impl State {
     /// Return [`Err`] if container runtime operations failed.
-    pub async fn new(args: &Args) -> Result<State> {
+    pub async fn new(args: &Args, metrics: Option<ActorRef<MetricsActor>>) -> Result<State> {
         let tls_connector = args
             .operator_tls_cert_pem
             .clone()
@@ -126,6 +130,7 @@ impl State {
             env: Arc::new(env),
             ephemeral,
             tls_connector,
+            metrics,
         })
     }
 
@@ -215,7 +220,10 @@ impl ClientConnectionHandler {
     ) -> Result<Self> {
         let pid = state.container_pid();
 
-        let file_manager = FileManager::new(pid.or_else(|| state.ephemeral.then_some(1)));
+        let file_manager = FileManager::new(
+            pid.or_else(|| state.ephemeral.then_some(1)),
+            state.metrics.clone().unwrap(),
+        );
 
         let tcp_sniffer_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection).await;
         let tcp_stealer_api =
@@ -396,11 +404,11 @@ impl ClientConnectionHandler {
     /// Handles incoming messages from the connected client (`mirrord-layer`).
     ///
     /// Returns `false` if the client disconnected.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     async fn handle_client_message(&mut self, message: ClientMessage) -> Result<bool> {
         match message {
             ClientMessage::FileRequest(req) => {
-                if let Some(response) = self.file_manager.handle_message(req)? {
+                if let Some(response) = self.file_manager.handle_message(req).await? {
                     self.respond(DaemonMessage::File(response))
                         .await
                         .inspect_err(|fail| {
@@ -488,9 +496,11 @@ impl ClientConnectionHandler {
 }
 
 /// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent(args: Args) -> Result<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
+
+    let metrics = kameo::spawn(MetricsActor::default());
 
     let listener = TcpListener::bind(SocketAddrV4::new(
         Ipv4Addr::UNSPECIFIED,
@@ -498,7 +508,7 @@ async fn start_agent(args: Args) -> Result<()> {
     ))
     .await?;
 
-    let state = State::new(&args).await?;
+    let state = State::new(&args, Some(metrics)).await?;
 
     let cancellation_token = CancellationToken::new();
 
@@ -761,7 +771,7 @@ async fn run_child_agent() -> Result<()> {
 async fn start_iptable_guard(args: Args) -> Result<()> {
     debug!("start_iptable_guard -> Initializing iptable-guard.");
 
-    let state = State::new(&args).await?;
+    let state = State::new(&args, None).await?;
     let pid = state.container_pid();
 
     std::env::set_var(IPTABLE_PREROUTING_ENV, IPTABLE_PREROUTING.as_str());
@@ -831,6 +841,17 @@ pub async fn main() -> Result<()> {
     );
 
     let args = cli::parse_args();
+
+    // TODO(alex) [high]: Could start metrics from here, as the agent itself has 2
+    // different starting points. So start task here, and pass comms to both.
+    //
+    // CANNOT `bind` anything before `start_agent`, we might hit addrinuse.
+    // let metrics = kameo::spawn(MetricsActor::default());
+    // let listener = TcpListener::bind("0.0.0.0:0")
+    //     .await
+    //     .map_err(AgentError::from)
+    //     .inspect_err(|fail| tracing::error!(?fail, "Generic listener!"))
+    //     .inspect(|s| tracing::info!(?s, "Listening"))?;
 
     let agent_result = if args.mode.is_targetless()
         || (std::env::var(IPTABLE_PREROUTING_ENV).is_ok()
