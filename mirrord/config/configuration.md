@@ -467,6 +467,16 @@ Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by
 
 DEPRECATED, WILL BE REMOVED
 
+### _experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}
+
+Sets buffer size for readonly remote files (in bytes, for example 4096).
+If set, such files will be read in chunks and buffered locally.
+This improves performace when the user application reads data in small portions.
+
+Setting to 0 disables file buffering.
+
+<https://github.com/metalbear-co/mirrord/issues/2069>
+
 ### _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
 
 <https://github.com/metalbear-co/mirrord/issues/2421#issuecomment-2093200904>
