@@ -818,6 +818,8 @@ pub struct ContainerExecCommand {
 }
 
 impl ContainerExecCommand {
+    /// Unpack exec command to inner components [`RuntimeArgs`] and [`ExecParams`]
+    /// (need to parse [`RuntimeArgs`] here just to make clap happy with nested trailing_var_arg)
     pub fn into_parts(self) -> (RuntimeArgs, ExecParams) {
         let ContainerExecCommand { params, exec } = self;
 

@@ -481,6 +481,7 @@ pub(crate) async fn container_command(
     }
 }
 
+/// Create sidecar and extproxy but return arguments for extension instead of executing run command
 pub(crate) async fn container_ext_command(
     config_file: Option<PathBuf>,
     target: Option<String>,
