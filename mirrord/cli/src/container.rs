@@ -320,17 +320,12 @@ fn prepare_tls_certs_for_container(
 pub(crate) async fn container_command(
     runtime_args: RuntimeArgs,
     exec_params: ExecParams,
-    warn_about_old_cli_command: bool,
     watch: drain::Watch,
 ) -> CliResult<i32> {
     let mut progress = ProgressTracker::from_env("mirrord container");
 
     if runtime_args.command.has_publish() {
         progress.warning("mirrord container may have problems with \"-p\" directly container in command, please add to \"contanier.cli_extra_args\" in config if you are planning to publish ports");
-    }
-
-    if warn_about_old_cli_command {
-        progress.warning("\"mirrord container docker ...\" is depricated please use \"mirrord container exec docker ...\"");
     }
 
     progress.warning("mirrord container is currently an unstable feature");

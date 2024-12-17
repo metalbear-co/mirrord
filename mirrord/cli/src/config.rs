@@ -59,6 +59,10 @@ pub(super) enum Commands {
     #[command(hide = true, name = "ls")]
     ListTargets(Box<ListTargetArgs>),
 
+    /// mirrord container extension integration.
+    #[command(hide = true, name = "container-ext")]
+    ExtensionContainer(Box<ExtensionContainerArgs>),
+
     /// Extension execution - used by extension to execute binaries.
     #[command(hide = true, name = "ext")]
     ExtensionExec(Box<ExtensionExecArgs>),
@@ -782,37 +786,6 @@ impl std::fmt::Display for ContainerRuntime {
 #[derive(Args, Debug)]
 #[clap(args_conflicts_with_subcommands = true)]
 pub(super) struct ContainerArgs {
-    #[clap(subcommand)]
-    pub command: Option<ContainerCommand>,
-
-    #[clap(flatten)]
-    pub fallback: ContainerExecSubcommand,
-}
-
-impl ContainerArgs {
-    pub fn into_container_command(self) -> ContainerCommand {
-        let ContainerArgs { command, fallback } = self;
-
-        match command {
-            Some(command) => command,
-            None => ContainerCommand::Exec(fallback),
-        }
-    }
-}
-
-/// Supported command for using mirrord with container runtimes.
-#[derive(Subcommand, Debug)]
-pub(super) enum ContainerCommand {
-    /// Execute container command with mirrord loaded
-    Exec(ContainerExecSubcommand),
-
-    /// mirrord container extension integration.
-    #[clap(hide = true)]
-    Ext(ContainerExtSubcommand),
-}
-
-#[derive(Args, Debug)]
-pub struct ContainerExecSubcommand {
     /// Parameters to be passed to mirrord.
     #[clap(flatten)]
     pub params: Box<ExecParams>,
@@ -822,11 +795,11 @@ pub struct ContainerExecSubcommand {
     pub exec: Vec<String>,
 }
 
-impl ContainerExecSubcommand {
+impl ContainerArgs {
     /// Unpack exec command to inner components [`RuntimeArgs`] and [`ExecParams`]
     /// (need to parse [`RuntimeArgs`] here just to make clap happy with nested trailing_var_arg)
     pub fn into_parts(self) -> (RuntimeArgs, ExecParams) {
-        let ContainerExecSubcommand { params, exec } = self;
+        let ContainerArgs { params, exec } = self;
 
         let runtime_args = RuntimeArgs::parse_from(
             std::iter::once("mirrord container exec --".into()).chain(exec),
@@ -837,7 +810,7 @@ impl ContainerExecSubcommand {
 }
 
 #[derive(Args, Debug)]
-pub struct ContainerExtSubcommand {
+pub struct ExtensionContainerArgs {
     /// Specify config file to use
     #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
     pub config_file: Option<PathBuf>,
@@ -963,18 +936,14 @@ mod tests {
 
     #[test]
     fn runtime_args_parsing() {
-        let command = "mirrord container exec -t deploy/test podman run -it --rm debian";
+        let command = "mirrord container -t deploy/test podman run -it --rm debian";
         let result = Cli::parse_from(command.split(' '));
 
         let Commands::Container(container) = result.commands else {
             panic!("cli command didn't parse into container command, got: {result:#?}")
         };
 
-        let ContainerCommand::Exec(command) = container.into_container_command() else {
-            panic!("cli command expected to parse into exec command")
-        };
-
-        let (runtime_args, _) = command.into_parts();
+        let (runtime_args, _) = container.into_parts();
 
         assert_eq!(runtime_args.runtime, ContainerRuntime::Podman);
 
@@ -985,52 +954,6 @@ mod tests {
 
     #[test]
     fn runtime_args_parsing_with_seperator() {
-        let command = "mirrord container exec -t deploy/test -- podman run -it --rm debian";
-        let result = Cli::parse_from(command.split(' '));
-
-        let Commands::Container(container) = result.commands else {
-            panic!("cli command didn't parse into container command, got: {result:#?}")
-        };
-
-        let ContainerCommand::Exec(command) = container.into_container_command() else {
-            panic!("cli command expected to parse into exec command")
-        };
-
-        let (runtime_args, _) = command.into_parts();
-
-        assert_eq!(runtime_args.runtime, ContainerRuntime::Podman);
-
-        let ContainerRuntimeCommand::Run { runtime_args } = runtime_args.command;
-
-        assert_eq!(runtime_args, vec!["-it", "--rm", "debian"]);
-    }
-
-    #[test]
-    fn fallback_runtime_args_parsing() {
-        let command = "mirrord container -t deploy/test podman run -it --rm debian";
-        let result = Cli::parse_from(command.split(' '));
-
-        let Commands::Container(container) = result.commands else {
-            panic!("cli command didn't parse into container command, got: {result:#?}")
-        };
-
-        assert!(container.command.is_none());
-
-        let ContainerCommand::Exec(command) = container.into_container_command() else {
-            panic!("cli command expected to parse into exec command")
-        };
-
-        let (runtime_args, _) = command.into_parts();
-
-        assert_eq!(runtime_args.runtime, ContainerRuntime::Podman);
-
-        let ContainerRuntimeCommand::Run { runtime_args } = runtime_args.command;
-
-        assert_eq!(runtime_args, vec!["-it", "--rm", "debian"]);
-    }
-
-    #[test]
-    fn fallback_runtime_args_parsing_with_seperator() {
         let command = "mirrord container -t deploy/test -- podman run -it --rm debian";
         let result = Cli::parse_from(command.split(' '));
 
@@ -1038,13 +961,7 @@ mod tests {
             panic!("cli command didn't parse into container command, got: {result:#?}")
         };
 
-        assert!(container.command.is_none());
-
-        let ContainerCommand::Exec(command) = container.into_container_command() else {
-            panic!("cli command expected to parse into exec command")
-        };
-
-        let (runtime_args, _) = command.into_parts();
+        let (runtime_args, _) = container.into_parts();
 
         assert_eq!(runtime_args.runtime, ContainerRuntime::Podman);
 
