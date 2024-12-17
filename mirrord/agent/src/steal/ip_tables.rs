@@ -111,6 +111,20 @@ pub fn new_iptables() -> iptables::IPTables {
     .expect("IPTables initialization may not fail!")
 }
 
+/// wrapper around iptables::new that uses nft or legacy based on env
+pub fn new_ip6tables() -> iptables::IPTables {
+    if let Ok(val) = std::env::var("MIRRORD_AGENT_NFTABLES")
+        && val.to_lowercase() == "true"
+    {
+        // TODO: check if there is such a binary.
+        iptables::new_with_cmd("/usr/sbin/ip6tables-nft")
+    } else {
+        // TODO: check if there is such a binary.
+        iptables::new_with_cmd("/usr/sbin/ip6tables-legacy")
+    }
+    .expect("IPTables initialization may not fail!")
+}
+
 impl Debug for IPTablesWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IPTablesWrapper")
