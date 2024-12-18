@@ -1,5 +1,8 @@
 use std::{
-    env, fmt, net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr}, ops::RangeInclusive, str::FromStr
+    env, fmt,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    ops::RangeInclusive,
+    str::FromStr,
 };
 
 use hyper::Uri;
@@ -89,10 +92,10 @@ pub enum DebuggerType {
     /// the NODE_OPTIONS env var looks like this:
     /// "NODE_OPTIONS": "--require=/Path/to/thing --inspect-publish-uid=http
     /// --max-old-space-size=9216 --enable-source-maps --inspect=9994"
-    /// 
-    /// Alternatively, the process may be string on a different port with the NODE_INSPECTOR_INFO 
+    ///
+    /// Alternatively, the process may be string on a different port with the NODE_INSPECTOR_INFO
     /// env var set, with the port in the "inspectorURL" address
-    /// 
+    ///
     /// the NODE_INSPECTOR_INFO env var looks like this:
     /// "NODE_INSPECTOR_INFO" : {"ipcAddress":"/Path/to/thing","pid":"75321",...
     /// "inspectorURL":"ws://127.0.0.1:9229/8decd19b-8ea8-45f4-bf72-095ddbdad103"}
@@ -116,13 +119,17 @@ impl FromStr for DebuggerType {
 
 impl fmt::Display for DebuggerType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self {
-            DebuggerType::DebugPy => "debugpy",
-            DebuggerType::PyDevD => "pydevd",
-            DebuggerType::ReSharper => "resharper",
-            DebuggerType::JavaAgent => "javaagent",
-            DebuggerType::NodeInspector => "nodeinspector",
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                DebuggerType::DebugPy => "debugpy",
+                DebuggerType::PyDevD => "pydevd",
+                DebuggerType::ReSharper => "resharper",
+                DebuggerType::JavaAgent => "javaagent",
+                DebuggerType::NodeInspector => "nodeinspector",
+            }
+        )
     }
 }
 
@@ -236,7 +243,7 @@ impl DebuggerType {
                 .into_iter()
                 .collect::<Vec<_>>()
             }
-            Self::NodeInspector => { 
+            Self::NodeInspector => {
                 if let Some(value) = get_env("NODE_OPTIONS") {
                     // matching specific flags so we avoid matching on, for example,
                     // `--inspect-publish-uid=http`
@@ -316,15 +323,12 @@ impl DebuggerPorts {
         };
         if !detected.is_empty() {
             let mut value = detected
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(",");
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",");
             if let Some(existing) = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV).ok() {
-                value = [value, existing]
-                    .into_iter()
-                    .collect::<Vec<_>>()
-                    .join(";");
+                value = [value, existing].into_iter().collect::<Vec<_>>().join(",");
             }
             env::set_var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV, value);
 
@@ -336,72 +340,14 @@ impl DebuggerPorts {
             return Self::Detected(detected);
         }
 
-        let multiple_ports = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV)
-            .ok()
-            .and_then(|s| {
-                s.split(',').map(u16::from_str).collect::<Result<Vec<_>, _>>().inspect_err(|e| {
-                    tracing::debug!(
-                        "Failed to decode individual debugger ports from {} env variable: {}, attempting to decode as range...",
-                        MIRRORD_IGNORE_DEBUGGER_PORTS_ENV,
-                        e
-                    )
-                })
-                .ok()
-            }
-        );
-        if let Some(ports) = multiple_ports {
-            return Self::Detected(ports);
-        }
-
-        let fixed_range = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV)
-            .ok()
-            .and_then(|s| {
-                let chunks = s
-                    .split('-')
-                    .map(u16::from_str)
-                    .collect::<Result<Vec<_>, _>>()
-                    .inspect_err(|e| error!(
-                        "Failed to decode debugger port range from {} env variable: {}, attempting to decode as combination...",
-                        MIRRORD_IGNORE_DEBUGGER_PORTS_ENV,
-                        e
-                    ))
-                    .ok()?;
-                match *chunks.as_slice() {
-                    [p] => Some(p..=p),
-                    [p1, p2] if p1 <= p2 => Some(p1..=p2),
-                    _ => {
-                        error!(
-                            "Failed to decode debugger ports from {} env variable: expected a port, list of ports or range of ports",
-                            MIRRORD_IGNORE_DEBUGGER_PORTS_ENV,
-                        );
-                        None
-                    },
-                }
-            });
-        if let Some(range) = fixed_range {
-            return Self::FixedRange(range);
-        }
-
-        // IGNORE_DEBUGGER_PORTS may have a combination of single, multiple or ranges of ports separated by a semi-colon
-        // they need to be parsed individually
+        // IGNORE_DEBUGGER_PORTS may have a combination of single, multiple or ranges of ports
+        // separated by a comma they need to be parsed individually
         let mut v = vec![];
         let _ : Option<()> = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV)
             .ok()
             .and_then(|s| {
-                let _ = s.split(';')
+                let _ = s.split(',')
                     .for_each(|s| {
-                        let multiple_ports = s.split(',').map(u16::from_str).collect::<Result<Vec<_>, _>>().inspect_err(|e| {
-                            tracing::debug!(
-                                "Failed to decode individual debugger ports from {} env variable: {}, attempting to decode as range...",
-                                MIRRORD_IGNORE_DEBUGGER_PORTS_ENV,
-                                e
-                            )
-                        })
-                        .ok();
-                        if let Some(ports) = multiple_ports {
-                            v.push(Self::Detected(ports));
-                        }
-
                         let chunks = s
                             .split('-')
                             .map(u16::from_str)
@@ -449,7 +395,10 @@ impl DebuggerPorts {
         match self {
             Self::Detected(ports) => ports.contains(&addr.port()),
             Self::FixedRange(range) => range.contains(&addr.port()),
-            Self::Combination(vec) => vec.iter().map(|ports|ports.contains(&addr)).fold(false,|acc, ports| ports || acc),
+            Self::Combination(vec) => vec
+                .iter()
+                .map(|ports| ports.contains(&addr))
+                .fold(false, |acc, ports| ports || acc),
             Self::None => false,
         }
     }
@@ -467,13 +416,15 @@ mod test {
         let debugger = DebuggerType::DebugPy;
 
         assert_eq!(
-            debugger.get_ports(
-                &command
-                    .split_ascii_whitespace()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>(),
-                |_| None
-            ),
+            debugger
+                .get_ports(
+                    &command
+                        .split_ascii_whitespace()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>(),
+                    |_| None
+                )
+                .0,
             vec![57141],
         )
     }
@@ -484,13 +435,15 @@ mod test {
         let command = "/path/to/python /path/to/pycharm/plugins/pydevd.py --multiprocess --qt-support=auto --client 127.0.0.1 --port 32845 --file /path/to/script.py";
 
         assert_eq!(
-            debugger.get_ports(
-                &command
-                    .split_ascii_whitespace()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>(),
-                |_| None
-            ),
+            debugger
+                .get_ports(
+                    &command
+                        .split_ascii_whitespace()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>(),
+                    |_| None
+                )
+                .0,
             vec![32845],
         )
     }
@@ -501,13 +454,15 @@ mod test {
         let command = "/path/to/rider/lib/ReSharperHost/linux-x64/dotnet/dotnet exec /path/to/rider/lib/ReSharperHost/JetBrains.Debugger.Worker.exe --mode=client --frontend-port=40905 --plugins=/path/to/rider/plugins/rider-unity/dotnetDebuggerWorker;/path/to/rider/plugins/dpa/DotFiles/JetBrains.DPA.DebugInjector.dll --etw-collect-flags=2 --backend-pid=222222 --handle=333";
 
         assert_eq!(
-            debugger.get_ports(
-                &command
-                    .split_ascii_whitespace()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>(),
-                |_| None
-            ),
+            debugger
+                .get_ports(
+                    &command
+                        .split_ascii_whitespace()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>(),
+                    |_| None
+                )
+                .0,
             vec![40905]
         )
     }
@@ -523,38 +478,43 @@ mod test {
         let debugger = DebuggerType::JavaAgent;
 
         assert_eq!(
-            debugger.get_ports(
-                &command_line
-                    .split_ascii_whitespace()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>(),
-                |_| None
-            ),
+            debugger
+                .get_ports(
+                    &command_line
+                        .split_ascii_whitespace()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>(),
+                    |_| None
+                )
+                .0,
             vec![54898]
         )
     }
 
     #[rstest]
     #[case(("NODE_OPTIONS", Some("--require=/path --inspect-publish-uid=http --inspect=9994")), vec![9994])]
+    #[case(("NODE_OPTIONS", Some("--require=/path --inspect-publish-uid=http --inspect")), vec![9229])]
     #[case(("NODE_OPTIONS", Some("--require=/path --inspect-publish-uid=http --inspect=9994 --inspect-brk=9001")), vec![9994, 9001])]
     fn detect_nodeinspector_port(#[case] env: (&str, Option<&str>), #[case] ports: Vec<u16>) {
         let debugger = DebuggerType::NodeInspector;
         let command = "/Path/to/node /Path/to/node/v20.17.0/bin/npx next dev";
 
         assert_eq!(
-            debugger.get_ports(
-                &command
-                    .split_ascii_whitespace()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>(),
-                |name| {
-                    if name == env.0 {
-                        env.1.map(ToString::to_string)
-                    } else {
-                        None
+            debugger
+                .get_ports(
+                    &command
+                        .split_ascii_whitespace()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>(),
+                    |name| {
+                        if name == env.0 {
+                            env.1.map(ToString::to_string)
+                        } else {
+                            None
+                        }
                     }
-                }
-            ),
+                )
+                .0,
             ports
         )
     }
