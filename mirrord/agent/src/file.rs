@@ -250,6 +250,14 @@ impl FileManager {
             }) => Some(FileResponse::GetDEnts64(
                 self.getdents64(remote_fd, buffer_size),
             )),
+            FileRequest::MakeDir(MakeDirRequest { pathname, mode }) => {
+                Some(FileResponse::MakeDir(self.mkdir(&pathname, mode)))
+            }
+            FileRequest::MakeDirAt(MakeDirAtRequest {
+                dirfd,
+                pathname,
+                mode,
+            }) => Some(FileResponse::MakeDir(self.mkdirat(dirfd, &pathname, mode))),
         })
     }
 
@@ -470,6 +478,46 @@ impl FileManager {
                     Err(ResponseError::NotFile(fd))
                 }
             })
+    }
+
+    pub(crate) fn mkdir(&mut self, path: &Path, mode: u32) -> RemoteResult<()> {
+        trace!("FileManager::mkdir -> path {:#?} | mode {:#?}", path, mode);
+
+        let path = resolve_path(path, &self.root_path)?;
+
+        match nix::unistd::mkdir(&path, nix::sys::stat::Mode::from_bits_truncate(mode)) {
+            Ok(_) => Ok(()),
+            Err(err) => Err(ResponseError::from(std::io::Error::from_raw_os_error(
+                err as i32,
+            ))),
+        }
+    }
+
+    pub(crate) fn mkdirat(&mut self, dirfd: u64, path: &Path, mode: u32) -> RemoteResult<()> {
+        trace!(
+            "FileManager::mkdirat -> dirfd {:#?} | path {:#?} | mode {:#?}",
+            dirfd,
+            path,
+            mode
+        );
+
+        let relative_dir = self
+            .open_files
+            .get(&dirfd)
+            .ok_or(ResponseError::NotFound(dirfd))?;
+
+        if let RemoteFile::Directory(relative_dir) = relative_dir {
+            let path = relative_dir.join(path);
+
+            match nix::unistd::mkdir(&path, nix::sys::stat::Mode::from_bits_truncate(mode)) {
+                Ok(_) => Ok(()),
+                Err(err) => Err(ResponseError::from(std::io::Error::from_raw_os_error(
+                    err as i32,
+                ))),
+            }
+        } else {
+            Err(ResponseError::NotDirectory(dirfd))
+        }
     }
 
     pub(crate) fn seek(&mut self, fd: u64, seek_from: SeekFrom) -> RemoteResult<SeekFileResponse> {
