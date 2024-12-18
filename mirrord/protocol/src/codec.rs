@@ -95,7 +95,16 @@ pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
     Close,
+    /// TCP sniffer message.
+    ///
+    /// These are the messages used by the `mirror` feature, and handled by the
+    /// `TcpSnifferApi` in the agent.
     Tcp(LayerTcp),
+
+    /// TCP stealer message.
+    ///
+    /// These are the messages used by the `steal` feature, and handled by the `TcpStealerApi` in
+    /// the agent.
     TcpSteal(LayerTcpSteal),
     TcpOutgoing(LayerTcpOutgoing),
     UdpOutgoing(LayerUdpOutgoing),

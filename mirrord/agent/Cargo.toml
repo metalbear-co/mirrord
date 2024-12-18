@@ -70,6 +70,10 @@ x509-parser = "0.16"
 rustls.workspace = true
 envy = "0.4"
 socket2.workspace = true
+prometheus = { version = "0.13", features = ["process"] }
+kameo = { git = "https://github.com/tqwewe/kameo", branch = "main" }
+axum = { version = "0.7", features = ["macros"] }
+axum-server = "*"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624" }

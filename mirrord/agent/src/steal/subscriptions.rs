@@ -215,30 +215,39 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     /// * `client_id` - identifier of the client that issued the subscription
     /// * `port` - number of the subscription port
     ///
+    /// # Returns
+    ///
+    /// `Some(true)` if the subscprition has an HTTP filter, `Some(false)` if it's unfiltered, and
+    /// `None` if we could not find the [`PortSubscription`].
+    ///
     /// # Warning
     ///
     /// If this method returns an [`Err`], it means that this set is out of sync with the inner
     /// [`PortRedirector`] and it is no longer usable. It is a caller's responsibility to clean
     /// up any external state.
-    pub async fn remove(&mut self, client_id: ClientId, port: Port) -> Result<(), R::Error> {
+    pub async fn remove(
+        &mut self,
+        client_id: ClientId,
+        port: Port,
+    ) -> Result<Option<bool>, R::Error> {
         let Entry::Occupied(mut e) = self.subscriptions.entry(port) else {
-            return Ok(());
+            return Ok(None);
         };
 
-        let remove_redirect = match e.get_mut() {
+        let (remove_redirect, filtered) = match e.get_mut() {
             PortSubscription::Unfiltered(subscribed_client) if *subscribed_client == client_id => {
                 e.remove();
-                true
+                (true, Some(false))
             }
-            PortSubscription::Unfiltered(..) => false,
+            PortSubscription::Unfiltered(..) => (false, Some(false)),
             PortSubscription::Filtered(filters) => {
                 filters.remove(&client_id);
 
                 if filters.is_empty() {
                     e.remove();
-                    true
+                    (true, Some(true))
                 } else {
-                    false
+                    (false, Some(true))
                 }
             }
         };
@@ -251,7 +260,7 @@ impl<R: PortRedirector> PortSubscriptions<R> {
             }
         }
 
-        Ok(())
+        Ok(filtered)
     }
 
     /// Remove all client subscriptions from this set.
@@ -265,18 +274,21 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     /// If this method returns an [`Err`], it means that this set is out of sync with the inner
     /// [`PortRedirector`] and it is no longer usable. It is a caller's responsibility to clean
     /// up any external state.
-    pub async fn remove_all(&mut self, client_id: ClientId) -> Result<(), R::Error> {
+    pub async fn remove_all(&mut self, client_id: ClientId) -> Result<Vec<bool>, R::Error> {
         let ports = self
             .subscriptions
             .iter()
             .filter_map(|(k, v)| v.has_client(client_id).then_some(*k))
             .collect::<Vec<_>>();
 
+        let mut all_removed = Vec::new();
         for port in ports {
-            self.remove(client_id, port).await?;
+            if let Some(removed) = self.remove(client_id, port).await? {
+                all_removed.push(removed);
+            }
         }
 
-        Ok(())
+        Ok(all_removed)
     }
 
     /// Return a subscription for the given `port`.

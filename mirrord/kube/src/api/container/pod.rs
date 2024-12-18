@@ -106,6 +106,8 @@ impl ContainerVariant for PodVariant<'_> {
                     [
                         ("sidecar.istio.io/inject".to_string(), "false".to_string()),
                         ("linkerd.io/inject".to_string(), "disabled".to_string()),
+                        ("prometheus.io/scrape".to_string(), "true".to_string()),
+                        ("prometheus.io/port".to_string(), "9000".to_string()),
                     ]
                     .into(),
                 ),
@@ -116,6 +118,8 @@ impl ContainerVariant for PodVariant<'_> {
                             "disabled".to_string(),
                         ),
                         ("app".to_string(), "mirrord".to_string()),
+                        ("prometheus.io/scrape".to_string(), "true".to_string()),
+                        ("prometheus.io/port".to_string(), "9000".to_string()),
                     ]
                     .into(),
                 ),

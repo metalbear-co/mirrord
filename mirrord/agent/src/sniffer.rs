@@ -434,7 +434,10 @@ mod test {
     use tokio::sync::mpsc;
 
     use super::*;
-    use crate::watched_task::{TaskStatus, WatchedTask};
+    use crate::{
+        metrics::MetricsActor,
+        watched_task::{TaskStatus, WatchedTask},
+    };
 
     struct TestSnifferSetup {
         command_tx: Sender<SnifferCommand>,
@@ -448,9 +451,17 @@ mod test {
         async fn get_api(&mut self) -> TcpSnifferApi {
             let client_id = self.next_client_id;
             self.next_client_id += 1;
-            TcpSnifferApi::new(client_id, self.command_tx.clone(), self.task_status.clone())
-                .await
-                .unwrap()
+
+            let metrics = kameo::spawn(MetricsActor::new(false));
+
+            TcpSnifferApi::new(
+                client_id,
+                self.command_tx.clone(),
+                self.task_status.clone(),
+                metrics,
+            )
+            .await
+            .unwrap()
         }
 
         fn times_filter_changed(&self) -> usize {
