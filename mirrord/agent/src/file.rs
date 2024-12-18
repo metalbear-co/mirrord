@@ -1,7 +1,7 @@
 use std::{
     self,
     collections::{hash_map::Entry, HashMap, VecDeque},
-    fs::{self, read_link, File, OpenOptions, ReadDir},
+    fs::{read_link, File, OpenOptions, ReadDir},
     io::{self, prelude::*, BufReader, SeekFrom},
     iter::{Enumerate, Peekable},
     ops::RangeInclusive,
