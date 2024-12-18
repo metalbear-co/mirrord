@@ -575,6 +575,14 @@
             "string",
             "null"
           ]
+        },
+        "cli_prevent_cleanup": {
+          "title": "container.cli_prevent_cleanup {#container-cli_extra_args}",
+          "description": "Don't add `--rm` to sidecar command to prevent cleanup.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "additionalProperties": false
