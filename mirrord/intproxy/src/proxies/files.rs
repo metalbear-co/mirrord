@@ -534,15 +534,7 @@ impl FilesProxy {
                         .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(request)))
                         .await;
                 } else {
-                    let file_response = match request {
-                        FileRequest::MakeDir(_) => {
-                            FileResponse::MakeDir(Err(ResponseError::NotImplemented))
-                        }
-                        FileRequest::MakeDirAt(_) => {
-                            FileResponse::MakeDirAt(Err(ResponseError::NotImplemented))
-                        }
-                        _ => unreachable!(),
-                    };
+                    let file_response = FileResponse::MakeDir(Err(ResponseError::NotImplemented));
 
                     message_bus
                         .send(ToLayer {

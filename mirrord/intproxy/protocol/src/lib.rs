@@ -312,16 +312,16 @@ impl_request!(
 
 impl_request!(
     req = MakeDirRequest,
-    res = RemoteResult<MakeDirResponse>,
+    res = RemoteResult<()>,
     req_path = LayerToProxyMessage::File => FileRequest::MakeDir,
     res_path = ProxyToLayerMessage::File => FileResponse::MakeDir,
 );
 
 impl_request!(
     req = MakeDirAtRequest,
-    res = RemoteResult<MakeDirResponse>,
+    res = RemoteResult<()>,
     req_path = LayerToProxyMessage::File => FileRequest::MakeDirAt,
-    res_path = ProxyToLayerMessage::File => FileResponse::MakeDirAt,
+    res_path = ProxyToLayerMessage::File => FileResponse::MakeDir,
 );
 
 impl_request!(

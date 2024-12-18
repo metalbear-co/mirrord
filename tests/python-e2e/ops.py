@@ -56,7 +56,7 @@ class FileOpsTest(unittest.TestCase):
         """
         os.mkdir("/tmp/test_mkdir")
         self.assertTrue(os.path.isdir("/tmp/test_mkdir"))
-    
+
     def test_mkdirat(self):
         """
         Creates a new directory in "/tmp" using mkdirat given the directory file descriptor for "/tmp" and verifies if the directory exists.
@@ -68,6 +68,26 @@ class FileOpsTest(unittest.TestCase):
         self.assertTrue(os.path.isdir("/tmp/test_mkdirat"))
         os.close(dir)
 
+    def test_mkdir_errors(self):
+        """
+        Test different mkdir/mkdirat errors
+        """
+        with self.assertRaises(FileNotFoundError):
+            os.mkdir("/tmp/test_mkdir_error/test_mkdir")
+
+        os.mkdir("/tmp/test_mkdir_error_already_exists")
+
+        with self.assertRaises(FileExistsError):
+            os.mkdir("/tmp/test_mkdir_error_already_exists")
+
+        dir = os.open(
+            "/tmp", os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_DIRECTORY
+        )
+        with self.assertRaises(FileExistsError):
+            os.mkdir("test_mkdir_error_already_exists", dir_fd=dir)
+
+        os.close(dir)
+        
     def _create_new_tmp_file(self):
         """
         Creates a new file in /tmp and returns the path and name of the file.

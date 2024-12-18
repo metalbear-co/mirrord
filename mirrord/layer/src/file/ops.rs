@@ -7,9 +7,9 @@ use libc::{c_char, statx, statx_timestamp};
 use libc::{c_int, iovec, unlink, AT_FDCWD};
 use mirrord_protocol::{
     file::{
-        MakeDirAtRequest, MakeDirRequest, MakeDirResponse, OpenFileRequest, OpenFileResponse,
-        OpenOptionsInternal, ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse,
-        SeekFileResponse, WriteFileResponse, XstatFsResponse, XstatResponse,
+        MakeDirAtRequest, MakeDirRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
+        ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse, SeekFileResponse,
+        WriteFileResponse, XstatFsResponse, XstatResponse,
     },
     ResponseError,
 };
@@ -338,7 +338,7 @@ pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
 }
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
-pub(crate) fn mkdir(pathname: Detour<PathBuf>, mode: u32) -> Detour<MakeDirResponse> {
+pub(crate) fn mkdir(pathname: Detour<PathBuf>, mode: u32) -> Detour<()> {
     let pathname = pathname?;
 
     check_relative_paths!(pathname);
@@ -361,11 +361,7 @@ pub(crate) fn mkdir(pathname: Detour<PathBuf>, mode: u32) -> Detour<MakeDirRespo
 }
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
-pub(crate) fn mkdirat(
-    dirfd: RawFd,
-    pathname: Detour<PathBuf>,
-    mode: u32,
-) -> Detour<MakeDirResponse> {
+pub(crate) fn mkdirat(dirfd: RawFd, pathname: Detour<PathBuf>, mode: u32) -> Detour<()> {
     let pathname: PathBuf = pathname?;
 
     if pathname.is_absolute() || dirfd == AT_FDCWD {

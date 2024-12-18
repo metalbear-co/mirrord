@@ -21,8 +21,7 @@ use libc::{
 use libc::{dirent64, stat64, statx, EBADF, ENOENT, ENOTDIR};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
-    FsMetadataInternal, MakeDirResponse, MetadataInternal, ReadFileResponse, ReadLinkFileResponse,
-    WriteFileResponse,
+    FsMetadataInternal, MetadataInternal, ReadFileResponse, ReadLinkFileResponse, WriteFileResponse,
 };
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
@@ -1067,12 +1066,7 @@ pub(crate) unsafe extern "C" fn readlink_detour(
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn mkdir_detour(pathname: *const c_char, mode: u32) -> c_int {
     mkdir(pathname.checked_into(), mode)
-        .map(|MakeDirResponse { result, errno }| {
-            if result == -1 {
-                set_errno(Errno(errno));
-            }
-            result
-        })
+        .map(|()| 0)
         .unwrap_or_bypass_with(|bypass| {
             let raw_path = update_ptr_from_bypass(pathname, &bypass);
             FN_MKDIR(raw_path, mode)
@@ -1087,12 +1081,7 @@ pub(crate) unsafe extern "C" fn mkdirat_detour(
     mode: u32,
 ) -> c_int {
     mkdirat(dirfd, pathname.checked_into(), mode)
-        .map(|MakeDirResponse { result, errno }| {
-            if result == -1 {
-                set_errno(Errno(errno));
-            }
-            result
-        })
+        .map(|()| 0)
         .unwrap_or_bypass_with(|bypass| {
             let raw_path = update_ptr_from_bypass(pathname, &bypass);
             FN_MKDIRAT(dirfd, raw_path, mode)

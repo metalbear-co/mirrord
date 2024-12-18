@@ -5,10 +5,7 @@ use std::{
     io::{self, prelude::*, BufReader, SeekFrom},
     iter::{Enumerate, Peekable},
     ops::RangeInclusive,
-    os::unix::{
-        fs::{MetadataExt, PermissionsExt},
-        prelude::FileExt,
-    },
+    os::unix::{fs::MetadataExt, prelude::FileExt},
     path::{Path, PathBuf},
 };
 
@@ -260,9 +257,7 @@ impl FileManager {
                 dirfd,
                 pathname,
                 mode,
-            }) => Some(FileResponse::MakeDirAt(
-                self.mkdirat(dirfd, &pathname, mode),
-            )),
+            }) => Some(FileResponse::MakeDir(self.mkdirat(dirfd, &pathname, mode))),
         })
     }
 
@@ -485,33 +480,20 @@ impl FileManager {
             })
     }
 
-    pub(crate) fn mkdir(&mut self, path: &Path, mode: u32) -> RemoteResult<MakeDirResponse> {
+    pub(crate) fn mkdir(&mut self, path: &Path, mode: u32) -> RemoteResult<()> {
         trace!("FileManager::mkdir -> path {:#?} | mode {:#?}", path, mode);
 
         let path = resolve_path(path, &self.root_path)?;
 
-        let result = std::fs::create_dir(Path::new(&path));
-
-        if let Err(err) = &result {
-            let errno = err.raw_os_error().unwrap_or(0);
-            return Ok(MakeDirResponse { result: -1, errno });
+        match nix::unistd::mkdir(&path, nix::sys::stat::Mode::from_bits_truncate(mode)) {
+            Ok(_) => Ok(()),
+            Err(err) => Err(ResponseError::from(std::io::Error::from_raw_os_error(
+                err as i32,
+            ))),
         }
-
-        let permissions = fs::Permissions::from_mode(mode);
-        fs::set_permissions(path, permissions)?;
-
-        Ok(MakeDirResponse {
-            result: 0,
-            errno: 0,
-        })
     }
 
-    pub(crate) fn mkdirat(
-        &mut self,
-        dirfd: u64,
-        path: &Path,
-        mode: u32,
-    ) -> RemoteResult<MakeDirResponse> {
+    pub(crate) fn mkdirat(&mut self, dirfd: u64, path: &Path, mode: u32) -> RemoteResult<()> {
         trace!(
             "FileManager::mkdirat -> dirfd {:#?} | path {:#?} | mode {:#?}",
             dirfd,
@@ -527,20 +509,12 @@ impl FileManager {
         if let RemoteFile::Directory(relative_dir) = relative_dir {
             let path = relative_dir.join(path);
 
-            let result = std::fs::create_dir(Path::new(&path));
-
-            if let Err(err) = &result {
-                let errno = err.raw_os_error().unwrap_or(0);
-                return Ok(MakeDirResponse { result: -1, errno });
+            match nix::unistd::mkdir(&path, nix::sys::stat::Mode::from_bits_truncate(mode)) {
+                Ok(_) => Ok(()),
+                Err(err) => Err(ResponseError::from(std::io::Error::from_raw_os_error(
+                    err as i32,
+                ))),
             }
-
-            let permissions = fs::Permissions::from_mode(mode);
-            fs::set_permissions(path, permissions)?;
-
-            Ok(MakeDirResponse {
-                result: 0,
-                errno: 0,
-            })
         } else {
             Err(ResponseError::NotDirectory(dirfd))
         }

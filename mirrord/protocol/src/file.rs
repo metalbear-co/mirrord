@@ -276,12 +276,6 @@ pub struct MakeDirRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct MakeDirResponse {
-    pub result: i32,
-    pub errno: i32,
-}
-
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct MakeDirAtRequest {
     pub dirfd: u64,
     pub pathname: PathBuf,

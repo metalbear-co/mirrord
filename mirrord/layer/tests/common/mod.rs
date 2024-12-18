@@ -482,10 +482,7 @@ impl TestIntProxy {
         self.codec
             .send(DaemonMessage::File(
                 mirrord_protocol::FileResponse::MakeDir(Ok(
-                    mirrord_protocol::file::MakeDirResponse {
-                        result: 0,
-                        errno: 0,
-                    },
+                    mirrord_protocol::file::MakeDirResponse {},
                 )),
             ))
             .await
