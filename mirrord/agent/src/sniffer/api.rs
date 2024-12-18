@@ -19,8 +19,8 @@ use super::messages::{SniffedConnection, SnifferCommand, SnifferCommandInner};
 use crate::{
     error::AgentError,
     metrics::{
-        MetricsActor, MetricsDecConnectionSubscription, MetricsDecPortSubscription,
-        MetricsIncPortSubscription,
+        MetricsActor, MetricsDecConnectionSubscription, MetricsDecMirrorPortSubscription,
+        MetricsIncMirrorPortSubscription,
     },
     util::ClientId,
     watched_task::TaskStatus,
@@ -29,6 +29,8 @@ use crate::{
 /// Interface used by clients to interact with the
 /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer). Multiple instances of this struct operate
 /// on a single sniffer instance.
+///
+/// Enabled by the `mirror` feature for incoming traffic.
 pub(crate) struct TcpSnifferApi {
     /// Id of the client using this struct.
     client_id: ClientId,
@@ -183,7 +185,7 @@ impl TcpSnifferApi {
 
                 let _ = self
                     .metrics
-                    .tell(MetricsIncPortSubscription)
+                    .tell(MetricsIncMirrorPortSubscription)
                     .await
                     .inspect_err(|fail| tracing::trace!(?fail));
 
@@ -196,7 +198,7 @@ impl TcpSnifferApi {
 
                 let _ = self
                     .metrics
-                    .tell(MetricsDecPortSubscription)
+                    .tell(MetricsDecMirrorPortSubscription)
                     .await
                     .inspect_err(|fail| tracing::trace!(?fail));
 

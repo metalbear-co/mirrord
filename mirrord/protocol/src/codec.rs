@@ -98,6 +98,11 @@ pub enum ClientMessage {
     /// These are the messages used by the `mirror` feature, and handled by the
     /// `TcpSnifferApi` in the agent.
     Tcp(LayerTcp),
+
+    /// TCP stealer message.
+    ///
+    /// These are the messages used by the `steal` feature, and handled by the `TcpStealerApi` in
+    /// the agent.
     TcpSteal(LayerTcpSteal),
     TcpOutgoing(LayerTcpOutgoing),
     UdpOutgoing(LayerUdpOutgoing),

@@ -579,13 +579,15 @@ async fn start_agent(args: Args) -> Result<()> {
         let cancellation_token = cancellation_token.clone();
         let watched_task = WatchedTask::new(
             TcpConnectionStealer::TASK_NAME,
-            TcpConnectionStealer::new(stealer_command_rx).and_then(|stealer| async move {
-                let res = stealer.start(cancellation_token).await;
-                if let Err(err) = res.as_ref() {
-                    error!("Stealer failed: {err}");
-                }
-                res
-            }),
+            TcpConnectionStealer::new(stealer_command_rx, state.metrics.clone()).and_then(
+                |stealer| async move {
+                    let res = stealer.start(cancellation_token).await;
+                    if let Err(err) = res.as_ref() {
+                        error!("Stealer failed: {err}");
+                    }
+                    res
+                },
+            ),
         );
         let status = watched_task.status();
         let task = run_thread_in_namespace(

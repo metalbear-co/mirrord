@@ -67,7 +67,10 @@ pub(crate) struct MetricsActor {
     enabled: bool,
     open_fd_count: u64,
     connected_client_count: u64,
-    port_subscription_count: u64,
+    mirror_port_subscription_count: u64,
+    steal_filtered_port_subscription_count: u64,
+    steal_unfiltered_port_subscription_count: u64,
+    steal_connection_subscription_count: u64,
     connection_subscription_count: u64,
 }
 
@@ -113,8 +116,22 @@ pub(crate) struct MetricsDecFd;
 pub(crate) struct MetricsIncClient;
 pub(crate) struct MetricsDecClient;
 
-pub(crate) struct MetricsIncPortSubscription;
-pub(crate) struct MetricsDecPortSubscription;
+pub(crate) struct MetricsIncMirrorPortSubscription;
+pub(crate) struct MetricsDecMirrorPortSubscription;
+
+pub(crate) struct MetricsIncStealPortSubscription {
+    pub(crate) filtered: bool,
+}
+pub(crate) struct MetricsDecStealPortSubscription {
+    pub(crate) filtered: bool,
+}
+
+pub(crate) struct MetricsDecStealPortSubscriptionMany {
+    pub(crate) removed_subscriptions: Vec<bool>,
+}
+
+pub(crate) struct MetricsIncStealConnectionSubscription;
+pub(crate) struct MetricsDecStealConnectionSubscription;
 
 pub(crate) struct MetricsIncConnectionSubscription;
 pub(crate) struct MetricsDecConnectionSubscription;
@@ -179,29 +196,119 @@ impl Message<MetricsDecClient> for MetricsActor {
     }
 }
 
-impl Message<MetricsIncPortSubscription> for MetricsActor {
+impl Message<MetricsIncMirrorPortSubscription> for MetricsActor {
     type Reply = ();
 
     #[tracing::instrument(level = Level::INFO, skip_all)]
     async fn handle(
         &mut self,
-        _: MetricsIncPortSubscription,
+        _: MetricsIncMirrorPortSubscription,
         _ctx: Context<'_, Self, Self::Reply>,
     ) -> Self::Reply {
-        self.port_subscription_count += 1;
+        self.mirror_port_subscription_count += 1;
     }
 }
 
-impl Message<MetricsDecPortSubscription> for MetricsActor {
+impl Message<MetricsDecMirrorPortSubscription> for MetricsActor {
     type Reply = ();
 
     #[tracing::instrument(level = Level::INFO, skip_all)]
     async fn handle(
         &mut self,
-        _: MetricsDecPortSubscription,
+        _: MetricsDecMirrorPortSubscription,
         _ctx: Context<'_, Self, Self::Reply>,
     ) -> Self::Reply {
-        self.port_subscription_count = self.port_subscription_count.saturating_sub(1);
+        self.mirror_port_subscription_count = self.mirror_port_subscription_count.saturating_sub(1);
+    }
+}
+
+impl Message<MetricsIncStealPortSubscription> for MetricsActor {
+    type Reply = ();
+
+    #[tracing::instrument(level = Level::INFO, skip_all)]
+    async fn handle(
+        &mut self,
+        MetricsIncStealPortSubscription { filtered }: MetricsIncStealPortSubscription,
+        _ctx: Context<'_, Self, Self::Reply>,
+    ) -> Self::Reply {
+        if filtered {
+            self.steal_filtered_port_subscription_count += 1;
+        } else {
+            self.steal_unfiltered_port_subscription_count += 1;
+        }
+    }
+}
+
+impl Message<MetricsDecStealPortSubscription> for MetricsActor {
+    type Reply = ();
+
+    #[tracing::instrument(level = Level::INFO, skip_all)]
+    async fn handle(
+        &mut self,
+        MetricsDecStealPortSubscription { filtered }: MetricsDecStealPortSubscription,
+        _ctx: Context<'_, Self, Self::Reply>,
+    ) -> Self::Reply {
+        if filtered {
+            self.steal_filtered_port_subscription_count = self
+                .steal_filtered_port_subscription_count
+                .saturating_sub(1);
+        } else {
+            self.steal_unfiltered_port_subscription_count = self
+                .steal_unfiltered_port_subscription_count
+                .saturating_sub(1);
+        }
+    }
+}
+
+impl Message<MetricsDecStealPortSubscriptionMany> for MetricsActor {
+    type Reply = ();
+
+    #[tracing::instrument(level = Level::INFO, skip_all)]
+    async fn handle(
+        &mut self,
+        MetricsDecStealPortSubscriptionMany {
+            removed_subscriptions,
+        }: MetricsDecStealPortSubscriptionMany,
+        _ctx: Context<'_, Self, Self::Reply>,
+    ) -> Self::Reply {
+        for filtered in removed_subscriptions {
+            if filtered {
+                self.steal_filtered_port_subscription_count = self
+                    .steal_filtered_port_subscription_count
+                    .saturating_sub(1);
+            } else {
+                self.steal_unfiltered_port_subscription_count = self
+                    .steal_unfiltered_port_subscription_count
+                    .saturating_sub(1);
+            }
+        }
+    }
+}
+
+impl Message<MetricsIncStealConnectionSubscription> for MetricsActor {
+    type Reply = ();
+
+    #[tracing::instrument(level = Level::INFO, skip_all)]
+    async fn handle(
+        &mut self,
+        _: MetricsIncStealConnectionSubscription,
+        _ctx: Context<'_, Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.steal_connection_subscription_count += 1;
+    }
+}
+
+impl Message<MetricsDecStealConnectionSubscription> for MetricsActor {
+    type Reply = ();
+
+    #[tracing::instrument(level = Level::INFO, skip_all)]
+    async fn handle(
+        &mut self,
+        _: MetricsDecStealConnectionSubscription,
+        _ctx: Context<'_, Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.steal_connection_subscription_count =
+            self.steal_connection_subscription_count.saturating_sub(1);
     }
 }
 
