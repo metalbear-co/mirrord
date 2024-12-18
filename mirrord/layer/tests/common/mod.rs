@@ -481,9 +481,7 @@ impl TestIntProxy {
         // Answer `mkdir`.
         self.codec
             .send(DaemonMessage::File(
-                mirrord_protocol::FileResponse::MakeDir(Ok(
-                    mirrord_protocol::file::MakeDirResponse {},
-                )),
+                mirrord_protocol::FileResponse::MakeDir(Ok(())),
             ))
             .await
             .unwrap();
