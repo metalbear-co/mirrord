@@ -19,19 +19,22 @@ workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-mirrord-config = { path = "../config"}
-mirrord-protocol = { path = "../protocol"}
-mirrord-layer-macro = { path = "./macro"}
+mirrord-config = { path = "../config" }
+mirrord-protocol = { path = "../protocol" }
+mirrord-layer-macro = { path = "./macro" }
 mirrord-console = { path = "../console" }
-mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
+mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = [
+    "codec",
+] }
 
 ctor = "0.2"
 libc.workspace = true
 bincode.workspace = true
-nix = { workspace = true, features = ["net", "process", "signal"]}
+nix = { workspace = true, features = ["net", "process", "signal"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 frida-gum = { version = "0.15", features = ["auto-download"] }
+hyper = { workspace = true }
 
 serde_json.workspace = true
 
@@ -60,7 +63,6 @@ mirrord-intproxy = { path = "../intproxy" }
 k8s-openapi.workspace = true
 chrono = { workspace = true, features = ["clock"] }
 http-body = { workspace = true }
-hyper = { workspace = true }
 rstest.workspace = true
 tempfile.workspace = true
 test-cdylib = "*"
