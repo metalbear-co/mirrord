@@ -36,21 +36,46 @@ async fn get_metrics(metrics: Extension<ActorRef<MetricsActor>>) -> Result<Strin
     use prometheus::{register_int_gauge, Encoder, TextEncoder};
 
     let MetricsGetAllReply {
-        open_fds_count,
-        connected_clients_count,
+        open_fd_count,
+        mirror_port_subscription_count,
+        steal_filtered_port_subscription_count,
+        steal_unfiltered_port_subscription_count,
+        steal_connection_subscription_count,
+        connection_subscription_count,
     } = metrics.ask(MetricsGetAll).await?;
 
     register_int_gauge!(
-        "mirrord_agent_open_fds_count",
+        "mirrord_agent_open_fd_count",
         "amount of open fds in mirrord-agent"
     )?
-    .set(open_fds_count as i64);
+    .set(open_fd_count as i64);
+
+    register_int_gauge!("mirrord_agent_mirror_port_subscription_count", "")?
+        .set(mirror_port_subscription_count as i64);
 
     register_int_gauge!(
-        "mirrord_agent_connected_clients_count",
+        "mirrord_agent_steal_filtered_port_subscription_count",
         "amount of connected clients in mirrord-agent"
     )?
-    .set(connected_clients_count as i64);
+    .set(steal_filtered_port_subscription_count as i64);
+
+    register_int_gauge!(
+        "mirrord_agent_steal_unfiltered_port_subscription_count",
+        "amount of connected clients in mirrord-agent"
+    )?
+    .set(steal_unfiltered_port_subscription_count as i64);
+
+    register_int_gauge!(
+        "mirrord_agent_steal_connection_subscription_count",
+        "amount of connected clients in mirrord-agent"
+    )?
+    .set(steal_connection_subscription_count as i64);
+
+    register_int_gauge!(
+        "mirrord_agent_connection_subscription_count",
+        "amount of connected clients in mirrord-agent"
+    )?
+    .set(connection_subscription_count as i64);
 
     let metric_families = prometheus::gather();
 
@@ -66,7 +91,6 @@ async fn get_metrics(metrics: Extension<ActorRef<MetricsActor>>) -> Result<Strin
 pub(crate) struct MetricsActor {
     enabled: bool,
     open_fd_count: u64,
-    connected_client_count: u64,
     mirror_port_subscription_count: u64,
     steal_filtered_port_subscription_count: u64,
     steal_unfiltered_port_subscription_count: u64,
@@ -113,9 +137,6 @@ impl Actor for MetricsActor {
 pub(crate) struct MetricsIncFd;
 pub(crate) struct MetricsDecFd;
 
-pub(crate) struct MetricsIncClient;
-pub(crate) struct MetricsDecClient;
-
 pub(crate) struct MetricsIncMirrorPortSubscription;
 pub(crate) struct MetricsDecMirrorPortSubscription;
 
@@ -140,8 +161,12 @@ pub(crate) struct MetricsGetAll;
 
 #[derive(Reply, Serialize)]
 pub(crate) struct MetricsGetAllReply {
-    open_fds_count: u64,
-    connected_clients_count: u64,
+    open_fd_count: u64,
+    mirror_port_subscription_count: u64,
+    steal_filtered_port_subscription_count: u64,
+    steal_unfiltered_port_subscription_count: u64,
+    steal_connection_subscription_count: u64,
+    connection_subscription_count: u64,
 }
 
 impl Message<MetricsIncFd> for MetricsActor {
@@ -167,32 +192,6 @@ impl Message<MetricsDecFd> for MetricsActor {
         _ctx: Context<'_, Self, Self::Reply>,
     ) -> Self::Reply {
         self.open_fd_count = self.open_fd_count.saturating_sub(1);
-    }
-}
-
-impl Message<MetricsIncClient> for MetricsActor {
-    type Reply = ();
-
-    #[tracing::instrument(level = Level::INFO, skip_all)]
-    async fn handle(
-        &mut self,
-        _: MetricsIncClient,
-        _ctx: Context<'_, Self, Self::Reply>,
-    ) -> Self::Reply {
-        self.connected_client_count += 1;
-    }
-}
-
-impl Message<MetricsDecClient> for MetricsActor {
-    type Reply = ();
-
-    #[tracing::instrument(level = Level::INFO, skip_all)]
-    async fn handle(
-        &mut self,
-        _: MetricsDecClient,
-        _ctx: Context<'_, Self, Self::Reply>,
-    ) -> Self::Reply {
-        self.connected_client_count = self.connected_client_count.saturating_sub(1);
     }
 }
 
@@ -348,8 +347,12 @@ impl Message<MetricsGetAll> for MetricsActor {
         _ctx: Context<'_, Self, Self::Reply>,
     ) -> Self::Reply {
         MetricsGetAllReply {
-            open_fds_count: self.open_fd_count,
-            connected_clients_count: self.connected_client_count,
+            open_fd_count: self.open_fd_count,
+            mirror_port_subscription_count: self.mirror_port_subscription_count,
+            steal_filtered_port_subscription_count: self.steal_filtered_port_subscription_count,
+            steal_unfiltered_port_subscription_count: self.steal_unfiltered_port_subscription_count,
+            steal_connection_subscription_count: self.steal_connection_subscription_count,
+            connection_subscription_count: self.connection_subscription_count,
         }
     }
 }
