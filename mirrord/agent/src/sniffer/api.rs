@@ -19,7 +19,7 @@ use super::messages::{SniffedConnection, SnifferCommand, SnifferCommandInner};
 use crate::{
     error::AgentError,
     metrics::{
-        MetricsActor, MetricsDecConnectionSubscription, MetricsDecMirrorPortSubscription,
+        MetricsActor, MetricsDecMirrorConnectionSubscription, MetricsDecMirrorPortSubscription,
         MetricsIncMirrorPortSubscription,
     },
     util::ClientId,
@@ -210,7 +210,7 @@ impl TcpSnifferApi {
 
                 let _ = self
                     .metrics
-                    .tell(MetricsDecConnectionSubscription)
+                    .tell(MetricsDecMirrorConnectionSubscription)
                     .await
                     .inspect_err(|fail| tracing::trace!(?fail));
 

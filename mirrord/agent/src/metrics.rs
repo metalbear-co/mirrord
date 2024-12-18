@@ -6,6 +6,7 @@ use kameo::{
     message::{Context, Message},
     Actor, Reply,
 };
+use prometheus::core::{AtomicI64, GenericGauge};
 use serde::Serialize;
 use thiserror::Error;
 use tokio::net::TcpListener;
@@ -25,57 +26,52 @@ pub(crate) enum MetricsError {
     Prometheus(#[from] prometheus::Error),
 }
 
+unsafe impl Send for MetricsError {}
+
 impl IntoResponse for MetricsError {
     fn into_response(self) -> axum::response::Response {
         (http::StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
     }
 }
 
-#[tracing::instrument(level = Level::INFO, ret, err)]
-async fn get_metrics(metrics: Extension<ActorRef<MetricsActor>>) -> Result<String, MetricsError> {
-    use prometheus::{register_int_gauge, Encoder, TextEncoder};
+#[tracing::instrument(level = Level::INFO, skip(prometheus_metrics), ret, err)]
+#[axum::debug_handler]
+async fn get_metrics(
+    metrics: Extension<ActorRef<MetricsActor>>,
+    prometheus_metrics: Extension<PrometheusMetrics>,
+) -> Result<String, MetricsError> {
+    use prometheus::{Encoder, TextEncoder};
 
     let MetricsGetAllReply {
         open_fd_count,
         mirror_port_subscription_count,
+        mirror_connection_subscription_count,
         steal_filtered_port_subscription_count,
         steal_unfiltered_port_subscription_count,
         steal_connection_subscription_count,
-        connection_subscription_count,
     } = metrics.ask(MetricsGetAll).await?;
 
-    register_int_gauge!(
-        "mirrord_agent_open_fd_count",
-        "amount of open fds in mirrord-agent"
-    )?
-    .set(open_fd_count as i64);
+    prometheus_metrics.open_fd_count.set(open_fd_count as i64);
 
-    register_int_gauge!("mirrord_agent_mirror_port_subscription_count", "")?
+    prometheus_metrics
+        .mirror_port_subscription_count
         .set(mirror_port_subscription_count as i64);
 
-    register_int_gauge!(
-        "mirrord_agent_steal_filtered_port_subscription_count",
-        "amount of connected clients in mirrord-agent"
-    )?
-    .set(steal_filtered_port_subscription_count as i64);
+    prometheus_metrics
+        .mirror_connection_subscription_count
+        .set(mirror_connection_subscription_count as i64);
 
-    register_int_gauge!(
-        "mirrord_agent_steal_unfiltered_port_subscription_count",
-        "amount of connected clients in mirrord-agent"
-    )?
-    .set(steal_unfiltered_port_subscription_count as i64);
+    prometheus_metrics
+        .steal_filtered_port_subscription_count
+        .set(steal_filtered_port_subscription_count as i64);
 
-    register_int_gauge!(
-        "mirrord_agent_steal_connection_subscription_count",
-        "amount of connected clients in mirrord-agent"
-    )?
-    .set(steal_connection_subscription_count as i64);
+    prometheus_metrics
+        .steal_unfiltered_port_subscription_count
+        .set(steal_unfiltered_port_subscription_count as i64);
 
-    register_int_gauge!(
-        "mirrord_agent_connection_subscription_count",
-        "amount of connected clients in mirrord-agent"
-    )?
-    .set(connection_subscription_count as i64);
+    prometheus_metrics
+        .steal_connection_subscription_count
+        .set(steal_connection_subscription_count as i64);
 
     let metric_families = prometheus::gather();
 
@@ -87,15 +83,58 @@ async fn get_metrics(metrics: Extension<ActorRef<MetricsActor>>) -> Result<Strin
     Ok(String::from_utf8(buffer)?)
 }
 
+#[derive(Clone)]
+struct PrometheusMetrics {
+    open_fd_count: GenericGauge<AtomicI64>,
+    mirror_port_subscription_count: GenericGauge<AtomicI64>,
+    mirror_connection_subscription_count: GenericGauge<AtomicI64>,
+    steal_filtered_port_subscription_count: GenericGauge<AtomicI64>,
+    steal_unfiltered_port_subscription_count: GenericGauge<AtomicI64>,
+    steal_connection_subscription_count: GenericGauge<AtomicI64>,
+}
+
+impl PrometheusMetrics {
+    fn new() -> Result<Self, MetricsError> {
+        use prometheus::register_int_gauge;
+
+        Ok(Self {
+            open_fd_count: register_int_gauge!(
+                "mirrord_agent_open_fd_count",
+                "amount of open fds in mirrord-agent"
+            )?,
+            mirror_port_subscription_count: register_int_gauge!(
+                "mirrord_agent_mirror_port_subscription_count",
+                "amount of mirror port subscriptions in mirror-agent"
+            )?,
+            mirror_connection_subscription_count: register_int_gauge!(
+                "mirrord_agent_mirror_connection_subscription_count",
+                "amount of connections in steal mode in mirrord-agent"
+            )?,
+            steal_filtered_port_subscription_count: register_int_gauge!(
+                "mirrord_agent_steal_filtered_port_subscription_count",
+                "amount of filtered steal port subscriptions in mirrord-agent"
+            )?,
+            steal_unfiltered_port_subscription_count: register_int_gauge!(
+                "mirrord_agent_steal_unfiltered_port_subscription_count",
+                "amount of unfiltered steal port subscriptions in mirrord-agent"
+            )?,
+            steal_connection_subscription_count: register_int_gauge!(
+                "mirrord_agent_steal_connection_subscription_count",
+                "amount of connections in steal mode in mirrord-agent"
+            )?,
+        })
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct MetricsActor {
     enabled: bool,
     open_fd_count: u64,
     mirror_port_subscription_count: u64,
+    mirror_connection_subscription_count: u64,
     steal_filtered_port_subscription_count: u64,
     steal_unfiltered_port_subscription_count: u64,
     steal_connection_subscription_count: u64,
-    connection_subscription_count: u64,
 }
 
 impl MetricsActor {
@@ -113,9 +152,12 @@ impl Actor for MetricsActor {
     #[tracing::instrument(level = Level::INFO, skip_all, ret ,err)]
     async fn on_start(&mut self, metrics: ActorRef<Self>) -> Result<(), BoxError> {
         if self.enabled {
+            let prometheus_metrics = PrometheusMetrics::new()?;
+
             let app = Router::new()
                 .route("/metrics", get(get_metrics))
-                .layer(Extension(metrics));
+                .layer(Extension(metrics))
+                .layer(Extension(prometheus_metrics));
 
             let listener = TcpListener::bind("0.0.0.0:9000")
                 .await
@@ -140,6 +182,9 @@ pub(crate) struct MetricsDecFd;
 pub(crate) struct MetricsIncMirrorPortSubscription;
 pub(crate) struct MetricsDecMirrorPortSubscription;
 
+pub(crate) struct MetricsIncMirrorConnectionSubscription;
+pub(crate) struct MetricsDecMirrorConnectionSubscription;
+
 pub(crate) struct MetricsIncStealPortSubscription {
     pub(crate) filtered: bool,
 }
@@ -154,19 +199,16 @@ pub(crate) struct MetricsDecStealPortSubscriptionMany {
 pub(crate) struct MetricsIncStealConnectionSubscription;
 pub(crate) struct MetricsDecStealConnectionSubscription;
 
-pub(crate) struct MetricsIncConnectionSubscription;
-pub(crate) struct MetricsDecConnectionSubscription;
-
 pub(crate) struct MetricsGetAll;
 
 #[derive(Reply, Serialize)]
 pub(crate) struct MetricsGetAllReply {
     open_fd_count: u64,
     mirror_port_subscription_count: u64,
+    mirror_connection_subscription_count: u64,
     steal_filtered_port_subscription_count: u64,
     steal_unfiltered_port_subscription_count: u64,
     steal_connection_subscription_count: u64,
-    connection_subscription_count: u64,
 }
 
 impl Message<MetricsIncFd> for MetricsActor {
@@ -311,29 +353,30 @@ impl Message<MetricsDecStealConnectionSubscription> for MetricsActor {
     }
 }
 
-impl Message<MetricsIncConnectionSubscription> for MetricsActor {
+impl Message<MetricsIncMirrorConnectionSubscription> for MetricsActor {
     type Reply = ();
 
     #[tracing::instrument(level = Level::INFO, skip_all)]
     async fn handle(
         &mut self,
-        _: MetricsIncConnectionSubscription,
+        _: MetricsIncMirrorConnectionSubscription,
         _ctx: Context<'_, Self, Self::Reply>,
     ) -> Self::Reply {
-        self.connection_subscription_count += 1;
+        self.mirror_connection_subscription_count += 1;
     }
 }
 
-impl Message<MetricsDecConnectionSubscription> for MetricsActor {
+impl Message<MetricsDecMirrorConnectionSubscription> for MetricsActor {
     type Reply = ();
 
     #[tracing::instrument(level = Level::INFO, skip_all)]
     async fn handle(
         &mut self,
-        _: MetricsDecConnectionSubscription,
+        _: MetricsDecMirrorConnectionSubscription,
         _ctx: Context<'_, Self, Self::Reply>,
     ) -> Self::Reply {
-        self.connection_subscription_count = self.connection_subscription_count.saturating_sub(1);
+        self.mirror_connection_subscription_count =
+            self.mirror_connection_subscription_count.saturating_sub(1);
     }
 }
 
@@ -349,10 +392,10 @@ impl Message<MetricsGetAll> for MetricsActor {
         MetricsGetAllReply {
             open_fd_count: self.open_fd_count,
             mirror_port_subscription_count: self.mirror_port_subscription_count,
+            mirror_connection_subscription_count: self.mirror_connection_subscription_count,
             steal_filtered_port_subscription_count: self.steal_filtered_port_subscription_count,
             steal_unfiltered_port_subscription_count: self.steal_unfiltered_port_subscription_count,
             steal_connection_subscription_count: self.steal_connection_subscription_count,
-            connection_subscription_count: self.connection_subscription_count,
         }
     }
 }
