@@ -327,7 +327,7 @@ impl DebuggerPorts {
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(",");
-            if let Some(existing) = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV).ok() {
+            if let Ok(existing) = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV) {
                 value = [value, existing].into_iter().collect::<Vec<_>>().join(",");
             }
             env::set_var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV, value);
@@ -346,7 +346,7 @@ impl DebuggerPorts {
         let _ : Option<()> = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV)
             .ok()
             .and_then(|s| {
-                let _ = s.split(',')
+                s.split(',')
                     .for_each(|s| {
                         let chunks = s
                             .split('-')
@@ -397,7 +397,7 @@ impl DebuggerPorts {
             Self::FixedRange(range) => range.contains(&addr.port()),
             Self::Combination(vec) => vec
                 .iter()
-                .map(|ports| ports.contains(&addr))
+                .map(|ports| ports.contains(addr))
                 .fold(false, |acc, ports| ports || acc),
             Self::None => false,
         }
