@@ -492,6 +492,7 @@ impl ClientConnectionHandler {
 async fn start_agent(args: Args) -> Result<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
 
+    // listen for client connections
     let listener = TcpListener::bind(SocketAddrV4::new(
         Ipv4Addr::UNSPECIFIED,
         args.communicate_port,

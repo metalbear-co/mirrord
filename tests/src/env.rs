@@ -36,7 +36,7 @@ mod env_tests {
         let service = service.await;
         let mut process = run_exec_with_target(
             application.command(),
-            &service.target,
+            &service.pod_container_target(),
             None,
             application.mirrord_args(),
             None,
