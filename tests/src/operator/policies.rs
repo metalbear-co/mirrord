@@ -379,4 +379,6 @@ pub async fn create_cluster_policy_and_try_to_mirror(
     run_mirrord_and_verify_mirror_result(&service_a, false).await;
     println!("Running mirrord against service b");
     run_mirrord_and_verify_mirror_result(&service_b, true).await;
+    println!("Running stealing against service a");
+    run_mirrord_and_verify_steal_result(&service_a, false, CanSteal::EvenWithoutFilter).await;
 }
