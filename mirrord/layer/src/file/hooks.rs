@@ -1088,6 +1088,17 @@ pub(crate) unsafe extern "C" fn mkdirat_detour(
         })
 }
 
+/// Hook for `libc::rmdir`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn rmdir_detour(pathname: *const c_char) -> c_int {
+    rmdir(pathname.checked_into())
+        .map(|()| 0)
+        .unwrap_or_bypass_with(|bypass| {
+            let raw_path = update_ptr_from_bypass(pathname, &bypass);
+            FN_RMDIR(raw_path)
+        })
+}
+
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
@@ -1171,6 +1182,8 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
         FnMkdirat,
         FN_MKDIRAT
     );
+
+    replace!(hook_manager, "rmdir", rmdir_detour, FnRmdir, FN_RMDIR);
 
     replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);
 
