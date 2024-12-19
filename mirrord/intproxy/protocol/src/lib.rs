@@ -325,6 +325,13 @@ impl_request!(
 );
 
 impl_request!(
+    req = RemoveDirRequest,
+    res = RemoteResult<()>,
+    req_path = LayerToProxyMessage::File => FileRequest::RemoveDir,
+    res_path = ProxyToLayerMessage::File => FileResponse::RemoveDir,
+);
+
+impl_request!(
     req = SeekFileRequest,
     res = RemoteResult<SeekFileResponse>,
     req_path = LayerToProxyMessage::File => FileRequest::Seek,

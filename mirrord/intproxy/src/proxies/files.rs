@@ -6,7 +6,7 @@ use mirrord_protocol::{
     file::{
         CloseDirRequest, CloseFileRequest, DirEntryInternal, ReadDirBatchRequest, ReadDirResponse,
         ReadFileResponse, ReadLimitedFileRequest, SeekFromInternal, MKDIR_VERSION,
-        READDIR_BATCH_VERSION, READLINK_VERSION,
+        READDIR_BATCH_VERSION, READLINK_VERSION, RMDIR_VERSION,
     },
     ClientMessage, DaemonMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError,
     ResponseError,
@@ -253,6 +253,23 @@ impl FilesProxy {
         self.protocol_version.replace(version);
     }
 
+    fn is_request_supported(&self, request: &FileRequest) -> bool {
+        let protocol_version = self.protocol_version.as_ref();
+
+        match request {
+            FileRequest::ReadLink(..) => {
+                protocol_version.is_some_and(|version| READLINK_VERSION.matches(version))
+            }
+            FileRequest::MakeDir(..) | FileRequest::MakeDirAt(..) => {
+                protocol_version.is_some_and(|version| MKDIR_VERSION.matches(version))
+            }
+            FileRequest::RemoveDir(..) => {
+                protocol_version.is_some_and(|version| RMDIR_VERSION.matches(version))
+            }
+            _ => true,
+        }
+    }
+
     // #[tracing::instrument(level = Level::TRACE, skip(message_bus))]
     async fn file_request(
         &mut self,
@@ -262,6 +279,33 @@ impl FilesProxy {
         message_bus: &mut MessageBus<Self>,
     ) {
         match request {
+            // Not supported in old `mirrord-protocol` versions.
+            r if !self.is_request_supported(&request) => {
+                let response = match r {
+                    FileRequest::ReadLink(..) => {
+                        FileResponse::ReadLink(Err(ResponseError::NotImplemented))
+                    }
+                    FileRequest::MakeDir(..) => {
+                        FileResponse::MakeDir(Err(ResponseError::NotImplemented))
+                    }
+                    FileRequest::MakeDirAt(..) => {
+                        FileResponse::MakeDir(Err(ResponseError::NotImplemented))
+                    }
+                    FileRequest::RemoveDir(..) => {
+                        FileResponse::RemoveDir(Err(ResponseError::NotImplemented))
+                    }
+                    _ => unreachable!(),
+                };
+
+                message_bus
+                    .send(ToLayer {
+                        message_id,
+                        layer_id,
+                        message: ProxyToLayerMessage::File(response),
+                    })
+                    .await;
+            }
+
             // Should trigger remote close only when the fd is closed in all layer instances.
             FileRequest::Close(close) => {
                 if self.remote_files.remove(layer_id, close.fd) {
@@ -454,31 +498,6 @@ impl FilesProxy {
                 }
             },
 
-            // Not supported in old `mirrord-protocol` versions.
-            req @ FileRequest::ReadLink(..) => {
-                let supported = self
-                    .protocol_version
-                    .as_ref()
-                    .is_some_and(|version| READLINK_VERSION.matches(version));
-
-                if supported {
-                    self.request_queue.push_back(message_id, layer_id);
-                    message_bus
-                        .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(req)))
-                        .await;
-                } else {
-                    message_bus
-                        .send(ToLayer {
-                            message_id,
-                            message: ProxyToLayerMessage::File(FileResponse::ReadLink(Err(
-                                ResponseError::NotImplemented,
-                            ))),
-                            layer_id,
-                        })
-                        .await;
-                }
-            }
-
             // Should only be sent from intproxy, not from the layer.
             FileRequest::ReadDirBatch(..) => {
                 unreachable!("ReadDirBatch request is never sent from the layer");
@@ -522,34 +541,12 @@ impl FilesProxy {
                     .await;
             }
 
-            FileRequest::MakeDir(_) | FileRequest::MakeDirAt(_) => {
-                let supported = self
-                    .protocol_version
-                    .as_ref()
-                    .is_some_and(|version| MKDIR_VERSION.matches(version));
-
-                if supported {
-                    self.request_queue.push_back(message_id, layer_id);
-                    message_bus
-                        .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(request)))
-                        .await;
-                } else {
-                    let file_response = FileResponse::MakeDir(Err(ResponseError::NotImplemented));
-
-                    message_bus
-                        .send(ToLayer {
-                            message_id,
-                            message: ProxyToLayerMessage::File(file_response),
-                            layer_id,
-                        })
-                        .await;
-                }
-            }
-
             // Doesn't require any special logic.
             other => {
                 self.request_queue.push_back(message_id, layer_id);
-                message_bus.send(ClientMessage::FileRequest(other)).await;
+                message_bus
+                    .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(other)))
+                    .await;
             }
         }
     }

@@ -258,6 +258,9 @@ impl FileManager {
                 pathname,
                 mode,
             }) => Some(FileResponse::MakeDir(self.mkdirat(dirfd, &pathname, mode))),
+            FileRequest::RemoveDir(RemoveDirRequest { pathname }) => {
+                Some(FileResponse::RemoveDir(self.rmdir(&pathname)))
+            }
         })
     }
 
@@ -518,6 +521,14 @@ impl FileManager {
         } else {
             Err(ResponseError::NotDirectory(dirfd))
         }
+    }
+
+    pub(crate) fn rmdir(&mut self, path: &Path) -> RemoteResult<()> {
+        trace!("FileManager::rmdir -> path {:#?}", path);
+
+        let path = resolve_path(path, &self.root_path)?;
+
+        std::fs::remove_dir(&path.as_path()).map_err(ResponseError::from)
     }
 
     pub(crate) fn seek(&mut self, fd: u64, seek_from: SeekFrom) -> RemoteResult<SeekFileResponse> {

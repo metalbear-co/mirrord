@@ -22,8 +22,13 @@ pub static READLINK_VERSION: LazyLock<VersionReq> =
 pub static READDIR_BATCH_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.9.0".parse().expect("Bad Identifier"));
 
+/// Minimal mirrord-protocol version that allows [`MakeDirRequest`] and [`MakeDirAtRequest`].
 pub static MKDIR_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.13.0".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows [`RemoveDirRequest`].
+pub static RMDIR_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.14.0".parse().expect("Bad Identifier"));
 
 /// Internal version of Metadata across operating system (macOS, Linux)
 /// Only mutual attributes
@@ -280,6 +285,11 @@ pub struct MakeDirAtRequest {
     pub dirfd: u64,
     pub pathname: PathBuf,
     pub mode: u32,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct RemoveDirRequest {
+    pub pathname: PathBuf,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

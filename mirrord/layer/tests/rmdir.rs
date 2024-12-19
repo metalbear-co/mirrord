@@ -6,22 +6,22 @@ use rstest::rstest;
 mod common;
 pub use common::*;
 
-/// Test for the [`libc::mkdir`] function.
+/// Test for the [`libc::rmdir`] function.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn mkdir(dylib_path: &Path) {
-    let application = Application::MakeDir;
+async fn rmdir(dylib_path: &Path) {
+    let application = Application::RemoveDir;
 
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, Default::default(), None)
         .await;
 
     println!("waiting for MakeDirRequest.");
-    intproxy.expect_make_dir("/mkdir_test_path", 0o777).await;
+    intproxy.expect_make_dir("/test_dir", 0o777).await;
 
-    println!("waiting for MakeDirRequest.");
-    intproxy.expect_make_dir("/mkdirat_test_path", 0o777).await;
+    println!("waiting for RemoveDirRequest.");
+    intproxy.expect_remove_dir("/test_dir").await;
 
     assert_eq!(intproxy.try_recv().await, None);
 
