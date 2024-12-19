@@ -289,12 +289,70 @@ impl DebuggerType {
 
 /// Local ports used by the debugger running the process.
 /// These should be ignored by the layer.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum DebuggerPorts {
     Single(u16),
     FixedRange(RangeInclusive<u16>),
     Combination(Vec<DebuggerPorts>),
     None,
+}
+
+impl FromStr for DebuggerPorts {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // string looks like 'port1,port2,port3-portx,porty-portz'
+        let mut vec = vec![];
+        s.split(',')
+            .for_each(|s| {
+                let chunks = s
+                    .split('-')
+                    .map(u16::from_str)
+                    .collect::<Result<Vec<_>, _>>()
+                    .inspect_err(|e| error!(
+                        "Failed to decode debugger port range from {} env variable: {}",
+                        MIRRORD_IGNORE_DEBUGGER_PORTS_ENV,
+                        e
+                    ))
+                    .ok().unwrap_or_default();
+                match *chunks.as_slice() {
+                    [p] => vec.push(Self::Single(p)),
+                    [p1, p2] if p1 <= p2 => vec.push(Self::FixedRange(p1..=p2)),
+                    _ => {
+                        error!(
+                            "Failed to decode debugger ports from {} env variable: expected a port or range of ports",
+                            MIRRORD_IGNORE_DEBUGGER_PORTS_ENV,
+                        );
+                    },
+                };
+            });
+        if !vec.is_empty() {
+            Ok(Self::Combination(vec))
+        } else {
+            Err(format!("couldn't parse ports from string: {s}"))
+        }
+    }
+}
+
+impl fmt::Display for DebuggerPorts {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                DebuggerPorts::Single(port) => port.to_string(),
+                DebuggerPorts::FixedRange(range_inclusive) =>
+                    format!("{}-{}", range_inclusive.start(), range_inclusive.end()),
+                DebuggerPorts::Combination(vec) => {
+                    vec.iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                }
+                DebuggerPorts::None => String::default(),
+            }
+        )
+    }
 }
 
 impl DebuggerPorts {
@@ -346,44 +404,14 @@ impl DebuggerPorts {
 
         // IGNORE_DEBUGGER_PORTS may have a combination of single, multiple or ranges of ports
         // separated by a comma they need to be parsed individually
-        let mut v = vec![];
-        let _ : Option<()> = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV)
+        env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV)
             .ok()
             .and_then(|s| {
-                s.split(',')
-                    .for_each(|s| {
-                        let chunks = s
-                            .split('-')
-                            .map(u16::from_str)
-                            .collect::<Result<Vec<_>, _>>()
-                            .inspect_err(|e| error!(
-                                "Failed to decode debugger port range from {} env variable: {}",
-                                MIRRORD_IGNORE_DEBUGGER_PORTS_ENV,
-                                e
-                            ))
-                            .ok().unwrap_or_default();
-                        let range = match *chunks.as_slice() {
-                            [p] => Some(p..=p),
-                            [p1, p2] if p1 <= p2 => Some(p1..=p2),
-                            _ => {
-                                error!(
-                                    "Failed to decode debugger ports from {} env variable: expected a port, list of ports or range of ports",
-                                    MIRRORD_IGNORE_DEBUGGER_PORTS_ENV,
-                                );
-                                None
-                            },
-                        };
-                        if let Some(ports) = range {
-                            v.push(Self::FixedRange(ports));
-                        }
-                    });
-                None
-            });
-        if !v.is_empty() {
-            return Self::Combination(v);
-        }
-
-        Self::None
+                Self::from_str(&s)
+                    .inspect_err(|e| error!("Failed to decode debugger ports: {e}"))
+                    .ok()
+            })
+            .unwrap_or(Self::None)
     }
 
     /// Return whether the given [SocketAddr] is used by the debugger.
@@ -540,7 +568,9 @@ mod test {
         );
 
         let ports = vec![DebuggerPorts::Single(1337), DebuggerPorts::Single(1338)];
-        assert!(DebuggerPorts::Combination(ports).contains(&"127.0.0.1:1337".parse().unwrap()));
+        assert!(
+            DebuggerPorts::Combination(ports.clone()).contains(&"127.0.0.1:1337".parse().unwrap())
+        );
         assert!(!DebuggerPorts::Combination(ports).contains(&"127.0.0.1:1340".parse().unwrap()));
 
         assert!(!DebuggerPorts::None.contains(&"127.0.0.1:1337".parse().unwrap()));
