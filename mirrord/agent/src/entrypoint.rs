@@ -12,6 +12,8 @@ use std::{
 use client_connection::AgentTlsConnector;
 use dns::{DnsCommand, DnsWorker};
 use futures::TryFutureExt;
+use kameo::actor::ActorRef;
+use metrics::MetricsActor;
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use sniffer::tcp_capture::RawSocketTcpCapture;
 use tokio::{
@@ -24,7 +26,7 @@ use tokio::{
     time::{timeout, Duration},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn, Level};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
@@ -68,11 +70,13 @@ struct State {
     ephemeral: bool,
     /// When present, it is used to secure incoming TCP connections.
     tls_connector: Option<AgentTlsConnector>,
+
+    metrics: ActorRef<MetricsActor>,
 }
 
 impl State {
     /// Return [`Err`] if container runtime operations failed.
-    pub async fn new(args: &Args) -> Result<State> {
+    pub async fn new(args: &Args, metrics: ActorRef<MetricsActor>) -> Result<State> {
         let tls_connector = args
             .operator_tls_cert_pem
             .clone()
@@ -126,6 +130,7 @@ impl State {
             env: Arc::new(env),
             ephemeral,
             tls_connector,
+            metrics,
         })
     }
 
@@ -215,15 +220,20 @@ impl ClientConnectionHandler {
     ) -> Result<Self> {
         let pid = state.container_pid();
 
-        let file_manager = FileManager::new(pid.or_else(|| state.ephemeral.then_some(1)));
+        let file_manager = FileManager::new(
+            pid.or_else(|| state.ephemeral.then_some(1)),
+            state.metrics.clone(),
+        );
 
-        let tcp_sniffer_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection).await;
+        let tcp_sniffer_api =
+            Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection, state.metrics.clone())
+                .await;
         let tcp_stealer_api =
             Self::create_stealer_api(id, bg_tasks.stealer, &mut connection).await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
 
-        let tcp_outgoing_api = TcpOutgoingApi::new(pid);
-        let udp_outgoing_api = UdpOutgoingApi::new(pid);
+        let tcp_outgoing_api = TcpOutgoingApi::new(pid, state.metrics.clone());
+        let udp_outgoing_api = UdpOutgoingApi::new(pid, state.metrics.clone());
 
         let client_handler = Self {
             id,
@@ -245,9 +255,10 @@ impl ClientConnectionHandler {
         id: ClientId,
         task: BackgroundTask<SnifferCommand>,
         connection: &mut ClientConnection,
+        metrics: ActorRef<MetricsActor>,
     ) -> Option<TcpSnifferApi> {
         if let BackgroundTask::Running(sniffer_status, sniffer_sender) = task {
-            match TcpSnifferApi::new(id, sniffer_sender, sniffer_status).await {
+            match TcpSnifferApi::new(id, sniffer_sender, sniffer_status, metrics).await {
                 Ok(api) => Some(api),
                 Err(e) => {
                     let message = format!(
@@ -396,11 +407,11 @@ impl ClientConnectionHandler {
     /// Handles incoming messages from the connected client (`mirrord-layer`).
     ///
     /// Returns `false` if the client disconnected.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     async fn handle_client_message(&mut self, message: ClientMessage) -> Result<bool> {
         match message {
             ClientMessage::FileRequest(req) => {
-                if let Some(response) = self.file_manager.handle_message(req)? {
+                if let Some(response) = self.file_manager.handle_message(req).await? {
                     self.respond(DaemonMessage::File(response))
                         .await
                         .inspect_err(|fail| {
@@ -488,9 +499,11 @@ impl ClientConnectionHandler {
 }
 
 /// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.
-#[tracing::instrument(level = "trace", ret)]
+#[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent(args: Args) -> Result<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
+
+    let metrics = kameo::spawn(MetricsActor::new(true));
 
     let listener = TcpListener::bind(SocketAddrV4::new(
         Ipv4Addr::UNSPECIFIED,
@@ -498,7 +511,7 @@ async fn start_agent(args: Args) -> Result<()> {
     ))
     .await?;
 
-    let state = State::new(&args).await?;
+    let state = State::new(&args, metrics).await?;
 
     let cancellation_token = CancellationToken::new();
 
@@ -566,13 +579,15 @@ async fn start_agent(args: Args) -> Result<()> {
         let cancellation_token = cancellation_token.clone();
         let watched_task = WatchedTask::new(
             TcpConnectionStealer::TASK_NAME,
-            TcpConnectionStealer::new(stealer_command_rx).and_then(|stealer| async move {
-                let res = stealer.start(cancellation_token).await;
-                if let Err(err) = res.as_ref() {
-                    error!("Stealer failed: {err}");
-                }
-                res
-            }),
+            TcpConnectionStealer::new(stealer_command_rx, state.metrics.clone()).and_then(
+                |stealer| async move {
+                    let res = stealer.start(cancellation_token).await;
+                    if let Err(err) = res.as_ref() {
+                        error!("Stealer failed: {err}");
+                    }
+                    res
+                },
+            ),
         );
         let status = watched_task.status();
         let task = run_thread_in_namespace(
@@ -761,7 +776,8 @@ async fn run_child_agent() -> Result<()> {
 async fn start_iptable_guard(args: Args) -> Result<()> {
     debug!("start_iptable_guard -> Initializing iptable-guard.");
 
-    let state = State::new(&args).await?;
+    let metrics = kameo::spawn(MetricsActor::new(false));
+    let state = State::new(&args, metrics).await?;
     let pid = state.container_pid();
 
     std::env::set_var(IPTABLE_PREROUTING_ENV, IPTABLE_PREROUTING.as_str());
@@ -795,6 +811,17 @@ async fn start_iptable_guard(args: Args) -> Result<()> {
     result
 }
 
+/// The agent is somewhat started twice, first with [`start_iptable_guard`], and then the
+/// proper agent with [`start_agent`].
+///
+/// ## Things to keep in mind due to the double initialization
+///
+/// Since the _second_ agent gets spawned as a child of the _first_, they share resources,
+/// like the `namespace`, which means:
+///
+/// 1. If you try to `bind` a socket to some address before [`start_agent`], it'll actually
+/// be bound **twice**, which incurs an error (address already in use). You could get around
+/// this by `bind`ing on `0.0.0.0:0`, but this is most likely **not** what you want.
 pub async fn main() -> Result<()> {
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
