@@ -26,7 +26,7 @@ pub(crate) struct MetricsDecStealConnectionSubscription;
 impl Message<MetricsIncMirrorPortSubscription> for MetricsActor {
     type Reply = ();
 
-    #[tracing::instrument(level = Level::INFO, skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn handle(
         &mut self,
         _: MetricsIncMirrorPortSubscription,
@@ -39,7 +39,7 @@ impl Message<MetricsIncMirrorPortSubscription> for MetricsActor {
 impl Message<MetricsDecMirrorPortSubscription> for MetricsActor {
     type Reply = ();
 
-    #[tracing::instrument(level = Level::INFO, skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn handle(
         &mut self,
         _: MetricsDecMirrorPortSubscription,
@@ -52,7 +52,7 @@ impl Message<MetricsDecMirrorPortSubscription> for MetricsActor {
 impl Message<MetricsIncStealPortSubscription> for MetricsActor {
     type Reply = ();
 
-    #[tracing::instrument(level = Level::INFO, skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn handle(
         &mut self,
         MetricsIncStealPortSubscription { filtered }: MetricsIncStealPortSubscription,
@@ -69,7 +69,7 @@ impl Message<MetricsIncStealPortSubscription> for MetricsActor {
 impl Message<MetricsDecStealPortSubscription> for MetricsActor {
     type Reply = ();
 
-    #[tracing::instrument(level = Level::INFO, skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn handle(
         &mut self,
         MetricsDecStealPortSubscription { filtered }: MetricsDecStealPortSubscription,
@@ -90,7 +90,7 @@ impl Message<MetricsDecStealPortSubscription> for MetricsActor {
 impl Message<MetricsDecStealPortSubscriptionMany> for MetricsActor {
     type Reply = ();
 
-    #[tracing::instrument(level = Level::INFO, skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn handle(
         &mut self,
         MetricsDecStealPortSubscriptionMany {
@@ -115,7 +115,7 @@ impl Message<MetricsDecStealPortSubscriptionMany> for MetricsActor {
 impl Message<MetricsIncStealConnectionSubscription> for MetricsActor {
     type Reply = ();
 
-    #[tracing::instrument(level = Level::INFO, skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn handle(
         &mut self,
         _: MetricsIncStealConnectionSubscription,
@@ -128,7 +128,7 @@ impl Message<MetricsIncStealConnectionSubscription> for MetricsActor {
 impl Message<MetricsDecStealConnectionSubscription> for MetricsActor {
     type Reply = ();
 
-    #[tracing::instrument(level = Level::INFO, skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn handle(
         &mut self,
         _: MetricsDecStealConnectionSubscription,
@@ -142,7 +142,7 @@ impl Message<MetricsDecStealConnectionSubscription> for MetricsActor {
 impl Message<MetricsIncMirrorConnectionSubscription> for MetricsActor {
     type Reply = ();
 
-    #[tracing::instrument(level = Level::INFO, skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn handle(
         &mut self,
         _: MetricsIncMirrorConnectionSubscription,
@@ -155,7 +155,7 @@ impl Message<MetricsIncMirrorConnectionSubscription> for MetricsActor {
 impl Message<MetricsDecMirrorConnectionSubscription> for MetricsActor {
     type Reply = ();
 
-    #[tracing::instrument(level = Level::INFO, skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn handle(
         &mut self,
         _: MetricsDecMirrorConnectionSubscription,

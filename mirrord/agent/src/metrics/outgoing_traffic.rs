@@ -12,7 +12,7 @@ pub(crate) struct MetricsDecUdpOutgoingConnection;
 impl Message<MetricsIncTcpOutgoingConnection> for MetricsActor {
     type Reply = ();
 
-    #[tracing::instrument(level = Level::INFO, skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn handle(
         &mut self,
         _: MetricsIncTcpOutgoingConnection,
@@ -25,7 +25,7 @@ impl Message<MetricsIncTcpOutgoingConnection> for MetricsActor {
 impl Message<MetricsDecTcpOutgoingConnection> for MetricsActor {
     type Reply = ();
 
-    #[tracing::instrument(level = Level::INFO, skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn handle(
         &mut self,
         _: MetricsDecTcpOutgoingConnection,
@@ -38,7 +38,7 @@ impl Message<MetricsDecTcpOutgoingConnection> for MetricsActor {
 impl Message<MetricsIncUdpOutgoingConnection> for MetricsActor {
     type Reply = ();
 
-    #[tracing::instrument(level = Level::INFO, skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn handle(
         &mut self,
         _: MetricsIncUdpOutgoingConnection,
@@ -51,7 +51,7 @@ impl Message<MetricsIncUdpOutgoingConnection> for MetricsActor {
 impl Message<MetricsDecUdpOutgoingConnection> for MetricsActor {
     type Reply = ();
 
-    #[tracing::instrument(level = Level::INFO, skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn handle(
         &mut self,
         _: MetricsDecUdpOutgoingConnection,

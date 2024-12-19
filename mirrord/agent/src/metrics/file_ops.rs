@@ -9,7 +9,7 @@ pub(crate) struct MetricsDecFd;
 impl Message<MetricsIncFd> for MetricsActor {
     type Reply = ();
 
-    #[tracing::instrument(level = Level::INFO, skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn handle(
         &mut self,
         _: MetricsIncFd,
@@ -22,7 +22,7 @@ impl Message<MetricsIncFd> for MetricsActor {
 impl Message<MetricsDecFd> for MetricsActor {
     type Reply = ();
 
-    #[tracing::instrument(level = Level::INFO, skip_all)]
+    #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn handle(
         &mut self,
         _: MetricsDecFd,
