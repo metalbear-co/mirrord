@@ -87,7 +87,16 @@ class FileOpsTest(unittest.TestCase):
             os.mkdir("test_mkdir_error_already_exists", dir_fd=dir)
 
         os.close(dir)
-        
+    
+    def test_rmdir(self):
+        """
+        Creates a new directory in "/tmp" and removes it using rmdir.
+        """
+        os.mkdir("/tmp/test_rmdir")
+        self.assertTrue(os.path.isdir("/tmp/test_rmdir"))
+        os.rmdir("/tmp/test_rmdir")
+        self.assertFalse(os.path.isdir("/tmp/test_rmdir"))
+            
     def _create_new_tmp_file(self):
         """
         Creates a new file in /tmp and returns the path and name of the file.
