@@ -1,8 +1,7 @@
 #include <assert.h>
 #include <stdio.h>
-#include <stdlib.h>
+#include <unistd.h>
 #include <sys/stat.h>
-#include <sys/fcntl.h>
 
 /// Test `rmdir`.
 ///
@@ -11,7 +10,7 @@
 int main()
 {
   char *test_dir = "/test_dir";
-  int mkdir_result = mkdir(mkdir_result, 0777);
+  int mkdir_result = mkdir(test_dir, 0777);
   assert(mkdir_result == 0);
 
   int rmdir_result = rmdir(test_dir);
