@@ -263,7 +263,7 @@ impl FilesProxy {
             FileRequest::MakeDir(..) | FileRequest::MakeDirAt(..) => {
                 protocol_version.is_some_and(|version| MKDIR_VERSION.matches(version))
             }
-            FileRequest::RemoveDir(..) => {
+            FileRequest::RemoveDir(..) | FileRequest::Unlink(..) | FileRequest::UnlinkAt(..) => {
                 protocol_version.is_some_and(|version| RMDIR_VERSION.matches(version))
             }
             _ => true,
@@ -285,14 +285,14 @@ impl FilesProxy {
                     FileRequest::ReadLink(..) => {
                         FileResponse::ReadLink(Err(ResponseError::NotImplemented))
                     }
-                    FileRequest::MakeDir(..) => {
-                        FileResponse::MakeDir(Err(ResponseError::NotImplemented))
-                    }
-                    FileRequest::MakeDirAt(..) => {
+                    FileRequest::MakeDir(..) | FileRequest::MakeDirAt(..) => {
                         FileResponse::MakeDir(Err(ResponseError::NotImplemented))
                     }
                     FileRequest::RemoveDir(..) => {
                         FileResponse::RemoveDir(Err(ResponseError::NotImplemented))
+                    }
+                    FileRequest::Unlink(..) | FileRequest::UnlinkAt(..) => {
+                        FileResponse::Unlink(Err(ResponseError::NotImplemented))
                     }
                     _ => unreachable!(),
                 };
