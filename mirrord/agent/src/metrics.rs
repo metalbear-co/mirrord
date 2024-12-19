@@ -50,6 +50,7 @@ async fn get_metrics(
         steal_unfiltered_port_subscription_count,
         steal_connection_subscription_count,
         tcp_outgoing_connection_count,
+        udp_outgoing_connection_count,
     } = metrics.ask(MetricsGetAll).await?;
 
     prometheus_metrics.open_fd_count.set(open_fd_count as i64);
@@ -78,6 +79,10 @@ async fn get_metrics(
         .tcp_outgoing_connection_count
         .set(tcp_outgoing_connection_count as i64);
 
+    prometheus_metrics
+        .udp_outgoing_connection_count
+        .set(udp_outgoing_connection_count as i64);
+
     let metric_families = prometheus::gather();
 
     let mut buffer = Vec::new();
@@ -97,6 +102,7 @@ struct PrometheusMetrics {
     steal_unfiltered_port_subscription_count: GenericGauge<AtomicI64>,
     steal_connection_subscription_count: GenericGauge<AtomicI64>,
     tcp_outgoing_connection_count: GenericGauge<AtomicI64>,
+    udp_outgoing_connection_count: GenericGauge<AtomicI64>,
 }
 
 impl PrometheusMetrics {
@@ -132,6 +138,10 @@ impl PrometheusMetrics {
                 "mirrord_agent_tcp_outgoing_connection_count",
                 "amount of tcp outgoing connections in mirrord-agent"
             )?,
+            udp_outgoing_connection_count: register_int_gauge!(
+                "mirrord_agent_udp_outgoing_connection_count",
+                "amount of udp outgoing connections in mirrord-agent"
+            )?,
         })
     }
 }
@@ -146,6 +156,7 @@ pub(crate) struct MetricsActor {
     steal_unfiltered_port_subscription_count: u64,
     steal_connection_subscription_count: u64,
     tcp_outgoing_connection_count: u64,
+    udp_outgoing_connection_count: u64,
 }
 
 impl MetricsActor {
@@ -213,6 +224,9 @@ pub(crate) struct MetricsDecStealConnectionSubscription;
 pub(crate) struct MetricsIncTcpOutgoingConnection;
 pub(crate) struct MetricsDecTcpOutgoingConnection;
 
+pub(crate) struct MetricsIncUdpOutgoingConnection;
+pub(crate) struct MetricsDecUdpOutgoingConnection;
+
 pub(crate) struct MetricsGetAll;
 
 #[derive(Reply, Serialize)]
@@ -224,6 +238,7 @@ pub(crate) struct MetricsGetAllReply {
     steal_unfiltered_port_subscription_count: u64,
     steal_connection_subscription_count: u64,
     tcp_outgoing_connection_count: u64,
+    udp_outgoing_connection_count: u64,
 }
 
 impl Message<MetricsIncFd> for MetricsActor {
@@ -421,6 +436,32 @@ impl Message<MetricsDecTcpOutgoingConnection> for MetricsActor {
     }
 }
 
+impl Message<MetricsIncUdpOutgoingConnection> for MetricsActor {
+    type Reply = ();
+
+    #[tracing::instrument(level = Level::INFO, skip_all)]
+    async fn handle(
+        &mut self,
+        _: MetricsIncUdpOutgoingConnection,
+        _ctx: Context<'_, Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.udp_outgoing_connection_count += 1;
+    }
+}
+
+impl Message<MetricsDecUdpOutgoingConnection> for MetricsActor {
+    type Reply = ();
+
+    #[tracing::instrument(level = Level::INFO, skip_all)]
+    async fn handle(
+        &mut self,
+        _: MetricsDecUdpOutgoingConnection,
+        _ctx: Context<'_, Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.udp_outgoing_connection_count = self.udp_outgoing_connection_count.saturating_sub(1);
+    }
+}
+
 impl Message<MetricsGetAll> for MetricsActor {
     type Reply = MetricsGetAllReply;
 
@@ -438,6 +479,7 @@ impl Message<MetricsGetAll> for MetricsActor {
             steal_unfiltered_port_subscription_count: self.steal_unfiltered_port_subscription_count,
             steal_connection_subscription_count: self.steal_connection_subscription_count,
             tcp_outgoing_connection_count: self.tcp_outgoing_connection_count,
+            udp_outgoing_connection_count: self.udp_outgoing_connection_count,
         }
     }
 }

@@ -233,7 +233,7 @@ impl ClientConnectionHandler {
         let dns_api = Self::create_dns_api(bg_tasks.dns);
 
         let tcp_outgoing_api = TcpOutgoingApi::new(pid, state.metrics.clone());
-        let udp_outgoing_api = UdpOutgoingApi::new(pid);
+        let udp_outgoing_api = UdpOutgoingApi::new(pid, state.metrics.clone());
 
         let client_handler = Self {
             id,

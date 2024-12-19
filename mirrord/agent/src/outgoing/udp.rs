@@ -9,6 +9,7 @@ use futures::{
     prelude::*,
     stream::{SplitSink, SplitStream},
 };
+use kameo::actor::ActorRef;
 use mirrord_protocol::{
     outgoing::{udp::*, *},
     ConnectionId, ResponseError,
@@ -22,8 +23,10 @@ use tokio::{
 use tokio_util::{codec::BytesCodec, udp::UdpFramed};
 use tracing::{debug, trace, warn};
 
+use super::MetricsActor;
 use crate::{
     error::Result,
+    metrics::{MetricsDecUdpOutgoingConnection, MetricsIncUdpOutgoingConnection},
     util::run_thread_in_namespace,
     watched_task::{TaskStatus, WatchedTask},
 };
@@ -71,12 +74,14 @@ async fn connect(remote_address: SocketAddr) -> Result<UdpSocket, ResponseError>
 impl UdpOutgoingApi {
     const TASK_NAME: &'static str = "UdpOutgoing";
 
-    pub(crate) fn new(pid: Option<u64>) -> Self {
+    pub(crate) fn new(pid: Option<u64>, metrics: ActorRef<MetricsActor>) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
-        let watched_task =
-            WatchedTask::new(Self::TASK_NAME, Self::interceptor_task(layer_rx, daemon_tx));
+        let watched_task = WatchedTask::new(
+            Self::TASK_NAME,
+            Self::interceptor_task(layer_rx, daemon_tx, metrics),
+        );
 
         let task_status = watched_task.status();
         let task = run_thread_in_namespace(
@@ -101,6 +106,7 @@ impl UdpOutgoingApi {
     async fn interceptor_task(
         mut layer_rx: Receiver<Layer>,
         daemon_tx: Sender<Daemon>,
+        metrics: ActorRef<MetricsActor>,
     ) -> Result<()> {
         let mut connection_ids = 0..=ConnectionId::MAX;
 
@@ -136,11 +142,14 @@ impl UdpOutgoingApi {
                                             .ok_or_else(|| ResponseError::IdsExhausted("connect".into()))?;
 
                                         debug!("interceptor_task -> mirror_socket {:#?}", mirror_socket);
+
                                         let peer_address = mirror_socket.peer_addr()?;
                                         let local_address = mirror_socket.local_addr()?;
                                         let local_address = SocketAddress::Ip(local_address);
+
                                         let framed = UdpFramed::new(mirror_socket, BytesCodec::new());
                                         debug!("interceptor_task -> framed {:#?}", framed);
+
                                         let (sink, stream): (
                                             SplitSink<UdpFramed<BytesCodec>, (BytesMut, SocketAddr)>,
                                             SplitStream<UdpFramed<BytesCodec>>,
@@ -158,7 +167,13 @@ impl UdpOutgoingApi {
 
                             let daemon_message = DaemonUdpOutgoing::Connect(daemon_connect);
                             debug!("interceptor_task -> daemon_message {:#?}", daemon_message);
-                            daemon_tx.send(daemon_message).await?
+
+                            daemon_tx.send(daemon_message).await?;
+
+                            let _ = metrics
+                                .tell(MetricsIncUdpOutgoingConnection)
+                                .await
+                                .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
                         }
                         // [user] -> [layer] -> [agent] -> [remote]
                         // `user` wrote some message to the remote host.
@@ -183,7 +198,12 @@ impl UdpOutgoingApi {
                                 readers.remove(&connection_id);
 
                                 let daemon_message = DaemonUdpOutgoing::Close(connection_id);
-                                daemon_tx.send(daemon_message).await?
+                                daemon_tx.send(daemon_message).await?;
+
+                                let _ = metrics
+                                    .tell(MetricsDecUdpOutgoingConnection)
+                                    .await
+                                    .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
                             }
                         }
                         // [layer] -> [agent]
@@ -191,6 +211,11 @@ impl UdpOutgoingApi {
                         LayerUdpOutgoing::Close(LayerClose { ref connection_id }) => {
                             writers.remove(connection_id);
                             readers.remove(connection_id);
+
+                            let _ = metrics
+                                .tell(MetricsDecUdpOutgoingConnection)
+                                .await
+                                .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
                         }
                     }
                 }
@@ -216,7 +241,12 @@ impl UdpOutgoingApi {
                             readers.remove(&connection_id);
 
                             let daemon_message = DaemonUdpOutgoing::Close(connection_id);
-                            daemon_tx.send(daemon_message).await?
+                            daemon_tx.send(daemon_message).await?;
+
+                            let _ = metrics
+                                .tell(MetricsDecUdpOutgoingConnection)
+                                .await
+                                .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
                         }
                     }
                 }

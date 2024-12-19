@@ -104,12 +104,16 @@ pub enum ClientMessage {
     /// These are the messages used by the `steal` feature, and handled by the `TcpStealerApi` in
     /// the agent.
     TcpSteal(LayerTcpSteal),
-    // TODO(alex) [high]: Outgoing is next!
     /// TCP outgoing message.
     ///
     /// These are the messages used by the `outgoing` feature (tcp), and handled by the
     /// `TcpOutgoingApi` in the agent.
     TcpOutgoing(LayerTcpOutgoing),
+
+    /// UDP outgoing message.
+    ///
+    /// These are the messages used by the `outgoing` feature (udp), and handled by the
+    /// `UdpOutgoingApi` in the agent.
     UdpOutgoing(LayerUdpOutgoing),
     FileRequest(FileRequest),
     GetEnvVarsRequest(GetEnvVarsRequest),
