@@ -35,7 +35,7 @@ pub struct LocalMessage<T> {
 }
 
 /// Messages sent by the layer and handled by the internal proxy.
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub enum LayerToProxyMessage {
     /// A request to start new `layer <-> proxy` session.
     /// This should be the first message sent by the layer after opening a new connection to the
@@ -54,7 +54,7 @@ pub enum LayerToProxyMessage {
 }
 
 /// Layer process information
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub struct ProcessInfo {
     /// Process ID.
     pub pid: u32,
@@ -82,7 +82,7 @@ pub struct LayerId(pub u64);
 /// Sharing state between [`exec`](https://man7.org/linux/man-pages/man3/exec.3.html) calls is currently not supported.
 /// Therefore, when the layer initializes, it uses [`NewSessionRequest::New`] and does not inherit
 /// any state.
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub enum NewSessionRequest {
     /// Layer initialized from its constructor, has a fresh state.
     New(ProcessInfo),
@@ -119,7 +119,7 @@ impl fmt::Display for NetProtocol {
 }
 
 /// A request to initiate a new outgoing connection.
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub struct OutgoingConnectRequest {
     /// The address the user application tries to connect to.
     pub remote_address: SocketAddress,
@@ -128,7 +128,7 @@ pub struct OutgoingConnectRequest {
 }
 
 /// Requests related to incoming connections.
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub enum IncomingRequest {
     /// A request made by layer when it starts listening for mirrored connections.
     PortSubscribe(PortSubscribe),
@@ -152,7 +152,7 @@ pub struct ConnMetadataRequest {
 
 /// A response to layer's [`ConnMetadataRequest`].
 /// Contains metadata useful for hooking `getsockname` and `getpeername`.
-#[derive(Encode, Decode, Debug, Clone)]
+#[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
 pub struct ConnMetadataResponse {
     /// Original source of data, provided by the agent. Meant to be exposed to the user instead of
     /// the real source, which will always be localhost.
@@ -176,7 +176,7 @@ pub struct ConnMetadataResponse {
 ///
 /// For each connection incoming to the remote port,
 /// the internal proxy will initiate a new connection to the local port specified in `listening_on`.
-#[derive(Encode, Decode, Debug, Clone)]
+#[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
 pub struct PortSubscribe {
     /// Local address on which the layer is listening.
     pub listening_on: SocketAddr,
@@ -185,7 +185,7 @@ pub struct PortSubscribe {
 }
 
 /// Instructions for the internal proxy and the agent on how to execute port mirroring.
-#[derive(Encode, Decode, Debug, Clone)]
+#[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
 pub enum PortSubscription {
     /// Wrapped [`StealType`] specifies how to execute port mirroring.
     Steal(StealType),
@@ -194,7 +194,7 @@ pub enum PortSubscription {
 }
 
 /// A request to stop proxying incoming connections.
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub struct PortUnsubscribe {
     /// Port on the remote pod that layer mirrored.
     pub port: Port,
@@ -203,7 +203,7 @@ pub struct PortUnsubscribe {
 }
 
 /// Messages sent by the internal proxy and handled by the layer.
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub enum ProxyToLayerMessage {
     /// A response to [`NewSessionRequest`]. Contains the identifier of the new `layer <-> proxy`
     /// session.
@@ -221,7 +221,7 @@ pub enum ProxyToLayerMessage {
 }
 
 /// A response to layer's [`IncomingRequest`].
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub enum IncomingResponse {
     /// A response to layer's [`PortSubscribe`].
     /// As a temporary workaround to [agent protocol](mirrord_protocol) limitations, the only error
@@ -234,7 +234,7 @@ pub enum IncomingResponse {
 }
 
 /// A response to layer's [`OutgoingConnectRequest`].
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode, Debug, PartialEq, Eq)]
 pub struct OutgoingConnectResponse {
     /// The address the layer should connect to instead of the address requested by the user.
     pub layer_address: SocketAddress,
@@ -308,6 +308,20 @@ impl_request!(
     res = RemoteResult<ReadLinkFileResponse>,
     req_path = LayerToProxyMessage::File => FileRequest::ReadLink,
     res_path = ProxyToLayerMessage::File => FileResponse::ReadLink,
+);
+
+impl_request!(
+    req = MakeDirRequest,
+    res = RemoteResult<()>,
+    req_path = LayerToProxyMessage::File => FileRequest::MakeDir,
+    res_path = ProxyToLayerMessage::File => FileResponse::MakeDir,
+);
+
+impl_request!(
+    req = MakeDirAtRequest,
+    res = RemoteResult<()>,
+    req_path = LayerToProxyMessage::File => FileRequest::MakeDirAt,
+    res_path = ProxyToLayerMessage::File => FileResponse::MakeDir,
 );
 
 impl_request!(

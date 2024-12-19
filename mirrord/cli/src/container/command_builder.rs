@@ -1,12 +1,12 @@
 use std::{ffi::OsStr, path::Path};
 
-use crate::config::{ContainerCommand, ContainerRuntime};
+use crate::config::{ContainerRuntime, ContainerRuntimeCommand};
 
 #[derive(Debug, Clone)]
 pub struct Empty;
 #[derive(Debug, Clone)]
 pub struct WithCommand {
-    command: ContainerCommand,
+    command: ContainerRuntimeCommand,
 }
 
 #[derive(Debug, Clone)]
@@ -113,7 +113,7 @@ impl RuntimeCommandBuilder {
 
     pub(super) fn with_command(
         self,
-        command: ContainerCommand,
+        command: ContainerRuntimeCommand,
     ) -> RuntimeCommandBuilder<WithCommand> {
         let RuntimeCommandBuilder {
             runtime,
@@ -123,6 +123,20 @@ impl RuntimeCommandBuilder {
 
         RuntimeCommandBuilder {
             step: WithCommand { command },
+            runtime,
+            extra_args,
+        }
+    }
+
+    /// Convert to serialzable result for mirrord extensions
+    pub fn into_command_extension_params(self) -> ExtensionRuntimeCommand {
+        let RuntimeCommandBuilder {
+            runtime,
+            extra_args,
+            ..
+        } = self;
+
+        ExtensionRuntimeCommand {
             runtime,
             extra_args,
         }
@@ -139,7 +153,7 @@ impl RuntimeCommandBuilder<WithCommand> {
         } = self;
 
         let (runtime_command, runtime_args) = match step.command {
-            ContainerCommand::Run { runtime_args } => ("run".to_owned(), runtime_args),
+            ContainerRuntimeCommand::Run { runtime_args } => ("run".to_owned(), runtime_args),
         };
 
         (
@@ -149,4 +163,15 @@ impl RuntimeCommandBuilder<WithCommand> {
                 .chain(runtime_args),
         )
     }
+}
+
+/// Information for mirrord extensions to use mirrord container feature but injecting the connection
+/// info into the container manualy by the extension
+#[derive(Debug, serde::Serialize)]
+pub struct ExtensionRuntimeCommand {
+    /// Container runtime to use (should be defaulted to docker)
+    runtime: ContainerRuntime,
+
+    /// Run command args that the extension should add to container command
+    extra_args: Vec<String>,
 }

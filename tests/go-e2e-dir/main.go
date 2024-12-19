@@ -20,9 +20,16 @@ func main() {
 		os.Exit(-1)
 	}
 	// `os.ReadDir` sorts the result by file name.
-	if dir[0].Name() != "app.py" || dir[1].Name() != "test.txt"{
+	if dir[0].Name() != "app.py" || dir[1].Name() != "test.txt" {
 		os.Exit(-1)
 	}
+
+	err = os.Mkdir("/app/test_mkdir", 0755)
+	if err != nil {
+		fmt.Printf("Mkdir error: %s\n", err)
+		os.Exit(-1)
+	}
+
 	// let close requests be sent for test
 	time.Sleep(1 * time.Second)
 	os.Exit(0)

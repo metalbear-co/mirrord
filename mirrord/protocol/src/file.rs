@@ -14,9 +14,16 @@ use bincode::{Decode, Encode};
 use nix::sys::statfs::Statfs;
 use semver::VersionReq;
 
+/// Minimal mirrord-protocol version that allows [`ReadLinkFileRequest`].
+pub static READLINK_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.6.0".parse().expect("Bad Identifier"));
+
 /// Minimal mirrord-protocol version that allows [`ReadDirBatchRequest`].
 pub static READDIR_BATCH_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.9.0".parse().expect("Bad Identifier"));
+
+pub static MKDIR_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.13.0".parse().expect("Bad Identifier"));
 
 /// Internal version of Metadata across operating system (macOS, Linux)
 /// Only mutual attributes
@@ -260,6 +267,19 @@ impl fmt::Debug for ReadFileResponse {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadLinkFileResponse {
     pub path: PathBuf,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct MakeDirRequest {
+    pub pathname: PathBuf,
+    pub mode: u32,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct MakeDirAtRequest {
+    pub dirfd: u64,
+    pub pathname: PathBuf,
+    pub mode: u32,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

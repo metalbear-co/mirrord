@@ -575,6 +575,14 @@
             "string",
             "null"
           ]
+        },
+        "cli_prevent_cleanup": {
+          "title": "container.cli_prevent_cleanup {#container-cli_extra_args}",
+          "description": "Don't add `--rm` to sidecar command to prevent cleanup.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "additionalProperties": false
@@ -814,6 +822,16 @@
             "boolean",
             "null"
           ]
+        },
+        "readonly_file_buffer": {
+          "title": "_experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}",
+          "description": "Sets buffer size for readonly remote files (in bytes, for example 4096). If set, such files will be read in chunks and buffered locally. This improves performace when the user application reads data in small portions.\n\nSetting to 0 disables file buffering.\n\n<https://github.com/metalbear-co/mirrord/issues/2069>",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
         },
         "tcp_ping4_mock": {
           "title": "_experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}",

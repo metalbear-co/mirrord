@@ -7,7 +7,10 @@ use std::{collections::BTreeMap, time::Duration};
 use kube::Api;
 use mirrord_operator::crd::{
     label_selector::LabelSelector,
-    policy::{BlockedFeature, MirrordPolicy, MirrordPolicySpec},
+    policy::{
+        BlockedFeature, MirrordClusterPolicy, MirrordClusterPolicySpec, MirrordPolicy,
+        MirrordPolicySpec,
+    },
 };
 use rstest::{fixture, rstest};
 
@@ -21,8 +24,26 @@ struct PolicyGuard {
 }
 
 impl PolicyGuard {
-    pub async fn new(kube_client: kube::Client, policy: &MirrordPolicy, namespace: &str) -> Self {
+    pub async fn namespaced(
+        kube_client: kube::Client,
+        policy: &MirrordPolicy,
+        namespace: &str,
+    ) -> Self {
         let policy_api: Api<MirrordPolicy> = Api::namespaced(kube_client.clone(), namespace);
+        PolicyGuard {
+            _inner: ResourceGuard::create(
+                policy_api,
+                policy.metadata.name.clone().unwrap(),
+                policy,
+                true,
+            )
+            .await
+            .expect("Could not create policy in E2E test."),
+        }
+    }
+
+    pub async fn clusterwide(kube_client: kube::Client, policy: &MirrordClusterPolicy) -> Self {
+        let policy_api: Api<MirrordClusterPolicy> = Api::all(kube_client.clone());
         PolicyGuard {
             _inner: ResourceGuard::create(
                 policy_api,
@@ -218,9 +239,9 @@ fn block_steal_with_unmatching_policy() -> PolicyTestCase {
     }
 }
 
-/// Assert that stealing failed due to policy if `expected_success` else succeeded.
+/// Assert that port subscription failed due to policy if `expected_success`, else succeeded.
 /// This function should be timed out - caller's responsibility.
-async fn assert_steal_result(mut test_proc: TestProcess, expected_success: bool) {
+async fn assert_subscription_result(mut test_proc: TestProcess, expected_success: bool) {
     if expected_success {
         test_proc
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
@@ -259,7 +280,7 @@ async fn run_mirrord_and_verify_steal_result(
         )
         .await;
 
-    assert_steal_result(test_proc, can_steal.should_work_without_filter()).await;
+    assert_subscription_result(test_proc, can_steal.should_work_without_filter()).await;
 
     let mut config_path = config_dir().clone();
     config_path.push("http_filter_header.json");
@@ -273,7 +294,7 @@ async fn run_mirrord_and_verify_steal_result(
         )
         .await;
 
-    assert_steal_result(test_proc, can_steal.should_work_with_filter()).await;
+    assert_subscription_result(test_proc, can_steal.should_work_with_filter()).await;
 }
 
 /// Set a policy, try to steal both with and without a filter from two services, verify subscribing
@@ -297,7 +318,7 @@ pub async fn create_policy_and_try_to_steal(
 
     // Create policy, delete it when test exits.
     let _policy_guard =
-        PolicyGuard::new(kube_client, &test_case.policy, &service_a.namespace).await;
+        PolicyGuard::namespaced(kube_client, &test_case.policy, &service_a.namespace).await;
 
     println!("Running mirrord against service a");
     run_mirrord_and_verify_steal_result(
@@ -313,4 +334,51 @@ pub async fn create_policy_and_try_to_steal(
         test_case.service_b_can_steal,
     )
     .await;
+}
+
+async fn run_mirrord_and_verify_mirror_result(kube_service: &KubeService, expected_success: bool) {
+    let application = Application::Go21HTTP;
+
+    let test_proc = application
+        .run(
+            &kube_service.target,
+            Some(&kube_service.namespace),
+            Some(vec!["--fs-mode=local"]),
+            None,
+        )
+        .await;
+
+    assert_subscription_result(test_proc, expected_success).await;
+}
+
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(60))]
+pub async fn create_cluster_policy_and_try_to_mirror(
+    #[future] services: (KubeService, KubeService),
+    #[future] kube_client: kube::Client,
+) {
+    let kube_client = kube_client.await;
+    let (service_a, service_b) = services.await;
+
+    // Create policy, delete it when test exits.
+    let _policy_guard = PolicyGuard::clusterwide(
+        kube_client,
+        &MirrordClusterPolicy::new(
+            "e2e-test-block-mirror-with-path-pattern",
+            MirrordClusterPolicySpec {
+                target_path: Some("*-service-a*".into()),
+                selector: None,
+                block: vec![BlockedFeature::Mirror],
+            },
+        ),
+    )
+    .await;
+
+    println!("Running mirrord against service a");
+    run_mirrord_and_verify_mirror_result(&service_a, false).await;
+    println!("Running mirrord against service b");
+    run_mirrord_and_verify_mirror_result(&service_b, true).await;
+    println!("Running stealing against service a");
+    run_mirrord_and_verify_steal_result(&service_a, false, CanSteal::EvenWithoutFilter).await;
 }
