@@ -291,7 +291,7 @@ impl DebuggerType {
 /// These should be ignored by the layer.
 #[derive(Debug)]
 pub enum DebuggerPorts {
-    Detected(Vec<u16>),
+    Single(u16),
     FixedRange(RangeInclusive<u16>),
     Combination(Vec<DebuggerPorts>),
     None,
@@ -337,7 +337,11 @@ impl DebuggerPorts {
             } else {
                 env::remove_var(MIRRORD_DETECT_DEBUGGER_PORT_ENV);
             }
-            return Self::Detected(detected);
+            let detected = detected
+                .iter()
+                .map(|&port| Self::Single(port))
+                .collect::<Vec<_>>();
+            return Self::Combination(detected);
         }
 
         // IGNORE_DEBUGGER_PORTS may have a combination of single, multiple or ranges of ports
@@ -393,7 +397,7 @@ impl DebuggerPorts {
         }
 
         match self {
-            Self::Detected(ports) => ports.contains(&addr.port()),
+            Self::Single(port) => port == &addr.port(),
             Self::FixedRange(range) => range.contains(&addr.port()),
             Self::Combination(vec) => vec
                 .iter()
@@ -521,12 +525,9 @@ mod test {
 
     #[test]
     fn debugger_ports_contain() {
-        assert!(DebuggerPorts::Detected(vec![1337]).contains(&"127.0.0.1:1337".parse().unwrap()));
-        assert!(
-            DebuggerPorts::Detected(vec![1337, 1338]).contains(&"127.0.0.1:1337".parse().unwrap())
-        );
-        assert!(!DebuggerPorts::Detected(vec![1337]).contains(&"127.0.0.1:1338".parse().unwrap()));
-        assert!(!DebuggerPorts::Detected(vec![1337]).contains(&"8.8.8.8:1337".parse().unwrap()));
+        assert!(DebuggerPorts::Single(1337).contains(&"127.0.0.1:1337".parse().unwrap()));
+        assert!(!DebuggerPorts::Single(1337).contains(&"127.0.0.1:1338".parse().unwrap()));
+        assert!(!DebuggerPorts::Single(1337).contains(&"8.8.8.8:1337".parse().unwrap()));
 
         assert!(
             DebuggerPorts::FixedRange(45000..=50000).contains(&"127.0.0.1:47888".parse().unwrap())
@@ -537,6 +538,10 @@ mod test {
         assert!(
             !DebuggerPorts::FixedRange(45000..=50000).contains(&"8.8.8.8:47888".parse().unwrap())
         );
+
+        let ports = vec![DebuggerPorts::Single(1337), DebuggerPorts::Single(1338)];
+        assert!(DebuggerPorts::Combination(ports).contains(&"127.0.0.1:1337".parse().unwrap()));
+        assert!(!DebuggerPorts::Combination(ports).contains(&"127.0.0.1:1340".parse().unwrap()));
 
         assert!(!DebuggerPorts::None.contains(&"127.0.0.1:1337".parse().unwrap()));
     }
