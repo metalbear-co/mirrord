@@ -380,26 +380,23 @@ impl DebuggerPorts {
             None => (vec![], None),
         };
         if !detected.is_empty() {
-            let mut value = detected
+            let mut dbg_ports = detected
                 .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(",");
+                .map(|&port| Some(Self::Single(port)))
+                .collect::<Vec<_>>();
             if let Ok(existing) = env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV) {
-                value = [value, existing].into_iter().collect::<Vec<_>>().join(",");
+                dbg_ports.push(DebuggerPorts::from_str(&existing).ok());
             }
-            env::set_var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV, value);
+            let dbg_ports = dbg_ports.into_iter().flatten().collect::<Vec<_>>();
+            let dbg_port = Self::Combination(dbg_ports);
+            env::set_var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV, dbg_port.to_string());
 
             if let Some(next_type) = next {
                 env::set_var(MIRRORD_DETECT_DEBUGGER_PORT_ENV, next_type.to_string());
             } else {
                 env::remove_var(MIRRORD_DETECT_DEBUGGER_PORT_ENV);
             }
-            let detected = detected
-                .iter()
-                .map(|&port| Self::Single(port))
-                .collect::<Vec<_>>();
-            return Self::Combination(detected);
+            return dbg_port;
         }
 
         // IGNORE_DEBUGGER_PORTS may have a combination of single, multiple or ranges of ports
