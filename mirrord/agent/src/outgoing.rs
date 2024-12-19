@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fmt, thread, time::Duration};
 
 use bytes::Bytes;
+use kameo::actor::ActorRef;
 use mirrord_protocol::{
     outgoing::{tcp::*, *},
     ConnectionId, RemoteError, ResponseError,
@@ -19,6 +20,7 @@ use tracing::Level;
 
 use crate::{
     error::Result,
+    metrics::{MetricsActor, MetricsDecTcpOutgoingConnection, MetricsIncTcpOutgoingConnection},
     util::run_thread_in_namespace,
     watched_task::{TaskStatus, WatchedTask},
 };
@@ -55,13 +57,13 @@ impl TcpOutgoingApi {
     ///
     /// * `pid` - process id of the agent's target container
     #[tracing::instrument(level = Level::TRACE)]
-    pub(crate) fn new(pid: Option<u64>) -> Self {
+    pub(crate) fn new(pid: Option<u64>, metrics: ActorRef<MetricsActor>) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
         let watched_task = WatchedTask::new(
             Self::TASK_NAME,
-            TcpOutgoingTask::new(pid, layer_rx, daemon_tx).run(),
+            TcpOutgoingTask::new(pid, layer_rx, daemon_tx, metrics).run(),
         );
         let task_status = watched_task.status();
         let task = run_thread_in_namespace(
@@ -110,6 +112,7 @@ struct TcpOutgoingTask {
     pid: Option<u64>,
     layer_rx: Receiver<LayerTcpOutgoing>,
     daemon_tx: Sender<DaemonTcpOutgoing>,
+    metrics: ActorRef<MetricsActor>,
 }
 
 impl fmt::Debug for TcpOutgoingTask {
@@ -138,6 +141,7 @@ impl TcpOutgoingTask {
         pid: Option<u64>,
         layer_rx: Receiver<LayerTcpOutgoing>,
         daemon_tx: Sender<DaemonTcpOutgoing>,
+        metrics: ActorRef<MetricsActor>,
     ) -> Self {
         Self {
             next_connection_id: 0,
@@ -146,6 +150,7 @@ impl TcpOutgoingTask {
             pid,
             layer_rx,
             daemon_tx,
+            metrics,
         }
     }
 
@@ -219,6 +224,12 @@ impl TcpOutgoingTask {
 
                 let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                 self.daemon_tx.send(daemon_message).await?;
+
+                let _ = self
+                    .metrics
+                    .tell(MetricsDecTcpOutgoingConnection)
+                    .await
+                    .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
             }
 
             // EOF occurred in one of peer connections.
@@ -249,6 +260,12 @@ impl TcpOutgoingTask {
                     self.daemon_tx
                         .send(DaemonTcpOutgoing::Close(connection_id))
                         .await?;
+
+                    let _ = self
+                        .metrics
+                        .tell(MetricsDecTcpOutgoingConnection)
+                        .await
+                        .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
                 }
             }
         }
@@ -299,9 +316,18 @@ impl TcpOutgoingTask {
                     result = ?daemon_connect,
                     "Connection attempt finished.",
                 );
+
                 self.daemon_tx
                     .send(DaemonTcpOutgoing::Connect(daemon_connect))
+                    .await?;
+
+                let _ = self
+                    .metrics
+                    .tell(MetricsIncTcpOutgoingConnection)
                     .await
+                    .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+
+                Ok(())
             }
 
             // This message handles two cases:
@@ -341,9 +367,20 @@ impl TcpOutgoingTask {
                                 connection_id,
                                 "Peer connection is shut down as well, sending close message to the client.",
                             );
+
                             self.daemon_tx
                                 .send(DaemonTcpOutgoing::Close(connection_id))
+                                .await?;
+
+                            let _ = self
+                                .metrics
+                                .tell(MetricsDecTcpOutgoingConnection)
                                 .await
+                                .inspect_err(
+                                    |fail| tracing::warn!(%fail, "agent metrics failure!"),
+                                );
+
+                            Ok(())
                         }
                     }
 
@@ -360,7 +397,15 @@ impl TcpOutgoingTask {
                         );
                         self.daemon_tx
                             .send(DaemonTcpOutgoing::Close(connection_id))
+                            .await?;
+
+                        let _ = self
+                            .metrics
+                            .tell(MetricsDecTcpOutgoingConnection)
                             .await
+                            .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+
+                        Ok(())
                     }
                 }
             }
@@ -370,6 +415,12 @@ impl TcpOutgoingTask {
             LayerTcpOutgoing::Close(LayerClose { connection_id }) => {
                 self.writers.remove(&connection_id);
                 self.readers.remove(&connection_id);
+
+                let _ = self
+                    .metrics
+                    .tell(MetricsDecTcpOutgoingConnection)
+                    .await
+                    .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
 
                 Ok(())
             }

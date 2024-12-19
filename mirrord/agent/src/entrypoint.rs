@@ -232,7 +232,7 @@ impl ClientConnectionHandler {
             Self::create_stealer_api(id, bg_tasks.stealer, &mut connection).await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
 
-        let tcp_outgoing_api = TcpOutgoingApi::new(pid);
+        let tcp_outgoing_api = TcpOutgoingApi::new(pid, state.metrics.clone());
         let udp_outgoing_api = UdpOutgoingApi::new(pid);
 
         let client_handler = Self {
