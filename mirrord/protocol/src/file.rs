@@ -26,7 +26,8 @@ pub static READDIR_BATCH_VERSION: LazyLock<VersionReq> =
 pub static MKDIR_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.13.0".parse().expect("Bad Identifier"));
 
-/// Minimal mirrord-protocol version that allows [`RemoveDirRequest`].
+/// Minimal mirrord-protocol version that allows [`RemoveDirRequest`], [`UnlinkRequest`] and
+/// [`UnlinkAtRequest`]..
 pub static RMDIR_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.14.0".parse().expect("Bad Identifier"));
 
@@ -290,6 +291,18 @@ pub struct MakeDirAtRequest {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct RemoveDirRequest {
     pub pathname: PathBuf,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct UnlinkRequest {
+    pub pathname: PathBuf,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct UnlinkAtRequest {
+    pub dirfd: Option<u64>,
+    pub pathname: PathBuf,
+    pub flags: u32,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

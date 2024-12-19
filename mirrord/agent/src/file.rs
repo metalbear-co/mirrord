@@ -5,13 +5,17 @@ use std::{
     io::{self, prelude::*, BufReader, SeekFrom},
     iter::{Enumerate, Peekable},
     ops::RangeInclusive,
-    os::unix::{fs::MetadataExt, prelude::FileExt},
+    os::{
+        fd::RawFd,
+        unix::{fs::MetadataExt, prelude::FileExt},
+    },
     path::{Path, PathBuf},
 };
 
 use faccess::{AccessMode, PathExt};
 use libc::DT_DIR;
 use mirrord_protocol::{file::*, FileRequest, FileResponse, RemoteResult, ResponseError};
+use nix::unistd::UnlinkatFlags;
 use tracing::{error, trace, Level};
 
 use crate::error::Result;
@@ -261,6 +265,14 @@ impl FileManager {
             FileRequest::RemoveDir(RemoveDirRequest { pathname }) => {
                 Some(FileResponse::RemoveDir(self.rmdir(&pathname)))
             }
+            FileRequest::Unlink(UnlinkRequest { pathname }) => {
+                Some(FileResponse::Unlink(self.unlink(&pathname)))
+            }
+            FileRequest::UnlinkAt(UnlinkAtRequest {
+                dirfd,
+                pathname,
+                flags,
+            }) => Some(FileResponse::Unlink(self.unlinkat(dirfd, &pathname, flags))),
         })
     }
 
@@ -529,6 +541,63 @@ impl FileManager {
         let path = resolve_path(path, &self.root_path)?;
 
         std::fs::remove_dir(path.as_path()).map_err(ResponseError::from)
+    }
+
+    pub(crate) fn unlink(&mut self, path: &Path) -> RemoteResult<()> {
+        trace!("FileManager::unlink -> path {:#?}", path);
+
+        let path = resolve_path(path, &self.root_path)?;
+
+        match nix::unistd::unlink(path.as_path()) {
+            Ok(_) => Ok(()),
+            Err(err) => Err(ResponseError::from(std::io::Error::from_raw_os_error(
+                err as i32,
+            ))),
+        }
+    }
+
+    pub(crate) fn unlinkat(
+        &mut self,
+        dirfd: Option<u64>,
+        path: &Path,
+        flags: u32,
+    ) -> RemoteResult<()> {
+        trace!(
+            "FileManager::unlinkat -> dirfd {:#?} | path {:#?} | flags {:#?}",
+            dirfd,
+            path,
+            flags
+        );
+
+        let path = match dirfd {
+            Some(dirfd) => {
+                let relative_dir = self
+                    .open_files
+                    .get(&dirfd)
+                    .ok_or(ResponseError::NotFound(dirfd))?;
+
+                if let RemoteFile::Directory(relative_dir) = relative_dir {
+                    relative_dir.join(path)
+                } else {
+                    return Err(ResponseError::NotDirectory(dirfd));
+                }
+            }
+            None => resolve_path(path, &self.root_path)?,
+        };
+
+        let flags = match flags {
+            0 => UnlinkatFlags::RemoveDir,
+            _ => UnlinkatFlags::NoRemoveDir,
+        };
+
+        let fd: Option<RawFd> = dirfd.map(|fd| fd as RawFd);
+
+        match nix::unistd::unlinkat(fd, path.as_path(), flags) {
+            Ok(_) => Ok(()),
+            Err(err) => Err(ResponseError::from(std::io::Error::from_raw_os_error(
+                err as i32,
+            ))),
+        }
     }
 
     pub(crate) fn seek(&mut self, fd: u64, seek_from: SeekFrom) -> RemoteResult<SeekFileResponse> {
