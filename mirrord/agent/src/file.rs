@@ -528,7 +528,7 @@ impl FileManager {
 
         let path = resolve_path(path, &self.root_path)?;
 
-        std::fs::remove_dir(&path.as_path()).map_err(ResponseError::from)
+        std::fs::remove_dir(path.as_path()).map_err(ResponseError::from)
     }
 
     pub(crate) fn seek(&mut self, fd: u64, seek_from: SeekFrom) -> RemoteResult<SeekFileResponse> {
