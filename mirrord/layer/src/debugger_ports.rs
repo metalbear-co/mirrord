@@ -298,7 +298,7 @@ pub enum DebuggerPorts {
 }
 
 impl FromStr for DebuggerPorts {
-    type Err = String;
+    type Err = std::convert::Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // string looks like 'port1,port2,port3-portx,porty-portz'
@@ -329,7 +329,7 @@ impl FromStr for DebuggerPorts {
         if !vec.is_empty() {
             Ok(Self::Combination(vec))
         } else {
-            Err(format!("couldn't parse ports from string: {s}"))
+            Ok(Self::None)
         }
     }
 }
@@ -403,11 +403,7 @@ impl DebuggerPorts {
         // separated by a comma they need to be parsed individually
         env::var(MIRRORD_IGNORE_DEBUGGER_PORTS_ENV)
             .ok()
-            .and_then(|s| {
-                Self::from_str(&s)
-                    .inspect_err(|e| error!("Failed to decode debugger ports: {e}"))
-                    .ok()
-            })
+            .and_then(|s| Self::from_str(&s).ok())
             .unwrap_or(Self::None)
     }
 
