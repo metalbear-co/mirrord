@@ -8,6 +8,43 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.128.0](https://github.com/metalbear-co/mirrord/tree/3.128.0) - 2024-12-19
+
+
+### Added
+
+- Added to mirrord config a new experimental field
+  `.experimental.readonly_file_buffer`. If set to a value greater than 0,
+  mirrord will fetch remote readonly files in chunks of at least this size (in bytes).
+  This is to improve performance with applications that make many small reads
+  from remote files.
+  [#2069](https://github.com/metalbear-co/mirrord/issues/2069)
+- Added `mirrord container-ext` command that should be used by extension and
+  works similarly to `mirrord ext` but for containers.
+- Added runAsNonRoot and RO file system to operator deployment
+- Added custom resource definition for cluster-wide mirrord policy -
+  `MirrordClusterPolicy`.
+- Added mapping option for env vars config, allowing the user to map multiple env
+  vars to another value based on regexes.
+  [#2920](https://github.com/metalbear-co/mirrord/issues/2920)
+- Added mkdir support
+  [#2221](https://github.com/metalbear-co/mirrord/issues/2221)
+
+
+### Fixed
+
+- Added debugger port detection type for the node `--inspect`, `--inspect-wait`
+  and `--inspect-brk` flags.
+  [#2936](https://github.com/metalbear-co/mirrord/issues/2936)
+- Fixed `mirrord operator setup` - added missing `/tmp` volume to the operator
+  deployment.
+
+
+### Internal
+
+- Added E2E test for `MirrordClusterPolicy` that blocks incoming traffic
+  mirroring.
+
 ## [3.127.0](https://github.com/metalbear-co/mirrord/tree/3.127.0) - 2024-12-10
 
 
