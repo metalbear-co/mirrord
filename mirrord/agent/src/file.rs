@@ -17,7 +17,10 @@ use tracing::{error, trace, Level};
 
 use crate::{
     error::Result,
-    metrics::{MetricsActor, MetricsDecFd, MetricsIncFd},
+    metrics::{
+        file_ops::{MetricsDecFd, MetricsIncFd},
+        MetricsActor,
+    },
 };
 
 #[derive(Debug)]

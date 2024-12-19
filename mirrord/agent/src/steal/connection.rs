@@ -35,9 +35,12 @@ use tracing::{trace, warn, Level};
 use crate::{
     error::{AgentError, Result},
     metrics::{
-        MetricsActor, MetricsDecStealConnectionSubscription, MetricsDecStealPortSubscription,
-        MetricsDecStealPortSubscriptionMany, MetricsIncStealConnectionSubscription,
-        MetricsIncStealPortSubscription,
+        incoming_traffic::{
+            MetricsDecStealConnectionSubscription, MetricsDecStealPortSubscription,
+            MetricsDecStealPortSubscriptionMany, MetricsIncStealConnectionSubscription,
+            MetricsIncStealPortSubscription,
+        },
+        MetricsActor,
     },
     steal::{
         connections::{

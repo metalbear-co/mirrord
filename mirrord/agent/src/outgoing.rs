@@ -20,7 +20,10 @@ use tracing::Level;
 
 use crate::{
     error::Result,
-    metrics::{MetricsActor, MetricsDecTcpOutgoingConnection, MetricsIncTcpOutgoingConnection},
+    metrics::{
+        outgoing_traffic::{MetricsDecTcpOutgoingConnection, MetricsIncTcpOutgoingConnection},
+        MetricsActor,
+    },
     util::run_thread_in_namespace,
     watched_task::{TaskStatus, WatchedTask},
 };

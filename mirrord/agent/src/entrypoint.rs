@@ -859,17 +859,6 @@ pub async fn main() -> Result<()> {
 
     let args = cli::parse_args();
 
-    // TODO(alex) [high]: Could start metrics from here, as the agent itself has 2
-    // different starting points. So start task here, and pass comms to both.
-    //
-    // CANNOT `bind` anything before `start_agent`, we might hit addrinuse.
-    // let metrics = kameo::spawn(MetricsActor::default());
-    // let listener = TcpListener::bind("0.0.0.0:0")
-    //     .await
-    //     .map_err(AgentError::from)
-    //     .inspect_err(|fail| tracing::error!(?fail, "Generic listener!"))
-    //     .inspect(|s| tracing::info!(?s, "Listening"))?;
-
     let agent_result = if args.mode.is_targetless()
         || (std::env::var(IPTABLE_PREROUTING_ENV).is_ok()
             && std::env::var(IPTABLE_MESH_ENV).is_ok()

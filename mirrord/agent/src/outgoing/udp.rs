@@ -26,7 +26,7 @@ use tracing::{debug, trace, warn};
 use super::MetricsActor;
 use crate::{
     error::Result,
-    metrics::{MetricsDecUdpOutgoingConnection, MetricsIncUdpOutgoingConnection},
+    metrics::outgoing_traffic::{MetricsDecUdpOutgoingConnection, MetricsIncUdpOutgoingConnection},
     util::run_thread_in_namespace,
     watched_task::{TaskStatus, WatchedTask},
 };

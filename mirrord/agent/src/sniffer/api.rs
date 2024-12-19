@@ -19,8 +19,11 @@ use super::messages::{SniffedConnection, SnifferCommand, SnifferCommandInner};
 use crate::{
     error::AgentError,
     metrics::{
-        MetricsActor, MetricsDecMirrorConnectionSubscription, MetricsDecMirrorPortSubscription,
-        MetricsIncMirrorPortSubscription,
+        incoming_traffic::{
+            MetricsDecMirrorConnectionSubscription, MetricsDecMirrorPortSubscription,
+            MetricsIncMirrorPortSubscription,
+        },
+        MetricsActor,
     },
     util::ClientId,
     watched_task::TaskStatus,
