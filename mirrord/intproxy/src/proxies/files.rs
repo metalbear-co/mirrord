@@ -544,9 +544,7 @@ impl FilesProxy {
             // Doesn't require any special logic.
             other => {
                 self.request_queue.push_back(message_id, layer_id);
-                message_bus
-                    .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(other)))
-                    .await;
+                message_bus.send(ClientMessage::FileRequest(other)).await;
             }
         }
     }
