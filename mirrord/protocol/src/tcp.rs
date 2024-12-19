@@ -79,6 +79,9 @@ pub enum LayerTcp {
 }
 
 /// Messages related to Tcp handler from server.
+///
+/// They are the same for both `steal` and `mirror` modes, even though their layer
+/// counterparts ([`LayerTcpSteal`] and [`LayerTcp`]) are different.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum DaemonTcp {
     NewConnection(NewTcpConnection),

@@ -38,8 +38,6 @@ pub enum DaemonTcpOutgoing {
     /// to the remote connection itself.
     Read(RemoteResult<DaemonRead>),
 
-    // TODO(alex) [high]: For other connections, check places where we `DaemonClose` to
-    // dec their counters.
     /// Tell the layer that this connection has been `close`d, either by a request from
     /// the user with [`LayerTcpOutgoing::Close`], or from some error in the agent when
     /// writing or reading from the connection.
