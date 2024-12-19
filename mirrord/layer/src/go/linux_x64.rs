@@ -344,6 +344,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
             #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
             libc::SYS_mkdir => mkdir_detour(param1 as _, param2 as _) as i64,
             libc::SYS_mkdirat => mkdirat_detour(param1 as _, param2 as _, param3 as _) as i64,
+            libc::SYS_rmdir => rmdir_detour(param1 as _) as i64,
             _ => {
                 let (Ok(result) | Err(result)) = syscalls::syscall!(
                     syscalls::Sysno::from(syscall as i32),
