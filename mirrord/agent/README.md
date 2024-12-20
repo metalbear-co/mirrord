@@ -9,7 +9,21 @@ mirrord-agent is distributed as a container image (currently only x86) that is p
 
 ## Enabling prometheus metrics
 
-TODO(alex) [mid]: Talk how to enable it from env whatever.
+To start the metrics server, you'll need to add this config to your `mirrord.json`:
+
+```json
+{
+  "agent": {
+    "metrics": "0.0.0.0:9000",
+    "annotations": {
+      "prometheus.io/scrape": "true",
+      "prometheus.io/port": "9000"
+    }
+}
+```
+
+Remember to change the `port` in both `metrics` and `annotations`, they have to match,
+otherwise prometheus will try to scrape on `port: 80` or other commonly used ports.
 
 ### Installing prometheus
 

@@ -322,7 +322,11 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "annotations": { "cats.io/inject": "enabled" }
+    ///   "annotations": {
+    ///     "cats.io/inject": "enabled"
+    ///     "prometheus.io/scrape": "true",
+    ///     "prometheus.io/port": "9000"
+    ///   }
     /// }
     /// ```
     pub annotations: Option<HashMap<String, String>>,
@@ -349,6 +353,21 @@ pub struct AgentConfig {
     /// }
     /// ```
     pub service_account: Option<String>,
+
+    /// ### agent.metrics {#agent-metrics}
+    ///
+    /// Enables prometheus metrics for the agent pod.
+    ///
+    /// You might need to add annotations to the agent pod depending on how prometheus is
+    /// configured to scrape for metrics.
+    ///
+    /// ```json
+    /// {
+    ///   "metrics": "0.0.0.0:9000"
+    /// }
+    /// ```
+    #[config(env = "MIRRORD_AGENT_METRICS")]
+    pub metrics: Option<String>,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing

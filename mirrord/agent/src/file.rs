@@ -14,7 +14,7 @@ use libc::DT_DIR;
 use mirrord_protocol::{file::*, FileRequest, FileResponse, RemoteResult, ResponseError};
 use tracing::{error, trace, Level};
 
-use crate::{error::Result, metrics::OPEN_FD_COUNT};
+use crate::{error::AgentResult, metrics::OPEN_FD_COUNT};
 
 #[derive(Debug)]
 pub enum RemoteFile {
@@ -139,7 +139,7 @@ impl FileManager {
     pub(crate) async fn handle_message(
         &mut self,
         request: FileRequest,
-    ) -> Result<Option<FileResponse>> {
+    ) -> AgentResult<Option<FileResponse>> {
         Ok(match request {
             FileRequest::Open(OpenFileRequest { path, open_options }) => {
                 // TODO: maybe not agent error on this?
@@ -857,7 +857,7 @@ impl FileManager {
             // buffer (and there was no error converting to a
             // `DirEntryInternal`.
             while let Some(entry) = entry_results
-                .next_if(|entry_res: &Result<DirEntryInternal, io::Error>| {
+                .next_if(|entry_res: &AgentResult<DirEntryInternal, io::Error>| {
                     entry_res.as_ref().is_ok_and(|entry| {
                         entry.get_d_reclen64() as u64 + result_size <= buffer_size
                     })

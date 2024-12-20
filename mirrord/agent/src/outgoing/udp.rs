@@ -23,7 +23,7 @@ use tokio_util::{codec::BytesCodec, udp::UdpFramed};
 use tracing::{debug, trace, warn};
 
 use crate::{
-    error::Result,
+    error::AgentResult,
     metrics::UDP_OUTGOING_CONNECTION,
     util::run_thread_in_namespace,
     watched_task::{TaskStatus, WatchedTask},
@@ -57,7 +57,7 @@ pub(crate) struct UdpOutgoingApi {
 /// 3. User is trying to use `sendto` and `recvfrom`, we use the same hack as in DNS to fake a
 ///    connection.
 #[tracing::instrument(level = "trace", ret)]
-async fn connect(remote_address: SocketAddr) -> Result<UdpSocket, ResponseError> {
+async fn connect(remote_address: SocketAddr) -> AgentResult<UdpSocket, ResponseError> {
     let mirror_address = match remote_address {
         std::net::SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
         std::net::SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
@@ -102,7 +102,7 @@ impl UdpOutgoingApi {
     async fn interceptor_task(
         mut layer_rx: Receiver<Layer>,
         daemon_tx: Sender<Daemon>,
-    ) -> Result<()> {
+    ) -> AgentResult<()> {
         let mut connection_ids = 0..=ConnectionId::MAX;
 
         // TODO: Right now we're manually keeping these 2 maps in sync (aviram suggested using
@@ -245,7 +245,7 @@ impl UdpOutgoingApi {
     }
 
     /// Sends a `UdpOutgoingRequest` to the `interceptor_task`.
-    pub(crate) async fn layer_message(&mut self, message: LayerUdpOutgoing) -> Result<()> {
+    pub(crate) async fn layer_message(&mut self, message: LayerUdpOutgoing) -> AgentResult<()> {
         trace!(
             "UdpOutgoingApi::layer_message -> layer_message {:#?}",
             message
@@ -259,7 +259,7 @@ impl UdpOutgoingApi {
     }
 
     /// Receives a `UdpOutgoingResponse` from the `interceptor_task`.
-    pub(crate) async fn daemon_message(&mut self) -> Result<DaemonUdpOutgoing> {
+    pub(crate) async fn daemon_message(&mut self) -> AgentResult<DaemonUdpOutgoing> {
         match self.daemon_rx.recv().await {
             Some(msg) => Ok(msg),
             None => Err(self.task_status.unwrap_err().await),

@@ -32,7 +32,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{warn, Level};
 
 use crate::{
-    error::{AgentError, Result},
+    error::{AgentError, AgentResult},
     metrics::{
         STEAL_CONNECTION_SUBSCRIPTION, STEAL_FILTERED_PORT_SUBSCRIPTION,
         STEAL_UNFILTERED_PORT_SUBSCRIPTION,
@@ -59,7 +59,7 @@ struct MatchedHttpRequest {
 }
 
 impl MatchedHttpRequest {
-    async fn into_serializable(self) -> Result<HttpRequest<InternalHttpBody>, hyper::Error> {
+    async fn into_serializable(self) -> AgentResult<HttpRequest<InternalHttpBody>, hyper::Error> {
         let (
             Parts {
                 method,
@@ -89,7 +89,7 @@ impl MatchedHttpRequest {
         })
     }
 
-    async fn into_serializable_fallback(self) -> Result<HttpRequest<Vec<u8>>, hyper::Error> {
+    async fn into_serializable_fallback(self) -> AgentResult<HttpRequest<Vec<u8>>, hyper::Error> {
         let (
             Parts {
                 method,
@@ -185,7 +185,7 @@ impl Client {
                         let frames = frames
                             .into_iter()
                             .map(InternalHttpBodyFrame::try_from)
-                            .filter_map(Result::ok)
+                            .filter_map(AgentResult::ok)
                             .collect();
                         let message =
                             DaemonTcp::HttpRequestChunked(ChunkedRequest::Start(HttpRequest {
@@ -214,7 +214,7 @@ impl Client {
                             let frames = frames
                                 .into_iter()
                                 .map(InternalHttpBodyFrame::try_from)
-                                .filter_map(Result::ok)
+                                .filter_map(AgentResult::ok)
                                 .collect();
                             let message = DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
                                 ChunkedHttpBody {
@@ -303,7 +303,7 @@ impl TcpConnectionStealer {
     /// Initializes a new [`TcpConnectionStealer`], but doesn't start the actual work.
     /// You need to call [`TcpConnectionStealer::start`] to do so.
     #[tracing::instrument(level = Level::TRACE, err)]
-    pub(crate) async fn new(command_rx: Receiver<StealerCommand>) -> Result<Self, AgentError> {
+    pub(crate) async fn new(command_rx: Receiver<StealerCommand>) -> AgentResult<Self, AgentError> {
         let config = envy::prefixed("MIRRORD_AGENT_")
             .from_env::<TcpStealerConfig>()
             .unwrap_or_default();
@@ -339,7 +339,7 @@ impl TcpConnectionStealer {
     pub(crate) async fn start(
         mut self,
         cancellation_token: CancellationToken,
-    ) -> Result<(), AgentError> {
+    ) -> AgentResult<(), AgentError> {
         loop {
             tokio::select! {
                 command = self.command_rx.recv() => {
@@ -379,7 +379,11 @@ impl TcpConnectionStealer {
 
     /// Handles a new remote connection that was stolen by [`Self::port_subscriptions`].
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn incoming_connection(&mut self, stream: TcpStream, peer: SocketAddr) -> Result<()> {
+    async fn incoming_connection(
+        &mut self,
+        stream: TcpStream,
+        peer: SocketAddr,
+    ) -> AgentResult<()> {
         let mut real_address = orig_dst::orig_dst_addr(&stream)?;
         // If we use the original IP we would go through prerouting and hit a loop.
         // localhost should always work.
@@ -413,7 +417,7 @@ impl TcpConnectionStealer {
     async fn handle_connection_update(
         &mut self,
         update: ConnectionMessageOut,
-    ) -> Result<(), AgentError> {
+    ) -> AgentResult<(), AgentError> {
         match update {
             ConnectionMessageOut::Closed {
                 connection_id,
@@ -551,7 +555,11 @@ impl TcpConnectionStealer {
     ///
     /// - Returns: `true` if this is an HTTP filtered subscription.
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    async fn port_subscribe(&mut self, client_id: ClientId, port_steal: StealType) -> Result<bool> {
+    async fn port_subscribe(
+        &mut self,
+        client_id: ClientId,
+        port_steal: StealType,
+    ) -> AgentResult<bool> {
         let spec = match port_steal {
             StealType::All(port) => Ok((port, None)),
             StealType::FilteredHttp(port, filter) => Regex::new(&format!("(?i){filter}"))
@@ -582,7 +590,7 @@ impl TcpConnectionStealer {
     /// their subscriptions from [`Self::port_subscriptions`] and all their open
     /// connections.
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn close_client(&mut self, client_id: ClientId) -> Result<(), AgentError> {
+    async fn close_client(&mut self, client_id: ClientId) -> AgentResult<(), AgentError> {
         let removed_subscriptions = self.port_subscriptions.remove_all(client_id).await?;
 
         for filtered in removed_subscriptions {
@@ -647,7 +655,7 @@ impl TcpConnectionStealer {
 
     /// Handles [`Command`]s that were received by [`TcpConnectionStealer::command_rx`].
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    async fn handle_command(&mut self, command: StealerCommand) -> Result<(), AgentError> {
+    async fn handle_command(&mut self, command: StealerCommand) -> AgentResult<(), AgentError> {
         let StealerCommand { client_id, command } = command;
 
         match command {

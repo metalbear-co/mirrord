@@ -33,7 +33,7 @@ use crate::{
     client_connection::ClientConnection,
     container_handle::ContainerHandle,
     dns::DnsApi,
-    error::{AgentError, Result},
+    error::{AgentError, AgentResult},
     file::FileManager,
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     runtime::get_container,
@@ -73,7 +73,7 @@ struct State {
 
 impl State {
     /// Return [`Err`] if container runtime operations failed.
-    pub async fn new(args: &Args) -> Result<State> {
+    pub async fn new(args: &Args) -> AgentResult<State> {
         let tls_connector = args
             .operator_tls_cert_pem
             .clone()
@@ -213,7 +213,7 @@ impl ClientConnectionHandler {
         mut connection: ClientConnection,
         bg_tasks: BackgroundTasks,
         state: State,
-    ) -> Result<Self> {
+    ) -> AgentResult<Self> {
         let pid = state.container_pid();
 
         let file_manager = FileManager::new(pid.or_else(|| state.ephemeral.then_some(1)));
@@ -274,7 +274,7 @@ impl ClientConnectionHandler {
         id: ClientId,
         task: BackgroundTask<StealerCommand>,
         connection: &mut ClientConnection,
-    ) -> Result<Option<TcpStealerApi>> {
+    ) -> AgentResult<Option<TcpStealerApi>> {
         if let BackgroundTask::Running(stealer_status, stealer_sender) = task {
             match TcpStealerApi::new(
                 id,
@@ -314,7 +314,7 @@ impl ClientConnectionHandler {
     ///
     /// Breaks upon receiver/sender drop.
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn start(mut self, cancellation_token: CancellationToken) -> Result<()> {
+    async fn start(mut self, cancellation_token: CancellationToken) -> AgentResult<()> {
         let error = loop {
             select! {
                 message = self.connection.receive() => {
@@ -390,7 +390,7 @@ impl ClientConnectionHandler {
 
     /// Sends a [`DaemonMessage`] response to the connected client (`mirrord-layer`).
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn respond(&mut self, response: DaemonMessage) -> Result<()> {
+    async fn respond(&mut self, response: DaemonMessage) -> AgentResult<()> {
         self.connection.send(response).await.map_err(Into::into)
     }
 
@@ -398,7 +398,7 @@ impl ClientConnectionHandler {
     ///
     /// Returns `false` if the client disconnected.
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    async fn handle_client_message(&mut self, message: ClientMessage) -> Result<bool> {
+    async fn handle_client_message(&mut self, message: ClientMessage) -> AgentResult<bool> {
         match message {
             ClientMessage::FileRequest(req) => {
                 if let Some(response) = self.file_manager.handle_message(req).await? {
@@ -490,14 +490,17 @@ impl ClientConnectionHandler {
 
 /// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.
 #[tracing::instrument(level = Level::TRACE, ret, err)]
-async fn start_agent(args: Args) -> Result<()> {
+async fn start_agent(args: Args) -> AgentResult<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
 
-    tokio::spawn(async move {
-        start_metrics()
-            .await
-            .inspect_err(|fail| tracing::error!(?fail, "Failed starting metrics server!"))
-    });
+    if let Some(metrics_address) = args.metrics.as_ref() {
+        let address = metrics_address.parse()?;
+        tokio::spawn(async move {
+            start_metrics(address)
+                .await
+                .inspect_err(|fail| tracing::error!(?fail, "Failed starting metrics server!"))
+        });
+    }
 
     let listener = TcpListener::bind(SocketAddrV4::new(
         Ipv4Addr::UNSPECIFIED,
@@ -730,7 +733,7 @@ async fn start_agent(args: Args) -> Result<()> {
     Ok(())
 }
 
-async fn clear_iptable_chain() -> Result<()> {
+async fn clear_iptable_chain() -> AgentResult<()> {
     let ipt = new_iptables();
 
     SafeIpTables::load(IPTablesWrapper::from(ipt), false)
@@ -741,7 +744,7 @@ async fn clear_iptable_chain() -> Result<()> {
     Ok(())
 }
 
-async fn run_child_agent() -> Result<()> {
+async fn run_child_agent() -> AgentResult<()> {
     let command_args = std::env::args().collect::<Vec<_>>();
     let (command, args) = command_args
         .split_first()
@@ -765,7 +768,7 @@ async fn run_child_agent() -> Result<()> {
 ///
 /// Captures SIGTERM signals sent by Kubernetes when the pod is gracefully deleted.
 /// When a signal is captured, the child process is killed and the iptables are cleaned.
-async fn start_iptable_guard(args: Args) -> Result<()> {
+async fn start_iptable_guard(args: Args) -> AgentResult<()> {
     debug!("start_iptable_guard -> Initializing iptable-guard.");
 
     let state = State::new(&args).await?;
@@ -813,7 +816,7 @@ async fn start_iptable_guard(args: Args) -> Result<()> {
 /// 1. If you try to `bind` a socket to some address before [`start_agent`], it'll actually
 /// be bound **twice**, which incurs an error (address already in use). You could get around
 /// this by `bind`ing on `0.0.0.0:0`, but this is most likely **not** what you want.
-pub async fn main() -> Result<()> {
+pub async fn main() -> AgentResult<()> {
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
 

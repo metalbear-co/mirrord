@@ -71,7 +71,6 @@ rustls.workspace = true
 envy = "0.4"
 socket2.workspace = true
 prometheus = { version = "0.13", features = ["process"] }
-kameo = { git = "https://github.com/tqwewe/kameo", branch = "main" }
 axum = { version = "0.7", features = ["macros"] }
 axum-server = "0.7"
 

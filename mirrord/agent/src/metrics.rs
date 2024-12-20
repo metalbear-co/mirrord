@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::{net::SocketAddr, sync::LazyLock};
 
 use axum::{response::IntoResponse, routing::get, Router};
 use prometheus::{register_int_gauge, IntGauge};
@@ -104,10 +104,10 @@ async fn get_metrics() -> Result<String, MetricsError> {
 }
 
 #[tracing::instrument(level = Level::TRACE, skip_all, ret ,err)]
-pub(crate) async fn start_metrics() -> Result<(), axum::BoxError> {
+pub(crate) async fn start_metrics(address: SocketAddr) -> Result<(), axum::BoxError> {
     let app = Router::new().route("/metrics", get(get_metrics));
 
-    let listener = TcpListener::bind("0.0.0.0:9000")
+    let listener = TcpListener::bind(address)
         .await
         .map_err(AgentError::from)
         .inspect_err(|fail| tracing::error!(?fail, "Actor listener!"))?;

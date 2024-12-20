@@ -18,7 +18,7 @@ use tokio_util::io::ReaderStream;
 use tracing::Level;
 
 use crate::{
-    error::Result,
+    error::AgentResult,
     metrics::TCP_OUTGOING_CONNECTION,
     util::run_thread_in_namespace,
     watched_task::{TaskStatus, WatchedTask},
@@ -82,7 +82,7 @@ impl TcpOutgoingApi {
 
     /// Sends the [`LayerTcpOutgoing`] message to the background task.
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    pub(crate) async fn send_to_task(&mut self, message: LayerTcpOutgoing) -> Result<()> {
+    pub(crate) async fn send_to_task(&mut self, message: LayerTcpOutgoing) -> AgentResult<()> {
         if self.layer_tx.send(message).await.is_ok() {
             Ok(())
         } else {
@@ -92,7 +92,7 @@ impl TcpOutgoingApi {
 
     /// Receives a [`DaemonTcpOutgoing`] message from the background task.
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    pub(crate) async fn recv_from_task(&mut self) -> Result<DaemonTcpOutgoing> {
+    pub(crate) async fn recv_from_task(&mut self) -> AgentResult<DaemonTcpOutgoing> {
         match self.daemon_rx.recv().await {
             Some(msg) => Ok(msg),
             None => Err(self.task_status.unwrap_err().await),
@@ -153,7 +153,7 @@ impl TcpOutgoingTask {
     /// Runs this task as long as the channels connecting it with [`TcpOutgoingApi`] are open.
     /// This routine never fails and returns [`Result`] only due to [`WatchedTask`] constraints.
     #[tracing::instrument(level = Level::TRACE, skip(self))]
-    async fn run(mut self) -> Result<()> {
+    async fn run(mut self) -> AgentResult<()> {
         loop {
             let channel_closed = select! {
                 biased;
@@ -191,7 +191,7 @@ impl TcpOutgoingTask {
         &mut self,
         connection_id: ConnectionId,
         read: io::Result<Option<Bytes>>,
-    ) -> Result<(), SendError<DaemonTcpOutgoing>> {
+    ) -> AgentResult<(), SendError<DaemonTcpOutgoing>> {
         match read {
             // New bytes came in from a peer connection.
             // We pass them to the layer.
@@ -266,7 +266,7 @@ impl TcpOutgoingTask {
     async fn handle_layer_msg(
         &mut self,
         message: LayerTcpOutgoing,
-    ) -> Result<(), SendError<DaemonTcpOutgoing>> {
+    ) -> AgentResult<(), SendError<DaemonTcpOutgoing>> {
         match message {
             // We make connection to the requested address, split the stream into halves with
             // `io::split`, and put them into respective maps.

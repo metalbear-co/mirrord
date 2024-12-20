@@ -3735,34 +3735,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kameo"
-version = "0.13.0"
-source = "git+https://github.com/tqwewe/kameo?branch=main#fcd9987669d7530ec5853be8f05932b2d78c901d"
-dependencies = [
- "dyn-clone",
- "futures",
- "itertools 0.13.0",
- "kameo_macros",
- "once_cell",
- "serde",
- "tokio",
- "tokio-stream",
- "tracing",
-]
-
-[[package]]
-name = "kameo_macros"
-version = "0.13.0"
-source = "git+https://github.com/tqwewe/kameo?branch=main#fcd9987669d7530ec5853be8f05932b2d78c901d"
-dependencies = [
- "heck 0.5.0",
- "proc-macro2",
- "quote",
- "syn 2.0.90",
- "uuid",
-]
-
-[[package]]
 name = "konst"
 version = "0.3.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4262,7 +4234,6 @@ dependencies = [
  "hyper-util",
  "iptables",
  "k8s-cri",
- "kameo",
  "libc",
  "mirrord-protocol",
  "mockall",
@@ -7254,7 +7225,6 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
- "tracing",
  "windows-sys 0.52.0",
 ]
 

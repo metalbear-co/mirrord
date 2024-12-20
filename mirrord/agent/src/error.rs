@@ -84,6 +84,9 @@ pub(crate) enum AgentError {
     /// Temporary error for vpn feature
     #[error("Generic error in vpn: {0}")]
     VpnError(String),
+
+    #[error(transparent)]
+    AddrParse(#[from] std::net::AddrParseError),
 }
 
 impl From<mpsc::error::SendError<StealerCommand>> for AgentError {
@@ -92,4 +95,4 @@ impl From<mpsc::error::SendError<StealerCommand>> for AgentError {
     }
 }
 
-pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;
+pub(crate) type AgentResult<T, E = AgentError> = std::result::Result<T, E>;
