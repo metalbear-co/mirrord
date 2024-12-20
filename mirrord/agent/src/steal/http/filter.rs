@@ -3,7 +3,7 @@ use hyper::Request;
 use tracing::Level;
 
 /// Currently supported filtering criterias.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum HttpFilter {
     /// Header based filter.
     /// This [`Regex`] should be used against each header after transforming it to `k: v` format.
