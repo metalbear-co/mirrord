@@ -81,8 +81,6 @@ pub(crate) enum MetricsError {
     Prometheus(#[from] prometheus::Error),
 }
 
-unsafe impl Send for MetricsError {}
-
 impl IntoResponse for MetricsError {
     fn into_response(self) -> axum::response::Response {
         (http::StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
