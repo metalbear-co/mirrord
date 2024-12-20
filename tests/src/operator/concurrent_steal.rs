@@ -31,7 +31,7 @@ pub async fn two_clients_steal_same_target(
 
     let mut client_a = application
         .run(
-            &service.target,
+            &service.pod_container_target(),
             Some(&service.namespace),
             Some(flags.clone()),
             None,
@@ -43,7 +43,12 @@ pub async fn two_clients_steal_same_target(
         .await;
 
     let mut client_b = application
-        .run(&service.target, Some(&service.namespace), Some(flags), None)
+        .run(
+            &service.pod_container_target(),
+            Some(&service.namespace),
+            Some(flags),
+            None,
+        )
         .await;
 
     let res = client_b.child.wait().await.unwrap();
@@ -84,7 +89,7 @@ pub async fn two_clients_steal_same_target_pod_deployment(
 
     let mut client_a = application
         .run(
-            &service.target,
+            &service.pod_container_target(),
             Some(&service.namespace),
             Some(flags.clone()),
             None,
@@ -148,7 +153,7 @@ pub async fn two_clients_steal_with_http_filter(
 
     let mut client_a = application
         .run(
-            &service.target,
+            &service.pod_container_target(),
             Some(&service.namespace),
             Some(flags.clone()),
             Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
@@ -164,7 +169,7 @@ pub async fn two_clients_steal_with_http_filter(
 
     let mut client_b = application
         .run(
-            &service.target,
+            &service.pod_container_target(),
             Some(&service.namespace),
             Some(flags),
             Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),

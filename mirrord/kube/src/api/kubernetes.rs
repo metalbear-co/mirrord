@@ -166,6 +166,7 @@ impl KubernetesAPI {
         &self,
         target: &TargetConfig,
         tls_cert: Option<String>,
+        support_ipv6: bool,
     ) -> Result<(ContainerParams, Option<RuntimeData>), KubeApiError> {
         let runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
             Target::Targetless => None,
@@ -187,7 +188,7 @@ impl KubernetesAPI {
                     .join(",")
             });
 
-        let params = ContainerParams::new(tls_cert, pod_ips);
+        let params = ContainerParams::new(tls_cert, pod_ips, support_ipv6);
 
         Ok((params, runtime_data))
     }
@@ -209,7 +210,12 @@ impl KubernetesAPI {
     where
         P: Progress + Send + Sync,
     {
-        let (params, runtime_data) = self.create_agent_params(target, tls_cert).await?;
+        let support_ipv6 = config
+            .map(|layer_conf| layer_conf.feature.network.ipv6)
+            .unwrap_or_default();
+        let (params, runtime_data) = self
+            .create_agent_params(target, tls_cert, support_ipv6)
+            .await?;
         if let Some(RuntimeData {
             guessed_container: true,
             container_name,
