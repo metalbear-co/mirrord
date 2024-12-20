@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, path::Path};
+use std::{collections::HashMap, fmt, net::SocketAddr, path::Path};
 
 use k8s_openapi::api::core::v1::{ResourceRequirements, Toleration};
 use mirrord_analytics::CollectAnalytics;
@@ -366,8 +366,7 @@ pub struct AgentConfig {
     ///   "metrics": "0.0.0.0:9000"
     /// }
     /// ```
-    #[config(env = "MIRRORD_AGENT_METRICS")]
-    pub metrics: Option<String>,
+    pub metrics: Option<SocketAddr>,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing

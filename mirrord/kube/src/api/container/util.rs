@@ -68,8 +68,8 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &&ContainerParams) -> Vec<E
         env.push(("MIRRORD_AGENT_POD_IPS".to_string(), pod_ips));
     }
 
-    if let Some(metrics) = agent.metrics.as_ref() {
-        env.push((AGENT_METRICS_ENV.to_string(), metrics.into()));
+    if let Some(metrics_address) = agent.metrics.as_ref() {
+        env.push((AGENT_METRICS_ENV.to_string(), metrics_address.to_string()));
     }
 
     env.into_iter()

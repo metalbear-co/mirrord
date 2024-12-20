@@ -1,5 +1,7 @@
 #![deny(missing_docs)]
 
+use std::net::SocketAddr;
+
 use clap::{Parser, Subcommand};
 use mirrord_protocol::{
     MeshVendor, AGENT_METRICS_ENV, AGENT_NETWORK_INTERFACE_ENV, AGENT_OPERATOR_CERT_ENV,
@@ -30,7 +32,7 @@ pub struct Args {
 
     /// Controls whether metrics are enabled, and the address to set up the metrics server.
     #[arg(long, env = AGENT_METRICS_ENV)]
-    pub metrics: Option<String>,
+    pub metrics: Option<SocketAddr>,
 
     /// Return an error after accepting the first client connection, in order to test agent error
     /// cleanup.

@@ -493,10 +493,9 @@ impl ClientConnectionHandler {
 async fn start_agent(args: Args) -> AgentResult<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
 
-    if let Some(metrics_address) = args.metrics.as_ref() {
-        let address = metrics_address.parse()?;
+    if let Some(metrics_address) = args.metrics.clone() {
         tokio::spawn(async move {
-            start_metrics(address)
+            start_metrics(metrics_address)
                 .await
                 .inspect_err(|fail| tracing::error!(?fail, "Failed starting metrics server!"))
         });
