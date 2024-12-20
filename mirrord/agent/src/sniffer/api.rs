@@ -18,13 +18,7 @@ use tokio_stream::{
 use super::messages::{SniffedConnection, SnifferCommand, SnifferCommandInner};
 use crate::{
     error::AgentError,
-    metrics::{
-        incoming_traffic::{
-            MetricsDecMirrorConnectionSubscription, MetricsDecMirrorPortSubscription,
-            MetricsIncMirrorPortSubscription,
-        },
-        MetricsActor,
-    },
+    metrics::{MetricsActor, MIRROR_PORT_SUBSCRIPTION},
     util::ClientId,
     watched_task::TaskStatus,
 };
@@ -186,11 +180,7 @@ impl TcpSnifferApi {
                     .await?;
                 self.subscriptions_in_progress.push(rx);
 
-                let _ = self
-                    .metrics
-                    .tell(MetricsIncMirrorPortSubscription)
-                    .await
-                    .inspect_err(|fail| tracing::trace!(?fail));
+                MIRROR_PORT_SUBSCRIPTION.inc();
 
                 Ok(())
             }
@@ -199,11 +189,7 @@ impl TcpSnifferApi {
                 self.send_command(SnifferCommandInner::UnsubscribePort(port))
                     .await?;
 
-                let _ = self
-                    .metrics
-                    .tell(MetricsDecMirrorPortSubscription)
-                    .await
-                    .inspect_err(|fail| tracing::trace!(?fail));
+                MIRROR_PORT_SUBSCRIPTION.dec();
 
                 Ok(())
             }
@@ -211,11 +197,7 @@ impl TcpSnifferApi {
             LayerTcp::ConnectionUnsubscribe(connection_id) => {
                 self.connections.remove(&connection_id);
 
-                let _ = self
-                    .metrics
-                    .tell(MetricsDecMirrorConnectionSubscription)
-                    .await
-                    .inspect_err(|fail| tracing::trace!(?fail));
+                MIRROR_PORT_SUBSCRIPTION.dec();
 
                 Ok(())
             }

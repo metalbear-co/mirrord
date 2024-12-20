@@ -17,10 +17,7 @@ use tracing::{error, trace, Level};
 
 use crate::{
     error::Result,
-    metrics::{
-        file_ops::{MetricsDecFd, MetricsIncFd},
-        MetricsActor,
-    },
+    metrics::{MetricsActor, OPEN_FD_COUNT},
 };
 
 #[derive(Debug)]
@@ -297,11 +294,7 @@ impl FileManager {
         };
 
         if self.open_files.insert(fd, remote_file).is_none() {
-            let _ = self
-                .metrics
-                .tell(MetricsIncFd)
-                .await
-                .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+            OPEN_FD_COUNT.inc();
         }
 
         Ok(OpenFileResponse { fd })
@@ -337,11 +330,7 @@ impl FileManager {
             };
 
             if self.open_files.insert(fd, remote_file).is_none() {
-                let _ = self
-                    .metrics
-                    .tell(MetricsIncFd)
-                    .await
-                    .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+                OPEN_FD_COUNT.inc();
             }
 
             Ok(OpenFileResponse { fd })
@@ -593,11 +582,7 @@ impl FileManager {
         if self.open_files.remove(&fd).is_none() {
             error!(fd, "fd not found!");
         } else {
-            let _ = self
-                .metrics
-                .tell(MetricsDecFd)
-                .await
-                .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+            OPEN_FD_COUNT.dec();
         }
 
         None
@@ -610,11 +595,7 @@ impl FileManager {
         if self.dir_streams.remove(&fd).is_none() && self.getdents_streams.remove(&fd).is_none() {
             error!("FileManager::close_dir -> fd {:#?} not found", fd);
         } else {
-            let _ = self
-                .metrics
-                .tell(MetricsDecFd)
-                .await
-                .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+            OPEN_FD_COUNT.dec();
         }
 
         None
@@ -740,11 +721,7 @@ impl FileManager {
         let dir_stream = path.read_dir()?.enumerate();
 
         if self.dir_streams.insert(fd, dir_stream).is_none() {
-            let _ = self
-                .metrics
-                .tell(MetricsIncFd)
-                .await
-                .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+            OPEN_FD_COUNT.dec();
         }
 
         Ok(OpenDirResponse { fd })

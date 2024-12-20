@@ -22,7 +22,7 @@ use crate::{
     error::Result,
     metrics::{
         outgoing_traffic::{MetricsDecTcpOutgoingConnection, MetricsIncTcpOutgoingConnection},
-        MetricsActor,
+        MetricsActor, TCP_OUTGOING_CONNECTION,
     },
     util::run_thread_in_namespace,
     watched_task::{TaskStatus, WatchedTask},
@@ -228,11 +228,7 @@ impl TcpOutgoingTask {
                 let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                 self.daemon_tx.send(daemon_message).await?;
 
-                let _ = self
-                    .metrics
-                    .tell(MetricsDecTcpOutgoingConnection)
-                    .await
-                    .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+                TCP_OUTGOING_CONNECTION.dec();
             }
 
             // EOF occurred in one of peer connections.
@@ -264,11 +260,7 @@ impl TcpOutgoingTask {
                         .send(DaemonTcpOutgoing::Close(connection_id))
                         .await?;
 
-                    let _ = self
-                        .metrics
-                        .tell(MetricsDecTcpOutgoingConnection)
-                        .await
-                        .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+                    TCP_OUTGOING_CONNECTION.dec();
                 }
             }
         }
@@ -324,11 +316,7 @@ impl TcpOutgoingTask {
                     .send(DaemonTcpOutgoing::Connect(daemon_connect))
                     .await?;
 
-                let _ = self
-                    .metrics
-                    .tell(MetricsIncTcpOutgoingConnection)
-                    .await
-                    .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+                TCP_OUTGOING_CONNECTION.inc();
 
                 Ok(())
             }
@@ -375,13 +363,7 @@ impl TcpOutgoingTask {
                                 .send(DaemonTcpOutgoing::Close(connection_id))
                                 .await?;
 
-                            let _ = self
-                                .metrics
-                                .tell(MetricsDecTcpOutgoingConnection)
-                                .await
-                                .inspect_err(
-                                    |fail| tracing::warn!(%fail, "agent metrics failure!"),
-                                );
+                            TCP_OUTGOING_CONNECTION.dec();
 
                             Ok(())
                         }
@@ -402,11 +384,7 @@ impl TcpOutgoingTask {
                             .send(DaemonTcpOutgoing::Close(connection_id))
                             .await?;
 
-                        let _ = self
-                            .metrics
-                            .tell(MetricsDecTcpOutgoingConnection)
-                            .await
-                            .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+                        TCP_OUTGOING_CONNECTION.dec();
 
                         Ok(())
                     }
@@ -419,12 +397,7 @@ impl TcpOutgoingTask {
                 self.writers.remove(&connection_id);
                 self.readers.remove(&connection_id);
 
-                let _ = self
-                    .metrics
-                    .tell(MetricsDecTcpOutgoingConnection)
-                    .await
-                    .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
-
+                TCP_OUTGOING_CONNECTION.dec();
                 Ok(())
             }
         }

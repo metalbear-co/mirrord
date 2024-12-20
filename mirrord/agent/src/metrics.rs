@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use axum::{response::IntoResponse, routing::get, Extension, Router};
 use kameo::{
     actor::ActorRef,
@@ -6,7 +8,10 @@ use kameo::{
     message::{Context, Message},
     Actor, Reply,
 };
-use prometheus::core::{AtomicI64, GenericGauge};
+use prometheus::{
+    core::{AtomicI64, GenericGauge},
+    register_int_gauge, IntGauge,
+};
 use serde::Serialize;
 use thiserror::Error;
 use tokio::net::TcpListener;
@@ -17,6 +22,70 @@ use crate::error::AgentError;
 pub(crate) mod file_ops;
 pub(crate) mod incoming_traffic;
 pub(crate) mod outgoing_traffic;
+
+pub(crate) static OPEN_FD_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
+    register_int_gauge!(
+        "mirrord_agent_open_fd_count",
+        "amount of open fds in mirrord-agent"
+    )
+    .expect("Valid at initialization!")
+});
+
+pub(crate) static MIRROR_PORT_SUBSCRIPTION: LazyLock<IntGauge> = LazyLock::new(|| {
+    register_int_gauge!(
+        "mirrord_agent_mirror_port_subscription_count",
+        "amount of mirror port subscriptions in mirror-agent"
+    )
+    .expect("Valid at initialization")
+});
+
+pub(crate) static MIRROR_CONNECTION_SUBSCRIPTION: LazyLock<IntGauge> = LazyLock::new(|| {
+    register_int_gauge!(
+        "mirrord_agent_mirror_connection_subscription_count",
+        "amount of connections in steal mode in mirrord-agent"
+    )
+    .expect("Valid at initialization!")
+});
+
+pub(crate) static STEAL_FILTERED_PORT_SUBSCRIPTION: LazyLock<IntGauge> = LazyLock::new(|| {
+    register_int_gauge!(
+        "mirrord_agent_steal_filtered_port_subscription_count",
+        "amount of filtered steal port subscriptions in mirrord-agent"
+    )
+    .expect("Valid at initialization!")
+});
+
+pub(crate) static STEAL_UNFILTERED_PORT_SUBSCRIPTION: LazyLock<IntGauge> = LazyLock::new(|| {
+    register_int_gauge!(
+        "mirrord_agent_steal_unfiltered_port_subscription_count",
+        "amount of unfiltered steal port subscriptions in mirrord-agent"
+    )
+    .expect("Valid at initialization!")
+});
+
+pub(crate) static STEAL_CONNECTION_SUBSCRIPTION: LazyLock<IntGauge> = LazyLock::new(|| {
+    register_int_gauge!(
+        "mirrord_agent_steal_connection_subscription_count",
+        "amount of connections in steal mode in mirrord-agent"
+    )
+    .expect("Valid at initialization!")
+});
+
+pub(crate) static TCP_OUTGOING_CONNECTION: LazyLock<IntGauge> = LazyLock::new(|| {
+    register_int_gauge!(
+        "mirrord_agent_tcp_outgoing_connection_count",
+        "amount of tcp outgoing connections in mirrord-agent"
+    )
+    .expect("Valid at initialization!")
+});
+
+pub(crate) static UDP_OUTGOING_CONNECTION: LazyLock<IntGauge> = LazyLock::new(|| {
+    register_int_gauge!(
+        "mirrord_agent_udp_outgoing_connection_count",
+        "amount of udp outgoing connections in mirrord-agent"
+    )
+    .expect("Valid at initialization!")
+});
 
 #[derive(Error, Debug)]
 pub(crate) enum MetricsError {

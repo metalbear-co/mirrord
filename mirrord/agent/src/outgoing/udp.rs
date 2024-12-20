@@ -26,7 +26,10 @@ use tracing::{debug, trace, warn};
 use super::MetricsActor;
 use crate::{
     error::Result,
-    metrics::outgoing_traffic::{MetricsDecUdpOutgoingConnection, MetricsIncUdpOutgoingConnection},
+    metrics::{
+        outgoing_traffic::{MetricsDecUdpOutgoingConnection, MetricsIncUdpOutgoingConnection},
+        UDP_OUTGOING_CONNECTION,
+    },
     util::run_thread_in_namespace,
     watched_task::{TaskStatus, WatchedTask},
 };
@@ -170,10 +173,7 @@ impl UdpOutgoingApi {
 
                             daemon_tx.send(daemon_message).await?;
 
-                            let _ = metrics
-                                .tell(MetricsIncUdpOutgoingConnection)
-                                .await
-                                .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+                            UDP_OUTGOING_CONNECTION.inc();
                         }
                         // [user] -> [layer] -> [agent] -> [remote]
                         // `user` wrote some message to the remote host.
@@ -200,10 +200,7 @@ impl UdpOutgoingApi {
                                 let daemon_message = DaemonUdpOutgoing::Close(connection_id);
                                 daemon_tx.send(daemon_message).await?;
 
-                                let _ = metrics
-                                    .tell(MetricsDecUdpOutgoingConnection)
-                                    .await
-                                    .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+                                UDP_OUTGOING_CONNECTION.dec();
                             }
                         }
                         // [layer] -> [agent]
@@ -212,10 +209,7 @@ impl UdpOutgoingApi {
                             writers.remove(connection_id);
                             readers.remove(connection_id);
 
-                            let _ = metrics
-                                .tell(MetricsDecUdpOutgoingConnection)
-                                .await
-                                .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+                            UDP_OUTGOING_CONNECTION.dec();
                         }
                     }
                 }
@@ -243,10 +237,7 @@ impl UdpOutgoingApi {
                             let daemon_message = DaemonUdpOutgoing::Close(connection_id);
                             daemon_tx.send(daemon_message).await?;
 
-                            let _ = metrics
-                                .tell(MetricsDecUdpOutgoingConnection)
-                                .await
-                                .inspect_err(|fail| tracing::warn!(%fail, "agent metrics failure!"));
+                            UDP_OUTGOING_CONNECTION.dec();
                         }
                     }
                 }

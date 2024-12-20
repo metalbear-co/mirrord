@@ -36,11 +36,11 @@ use crate::{
     error::{AgentError, Result},
     metrics::{
         incoming_traffic::{
-            MetricsDecStealConnectionSubscription, MetricsDecStealPortSubscription,
-            MetricsDecStealPortSubscriptionMany, MetricsIncStealConnectionSubscription,
-            MetricsIncStealPortSubscription,
+            MetricsDecStealConnectionSubscription, MetricsDecStealPortSubscriptionMany,
+            MetricsIncStealConnectionSubscription,
         },
-        MetricsActor,
+        MetricsActor, STEAL_CONNECTION_SUBSCRIPTION, STEAL_FILTERED_PORT_SUBSCRIPTION,
+        STEAL_UNFILTERED_PORT_SUBSCRIPTION,
     },
     steal::{
         connections::{
@@ -371,11 +371,7 @@ impl TcpConnectionStealer {
                     Ok((stream, peer)) => {
                         self.incoming_connection(stream, peer).await?;
 
-                        let _ = self
-                            .metrics
-                            .tell(MetricsIncStealConnectionSubscription)
-                            .await
-                            .inspect_err(|fail| trace!(?fail));
+                        STEAL_CONNECTION_SUBSCRIPTION.inc();
                     }
                     Err(error) => {
                         tracing::error!(?error, "Failed to accept a stolen connection");
@@ -600,13 +596,13 @@ impl TcpConnectionStealer {
     async fn close_client(&mut self, client_id: ClientId) -> Result<(), AgentError> {
         let removed_subscriptions = self.port_subscriptions.remove_all(client_id).await?;
 
-        let _ = self
-            .metrics
-            .tell(MetricsDecStealPortSubscriptionMany {
-                removed_subscriptions,
-            })
-            .await
-            .inspect_err(|fail| trace!(?fail));
+        for filtered in removed_subscriptions {
+            if filtered {
+                STEAL_FILTERED_PORT_SUBSCRIPTION.dec();
+            } else {
+                STEAL_UNFILTERED_PORT_SUBSCRIPTION.dec();
+            }
+        }
 
         let client = self.clients.remove(&client_id).expect("client not found");
         for connection in client.subscribed_connections {
@@ -691,30 +687,24 @@ impl TcpConnectionStealer {
                     )
                     .await;
 
-                let _ = self
-                    .metrics
-                    .tell(MetricsDecStealConnectionSubscription)
-                    .await
-                    .inspect_err(|fail| trace!(?fail));
+                STEAL_CONNECTION_SUBSCRIPTION.dec();
             }
 
             Command::PortSubscribe(port_steal) => {
-                let filtered = self.port_subscribe(client_id, port_steal).await?;
-
-                let _ = self
-                    .metrics
-                    .tell(MetricsIncStealPortSubscription { filtered })
-                    .await
-                    .inspect_err(|fail| trace!(?fail));
+                if self.port_subscribe(client_id, port_steal).await? {
+                    STEAL_FILTERED_PORT_SUBSCRIPTION.inc();
+                } else {
+                    STEAL_UNFILTERED_PORT_SUBSCRIPTION.inc();
+                }
             }
 
             Command::PortUnsubscribe(port) => {
                 if let Some(filtered) = self.port_subscriptions.remove(client_id, port).await? {
-                    let _ = self
-                        .metrics
-                        .tell(MetricsDecStealPortSubscription { filtered })
-                        .await
-                        .inspect_err(|fail| trace!(?fail));
+                    if filtered {
+                        STEAL_FILTERED_PORT_SUBSCRIPTION.inc();
+                    } else {
+                        STEAL_UNFILTERED_PORT_SUBSCRIPTION.inc();
+                    }
                 }
             }
 
