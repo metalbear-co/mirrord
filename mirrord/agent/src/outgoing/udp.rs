@@ -9,7 +9,6 @@ use futures::{
     prelude::*,
     stream::{SplitSink, SplitStream},
 };
-use kameo::actor::ActorRef;
 use mirrord_protocol::{
     outgoing::{udp::*, *},
     ConnectionId, ResponseError,
@@ -23,13 +22,9 @@ use tokio::{
 use tokio_util::{codec::BytesCodec, udp::UdpFramed};
 use tracing::{debug, trace, warn};
 
-use super::MetricsActor;
 use crate::{
     error::Result,
-    metrics::{
-        outgoing_traffic::{MetricsDecUdpOutgoingConnection, MetricsIncUdpOutgoingConnection},
-        UDP_OUTGOING_CONNECTION,
-    },
+    metrics::UDP_OUTGOING_CONNECTION,
     util::run_thread_in_namespace,
     watched_task::{TaskStatus, WatchedTask},
 };
@@ -77,14 +72,12 @@ async fn connect(remote_address: SocketAddr) -> Result<UdpSocket, ResponseError>
 impl UdpOutgoingApi {
     const TASK_NAME: &'static str = "UdpOutgoing";
 
-    pub(crate) fn new(pid: Option<u64>, metrics: ActorRef<MetricsActor>) -> Self {
+    pub(crate) fn new(pid: Option<u64>) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
-        let watched_task = WatchedTask::new(
-            Self::TASK_NAME,
-            Self::interceptor_task(layer_rx, daemon_tx, metrics),
-        );
+        let watched_task =
+            WatchedTask::new(Self::TASK_NAME, Self::interceptor_task(layer_rx, daemon_tx));
 
         let task_status = watched_task.status();
         let task = run_thread_in_namespace(
@@ -109,7 +102,6 @@ impl UdpOutgoingApi {
     async fn interceptor_task(
         mut layer_rx: Receiver<Layer>,
         daemon_tx: Sender<Daemon>,
-        metrics: ActorRef<MetricsActor>,
     ) -> Result<()> {
         let mut connection_ids = 0..=ConnectionId::MAX;
 

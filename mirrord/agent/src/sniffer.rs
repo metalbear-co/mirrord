@@ -26,6 +26,7 @@ use self::{
 use crate::{
     error::AgentError,
     http::HttpVersion,
+    metrics::MIRROR_CONNECTION_SUBSCRIPTION,
     util::{ChannelClosedFuture, ClientId, Subscriptions},
 };
 
@@ -276,6 +277,7 @@ where
             } => {
                 if self.port_subscriptions.subscribe(client_id, port) {
                     self.update_packet_filter()?;
+                    MIRROR_CONNECTION_SUBSCRIPTION.inc();
                 }
 
                 let _ = tx.send(port);
@@ -434,10 +436,7 @@ mod test {
     use tokio::sync::mpsc;
 
     use super::*;
-    use crate::{
-        metrics::MetricsActor,
-        watched_task::{TaskStatus, WatchedTask},
-    };
+    use crate::watched_task::{TaskStatus, WatchedTask};
 
     struct TestSnifferSetup {
         command_tx: Sender<SnifferCommand>,
@@ -452,16 +451,9 @@ mod test {
             let client_id = self.next_client_id;
             self.next_client_id += 1;
 
-            let metrics = kameo::spawn(MetricsActor::new(false));
-
-            TcpSnifferApi::new(
-                client_id,
-                self.command_tx.clone(),
-                self.task_status.clone(),
-                metrics,
-            )
-            .await
-            .unwrap()
+            TcpSnifferApi::new(client_id, self.command_tx.clone(), self.task_status.clone())
+                .await
+                .unwrap()
         }
 
         fn times_filter_changed(&self) -> usize {

@@ -1,7 +1,6 @@
 use std::ops::RangeInclusive;
 
 use futures::{stream::FuturesUnordered, StreamExt};
-use kameo::actor::ActorRef;
 use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ConnectionId, LogMessage, Port,
@@ -17,10 +16,7 @@ use tokio_stream::{
 
 use super::messages::{SniffedConnection, SnifferCommand, SnifferCommandInner};
 use crate::{
-    error::AgentError,
-    metrics::{MetricsActor, MIRROR_PORT_SUBSCRIPTION},
-    util::ClientId,
-    watched_task::TaskStatus,
+    error::AgentError, metrics::MIRROR_PORT_SUBSCRIPTION, util::ClientId, watched_task::TaskStatus,
 };
 
 /// Interface used by clients to interact with the
@@ -44,7 +40,6 @@ pub(crate) struct TcpSnifferApi {
     connection_ids_iter: RangeInclusive<ConnectionId>,
     /// [`LayerTcp::PortSubscribe`] requests in progress.
     subscriptions_in_progress: FuturesUnordered<oneshot::Receiver<Port>>,
-    metrics: ActorRef<MetricsActor>,
 }
 
 impl TcpSnifferApi {
@@ -60,12 +55,10 @@ impl TcpSnifferApi {
     ///   [`TcpConnectionSniffer`](super::TcpConnectionSniffer)
     /// * `task_status` - handle to the [`TcpConnectionSniffer`](super::TcpConnectionSniffer) exit
     ///   status
-    /// * `metrics` - used to send agent metrics messages to our metrics actor;
     pub async fn new(
         client_id: ClientId,
         sniffer_sender: Sender<SnifferCommand>,
         mut task_status: TaskStatus,
-        metrics: ActorRef<MetricsActor>,
     ) -> Result<Self, AgentError> {
         let (sender, receiver) = mpsc::channel(Self::CONNECTION_CHANNEL_SIZE);
 
@@ -85,7 +78,6 @@ impl TcpSnifferApi {
             connections: Default::default(),
             connection_ids_iter: (0..=ConnectionId::MAX),
             subscriptions_in_progress: Default::default(),
-            metrics,
         })
     }
 

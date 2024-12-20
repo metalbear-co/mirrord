@@ -12,8 +12,7 @@ use std::{
 use client_connection::AgentTlsConnector;
 use dns::{DnsCommand, DnsWorker};
 use futures::TryFutureExt;
-use kameo::actor::ActorRef;
-use metrics::MetricsActor;
+use metrics::start_metrics;
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use sniffer::tcp_capture::RawSocketTcpCapture;
 use tokio::{
@@ -70,13 +69,11 @@ struct State {
     ephemeral: bool,
     /// When present, it is used to secure incoming TCP connections.
     tls_connector: Option<AgentTlsConnector>,
-
-    metrics: ActorRef<MetricsActor>,
 }
 
 impl State {
     /// Return [`Err`] if container runtime operations failed.
-    pub async fn new(args: &Args, metrics: ActorRef<MetricsActor>) -> Result<State> {
+    pub async fn new(args: &Args) -> Result<State> {
         let tls_connector = args
             .operator_tls_cert_pem
             .clone()
@@ -130,7 +127,6 @@ impl State {
             env: Arc::new(env),
             ephemeral,
             tls_connector,
-            metrics,
         })
     }
 
@@ -220,20 +216,15 @@ impl ClientConnectionHandler {
     ) -> Result<Self> {
         let pid = state.container_pid();
 
-        let file_manager = FileManager::new(
-            pid.or_else(|| state.ephemeral.then_some(1)),
-            state.metrics.clone(),
-        );
+        let file_manager = FileManager::new(pid.or_else(|| state.ephemeral.then_some(1)));
 
-        let tcp_sniffer_api =
-            Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection, state.metrics.clone())
-                .await;
+        let tcp_sniffer_api = Self::create_sniffer_api(id, bg_tasks.sniffer, &mut connection).await;
         let tcp_stealer_api =
             Self::create_stealer_api(id, bg_tasks.stealer, &mut connection).await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
 
-        let tcp_outgoing_api = TcpOutgoingApi::new(pid, state.metrics.clone());
-        let udp_outgoing_api = UdpOutgoingApi::new(pid, state.metrics.clone());
+        let tcp_outgoing_api = TcpOutgoingApi::new(pid);
+        let udp_outgoing_api = UdpOutgoingApi::new(pid);
 
         let client_handler = Self {
             id,
@@ -255,10 +246,9 @@ impl ClientConnectionHandler {
         id: ClientId,
         task: BackgroundTask<SnifferCommand>,
         connection: &mut ClientConnection,
-        metrics: ActorRef<MetricsActor>,
     ) -> Option<TcpSnifferApi> {
         if let BackgroundTask::Running(sniffer_status, sniffer_sender) = task {
-            match TcpSnifferApi::new(id, sniffer_sender, sniffer_status, metrics).await {
+            match TcpSnifferApi::new(id, sniffer_sender, sniffer_status).await {
                 Ok(api) => Some(api),
                 Err(e) => {
                     let message = format!(
@@ -503,7 +493,11 @@ impl ClientConnectionHandler {
 async fn start_agent(args: Args) -> Result<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
 
-    let metrics = kameo::spawn(MetricsActor::new(true));
+    tokio::spawn(async move {
+        start_metrics()
+            .await
+            .inspect_err(|fail| tracing::error!(?fail, "Failed starting metrics server!"))
+    });
 
     let listener = TcpListener::bind(SocketAddrV4::new(
         Ipv4Addr::UNSPECIFIED,
@@ -511,7 +505,7 @@ async fn start_agent(args: Args) -> Result<()> {
     ))
     .await?;
 
-    let state = State::new(&args, metrics).await?;
+    let state = State::new(&args).await?;
 
     let cancellation_token = CancellationToken::new();
 
@@ -579,15 +573,13 @@ async fn start_agent(args: Args) -> Result<()> {
         let cancellation_token = cancellation_token.clone();
         let watched_task = WatchedTask::new(
             TcpConnectionStealer::TASK_NAME,
-            TcpConnectionStealer::new(stealer_command_rx, state.metrics.clone()).and_then(
-                |stealer| async move {
-                    let res = stealer.start(cancellation_token).await;
-                    if let Err(err) = res.as_ref() {
-                        error!("Stealer failed: {err}");
-                    }
-                    res
-                },
-            ),
+            TcpConnectionStealer::new(stealer_command_rx).and_then(|stealer| async move {
+                let res = stealer.start(cancellation_token).await;
+                if let Err(err) = res.as_ref() {
+                    error!("Stealer failed: {err}");
+                }
+                res
+            }),
         );
         let status = watched_task.status();
         let task = run_thread_in_namespace(
@@ -776,8 +768,7 @@ async fn run_child_agent() -> Result<()> {
 async fn start_iptable_guard(args: Args) -> Result<()> {
     debug!("start_iptable_guard -> Initializing iptable-guard.");
 
-    let metrics = kameo::spawn(MetricsActor::new(false));
-    let state = State::new(&args, metrics).await?;
+    let state = State::new(&args).await?;
     let pid = state.container_pid();
 
     std::env::set_var(IPTABLE_PREROUTING_ENV, IPTABLE_PREROUTING.as_str());

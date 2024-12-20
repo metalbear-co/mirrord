@@ -1,7 +1,6 @@
 use std::{collections::HashMap, fmt, thread, time::Duration};
 
 use bytes::Bytes;
-use kameo::actor::ActorRef;
 use mirrord_protocol::{
     outgoing::{tcp::*, *},
     ConnectionId, RemoteError, ResponseError,
@@ -20,10 +19,7 @@ use tracing::Level;
 
 use crate::{
     error::Result,
-    metrics::{
-        outgoing_traffic::{MetricsDecTcpOutgoingConnection, MetricsIncTcpOutgoingConnection},
-        MetricsActor, TCP_OUTGOING_CONNECTION,
-    },
+    metrics::TCP_OUTGOING_CONNECTION,
     util::run_thread_in_namespace,
     watched_task::{TaskStatus, WatchedTask},
 };
@@ -60,13 +56,13 @@ impl TcpOutgoingApi {
     ///
     /// * `pid` - process id of the agent's target container
     #[tracing::instrument(level = Level::TRACE)]
-    pub(crate) fn new(pid: Option<u64>, metrics: ActorRef<MetricsActor>) -> Self {
+    pub(crate) fn new(pid: Option<u64>) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
         let watched_task = WatchedTask::new(
             Self::TASK_NAME,
-            TcpOutgoingTask::new(pid, layer_rx, daemon_tx, metrics).run(),
+            TcpOutgoingTask::new(pid, layer_rx, daemon_tx).run(),
         );
         let task_status = watched_task.status();
         let task = run_thread_in_namespace(
@@ -115,7 +111,6 @@ struct TcpOutgoingTask {
     pid: Option<u64>,
     layer_rx: Receiver<LayerTcpOutgoing>,
     daemon_tx: Sender<DaemonTcpOutgoing>,
-    metrics: ActorRef<MetricsActor>,
 }
 
 impl fmt::Debug for TcpOutgoingTask {
@@ -144,7 +139,6 @@ impl TcpOutgoingTask {
         pid: Option<u64>,
         layer_rx: Receiver<LayerTcpOutgoing>,
         daemon_tx: Sender<DaemonTcpOutgoing>,
-        metrics: ActorRef<MetricsActor>,
     ) -> Self {
         Self {
             next_connection_id: 0,
@@ -153,7 +147,6 @@ impl TcpOutgoingTask {
             pid,
             layer_rx,
             daemon_tx,
-            metrics,
         }
     }
 

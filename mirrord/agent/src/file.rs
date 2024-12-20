@@ -10,15 +10,11 @@ use std::{
 };
 
 use faccess::{AccessMode, PathExt};
-use kameo::actor::ActorRef;
 use libc::DT_DIR;
 use mirrord_protocol::{file::*, FileRequest, FileResponse, RemoteResult, ResponseError};
 use tracing::{error, trace, Level};
 
-use crate::{
-    error::Result,
-    metrics::{MetricsActor, OPEN_FD_COUNT},
-};
+use crate::{error::Result, metrics::OPEN_FD_COUNT};
 
 #[derive(Debug)]
 pub enum RemoteFile {
@@ -74,7 +70,6 @@ pub(crate) struct FileManager {
     dir_streams: HashMap<u64, Enumerate<ReadDir>>,
     getdents_streams: HashMap<u64, Peekable<GetDEnts64Stream>>,
     fds_iter: RangeInclusive<u64>,
-    metrics: ActorRef<MetricsActor>,
 }
 
 pub fn get_root_path_from_optional_pid(pid: Option<u64>) -> PathBuf {
@@ -252,12 +247,11 @@ impl FileManager {
     }
 
     #[tracing::instrument(level = Level::TRACE)]
-    pub fn new(pid: Option<u64>, metrics: ActorRef<MetricsActor>) -> Self {
+    pub fn new(pid: Option<u64>) -> Self {
         let root_path = get_root_path_from_optional_pid(pid);
         trace!("Agent root path >> {root_path:?}");
 
         Self {
-            metrics,
             root_path,
             open_files: Default::default(),
             dir_streams: Default::default(),

@@ -11,7 +11,6 @@ use hyper::{
     body::Incoming,
     http::{header::UPGRADE, request::Parts},
 };
-use kameo::actor::ActorRef;
 use mirrord_protocol::{
     body_chunks::{BodyExt as _, Frames},
     tcp::{
@@ -30,16 +29,12 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{trace, warn, Level};
+use tracing::{warn, Level};
 
 use crate::{
     error::{AgentError, Result},
     metrics::{
-        incoming_traffic::{
-            MetricsDecStealConnectionSubscription, MetricsDecStealPortSubscriptionMany,
-            MetricsIncStealConnectionSubscription,
-        },
-        MetricsActor, STEAL_CONNECTION_SUBSCRIPTION, STEAL_FILTERED_PORT_SUBSCRIPTION,
+        STEAL_CONNECTION_SUBSCRIPTION, STEAL_FILTERED_PORT_SUBSCRIPTION,
         STEAL_UNFILTERED_PORT_SUBSCRIPTION,
     },
     steal::{
@@ -300,8 +295,6 @@ pub(crate) struct TcpConnectionStealer {
 
     /// Set of active connections stolen by [`Self::port_subscriptions`].
     connections: StolenConnections,
-
-    metrics: ActorRef<MetricsActor>,
 }
 
 impl TcpConnectionStealer {
@@ -310,10 +303,7 @@ impl TcpConnectionStealer {
     /// Initializes a new [`TcpConnectionStealer`], but doesn't start the actual work.
     /// You need to call [`TcpConnectionStealer::start`] to do so.
     #[tracing::instrument(level = Level::TRACE, err)]
-    pub(crate) async fn new(
-        command_rx: Receiver<StealerCommand>,
-        metrics: ActorRef<MetricsActor>,
-    ) -> Result<Self, AgentError> {
+    pub(crate) async fn new(command_rx: Receiver<StealerCommand>) -> Result<Self, AgentError> {
         let config = envy::prefixed("MIRRORD_AGENT_")
             .from_env::<TcpStealerConfig>()
             .unwrap_or_default();
@@ -331,7 +321,6 @@ impl TcpConnectionStealer {
             clients: HashMap::with_capacity(8),
             clients_closed: Default::default(),
             connections: StolenConnections::with_capacity(8),
-            metrics,
         })
     }
 
