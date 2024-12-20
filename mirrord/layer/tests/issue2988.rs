@@ -1,6 +1,7 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
-use std::{time::Duration, path::Path};
+use std::{path::Path, time::Duration};
+
 use rstest::rstest;
 
 mod common;

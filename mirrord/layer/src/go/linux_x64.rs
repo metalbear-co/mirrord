@@ -495,9 +495,9 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "mov    r14, QWORD PTR FS:[0xfffffff8]",
         "ret",
         // just execute syscall instruction
-        // this is for SYS_EXIT and SYS_EXIT_GROUP only - we know for sure that it's safe to just let it happen
-        // running our code is an unnecessary risk due to switching between stacks
-        // see issue https://github.com/metalbear-co/mirrord/issues/2988
+        // this is for SYS_EXIT and SYS_EXIT_GROUP only - we know for sure that it's safe to just
+        // let it happen running our code is an unnecessary risk due to switching between
+        // stacks see issue https://github.com/metalbear-co/mirrord/issues/2988
         "4:",
         "mov rdx, rdi",
         "syscall",
