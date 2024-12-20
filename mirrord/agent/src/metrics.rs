@@ -11,7 +11,7 @@ use crate::error::AgentError;
 pub(crate) static OPEN_FD_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
     register_int_gauge!(
         "mirrord_agent_open_fd_count",
-        "amount of open fds in mirrord-agent"
+        "amount of open file descriptors in mirrord-agent file manager"
     )
     .expect("Valid at initialization!")
 });
