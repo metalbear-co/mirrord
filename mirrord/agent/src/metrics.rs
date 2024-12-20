@@ -27,7 +27,7 @@ pub(crate) static MIRROR_PORT_SUBSCRIPTION: LazyLock<IntGauge> = LazyLock::new(|
 pub(crate) static MIRROR_CONNECTION_SUBSCRIPTION: LazyLock<IntGauge> = LazyLock::new(|| {
     register_int_gauge!(
         "mirrord_agent_mirror_connection_subscription_count",
-        "amount of connections in steal mode in mirrord-agent"
+        "amount of connections in mirror mode in mirrord-agent"
     )
     .expect("Valid at initialization!")
 });
