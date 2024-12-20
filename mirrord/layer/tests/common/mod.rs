@@ -784,6 +784,8 @@ pub enum Application {
     },
     // For running applications with the executable and arguments determined at runtime.
     DynamicApp(String, Vec<String>),
+    // Go app that only checks whether Linux pidfd syscalls are supported.
+    Go23Issue2988,
 }
 
 impl Application {
@@ -958,6 +960,7 @@ impl Application {
             Application::RustIssue2204 => String::from("tests/apps/issue2204/target/issue2204"),
             Application::Go23Open { .. } => String::from("tests/apps/open_go/23.go_test_app"),
             Application::DynamicApp(exe, _) => exe.clone(),
+            Application::Go23Issue2988 => String::from("tests/apps/issue2988/23.go_test_app"),
         }
     }
 
@@ -1081,7 +1084,8 @@ impl Application {
             | Application::CIssue2178
             | Application::RustIssue2204
             | Application::RustRebind0
-            | Application::RustIssue2438 => vec![],
+            | Application::RustIssue2438
+            | Application::Go23Issue2988 => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
                 .map(Into::into)
@@ -1175,7 +1179,8 @@ impl Application {
             | Application::NodeIssue2807
             | Application::RustRebind0
             | Application::Go23Open { .. }
-            | Application::DynamicApp(..) => unimplemented!("shouldn't get here"),
+            | Application::DynamicApp(..)
+            | Application::Go23Issue2988 => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
         }
