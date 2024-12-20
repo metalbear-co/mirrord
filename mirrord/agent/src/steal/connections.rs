@@ -11,10 +11,16 @@ use tokio::{
     sync::mpsc::{self, error::SendError, Receiver, Sender},
     task::JoinSet,
 };
+use tracing::Level;
 
 use self::{filtered::DynamicBody, unfiltered::UnfilteredStealTask};
 use super::{http::DefaultReversibleStream, subscriptions::PortSubscription};
-use crate::{http::HttpVersion, steal::connections::filtered::FilteredStealTask, util::ClientId};
+use crate::{
+    http::HttpVersion,
+    metrics::{STEAL_FILTERED_CONNECTION_SUBSCRIPTION, STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION},
+    steal::connections::filtered::FilteredStealTask,
+    util::ClientId,
+};
 
 mod filtered;
 mod unfiltered;
@@ -287,13 +293,15 @@ impl StolenConnections {
 
     /// Adds the given [`StolenConnection`] to this set. Spawns a new [`tokio::task`] that will
     /// manage it.
-    #[tracing::instrument(level = "trace", name = "manage_stolen_connection", skip(self))]
+    #[tracing::instrument(level = Level::TRACE, name = "manage_stolen_connection", skip(self))]
     pub fn manage(&mut self, connection: StolenConnection) {
         let connection_id = self.next_connection_id;
         self.next_connection_id += 1;
 
         let (task_tx, task_rx) = mpsc::channel(Self::TASK_IN_CHANNEL_CAPACITY);
         let main_tx = self.main_tx.clone();
+
+        let filtered = matches!(connection.port_subscription, PortSubscription::Filtered(..));
 
         tracing::trace!(connection_id, "Spawning connection task");
         self.tasks.spawn(async move {
@@ -304,9 +312,21 @@ impl StolenConnections {
                 rx: task_rx,
             };
 
+            if filtered {
+                STEAL_FILTERED_CONNECTION_SUBSCRIPTION.inc();
+            } else {
+                STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.inc();
+            }
+
             match task.run().await {
                 Ok(()) => {
                     tracing::trace!(connection_id, "Connection task finished");
+
+                    if filtered {
+                        STEAL_FILTERED_CONNECTION_SUBSCRIPTION.dec();
+                    } else {
+                        STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.dec();
+                    }
                 }
                 Err(error) => {
                     tracing::trace!(connection_id, ?error, "Connection task failed");

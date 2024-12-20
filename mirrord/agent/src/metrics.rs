@@ -48,13 +48,23 @@ pub(crate) static STEAL_UNFILTERED_PORT_SUBSCRIPTION: LazyLock<IntGauge> = LazyL
     .expect("Valid at initialization!")
 });
 
-pub(crate) static STEAL_CONNECTION_SUBSCRIPTION: LazyLock<IntGauge> = LazyLock::new(|| {
-    register_int_gauge!(
-        "mirrord_agent_steal_connection_subscription_count",
-        "amount of connections in steal mode in mirrord-agent"
-    )
-    .expect("Valid at initialization!")
-});
+pub(crate) static STEAL_FILTERED_CONNECTION_SUBSCRIPTION: LazyLock<IntGauge> =
+    LazyLock::new(|| {
+        register_int_gauge!(
+            "mirrord_agent_steal_connection_subscription_count",
+            "amount of filtered connections in steal mode in mirrord-agent"
+        )
+        .expect("Valid at initialization!")
+    });
+
+pub(crate) static STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION: LazyLock<IntGauge> =
+    LazyLock::new(|| {
+        register_int_gauge!(
+            "mirrord_agent_steal_connection_subscription_count",
+            "amount of unfiltered connections in steal mode in mirrord-agent"
+        )
+        .expect("Valid at initialization!")
+    });
 
 pub(crate) static TCP_OUTGOING_CONNECTION: LazyLock<IntGauge> = LazyLock::new(|| {
     register_int_gauge!(

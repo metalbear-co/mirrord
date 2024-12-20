@@ -34,7 +34,7 @@ use tracing::{warn, Level};
 use crate::{
     error::{AgentError, AgentResult},
     metrics::{
-        STEAL_CONNECTION_SUBSCRIPTION, STEAL_FILTERED_PORT_SUBSCRIPTION,
+        STEAL_FILTERED_PORT_SUBSCRIPTION, STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION,
         STEAL_UNFILTERED_PORT_SUBSCRIPTION,
     },
     steal::{
@@ -360,7 +360,7 @@ impl TcpConnectionStealer {
                     Ok((stream, peer)) => {
                         self.incoming_connection(stream, peer).await?;
 
-                        STEAL_CONNECTION_SUBSCRIPTION.inc();
+                        STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.inc();
                     }
                     Err(error) => {
                         tracing::error!(?error, "Failed to accept a stolen connection");
@@ -676,7 +676,7 @@ impl TcpConnectionStealer {
                     )
                     .await;
 
-                STEAL_CONNECTION_SUBSCRIPTION.dec();
+                STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.dec();
             }
 
             Command::PortSubscribe(port_steal) => {
