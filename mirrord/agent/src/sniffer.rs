@@ -26,7 +26,7 @@ use self::{
 use crate::{
     error::AgentError,
     http::HttpVersion,
-    metrics::MIRROR_CONNECTION_SUBSCRIPTION,
+    metrics::{MIRROR_CONNECTION_SUBSCRIPTION, MIRROR_PORT_SUBSCRIPTION},
     util::{ChannelClosedFuture, ClientId, Subscriptions},
 };
 
@@ -269,6 +269,8 @@ where
                 command: SnifferCommandInner::NewClient(sender),
             } => {
                 self.handle_new_client(client_id, sender);
+
+                MIRROR_CONNECTION_SUBSCRIPTION.inc();
             }
 
             SnifferCommand {
@@ -277,7 +279,8 @@ where
             } => {
                 if self.port_subscriptions.subscribe(client_id, port) {
                     self.update_packet_filter()?;
-                    MIRROR_CONNECTION_SUBSCRIPTION.inc();
+
+                    MIRROR_PORT_SUBSCRIPTION.inc();
                 }
 
                 let _ = tx.send(port);
@@ -289,6 +292,8 @@ where
             } => {
                 if self.port_subscriptions.unsubscribe(client_id, port) {
                     self.update_packet_filter()?;
+
+                    MIRROR_PORT_SUBSCRIPTION.dec();
                 }
             }
         }

@@ -15,9 +15,7 @@ use tokio_stream::{
 };
 
 use super::messages::{SniffedConnection, SnifferCommand, SnifferCommandInner};
-use crate::{
-    error::AgentError, metrics::MIRROR_PORT_SUBSCRIPTION, util::ClientId, watched_task::TaskStatus,
-};
+use crate::{error::AgentError, util::ClientId, watched_task::TaskStatus};
 
 /// Interface used by clients to interact with the
 /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer). Multiple instances of this struct operate
@@ -171,26 +169,17 @@ impl TcpSnifferApi {
                 self.send_command(SnifferCommandInner::Subscribe(port, tx))
                     .await?;
                 self.subscriptions_in_progress.push(rx);
-
-                MIRROR_PORT_SUBSCRIPTION.inc();
-
                 Ok(())
             }
 
             LayerTcp::PortUnsubscribe(port) => {
                 self.send_command(SnifferCommandInner::UnsubscribePort(port))
                     .await?;
-
-                MIRROR_PORT_SUBSCRIPTION.dec();
-
                 Ok(())
             }
 
             LayerTcp::ConnectionUnsubscribe(connection_id) => {
                 self.connections.remove(&connection_id);
-
-                MIRROR_PORT_SUBSCRIPTION.dec();
-
                 Ok(())
             }
         }
