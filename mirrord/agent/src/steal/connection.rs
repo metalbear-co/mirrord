@@ -359,8 +359,6 @@ impl TcpConnectionStealer {
                 accept = self.port_subscriptions.next_connection() => match accept {
                     Ok((stream, peer)) => {
                         self.incoming_connection(stream, peer).await?;
-
-                        STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.inc();
                     }
                     Err(error) => {
                         tracing::error!(?error, "Failed to accept a stolen connection");
@@ -675,8 +673,6 @@ impl TcpConnectionStealer {
                         ConnectionMessageIn::Unsubscribed { client_id },
                     )
                     .await;
-
-                STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.dec();
             }
 
             Command::PortSubscribe(port_steal) => {
