@@ -393,6 +393,10 @@ unsafe extern "C" fn c_abi_syscall_handler(
 #[naked]
 unsafe extern "C" fn go_syscall_new_detour() {
     naked_asm!(
+        "cmp rax, 60",
+        "je 4f",
+        "cmp rax, 231",
+        "je 4f",
         // Save rdi in r10
         "mov r10, rdi",
         // Save r9 in r11
@@ -489,7 +493,11 @@ unsafe extern "C" fn go_syscall_new_detour() {
         "mov    rcx, 0x0",
         "xorps  xmm15, xmm15",
         "mov    r14, QWORD PTR FS:[0xfffffff8]",
-        "ret"
+        "ret",
+        // just execute syscall instruction
+        "4:",
+        "mov rdx, rdi",
+        "syscall",
     )
 }
 
