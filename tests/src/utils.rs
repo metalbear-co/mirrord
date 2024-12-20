@@ -39,8 +39,8 @@ use tokio::{
     task::JoinHandle,
 };
 
-pub mod sqs_resources;
 pub(crate) mod ipv6;
+pub mod sqs_resources;
 
 const TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 pub const CONTAINER_NAME: &str = "test";
@@ -587,7 +587,10 @@ pub async fn run_exec(
     let mut base_env = HashMap::new();
     // TODO: revert
     // base_env.insert("MIRRORD_AGENT_IMAGE", "test");
-    base_env.insert("MIRRORD_AGENT_IMAGE", "docker.io/t4lz/mirrord-agent:latest");
+    base_env.insert(
+        "MIRRORD_AGENT_IMAGE",
+        "docker.io/t4lz/mirrord-agent:2025-12-13",
+    );
     base_env.insert("MIRRORD_AGENT_TTL", "180"); // TODO: delete
     base_env.insert("MIRRORD_CHECK_VERSION", "false");
     base_env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
