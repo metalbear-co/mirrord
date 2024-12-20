@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    error::Result,
+    error::AgentResult,
     runtime::{Container, ContainerInfo, ContainerRuntime},
 };
 
@@ -22,7 +22,7 @@ pub(crate) struct ContainerHandle(Arc<Inner>);
 impl ContainerHandle {
     /// Retrieve info about the container and initialize this struct.
     #[tracing::instrument(level = "trace")]
-    pub(crate) async fn new(container: Container) -> Result<Self> {
+    pub(crate) async fn new(container: Container) -> AgentResult<Self> {
         let ContainerInfo { pid, env: raw_env } = container.get_info().await?;
 
         let inner = Inner { pid, raw_env };

@@ -41,8 +41,11 @@ mod vpn;
 mod watched_task;
 
 #[cfg(target_os = "linux")]
+mod metrics;
+
+#[cfg(target_os = "linux")]
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> crate::error::Result<()> {
+async fn main() -> crate::error::AgentResult<()> {
     crate::entrypoint::main().await
 }
 

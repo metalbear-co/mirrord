@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Level;
 
 use crate::{
-    error::{AgentError, Result},
+    error::{AgentError, AgentResult},
     watched_task::TaskStatus,
 };
 
@@ -86,7 +86,7 @@ impl DnsWorker {
         // Prepares the `Resolver` after reading some `/etc` DNS files.
         //
         // We care about logging these errors, at an `error!` level.
-        let resolver: Result<_, ResponseError> = try {
+        let resolver: AgentResult<_, ResponseError> = try {
             let resolv_conf_path = etc_path.join("resolv.conf");
             let hosts_path = etc_path.join("hosts");
 
@@ -139,7 +139,7 @@ impl DnsWorker {
     pub(crate) async fn run(
         mut self,
         cancellation_token: CancellationToken,
-    ) -> Result<(), AgentError> {
+    ) -> AgentResult<(), AgentError> {
         loop {
             tokio::select! {
                 _ = cancellation_token.cancelled() => break Ok(()),
@@ -175,7 +175,7 @@ impl DnsApi {
     pub(crate) async fn make_request(
         &mut self,
         request: GetAddrInfoRequest,
-    ) -> Result<(), AgentError> {
+    ) -> AgentResult<(), AgentError> {
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = DnsCommand {
@@ -194,7 +194,7 @@ impl DnsApi {
     /// Returns the result of the oldest outstanding DNS request issued with this struct (see
     /// [`Self::make_request`]).
     #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
-    pub(crate) async fn recv(&mut self) -> Result<GetAddrInfoResponse, AgentError> {
+    pub(crate) async fn recv(&mut self) -> AgentResult<GetAddrInfoResponse, AgentError> {
         let Some(response) = self.responses.next().await else {
             return future::pending().await;
         };

@@ -12,7 +12,11 @@ use super::{
     http::HttpFilter,
     ip_tables::{new_iptables, IPTablesWrapper, SafeIpTables},
 };
-use crate::{error::AgentError, util::ClientId};
+use crate::{
+    error::AgentError,
+    metrics::{STEAL_FILTERED_PORT_SUBSCRIPTION, STEAL_UNFILTERED_PORT_SUBSCRIPTION},
+    util::ClientId,
+};
 
 /// For stealing incoming TCP connections.
 #[async_trait::async_trait]
@@ -215,6 +219,11 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     /// * `client_id` - identifier of the client that issued the subscription
     /// * `port` - number of the subscription port
     ///
+    /// # Returns
+    ///
+    /// `Some(true)` if the subscprition has an HTTP filter, `Some(false)` if it's unfiltered, and
+    /// `None` if we could not find the [`PortSubscription`].
+    ///
     /// # Warning
     ///
     /// If this method returns an [`Err`], it means that this set is out of sync with the inner
@@ -228,16 +237,23 @@ impl<R: PortRedirector> PortSubscriptions<R> {
         let remove_redirect = match e.get_mut() {
             PortSubscription::Unfiltered(subscribed_client) if *subscribed_client == client_id => {
                 e.remove();
+                STEAL_UNFILTERED_PORT_SUBSCRIPTION.dec();
+
                 true
             }
-            PortSubscription::Unfiltered(..) => false,
+            PortSubscription::Unfiltered(..) => {
+                STEAL_UNFILTERED_PORT_SUBSCRIPTION.dec();
+                false
+            }
             PortSubscription::Filtered(filters) => {
                 filters.remove(&client_id);
 
                 if filters.is_empty() {
                     e.remove();
+                    STEAL_FILTERED_PORT_SUBSCRIPTION.dec();
                     true
                 } else {
+                    STEAL_FILTERED_PORT_SUBSCRIPTION.dec();
                     false
                 }
             }

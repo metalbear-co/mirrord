@@ -26,6 +26,7 @@ use self::{
 use crate::{
     error::AgentError,
     http::HttpVersion,
+    metrics::{MIRROR_CONNECTION_SUBSCRIPTION, MIRROR_PORT_SUBSCRIPTION},
     util::{ChannelClosedFuture, ClientId, Subscriptions},
 };
 
@@ -268,6 +269,8 @@ where
                 command: SnifferCommandInner::NewClient(sender),
             } => {
                 self.handle_new_client(client_id, sender);
+
+                MIRROR_CONNECTION_SUBSCRIPTION.inc();
             }
 
             SnifferCommand {
@@ -276,6 +279,8 @@ where
             } => {
                 if self.port_subscriptions.subscribe(client_id, port) {
                     self.update_packet_filter()?;
+
+                    MIRROR_PORT_SUBSCRIPTION.inc();
                 }
 
                 let _ = tx.send(port);
@@ -287,6 +292,8 @@ where
             } => {
                 if self.port_subscriptions.unsubscribe(client_id, port) {
                     self.update_packet_filter()?;
+
+                    MIRROR_PORT_SUBSCRIPTION.dec();
                 }
             }
         }
@@ -448,6 +455,7 @@ mod test {
         async fn get_api(&mut self) -> TcpSnifferApi {
             let client_id = self.next_client_id;
             self.next_client_id += 1;
+
             TcpSnifferApi::new(client_id, self.command_tx.clone(), self.task_status.clone())
                 .await
                 .unwrap()

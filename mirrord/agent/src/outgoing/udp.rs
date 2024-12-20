@@ -23,7 +23,8 @@ use tokio_util::{codec::BytesCodec, udp::UdpFramed};
 use tracing::{debug, trace, warn};
 
 use crate::{
-    error::Result,
+    error::AgentResult,
+    metrics::UDP_OUTGOING_CONNECTION,
     util::run_thread_in_namespace,
     watched_task::{TaskStatus, WatchedTask},
 };
@@ -56,7 +57,7 @@ pub(crate) struct UdpOutgoingApi {
 /// 3. User is trying to use `sendto` and `recvfrom`, we use the same hack as in DNS to fake a
 ///    connection.
 #[tracing::instrument(level = "trace", ret)]
-async fn connect(remote_address: SocketAddr) -> Result<UdpSocket, ResponseError> {
+async fn connect(remote_address: SocketAddr) -> AgentResult<UdpSocket, ResponseError> {
     let mirror_address = match remote_address {
         std::net::SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
         std::net::SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
@@ -101,7 +102,7 @@ impl UdpOutgoingApi {
     async fn interceptor_task(
         mut layer_rx: Receiver<Layer>,
         daemon_tx: Sender<Daemon>,
-    ) -> Result<()> {
+    ) -> AgentResult<()> {
         let mut connection_ids = 0..=ConnectionId::MAX;
 
         // TODO: Right now we're manually keeping these 2 maps in sync (aviram suggested using
@@ -136,11 +137,14 @@ impl UdpOutgoingApi {
                                             .ok_or_else(|| ResponseError::IdsExhausted("connect".into()))?;
 
                                         debug!("interceptor_task -> mirror_socket {:#?}", mirror_socket);
+
                                         let peer_address = mirror_socket.peer_addr()?;
                                         let local_address = mirror_socket.local_addr()?;
                                         let local_address = SocketAddress::Ip(local_address);
+
                                         let framed = UdpFramed::new(mirror_socket, BytesCodec::new());
                                         debug!("interceptor_task -> framed {:#?}", framed);
+
                                         let (sink, stream): (
                                             SplitSink<UdpFramed<BytesCodec>, (BytesMut, SocketAddr)>,
                                             SplitStream<UdpFramed<BytesCodec>>,
@@ -158,7 +162,10 @@ impl UdpOutgoingApi {
 
                             let daemon_message = DaemonUdpOutgoing::Connect(daemon_connect);
                             debug!("interceptor_task -> daemon_message {:#?}", daemon_message);
-                            daemon_tx.send(daemon_message).await?
+
+                            daemon_tx.send(daemon_message).await?;
+
+                            UDP_OUTGOING_CONNECTION.inc();
                         }
                         // [user] -> [layer] -> [agent] -> [remote]
                         // `user` wrote some message to the remote host.
@@ -183,7 +190,9 @@ impl UdpOutgoingApi {
                                 readers.remove(&connection_id);
 
                                 let daemon_message = DaemonUdpOutgoing::Close(connection_id);
-                                daemon_tx.send(daemon_message).await?
+                                daemon_tx.send(daemon_message).await?;
+
+                                UDP_OUTGOING_CONNECTION.dec();
                             }
                         }
                         // [layer] -> [agent]
@@ -191,6 +200,8 @@ impl UdpOutgoingApi {
                         LayerUdpOutgoing::Close(LayerClose { ref connection_id }) => {
                             writers.remove(connection_id);
                             readers.remove(connection_id);
+
+                            UDP_OUTGOING_CONNECTION.dec();
                         }
                     }
                 }
@@ -216,7 +227,9 @@ impl UdpOutgoingApi {
                             readers.remove(&connection_id);
 
                             let daemon_message = DaemonUdpOutgoing::Close(connection_id);
-                            daemon_tx.send(daemon_message).await?
+                            daemon_tx.send(daemon_message).await?;
+
+                            UDP_OUTGOING_CONNECTION.dec();
                         }
                     }
                 }
@@ -232,7 +245,7 @@ impl UdpOutgoingApi {
     }
 
     /// Sends a `UdpOutgoingRequest` to the `interceptor_task`.
-    pub(crate) async fn layer_message(&mut self, message: LayerUdpOutgoing) -> Result<()> {
+    pub(crate) async fn layer_message(&mut self, message: LayerUdpOutgoing) -> AgentResult<()> {
         trace!(
             "UdpOutgoingApi::layer_message -> layer_message {:#?}",
             message
@@ -246,7 +259,7 @@ impl UdpOutgoingApi {
     }
 
     /// Receives a `UdpOutgoingResponse` from the `interceptor_task`.
-    pub(crate) async fn daemon_message(&mut self) -> Result<DaemonUdpOutgoing> {
+    pub(crate) async fn daemon_message(&mut self) -> AgentResult<DaemonUdpOutgoing> {
         match self.daemon_rx.recv().await {
             Some(msg) => Ok(msg),
             None => Err(self.task_status.unwrap_err().await),
