@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     mem,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddrV4},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
     path::PathBuf,
     sync::{
         atomic::{AtomicU32, Ordering},
@@ -501,9 +501,11 @@ async fn start_agent(args: Args) -> Result<()> {
 
     let listener = if args.ipv6 && ipv4_listener_result.is_err() {
         debug!("IPv6 Support enabled, and IPv4 bind failed, binding IPv6 listener");
-        TcpListener::bind(SocketAddrV4::new(
+        TcpListener::bind(SocketAddrV6::new(
             Ipv6Addr::UNSPECIFIED,
             args.communicate_port,
+            0,
+            0,
         ))
         .await
     } else {

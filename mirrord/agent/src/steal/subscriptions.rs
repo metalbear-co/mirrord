@@ -1,6 +1,7 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
-    net::{Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    ops::Not,
     sync::Arc,
 };
 
@@ -56,14 +57,32 @@ pub(crate) struct IptablesListener {
     redirect_to: Port,
     /// Listener to which redirect all connections.
     listener: TcpListener,
+    /// Optional comma-seperated list of IPs of the pod, originating in the pod's `Status.PodIps`
+    pod_ips: Option<String>,
+    /// Whether existing connections should be flushed when adding new redirects.
+    flush_connections: bool,
+}
+
+impl IptablesListener {
+    async fn add_redirect(&mut self, from: Port) -> Result<(), AgentError> {
+        let iptables = if let Some(iptables) = self.iptables.as_ref() {
+            iptables
+        } else {
+            let safe = crate::steal::ip_tables::SafeIpTables::create(
+                new_iptables().into(),
+                self.flush_connections,
+                self.pod_ips.as_deref(),
+            )
+            .await?;
+            self.iptables.insert(safe)
+        };
+        iptables.add_redirect(from, self.redirect_to).await
+    }
 }
 
 /// Implementation of [`PortRedirector`] that manipulates iptables to steal connections by
 /// redirecting TCP packets to inner [`TcpListener`].
 pub(crate) struct IpTablesRedirector {
-    /// Whether existing connections should be flushed when adding new redirects.
-    flush_connections: bool,
-
     /// TCP listener + iptables, for redirecting IPv4 connections.
     /// Could be `None` if IPv6 support is enabled and we cannot bind an IPv4 address.
     iptables_listener: Option<IptablesListener>,
@@ -72,8 +91,6 @@ pub(crate) struct IpTablesRedirector {
     /// Will only be `Some` if IPv6 support is enabled, and the agent is able to listen on an IPv6
     /// address.
     ip6tables_listener: Option<IptablesListener>,
-
-    pod_ips: Option<String>,
 }
 
 impl IpTablesRedirector {
@@ -98,18 +115,46 @@ impl IpTablesRedirector {
         support_ipv6: bool,
     ) -> Result<Self, AgentError> {
         let bind_res = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await;
+        let (pod_ips4, pod_ips6) = pod_ips.map_or_else(
+            || (None, None),
+            |ips| {
+                // TODO: probably nicer to split at the client and avoid the conversion to and back
+                // from a string.
+                let (ip4s, ip6s): (Vec<_>, Vec<_>) = ips.split(',').partition(|ip_str| {
+                    ip_str
+                        .parse::<IpAddr>()
+                        .inspect_err(|e| tracing::warn!(%e, "failed to parse pod IP {ip_str}"))
+                        .as_ref()
+                        .map(IpAddr::is_ipv4)
+                        .unwrap_or_default()
+                });
+                // Convert to options, `None` if vector is empty.
+                (
+                    ip4s.is_empty().not().then(|| ip4s.join(",")),
+                    ip6s.is_empty().not().then(|| ip6s.join(",")),
+                )
+            },
+        );
         let (iptables_listener, ip6tables_listener) = if support_ipv6 {
             let listener4 = bind_res
                 .inspect_err(
-                    |err| traceing::debug!(%err, "Could not bind IPv4, continuing with IPv6 only."),
+                    |err| tracing::debug!(%err, "Could not bind IPv4, continuing with IPv6 only."),
                 )
                 .ok()
                 .and_then(|listener| {
-                    let redirect_to = listener.local_addr()?.port();
+                    let redirect_to = listener
+                        .local_addr()
+                        .inspect_err(
+                            |err| tracing::debug!(%err, "Get IPv4 listener address, continuing with IPv6 only."),
+                        )
+                        .ok()?
+                        .port();
                     Some(IptablesListener {
                         iptables: None,
                         redirect_to,
                         listener,
+                        pod_ips: pod_ips4,
+                        flush_connections,
                     })
                 });
             let listener = TcpListener::bind((Ipv6Addr::UNSPECIFIED, 0)).await?;
@@ -118,8 +163,10 @@ impl IpTablesRedirector {
                 iptables: None,
                 redirect_to,
                 listener,
+                pod_ips: pod_ips6,
+                flush_connections,
             });
-            (litener, listener6)
+            (listener4, listener6)
         } else {
             let listener = bind_res?;
             let redirect_to = listener.local_addr()?.port();
@@ -128,14 +175,14 @@ impl IpTablesRedirector {
                     iptables: None, // populated lazily
                     listener,
                     redirect_to,
+                    pod_ips: pod_ips4,
+                    flush_connections,
                 }),
                 None,
             )
         };
 
         Ok(Self {
-            flush_connections,
-            pod_ips,
             iptables_listener,
             ip6tables_listener,
         })
@@ -147,21 +194,13 @@ impl PortRedirector for IpTablesRedirector {
     type Error = AgentError;
 
     async fn add_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
-        let iptables = match self.iptables.as_ref() {
-            Some(iptables) => iptables,
-            None => {
-                let iptables = new_iptables();
-                let safe = SafeIpTables::create(
-                    iptables.into(),
-                    self.flush_connections,
-                    self.pod_ips.as_deref(),
-                )
-                .await?;
-                self.iptables.insert(safe)
-            }
-        };
-
-        iptables.add_redirect(from, self.redirect_to).await
+        if let Some(ip4_listener) = self.iptables_listener.as_mut() {
+            ip4_listener.add_redirect(from).await?;
+        }
+        if let Some(ip6_listener) = self.ip6tables_listener.as_mut() {
+            ip6_listener.add_redirect(from).await?;
+        }
+        Ok(())
     }
 
     async fn remove_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
