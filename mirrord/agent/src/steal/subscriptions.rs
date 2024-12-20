@@ -12,7 +12,11 @@ use super::{
     http::HttpFilter,
     ip_tables::{new_iptables, IPTablesWrapper, SafeIpTables},
 };
-use crate::{error::AgentError, util::ClientId};
+use crate::{
+    error::AgentError,
+    metrics::{STEAL_FILTERED_PORT_SUBSCRIPTION, STEAL_UNFILTERED_PORT_SUBSCRIPTION},
+    util::ClientId,
+};
 
 /// For stealing incoming TCP connections.
 #[async_trait::async_trait]
@@ -225,29 +229,32 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     /// If this method returns an [`Err`], it means that this set is out of sync with the inner
     /// [`PortRedirector`] and it is no longer usable. It is a caller's responsibility to clean
     /// up any external state.
-    pub async fn remove(
-        &mut self,
-        client_id: ClientId,
-        port: Port,
-    ) -> Result<Option<bool>, R::Error> {
+    pub async fn remove(&mut self, client_id: ClientId, port: Port) -> Result<(), R::Error> {
         let Entry::Occupied(mut e) = self.subscriptions.entry(port) else {
-            return Ok(None);
+            return Ok(());
         };
 
-        let (remove_redirect, filtered) = match e.get_mut() {
+        let remove_redirect = match e.get_mut() {
             PortSubscription::Unfiltered(subscribed_client) if *subscribed_client == client_id => {
                 e.remove();
-                (true, Some(false))
+                STEAL_UNFILTERED_PORT_SUBSCRIPTION.dec();
+
+                true
             }
-            PortSubscription::Unfiltered(..) => (false, Some(false)),
+            PortSubscription::Unfiltered(..) => {
+                STEAL_UNFILTERED_PORT_SUBSCRIPTION.dec();
+                false
+            }
             PortSubscription::Filtered(filters) => {
                 filters.remove(&client_id);
 
                 if filters.is_empty() {
                     e.remove();
-                    (true, Some(true))
+                    STEAL_FILTERED_PORT_SUBSCRIPTION.dec();
+                    true
                 } else {
-                    (false, Some(true))
+                    STEAL_FILTERED_PORT_SUBSCRIPTION.dec();
+                    false
                 }
             }
         };
@@ -260,7 +267,7 @@ impl<R: PortRedirector> PortSubscriptions<R> {
             }
         }
 
-        Ok(filtered)
+        Ok(())
     }
 
     /// Remove all client subscriptions from this set.
@@ -274,21 +281,18 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     /// If this method returns an [`Err`], it means that this set is out of sync with the inner
     /// [`PortRedirector`] and it is no longer usable. It is a caller's responsibility to clean
     /// up any external state.
-    pub async fn remove_all(&mut self, client_id: ClientId) -> Result<Vec<bool>, R::Error> {
+    pub async fn remove_all(&mut self, client_id: ClientId) -> Result<(), R::Error> {
         let ports = self
             .subscriptions
             .iter()
             .filter_map(|(k, v)| v.has_client(client_id).then_some(*k))
             .collect::<Vec<_>>();
 
-        let mut all_removed = Vec::new();
         for port in ports {
-            if let Some(removed) = self.remove(client_id, port).await? {
-                all_removed.push(removed);
-            }
+            self.remove(client_id, port).await?;
         }
 
-        Ok(all_removed)
+        Ok(())
     }
 
     /// Return a subscription for the given `port`.

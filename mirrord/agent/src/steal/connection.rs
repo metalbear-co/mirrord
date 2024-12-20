@@ -591,15 +591,7 @@ impl TcpConnectionStealer {
     /// connections.
     #[tracing::instrument(level = "trace", skip(self))]
     async fn close_client(&mut self, client_id: ClientId) -> AgentResult<(), AgentError> {
-        let removed_subscriptions = self.port_subscriptions.remove_all(client_id).await?;
-
-        for filtered in removed_subscriptions {
-            if filtered {
-                STEAL_FILTERED_PORT_SUBSCRIPTION.dec();
-            } else {
-                STEAL_UNFILTERED_PORT_SUBSCRIPTION.dec();
-            }
-        }
+        self.port_subscriptions.remove_all(client_id).await?;
 
         let client = self.clients.remove(&client_id).expect("client not found");
         for connection in client.subscribed_connections {
@@ -696,13 +688,7 @@ impl TcpConnectionStealer {
             }
 
             Command::PortUnsubscribe(port) => {
-                if let Some(filtered) = self.port_subscriptions.remove(client_id, port).await? {
-                    if filtered {
-                        STEAL_FILTERED_PORT_SUBSCRIPTION.inc();
-                    } else {
-                        STEAL_UNFILTERED_PORT_SUBSCRIPTION.inc();
-                    }
-                }
+                self.port_subscriptions.remove(client_id, port).await?;
             }
 
             Command::ResponseData(TcpData {
