@@ -112,12 +112,10 @@ pub(crate) async fn start_metrics(address: SocketAddr) -> Result<(), axum::BoxEr
         .map_err(AgentError::from)
         .inspect_err(|fail| tracing::error!(?fail, "Actor listener!"))?;
 
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.inspect_err(|fail| {
-            tracing::error!(%fail, "Could not start agent metrics
+    let _ = axum::serve(listener, app).await.inspect_err(|fail| {
+        tracing::error!(%fail, "Could not start agent metrics
         server!")
-        })
-    });
+    })?;
 
     Ok(())
 }
