@@ -136,7 +136,7 @@ pub fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt:
 impl FileManager {
     /// Executes the request and returns the response.
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    pub(crate) async fn handle_message(
+    pub(crate) fn handle_message(
         &mut self,
         request: FileRequest,
     ) -> AgentResult<Option<FileResponse>> {
@@ -147,7 +147,7 @@ impl FileManager {
                     .strip_prefix("/")
                     .inspect_err(|fail| error!("file_worker -> {:#?}", fail))?;
 
-                let open_result = self.open(path.into(), open_options).await;
+                let open_result = self.open(path.into(), open_options);
                 Some(FileResponse::Open(open_result))
             }
             FileRequest::OpenRelative(OpenRelativeFileRequest {
@@ -155,7 +155,7 @@ impl FileManager {
                 path,
                 open_options,
             }) => {
-                let open_result = self.open_relative(relative_fd, path, open_options).await;
+                let open_result = self.open_relative(relative_fd, path, open_options);
                 Some(FileResponse::Open(open_result))
             }
             FileRequest::Read(ReadFileRequest {
@@ -193,7 +193,7 @@ impl FileManager {
                 let write_result = self.write_limited(remote_fd, start_from, write_bytes);
                 Some(FileResponse::WriteLimited(write_result))
             }
-            FileRequest::Close(CloseFileRequest { fd }) => self.close(fd).await,
+            FileRequest::Close(CloseFileRequest { fd }) => self.close(fd),
             FileRequest::Access(AccessFileRequest { pathname, mode }) => {
                 let pathname = pathname
                     .strip_prefix("/")
@@ -217,7 +217,7 @@ impl FileManager {
 
             // dir operations
             FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd }) => {
-                let open_dir_result = self.fdopen_dir(remote_fd).await;
+                let open_dir_result = self.fdopen_dir(remote_fd);
                 Some(FileResponse::OpenDir(open_dir_result))
             }
             FileRequest::ReadDir(ReadDirRequest { remote_fd }) => {
@@ -228,7 +228,7 @@ impl FileManager {
                 let read_dir_result = self.read_dir_batch(remote_fd, amount);
                 Some(FileResponse::ReadDirBatch(read_dir_result))
             }
-            FileRequest::CloseDir(CloseDirRequest { remote_fd }) => self.close_dir(remote_fd).await,
+            FileRequest::CloseDir(CloseDirRequest { remote_fd }) => self.close_dir(remote_fd),
             FileRequest::GetDEnts64(GetDEnts64Request {
                 remote_fd,
                 buffer_size,
@@ -266,7 +266,7 @@ impl FileManager {
     at mirrord/agent/src/file.rs:261
     */
     #[tracing::instrument(level = Level::TRACE, skip(self), err(level = Level::DEBUG))]
-    async fn open(
+    fn open(
         &mut self,
         path: PathBuf,
         open_options: OpenOptionsInternal,
@@ -295,7 +295,7 @@ impl FileManager {
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self), err(level = Level::DEBUG))]
-    async fn open_relative(
+    fn open_relative(
         &mut self,
         relative_fd: u64,
         path: PathBuf,
@@ -572,7 +572,7 @@ impl FileManager {
     /// Always returns `None`, since we don't return any [`FileResponse`] back to mirrord
     /// on `close` of an fd.
     #[tracing::instrument(level = Level::TRACE, skip(self))]
-    pub(crate) async fn close(&mut self, fd: u64) -> Option<FileResponse> {
+    pub(crate) fn close(&mut self, fd: u64) -> Option<FileResponse> {
         if self.open_files.remove(&fd).is_none() {
             error!(fd, "fd not found!");
         } else {
@@ -585,7 +585,7 @@ impl FileManager {
     /// Always returns `None`, since we don't return any [`FileResponse`] back to mirrord
     /// on `close_dir` of an fd.
     #[tracing::instrument(level = Level::TRACE, skip(self))]
-    pub(crate) async fn close_dir(&mut self, fd: u64) -> Option<FileResponse> {
+    pub(crate) fn close_dir(&mut self, fd: u64) -> Option<FileResponse> {
         if self.dir_streams.remove(&fd).is_none() && self.getdents_streams.remove(&fd).is_none() {
             error!("FileManager::close_dir -> fd {:#?} not found", fd);
         } else {
@@ -697,7 +697,7 @@ impl FileManager {
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self), err(level = Level::DEBUG))]
-    pub(crate) async fn fdopen_dir(&mut self, fd: u64) -> RemoteResult<OpenDirResponse> {
+    pub(crate) fn fdopen_dir(&mut self, fd: u64) -> RemoteResult<OpenDirResponse> {
         let path = match self
             .open_files
             .get(&fd)

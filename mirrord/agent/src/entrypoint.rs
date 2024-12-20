@@ -401,7 +401,7 @@ impl ClientConnectionHandler {
     async fn handle_client_message(&mut self, message: ClientMessage) -> AgentResult<bool> {
         match message {
             ClientMessage::FileRequest(req) => {
-                if let Some(response) = self.file_manager.handle_message(req).await? {
+                if let Some(response) = self.file_manager.handle_message(req)? {
                     self.respond(DaemonMessage::File(response))
                         .await
                         .inspect_err(|fail| {
