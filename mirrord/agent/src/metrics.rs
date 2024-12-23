@@ -4,6 +4,7 @@ use axum::{response::IntoResponse, routing::get, Router};
 use prometheus::{register_int_gauge, IntGauge};
 use thiserror::Error;
 use tokio::net::TcpListener;
+use tokio_util::sync::CancellationToken;
 use tracing::Level;
 
 use crate::error::AgentError;
@@ -112,7 +113,10 @@ async fn get_metrics() -> Result<String, MetricsError> {
 }
 
 #[tracing::instrument(level = Level::TRACE, skip_all, ret ,err)]
-pub(crate) async fn start_metrics(address: SocketAddr) -> Result<(), axum::BoxError> {
+pub(crate) async fn start_metrics(
+    address: SocketAddr,
+    cancellation_token: CancellationToken,
+) -> Result<(), axum::BoxError> {
     let app = Router::new().route("/metrics", get(get_metrics));
 
     let listener = TcpListener::bind(address)
@@ -120,10 +124,13 @@ pub(crate) async fn start_metrics(address: SocketAddr) -> Result<(), axum::BoxEr
         .map_err(AgentError::from)
         .inspect_err(|fail| tracing::error!(?fail, "Actor listener!"))?;
 
-    let _ = axum::serve(listener, app).await.inspect_err(|fail| {
-        tracing::error!(%fail, "Could not start agent metrics
+    let _ = axum::serve(listener, app)
+        .with_graceful_shutdown(async move { cancellation_token.cancelled().await })
+        .await
+        .inspect_err(|fail| {
+            tracing::error!(%fail, "Could not start agent metrics
         server!")
-    })?;
+        })?;
 
     Ok(())
 }

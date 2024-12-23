@@ -493,14 +493,6 @@ impl ClientConnectionHandler {
 async fn start_agent(args: Args) -> AgentResult<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
 
-    if let Some(metrics_address) = args.metrics.clone() {
-        tokio::spawn(async move {
-            start_metrics(metrics_address)
-                .await
-                .inspect_err(|fail| tracing::error!(?fail, "Failed starting metrics server!"))
-        });
-    }
-
     let listener = TcpListener::bind(SocketAddrV4::new(
         Ipv4Addr::UNSPECIFIED,
         args.communicate_port,
@@ -513,6 +505,15 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 
     // To make sure that background tasks are cancelled when we exit early from this function.
     let cancel_guard = cancellation_token.clone().drop_guard();
+
+    if let Some(metrics_address) = args.metrics.clone() {
+        let cancellation_token = cancellation_token.clone();
+        tokio::spawn(async move {
+            start_metrics(metrics_address, cancellation_token)
+                .await
+                .inspect_err(|fail| tracing::error!(?fail, "Failed starting metrics server!"))
+        });
+    }
 
     let (sniffer_command_tx, sniffer_command_rx) = mpsc::channel::<SnifferCommand>(1000);
     let (stealer_command_tx, stealer_command_rx) = mpsc::channel::<StealerCommand>(1000);
