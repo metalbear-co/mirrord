@@ -124,7 +124,7 @@ pub(crate) async fn start_metrics(
         .map_err(AgentError::from)
         .inspect_err(|fail| tracing::error!(?fail, "Actor listener!"))?;
 
-    let _ = axum::serve(listener, app)
+    axum::serve(listener, app)
         .with_graceful_shutdown(async move { cancellation_token.cancelled().await })
         .await
         .inspect_err(|fail| {

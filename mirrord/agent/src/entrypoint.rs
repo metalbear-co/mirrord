@@ -506,7 +506,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     // To make sure that background tasks are cancelled when we exit early from this function.
     let cancel_guard = cancellation_token.clone().drop_guard();
 
-    if let Some(metrics_address) = args.metrics.clone() {
+    if let Some(metrics_address) = args.metrics {
         let cancellation_token = cancellation_token.clone();
         tokio::spawn(async move {
             start_metrics(metrics_address, cancellation_token)
@@ -813,9 +813,9 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
 /// Since the _second_ agent gets spawned as a child of the _first_, they share resources,
 /// like the `namespace`, which means:
 ///
-/// 1. If you try to `bind` a socket to some address before [`start_agent`], it'll actually
-/// be bound **twice**, which incurs an error (address already in use). You could get around
-/// this by `bind`ing on `0.0.0.0:0`, but this is most likely **not** what you want.
+/// 1. If you try to `bind` a socket to some address before [`start_agent`], it'll actually be bound
+///    **twice**, which incurs an error (address already in use). You could get around this by
+///    `bind`ing on `0.0.0.0:0`, but this is most likely **not** what you want.
 pub async fn main() -> AgentResult<()> {
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
