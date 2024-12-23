@@ -16,11 +16,7 @@ use super::{
     http::HttpFilter,
     ip_tables::{new_ip6tables_wrapper, new_iptables, IPTablesWrapper, SafeIpTables},
 };
-use crate::{
-    error::AgentError,
-    steal::ip_tables::prerouting::{ChainName, PreroutingRedirect},
-    util::ClientId,
-};
+use crate::{error::AgentError, util::ClientId};
 
 /// For stealing incoming TCP connections.
 #[async_trait::async_trait]
@@ -57,12 +53,9 @@ pub trait PortRedirector {
 
 /// A TCP listener, together with an iptables wrapper to set rules that send traffic to the
 /// listener.
-pub(crate) struct IptablesListener<const IPV6: bool>
-where
-    PreroutingRedirect<_, IPV6>: ChainName,
-{
+pub(crate) struct IptablesListener {
     /// For altering iptables rules.
-    iptables: Option<SafeIpTables<IPTablesWrapper, IPV6>>,
+    iptables: Option<SafeIpTables<IPTablesWrapper>>,
     /// Port of [`IpTablesRedirector::listener`].
     redirect_to: Port,
     /// Listener to which redirect all connections.
@@ -71,20 +64,19 @@ where
     pod_ips: Option<String>,
     /// Whether existing connections should be flushed when adding new redirects.
     flush_connections: bool,
+    /// Is this for connections incoming over IPv6
+    ipv6: bool,
 }
 
 #[async_trait::async_trait]
-impl<const IPV6: bool> PortRedirector for IptablesListener<IPV6>
-where
-    PreroutingRedirect<_, IPV6>: ChainName,
-{
+impl PortRedirector for IptablesListener {
     type Error = AgentError;
     async fn add_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
         let iptables = if let Some(iptables) = self.iptables.as_ref() {
             iptables
         } else {
             let safe = crate::steal::ip_tables::SafeIpTables::create(
-                if IPV6 {
+                if self.ipv6 {
                     new_iptables().into()
                 } else {
                     new_ip6tables_wrapper()
@@ -124,12 +116,12 @@ where
 ///
 /// Holds TCP listeners + iptables, for redirecting IPv4 and/or IPv6 connections.
 pub(crate) enum IpTablesRedirector {
-    Ipv4Only(IptablesListener<false>),
+    Ipv4Only(IptablesListener),
     /// Could be used if IPv6 support is enabled, and we cannot bind an IPv4 address.
-    Ipv6Only(IptablesListener<true>),
+    Ipv6Only(IptablesListener),
     Dual {
-        ipv4_listener: IptablesListener<false>,
-        ipv6_listener: IptablesListener<true>,
+        ipv4_listener: IptablesListener,
+        ipv6_listener: IptablesListener,
     },
 }
 
@@ -189,12 +181,13 @@ impl IpTablesRedirector {
                         )
                         .ok()?
                         .port();
-                    Some(IptablesListener::<false> {
+                    Some(IptablesListener {
                         iptables: None,
                         redirect_to,
                         listener,
                         pod_ips: pod_ips4,
                         flush_connections,
+                        ipv6: false,
                     })
                 });
         let listener6 = if support_ipv6 {
@@ -211,12 +204,13 @@ impl IpTablesRedirector {
                             )
                             .ok()?
                             .port();
-                        Some(IptablesListener::<true> {
+                        Some(IptablesListener {
                             iptables: None,
                             redirect_to,
                             listener,
                             pod_ips: pod_ips6,
                             flush_connections,
+                            ipv6: true,
                         })
                     })
         } else {
@@ -233,12 +227,25 @@ impl IpTablesRedirector {
         }
     }
 
+    pub(crate) fn get_ipv4_listener_mut(&mut self) -> Option<&mut IptablesListener> {
+        match self {
+            IpTablesRedirector::Ipv6Only(_) => None,
+            IpTablesRedirector::Dual { ipv4_listener, .. }
+            | IpTablesRedirector::Ipv4Only(ipv4_listener) => Some(ipv4_listener),
+        }
+    }
+
+    pub(crate) fn get_ipv6_listener_mut(&mut self) -> Option<&mut IptablesListener> {
+        match self {
+            IpTablesRedirector::Ipv4Only(_) => None,
+            IpTablesRedirector::Dual { ipv6_listener, .. }
+            | IpTablesRedirector::Ipv6Only(ipv6_listener) => Some(ipv6_listener),
+        }
+    }
+
     pub(crate) fn get_listeners_mut(
         &mut self,
-    ) -> (
-        Option<&mut IptablesListener<false>>,
-        Option<&mut IptablesListener<true>>,
-    ) {
+    ) -> (Option<&mut IptablesListener>, Option<&mut IptablesListener>) {
         match self {
             IpTablesRedirector::Ipv4Only(ipv4_listener) => (Some(ipv4_listener), None),
             IpTablesRedirector::Ipv6Only(ipv6_listener) => (None, Some(ipv6_listener)),
@@ -298,8 +305,7 @@ impl PortRedirector for IpTablesRedirector {
                     con = ipv6_listener.next_connection() => con,
                 }
             }
-            Self::Ipv4Only(listener) => listener.next_connection().await,
-            Self::Ipv6Only(listener) => listener.next_connection().await,
+            Self::Ipv4Only(listener) | Self::Ipv6Only(listener) => listener.next_connection().await,
         }
     }
 }
