@@ -1,0 +1,1 @@
+Extended docs for HTTP filter in the mirrord config.
