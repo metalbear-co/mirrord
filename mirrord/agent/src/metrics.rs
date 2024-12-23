@@ -134,3 +134,44 @@ pub(crate) async fn start_metrics(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use tokio_util::sync::CancellationToken;
+
+    use super::OPEN_FD_COUNT;
+    use crate::metrics::start_metrics;
+
+    #[tokio::test]
+    async fn test_metrics() {
+        let metrics_address = "127.0.0.1:9000".parse().unwrap();
+        let cancellation_token = CancellationToken::new();
+
+        let metrics_cancellation = cancellation_token.child_token();
+        tokio::spawn(async move {
+            start_metrics(metrics_address, metrics_cancellation)
+                .await
+                .unwrap()
+        });
+
+        OPEN_FD_COUNT.inc();
+
+        // Give the server some time to start.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        let get_all_metrics = reqwest::get("http://127.0.0.1:9000/metrics")
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+
+        assert!(get_all_metrics.contains("mirrord_agent_open_fd_count 1"));
+
+        cancellation_token.drop_guard();
+    }
+}

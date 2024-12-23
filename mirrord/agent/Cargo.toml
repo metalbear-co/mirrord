@@ -84,3 +84,4 @@ rstest.workspace = true
 mockall = "0.13"
 test_bin = "0.4"
 rcgen.workspace = true
+reqwest.workspace = true
