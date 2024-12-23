@@ -12,7 +12,7 @@ use crate::{
 };
 
 pub(crate) struct AmbientRedirect<IPT: IPTables> {
-    prerouting: PreroutingRedirect<IPT>,
+    prerouting: PreroutingRedirect<IPT, false>,
     output: OutputRedirect<true, IPT>,
 }
 

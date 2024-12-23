@@ -13,7 +13,7 @@ use crate::{
     steal::ip_tables::{
         flush_connections::FlushConnections,
         mesh::{istio::AmbientRedirect, MeshRedirect, MeshVendorExt},
-        prerouting::PreroutingRedirect,
+        prerouting::{ChainName, PreroutingRedirect},
         redirect::Redirect,
         standard::StandardRedirect,
     },
@@ -213,18 +213,23 @@ impl IPTables for IPTablesWrapper {
 }
 
 #[enum_dispatch(Redirect)]
-pub(crate) enum Redirects<IPT: IPTables + Send + Sync> {
+pub(crate) enum Redirects<IPT: IPTables + Send + Sync, const IPV6: bool>
+where
+    PreroutingRedirect<IPT, IPV6>: ChainName,
+{
     Ambient(AmbientRedirect<IPT>),
-    Standard(StandardRedirect<IPT>),
+    Standard(StandardRedirect<IPT, IPV6>),
     Mesh(MeshRedirect<IPT>),
-    FlushConnections(FlushConnections<IPT, Redirects<IPT>>),
-    PrerouteFallback(PreroutingRedirect<IPT>),
+    FlushConnections(FlushConnections<IPT, Redirects<IPT, IPV6>>),
+    PrerouteFallback(PreroutingRedirect<IPT, IPV6>),
 }
 
 /// Wrapper struct for IPTables so it flushes on drop.
-pub(crate) struct SafeIpTables<IPT: IPTables + Send + Sync> {
-    redirect: Redirects<IPT>,
-    ipv6: bool,
+pub(crate) struct SafeIpTables<IPT: IPTables + Send + Sync, const IPV6: bool>
+where
+    PreroutingRedirect<IPT, IPV6>: ChainName,
+{
+    redirect: Redirects<IPT, IPV6>,
 }
 
 /// Wrapper for using iptables. This creates a a new chain on creation and deletes it on drop.
@@ -232,9 +237,10 @@ pub(crate) struct SafeIpTables<IPT: IPTables + Send + Sync> {
 /// original chain (fallback) and adds a rule in the "PREROUTING" table that jumps to the new chain.
 /// Connections will go then PREROUTING -> OUR_CHAIN -> IF MATCH REDIRECT -> IF NOT MATCH FALLBACK
 /// -> ORIGINAL_CHAIN
-impl<IPT> SafeIpTables<IPT>
+impl<IPT, const IPV6: bool> SafeIpTables<IPT, IPV6>
 where
     IPT: IPTables + Send + Sync,
+    PreroutingRedirect<IPT, IPV6>: ChainName,
 {
     pub(super) async fn create(
         ipt: IPT,

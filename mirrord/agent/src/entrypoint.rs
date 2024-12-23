@@ -39,9 +39,10 @@ use crate::{
     sniffer::{api::TcpSnifferApi, messages::SnifferCommand, TcpConnectionSniffer},
     steal::{
         ip_tables::{
-            new_iptables, IPTablesWrapper, SafeIpTables, IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL,
-            IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV, IPTABLE_MESH, IPTABLE_MESH_ENV,
-            IPTABLE_PREROUTING, IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD, IPTABLE_STANDARD_ENV,
+            new_ip6tables_wrapper, new_iptables, IPTablesWrapper, SafeIpTables,
+            IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL, IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV,
+            IPTABLE_MESH, IPTABLE_MESH_ENV, IPTABLE_PREROUTING, IPTABLE_PREROUTING_ENV,
+            IPTABLE_STANDARD, IPTABLE_STANDARD_ENV,
         },
         StealerCommand, TcpConnectionStealer, TcpStealerApi,
     },
@@ -748,9 +749,12 @@ async fn start_agent(args: Args) -> Result<()> {
 }
 
 async fn clear_iptable_chain() -> Result<()> {
-    let ipt = new_iptables();
+    SafeIpTables::<_, false>::load(IPTablesWrapper::from(new_iptables()), false)
+        .await?
+        .cleanup()
+        .await?;
 
-    SafeIpTables::load(IPTablesWrapper::from(ipt), false)
+    SafeIpTables::<_, true>::load(new_ip6tables_wrapper(), false)
         .await?
         .cleanup()
         .await?;

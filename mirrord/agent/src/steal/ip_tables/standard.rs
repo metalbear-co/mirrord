@@ -6,19 +6,21 @@ use mirrord_protocol::Port;
 use crate::{
     error::Result,
     steal::ip_tables::{
-        output::OutputRedirect, prerouting::PreroutingRedirect, IPTables, Redirect,
-        IPTABLE_STANDARD,
+        output::OutputRedirect,
+        prerouting::{ChainName, PreroutingRedirect},
+        IPTables, Redirect, IPTABLE_STANDARD,
     },
 };
 
-pub(crate) struct StandardRedirect<IPT: IPTables> {
-    prerouting: PreroutingRedirect<IPT>,
+pub(crate) struct StandardRedirect<IPT: IPTables, const IPV6: bool> {
+    prerouting: PreroutingRedirect<IPT, IPV6>,
     output: OutputRedirect<false, IPT>,
 }
 
-impl<IPT> StandardRedirect<IPT>
+impl<IPT, const IPV6: bool> StandardRedirect<IPT, IPV6>
 where
     IPT: IPTables,
+    PreroutingRedirect<IPT, IPV6>: ChainName,
 {
     pub fn create(ipt: Arc<IPT>, pod_ips: Option<&str>) -> Result<Self> {
         let prerouting = PreroutingRedirect::create(ipt.clone())?;
@@ -38,9 +40,10 @@ where
 /// This wrapper adds a new rule to the NAT OUTPUT chain to redirect "localhost" traffic as well
 /// Note: OUTPUT chain is only traversed for packets produced by local applications
 #[async_trait]
-impl<IPT> Redirect for StandardRedirect<IPT>
+impl<IPT, const IPV6: bool> Redirect for StandardRedirect<IPT, IPV6>
 where
     IPT: IPTables + Send + Sync,
+    PreroutingRedirect<IPT, IPV6>: ChainName,
 {
     async fn mount_entrypoint(&self) -> Result<()> {
         self.prerouting.mount_entrypoint().await?;

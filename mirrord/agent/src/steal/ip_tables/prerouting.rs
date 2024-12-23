@@ -8,16 +8,27 @@ use crate::{
     steal::ip_tables::{chain::IPTableChain, IPTables, Redirect, IPTABLE_PREROUTING},
 };
 
-pub(crate) struct PreroutingRedirect<IPT: IPTables> {
+pub(crate) struct PreroutingRedirect<IPT: IPTables, const IPV6: bool> {
     managed: IPTableChain<IPT>,
 }
 
-impl<IPT> PreroutingRedirect<IPT>
+pub(crate) trait ChainName {
+    const ENTRYPOINT: &'static str;
+}
+
+impl<IPT: IPTables> ChainName for PreroutingRedirect<IPT, false> {
+    const ENTRYPOINT: &'static str = "PREROUTING";
+}
+
+impl<IPT: IPTables> ChainName for PreroutingRedirect<IPT, true> {
+    const ENTRYPOINT: &'static str = "INPUT";
+}
+
+impl<IPT, const IPV6: bool> PreroutingRedirect<IPT, IPV6>
 where
     IPT: IPTables,
+    Self: ChainName,
 {
-    const ENTRYPOINT: &'static str = "PREROUTING";
-
     pub fn create(ipt: Arc<IPT>) -> Result<Self> {
         let managed = IPTableChain::create(ipt, IPTABLE_PREROUTING.to_string())?;
 
@@ -32,9 +43,10 @@ where
 }
 
 #[async_trait]
-impl<IPT> Redirect for PreroutingRedirect<IPT>
+impl<IPT, const IPV6: bool> Redirect for PreroutingRedirect<IPT, IPV6>
 where
     IPT: IPTables + Send + Sync,
+    Self: ChainName,
 {
     async fn mount_entrypoint(&self) -> Result<()> {
         self.managed.inner().add_rule(
@@ -73,7 +85,7 @@ where
     }
 }
 
-impl<IPT> Deref for PreroutingRedirect<IPT>
+impl<IPT, const IPV6: bool> Deref for PreroutingRedirect<IPT, IPV6>
 where
     IPT: IPTables,
 {
