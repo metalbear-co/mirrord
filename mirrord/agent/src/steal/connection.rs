@@ -33,10 +33,7 @@ use tracing::{warn, Level};
 
 use crate::{
     error::{AgentError, AgentResult},
-    metrics::{
-        STEAL_FILTERED_PORT_SUBSCRIPTION, STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION,
-        STEAL_UNFILTERED_PORT_SUBSCRIPTION,
-    },
+    metrics::{STEAL_FILTERED_PORT_SUBSCRIPTION, STEAL_UNFILTERED_PORT_SUBSCRIPTION},
     steal::{
         connections::{
             ConnectionMessageIn, ConnectionMessageOut, StolenConnection, StolenConnections,
