@@ -14,7 +14,7 @@ use tokio::{
 
 use super::{
     http::HttpFilter,
-    ip_tables::{new_iptables, IPTablesWrapper, SafeIpTables},
+    ip_tables::{new_ip6tables_wrapper, new_iptables, IPTablesWrapper, SafeIpTables},
 };
 use crate::{error::AgentError, util::ClientId};
 
@@ -64,6 +64,8 @@ pub(crate) struct IptablesListener {
     pod_ips: Option<String>,
     /// Whether existing connections should be flushed when adding new redirects.
     flush_connections: bool,
+    /// Is this for connections incoming over IPv6
+    ipv6: bool,
 }
 
 #[async_trait::async_trait]
@@ -74,7 +76,11 @@ impl PortRedirector for IptablesListener {
             iptables
         } else {
             let safe = crate::steal::ip_tables::SafeIpTables::create(
-                new_iptables().into(),
+                if self.ipv6 {
+                    new_iptables().into()
+                } else {
+                    new_ip6tables_wrapper()
+                },
                 self.flush_connections,
                 self.pod_ips.as_deref(),
             )
@@ -160,6 +166,7 @@ impl IpTablesRedirector {
                 )
             },
         );
+        tracing::debug!("pod IPv4 addresses: {pod_ips4:?}, pod IPv6 addresses: {pod_ips6:?}");
 
         let listener4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await
                 .inspect_err(
@@ -180,6 +187,7 @@ impl IpTablesRedirector {
                         listener,
                         pod_ips: pod_ips4,
                         flush_connections,
+                        ipv6: false,
                     })
                 });
         let listener6 = if support_ipv6 {
@@ -202,6 +210,7 @@ impl IpTablesRedirector {
                             listener,
                             pod_ips: pod_ips6,
                             flush_connections,
+                            ipv6: true,
                         })
                     })
         } else {

@@ -589,7 +589,7 @@ pub async fn run_exec(
     // base_env.insert("MIRRORD_AGENT_IMAGE", "test");
     base_env.insert(
         "MIRRORD_AGENT_IMAGE",
-        "docker.io/t4lz/mirrord-agent:2025-12-13",
+        "docker.io/t4lz/mirrord-agent:2024-12-22_2",
     );
     base_env.insert("MIRRORD_AGENT_TTL", "180"); // TODO: delete
     base_env.insert("MIRRORD_CHECK_VERSION", "false");
