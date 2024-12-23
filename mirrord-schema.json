@@ -255,7 +255,7 @@
       "properties": {
         "annotations": {
           "title": "agent.annotations {#agent-annotations}",
-          "description": "Allows setting up custom annotations for the agent Job and Pod.\n\n```json { \"annotations\": { \"cats.io/inject\": \"enabled\" } } ```",
+          "description": "Allows setting up custom annotations for the agent Job and Pod.\n\n```json { \"annotations\": { \"cats.io/inject\": \"enabled\" \"prometheus.io/scrape\": \"true\", \"prometheus.io/port\": \"9000\" } } ```",
           "type": [
             "object",
             "null"
@@ -373,6 +373,14 @@
         "log_level": {
           "title": "agent.log_level {#agent-log_level}",
           "description": "Log level for the agent.\n\nSupports `\"trace\"`, `\"debug\"`, `\"info\"`, `\"warn\"`, `\"error\"`, or any string that would work with `RUST_LOG`.\n\n```json { \"agent\": { \"log_level\": \"mirrord=debug,warn\" } } ```",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "metrics": {
+          "title": "agent.metrics {#agent-metrics}",
+          "description": "Enables prometheus metrics for the agent pod.\n\nYou might need to add annotations to the agent pod depending on how prometheus is configured to scrape for metrics.\n\n```json { \"metrics\": \"0.0.0.0:9000\" } ```",
           "type": [
             "string",
             "null"
