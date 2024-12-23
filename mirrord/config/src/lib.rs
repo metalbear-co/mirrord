@@ -113,7 +113,8 @@ pub static MIRRORD_CONFIG_FILE_ENV: &str = "MIRRORD_CONFIG_FILE";
 ///     "communication_timeout": 30,
 ///     "startup_timeout": 360,
 ///     "network_interface": "eth0",
-///     "flush_connections": true
+///     "flush_connections": true,
+///     "metrics": "0.0.0.0:9000",
 ///   },
 ///   "feature": {
 ///     "env": {
