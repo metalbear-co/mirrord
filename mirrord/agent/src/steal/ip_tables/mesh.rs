@@ -20,7 +20,7 @@ static TCP_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"-p tcp -m tcp --dport ([\d:,]+)").unwrap());
 
 pub(crate) struct MeshRedirect<IPT: IPTables> {
-    prerouting: PreroutingRedirect<IPT, false>,
+    prerouting: PreroutingRedirect<IPT>,
     output: OutputRedirect<false, IPT>,
     vendor: MeshVendor,
 }
