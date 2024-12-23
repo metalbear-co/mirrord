@@ -1106,15 +1106,62 @@ Similarly, you can exclude certain paths using a negative look-ahead:
 Setting this filter will make mirrord only steal requests to URIs that do not start with
 "/health/".
 
-#### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
+You can use multiple HTTP filters at the same time like this:
+```json
+{
+  "all_of": [
+    { "header": "^User-Agent: (?!kube-probe)" },
+    { "path": "^/api/" }
+  ]
+}
+```
+Filter above might be used to steal HTTP API requests, but not Kubernetes probes.
 
-Messages must match all of the specified filters.
+You can also capture HTTP requests that match at least one of a set of filters like this:
+```json
+{
+  "any_of": [
+    { "path": "^/api/v1" }
+    { "path": "^/api/v2"}
+  ]
+}
+```
+Filter above might be used to steal only HTTP requests made to your application's API in
+versions 1 and 2.
+
+##### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
+
+An array of HTTP filters. Each inner filter specifies either header or path regex.
+Requests must match all of the filters to be stolen.
+
 Cannot be an empty list.
 
-#### feature.network.incoming.http_filter.any_of {#feature-network-incoming-http_filter-any_of}
+Example:
+```json
+{
+  "all_of": [
+    { "header": "x-user: my-user$" },
+    { "path": "^/api/v1/my-endpoint" }
+  ]
+}
+```
 
-Messages must match any of the specified filters.
+##### feature.network.incoming.http_filter.any_of {#feature-network-incoming-http_filter-any_of}
+
+An array of HTTP filters. Each inner filter specifies either header or path regex.
+Requests must match at least one of the filters to be stolen.
+
 Cannot be an empty list.
+
+Example:
+```json
+{
+  "any_of": [
+    { "header": "^x-user: my-user$" },
+    { "path": "^/api/v1/my-endpoint" }
+  ]
+}
+```
 
 ##### feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}
 
