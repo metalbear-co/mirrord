@@ -117,7 +117,7 @@ pub(crate) async fn start_metrics(
     let listener = TcpListener::bind(address)
         .await
         .map_err(AgentError::from)
-        .inspect_err(|fail| tracing::error!(?fail, "Actor listener!"))?;
+        .inspect_err(|fail| tracing::error!(?fail, "Failed to bind TCP socket for metrics server"))?;
 
     let cancel_on_error = cancellation_token.clone();
     axum::serve(listener, app)
