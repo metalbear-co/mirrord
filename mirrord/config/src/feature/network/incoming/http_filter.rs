@@ -56,28 +56,29 @@ use crate::{
 /// Setting this filter will make mirrord only steal requests to URIs that do not start with
 /// "/health/".
 ///
-/// You can use multiple HTTP filters at the same time like this:
+/// With `all_of` and `any_of` you can use multiple HTTP filters at the same time.
+///
+/// If you want to steal HTTP requests that match **every** pattern specified, use `all_of`.
+/// For example, this filter steals only HTTP requests to endpoint `/api/my-endpoint` that contain
+/// header `x-debug-session` with value `121212`.
 /// ```json
 /// {
 ///   "all_of": [
-///     { "header": "^User-Agent: (?!kube-probe)" },
-///     { "path": "^/api/" }
+///     { "header": "^x-debug-session: 121212$" },
+///     { "path": "^/api/my-endpoint$" }
 ///   ]
 /// }
-/// ```
-/// Filter above might be used to steal HTTP API requests, but not Kubernetes probes.
 ///
-/// You can also capture HTTP requests that match at least one of a set of filters like this:
+/// If you want to steal HTTP requests that match **any** of the patterns specified, use `any_of`.
+/// For example, this filter steals HTTP requests to endpoint `/api/my-endpoint`
+/// **and** HTTP requests that contain header `x-debug-session` with value `121212`.
 /// ```json
-/// {
-///   "any_of": [
-///     { "path": "^/api/v1" }
-///     { "path": "^/api/v2"}
-///   ]
-/// }
-/// ```
-/// Filter above might be used to steal only HTTP requests made to your application's API in
-/// versions 1 and 2.
+///{
+///  "any_of": [
+///    { "path": "^/api/my-endpoint$"},
+///    { "header": "^x-debug-session: 121212$" }
+///  ]
+///}
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize)]
 #[config(map_to = "HttpFilterFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
@@ -106,7 +107,9 @@ pub struct HttpFilterConfig {
 
     /// ##### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
     ///
-    /// An array of HTTP filters. Each inner filter specifies either header or path regex.
+    /// An array of HTTP filters.
+    ///
+    /// Each inner filter specifies either header or path regex.
     /// Requests must match all of the filters to be stolen.
     ///
     /// Cannot be an empty list.
@@ -124,7 +127,9 @@ pub struct HttpFilterConfig {
 
     /// ##### feature.network.incoming.http_filter.any_of {#feature-network-incoming-http_filter-any_of}
     ///
-    /// An array of HTTP filters. Each inner filter specifies either header or path regex.
+    /// An array of HTTP filters.
+    ///
+    /// Each inner filter specifies either header or path regex.
     /// Requests must match at least one of the filters to be stolen.
     ///
     /// Cannot be an empty list.
