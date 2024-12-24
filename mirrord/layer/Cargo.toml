@@ -42,13 +42,11 @@ thiserror.workspace = true
 num-traits = "0.2"
 
 rand.workspace = true
-fancy-regex.workspace = true
 regex.workspace = true
 errno = "0.3"
 socket2.workspace = true
 bytemuck = "1"
 hashbrown = "0.15"
-exec.workspace = true
 syscalls = { version = "0.6", features = ["full"] }
 null-terminated = "0.3"
 base64.workspace = true
@@ -60,19 +58,13 @@ resolv-conf = "0.7"
 
 [dev-dependencies]
 mirrord-intproxy = { path = "../intproxy" }
-k8s-openapi.workspace = true
-chrono = { workspace = true, features = ["clock"] }
-http-body = { workspace = true }
 rstest.workspace = true
 tempfile.workspace = true
 test-cdylib = "*"
-tower.workspace = true
-tokio = { workspace = true, features = ["rt", "net", "macros"] }
+tokio = { workspace = true, features = ["rt", "net", "macros", "fs"] }
 tests = { path = "../../tests" }
-flaky_test = "0.2"
 futures.workspace = true
 actix-codec.workspace = true
-tokio-stream.workspace = true
 
 [lib]
 crate-type = ["cdylib"]

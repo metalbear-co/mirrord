@@ -9,6 +9,7 @@
 #![feature(vec_into_raw_parts)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::indexing_slicing)]
+#![deny(unused_crate_dependencies)]
 
 //! Loaded dynamically with your local process.
 //!
@@ -710,4 +711,18 @@ pub(crate) unsafe extern "C" fn uv_fs_close_detour(
     // does not return to here after calling `FN_UV_FS_CLOSE`.
     close_layer_fd(fd);
     FN_UV_FS_CLOSE(a, b, fd, c)
+}
+
+/// Silences `deny(unused_crate_dependencies)`.
+/// 
+/// These dependencies are only used in integration tests.
+#[cfg(test)]
+mod integration_tests_deps {
+    use actix_codec as _;
+    use futures as _;
+    use mirrord_intproxy as _;
+    use tempfile as _;
+    use tests as _;
+    use test_cdylib as _;
+    use tokio as _;
 }
