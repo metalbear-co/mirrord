@@ -10,24 +10,45 @@ use crate::{
 
 pub(crate) struct PreroutingRedirect<IPT: IPTables> {
     managed: IPTableChain<IPT>,
+    chain_name: &'static str,
 }
 
 impl<IPT> PreroutingRedirect<IPT>
 where
     IPT: IPTables,
 {
-    const ENTRYPOINT: &'static str = "PREROUTING";
-
-    pub fn create(ipt: Arc<IPT>) -> Result<Self> {
-        let managed = IPTableChain::create(ipt, IPTABLE_PREROUTING.to_string())?;
-
-        Ok(PreroutingRedirect { managed })
+    pub fn create_prerouting(ipt: Arc<IPT>) -> Result<Self> {
+        Self::create(ipt, "PREROUTING")
     }
 
-    pub fn load(ipt: Arc<IPT>) -> Result<Self> {
+    pub fn create_input(ipt: Arc<IPT>) -> Result<Self> {
+        Self::create(ipt, "INPUT")
+    }
+
+    pub fn create(ipt: Arc<IPT>, chain_name: &'static str) -> Result<Self> {
+        let managed = IPTableChain::create(ipt, IPTABLE_PREROUTING.to_string())?;
+
+        Ok(PreroutingRedirect {
+            managed,
+            chain_name,
+        })
+    }
+
+    pub fn load_prerouting(ipt: Arc<IPT>) -> Result<Self> {
+        Self::load(ipt, "PREROUTING")
+    }
+
+    pub fn load_input(ipt: Arc<IPT>) -> Result<Self> {
+        Self::load(ipt, "INPUT")
+    }
+
+    pub fn load(ipt: Arc<IPT>, chain_name: &'static str) -> Result<Self> {
         let managed = IPTableChain::load(ipt, IPTABLE_PREROUTING.to_string())?;
 
-        Ok(PreroutingRedirect { managed })
+        Ok(PreroutingRedirect {
+            managed,
+            chain_name,
+        })
     }
 }
 
@@ -38,7 +59,7 @@ where
 {
     async fn mount_entrypoint(&self) -> Result<()> {
         self.managed.inner().add_rule(
-            Self::ENTRYPOINT,
+            &self.chain_name,
             &format!("-j {}", self.managed.chain_name()),
         )?;
 
@@ -47,7 +68,7 @@ where
 
     async fn unmount_entrypoint(&self) -> Result<()> {
         self.managed.inner().remove_rule(
-            Self::ENTRYPOINT,
+            &self.chain_name,
             &format!("-j {}", self.managed.chain_name()),
         )?;
 
@@ -114,7 +135,8 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
+        let prerouting =
+            PreroutingRedirect::create_prerouting(Arc::new(mock)).expect("Unable to create");
 
         assert!(prerouting.add_redirect(69, 420).await.is_ok());
     }
@@ -151,7 +173,8 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
+        let prerouting =
+            PreroutingRedirect::create_prerouting(Arc::new(mock)).expect("Unable to create");
 
         assert!(prerouting.add_redirect(69, 420).await.is_ok());
         assert!(prerouting.add_redirect(169, 1420).await.is_ok());
@@ -179,7 +202,8 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
+        let prerouting =
+            PreroutingRedirect::create_prerouting(Arc::new(mock)).expect("Unable to create");
 
         assert!(prerouting.remove_redirect(69, 420).await.is_ok());
     }

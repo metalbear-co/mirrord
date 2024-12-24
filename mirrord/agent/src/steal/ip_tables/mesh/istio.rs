@@ -21,14 +21,14 @@ where
     IPT: IPTables,
 {
     pub fn create(ipt: Arc<IPT>, pod_ips: Option<&str>) -> Result<Self> {
-        let prerouting = PreroutingRedirect::create(ipt.clone())?;
+        let prerouting = PreroutingRedirect::create_prerouting(ipt.clone())?;
         let output = OutputRedirect::create(ipt, IPTABLE_MESH.to_string(), pod_ips)?;
 
         Ok(AmbientRedirect { prerouting, output })
     }
 
     pub fn load(ipt: Arc<IPT>) -> Result<Self> {
-        let prerouting = PreroutingRedirect::load(ipt.clone())?;
+        let prerouting = PreroutingRedirect::load_prerouting(ipt.clone())?;
         let output = OutputRedirect::load(ipt, IPTABLE_MESH.to_string())?;
 
         Ok(AmbientRedirect { prerouting, output })

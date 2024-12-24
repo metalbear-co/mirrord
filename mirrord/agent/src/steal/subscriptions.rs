@@ -83,6 +83,7 @@ impl PortRedirector for IptablesListener {
                 },
                 self.flush_connections || self.ipv6,
                 self.pod_ips.as_deref(),
+                self.ipv6,
             )
             .await?;
             self.iptables.insert(safe)
