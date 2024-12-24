@@ -25,6 +25,7 @@ client = [
 	"dep:fs4",
 	"dep:k8s-openapi",
 	"dep:kube",
+	"dep:reqwest",
 	"dep:serde_yaml",
 	"dep:thiserror",
 	"dep:tokio",
@@ -45,7 +46,6 @@ serde_yaml = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["fs"], optional = true  }
 thiserror = { workspace = true, optional = true }
 x509-certificate = "0.24"
-# not direct dependency, but if we don't put it here it'll use openssl :(
 reqwest = { workspace = true, features=["json", "rustls-tls-native-roots"], default-features = false, optional = true }
 tracing = { workspace = true, optional = true }
 
