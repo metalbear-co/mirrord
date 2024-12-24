@@ -16,10 +16,8 @@ use tracing::Level;
 use self::{filtered::DynamicBody, unfiltered::UnfilteredStealTask};
 use super::{http::DefaultReversibleStream, subscriptions::PortSubscription};
 use crate::{
-    http::HttpVersion,
-    metrics::{STEAL_FILTERED_CONNECTION_SUBSCRIPTION, STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION},
-    steal::connections::filtered::FilteredStealTask,
-    util::ClientId,
+    http::HttpVersion, metrics::STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION,
+    steal::connections::filtered::FilteredStealTask, util::ClientId,
 };
 
 mod filtered;
