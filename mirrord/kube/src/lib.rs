@@ -7,7 +7,7 @@
 //!
 //! ## `incluster`
 //!
-//! Turn this feature on if you want to connect to agent pods from withing the cluster with a plain
+//! Turn this feature on if you want to connect to agent pods from within the cluster with a plain
 //! TCP connection.
 //!
 //! ## `portforward`
