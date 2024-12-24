@@ -219,11 +219,6 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     /// * `client_id` - identifier of the client that issued the subscription
     /// * `port` - number of the subscription port
     ///
-    /// # Returns
-    ///
-    /// `Some(true)` if the subscprition has an HTTP filter, `Some(false)` if it's unfiltered, and
-    /// `None` if we could not find the [`PortSubscription`].
-    ///
     /// # Warning
     ///
     /// If this method returns an [`Err`], it means that this set is out of sync with the inner
