@@ -1,14 +1,13 @@
 #![doc = include_str!("../README.md")]
 #![deny(unused_crate_dependencies)]
 
-pub use pem;
-pub use x509_certificate;
-
 /// Silences `deny(unused_crate_dependencies)`.
 /// Although we don't use this dependency directly,
 /// compilation fails without it.
 #[cfg(feature = "client")]
 use k8s_openapi as _;
+pub use pem;
+pub use x509_certificate;
 
 /// X509 Certificate abstraction for serialization and deserialization
 pub mod certificate;
