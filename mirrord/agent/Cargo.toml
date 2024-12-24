@@ -18,7 +18,7 @@ workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies]
+[target.'cfg(target_os = "linux")'.dependencies]
 containerd-client = "0.6"
 tokio = { workspace = true, features = [
     "rt",
@@ -49,7 +49,6 @@ streammap-ext.workspace = true
 libc.workspace = true
 faccess = "0.2"
 bytes.workspace = true
-regex.workspace = true
 wildmatch = "2"
 enum_dispatch.workspace = true
 http-body-util = { workspace = true }
@@ -72,14 +71,11 @@ envy = "0.4"
 socket2.workspace = true
 prometheus = { version = "0.13", features = ["process"] }
 axum = { version = "0.7", features = ["macros"] }
-axum-server = "0.7"
-
-[target.'cfg(target_os = "linux")'.dependencies]
 iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624" }
 rawsocket = { git = "https://github.com/metalbear-co/rawsocket.git" }
 procfs = "0.17.0"
 
-[dev-dependencies]
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 rstest.workspace = true
 mockall = "0.13"
 test_bin = "0.4"

@@ -18,7 +18,6 @@ workspace = true
 
 [features]
 default = []
-license-fetch = ["dep:reqwest"]
 client = [
   "crd",
   "dep:base64",
@@ -34,6 +33,7 @@ client = [
   "dep:mirrord-progress",
   "dep:mirrord-protocol",
   "dep:rand",
+  "dep:tokio",
   "dep:tokio-tungstenite",
   "dep:tracing",
 ]
@@ -41,8 +41,9 @@ crd = [
   "dep:k8s-openapi",
   "dep:kube",
   "dep:mirrord-config",
-  "dep:tokio",
-  "dep:serde_json"
+  "dep:semver",
+  "dep:serde_json",
+  "dep:thiserror",
 ]
 setup = ["crd", "dep:serde_yaml"]
 
@@ -66,13 +67,12 @@ k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, features = ["derive", "ws"], optional = true }
 futures = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
-reqwest = { workspace = true, default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"], optional = true }
 schemars = { workspace = true, features = ["chrono"] }
+semver = { workspace = true, features = ["serde"], optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
 serde_yaml = { workspace = true, optional = true }
-thiserror.workspace = true
-semver = { workspace = true, features = ["serde"] }
+thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }

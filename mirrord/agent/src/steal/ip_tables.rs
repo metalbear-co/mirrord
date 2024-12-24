@@ -19,36 +19,6 @@ use crate::{
     },
 };
 
-#[cfg(not(target_os = "linux"))]
-mod iptables {
-    pub struct IPTables;
-
-    impl IPTables {
-        pub fn list(&self, _: &str, _: &str) -> AgentResult<Vec<String>, String> {
-            todo!()
-        }
-        pub fn insert(&self, _: &str, _: &str, _: &str, _: i32) -> AgentResult<(), String> {
-            todo!()
-        }
-        pub fn append(&self, _: &str, _: &str, _: &str) -> AgentResult<(), String> {
-            todo!()
-        }
-        pub fn delete(&self, _: &str, _: &str, _: &str) -> AgentResult<(), String> {
-            todo!()
-        }
-
-        pub fn new_chain(&self, _: &str, _: &str) -> AgentResult<(), String> {
-            todo!()
-        }
-        pub fn delete_chain(&self, _: &str, _: &str) -> AgentResult<(), String> {
-            todo!()
-        }
-        pub fn flush_chain(&self, _: &str, _: &str) -> AgentResult<(), String> {
-            todo!()
-        }
-    }
-}
-
 pub(crate) mod chain;
 pub(crate) mod flush_connections;
 pub(crate) mod mesh;

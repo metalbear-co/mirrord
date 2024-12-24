@@ -1,5 +1,6 @@
 #![feature(map_try_insert, let_chains)]
 #![warn(clippy::indexing_slicing)]
+#![deny(unused_crate_dependencies)]
 
 use std::{collections::HashMap, time::Duration};
 

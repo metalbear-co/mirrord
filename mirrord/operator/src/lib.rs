@@ -1,6 +1,7 @@
 #![feature(let_chains)]
 #![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
+#![deny(unused_crate_dependencies)]
 
 #[cfg(feature = "client")]
 pub mod client;

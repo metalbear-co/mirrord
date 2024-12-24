@@ -14,6 +14,7 @@
 #![feature(iterator_try_collect)]
 #![deny(clippy::missing_docs_in_private_items)]
 #![deny(missing_docs)]
+#![deny(unused_crate_dependencies)]
 
 use std::{fs, fs::File, io::Read, path::PathBuf};
 
