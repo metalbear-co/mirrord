@@ -268,7 +268,7 @@ impl KubernetesAPI {
     }
 }
 
-/// Trait for IO streams returned from [`KubernetesAPI::create_connection`].
+/// Trait for IO streams returned from [`KubernetesAPI::create_connection_portforward`].
 /// It's here only to group the exisiting traits we actually need and return a `Box<dyn ...>`
 #[cfg(feature = "portforward")]
 pub trait UnpinStream:
