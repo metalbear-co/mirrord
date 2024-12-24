@@ -240,6 +240,9 @@ where
             self.update_packet_filter()?;
         }
 
+        MIRROR_PORT_SUBSCRIPTION.dec();
+        MIRROR_CONNECTION_SUBSCRIPTION.dec();
+
         Ok(())
     }
 

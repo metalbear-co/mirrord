@@ -31,6 +31,7 @@ use tracing::Level;
 use super::{ConnectionMessageIn, ConnectionMessageOut, ConnectionTaskError};
 use crate::{
     http::HttpVersion,
+    metrics::STEAL_FILTERED_CONNECTION_SUBSCRIPTION,
     steal::{connections::unfiltered::UnfilteredStealTask, http::HttpFilter},
     util::ClientId,
 };
@@ -619,6 +620,8 @@ where
         // PROTOCOLS` response.
         let mut queued_raw_data: HashMap<ClientId, Vec<Vec<u8>>> = Default::default();
 
+        STEAL_FILTERED_CONNECTION_SUBSCRIPTION.inc();
+
         loop {
             tokio::select! {
                 message = rx.recv() => match message.ok_or(ConnectionTaskError::RecvError)? {
@@ -638,6 +641,8 @@ where
                         queued_raw_data.remove(&client_id);
                         self.subscribed.insert(client_id, false);
                         self.blocked_requests.retain(|key, _| key.0 != client_id);
+
+                        STEAL_FILTERED_CONNECTION_SUBSCRIPTION.dec();
                     },
                 },
 
@@ -646,7 +651,10 @@ where
 
                     // No more requests from the `FilteringService`.
                     // HTTP connection is closed and possibly upgraded.
-                    None => break,
+                    None => {
+                        STEAL_FILTERED_CONNECTION_SUBSCRIPTION.dec();
+                        break
+                    }
                 }
             }
         }

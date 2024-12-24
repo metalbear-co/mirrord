@@ -301,8 +301,6 @@ impl StolenConnections {
         let (task_tx, task_rx) = mpsc::channel(Self::TASK_IN_CHANNEL_CAPACITY);
         let main_tx = self.main_tx.clone();
 
-        let filtered = matches!(connection.port_subscription, PortSubscription::Filtered(..));
-
         tracing::trace!(connection_id, "Spawning connection task");
         self.tasks.spawn(async move {
             let task = ConnectionTask {
@@ -312,21 +310,9 @@ impl StolenConnections {
                 rx: task_rx,
             };
 
-            if filtered {
-                STEAL_FILTERED_CONNECTION_SUBSCRIPTION.inc();
-            } else {
-                STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.inc();
-            }
-
             match task.run().await {
                 Ok(()) => {
                     tracing::trace!(connection_id, "Connection task finished");
-
-                    if filtered {
-                        STEAL_FILTERED_CONNECTION_SUBSCRIPTION.dec();
-                    } else {
-                        STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.dec();
-                    }
                 }
                 Err(error) => {
                     tracing::trace!(connection_id, ?error, "Connection task failed");
@@ -483,6 +469,8 @@ impl ConnectionTask {
                     client_id,
                     stream: self.connection.stream,
                 };
+
+                STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.inc();
 
                 task.run(self.tx, &mut self.rx).await
             }

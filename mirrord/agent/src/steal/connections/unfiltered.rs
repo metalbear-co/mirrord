@@ -7,7 +7,10 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 
-use super::{ConnectionMessageIn, ConnectionMessageOut, ConnectionTaskError};
+use super::{
+    ConnectionMessageIn, ConnectionMessageOut, ConnectionTaskError,
+    STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION,
+};
 use crate::util::ClientId;
 
 /// Manages an unfiltered stolen connection.
@@ -35,11 +38,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
         let mut buf = BytesMut::with_capacity(64 * 1024);
         let mut reading_closed = false;
 
+        STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.inc();
+
         loop {
             tokio::select! {
                 read = self.stream.read_buf(&mut buf), if !reading_closed => match read {
                     Ok(..) => {
                         if buf.is_empty() {
+                            STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.dec();
+
                             tracing::trace!(
                                 client_id = self.client_id,
                                 connection_id = self.connection_id,
@@ -63,6 +70,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
                     Err(e) if e.kind() == ErrorKind::WouldBlock => {}
 
                     Err(e) => {
+                        STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.dec();
+
                         tx.send(ConnectionMessageOut::Closed {
                             client_id: self.client_id,
                             connection_id: self.connection_id
@@ -85,6 +94,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
 
                     ConnectionMessageIn::Raw { data, .. } => {
                         let res = if data.is_empty() {
+                            STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.dec();
+
                             tracing::trace!(
                                 client_id = self.client_id,
                                 connection_id = self.connection_id,
@@ -97,6 +108,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
                         };
 
                         if let Err(e) = res {
+                            STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.dec();
+
                             tx.send(ConnectionMessageOut::Closed {
                                 client_id: self.client_id,
                                 connection_id: self.connection_id
@@ -115,6 +128,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
                     },
 
                     ConnectionMessageIn::Unsubscribed { .. } => {
+                        STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.dec();
+
                         return Ok(());
                     }
                 }
