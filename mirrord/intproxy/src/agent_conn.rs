@@ -161,7 +161,7 @@ impl AgentConnection {
                     .map_err(AgentConnectionError::Kube)?;
 
                 let stream = k8s_api
-                    .create_connection(connect_info.clone())
+                    .create_connection_portforward(connect_info.clone())
                     .await
                     .map_err(AgentConnectionError::Kube)?;
 

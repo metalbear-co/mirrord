@@ -27,7 +27,7 @@ mirrord-operator = { path = "../operator", features = [
 ] }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
 mirrord-progress = { path = "../progress" }
-mirrord-kube = { path = "../kube" }
+mirrord-kube = { path = "../kube", features = ["portforward"] }
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-analytics = { path = "../analytics" }

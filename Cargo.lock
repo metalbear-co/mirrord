@@ -4359,17 +4359,12 @@ version = "3.128.0"
 dependencies = [
  "actix-codec",
  "async-stream",
- "base64 0.22.1",
- "bytes",
  "futures",
- "http-body 1.0.1",
- "hyper 1.5.1",
  "k8s-openapi",
  "kube",
  "mirrord-config",
  "mirrord-progress",
  "mirrord-protocol",
- "pin-project-lite",
  "rand",
  "regex",
  "rstest",
@@ -4379,7 +4374,6 @@ dependencies = [
  "thiserror 2.0.4",
  "tokio",
  "tokio-retry",
- "tower 0.5.1",
  "tracing",
 ]
 

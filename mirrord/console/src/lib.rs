@@ -12,7 +12,7 @@ pub use async_logger::init_async_logger;
 pub use logger::init_logger;
 
 /// Silences `deny(unused_crate_dependencies)`.
-/// 
+///
 /// These dependencies are only used in the console binary.
 #[cfg(feature = "binary")]
 mod binary_deps {
