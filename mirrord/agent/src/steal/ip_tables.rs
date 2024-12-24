@@ -224,7 +224,6 @@ pub(crate) enum Redirects<IPT: IPTables + Send + Sync> {
 /// Wrapper struct for IPTables so it flushes on drop.
 pub(crate) struct SafeIpTables<IPT: IPTables + Send + Sync> {
     redirect: Redirects<IPT>,
-    ipv6: bool,
 }
 
 /// Wrapper for using iptables. This creates a a new chain on creation and deletes it on drop.
@@ -240,6 +239,7 @@ where
         ipt: IPT,
         flush_connections: bool,
         pod_ips: Option<&str>,
+        ipv6: bool,
     ) -> Result<Self> {
         let ipt = Arc::new(ipt);
 
@@ -251,11 +251,11 @@ where
                 _ => Redirects::Mesh(MeshRedirect::create(ipt.clone(), vendor, pod_ips)?),
             }
         } else {
-            match StandardRedirect::create(ipt.clone(), pod_ips) {
+            match StandardRedirect::create(ipt.clone(), pod_ips, ipv6) {
                 Err(err) => {
                     warn!("Unable to create StandardRedirect chain: {err}");
 
-                    Redirects::PrerouteFallback(PreroutingRedirect::create(ipt.clone())?)
+                    Redirects::PrerouteFallback(PreroutingRedirect::create_prerouting(ipt.clone())?)
                 }
                 Ok(standard) => Redirects::Standard(standard),
             }
@@ -284,7 +284,7 @@ where
                 Err(err) => {
                     warn!("Unable to load StandardRedirect chain: {err}");
 
-                    Redirects::PrerouteFallback(PreroutingRedirect::load(ipt.clone())?)
+                    Redirects::PrerouteFallback(PreroutingRedirect::load_prerouting(ipt.clone())?)
                 }
                 Ok(standard) => Redirects::Standard(standard),
             }

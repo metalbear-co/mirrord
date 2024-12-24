@@ -20,15 +20,19 @@ impl<IPT> StandardRedirect<IPT>
 where
     IPT: IPTables,
 {
-    pub fn create(ipt: Arc<IPT>, pod_ips: Option<&str>) -> Result<Self> {
-        let prerouting = PreroutingRedirect::create(ipt.clone())?;
+    pub fn create(ipt: Arc<IPT>, pod_ips: Option<&str>, ipv6: bool) -> Result<Self> {
+        let prerouting = if ipv6 {
+            PreroutingRedirect::create_input(ipt.clone())?
+        } else {
+            PreroutingRedirect::create_prerouting(ipt.clone())?
+        };
         let output = OutputRedirect::create(ipt, IPTABLE_STANDARD.to_string(), pod_ips)?;
 
         Ok(StandardRedirect { prerouting, output })
     }
 
     pub fn load(ipt: Arc<IPT>) -> Result<Self> {
-        let prerouting = PreroutingRedirect::load(ipt.clone())?;
+        let prerouting = PreroutingRedirect::load_prerouting(ipt.clone())?;
         let output = OutputRedirect::load(ipt, IPTABLE_STANDARD.to_string())?;
 
         Ok(StandardRedirect { prerouting, output })
