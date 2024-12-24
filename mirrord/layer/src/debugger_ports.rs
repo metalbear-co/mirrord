@@ -6,7 +6,6 @@ use std::{
 };
 
 use hyper::Uri;
-use tracing::{error, warn};
 
 /// Environment variable used to tell the layer that it should dynamically detect the local
 /// port used by the given debugger. Value passed through this variable should parse into
@@ -26,7 +25,7 @@ pub const MIRRORD_DETECT_DEBUGGER_PORT_ENV: &str = "MIRRORD_DETECT_DEBUGGER_PORT
 pub const MIRRORD_IGNORE_DEBUGGER_PORTS_ENV: &str = "MIRRORD_IGNORE_DEBUGGER_PORTS";
 
 /// The default port used by node's --inspect debugger from the
-/// [node doceumentation](https://nodejs.org/en/learn/getting-started/debugging#enable-inspector)
+/// [node documentation](https://nodejs.org/en/learn/getting-started/debugging#enable-inspector)
 pub const NODE_INSPECTOR_DEFAULT_PORT: u16 = 9229;
 
 /// Type of debugger which is used to run the user's processes.
@@ -269,9 +268,8 @@ impl DebuggerType {
         }.iter().filter_map(|addr| match addr.ip() {
             IpAddr::V4(Ipv4Addr::LOCALHOST) | IpAddr::V6(Ipv6Addr::LOCALHOST) => Some(addr.port()),
             other => {
-                warn!(
-                    "Debugger uses a remote socket address {:?}! This case is not yet handled properly.",
-                    other,
+                tracing::debug!(
+                    "Debugger uses a remote socket address {other}! This case is not yet handled properly.",
                 );
                 None
             }
@@ -300,58 +298,64 @@ pub enum DebuggerPorts {
 impl FromStr for DebuggerPorts {
     type Err = std::convert::Infallible;
 
+    /// Parses [`DebuggerPorts`] from a string.
+    /// The string should look like one of:
+    /// 1. <port>
+    /// 2. <port1>-<port2>
+    /// 3. Comma-separated sequence of previous two variants
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // string looks like 'port1,port2,port3-portx,porty-portz'
-        let mut vec = vec![];
-        s.split(',')
-            .for_each(|s| {
-                let chunks = s
+        let vec = s
+            .split(',')
+            .filter_map(|entry| {
+                let chunks = entry
                     .split('-')
                     .map(u16::from_str)
                     .collect::<Result<Vec<_>, _>>()
-                    .inspect_err(|e| error!(
-                        "Failed to decode debugger port range from {} env variable: {}",
-                        MIRRORD_IGNORE_DEBUGGER_PORTS_ENV,
-                        e
-                    ))
-                    .ok().unwrap_or_default();
-                match *chunks.as_slice() {
-                    [p] => vec.push(Self::Single(p)),
-                    [p1, p2] if p1 <= p2 => vec.push(Self::FixedRange(p1..=p2)),
+                    .ok();
+
+                match chunks.as_deref() {
+                    Some(&[p]) => Some(Self::Single(p)),
+                    Some(&[p1, p2]) if p1 <= p2 => Some(Self::FixedRange(p1..=p2)),
                     _ => {
-                        error!(
-                            "Failed to decode debugger ports from {} env variable: expected a port or range of ports",
+                        tracing::debug!(
+                            full_variable = s,
+                            entry,
+                            "Failed to decode debugger ports entry from {} env variable",
                             MIRRORD_IGNORE_DEBUGGER_PORTS_ENV,
                         );
-                    },
-                };
-            });
-        if !vec.is_empty() {
-            Ok(Self::Combination(vec))
-        } else {
-            Ok(Self::None)
-        }
+                        None
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let result = match vec.len() {
+            0 => Self::None,
+            1 => vec.into_iter().next().unwrap(),
+            _ => Self::Combination(vec),
+        };
+
+        Ok(result)
     }
 }
 
 impl fmt::Display for DebuggerPorts {
+    /// Writes [`DebuggerPorts`] into the given [`fmt::Formatter`],
+    /// using format recognized by [`FromStr`] implementation.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                DebuggerPorts::Single(port) => port.to_string(),
-                DebuggerPorts::FixedRange(range_inclusive) =>
-                    format!("{}-{}", range_inclusive.start(), range_inclusive.end()),
-                DebuggerPorts::Combination(vec) => {
-                    vec.iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join(",")
-                }
-                DebuggerPorts::None => String::default(),
+        match self {
+            Self::Single(port) => port.fmt(f),
+            Self::FixedRange(range) => write!(f, "{}-{}", range.start(), range.end()),
+            Self::Combination(vec) => {
+                let value = vec
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",");
+                f.write_str(&value)
             }
-        )
+            Self::None => Ok(()),
+        }
     }
 }
 
@@ -366,10 +370,11 @@ impl DebuggerPorts {
             .ok()
             .and_then(|s| {
                 DebuggerType::from_str(&s)
-                    .inspect_err(|e| {
-                        error!(
-                            "Failed to decode debugger type from {} env variable: {}",
-                            MIRRORD_DETECT_DEBUGGER_PORT_ENV, e
+                    .inspect_err(|error| {
+                        tracing::debug!(
+                            error,
+                            "Failed to decode debugger type from {} env variable",
+                            MIRRORD_DETECT_DEBUGGER_PORT_ENV,
                         )
                     })
                     .ok()
