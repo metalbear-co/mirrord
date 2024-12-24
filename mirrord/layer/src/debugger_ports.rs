@@ -300,8 +300,8 @@ impl FromStr for DebuggerPorts {
 
     /// Parses [`DebuggerPorts`] from a string.
     /// The string should look like one of:
-    /// 1. <port>
-    /// 2. <port1>-<port2>
+    /// 1. `<port>`
+    /// 2. `<port1>-<port2>`
     /// 3. Comma-separated sequence of previous two variants
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let vec = s
