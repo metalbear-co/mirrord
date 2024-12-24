@@ -4,6 +4,7 @@
 #![feature(try_blocks)]
 #![cfg_attr(target_os = "linux", feature(tcp_quickack))]
 #![warn(clippy::indexing_slicing)]
+#![deny(unused_crate_dependencies)]
 
 #[cfg(target_os = "linux")]
 mod cli;
@@ -49,4 +50,12 @@ async fn main() -> crate::error::Result<()> {
 #[cfg(not(target_os = "linux"))]
 fn main() {
     panic!("This program is only supported on Linux");
+}
+
+/// To silence false positives from `deny(unused_crate_dependencies)`.
+/// 
+/// These dependencies are only used in integration tests.
+#[cfg(all(test, target_os = "linux"))]
+mod integration_tests_deps {
+    use test_bin as _;
 }
