@@ -22,7 +22,6 @@ workspace = true
 mirrord-console = { path = "../console", features = ["async-logger"] }
 mirrord-operator = { path = "../operator", features = [
     "client",
-    "license-fetch",
     "setup",
 ] }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol" }

@@ -714,7 +714,7 @@ pub(crate) unsafe extern "C" fn uv_fs_close_detour(
 }
 
 /// Silences `deny(unused_crate_dependencies)`.
-/// 
+///
 /// These dependencies are only used in integration tests.
 #[cfg(test)]
 mod integration_tests_deps {
@@ -722,7 +722,7 @@ mod integration_tests_deps {
     use futures as _;
     use mirrord_intproxy as _;
     use tempfile as _;
-    use tests as _;
     use test_cdylib as _;
+    use tests as _;
     use tokio as _;
 }
