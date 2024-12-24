@@ -4,6 +4,12 @@
 pub use pem;
 pub use x509_certificate;
 
+/// Silences `deny(unused_crate_dependencies)`.
+/// Although we don't use this dependency directly,
+/// compilation fails without it.
+#[cfg(feature = "client")]
+use k8s_openapi as _;
+
 /// X509 Certificate abstraction for serialization and deserialization
 pub mod certificate;
 /// FileSystem based storage for multiple credentials (default contents "~/.mirrord/credentials")
@@ -16,9 +22,3 @@ pub mod credentials;
 pub mod error;
 /// Public/Private key abstraction for serialization and deserialization
 pub mod key_pair;
-
-/// Silences `deny(unused_crate_dependencies)`.
-/// Although we don't use this dependency directly,
-/// compilation fails without it.
-#[cfg(feature = "client")]
-use k8s_openapi as _;

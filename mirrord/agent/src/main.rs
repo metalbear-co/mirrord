@@ -7,6 +7,12 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
+/// Silences `deny(unused_crate_dependencies)`.
+///
+/// This dependency is only used in integration tests.
+#[cfg(test)]
+use test_bin as _;
+
 mod cli;
 mod client_connection;
 mod container_handle;
@@ -29,9 +35,3 @@ mod watched_task;
 async fn main() -> crate::error::Result<()> {
     crate::entrypoint::main().await
 }
-
-/// Silences `deny(unused_crate_dependencies)`.
-///
-/// This dependency is only used in integration tests.
-#[cfg(test)]
-use test_bin as _;
