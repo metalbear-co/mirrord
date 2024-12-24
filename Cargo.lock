@@ -4476,7 +4476,6 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "mirrord-protocol",
- "paste",
  "pnet_packet",
  "semver 1.0.23",
  "serde_yaml",
