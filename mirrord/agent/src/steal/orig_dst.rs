@@ -5,7 +5,6 @@ use std::{io, net::SocketAddr};
 
 use tokio::net::TcpStream;
 
-#[cfg(target_os = "linux")]
 #[allow(unsafe_code)]
 #[tracing::instrument(level = "trace")]
 pub(super) fn orig_dst_addr(sock: &TcpStream) -> io::Result<SocketAddr> {
@@ -14,15 +13,6 @@ pub(super) fn orig_dst_addr(sock: &TcpStream) -> io::Result<SocketAddr> {
     unsafe { linux::so_original_dst(fd) }
 }
 
-#[cfg(not(target_os = "linux"))]
-pub(super) fn orig_dst_addr(_: &TcpStream) -> io::Result<SocketAddr> {
-    Err(io::Error::new(
-        io::ErrorKind::Other,
-        "SO_ORIGINAL_DST not supported on this operating system",
-    ))
-}
-
-#[cfg(target_os = "linux")]
 #[allow(unsafe_code)]
 mod linux {
     use std::{
