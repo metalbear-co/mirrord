@@ -1,8 +1,8 @@
 use std::{net::SocketAddr, sync::LazyLock};
 
-use axum::{response::IntoResponse, routing::get, Router};
+use axum::{routing::get, Router};
+use http::StatusCode;
 use prometheus::{register_int_gauge, IntGauge};
-use thiserror::Error;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
@@ -83,28 +83,18 @@ pub(crate) static UDP_OUTGOING_CONNECTION: LazyLock<IntGauge> = LazyLock::new(||
     .expect("Valid at initialization!")
 });
 
-#[derive(Error, Debug)]
-pub(crate) enum MetricsError {
-    #[error(transparent)]
-    FromUtf8(#[from] std::string::FromUtf8Error),
-
-    #[error(transparent)]
-    Prometheus(#[from] prometheus::Error),
-}
-
-impl IntoResponse for MetricsError {
-    fn into_response(self) -> axum::response::Response {
-        (http::StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
-    }
-}
-
-#[tracing::instrument(level = Level::TRACE,  ret, err)]
-async fn get_metrics() -> Result<String, MetricsError> {
+#[tracing::instrument(level = Level::TRACE, ret)]
+async fn get_metrics() -> (StatusCode, String) {
     use prometheus::TextEncoder;
 
     let metric_families = prometheus::gather();
-
-    Ok(TextEncoder.encode_to_string(&metric_families)?)
+    match TextEncoder.encode_to_string(&metric_families) {
+        Ok(response) => (StatusCode::OK, response),
+        Err(fail) => {
+            tracing::error!(?fail, "Failed GET /metrics");
+            (StatusCode::INTERNAL_SERVER_ERROR, fail.to_string())
+        }
+    }
 }
 
 #[tracing::instrument(level = Level::TRACE, skip_all, ret ,err)]
@@ -117,7 +107,9 @@ pub(crate) async fn start_metrics(
     let listener = TcpListener::bind(address)
         .await
         .map_err(AgentError::from)
-        .inspect_err(|fail| tracing::error!(?fail, "Failed to bind TCP socket for metrics server"))?;
+        .inspect_err(|fail| {
+            tracing::error!(?fail, "Failed to bind TCP socket for metrics server")
+        })?;
 
     let cancel_on_error = cancellation_token.clone();
     axum::serve(listener, app)
