@@ -56,7 +56,7 @@ use crate::{
 /// Setting this filter will make mirrord only steal requests to URIs that do not start with
 /// "/health/".
 ///
-/// With `all_of` and `any_of` you can use multiple HTTP filters at the same time.
+/// With `all_of` and `any_of`, you can use multiple HTTP filters at the same time.
 ///
 /// If you want to steal HTTP requests that match **every** pattern specified, use `all_of`.
 /// For example, this filter steals only HTTP requests to endpoint `/api/my-endpoint` that contain
