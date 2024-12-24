@@ -4127,9 +4127,7 @@ dependencies = [
  "const-random",
  "drain",
  "envfile",
- "exec",
  "futures",
- "http-body 1.0.1",
  "http-body-util",
  "humantime",
  "hyper 1.5.1",
@@ -4167,13 +4165,11 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.4",
  "tokio",
- "tokio-retry",
  "tokio-rustls 0.26.1",
  "tokio-stream",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
- "tun2",
  "which 7.0.0",
 ]
 

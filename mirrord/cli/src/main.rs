@@ -1,6 +1,7 @@
 #![feature(let_chains)]
 #![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
+#![deny(unused_crate_dependencies)]
 
 use std::{
     collections::HashMap, env::vars, ffi::CString, net::SocketAddr, os::unix::ffi::OsStrExt,
