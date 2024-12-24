@@ -100,16 +100,11 @@ impl IntoResponse for MetricsError {
 
 #[tracing::instrument(level = Level::TRACE,  ret, err)]
 async fn get_metrics() -> Result<String, MetricsError> {
-    use prometheus::{Encoder, TextEncoder};
+    use prometheus::TextEncoder;
 
     let metric_families = prometheus::gather();
 
-    let mut buffer = Vec::new();
-    TextEncoder
-        .encode(&metric_families, &mut buffer)
-        .inspect_err(|error| tracing::error!(%error, "unable to encode prometheus metrics"))?;
-
-    Ok(String::from_utf8(buffer)?)
+    Ok(TextEncoder.encode_to_string(&metric_families)?)
 }
 
 #[tracing::instrument(level = Level::TRACE, skip_all, ret ,err)]
@@ -124,12 +119,14 @@ pub(crate) async fn start_metrics(
         .map_err(AgentError::from)
         .inspect_err(|fail| tracing::error!(?fail, "Actor listener!"))?;
 
+    let cancel_on_error = cancellation_token.clone();
     axum::serve(listener, app)
         .with_graceful_shutdown(async move { cancellation_token.cancelled().await })
         .await
         .inspect_err(|fail| {
             tracing::error!(%fail, "Could not start agent metrics
-        server!")
+        server!");
+            cancel_on_error.cancel();
         })?;
 
     Ok(())
