@@ -53,7 +53,7 @@ fn main() {
 }
 
 /// To silence false positives from `deny(unused_crate_dependencies)`.
-/// 
+///
 /// These dependencies are only used in integration tests.
 #[cfg(all(test, target_os = "linux"))]
 mod integration_tests_deps {
