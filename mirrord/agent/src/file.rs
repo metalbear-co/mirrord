@@ -260,11 +260,6 @@ impl FileManager {
         }
     }
 
-    // TODO(alex) [mid]: Fails with the wrong error?
-    /*
-    mirrord_agent::file: error: IO failed for remote operation with `Failed performing `getaddrinfo` with Some(2) and kind NotFound!!
-    at mirrord/agent/src/file.rs:261
-    */
     #[tracing::instrument(level = Level::TRACE, skip(self), err(level = Level::DEBUG))]
     fn open(
         &mut self,
