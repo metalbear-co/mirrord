@@ -85,6 +85,9 @@ pub enum FileRequest {
     ReadDirBatch(ReadDirBatchRequest),
     MakeDir(MakeDirRequest),
     MakeDirAt(MakeDirAtRequest),
+    RemoveDir(RemoveDirRequest),
+    Unlink(UnlinkRequest),
+    UnlinkAt(UnlinkAtRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -130,6 +133,8 @@ pub enum FileResponse {
     ReadLink(RemoteResult<ReadLinkFileResponse>),
     ReadDirBatch(RemoteResult<ReadDirBatchResponse>),
     MakeDir(RemoteResult<()>),
+    RemoveDir(RemoteResult<()>),
+    Unlink(RemoteResult<()>),
 }
 
 /// `-agent` --> `-layer` messages.
