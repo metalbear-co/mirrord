@@ -1,3 +1,5 @@
+#![deny(unused_crate_dependencies)]
+
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
