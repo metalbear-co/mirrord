@@ -9,6 +9,7 @@
 #![feature(vec_into_raw_parts)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::indexing_slicing)]
+#![deny(unused_crate_dependencies)]
 
 //! Loaded dynamically with your local process.
 //!
@@ -99,6 +100,20 @@ use crate::{
     common::make_proxy_request_with_response, debugger_ports::DebuggerPorts, detour::DetourGuard,
     load::LoadType,
 };
+
+/// Silences `deny(unused_crate_dependencies)`.
+///
+/// These dependencies are only used in integration tests.
+#[cfg(test)]
+mod integration_tests_deps {
+    use actix_codec as _;
+    use futures as _;
+    use mirrord_intproxy as _;
+    use tempfile as _;
+    use test_cdylib as _;
+    use tests as _;
+    use tokio as _;
+}
 
 mod common;
 mod debugger_ports;

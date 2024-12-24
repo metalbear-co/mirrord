@@ -2434,27 +2434,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
-name = "flaky_test"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "046caa1f23d7f751fc4ead3d6669a77fa5fc6cf6074960ddeb6a0b0a5b83c8da"
-dependencies = [
- "flaky_test_impl",
- "futures-util",
-]
-
-[[package]]
-name = "flaky_test_impl"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85e35909c2f0552fdae5b40f1e95a7da12afb58c1f2f455a12c216c58d869abe"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "flate2"
 version = "1.0.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4127,9 +4106,7 @@ dependencies = [
  "const-random",
  "drain",
  "envfile",
- "exec",
  "futures",
- "http-body 1.0.1",
  "http-body-util",
  "humantime",
  "hyper 1.5.1",
@@ -4167,13 +4144,11 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.4",
  "tokio",
- "tokio-retry",
  "tokio-rustls 0.26.1",
  "tokio-stream",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
- "tun2",
  "which 7.0.0",
 ]
 
@@ -4211,7 +4186,6 @@ dependencies = [
  "rand",
  "rawsocket",
  "rcgen",
- "regex",
  "rstest",
  "rustls 0.23.19",
  "semver 1.0.23",
@@ -4364,17 +4338,12 @@ version = "3.128.0"
 dependencies = [
  "actix-codec",
  "async-stream",
- "base64 0.22.1",
- "bytes",
  "futures",
- "http-body 1.0.1",
- "hyper 1.5.1",
  "k8s-openapi",
  "kube",
  "mirrord-config",
  "mirrord-progress",
  "mirrord-protocol",
- "pin-project-lite",
  "rand",
  "regex",
  "rstest",
@@ -4384,7 +4353,6 @@ dependencies = [
  "thiserror 2.0.4",
  "tokio",
  "tokio-retry",
- "tower 0.5.1",
  "tracing",
 ]
 
@@ -4396,19 +4364,14 @@ dependencies = [
  "base64 0.22.1",
  "bincode",
  "bytemuck",
- "chrono",
  "ctor",
  "envfile",
  "errno 0.3.10",
  "exec",
- "fancy-regex",
- "flaky_test",
  "frida-gum",
  "futures",
  "hashbrown 0.15.2",
- "http-body 1.0.1",
  "hyper 1.5.1",
- "k8s-openapi",
  "libc",
  "mirrord-config",
  "mirrord-console",
@@ -4432,8 +4395,6 @@ dependencies = [
  "tests",
  "thiserror 2.0.4",
  "tokio",
- "tokio-stream",
- "tower 0.5.1",
  "tracing",
  "tracing-subscriber",
 ]
@@ -4478,7 +4439,6 @@ dependencies = [
  "mirrord-progress",
  "mirrord-protocol",
  "rand",
- "reqwest 0.12.9",
  "rstest",
  "schemars",
  "semver 1.0.23",
@@ -4503,7 +4463,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.13.0"
+version = "1.13.1"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -4548,7 +4508,6 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "mirrord-protocol",
- "paste",
  "pnet_packet",
  "semver 1.0.23",
  "serde_yaml",

@@ -22,12 +22,11 @@ workspace = true
 mirrord-console = { path = "../console", features = ["async-logger"] }
 mirrord-operator = { path = "../operator", features = [
     "client",
-    "license-fetch",
     "setup",
 ] }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
 mirrord-progress = { path = "../progress" }
-mirrord-kube = { path = "../kube" }
+mirrord-kube = { path = "../kube", features = ["portforward"] }
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
 mirrord-analytics = { path = "../analytics" }
@@ -37,7 +36,6 @@ mirrord-vpn = { path = "../vpn" }
 actix-codec.workspace = true
 clap.workspace = true
 envfile.workspace = true
-tun2 = { workspace = true, features = ["async"] }
 tracing.workspace = true
 serde_json.workspace = true
 serde.workspace = true
@@ -45,7 +43,6 @@ tracing-subscriber.workspace = true
 futures.workspace = true
 which.workspace = true
 semver.workspace = true
-exec.workspace = true
 reqwest.workspace = true
 const-random = "0.1.15"
 tokio = { workspace = true, features = ["rt", "net", "macros", "process"] }
@@ -67,7 +64,6 @@ rcgen.workspace = true
 rustls-pemfile.workspace = true
 tokio-rustls.workspace = true
 tokio-stream = { workspace = true, features = ["net"] }
-tokio-retry = "0.3"
 regex.workspace = true
 mid = "3.0.0"
 rand.workspace = true
@@ -82,6 +78,5 @@ mirrord-layer = { artifact = "cdylib", path = "../layer" }
 rstest.workspace = true
 hyper.workspace = true
 hyper-util = { workspace = true, "features" = ["server"] }
-http-body.workspace = true
 http-body-util.workspace = true
 kube.workspace = true

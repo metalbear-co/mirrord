@@ -27,52 +27,46 @@ mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = [
     "codec",
 ] }
 
-ctor = "0.2"
-libc.workspace = true
+base64.workspace = true
 bincode.workspace = true
+bytemuck = "1"
+ctor = "0.2"
+envfile.workspace = true
+errno = "0.3"
+frida-gum = { version = "0.15", features = ["auto-download"] }
+hashbrown = "0.15"
+hyper = { workspace = true }
+libc.workspace = true
 nix = { workspace = true, features = ["net", "process", "signal"] }
+null-terminated = "0.3"
+num-traits = "0.2"
+rand.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+socket2.workspace = true
+thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-frida-gum = { version = "0.15", features = ["auto-download"] }
-hyper = { workspace = true }
 
-serde_json.workspace = true
-
-thiserror.workspace = true
-num-traits = "0.2"
-
-rand.workspace = true
-fancy-regex.workspace = true
-regex.workspace = true
-errno = "0.3"
-socket2.workspace = true
-bytemuck = "1"
-hashbrown = "0.15"
-exec.workspace = true
+[target.'cfg(target_os = "linux")'.dependencies]
 syscalls = { version = "0.6", features = ["full"] }
-null-terminated = "0.3"
-base64.workspace = true
-envfile.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
+
+exec.workspace = true
 resolv-conf = "0.7"
 
 [dev-dependencies]
 mirrord-intproxy = { path = "../intproxy" }
-k8s-openapi.workspace = true
-chrono = { workspace = true, features = ["clock"] }
-http-body = { workspace = true }
+
+actix-codec.workspace = true
+futures.workspace = true
 rstest.workspace = true
 tempfile.workspace = true
-test-cdylib = "*"
-tower.workspace = true
-tokio = { workspace = true, features = ["rt", "net", "macros"] }
 tests = { path = "../../tests" }
-flaky_test = "0.2"
-futures.workspace = true
-actix-codec.workspace = true
-tokio-stream.workspace = true
+test-cdylib = "1"
+tokio = { workspace = true, features = ["rt", "net", "macros", "fs"] }
 
 [lib]
 crate-type = ["cdylib"]

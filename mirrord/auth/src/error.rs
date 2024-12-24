@@ -3,7 +3,6 @@ use x509_certificate::X509CertificateError;
 
 /// Errors from [`CredentialStore`](crate::credential_store::CredentialStore) and
 /// [`CredentialStoreSync`](crate::credential_store::CredentialStoreSync) operations
-#[cfg(feature = "client")]
 #[derive(Debug, Error)]
 pub enum CredentialStoreError {
     #[error("failed to parent directory for credential store file: {0}")]

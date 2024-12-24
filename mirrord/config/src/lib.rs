@@ -1,6 +1,8 @@
 #![feature(slice_concat_trait)]
 #![feature(iterator_try_collect)]
 #![warn(clippy::indexing_slicing)]
+#![deny(unused_crate_dependencies)]
+
 //! <!--${internal}-->
 //! To generate the `mirrord-schema.json` file see
 //! `tests::check_schema_file_exists_and_is_valid_or_create_it`.

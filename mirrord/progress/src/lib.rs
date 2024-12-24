@@ -1,3 +1,5 @@
+#![deny(unused_crate_dependencies)]
+
 use std::{collections::HashSet, time::Duration};
 
 use enum_dispatch::enum_dispatch;

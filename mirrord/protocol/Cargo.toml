@@ -1,6 +1,6 @@
 [package]
 name = "mirrord-protocol"
-version = "1.13.0"
+version = "1.13.1"
 authors.workspace = true
 description.workspace = true
 documentation.workspace = true
@@ -29,7 +29,6 @@ hyper = { workspace = true, features = ["client"] }
 http-serde = "2"
 http-body-util = { workspace = true }
 fancy-regex = { workspace = true }
-libc.workspace = true
 socket2.workspace = true
 semver = { workspace = true, features = ["serde"] }
 tokio-stream.workspace = true
@@ -38,4 +37,5 @@ tokio.workspace = true
 mirrord-macros = { path = "../macros" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
 nix = { workspace = true, features = ["fs"] }
