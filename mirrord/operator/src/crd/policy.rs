@@ -54,6 +54,10 @@ pub struct MirrordPolicySpec {
     /// List of features and operations blocked by this policy.
     pub block: Vec<BlockedFeature>,
 
+    /// List of environment variables that should be excluded when using mirrord.
+    ///
+    /// These environment variables won't be retieved from the target even if the user
+    /// specifies them in their `feature.env.include` mirrord config.
     pub env_vars_exclude: HashSet<String>,
 }
 
@@ -83,6 +87,10 @@ pub struct MirrordClusterPolicySpec {
     /// List of features and operations blocked by this policy.
     pub block: Vec<BlockedFeature>,
 
+    /// List of environment variables that should be excluded when using mirrord.
+    ///
+    /// These environment variables won't be retieved from the target even if the user
+    /// specifies them in their `feature.env.include` mirrord config.
     pub env_vars_exclude: HashSet<String>,
 }
 
