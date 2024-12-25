@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -51,6 +53,8 @@ pub struct MirrordPolicySpec {
     // TODO: make the k8s list type be set/map to prevent duplicates.
     /// List of features and operations blocked by this policy.
     pub block: Vec<BlockedFeature>,
+
+    pub env_vars_exclude: HashSet<String>,
 }
 
 /// Custom cluster-wide resource for policies that limit what mirrord features users can use.
@@ -78,6 +82,8 @@ pub struct MirrordClusterPolicySpec {
     // TODO: make the k8s list type be set/map to prevent duplicates.
     /// List of features and operations blocked by this policy.
     pub block: Vec<BlockedFeature>,
+
+    pub env_vars_exclude: HashSet<String>,
 }
 
 #[test]
