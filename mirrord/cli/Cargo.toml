@@ -67,6 +67,7 @@ tokio-stream = { workspace = true, features = ["net"] }
 regex.workspace = true
 mid = "3.0.0"
 rand.workspace = true
+pin-project-lite = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }

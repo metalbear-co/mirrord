@@ -1,11 +1,15 @@
 use std::{
     fs::OpenOptions,
+    future::Future,
     path::{Path, PathBuf},
     time::SystemTime,
 };
 
+use futures::StreamExt;
 use mirrord_config::LayerConfig;
 use rand::{distributions::Alphanumeric, Rng};
+use tokio::io::AsyncWriteExt;
+use tokio_stream::Stream;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 use crate::{
@@ -144,4 +148,45 @@ pub fn init_extproxy_tracing_registry(config: &LayerConfig) -> Result<(), Extern
         .map_err(|fail| {
             ExternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
         })
+}
+
+pub async fn pipe_intproxy_sidecar_logs<'s, S>(
+    config: &LayerConfig,
+    stream: S,
+) -> Result<impl Future<Output = ()> + 's, InternalProxyError>
+where
+    S: Stream<Item = std::io::Result<String>> + 's,
+{
+    let log_destination = config
+        .internal_proxy
+        .log_destination
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_logfile_path("mirrord-intproxy"));
+
+    let mut output_file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_destination)
+        .await
+        .map_err(|fail| {
+            InternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
+        })?;
+
+    Ok(async move {
+        let mut stream = std::pin::pin!(stream);
+
+        while let Some(line) = stream.next().await {
+            let result: std::io::Result<_> = try {
+                output_file.write_all(line?.as_bytes()).await?;
+                output_file.write_u8(b'\n').await?;
+
+                output_file.flush().await?;
+            };
+
+            if let Err(error) = result {
+                tracing::error!(?error, "unable to pipe logs from intproxy");
+            }
+        }
+    })
 }

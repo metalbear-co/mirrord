@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     io::Write,
     net::SocketAddr,
-    ops::Not,
     path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
@@ -15,7 +14,6 @@ use mirrord_config::{
     external_proxy::{MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV, MIRRORD_EXTERNAL_TLS_KEY_ENV},
     internal_proxy::{
         MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE_ENV, MIRRORD_INTPROXY_CLIENT_TLS_KEY_ENV,
-        MIRRORD_INTPROXY_CONTAINER_MODE_ENV,
     },
     LayerConfig, MIRRORD_CONFIG_FILE_ENV,
 };
@@ -28,20 +26,22 @@ use tokio::{
 use tracing::Level;
 
 use crate::{
-    config::{ContainerRuntime, ContainerRuntimeCommand, ExecParams, RuntimeArgs},
+    config::{ContainerRuntime, ExecParams, RuntimeArgs},
     connection::AGENT_CONNECT_INFO_ENV_KEY,
-    container::command_builder::RuntimeCommandBuilder,
+    container::{command_builder::RuntimeCommandBuilder, sidecar::Sidecar},
     error::{CliError, CliResult, ContainerError},
     execution::{
         MirrordExecution, LINUX_INJECTION_ENV_VAR, MIRRORD_CONNECT_TCP_ENV,
         MIRRORD_EXECUTION_KIND_ENV,
     },
+    logging::pipe_intproxy_sidecar_logs,
     util::MIRRORD_CONSOLE_ADDR_ENV,
 };
 
 static CONTAINER_EXECUTION_KIND: ExecutionKind = ExecutionKind::Container;
 
 mod command_builder;
+mod sidecar;
 
 /// Format [`Command`] to look like the executated command (currently without env because we don't
 /// use it in these scenarios)
@@ -149,115 +149,6 @@ fn create_self_signed_certificate(
         .map_err(ContainerError::WriteSelfSignedCertificate)?;
 
     Ok((certificate, private_key))
-}
-
-/// Create a "sidecar" container that is running `mirrord intproxy` that connects to `mirrord
-/// extproxy` running on user machine to be used by execution container (via mounting on same
-/// network)
-#[tracing::instrument(level = Level::TRACE, ret)]
-async fn create_sidecar_intproxy(
-    config: &LayerConfig,
-    base_command: &RuntimeCommandBuilder,
-    connection_info: Vec<(&str, &str)>,
-) -> Result<(String, SocketAddr), ContainerError> {
-    let mut sidecar_command = base_command.clone();
-
-    sidecar_command.add_env(MIRRORD_INTPROXY_CONTAINER_MODE_ENV, "true");
-    sidecar_command.add_envs(connection_info);
-
-    let cleanup = config.container.cli_prevent_cleanup.not().then_some("--rm");
-
-    let sidecar_container_command = ContainerRuntimeCommand::run(
-        config
-            .container
-            .cli_extra_args
-            .iter()
-            .map(String::as_str)
-            .chain(cleanup)
-            .chain(["-d", &config.container.cli_image, "mirrord", "intproxy"]),
-    );
-
-    let (runtime_binary, sidecar_args) = sidecar_command
-        .with_command(sidecar_container_command)
-        .into_command_args();
-
-    let mut sidecar_container_spawn = Command::new(&runtime_binary);
-
-    sidecar_container_spawn.args(sidecar_args);
-
-    let sidecar_container_id = exec_and_get_first_line(&mut sidecar_container_spawn)
-        .await?
-        .ok_or_else(|| {
-            ContainerError::UnsuccesfulCommandOutput(
-                format_command(&sidecar_container_spawn),
-                "stdout and stderr were empty".to_owned(),
-            )
-        })?;
-
-    // For Docker runtime sometimes the sidecar doesn't start so we double check.
-    // See [#2927](https://github.com/metalbear-co/mirrord/issues/2927)
-    if matches!(base_command.runtime(), ContainerRuntime::Docker) {
-        let mut container_inspect_command = Command::new(&runtime_binary);
-        container_inspect_command
-            .args(["inspect", &sidecar_container_id])
-            .stdout(Stdio::piped());
-
-        let container_inspect_output = container_inspect_command.output().await.map_err(|err| {
-            ContainerError::UnsuccesfulCommandOutput(
-                format_command(&container_inspect_command),
-                err.to_string(),
-            )
-        })?;
-
-        let (container_inspection,) =
-            serde_json::from_slice::<(serde_json::Value,)>(&container_inspect_output.stdout)
-                .unwrap_or_default();
-
-        let container_status = container_inspection
-            .get("State")
-            .and_then(|inspect| inspect.get("Status"));
-
-        if container_status
-            .map(|status| status == "created")
-            .unwrap_or(false)
-        {
-            let mut container_start_command = Command::new(&runtime_binary);
-
-            container_start_command
-                .args(["start", &sidecar_container_id])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
-
-            let _ = container_start_command.status().await.map_err(|err| {
-                ContainerError::UnsuccesfulCommandOutput(
-                    format_command(&container_start_command),
-                    err.to_string(),
-                )
-            })?;
-        }
-    }
-
-    // After spawning sidecar with -d flag it prints container_id, now we need the address of
-    // intproxy running in sidecar to be used by mirrord-layer in execution container
-    let intproxy_address: SocketAddr = {
-        let mut attach_command = Command::new(&runtime_binary);
-        attach_command.args(["logs", "-f", &sidecar_container_id]);
-
-        match exec_and_get_first_line(&mut attach_command).await? {
-            Some(line) => line
-                .parse()
-                .map_err(ContainerError::UnableParseProxySocketAddr)?,
-            None => {
-                return Err(ContainerError::UnsuccesfulCommandOutput(
-                    format_command(&attach_command),
-                    "stdout and stderr were empty".into(),
-                ))
-            }
-        }
-    };
-
-    Ok((sidecar_container_id, intproxy_address))
 }
 
 type TlsGuard = (NamedTempFile, NamedTempFile);
@@ -426,11 +317,13 @@ pub(crate) async fn container_command(
 
     runtime_command.add_envs(execution_info_env_without_connection_info);
 
-    let (sidecar_container_id, sidecar_intproxy_address) =
-        create_sidecar_intproxy(&config, &runtime_command, connection_info).await?;
+    let sidecar = Sidecar::create_intproxy(&config, &runtime_command, connection_info).await?;
 
-    runtime_command.add_network(format!("container:{sidecar_container_id}"));
-    runtime_command.add_volumes_from(sidecar_container_id);
+    runtime_command.add_network(sidecar.as_network());
+    runtime_command.add_volumes_from(&sidecar.container_id);
+
+    let (sidecar_intproxy_address, sidecar_intproxy_logs) = sidecar.start().await?;
+    tokio::spawn(pipe_intproxy_sidecar_logs(&config, sidecar_intproxy_logs).await?);
 
     runtime_command.add_env(LINUX_INJECTION_ENV_VAR, config.container.cli_image_lib_path);
     runtime_command.add_env(
@@ -596,11 +489,13 @@ pub(crate) async fn container_ext_command(
 
     runtime_command.add_envs(execution_info_env_without_connection_info);
 
-    let (sidecar_container_id, sidecar_intproxy_address) =
-        create_sidecar_intproxy(&config, &runtime_command, connection_info).await?;
+    let sidecar = Sidecar::create_intproxy(&config, &runtime_command, connection_info).await?;
 
-    runtime_command.add_network(format!("container:{sidecar_container_id}"));
-    runtime_command.add_volumes_from(sidecar_container_id);
+    runtime_command.add_network(sidecar.as_network());
+    runtime_command.add_volumes_from(&sidecar.container_id);
+
+    let (sidecar_intproxy_address, sidecar_intproxy_logs) = sidecar.start().await?;
+    tokio::spawn(pipe_intproxy_sidecar_logs(&config, sidecar_intproxy_logs).await?);
 
     runtime_command.add_env(LINUX_INJECTION_ENV_VAR, config.container.cli_image_lib_path);
     runtime_command.add_env(
