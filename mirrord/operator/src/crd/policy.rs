@@ -56,7 +56,7 @@ pub struct MirrordPolicySpec {
 
     /// List of environment variables that should be excluded when using mirrord.
     ///
-    /// These environment variables won't be retieved from the target even if the user
+    /// These environment variables won't be retrieved from the target even if the user
     /// specifies them in their `feature.env.include` mirrord config.
     pub env_vars_exclude: Option<HashSet<String>>,
 }
