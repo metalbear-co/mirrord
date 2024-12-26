@@ -58,7 +58,7 @@ pub struct MirrordPolicySpec {
     ///
     /// These environment variables won't be retieved from the target even if the user
     /// specifies them in their `feature.env.include` mirrord config.
-    pub env_vars_exclude: HashSet<String>,
+    pub env_vars_exclude: Option<HashSet<String>>,
 }
 
 /// Custom cluster-wide resource for policies that limit what mirrord features users can use.
@@ -91,7 +91,7 @@ pub struct MirrordClusterPolicySpec {
     ///
     /// These environment variables won't be retieved from the target even if the user
     /// specifies them in their `feature.env.include` mirrord config.
-    pub env_vars_exclude: HashSet<String>,
+    pub env_vars_exclude: Option<HashSet<String>>,
 }
 
 #[test]
