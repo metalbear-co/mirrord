@@ -303,7 +303,7 @@ async fn create_runtime_command_with_sidecar<P: Progress + Send + Sync>(
 
     runtime_command.add_envs(execution_info_env_without_connection_info);
 
-    let sidecar = Sidecar::create_intproxy(&config, &runtime_command, connection_info).await?;
+    let sidecar = Sidecar::create_intproxy(config, &runtime_command, connection_info).await?;
 
     runtime_command.add_network(sidecar.as_network());
     runtime_command.add_volumes_from(&sidecar.container_id);
