@@ -236,10 +236,7 @@ impl<R: PortRedirector> PortSubscriptions<R> {
 
                 true
             }
-            PortSubscription::Unfiltered(..) => {
-                STEAL_UNFILTERED_PORT_SUBSCRIPTION.dec();
-                false
-            }
+            PortSubscription::Unfiltered(..) => false,
             PortSubscription::Filtered(filters) => {
                 filters.remove(&client_id);
 
