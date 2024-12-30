@@ -638,8 +638,6 @@ where
         // PROTOCOLS` response.
         let mut queued_raw_data: HashMap<ClientId, Vec<Vec<u8>>> = Default::default();
 
-        STEAL_FILTERED_CONNECTION_SUBSCRIPTION.inc();
-
         loop {
             tokio::select! {
                 message = rx.recv() => match message.ok_or(ConnectionTaskError::RecvError)? {

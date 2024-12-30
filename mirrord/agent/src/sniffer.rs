@@ -246,9 +246,6 @@ where
             self.update_packet_filter()?;
         }
 
-        MIRROR_PORT_SUBSCRIPTION.dec();
-        MIRROR_CONNECTION_SUBSCRIPTION.dec();
-
         Ok(())
     }
 
@@ -289,8 +286,6 @@ where
             } => {
                 if self.port_subscriptions.subscribe(client_id, port) {
                     self.update_packet_filter()?;
-
-                    MIRROR_PORT_SUBSCRIPTION.inc();
                 }
 
                 let _ = tx.send(port);
@@ -302,8 +297,6 @@ where
             } => {
                 if self.port_subscriptions.unsubscribe(client_id, port) {
                     self.update_packet_filter()?;
-
-                    MIRROR_PORT_SUBSCRIPTION.dec();
                 }
             }
         }
