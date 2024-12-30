@@ -12,7 +12,7 @@ use std::{
 use client_connection::AgentTlsConnector;
 use dns::{DnsCommand, DnsWorker};
 use futures::TryFutureExt;
-use metrics::start_metrics;
+use metrics::{start_metrics, CLIENT_COUNT};
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use sniffer::tcp_capture::RawSocketTcpCapture;
 use tokio::{
@@ -206,6 +206,12 @@ struct ClientConnectionHandler {
     ready_for_logs: bool,
 }
 
+impl Drop for ClientConnectionHandler {
+    fn drop(&mut self) {
+        CLIENT_COUNT.dec();
+    }
+}
+
 impl ClientConnectionHandler {
     /// Initializes [`ClientConnectionHandler`].
     pub async fn new(
@@ -238,6 +244,8 @@ impl ClientConnectionHandler {
             state,
             ready_for_logs: false,
         };
+
+        CLIENT_COUNT.inc();
 
         Ok(client_handler)
     }

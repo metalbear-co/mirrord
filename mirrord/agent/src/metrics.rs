@@ -9,6 +9,14 @@ use tracing::Level;
 
 use crate::error::AgentError;
 
+pub(crate) static CLIENT_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
+    register_int_gauge!(
+        "mirrord_agent_client_count",
+        "amount of connected clients to this mirrord-agent"
+    )
+    .expect("Valid at initialization!")
+});
+
 pub(crate) static OPEN_FD_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
     register_int_gauge!(
         "mirrord_agent_open_fd_count",
