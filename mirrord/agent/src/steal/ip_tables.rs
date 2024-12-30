@@ -252,11 +252,11 @@ where
             }
         } else {
             tracing::debug!(ipv6 = ipv6, "creating standard redirect"); // TODO: change to trace.
-            match StandardRedirect::create(ipt.clone(), pod_ips, ipv6) {
+            match StandardRedirect::create(ipt.clone(), pod_ips) {
                 Err(err) => {
                     warn!("Unable to create StandardRedirect chain: {err}");
 
-                    Redirects::PrerouteFallback(PreroutingRedirect::create_prerouting(ipt.clone())?)
+                    Redirects::PrerouteFallback(PreroutingRedirect::create(ipt.clone())?)
                 }
                 Ok(standard) => Redirects::Standard(standard),
             }
@@ -285,7 +285,7 @@ where
                 Err(err) => {
                     warn!("Unable to load StandardRedirect chain: {err}");
 
-                    Redirects::PrerouteFallback(PreroutingRedirect::load_prerouting(ipt.clone())?)
+                    Redirects::PrerouteFallback(PreroutingRedirect::load(ipt.clone())?)
                 }
                 Ok(standard) => Redirects::Standard(standard),
             }
