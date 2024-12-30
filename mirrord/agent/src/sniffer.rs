@@ -142,6 +142,12 @@ pub(crate) struct TcpConnectionSniffer<T> {
     clients_closed: FuturesUnordered<ChannelClosedFuture<SniffedConnection>>,
 }
 
+impl<T> Drop for TcpConnectionSniffer<T> {
+    fn drop(&mut self) {
+        MIRROR_PORT_SUBSCRIPTION.set(0);
+    }
+}
+
 impl<T> fmt::Debug for TcpConnectionSniffer<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TcpConnectionSniffer")
@@ -251,6 +257,7 @@ where
     #[tracing::instrument(level = Level::TRACE, err)]
     fn update_packet_filter(&mut self) -> Result<(), AgentError> {
         let ports = self.port_subscriptions.get_subscribed_topics();
+        MIRROR_PORT_SUBSCRIPTION.set(ports.len() as i64);
 
         let filter = if ports.is_empty() {
             tracing::trace!("No ports subscribed, setting dummy bpf");
