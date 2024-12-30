@@ -91,7 +91,12 @@ pub struct MirrordClusterPolicySpec {
     ///
     /// These environment variables won't be retrieved from the target even if the user
     /// specifies them in their `feature.env.include` mirrord config.
-    pub env_vars_exclude: Option<HashSet<String>>,
+    ///
+    /// Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of
+    /// any character and `*` matches arbitrary many (including zero) occurrences of any character,
+    /// e.g. `DATABASE_*` will match `DATABASE_URL` and `DATABASE_PORT`.
+    #[serde(default)]
+    pub env_vars_exclude: HashSet<String>,
 }
 
 #[test]
