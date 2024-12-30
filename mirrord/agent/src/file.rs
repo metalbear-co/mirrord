@@ -710,7 +710,7 @@ impl FileManager {
         let dir_stream = path.read_dir()?.enumerate();
 
         if self.dir_streams.insert(fd, dir_stream).is_none() {
-            OPEN_FD_COUNT.dec();
+            OPEN_FD_COUNT.inc();
         }
 
         Ok(OpenDirResponse { fd })
