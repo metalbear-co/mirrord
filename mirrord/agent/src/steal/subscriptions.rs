@@ -147,6 +147,13 @@ pub struct PortSubscriptions<R: PortRedirector> {
     subscriptions: HashMap<Port, PortSubscription>,
 }
 
+impl<R: PortRedirector> Drop for PortSubscriptions<R> {
+    fn drop(&mut self) {
+        STEAL_FILTERED_PORT_SUBSCRIPTION.set(0);
+        STEAL_UNFILTERED_PORT_SUBSCRIPTION.set(0);
+    }
+}
+
 impl<R: PortRedirector> PortSubscriptions<R> {
     /// Create an empty instance of this struct.
     ///
