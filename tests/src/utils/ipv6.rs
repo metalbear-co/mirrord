@@ -56,6 +56,7 @@ pub async fn send_request_with_method(
 ) {
     let req = Request::builder()
         .method(method)
+        .header("Host", "::")
         .body(Empty::<hyper::body::Bytes>::new())
         .unwrap();
 
