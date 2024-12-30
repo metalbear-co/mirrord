@@ -152,6 +152,7 @@ impl UdpOutgoingApi {
 
                                         writers.insert(connection_id, (sink, peer_address));
                                         readers.insert(connection_id, stream);
+                                        UDP_OUTGOING_CONNECTION.inc();
 
                                         Ok(DaemonConnect {
                                             connection_id,
@@ -164,8 +165,6 @@ impl UdpOutgoingApi {
                             debug!("interceptor_task -> daemon_message {:#?}", daemon_message);
 
                             daemon_tx.send(daemon_message).await?;
-
-                            UDP_OUTGOING_CONNECTION.inc();
                         }
                         // [user] -> [layer] -> [agent] -> [remote]
                         // `user` wrote some message to the remote host.
@@ -188,11 +187,10 @@ impl UdpOutgoingApi {
                                 warn!("LayerUdpOutgoing::Write -> Failed with {:#?}", fail);
                                 writers.remove(&connection_id);
                                 readers.remove(&connection_id);
+                                UDP_OUTGOING_CONNECTION.dec();
 
                                 let daemon_message = DaemonUdpOutgoing::Close(connection_id);
                                 daemon_tx.send(daemon_message).await?;
-
-                                UDP_OUTGOING_CONNECTION.dec();
                             }
                         }
                         // [layer] -> [agent]
@@ -200,7 +198,6 @@ impl UdpOutgoingApi {
                         LayerUdpOutgoing::Close(LayerClose { ref connection_id }) => {
                             writers.remove(connection_id);
                             readers.remove(connection_id);
-
                             UDP_OUTGOING_CONNECTION.dec();
                         }
                     }
@@ -225,11 +222,10 @@ impl UdpOutgoingApi {
                             trace!("interceptor_task -> close connection {:#?}", connection_id);
                             writers.remove(&connection_id);
                             readers.remove(&connection_id);
+                            UDP_OUTGOING_CONNECTION.dec();
 
                             let daemon_message = DaemonUdpOutgoing::Close(connection_id);
                             daemon_tx.send(daemon_message).await?;
-
-                            UDP_OUTGOING_CONNECTION.dec();
                         }
                     }
                 }

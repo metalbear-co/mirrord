@@ -113,6 +113,13 @@ struct TcpOutgoingTask {
     daemon_tx: Sender<DaemonTcpOutgoing>,
 }
 
+impl Drop for TcpOutgoingTask {
+    fn drop(&mut self) {
+        let connections = self.readers.keys().chain(self.writers.keys()).count();
+        TCP_OUTGOING_CONNECTION.sub(connections as i64);
+    }
+}
+
 impl fmt::Debug for TcpOutgoingTask {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TcpOutgoingTask")
@@ -217,11 +224,10 @@ impl TcpOutgoingTask {
 
                 self.readers.remove(&connection_id);
                 self.writers.remove(&connection_id);
+                TCP_OUTGOING_CONNECTION.dec();
 
                 let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                 self.daemon_tx.send(daemon_message).await?;
-
-                TCP_OUTGOING_CONNECTION.dec();
             }
 
             // EOF occurred in one of peer connections.
@@ -252,8 +258,6 @@ impl TcpOutgoingTask {
                     self.daemon_tx
                         .send(DaemonTcpOutgoing::Close(connection_id))
                         .await?;
-
-                    TCP_OUTGOING_CONNECTION.dec();
                 }
             }
         }
@@ -292,6 +296,7 @@ impl TcpOutgoingTask {
                         connection_id,
                         ReaderStream::with_capacity(read_half, Self::READ_BUFFER_SIZE),
                     );
+                    TCP_OUTGOING_CONNECTION.inc();
 
                     Ok(DaemonConnect {
                         connection_id,
@@ -308,8 +313,6 @@ impl TcpOutgoingTask {
                 self.daemon_tx
                     .send(DaemonTcpOutgoing::Connect(daemon_connect))
                     .await?;
-
-                TCP_OUTGOING_CONNECTION.inc();
 
                 Ok(())
             }
@@ -356,8 +359,6 @@ impl TcpOutgoingTask {
                                 .send(DaemonTcpOutgoing::Close(connection_id))
                                 .await?;
 
-                            TCP_OUTGOING_CONNECTION.dec();
-
                             Ok(())
                         }
                     }
@@ -367,6 +368,7 @@ impl TcpOutgoingTask {
                     Err(error) => {
                         self.writers.remove(&connection_id);
                         self.readers.remove(&connection_id);
+                        TCP_OUTGOING_CONNECTION.dec();
 
                         tracing::trace!(
                             connection_id,
@@ -376,8 +378,6 @@ impl TcpOutgoingTask {
                         self.daemon_tx
                             .send(DaemonTcpOutgoing::Close(connection_id))
                             .await?;
-
-                        TCP_OUTGOING_CONNECTION.dec();
 
                         Ok(())
                     }
@@ -389,8 +389,8 @@ impl TcpOutgoingTask {
             LayerTcpOutgoing::Close(LayerClose { connection_id }) => {
                 self.writers.remove(&connection_id);
                 self.readers.remove(&connection_id);
-
                 TCP_OUTGOING_CONNECTION.dec();
+
                 Ok(())
             }
         }
