@@ -72,6 +72,14 @@ pub(crate) struct FileManager {
     fds_iter: RangeInclusive<u64>,
 }
 
+impl Drop for FileManager {
+    fn drop(&mut self) {
+        let descriptors =
+            self.open_files.len() + self.dir_streams.len() + self.getdents_streams.len();
+        OPEN_FD_COUNT.sub(descriptors as i64);
+    }
+}
+
 pub fn get_root_path_from_optional_pid(pid: Option<u64>) -> PathBuf {
     match pid {
         Some(pid) => PathBuf::from("/proc").join(pid.to_string()).join("root"),
