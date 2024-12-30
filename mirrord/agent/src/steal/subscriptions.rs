@@ -71,17 +71,19 @@ pub(crate) struct IptablesListener {
 #[async_trait::async_trait]
 impl PortRedirector for IptablesListener {
     type Error = AgentError;
+
+    #[tracing::instrument(skip(self), err, level=tracing::Level::DEBUG, fields(self.ipv6 = %self.ipv6))]
     async fn add_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
         let iptables = if let Some(iptables) = self.iptables.as_ref() {
             iptables
         } else {
             let safe = crate::steal::ip_tables::SafeIpTables::create(
                 if self.ipv6 {
-                    new_iptables().into()
-                } else {
                     new_ip6tables_wrapper()
+                } else {
+                    new_iptables().into()
                 },
-                self.flush_connections || self.ipv6,
+                self.flush_connections,
                 self.pod_ips.as_deref(),
                 self.ipv6,
             )
@@ -169,6 +171,7 @@ impl IpTablesRedirector {
         );
         tracing::debug!("pod IPv4 addresses: {pod_ips4:?}, pod IPv6 addresses: {pod_ips6:?}");
 
+        tracing::debug!("Creating IPv4 iptables redirection listener");
         let listener4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await
                 .inspect_err(
                     |err| tracing::debug!(%err, "Could not bind IPv4, continuing with IPv6 only."),
@@ -191,6 +194,7 @@ impl IpTablesRedirector {
                         ipv6: false,
                     })
                 });
+        tracing::debug!("Creating IPv6 iptables redirection listener");
         let listener6 = if support_ipv6 {
             TcpListener::bind((Ipv6Addr::UNSPECIFIED, 0)).await
                     .inspect_err(
@@ -265,9 +269,11 @@ impl PortRedirector for IpTablesRedirector {
     async fn add_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
         let (ipv4_listener, ipv6_listener) = self.get_listeners_mut();
         if let Some(ip4_listener) = ipv4_listener {
+            tracing::debug!("Adding IPv4 redirection from port {from}");
             ip4_listener.add_redirection(from).await?;
         }
         if let Some(ip6_listener) = ipv6_listener {
+            tracing::debug!("Adding IPv6 redirection from port {from}");
             ip6_listener.add_redirection(from).await?;
         }
         Ok(())

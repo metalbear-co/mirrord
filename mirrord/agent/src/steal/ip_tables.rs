@@ -159,7 +159,7 @@ impl IPTables for IPTablesWrapper {
         }
     }
 
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = "debug", skip(self), ret, fields(table_name=%self.table_name))] // TODO: change to trace.
     fn create_chain(&self, name: &str) -> Result<()> {
         self.tables
             .new_chain(self.table_name, name)
@@ -251,6 +251,7 @@ where
                 _ => Redirects::Mesh(MeshRedirect::create(ipt.clone(), vendor, pod_ips)?),
             }
         } else {
+            tracing::debug!(ipv6 = ipv6, "creating standard redirect"); // TODO: change to trace.
             match StandardRedirect::create(ipt.clone(), pod_ips, ipv6) {
                 Err(err) => {
                     warn!("Unable to create StandardRedirect chain: {err}");

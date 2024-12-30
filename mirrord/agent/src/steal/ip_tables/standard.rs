@@ -20,6 +20,7 @@ impl<IPT> StandardRedirect<IPT>
 where
     IPT: IPTables,
 {
+    #[tracing::instrument(skip(ipt), level = tracing::Level::DEBUG)]
     pub fn create(ipt: Arc<IPT>, pod_ips: Option<&str>, ipv6: bool) -> Result<Self> {
         let prerouting = if ipv6 {
             PreroutingRedirect::create_input(ipt.clone())?
