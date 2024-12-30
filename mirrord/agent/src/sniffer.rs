@@ -145,6 +145,7 @@ pub(crate) struct TcpConnectionSniffer<T> {
 impl<T> Drop for TcpConnectionSniffer<T> {
     fn drop(&mut self) {
         MIRROR_PORT_SUBSCRIPTION.set(0);
+        MIRROR_CONNECTION_SUBSCRIPTION.set(0);
     }
 }
 
@@ -276,8 +277,6 @@ where
                 command: SnifferCommandInner::NewClient(sender),
             } => {
                 self.handle_new_client(client_id, sender);
-
-                MIRROR_CONNECTION_SUBSCRIPTION.inc();
             }
 
             SnifferCommand {
@@ -404,6 +403,7 @@ where
                     }
                 }
 
+                MIRROR_CONNECTION_SUBSCRIPTION.inc();
                 e.insert_entry(data_tx)
             }
         };
