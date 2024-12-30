@@ -301,7 +301,7 @@ where
     /// Adds the redirect rule to iptables.
     ///
     /// Used to redirect packets when mirrord incoming feature is set to `steal`.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip(self))]
     pub(super) async fn add_redirect(
         &self,
         redirected_port: Port,

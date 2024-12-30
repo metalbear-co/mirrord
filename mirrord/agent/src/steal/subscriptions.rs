@@ -72,7 +72,7 @@ pub(crate) struct IptablesListener {
 impl PortRedirector for IptablesListener {
     type Error = AgentError;
 
-    #[tracing::instrument(skip(self), err, level=tracing::Level::DEBUG, fields(self.ipv6 = %self.ipv6))]
+    #[tracing::instrument(skip(self), err, ret, level=tracing::Level::DEBUG, fields(self.ipv6 = %self.ipv6))]
     async fn add_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
         let iptables = if let Some(iptables) = self.iptables.as_ref() {
             iptables
