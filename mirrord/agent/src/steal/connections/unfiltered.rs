@@ -22,7 +22,23 @@ pub struct UnfilteredStealTask<T> {
     pub stream: T,
 }
 
+impl<T> Drop for UnfilteredStealTask<T> {
+    fn drop(&mut self) {
+        STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.dec();
+    }
+}
+
 impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
+    pub(crate) fn new(connection_id: ConnectionId, client_id: ClientId, stream: T) -> Self {
+        STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.inc();
+
+        Self {
+            connection_id,
+            client_id,
+            stream,
+        }
+    }
+
     /// Runs this task until the managed connection is closed.
     ///
     /// # Note

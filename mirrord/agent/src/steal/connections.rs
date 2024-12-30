@@ -462,15 +462,9 @@ impl ConnectionTask {
                     })
                     .await?;
 
-                let task = UnfilteredStealTask {
-                    connection_id: self.connection_id,
-                    client_id,
-                    stream: self.connection.stream,
-                };
-
-                STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.inc();
-
-                task.run(self.tx, &mut self.rx).await
+                UnfilteredStealTask::new(self.connection_id, client_id, self.connection.stream)
+                    .run(self.tx, &mut self.rx)
+                    .await
             }
 
             PortSubscription::Filtered(filters) => {
