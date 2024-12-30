@@ -399,7 +399,6 @@ impl Application {
             Application::PythonFastApiHTTPIPv6 => {
                 vec![
                     "uvicorn",
-                    "--log-level=trace", // TODO: delete?
                     "--port=80",
                     "--host=::",
                     "--app-dir=./python-e2e/",
