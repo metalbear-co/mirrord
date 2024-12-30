@@ -238,14 +238,14 @@ impl<R: PortRedirector> PortSubscriptions<R> {
             }
             PortSubscription::Unfiltered(..) => false,
             PortSubscription::Filtered(filters) => {
-                filters.remove(&client_id);
+                if filters.remove(&client_id).is_some() {
+                    STEAL_FILTERED_PORT_SUBSCRIPTION.dec();
+                }
 
                 if filters.is_empty() {
                     e.remove();
-                    STEAL_FILTERED_PORT_SUBSCRIPTION.dec();
                     true
                 } else {
-                    STEAL_FILTERED_PORT_SUBSCRIPTION.dec();
                     false
                 }
             }

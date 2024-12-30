@@ -116,8 +116,7 @@ pub(crate) async fn start_metrics(
         .with_graceful_shutdown(async move { cancellation_token.cancelled().await })
         .await
         .inspect_err(|fail| {
-            tracing::error!(%fail, "Could not start agent metrics
-        server!");
+            tracing::error!(%fail, "Could not start agent metrics server!");
             cancel_on_error.cancel();
         })?;
 

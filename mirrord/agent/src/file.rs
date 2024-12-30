@@ -718,7 +718,7 @@ impl FileManager {
         let dir_stream = path.read_dir()?.enumerate();
 
         if self.dir_streams.insert(fd, dir_stream).is_none() {
-            OPEN_FD_COUNT.dec();
+            OPEN_FD_COUNT.inc();
         }
 
         Ok(OpenDirResponse { fd })
@@ -781,7 +781,7 @@ impl FileManager {
                     let current_and_parent = Self::get_current_and_parent_entries(dir);
                     let stream =
                         GetDEnts64Stream::new(dir.read_dir()?, current_and_parent).peekable();
-                    // TODO(alex) [mid]: Do we also want to count streams of stuffs?
+                    OPEN_FD_COUNT.inc();
                     Ok(e.insert(stream))
                 }
             },
