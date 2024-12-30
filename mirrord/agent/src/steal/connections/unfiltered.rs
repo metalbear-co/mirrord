@@ -54,8 +54,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
         let mut buf = BytesMut::with_capacity(64 * 1024);
         let mut reading_closed = false;
 
-        STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.inc();
-
         loop {
             tokio::select! {
                 read = self.stream.read_buf(&mut buf), if !reading_closed => match read {
