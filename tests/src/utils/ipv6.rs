@@ -59,6 +59,8 @@ pub async fn send_request_with_method(
         .body(Empty::<hyper::body::Bytes>::new())
         .unwrap();
 
+    println!("Request: {:?}", req);
+
     let res = request_sender.send_request(req).await.unwrap();
     println!("Response: {:?}", res);
     assert_eq!(res.status(), hyper::StatusCode::OK);

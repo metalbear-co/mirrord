@@ -14,7 +14,7 @@ use tokio::{
 
 use super::{
     http::HttpFilter,
-    ip_tables::{new_ip6tables_wrapper, new_iptables, IPTablesWrapper, SafeIpTables},
+    ip_tables::{new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables},
 };
 use crate::{error::AgentError, util::ClientId};
 
@@ -79,10 +79,11 @@ impl PortRedirector for IptablesListener {
         } else {
             let safe = crate::steal::ip_tables::SafeIpTables::create(
                 if self.ipv6 {
-                    new_ip6tables_wrapper()
+                    new_ip6tables()
                 } else {
-                    new_iptables().into()
-                },
+                    new_iptables()
+                }
+                .into(),
                 self.flush_connections,
                 self.pod_ips.as_deref(),
                 self.ipv6,

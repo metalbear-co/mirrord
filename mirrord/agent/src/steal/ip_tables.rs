@@ -76,7 +76,6 @@ pub static IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL: LazyLock<String> = LazyLock::ne
 });
 
 const IPTABLES_TABLE_NAME: &str = "nat";
-const IP6TABLES_TABLE_NAME: &str = "filter";
 
 #[cfg_attr(test, allow(clippy::indexing_slicing))] // `mockall::automock` violates our clippy rules
 #[cfg_attr(test, mockall::automock)]
@@ -113,8 +112,8 @@ pub fn new_iptables() -> iptables::IPTables {
 }
 
 /// wrapper around iptables::new that uses nft or legacy based on env
-pub fn new_ip6tables_wrapper() -> IPTablesWrapper {
-    let ip6tables = if let Ok(val) = std::env::var("MIRRORD_AGENT_NFTABLES")
+pub fn new_ip6tables() -> iptables::IPTables {
+    if let Ok(val) = std::env::var("MIRRORD_AGENT_NFTABLES")
         && val.to_lowercase() == "true"
     {
         // TODO: check if there is such a binary.
@@ -123,11 +122,7 @@ pub fn new_ip6tables_wrapper() -> IPTablesWrapper {
         // TODO: check if there is such a binary.
         iptables::new_with_cmd("/usr/sbin/ip6tables-legacy")
     }
-    .expect("IPTables initialization may not fail!");
-    IPTablesWrapper {
-        table_name: IP6TABLES_TABLE_NAME,
-        tables: Arc::new(ip6tables),
-    }
+    .expect("IPTables initialization may not fail!")
 }
 
 impl Debug for IPTablesWrapper {
