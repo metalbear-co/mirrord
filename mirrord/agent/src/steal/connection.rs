@@ -673,11 +673,7 @@ impl TcpConnectionStealer {
             }
 
             Command::PortSubscribe(port_steal) => {
-                if self.port_subscribe(client_id, port_steal).await? {
-                    STEAL_FILTERED_PORT_SUBSCRIPTION.inc();
-                } else {
-                    STEAL_UNFILTERED_PORT_SUBSCRIPTION.inc();
-                }
+                self.port_subscribe(client_id, port_steal).await?;
             }
 
             Command::PortUnsubscribe(port) => {
