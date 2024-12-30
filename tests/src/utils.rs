@@ -399,6 +399,7 @@ impl Application {
             Application::PythonFastApiHTTPIPv6 => {
                 vec![
                     "uvicorn",
+                    "--log-level=trace", // TODO: delete?
                     "--port=80",
                     "--host=::",
                     "--app-dir=./python-e2e/",
@@ -589,7 +590,7 @@ pub async fn run_exec(
     // base_env.insert("MIRRORD_AGENT_IMAGE", "test");
     base_env.insert(
         "MIRRORD_AGENT_IMAGE",
-        "docker.io/t4lz/mirrord-agent:2024-12-30_3",
+        "docker.io/t4lz/mirrord-agent:2024-12-30_5",
     );
     base_env.insert("MIRRORD_AGENT_TTL", "180"); // TODO: delete
     base_env.insert("MIRRORD_CHECK_VERSION", "false");
