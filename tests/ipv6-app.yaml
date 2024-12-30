@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: py-serv-deployment
+  labels:
+    app: py-serv
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: py-serv
+  template:
+    metadata:
+      labels:
+        app: py-serv
+    spec:
+      containers:
+        - name: py-serv
+          image: docker.io/t4lz/mirrord-pytest:1204 # TODO: change to metalbear's image.
+          ports:
+            - containerPort: 80
+          env:
+            - name: MIRRORD_FAKE_VAR_FIRST
+              value: mirrord.is.running
+            - name: MIRRORD_FAKE_VAR_SECOND
+              value: "7777"
+            - name: HOST
+              value: "::"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: py-serv
+  name: py-serv
+spec:
+  ipFamilyPolicy: SingleStack
+  ipFamilies:
+    - IPv6
+  ports:
+    - port: 80
+      protocol: TCP
+      targetPort: 80
+      nodePort: 30000
+  selector:
+    app: py-serv
+  sessionAffinity: None
+  type: NodePort
