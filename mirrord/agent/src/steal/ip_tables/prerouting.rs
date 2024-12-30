@@ -10,48 +10,24 @@ use crate::{
 
 pub(crate) struct PreroutingRedirect<IPT: IPTables> {
     managed: IPTableChain<IPT>,
-    chain_name: &'static str,
 }
 
 impl<IPT> PreroutingRedirect<IPT>
 where
     IPT: IPTables,
 {
-    pub fn create_prerouting(ipt: Arc<IPT>) -> Result<Self> {
-        Self::create(ipt, "PREROUTING")
+    const ENTRYPOINT: &'static str = "PREROUTING";
+
+    pub fn create(ipt: Arc<IPT>) -> Result<Self> {
+        let managed = IPTableChain::create(ipt, IPTABLE_PREROUTING.to_string())?;
+
+        Ok(PreroutingRedirect { managed })
     }
 
-    pub fn create_input(ipt: Arc<IPT>) -> Result<Self> {
-        Self::create(ipt, "INPUT")
-    }
-
-    #[tracing::instrument(skip(ipt), level = tracing::Level::DEBUG)] // TODO: change to trace.
-    pub fn create(ipt: Arc<IPT>, chain_name: &'static str) -> Result<Self> {
-        let managed = IPTableChain::create(ipt, IPTABLE_PREROUTING.to_string()).inspect_err(
-            |e| tracing::error!(%e, "Could not create iptables chain \"{chain_name}\"."),
-        )?;
-
-        Ok(PreroutingRedirect {
-            managed,
-            chain_name,
-        })
-    }
-
-    pub fn load_prerouting(ipt: Arc<IPT>) -> Result<Self> {
-        Self::load(ipt, "PREROUTING")
-    }
-
-    pub fn load_input(ipt: Arc<IPT>) -> Result<Self> {
-        Self::load(ipt, "INPUT")
-    }
-
-    pub fn load(ipt: Arc<IPT>, chain_name: &'static str) -> Result<Self> {
+    pub fn load(ipt: Arc<IPT>) -> Result<Self> {
         let managed = IPTableChain::load(ipt, IPTABLE_PREROUTING.to_string())?;
 
-        Ok(PreroutingRedirect {
-            managed,
-            chain_name,
-        })
+        Ok(PreroutingRedirect { managed })
     }
 }
 
@@ -62,7 +38,7 @@ where
 {
     async fn mount_entrypoint(&self) -> Result<()> {
         self.managed.inner().add_rule(
-            &self.chain_name,
+            Self::ENTRYPOINT,
             &format!("-j {}", self.managed.chain_name()),
         )?;
 
@@ -71,14 +47,13 @@ where
 
     async fn unmount_entrypoint(&self) -> Result<()> {
         self.managed.inner().remove_rule(
-            &self.chain_name,
+            Self::ENTRYPOINT,
             &format!("-j {}", self.managed.chain_name()),
         )?;
 
         Ok(())
     }
 
-    #[tracing::instrument(skip(self), level = tracing::Level::DEBUG)] // TODO: change to trace.
     async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
@@ -139,8 +114,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let prerouting =
-            PreroutingRedirect::create_prerouting(Arc::new(mock)).expect("Unable to create");
+        let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
 
         assert!(prerouting.add_redirect(69, 420).await.is_ok());
     }
@@ -177,8 +151,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let prerouting =
-            PreroutingRedirect::create_prerouting(Arc::new(mock)).expect("Unable to create");
+        let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
 
         assert!(prerouting.add_redirect(69, 420).await.is_ok());
         assert!(prerouting.add_redirect(169, 1420).await.is_ok());
@@ -206,8 +179,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let prerouting =
-            PreroutingRedirect::create_prerouting(Arc::new(mock)).expect("Unable to create");
+        let prerouting = PreroutingRedirect::create(Arc::new(mock)).expect("Unable to create");
 
         assert!(prerouting.remove_redirect(69, 420).await.is_ok());
     }
