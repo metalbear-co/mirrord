@@ -20,6 +20,7 @@ where
 {
     const ENTRYPOINT: &'static str = "OUTPUT";
 
+    #[tracing::instrument(skip(ipt), level = "debug", ret)] // TODO: change to trace.
     pub fn create(ipt: Arc<IPT>, chain_name: String, pod_ips: Option<&str>) -> Result<Self> {
         let managed = IPTableChain::create(ipt, chain_name)?;
 
