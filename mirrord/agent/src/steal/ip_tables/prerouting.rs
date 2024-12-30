@@ -25,9 +25,11 @@ where
         Self::create(ipt, "INPUT")
     }
 
-    #[tracing::instrument(level = "debug", skip(ipt), ret)]
+    #[tracing::instrument(skip(ipt), level = tracing::Level::DEBUG)] // TODO: change to trace.
     pub fn create(ipt: Arc<IPT>, chain_name: &'static str) -> Result<Self> {
-        let managed = IPTableChain::create(ipt, IPTABLE_PREROUTING.to_string())?;
+        let managed = IPTableChain::create(ipt, IPTABLE_PREROUTING.to_string()).inspect_err(
+            |e| tracing::error!(%e, "Could not create iptables chain \"{chain_name}\"."),
+        )?;
 
         Ok(PreroutingRedirect {
             managed,
@@ -76,6 +78,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(skip(self), level = tracing::Level::DEBUG)] // TODO: change to trace.
     async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");

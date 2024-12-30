@@ -61,6 +61,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip(self), ret, err)]
     async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
         self.prerouting
             .add_redirect(redirected_port, target_port)
