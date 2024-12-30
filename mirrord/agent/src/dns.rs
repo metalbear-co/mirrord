@@ -18,6 +18,7 @@ use tracing::Level;
 
 use crate::{
     error::{AgentError, AgentResult},
+    metrics::DNS_REQUEST_COUNT,
     watched_task::TaskStatus,
 };
 
@@ -187,6 +188,7 @@ impl DnsApi {
         }
 
         self.responses.push_back(response_rx);
+        DNS_REQUEST_COUNT.inc();
 
         Ok(())
     }
@@ -208,6 +210,8 @@ impl DnsApi {
                 kind: ResolveErrorKindInternal::Unknown,
             }),
         });
+
+        DNS_REQUEST_COUNT.dec();
 
         Ok(GetAddrInfoResponse(response))
     }

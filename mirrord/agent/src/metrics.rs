@@ -17,6 +17,14 @@ pub(crate) static CLIENT_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
     .expect("Valid at initialization!")
 });
 
+pub(crate) static DNS_REQUEST_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
+    register_int_gauge!(
+        "mirrord_agent_dns_request_count",
+        "amount of in-progress dns requests in the mirrord-agent"
+    )
+    .expect("Valid at initialization!")
+});
+
 pub(crate) static OPEN_FD_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
     register_int_gauge!(
         "mirrord_agent_open_fd_count",
