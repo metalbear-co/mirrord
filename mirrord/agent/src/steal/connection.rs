@@ -33,6 +33,7 @@ use tracing::{warn, Level};
 
 use crate::{
     error::{AgentError, AgentResult},
+    metrics::HTTP_REQUEST_IN_PROGRESS_COUNT,
     steal::{
         connections::{
             ConnectionMessageIn, ConnectionMessageOut, StolenConnection, StolenConnections,
@@ -55,6 +56,22 @@ struct MatchedHttpRequest {
 }
 
 impl MatchedHttpRequest {
+    fn new(
+        connection_id: ConnectionId,
+        port: Port,
+        request_id: RequestId,
+        request: Request<Incoming>,
+    ) -> Self {
+        HTTP_REQUEST_IN_PROGRESS_COUNT.inc();
+
+        Self {
+            connection_id,
+            port,
+            request_id,
+            request,
+        }
+    }
+
     async fn into_serializable(self) -> AgentResult<HttpRequest<InternalHttpBody>, hyper::Error> {
         let (
             Parts {
@@ -258,6 +275,7 @@ impl Client {
             }
         });
 
+        HTTP_REQUEST_IN_PROGRESS_COUNT.dec();
         true
     }
 }
@@ -518,12 +536,7 @@ impl TcpConnectionStealer {
                     return Ok(());
                 }
 
-                let matched_request = MatchedHttpRequest {
-                    connection_id,
-                    request,
-                    request_id: id,
-                    port,
-                };
+                let matched_request = MatchedHttpRequest::new(connection_id, port, id, request);
 
                 if !client.send_request_async(matched_request) {
                     self.connections

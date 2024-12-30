@@ -83,6 +83,14 @@ pub(crate) static STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION: LazyLock<IntGauge> =
         .expect("Valid at initialization!")
     });
 
+pub(crate) static HTTP_REQUEST_IN_PROGRESS_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
+    register_int_gauge!(
+        "mirrord_agent_http_request_in_progress_count",
+        "amount of in-progress http requests in the mirrord-agent"
+    )
+    .expect("Valid at initialization!")
+});
+
 pub(crate) static TCP_OUTGOING_CONNECTION: LazyLock<IntGauge> = LazyLock::new(|| {
     register_int_gauge!(
         "mirrord_agent_tcp_outgoing_connection_count",
