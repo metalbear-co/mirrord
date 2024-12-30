@@ -374,6 +374,7 @@ pub struct FilteredStealTask<T> {
     /// For safely downcasting the IO stream after an HTTP upgrade. See [`Upgraded::downcast`].
     _io_type: PhantomData<fn() -> T>,
 
+    /// Helps us figuring out if we should update some metrics in the `Drop` implementation.
     metrics_updated: bool,
 }
 
