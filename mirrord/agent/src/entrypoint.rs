@@ -509,9 +509,12 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     if let Some(metrics_address) = args.metrics {
         let cancellation_token = cancellation_token.clone();
         tokio::spawn(async move {
-            start_metrics(metrics_address, cancellation_token)
+            start_metrics(metrics_address, cancellation_token.clone())
                 .await
-                .inspect_err(|fail| tracing::error!(?fail, "Failed starting metrics server!"))
+                .inspect_err(|fail| {
+                    tracing::error!(?fail, "Failed starting metrics server!");
+                    cancellation_token.cancel();
+                })
         });
     }
 
