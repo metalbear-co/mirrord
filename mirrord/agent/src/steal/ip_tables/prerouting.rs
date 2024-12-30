@@ -25,6 +25,7 @@ where
         Self::create(ipt, "INPUT")
     }
 
+    #[tracing::instrument(level = "debug", skip(ipt), ret)]
     pub fn create(ipt: Arc<IPT>, chain_name: &'static str) -> Result<Self> {
         let managed = IPTableChain::create(ipt, IPTABLE_PREROUTING.to_string())?;
 
