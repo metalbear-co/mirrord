@@ -255,6 +255,8 @@ impl TcpOutgoingTask {
                         "Layer connection is shut down as well, sending close message.",
                     );
 
+                    TCP_OUTGOING_CONNECTION.dec();
+
                     self.daemon_tx
                         .send(DaemonTcpOutgoing::Close(connection_id))
                         .await?;
@@ -354,6 +356,7 @@ impl TcpOutgoingTask {
                                 connection_id,
                                 "Peer connection is shut down as well, sending close message to the client.",
                             );
+                            TCP_OUTGOING_CONNECTION.dec();
 
                             self.daemon_tx
                                 .send(DaemonTcpOutgoing::Close(connection_id))
