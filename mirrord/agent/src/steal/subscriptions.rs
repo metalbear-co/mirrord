@@ -56,7 +56,7 @@ pub trait PortRedirector {
 pub(crate) struct IptablesListener {
     /// For altering iptables rules.
     iptables: Option<SafeIpTables<IPTablesWrapper>>,
-    /// Port of [`IpTablesRedirector::listener`].
+    /// Port of [`listener`](Self::listener).
     redirect_to: Port,
     /// Listener to which redirect all connections.
     listener: TcpListener,
