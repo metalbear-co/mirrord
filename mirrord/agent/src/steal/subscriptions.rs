@@ -195,7 +195,14 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     ) -> Result<RemoteResult<Port>, R::Error> {
         let add_redirect = match self.subscriptions.entry(port) {
             Entry::Occupied(mut e) => {
+                let filtered = filter.is_some();
                 if e.get_mut().try_extend(client_id, filter) {
+                    if filtered {
+                        STEAL_FILTERED_PORT_SUBSCRIPTION.inc();
+                    } else {
+                        STEAL_UNFILTERED_PORT_SUBSCRIPTION.inc();
+                    }
+
                     Ok(false)
                 } else {
                     Err(ResponseError::PortAlreadyStolen(port))
@@ -203,6 +210,12 @@ impl<R: PortRedirector> PortSubscriptions<R> {
             }
 
             Entry::Vacant(e) => {
+                if filter.is_some() {
+                    STEAL_FILTERED_PORT_SUBSCRIPTION.inc();
+                } else {
+                    STEAL_UNFILTERED_PORT_SUBSCRIPTION.inc();
+                }
+
                 e.insert(PortSubscription::new(client_id, filter));
                 Ok(true)
             }
