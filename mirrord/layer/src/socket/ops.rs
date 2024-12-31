@@ -130,10 +130,8 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
         Ok(())
     }?;
 
-    if domain == libc::AF_INET6 {
-        if crate::setup().layer_config().feature.network.ipv6.not() {
-            return Detour::Error(HookError::SocketUnsuportedIpv6);
-        }
+    if domain == libc::AF_INET6 && crate::setup().layer_config().feature.network.ipv6.not() {
+        return Detour::Error(HookError::SocketUnsuportedIpv6);
     }
 
     let socket_result = unsafe { FN_SOCKET(domain, type_, protocol) };
