@@ -126,12 +126,16 @@ impl DnsWorker {
         let etc_path = self.etc_path.clone();
         let timeout = self.timeout;
         let attempts = self.attempts;
+
+        DNS_REQUEST_COUNT.inc();
+
         let lookup_future = async move {
             let result = Self::do_lookup(etc_path, message.request.node, attempts, timeout).await;
 
             if let Err(result) = message.response_tx.send(result) {
                 tracing::error!(?result, "Failed to send query response");
             }
+            DNS_REQUEST_COUNT.dec();
         };
 
         tokio::spawn(lookup_future);
@@ -188,7 +192,6 @@ impl DnsApi {
         }
 
         self.responses.push_back(response_rx);
-        DNS_REQUEST_COUNT.inc();
 
         Ok(())
     }
@@ -210,8 +213,6 @@ impl DnsApi {
                 kind: ResolveErrorKindInternal::Unknown,
             }),
         });
-
-        DNS_REQUEST_COUNT.dec();
 
         Ok(GetAddrInfoResponse(response))
     }
