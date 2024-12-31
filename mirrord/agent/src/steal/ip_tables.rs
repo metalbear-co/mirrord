@@ -424,7 +424,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::create(mock, false, None)
+        let ipt = SafeIpTables::create(mock, false, None, false)
             .await
             .expect("Create Failed");
 
@@ -557,7 +557,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::create(mock, false, None)
+        let ipt = SafeIpTables::create(mock, false, None, false)
             .await
             .expect("Create Failed");
 
