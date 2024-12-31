@@ -1489,13 +1489,13 @@ pub async fn service_for_mirrord_ls(
             .unwrap();
     watch_resource_exists(&job_api, &name).await;
 
-    let target = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
+    let pod_name = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
         .await
         .unwrap();
 
     let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
 
-    await_condition(pod_api, &target, is_pod_running())
+    await_condition(pod_api, &pod_name, is_pod_running())
         .await
         .unwrap();
 
@@ -1507,7 +1507,6 @@ pub async fn service_for_mirrord_ls(
     KubeService {
         name,
         namespace: namespace.to_string(),
-        target: format!("pod/{target}/container/{CONTAINER_NAME}"),
         guards: vec![
             pod_guard,
             service_guard,
@@ -1516,6 +1515,7 @@ pub async fn service_for_mirrord_ls(
             job_guard,
         ],
         namespace_guard,
+        pod_name,
     }
 }
 
