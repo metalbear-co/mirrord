@@ -1134,6 +1134,7 @@ pub async fn service_with_env(
 /// This behavior can be changed, see [`PRESERVE_FAILED_ENV_NAME`].
 /// * `randomize_name` - whether a random suffix should be added to the end of the resource names
 /// * `env` - `Value`, should be `Value::Array` of kubernetes container env var definitions.
+#[allow(clippy::too_many_arguments)]
 async fn internal_service(
     namespace: &str,
     service_type: &str,
