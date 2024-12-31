@@ -54,7 +54,8 @@ pub struct MirrordPolicySpec {
     /// List of features and operations blocked by this policy.
     pub block: Vec<BlockedFeature>,
 
-    /// Controls how mirrord-operator handles user requests to fetch environment variables from the target.
+    /// Controls how mirrord-operator handles user requests to fetch environment variables from the
+    /// target.
     #[serde(default)]
     pub env: EnvPolicy,
 }
@@ -85,7 +86,8 @@ pub struct MirrordClusterPolicySpec {
     /// List of features and operations blocked by this policy.
     pub block: Vec<BlockedFeature>,
 
-    /// Controls how mirrord-operator handles user requests to fetch environment variables from the target.
+    /// Controls how mirrord-operator handles user requests to fetch environment variables from the
+    /// target.
     #[serde(default)]
     pub env: EnvPolicy,
 }
