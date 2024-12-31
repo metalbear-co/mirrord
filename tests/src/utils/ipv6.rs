@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use http_body_util::{BodyExt, Empty};
 use hyper::{
     client::{conn, conn::http1::SendRequest},
