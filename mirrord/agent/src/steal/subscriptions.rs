@@ -233,22 +233,6 @@ impl IpTablesRedirector {
         }
     }
 
-    pub(crate) fn get_ipv4_listener_mut(&mut self) -> Option<&mut IptablesListener> {
-        match self {
-            IpTablesRedirector::Ipv6Only(_) => None,
-            IpTablesRedirector::Dual { ipv4_listener, .. }
-            | IpTablesRedirector::Ipv4Only(ipv4_listener) => Some(ipv4_listener),
-        }
-    }
-
-    pub(crate) fn get_ipv6_listener_mut(&mut self) -> Option<&mut IptablesListener> {
-        match self {
-            IpTablesRedirector::Ipv4Only(_) => None,
-            IpTablesRedirector::Dual { ipv6_listener, .. }
-            | IpTablesRedirector::Ipv6Only(ipv6_listener) => Some(ipv6_listener),
-        }
-    }
-
     pub(crate) fn get_listeners_mut(
         &mut self,
     ) -> (Option<&mut IptablesListener>, Option<&mut IptablesListener>) {
