@@ -71,7 +71,7 @@ mod steal_tests {
         application.assert(&process).await;
     }
 
-    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
+    #[ignore] // Needs special cluster setup, so ignore by default.
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
