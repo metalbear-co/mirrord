@@ -275,7 +275,6 @@ impl Client {
             }
         });
 
-        HTTP_REQUEST_IN_PROGRESS_COUNT.dec();
         true
     }
 }
