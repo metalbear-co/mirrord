@@ -589,10 +589,16 @@ impl FileManager {
     /// on `close_dir` of an fd.
     #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(crate) fn close_dir(&mut self, fd: u64) -> Option<FileResponse> {
-        if self.dir_streams.remove(&fd).is_none() && self.getdents_streams.remove(&fd).is_none() {
-            error!("FileManager::close_dir -> fd {:#?} not found", fd);
-        } else {
+        let closed_dir_stream = self.dir_streams.remove(&fd);
+        let closed_getdents_stream = self.getdents_streams.remove(&fd);
+
+        if closed_dir_stream.is_some() && closed_getdents_stream.is_some() {
             OPEN_FD_COUNT.dec();
+            OPEN_FD_COUNT.dec();
+        } else if closed_dir_stream.is_some() || closed_getdents_stream.is_some() {
+            OPEN_FD_COUNT.dec();
+        } else {
+            error!("FileManager::close_dir -> fd {:#?} not found", fd);
         }
 
         None
