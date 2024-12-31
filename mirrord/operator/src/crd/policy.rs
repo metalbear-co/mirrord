@@ -102,7 +102,7 @@ pub struct EnvPolicy {
     /// Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of
     /// any character and `*` matches arbitrary many (including zero) occurrences of any character,
     /// e.g. `DATABASE_*` will match `DATABASE_URL` and `DATABASE_PORT`.
-    exclude: HashSet<String>,
+    pub exclude: HashSet<String>,
 }
 
 #[test]
