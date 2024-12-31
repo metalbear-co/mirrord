@@ -58,6 +58,9 @@ pub struct MirrordPolicySpec {
     /// target.
     #[serde(default)]
     pub env: EnvPolicy,
+
+    #[serde(default)]
+    pub fs: FsPolicy,
 }
 
 /// Custom cluster-wide resource for policies that limit what mirrord features users can use.
@@ -90,6 +93,9 @@ pub struct MirrordClusterPolicySpec {
     /// target.
     #[serde(default)]
     pub env: EnvPolicy,
+
+    #[serde(default)]
+    pub fs: FsPolicy,
 }
 
 /// Policy for controlling environment variables access from mirrord instances.
@@ -104,7 +110,24 @@ pub struct EnvPolicy {
     /// Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of
     /// any character and `*` matches arbitrary many (including zero) occurrences of any character,
     /// e.g. `DATABASE_*` will match `DATABASE_URL` and `DATABASE_PORT`.
+    #[serde(default)]
     pub exclude: HashSet<String>,
+}
+
+#[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub struct FsPolicy {
+    #[serde(default)]
+    pub read_only: HashSet<String>,
+
+    #[serde(default)]
+    pub read_write: HashSet<String>,
+
+    #[serde(default)]
+    pub local: HashSet<String>,
+
+    #[serde(default)]
+    pub not_found: HashSet<String>,
 }
 
 #[test]
