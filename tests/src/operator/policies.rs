@@ -347,7 +347,7 @@ async fn run_mirrord_and_verify_mirror_result(kube_service: &KubeService, expect
 
     let test_proc = application
         .run(
-            &kube_service.target,
+            &kube_service.pod_container_target(),
             Some(&kube_service.namespace),
             Some(vec!["--fs-mode=local"]),
             None,
