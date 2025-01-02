@@ -18,7 +18,6 @@ use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
 use kube::Client;
-use miette::JSONReportHandler;
 use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, NullReporter, Reporter,
 };
@@ -45,7 +44,6 @@ use regex::Regex;
 use semver::{Version, VersionReq};
 use serde_json::json;
 use tracing::{error, info, warn};
-use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 use which::which;
 
 mod config;
@@ -58,6 +56,7 @@ mod extension;
 mod external_proxy;
 mod extract;
 mod internal_proxy;
+mod logging;
 mod operator;
 pub mod port_forward;
 mod teams;
@@ -650,21 +649,8 @@ fn main() -> miette::Result<()> {
 
     let (signal, watch) = drain::channel();
 
-    // There are situations where even if running "ext" commands that shouldn't log, we want those
-    // to log to be able to debug issues.
-    let force_log = std::env::var("MIRRORD_FORCE_LOG")
-        .map(|s| s.parse().unwrap_or(false))
-        .unwrap_or(false);
-
     let res: CliResult<(), CliError> = rt.block_on(async move {
-        if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
-            mirrord_console::init_async_logger(&console_addr, watch.clone(), 124).await?;
-        } else if force_log || !init_ext_error_handler(&cli.commands) {
-            registry()
-                .with(fmt::layer().with_writer(std::io::stderr))
-                .with(EnvFilter::from_default_env())
-                .init();
-        }
+        logging::init_tracing_registry(&cli.commands, watch.clone()).await?;
 
         match cli.commands {
             Commands::Exec(args) => exec(&args, watch).await?,
@@ -718,19 +704,6 @@ fn main() -> miette::Result<()> {
     });
 
     res.map_err(Into::into)
-}
-
-// only ls and ext commands need the errors in json format
-// error logs are disabled for extensions
-fn init_ext_error_handler(commands: &Commands) -> bool {
-    match commands {
-        Commands::ListTargets(_) | Commands::ExtensionExec(_) => {
-            let _ = miette::set_hook(Box::new(|_| Box::new(JSONReportHandler::new())));
-            true
-        }
-        Commands::InternalProxy { .. } | Commands::ExternalProxy { .. } => true,
-        _ => false,
-    }
 }
 
 async fn prompt_outdated_version(progress: &ProgressTracker) {

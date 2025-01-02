@@ -63,10 +63,11 @@ tempfile.workspace = true
 rcgen.workspace = true
 rustls-pemfile.workspace = true
 tokio-rustls.workspace = true
-tokio-stream = { workspace = true, features = ["net"] }
+tokio-stream = { workspace = true, features = ["io-util", "net"] }
 regex.workspace = true
 mid = "3.0.0"
 rand.workspace = true
+
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mirrord-sip = { path = "../sip" }
