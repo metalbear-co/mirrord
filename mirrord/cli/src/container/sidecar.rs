@@ -125,6 +125,9 @@ impl Sidecar {
     }
 }
 
+// The use pin_project is to have a simple wrapper instead of unpining and repining for accessing
+// `Pin<&mut Lines<BufReader<ChildStdout>>>` and `Pin<&mut Lines<BufReader<ChildStderr>>>` as in
+// accordance to their underlying `Stream` impl.
 pin_project! {
     #[derive(Debug)]
     pub(crate) struct SidecarLogs {
