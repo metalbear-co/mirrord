@@ -396,7 +396,7 @@ impl ClientConnectionHandler {
     /// Handles incoming messages from the connected client (`mirrord-layer`).
     ///
     /// Returns `false` if the client disconnected.
-    #[tracing::instrument(level = Level::INFO, skip(self), ret, err(level = Level::DEBUG))]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::DEBUG))]
     async fn handle_client_message(&mut self, message: ClientMessage) -> Result<bool> {
         match message {
             ClientMessage::FileRequest(req) => {
