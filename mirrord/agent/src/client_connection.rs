@@ -208,7 +208,7 @@ enum ConnectionFramed {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
+    use std::sync::{Arc, Once};
 
     use futures::StreamExt;
     use mirrord_protocol::ClientCodec;
@@ -220,10 +220,19 @@ mod test {
 
     use super::*;
 
+    static CRYPTO_PROVIDER: Once = Once::new();
+
     /// Verifies that [`AgentTlsConnector`] correctly accepts a
     /// connection from a server using the provided certificate.
     #[tokio::test]
     async fn agent_tls_connector_valid_cert() {
+        CRYPTO_PROVIDER.call_once(|| {
+            rustls::crypto::CryptoProvider::install_default(
+                rustls::crypto::aws_lc_rs::default_provider(),
+            )
+            .expect("Failed to install crypto provider")
+        });
+
         let cert = rcgen::generate_simple_self_signed(vec!["operator".to_string()]).unwrap();
         let cert_bytes = cert.cert.der();
         let key_bytes = cert.key_pair.serialize_der();
@@ -269,6 +278,13 @@ mod test {
     /// connection from a server using some other certificate.
     #[tokio::test]
     async fn agent_tls_connector_invalid_cert() {
+        CRYPTO_PROVIDER.call_once(|| {
+            rustls::crypto::CryptoProvider::install_default(
+                rustls::crypto::aws_lc_rs::default_provider(),
+            )
+            .expect("Failed to install crypto provider")
+        });
+
         let server_cert = rcgen::generate_simple_self_signed(vec!["operator".to_string()]).unwrap();
         let cert_bytes = server_cert.cert.der();
         let key_bytes = server_cert.key_pair.serialize_der();

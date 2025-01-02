@@ -18,7 +18,8 @@ use tokio_util::io::ReaderStream;
 use tracing::Level;
 
 use crate::{
-    error::Result,
+    error::AgentResult,
+    metrics::TCP_OUTGOING_CONNECTION,
     util::run_thread_in_namespace,
     watched_task::{TaskStatus, WatchedTask},
 };
@@ -81,7 +82,7 @@ impl TcpOutgoingApi {
 
     /// Sends the [`LayerTcpOutgoing`] message to the background task.
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    pub(crate) async fn send_to_task(&mut self, message: LayerTcpOutgoing) -> Result<()> {
+    pub(crate) async fn send_to_task(&mut self, message: LayerTcpOutgoing) -> AgentResult<()> {
         if self.layer_tx.send(message).await.is_ok() {
             Ok(())
         } else {
@@ -91,7 +92,7 @@ impl TcpOutgoingApi {
 
     /// Receives a [`DaemonTcpOutgoing`] message from the background task.
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    pub(crate) async fn recv_from_task(&mut self) -> Result<DaemonTcpOutgoing> {
+    pub(crate) async fn recv_from_task(&mut self) -> AgentResult<DaemonTcpOutgoing> {
         match self.daemon_rx.recv().await {
             Some(msg) => Ok(msg),
             None => Err(self.task_status.unwrap_err().await),
@@ -110,6 +111,13 @@ struct TcpOutgoingTask {
     pid: Option<u64>,
     layer_rx: Receiver<LayerTcpOutgoing>,
     daemon_tx: Sender<DaemonTcpOutgoing>,
+}
+
+impl Drop for TcpOutgoingTask {
+    fn drop(&mut self) {
+        let connections = self.readers.keys().chain(self.writers.keys()).count();
+        TCP_OUTGOING_CONNECTION.sub(connections as i64);
+    }
 }
 
 impl fmt::Debug for TcpOutgoingTask {
@@ -152,7 +160,7 @@ impl TcpOutgoingTask {
     /// Runs this task as long as the channels connecting it with [`TcpOutgoingApi`] are open.
     /// This routine never fails and returns [`Result`] only due to [`WatchedTask`] constraints.
     #[tracing::instrument(level = Level::TRACE, skip(self))]
-    async fn run(mut self) -> Result<()> {
+    async fn run(mut self) -> AgentResult<()> {
         loop {
             let channel_closed = select! {
                 biased;
@@ -190,7 +198,7 @@ impl TcpOutgoingTask {
         &mut self,
         connection_id: ConnectionId,
         read: io::Result<Option<Bytes>>,
-    ) -> Result<(), SendError<DaemonTcpOutgoing>> {
+    ) -> AgentResult<(), SendError<DaemonTcpOutgoing>> {
         match read {
             // New bytes came in from a peer connection.
             // We pass them to the layer.
@@ -216,6 +224,7 @@ impl TcpOutgoingTask {
 
                 self.readers.remove(&connection_id);
                 self.writers.remove(&connection_id);
+                TCP_OUTGOING_CONNECTION.dec();
 
                 let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                 self.daemon_tx.send(daemon_message).await?;
@@ -246,6 +255,8 @@ impl TcpOutgoingTask {
                         "Layer connection is shut down as well, sending close message.",
                     );
 
+                    TCP_OUTGOING_CONNECTION.dec();
+
                     self.daemon_tx
                         .send(DaemonTcpOutgoing::Close(connection_id))
                         .await?;
@@ -261,7 +272,7 @@ impl TcpOutgoingTask {
     async fn handle_layer_msg(
         &mut self,
         message: LayerTcpOutgoing,
-    ) -> Result<(), SendError<DaemonTcpOutgoing>> {
+    ) -> AgentResult<(), SendError<DaemonTcpOutgoing>> {
         match message {
             // We make connection to the requested address, split the stream into halves with
             // `io::split`, and put them into respective maps.
@@ -287,6 +298,7 @@ impl TcpOutgoingTask {
                         connection_id,
                         ReaderStream::with_capacity(read_half, Self::READ_BUFFER_SIZE),
                     );
+                    TCP_OUTGOING_CONNECTION.inc();
 
                     Ok(DaemonConnect {
                         connection_id,
@@ -299,9 +311,12 @@ impl TcpOutgoingTask {
                     result = ?daemon_connect,
                     "Connection attempt finished.",
                 );
+
                 self.daemon_tx
                     .send(DaemonTcpOutgoing::Connect(daemon_connect))
-                    .await
+                    .await?;
+
+                Ok(())
             }
 
             // This message handles two cases:
@@ -341,9 +356,13 @@ impl TcpOutgoingTask {
                                 connection_id,
                                 "Peer connection is shut down as well, sending close message to the client.",
                             );
+                            TCP_OUTGOING_CONNECTION.dec();
+
                             self.daemon_tx
                                 .send(DaemonTcpOutgoing::Close(connection_id))
-                                .await
+                                .await?;
+
+                            Ok(())
                         }
                     }
 
@@ -352,6 +371,7 @@ impl TcpOutgoingTask {
                     Err(error) => {
                         self.writers.remove(&connection_id);
                         self.readers.remove(&connection_id);
+                        TCP_OUTGOING_CONNECTION.dec();
 
                         tracing::trace!(
                             connection_id,
@@ -360,7 +380,9 @@ impl TcpOutgoingTask {
                         );
                         self.daemon_tx
                             .send(DaemonTcpOutgoing::Close(connection_id))
-                            .await
+                            .await?;
+
+                        Ok(())
                     }
                 }
             }
@@ -370,6 +392,7 @@ impl TcpOutgoingTask {
             LayerTcpOutgoing::Close(LayerClose { connection_id }) => {
                 self.writers.remove(&connection_id);
                 self.readers.remove(&connection_id);
+                TCP_OUTGOING_CONNECTION.dec();
 
                 Ok(())
             }

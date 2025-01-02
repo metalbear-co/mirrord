@@ -69,6 +69,8 @@ x509-parser = "0.16"
 rustls.workspace = true
 envy = "0.4"
 socket2.workspace = true
+prometheus = { version = "0.13", features = ["process"] }
+axum = { version = "0.7", features = ["macros"] }
 iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624" }
 rawsocket = { git = "https://github.com/metalbear-co/rawsocket.git" }
 procfs = "0.17.0"
@@ -78,3 +80,4 @@ rstest.workspace = true
 mockall = "0.13"
 test_bin = "0.4"
 rcgen.workspace = true
+reqwest.workspace = true

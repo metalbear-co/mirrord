@@ -11,10 +11,14 @@ use tokio::{
     sync::mpsc::{self, error::SendError, Receiver, Sender},
     task::JoinSet,
 };
+use tracing::Level;
 
 use self::{filtered::DynamicBody, unfiltered::UnfilteredStealTask};
 use super::{http::DefaultReversibleStream, subscriptions::PortSubscription};
-use crate::{http::HttpVersion, steal::connections::filtered::FilteredStealTask, util::ClientId};
+use crate::{
+    http::HttpVersion, metrics::STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION,
+    steal::connections::filtered::FilteredStealTask, util::ClientId,
+};
 
 mod filtered;
 mod unfiltered;
@@ -287,7 +291,7 @@ impl StolenConnections {
 
     /// Adds the given [`StolenConnection`] to this set. Spawns a new [`tokio::task`] that will
     /// manage it.
-    #[tracing::instrument(level = "trace", name = "manage_stolen_connection", skip(self))]
+    #[tracing::instrument(level = Level::TRACE, name = "manage_stolen_connection", skip(self))]
     pub fn manage(&mut self, connection: StolenConnection) {
         let connection_id = self.next_connection_id;
         self.next_connection_id += 1;
@@ -458,13 +462,9 @@ impl ConnectionTask {
                     })
                     .await?;
 
-                let task = UnfilteredStealTask {
-                    connection_id: self.connection_id,
-                    client_id,
-                    stream: self.connection.stream,
-                };
-
-                task.run(self.tx, &mut self.rx).await
+                UnfilteredStealTask::new(self.connection_id, client_id, self.connection.stream)
+                    .run(self.tx, &mut self.rx)
+                    .await
             }
 
             PortSubscription::Filtered(filters) => {

@@ -26,6 +26,7 @@ use self::{
 use crate::{
     error::AgentError,
     http::HttpVersion,
+    metrics::{MIRROR_CONNECTION_SUBSCRIPTION, MIRROR_PORT_SUBSCRIPTION},
     util::{ChannelClosedFuture, ClientId, Subscriptions},
 };
 
@@ -141,6 +142,13 @@ pub(crate) struct TcpConnectionSniffer<T> {
     clients_closed: FuturesUnordered<ChannelClosedFuture<SniffedConnection>>,
 }
 
+impl<T> Drop for TcpConnectionSniffer<T> {
+    fn drop(&mut self) {
+        MIRROR_PORT_SUBSCRIPTION.set(0);
+        MIRROR_CONNECTION_SUBSCRIPTION.set(0);
+    }
+}
+
 impl<T> fmt::Debug for TcpConnectionSniffer<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TcpConnectionSniffer")
@@ -247,6 +255,7 @@ where
     #[tracing::instrument(level = Level::TRACE, err)]
     fn update_packet_filter(&mut self) -> Result<(), AgentError> {
         let ports = self.port_subscriptions.get_subscribed_topics();
+        MIRROR_PORT_SUBSCRIPTION.set(ports.len() as i64);
 
         let filter = if ports.is_empty() {
             tracing::trace!("No ports subscribed, setting dummy bpf");
@@ -394,6 +403,7 @@ where
                     }
                 }
 
+                MIRROR_CONNECTION_SUBSCRIPTION.inc();
                 e.insert_entry(data_tx)
             }
         };
@@ -448,6 +458,7 @@ mod test {
         async fn get_api(&mut self) -> TcpSnifferApi {
             let client_id = self.next_client_id;
             self.next_client_id += 1;
+
             TcpSnifferApi::new(client_id, self.command_tx.clone(), self.task_status.clone())
                 .await
                 .unwrap()

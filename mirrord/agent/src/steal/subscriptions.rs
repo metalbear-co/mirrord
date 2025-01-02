@@ -12,7 +12,11 @@ use super::{
     http::HttpFilter,
     ip_tables::{new_iptables, IPTablesWrapper, SafeIpTables},
 };
-use crate::{error::AgentError, util::ClientId};
+use crate::{
+    error::AgentError,
+    metrics::{STEAL_FILTERED_PORT_SUBSCRIPTION, STEAL_UNFILTERED_PORT_SUBSCRIPTION},
+    util::ClientId,
+};
 
 /// For stealing incoming TCP connections.
 #[async_trait::async_trait]
@@ -143,6 +147,13 @@ pub struct PortSubscriptions<R: PortRedirector> {
     subscriptions: HashMap<Port, PortSubscription>,
 }
 
+impl<R: PortRedirector> Drop for PortSubscriptions<R> {
+    fn drop(&mut self) {
+        STEAL_FILTERED_PORT_SUBSCRIPTION.set(0);
+        STEAL_UNFILTERED_PORT_SUBSCRIPTION.set(0);
+    }
+}
+
 impl<R: PortRedirector> PortSubscriptions<R> {
     /// Create an empty instance of this struct.
     ///
@@ -184,7 +195,14 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     ) -> Result<RemoteResult<Port>, R::Error> {
         let add_redirect = match self.subscriptions.entry(port) {
             Entry::Occupied(mut e) => {
+                let filtered = filter.is_some();
                 if e.get_mut().try_extend(client_id, filter) {
+                    if filtered {
+                        STEAL_FILTERED_PORT_SUBSCRIPTION.inc();
+                    } else {
+                        STEAL_UNFILTERED_PORT_SUBSCRIPTION.inc();
+                    }
+
                     Ok(false)
                 } else {
                     Err(ResponseError::PortAlreadyStolen(port))
@@ -192,6 +210,12 @@ impl<R: PortRedirector> PortSubscriptions<R> {
             }
 
             Entry::Vacant(e) => {
+                if filter.is_some() {
+                    STEAL_FILTERED_PORT_SUBSCRIPTION.inc();
+                } else {
+                    STEAL_UNFILTERED_PORT_SUBSCRIPTION.inc();
+                }
+
                 e.insert(PortSubscription::new(client_id, filter));
                 Ok(true)
             }
@@ -228,11 +252,15 @@ impl<R: PortRedirector> PortSubscriptions<R> {
         let remove_redirect = match e.get_mut() {
             PortSubscription::Unfiltered(subscribed_client) if *subscribed_client == client_id => {
                 e.remove();
+                STEAL_UNFILTERED_PORT_SUBSCRIPTION.dec();
+
                 true
             }
             PortSubscription::Unfiltered(..) => false,
             PortSubscription::Filtered(filters) => {
-                filters.remove(&client_id);
+                if filters.remove(&client_id).is_some() {
+                    STEAL_FILTERED_PORT_SUBSCRIPTION.dec();
+                }
 
                 if filters.is_empty() {
                     e.remove();

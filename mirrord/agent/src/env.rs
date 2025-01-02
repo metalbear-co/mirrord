@@ -7,7 +7,7 @@ use mirrord_protocol::RemoteResult;
 use tokio::io::AsyncReadExt;
 use wildmatch::WildMatch;
 
-use crate::error::Result;
+use crate::error::AgentResult;
 
 struct EnvFilter {
     include: Vec<WildMatch>,
@@ -97,7 +97,7 @@ pub(crate) fn parse_raw_env<'a, S: AsRef<str> + 'a + ?Sized, T: IntoIterator<Ite
         .collect::<HashMap<_, _>>()
 }
 
-pub(crate) async fn get_proc_environ(path: PathBuf) -> Result<HashMap<String, String>> {
+pub(crate) async fn get_proc_environ(path: PathBuf) -> AgentResult<HashMap<String, String>> {
     let mut environ_file = tokio::fs::File::open(path).await?;
 
     let mut raw_env_vars = String::with_capacity(8192);

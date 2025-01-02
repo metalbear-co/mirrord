@@ -936,6 +936,7 @@ checksum = "edca88bc138befd0323b20752846e6587272d3b03b0343c8ea28a6f819e6e71f"
 dependencies = [
  "async-trait",
  "axum-core",
+ "axum-macros",
  "base64 0.22.1",
  "bytes",
  "futures-util",
@@ -984,6 +985,17 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "axum-macros"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57d123550fa8d071b7255cb0cc04dc302baa6c8c4a79f55701552684d8399bce"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.93",
 ]
 
 [[package]]
@@ -2466,7 +2478,7 @@ version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fcca6a476beb610ebeab9c0bc60b3535aa103b52a2c265dc9d3d26209bea666c"
 dependencies = [
- "reqwest 0.12.11",
+ "reqwest 0.12.12",
  "tar",
  "xz",
 ]
@@ -4123,7 +4135,7 @@ dependencies = [
  "rand",
  "rcgen",
  "regex",
- "reqwest 0.12.11",
+ "reqwest 0.12.12",
  "rstest",
  "rustls 0.23.20",
  "rustls-pemfile 2.2.0",
@@ -4148,6 +4160,7 @@ version = "3.128.0"
 dependencies = [
  "actix-codec",
  "async-trait",
+ "axum",
  "bollard",
  "bytes",
  "clap",
@@ -4172,10 +4185,12 @@ dependencies = [
  "nix 0.29.0",
  "oci-spec",
  "pnet",
- "procfs",
+ "procfs 0.17.0",
+ "prometheus",
  "rand",
  "rawsocket",
  "rcgen",
+ "reqwest 0.12.12",
  "rstest",
  "rustls 0.23.20",
  "semver 1.0.24",
@@ -4204,7 +4219,7 @@ dependencies = [
  "assert-json-diff",
  "base64 0.22.1",
  "drain",
- "reqwest 0.12.11",
+ "reqwest 0.12.12",
  "serde",
  "serde_json",
  "tokio",
@@ -4222,7 +4237,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "pem",
- "reqwest 0.12.11",
+ "reqwest 0.12.12",
  "serde",
  "serde_yaml",
  "thiserror 2.0.9",
@@ -4299,7 +4314,7 @@ dependencies = [
  "mirrord-operator",
  "mirrord-protocol",
  "rand",
- "reqwest 0.12.11",
+ "reqwest 0.12.12",
  "rstest",
  "rustls 0.23.20",
  "rustls-pemfile 2.2.0",
@@ -4453,7 +4468,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.13.1"
+version = "1.13.2"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -5388,6 +5403,19 @@ dependencies = [
 
 [[package]]
 name = "procfs"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "731e0d9356b0c25f16f33b5be79b1c57b562f141ebfcdb0ad8ac2c13a24293b4"
+dependencies = [
+ "bitflags 2.6.0",
+ "hex",
+ "lazy_static",
+ "procfs-core 0.16.0",
+ "rustix",
+]
+
+[[package]]
+name = "procfs"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc5b72d8145275d844d4b5f6d4e1eef00c8cd889edb6035c21675d1bb1f45c9f"
@@ -5396,8 +5424,18 @@ dependencies = [
  "chrono",
  "flate2",
  "hex",
- "procfs-core",
+ "procfs-core 0.17.0",
  "rustix",
+]
+
+[[package]]
+name = "procfs-core"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d3554923a69f4ce04c4a754260c338f505ce22642d3830e049a399fc2059a29"
+dependencies = [
+ "bitflags 2.6.0",
+ "hex",
 ]
 
 [[package]]
@@ -5409,6 +5447,23 @@ dependencies = [
  "bitflags 2.6.0",
  "chrono",
  "hex",
+]
+
+[[package]]
+name = "prometheus"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d33c28a30771f7f96db69893f78b857f7450d7e0237e9c8fc6427a81bae7ed1"
+dependencies = [
+ "cfg-if",
+ "fnv",
+ "lazy_static",
+ "libc",
+ "memchr",
+ "parking_lot",
+ "procfs 0.16.0",
+ "protobuf",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -5462,6 +5517,12 @@ checksum = "cc2f1e56baa61e93533aebc21af4d2134b70f66275e0fcdf3cbe43d77ff7e8fc"
 dependencies = [
  "prost",
 ]
+
+[[package]]
+name = "protobuf"
+version = "2.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "quanta"
@@ -5823,9 +5884,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.12.11"
+version = "0.12.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fe060fe50f524be480214aba758c71f99f90ee8c83c5a36b5e9e1d568eb4eb3"
+checksum = "43e734407157c3c2034e0258f5e4473ddb361b1e85f95a66690d67264d7cd1da"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -6943,7 +7004,7 @@ dependencies = [
  "mirrord-operator",
  "rand",
  "regex",
- "reqwest 0.12.11",
+ "reqwest 0.12.12",
  "rstest",
  "rustls 0.23.20",
  "serde",
@@ -8131,9 +8192,9 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "winnow"
-version = "0.6.20"
+version = "0.6.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36c1fec1a2bb5866f07c25f68c26e565c4c200aebb96d7e55710c19d3e8ac49b"
+checksum = "e6f5bb5257f2407a5425c6e749bfd9692192a73e70a6060516ac04f889087d68"
 dependencies = [
  "memchr",
 ]
