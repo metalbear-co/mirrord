@@ -65,10 +65,8 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
         .spawn()
         .map_err(ContainerError::UnableToExecuteCommand)?;
 
-    tracing::warn!(?child, "spawned watch for child");
-
     let stdout = child.stdout.take().expect("stdout should be piped");
-    let stderr = child.stderr.take().expect("stdout should be piped");
+    let stderr = child.stderr.take().expect("stderr should be piped");
 
     let result = tokio::time::timeout(Duration::from_secs(30), async {
         BufReader::new(stdout)

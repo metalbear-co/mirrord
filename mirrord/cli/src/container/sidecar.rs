@@ -94,11 +94,9 @@ impl Sidecar {
             .spawn()
             .map_err(ContainerError::UnableToExecuteCommand)?;
 
-        tracing::warn!(?child, "spawned watch for child");
-
         let mut stdout =
             BufReader::new(child.stdout.take().expect("stdout should be piped")).lines();
-        let stderr = BufReader::new(child.stderr.take().expect("stdout should be piped")).lines();
+        let stderr = BufReader::new(child.stderr.take().expect("stderr should be piped")).lines();
 
         let first_line = tokio::time::timeout(Duration::from_secs(30), async {
             stdout.next_line().await.map_err(|error| {
