@@ -154,7 +154,7 @@ impl From<AddrParseError> for RemoteError {
 /// Our internal version of Rust's `std::io::Error` that can be passed between mirrord-layer and
 /// mirrord-agent.
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
-#[error("Failed performing `getaddrinfo` with {raw_os_error:?} and kind {kind:?}!")]
+#[error("Failed IO operation with {raw_os_error:?} and kind {kind:?}!")]
 pub struct RemoteIOError {
     pub raw_os_error: Option<i32>,
     pub kind: ErrorKindInternal,
