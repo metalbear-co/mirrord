@@ -319,7 +319,7 @@ pub(crate) async fn container_command(
     let mut progress = ProgressTracker::from_env("mirrord container");
 
     if runtime_args.command.has_publish() {
-        progress.warning("mirrord container may have problems with \"-p\" directly container in command, please add to \"contanier.cli_extra_args\" in config if you are planning to publish ports");
+        progress.warning("mirrord container may have problems with \"-p\" when used as part of container run command, please add the publish arguments to \"contanier.cli_extra_args\" in config if you are planning to publish ports");
     }
 
     progress.warning("mirrord container is currently an unstable feature");

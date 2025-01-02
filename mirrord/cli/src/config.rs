@@ -834,7 +834,8 @@ pub struct RuntimeArgs {
 /// Supported command for using mirrord with container runtimes.
 #[derive(Subcommand, Debug, Clone)]
 pub(super) enum ContainerRuntimeCommand {
-    /// Execute a `<RUNTIME> create` command with mirrord loaded.
+    /// Execute a `<RUNTIME> create` command with mirrord loaded. (not supported with )
+    #[command(hide = true)]
     Create {
         /// Arguments that will be propogated to underlying `<RUNTIME> create` command.
         #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
