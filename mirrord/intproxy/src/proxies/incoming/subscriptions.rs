@@ -242,6 +242,7 @@ impl SubscriptionsManager {
 
                 Ok(subscription.confirm())
             }
+
             Err(ResponseError::PortAlreadyStolen(port)) => {
                 let Some(subscription) = self.subscriptions.remove(&port) else {
                     return Ok(vec![]);
@@ -255,23 +256,30 @@ impl SubscriptionsManager {
                     }
                 }
             }
+
             Err(
-                ref response_err @ ResponseError::Forbidden {
-                    blocked_action: BlockedAction::Steal(ref steal_type),
-                    ..
+                ref response_error @ ResponseError::Forbidden {
+                    ref blocked_action, ..
                 },
             ) => {
-                tracing::warn!("Port subscribe blocked by policy: {response_err}");
-                let Some(subscription) = self.subscriptions.remove(&steal_type.get_port()) else {
+                tracing::warn!(%response_error, "Port subscribe blocked by policy");
+
+                let port = match blocked_action {
+                    BlockedAction::Steal(steal_type) => steal_type.get_port(),
+                    BlockedAction::Mirror(port) => *port,
+                };
+                let Some(subscription) = self.subscriptions.remove(&port) else {
                     return Ok(vec![]);
                 };
+
                 subscription
-                    .reject(response_err.clone())
-                    .map_err(|sub|{
-                        tracing::error!("Subscription {sub:?} was confirmed before, then requested again and blocked by a policy.");
-                        IncomingProxyError::SubscriptionFailed(response_err.clone())
+                    .reject(response_error.clone())
+                    .map_err(|subscription|{
+                        tracing::error!(?subscription, "Subscription was confirmed before, then requested again and blocked by a policy.");
+                        IncomingProxyError::SubscriptionFailed(response_error.clone())
                     })
             }
+
             Err(err) => Err(IncomingProxyError::SubscriptionFailed(err)),
         }
     }
