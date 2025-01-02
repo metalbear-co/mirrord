@@ -162,16 +162,17 @@ impl SinglePortForwarder {
 
         loop {
             tokio::select! {
-                error = error_future.as_mut() => {
+                biased;
 
-                    if retry_strategy.peek().is_none() || error.is_none() {
+                error = error_future.as_mut() => {
+                    if let Some(error) = error {
+                        tracing::warn!(?connect_info, %error, "error while performing port-forward");
+                    }
+
+                    if retry_strategy.peek().is_none() {
                         tracing::warn!(?connect_info, "finished retry strategy, closing connection");
 
                         break;
-                    }
-
-                    if let Some(error) = error {
-                        tracing::warn!(?connect_info, %error, "error while performing port-forward, retrying");
                     }
 
                     match create_portforward_streams(&pod_api, &connect_info, &mut retry_strategy).await {
@@ -193,9 +194,11 @@ impl SinglePortForwarder {
                 copy_result = tokio::io::copy_bidirectional(&mut stream, &mut sink) => {
                     if let Err(error) = copy_result {
                         tracing::error!(?connect_info, %error, "unable to copy_bidirectional agent stream to local sink");
-
-                        break;
+                    } else {
+                        tracing::info!(?connect_info, "closed copy_bidirectional agent stream to local sink");
                     }
+
+                    break;
                 }
             }
         }
@@ -208,7 +211,7 @@ pub async fn retry_portforward(
     client: &Client,
     connect_info: AgentKubernetesConnectInfo,
 ) -> Result<(Box<dyn UnpinStream>, SinglePortForwarder)> {
-    let (lhs, rhs) = tokio::io::duplex(4096);
+    let (lhs, rhs) = tokio::io::duplex(1024 * 1024);
 
     let port_forwarder = SinglePortForwarder::connect(client, connect_info, Box::new(rhs)).await?;
 
