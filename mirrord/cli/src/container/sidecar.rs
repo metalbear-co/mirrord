@@ -1,19 +1,11 @@
-use std::{
-    net::SocketAddr,
-    ops::Not,
-    pin::Pin,
-    process::Stdio,
-    task::{Context, Poll},
-    time::Duration,
-};
+use std::{net::SocketAddr, ops::Not, process::Stdio, time::Duration};
 
 use mirrord_config::{internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV, LayerConfig};
-use pin_project_lite::pin_project;
 use tokio::{
-    io::{AsyncBufReadExt, BufReader, Lines},
+    io::{AsyncBufReadExt, BufReader},
     process::{ChildStderr, ChildStdout, Command},
 };
-use tokio_stream::Stream;
+use tokio_stream::{wrappers::LinesStream, StreamExt};
 use tracing::Level;
 
 use crate::{
@@ -121,39 +113,14 @@ impl Sidecar {
             .parse()
             .map_err(ContainerError::UnableParseProxySocketAddr)?;
 
-        Ok((internal_proxy_addr, SidecarLogs { stdout, stderr }))
+        Ok((
+            internal_proxy_addr,
+            LinesStream::new(stdout).merge(LinesStream::new(stderr)),
+        ))
     }
 }
 
-// The use pin_project is to have a simple wrapper instead of unpining and repining for accessing
-// `Pin<&mut Lines<BufReader<ChildStdout>>>` and `Pin<&mut Lines<BufReader<ChildStderr>>>` as in
-// accordance to their underlying `Stream` impl.
-pin_project! {
-    #[derive(Debug)]
-    pub(crate) struct SidecarLogs {
-        #[pin]
-        pub stdout: Lines<BufReader<ChildStdout>>,
-        #[pin]
-        pub stderr: Lines<BufReader<ChildStderr>>,
-    }
-}
-
-impl Stream for SidecarLogs {
-    type Item = Result<String, std::io::Error>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.project();
-
-        if let result @ Poll::Ready(Some(_)) = this
-            .stdout
-            .poll_next_line(cx)
-            .map(|result| result.transpose())
-        {
-            return result;
-        }
-
-        this.stderr
-            .poll_next_line(cx)
-            .map(|result| result.transpose())
-    }
-}
+type SidecarLogs = tokio_stream::adapters::Merge<
+    LinesStream<BufReader<ChildStdout>>,
+    LinesStream<BufReader<ChildStderr>>,
+>;

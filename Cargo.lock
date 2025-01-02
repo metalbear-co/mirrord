@@ -4119,7 +4119,6 @@ dependencies = [
  "mirrord-sip",
  "mirrord-vpn",
  "nix 0.29.0",
- "pin-project-lite",
  "prettytable-rs",
  "rand",
  "rcgen",
