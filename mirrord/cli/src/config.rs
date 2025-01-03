@@ -715,6 +715,9 @@ pub(super) struct ListTargetArgs {
     /// Specify config file to use
     #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
     pub config_file: Option<PathBuf>,
+
+    #[arg(long, default_value_t = false)]
+    pub rich_output: bool,
 }
 
 #[derive(Args, Debug)]
