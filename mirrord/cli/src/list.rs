@@ -174,7 +174,7 @@ static ALL_TARGETS_SUPPORTED_OPERATOR_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=3.84.0".parse().expect("verion should be valid"));
 
 /// Fetches mirrord targets from the cluster and prints output to stdout.
-pub async fn print_targets(args: ListTargetArgs) -> CliResult<()> {
+pub async fn print_targets(args: ListTargetArgs, rich_output: bool) -> CliResult<()> {
     let mut layer_config = if let Some(config) = &args.config_file {
         let mut cfg_context = ConfigContext::default();
         LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?
@@ -190,11 +190,11 @@ pub async fn print_targets(args: ListTargetArgs) -> CliResult<()> {
         util::remove_proxy_env();
     }
 
-    let targets = FoundTargets::resolve(layer_config, args.rich_output).await?;
+    let targets = FoundTargets::resolve(layer_config, rich_output).await?;
 
     match args.output {
         Format::Json => {
-            let serialized = if args.rich_output {
+            let serialized = if rich_output {
                 serde_json::to_string(&targets).unwrap()
             } else {
                 serde_json::to_string(&SimpleDisplay(&targets)).unwrap()

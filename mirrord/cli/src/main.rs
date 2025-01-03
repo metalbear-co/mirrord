@@ -557,7 +557,14 @@ fn main() -> miette::Result<()> {
                     false,
                 )?;
             }
-            Commands::ListTargets(args) => list::print_targets(*args).await?,
+            Commands::ListTargets(args) => {
+                let rich_output = std::env::var(ListTargetArgs::RICH_OUTPUT_ENV)
+                    .ok()
+                    .and_then(|value| value.parse::<bool>().ok())
+                    .unwrap_or_default();
+
+                list::print_targets(*args, rich_output).await?
+            }
             Commands::Operator(args) => operator_command(*args).await?,
             Commands::ExtensionExec(args) => {
                 extension_exec(*args, watch).await?;
