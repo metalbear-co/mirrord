@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: py-serv
-          image: docker.io/t4lz/mirrord-pytest:1204 # TODO: change to metalbear's image.
+          image: ghcr.io/metalbear-co/mirrord-pytest:latest
           ports:
             - containerPort: 80
           env:
