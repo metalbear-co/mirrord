@@ -585,13 +585,8 @@ pub async fn run_exec(
     // docker build -t test . -f mirrord/agent/Dockerfile
     // minikube load image test:latest
     let mut base_env = HashMap::new();
-    // TODO: revert
-    // base_env.insert("MIRRORD_AGENT_IMAGE", "test");
-    base_env.insert(
-        "MIRRORD_AGENT_IMAGE",
-        "docker.io/t4lz/mirrord-agent:2024-12-30_5",
-    );
-    base_env.insert("MIRRORD_AGENT_TTL", "180"); // TODO: delete
+    base_env.insert("MIRRORD_AGENT_IMAGE", "test");
+    // base_env.insert("MIRRORD_AGENT_TTL", "180"); // Uncomment for getting logs after failed tests
     base_env.insert("MIRRORD_CHECK_VERSION", "false");
     base_env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
     base_env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
