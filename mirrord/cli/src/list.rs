@@ -1,12 +1,17 @@
 use std::sync::LazyLock;
 
+use futures::TryStreamExt;
+use k8s_openapi::api::core::v1::Namespace;
 use kube::Client;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
     LayerConfig, LayerFileConfig,
 };
-use mirrord_kube::api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker};
+use mirrord_kube::{
+    api::kubernetes::{create_kube_config, list, seeker::KubeResourceSeeker},
+    error::KubeApiError,
+};
 use mirrord_operator::client::OperatorApi;
 use semver::VersionReq;
 use serde::{ser::SerializeSeq, Serialize, Serializer};
@@ -95,11 +100,19 @@ impl FoundTargets {
             .as_deref()
             .unwrap_or(client.default_namespace())
             .to_owned();
+        let namespaces = list::list_all_clusterwide::<Namespace>(client, None)
+            .try_filter_map(|namespace| std::future::ready(Ok(namespace.metadata.name)))
+            .try_collect::<Vec<_>>()
+            .await
+            .map_err(KubeApiError::KubeError)
+            .map_err(|error| {
+                CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
+            })?;
 
         Ok(Self {
             targets,
             current_namespace,
-            namespaces: Default::default(),
+            namespaces,
         })
     }
 }
