@@ -553,7 +553,6 @@ jobs:
 
   ipv6_e2e_tests:
     runs-on: ubuntu-24.04
-    name: e2e
     needs: [ test_agent_image, changed_files ]
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true'}}
     env:
