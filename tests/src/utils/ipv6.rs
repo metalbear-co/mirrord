@@ -21,8 +21,7 @@ use crate::utils::{internal_service, kube_client, KubeService};
 pub async fn ipv6_service(
     #[default("default")] namespace: &str,
     #[default("NodePort")] service_type: &str,
-    // #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
-    #[default("docker.io/t4lz/mirrord-pytest:1204")] image: &str,
+    #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
     #[default("http-echo")] service_name: &str,
     #[default(true)] randomize_name: bool,
     #[future] kube_client: Client,
