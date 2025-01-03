@@ -1,7 +1,6 @@
 use std::fmt;
 
-use async_stream::stream;
-use futures::{stream, Stream, StreamExt, TryStreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use k8s_openapi::{
     api::{
         apps::v1::{Deployment, StatefulSet},
@@ -10,15 +9,13 @@ use k8s_openapi::{
     },
     Metadata, NamespaceResourceScope,
 };
-use kube::{api::ListParams, Resource};
+use kube::Resource;
 use serde::de;
 
+use super::list;
 use crate::{
-    api::{
-        container::SKIP_NAMES,
-        kubernetes::{get_k8s_resource_api, rollout::Rollout},
-    },
-    error::Result,
+    api::{container::SKIP_NAMES, kubernetes::rollout::Rollout},
+    error::{KubeApiError, Result},
 };
 
 pub struct KubeResourceSeeker<'a> {
@@ -95,22 +92,27 @@ impl KubeResourceSeeker<'_> {
             Some((name, containers))
         }
 
-        self.list_resource::<Pod>(Some("status.phase=Running"))
-            .try_filter(|pod| std::future::ready(check_pod_status(pod)))
-            .try_filter_map(|pod| std::future::ready(Ok(create_pod_container_map(pod))))
-            .map_ok(|(pod, containers)| {
-                stream::iter(if containers.len() == 1 {
-                    vec![Ok(format!("pod/{pod}"))]
-                } else {
-                    containers
-                        .iter()
-                        .map(move |container| Ok(format!("pod/{pod}/container/{container}")))
-                        .collect()
-                })
+        list::list_all_namespaced(
+            self.client.clone(),
+            self.namespace.unwrap_or(self.client.default_namespace()),
+            Some("status.phase=Running"),
+        )
+        .try_filter(|pod| std::future::ready(check_pod_status(pod)))
+        .try_filter_map(|pod| std::future::ready(Ok(create_pod_container_map(pod))))
+        .map_ok(|(pod, containers)| {
+            stream::iter(if containers.len() == 1 {
+                vec![Ok(format!("pod/{pod}"))]
+            } else {
+                containers
+                    .iter()
+                    .map(move |container| Ok(format!("pod/{pod}/container/{container}")))
+                    .collect()
             })
-            .try_flatten()
-            .try_collect()
-            .await
+        })
+        .try_flatten()
+        .try_collect()
+        .await
+        .map_err(KubeApiError::KubeError)
     }
 
     /// The list of deployments that have at least 1 `Replicas` and a deployment name.
@@ -123,71 +125,49 @@ impl KubeResourceSeeker<'_> {
                 .unwrap_or(false)
         }
 
-        self.list_resource::<Deployment>(None)
-            .filter(|response| std::future::ready(response.is_ok()))
-            .try_filter(|deployment| std::future::ready(check_deployment_replicas(deployment)))
-            .try_filter_map(|deployment| {
-                std::future::ready(Ok(deployment
-                    .metadata
-                    .name
-                    .map(|name| format!("deployment/{name}"))))
-            })
-            .try_collect()
-            .await
-    }
-
-    /// Helper to get the list of a resource type ([`Pod`], [`Deployment`], [`Rollout`], [`Job`],
-    /// [`CronJob`], [`StatefulSet`], or whatever satisfies `R`) through the kube api.
-    fn list_resource<'s, R>(
-        &self,
-        field_selector: Option<&'s str>,
-    ) -> impl Stream<Item = Result<R>> + 's
-    where
-        R: Clone + fmt::Debug + for<'de> de::Deserialize<'de> + 's,
-        R: Resource<DynamicType = (), Scope = NamespaceResourceScope>,
-    {
-        let Self { client, namespace } = self;
-        let resource_api = get_k8s_resource_api::<R>(client, *namespace);
-
-        stream! {
-            let mut params =  ListParams {
-                label_selector: Some("app!=mirrord,!operator.metalbear.co/owner".to_string()),
-                field_selector: field_selector.map(ToString::to_string),
-                limit: Some(500),
-                ..Default::default()
-            };
-
-            loop {
-                let resource = resource_api.list(&params).await?;
-
-                for resource in resource.items {
-                    yield Ok(resource);
-                }
-
-                if let Some(continue_token) = resource.metadata.continue_ && !continue_token.is_empty() {
-                    params = params.continue_token(&continue_token);
-                } else {
-                    break;
-                }
-            }
-        }
+        list::list_all_namespaced::<Deployment>(
+            self.client.clone(),
+            self.namespace.unwrap_or(self.client.default_namespace()),
+            None,
+        )
+        .filter(|response| std::future::ready(response.is_ok()))
+        .try_filter(|deployment| std::future::ready(check_deployment_replicas(deployment)))
+        .try_filter_map(|deployment| {
+            std::future::ready(Ok(deployment
+                .metadata
+                .name
+                .map(|name| format!("deployment/{name}"))))
+        })
+        .try_collect()
+        .await
+        .map_err(From::from)
     }
 
     async fn simple_list_resource<'s, R>(&self, prefix: &'s str) -> Result<Vec<String>>
     where
-        R: Clone + fmt::Debug + for<'de> de::Deserialize<'de>,
-        R: Resource<DynamicType = (), Scope = NamespaceResourceScope> + Metadata,
+        R: 'static
+            + Clone
+            + fmt::Debug
+            + for<'de> de::Deserialize<'de>
+            + Resource<DynamicType = (), Scope = NamespaceResourceScope>
+            + Metadata
+            + Send,
     {
-        self.list_resource::<R>(None)
-            .filter(|response| std::future::ready(response.is_ok()))
-            .try_filter_map(|rollout| {
-                std::future::ready(Ok(rollout
-                    .meta()
-                    .name
-                    .as_ref()
-                    .map(|name| format!("{prefix}/{name}"))))
-            })
-            .try_collect()
-            .await
+        list::list_all_namespaced::<R>(
+            self.client.clone(),
+            self.namespace.unwrap_or(self.client.default_namespace()),
+            None,
+        )
+        .filter(|response| std::future::ready(response.is_ok()))
+        .try_filter_map(|rollout| {
+            std::future::ready(Ok(rollout
+                .meta()
+                .name
+                .as_ref()
+                .map(|name| format!("{prefix}/{name}"))))
+        })
+        .try_collect()
+        .await
+        .map_err(From::from)
     }
 }
