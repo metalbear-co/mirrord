@@ -30,6 +30,7 @@ use crate::{
     error::{KubeApiError, Result},
 };
 
+pub mod list;
 #[cfg(feature = "portforward")]
 pub mod portforwarder;
 pub mod rollout;

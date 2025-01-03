@@ -29,8 +29,7 @@ use mirrord_protocol::{
         LayerClose, LayerConnect, LayerWrite, SocketAddress,
     },
     tcp::{Filter, HttpFilter, LayerTcp, LayerTcpSteal, StealType},
-    ClientMessage, ConnectionId, DaemonMessage, LogLevel, Port, ResponseError,
-    CLIENT_READY_FOR_LOGS,
+    ClientMessage, ConnectionId, DaemonMessage, LogLevel, Port, CLIENT_READY_FOR_LOGS,
 };
 use thiserror::Error;
 use tokio::{
@@ -969,18 +968,11 @@ impl IncomingMode {
 
 #[derive(Debug, Error)]
 pub enum PortForwardError {
-    // setup errors
-    #[error("wrong combination of arguments used: {0}")]
-    ArgsError(String),
-
     #[error("multiple port forwarding mappings found for local address `{0}`")]
     PortMapSetupError(SocketAddr),
 
     #[error("multiple port forwarding mappings found for desination port `{0:?}`")]
     ReversePortMapSetupError(RemotePort),
-
-    #[error("no port forwarding mappings were provided")]
-    NoMappingsError(),
 
     // running errors
     #[error("agent closed connection with error: `{0}`")]
@@ -992,17 +984,8 @@ pub enum PortForwardError {
     #[error("error from Incoming Proxy task")]
     IncomingProxyError(IntProxyError),
 
-    #[error("failed to send Ping to agent: `{0}`")]
-    PingError(String),
-
     #[error("TcpListener operation failed with error: `{0}`")]
     TcpListenerError(std::io::Error),
-
-    #[error("TcpStream operation failed with error: `{0}`")]
-    TcpStreamError(std::io::Error),
-
-    #[error("no destination address found for local address `{0}`")]
-    SocketMappingNotFound(SocketAddr),
 
     #[error("no task for socket {0} ready to receive connection ID: `{1}`")]
     ReadyTaskNotFound(SocketAddr, ConnectionId),
@@ -1012,9 +995,6 @@ pub enum PortForwardError {
 
     #[error("failed to establish connection with remote process: `{0}`")]
     ConnectionError(String),
-
-    #[error("failed to subscribe to remote port: `{0}`")]
-    SubscriptionError(ResponseError),
 }
 
 impl From<mpsc::error::SendError<ClientMessage>> for PortForwardError {
