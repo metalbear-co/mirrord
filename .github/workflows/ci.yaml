@@ -569,9 +569,10 @@ jobs:
           name: test
           path: /tmp
       - name: Create k8s Kind Cluster
-        uses: helm/kind-action@v1
-        with:
-          config: tests/kind-cluster-ipv6-config.yaml
+        #        uses: helm/kind-action@v1
+        #        with:
+        #          config: tests/kind-cluster-ipv6-config.yaml
+        run: .github/workflows/kind-with-registry-and-ipv6.sh
       - run: kind load image-archive /tmp/test.tar
       - run: |
           cargo test --ignored --target=x86_64-unknown-linux-gnu -p tests steal_http_ipv6_traffic -- --test-threads=6
