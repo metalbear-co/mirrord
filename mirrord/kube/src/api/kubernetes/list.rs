@@ -1,3 +1,5 @@
+//! Helper functions for listing k8s [`Resource`]s.
+
 use std::fmt;
 
 use futures::Stream;
@@ -5,6 +7,9 @@ use k8s_openapi::{ClusterResourceScope, NamespaceResourceScope};
 use kube::{api::ListParams, Api, Client, Resource};
 use serde::de::DeserializeOwned;
 
+/// Prepares [`ListParams`] that:
+/// 1. Excludes our own resources
+/// 2. Adds a limit for item count in a response
 fn make_list_params(field_selector: Option<&str>) -> ListParams {
     ListParams {
         label_selector: Some("app!=mirrord,!operator.metalbear.co/owner".to_string()),
@@ -14,6 +19,10 @@ fn make_list_params(field_selector: Option<&str>) -> ListParams {
     }
 }
 
+/// Returns a [`Stream`] of all objects in the given namespace.
+///
+/// 1. `field_selector` can be used for filtering.
+/// 2. Our own resources are excluded.
 pub fn list_all_namespaced<R>(
     client: Client,
     namespace: &str,
@@ -47,6 +56,10 @@ where
     }
 }
 
+/// Returns a [`Stream`] of all objects in the cluster.
+///
+/// 1. `field_selector` can be used for filtering.
+/// 2. Our own resources are excluded.
 pub fn list_all_clusterwide<R>(
     client: Client,
     field_selector: Option<&str>,
