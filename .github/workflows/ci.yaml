@@ -573,6 +573,12 @@ jobs:
       - run: kind load image-archive /tmp/test.tar
       - run: |
           cargo test --target=x86_64-unknown-linux-gnu -p tests steal_http_ipv6_traffic -- --ignored --test-threads=6
+      - name: fetch agent logs
+        if: ${{ failure() }}
+        run: |
+          kubectl logs -l app==mirrord --tail -1
+          kubectl get all
+          kubectl describe pods
 
   lint_markdown:
     runs-on: ubuntu-24.04
