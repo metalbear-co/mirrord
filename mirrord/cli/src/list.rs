@@ -153,7 +153,7 @@ impl FoundTargets {
 /// Its serialized format is a sequence of available target paths.
 struct SimpleDisplay<'a>(&'a FoundTargets);
 
-impl<'a> Serialize for SimpleDisplay<'a> {
+impl Serialize for SimpleDisplay<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
