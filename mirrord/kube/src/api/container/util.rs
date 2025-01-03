@@ -4,7 +4,7 @@ use futures::{AsyncBufReadExt, TryStreamExt};
 use k8s_openapi::api::core::v1::{EnvVar, Pod, Toleration};
 use kube::{api::LogParams, Api};
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
-use mirrord_protocol::{AGENT_NETWORK_INTERFACE_ENV, AGENT_OPERATOR_CERT_ENV};
+use mirrord_protocol::{AGENT_IPV6_ENV, AGENT_NETWORK_INTERFACE_ENV, AGENT_OPERATOR_CERT_ENV};
 use regex::Regex;
 use tracing::warn;
 
@@ -59,6 +59,7 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &&ContainerParams) -> Vec<E
     if let Some(interface) = agent.network_interface.as_ref() {
         env.push((AGENT_NETWORK_INTERFACE_ENV.to_string(), interface.into()));
     }
+    env.push((AGENT_IPV6_ENV.to_string(), params.support_ipv6.to_string()));
     if let Some(timeout) = agent.dns.timeout {
         env.push(("MIRRORD_AGENT_DNS_TIMEOUT".to_string(), timeout.to_string()));
     };

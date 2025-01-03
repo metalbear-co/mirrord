@@ -111,6 +111,18 @@ pub fn new_iptables() -> iptables::IPTables {
     .expect("IPTables initialization may not fail!")
 }
 
+/// wrapper around iptables::new that uses nft or legacy based on env
+pub fn new_ip6tables() -> iptables::IPTables {
+    if let Ok(val) = std::env::var("MIRRORD_AGENT_NFTABLES")
+        && val.to_lowercase() == "true"
+    {
+        iptables::new_with_cmd("/usr/sbin/ip6tables-nft")
+    } else {
+        iptables::new_with_cmd("/usr/sbin/ip6tables-legacy")
+    }
+    .expect("IPTables initialization may not fail!")
+}
+
 impl Debug for IPTablesWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IPTablesWrapper")
@@ -140,7 +152,7 @@ impl IPTables for IPTablesWrapper {
         }
     }
 
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = tracing::Level::TRACE, skip(self), ret, fields(table_name=%self.table_name))]
     fn create_chain(&self, name: &str) -> Result<()> {
         self.tables
             .new_chain(self.table_name, name)
@@ -220,6 +232,7 @@ where
         ipt: IPT,
         flush_connections: bool,
         pod_ips: Option<&str>,
+        ipv6: bool,
     ) -> Result<Self> {
         let ipt = Arc::new(ipt);
 
@@ -231,6 +244,7 @@ where
                 _ => Redirects::Mesh(MeshRedirect::create(ipt.clone(), vendor, pod_ips)?),
             }
         } else {
+            tracing::trace!(ipv6 = ipv6, "creating standard redirect");
             match StandardRedirect::create(ipt.clone(), pod_ips) {
                 Err(err) => {
                     warn!("Unable to create StandardRedirect chain: {err}");
@@ -280,7 +294,7 @@ where
     /// Adds the redirect rule to iptables.
     ///
     /// Used to redirect packets when mirrord incoming feature is set to `steal`.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip(self))]
     pub(super) async fn add_redirect(
         &self,
         redirected_port: Port,
@@ -408,7 +422,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::create(mock, false, None)
+        let ipt = SafeIpTables::create(mock, false, None, false)
             .await
             .expect("Create Failed");
 
@@ -541,7 +555,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::create(mock, false, None)
+        let ipt = SafeIpTables::create(mock, false, None, false)
             .await
             .expect("Create Failed");
 

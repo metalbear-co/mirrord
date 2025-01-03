@@ -241,12 +241,14 @@ mod test {
     fn targetless() -> Result<(), Box<dyn std::error::Error>> {
         let mut config_context = ConfigContext::default();
         let agent = AgentFileConfig::default().generate_config(&mut config_context)?;
+        let support_ipv6 = false;
         let params = ContainerParams {
             name: "foobar".to_string(),
             port: 3000,
             gid: 13,
             tls_cert: None,
             pod_ips: None,
+            support_ipv6,
         };
 
         let update = JobVariant::new(&agent, &params).as_update();
@@ -298,7 +300,8 @@ mod test {
                                     { "name": "RUST_LOG", "value": agent.log_level },
                                     { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() },
                                     { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() },
-                                    { "name": "MIRRORD_AGENT_JSON_LOG", "value": Some(agent.json_log.to_string()) }
+                                    { "name": "MIRRORD_AGENT_JSON_LOG", "value": Some(agent.json_log.to_string()) },
+                                    { "name": "MIRRORD_AGENT_SUPPORT_IPV6", "value": Some(support_ipv6.to_string()) }
 
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
@@ -330,12 +333,14 @@ mod test {
     fn targeted() -> Result<(), Box<dyn std::error::Error>> {
         let mut config_context = ConfigContext::default();
         let agent = AgentFileConfig::default().generate_config(&mut config_context)?;
+        let support_ipv6 = false;
         let params = ContainerParams {
             name: "foobar".to_string(),
             port: 3000,
             gid: 13,
             tls_cert: None,
             pod_ips: None,
+            support_ipv6,
         };
 
         let update = JobTargetedVariant::new(
@@ -432,7 +437,8 @@ mod test {
                                     { "name": "RUST_LOG", "value": agent.log_level },
                                     { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() },
                                     { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() },
-                                    { "name": "MIRRORD_AGENT_JSON_LOG", "value": Some(agent.json_log.to_string()) }
+                                    { "name": "MIRRORD_AGENT_JSON_LOG", "value": Some(agent.json_log.to_string()) },
+                                    { "name": "MIRRORD_AGENT_SUPPORT_IPV6", "value": Some(support_ipv6.to_string()) }
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 {

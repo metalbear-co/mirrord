@@ -3,7 +3,7 @@ use std::{
     collections::BTreeMap,
     convert::Infallible,
     fmt::{self, Display, Formatter},
-    net::Ipv4Addr,
+    net::IpAddr,
     ops::FromResidual,
     str::FromStr,
 };
@@ -71,7 +71,7 @@ impl Display for ContainerRuntime {
 #[derive(Debug)]
 pub struct RuntimeData {
     pub pod_name: String,
-    pub pod_ips: Vec<Ipv4Addr>,
+    pub pod_ips: Vec<IpAddr>,
     pub pod_namespace: Option<String>,
     pub node_name: String,
     pub container_id: String,
@@ -128,9 +128,9 @@ impl RuntimeData {
             .filter_map(|pod_ip| {
                 pod_ip
                     .ip
-                    .parse::<Ipv4Addr>()
+                    .parse::<IpAddr>()
                     .inspect_err(|e| {
-                        tracing::warn!("failed to parse pod IP {ip}: {e:?}", ip = pod_ip.ip);
+                        tracing::warn!("failed to parse pod IP {ip}: {e:#?}", ip = pod_ip.ip);
                     })
                     .ok()
             })

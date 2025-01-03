@@ -84,6 +84,10 @@ pub(crate) enum AgentError {
     /// Temporary error for vpn feature
     #[error("Generic error in vpn: {0}")]
     VpnError(String),
+
+    /// When we neither create a redirector for IPv4, nor for IPv6
+    #[error("Could not create a listener for stolen connections")]
+    CannotListenForStolenConnections,
 }
 
 impl From<mpsc::error::SendError<StealerCommand>> for AgentError {
