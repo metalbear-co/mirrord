@@ -712,10 +712,11 @@ pub(super) struct ListTargetArgs {
     #[arg(short = 'n', long = "namespace")]
     pub namespace: Option<String>,
 
-    /// Specify config file to use
+    /// Specify config file to use.
     #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
     pub config_file: Option<PathBuf>,
 
+    /// Print output in new extended format.
     #[arg(long, default_value_t = false)]
     pub rich_output: bool,
 }
