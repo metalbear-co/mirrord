@@ -18,12 +18,25 @@ use serde::{ser::SerializeSeq, Serialize, Serializer};
 
 use crate::{util, CliError, CliResult, Format, ListTargetArgs};
 
+/// A mirrord target found in the cluster.
 #[derive(Serialize)]
 struct FoundTarget {
+    /// E.g `pod/my-pod-1234/container/my-container`.
     path: String,
+
+    /// Whether this target is currently available.
+    ///
+    /// # Note
+    ///
+    /// Right now this is always true. Some preliminary checks are done in the
+    /// [`KubeResourceSeeker`] and results come filtered.
+    ///
+    /// This field is here for forward compatibility, because in the future we might want to return
+    /// unavailable targets as well (along with some validation error message) to improve UX.
     available: bool,
 }
 
+/// Result of mirrord targets lookup in the cluster.
 #[derive(Serialize)]
 struct FoundTargets {
     /// In order:
@@ -34,12 +47,26 @@ struct FoundTargets {
     /// 5. jobs
     /// 6. pods
     targets: Vec<FoundTarget>,
+
+    /// Current lookup namespace.
+    ///
+    /// Taken from [`LayerConfig::target`], defaults to [`Client`]'s default namespace.
     current_namespace: String,
+
+    /// Available lookup namespaces.
     namespaces: Vec<String>,
 }
 
 impl FoundTargets {
-    async fn resolve(config: LayerConfig) -> CliResult<Self> {
+    /// Performs a lookup of mirrord targets in the cluster.
+    ///
+    /// Unless the operator is explicitly disabled, attempts to connect with it.
+    /// Operator lookup affects returned results (e.g some targets are only available via the
+    /// operator).
+    ///
+    /// If `fetch_namespaces` is set, returned [`FoundTargets`] will contain info about namespaces
+    /// available in the cluster.
+    async fn resolve(config: LayerConfig, fetch_namespaces: bool) -> CliResult<Self> {
         let client = create_kube_config(
             config.accept_invalid_certificates,
             config.kubeconfig.clone(),
@@ -100,14 +127,19 @@ impl FoundTargets {
             .as_deref()
             .unwrap_or(client.default_namespace())
             .to_owned();
-        let namespaces = list::list_all_clusterwide::<Namespace>(client, None)
-            .try_filter_map(|namespace| std::future::ready(Ok(namespace.metadata.name)))
-            .try_collect::<Vec<_>>()
-            .await
-            .map_err(KubeApiError::KubeError)
-            .map_err(|error| {
-                CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
-            })?;
+
+        let namespaces = if fetch_namespaces {
+            list::list_all_clusterwide::<Namespace>(client, None)
+                .try_filter_map(|namespace| std::future::ready(Ok(namespace.metadata.name)))
+                .try_collect::<Vec<_>>()
+                .await
+                .map_err(KubeApiError::KubeError)
+                .map_err(|error| {
+                    CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
+                })?
+        } else {
+            Default::default()
+        };
 
         Ok(Self {
             targets,
@@ -117,6 +149,8 @@ impl FoundTargets {
     }
 }
 
+/// Thin wrapper over [`FoundTargets`] that implements [`Serialize`].
+/// Its serialized format is a sequence of available target paths.
 struct SimpleDisplay<'a>(&'a FoundTargets);
 
 impl<'a> Serialize for SimpleDisplay<'a> {
@@ -139,6 +173,7 @@ impl<'a> Serialize for SimpleDisplay<'a> {
 static ALL_TARGETS_SUPPORTED_OPERATOR_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=3.84.0".parse().expect("verion should be valid"));
 
+/// Fetches mirrord targets from the cluster and prints output to stdout.
 pub async fn print_targets(args: ListTargetArgs) -> CliResult<()> {
     let mut layer_config = if let Some(config) = &args.config_file {
         let mut cfg_context = ConfigContext::default();
@@ -155,7 +190,7 @@ pub async fn print_targets(args: ListTargetArgs) -> CliResult<()> {
         util::remove_proxy_env();
     }
 
-    let targets = FoundTargets::resolve(layer_config).await?;
+    let targets = FoundTargets::resolve(layer_config, args.rich_output).await?;
 
     match args.output {
         Format::Json => {
