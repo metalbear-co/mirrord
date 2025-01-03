@@ -20,7 +20,7 @@ where
 {
     const ENTRYPOINT: &'static str = "OUTPUT";
 
-    #[tracing::instrument(skip(ipt), level = tracing::Level::DEBUG)] // TODO: change to trace.
+    #[tracing::instrument(skip(ipt), level = tracing::Level::TRACE)]
     pub fn create(ipt: Arc<IPT>, chain_name: String, pod_ips: Option<&str>) -> Result<Self> {
         let managed = IPTableChain::create(ipt, chain_name.clone()).inspect_err(
             |e| tracing::error!(%e, "Could not create iptables chain \"{chain_name}\"."),
