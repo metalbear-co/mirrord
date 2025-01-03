@@ -124,8 +124,8 @@ In order to test IPv6 on a local cluster on macOS, you can use Kind:
    kind: Cluster
    apiVersion: kind.x-k8s.io/v1alpha4
    networking:
-   ipFamily: ipv6
-   apiServerAddress: 127.0.0.1
+     ipFamily: ipv6
+     apiServerAddress: 127.0.0.1
    EOF
    ```
 3. `kind create cluster --config kind-config.yaml`
