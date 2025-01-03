@@ -55,7 +55,7 @@ mod extract;
 mod internal_proxy;
 mod list;
 mod operator;
-pub mod port_forward;
+mod port_forward;
 mod teams;
 mod util;
 mod verify_config;
