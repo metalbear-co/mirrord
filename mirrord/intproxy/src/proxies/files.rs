@@ -261,18 +261,18 @@ impl FilesProxy {
             FileRequest::ReadLink(..)
                 if protocol_version.is_some_and(|version| !READLINK_VERSION.matches(version)) =>
             {
-                return Err(FileResponse::ReadLink(Err(ResponseError::NotImplemented)));
+                Err(FileResponse::ReadLink(Err(ResponseError::NotImplemented)))
             }
             FileRequest::MakeDir(..) | FileRequest::MakeDirAt(..)
                 if protocol_version.is_some_and(|version| !MKDIR_VERSION.matches(version)) =>
             {
-                return Err(FileResponse::MakeDir(Err(ResponseError::NotImplemented)));
+                Err(FileResponse::MakeDir(Err(ResponseError::NotImplemented)))
             }
             FileRequest::RemoveDir(..) | FileRequest::Unlink(..) | FileRequest::UnlinkAt(..)
                 if protocol_version
                     .is_some_and(|version: &Version| !RMDIR_VERSION.matches(version)) =>
             {
-                return Err(FileResponse::RemoveDir(Err(ResponseError::NotImplemented)));
+                Err(FileResponse::RemoveDir(Err(ResponseError::NotImplemented)))
             }
             _ => Ok(()),
         }
