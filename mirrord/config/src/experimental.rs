@@ -68,7 +68,7 @@ pub struct ExperimentalConfig {
     /// Setting to 0 disables file buffering.
     ///
     /// <https://github.com/metalbear-co/mirrord/issues/2069>
-    #[config(default = 0)]
+    #[config(default = 128000)]
     pub readonly_file_buffer: u64,
 }
 
