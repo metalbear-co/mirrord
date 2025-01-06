@@ -1,6 +1,7 @@
 #![feature(const_trait_impl)]
 #![feature(io_error_more)]
 #![warn(clippy::indexing_slicing)]
+#![deny(unused_crate_dependencies)]
 
 pub mod body_chunks;
 pub mod codec;

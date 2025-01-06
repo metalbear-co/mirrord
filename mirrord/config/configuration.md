@@ -1106,15 +1106,67 @@ Similarly, you can exclude certain paths using a negative look-ahead:
 Setting this filter will make mirrord only steal requests to URIs that do not start with
 "/health/".
 
-#### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
+With `all_of` and `any_of`, you can use multiple HTTP filters at the same time.
 
-Messages must match all of the specified filters.
+If you want to steal HTTP requests that match **every** pattern specified, use `all_of`.
+For example, this filter steals only HTTP requests to endpoint `/api/my-endpoint` that contain
+header `x-debug-session` with value `121212`.
+```json
+{
+  "all_of": [
+    { "header": "^x-debug-session: 121212$" },
+    { "path": "^/api/my-endpoint$" }
+  ]
+}
+
+If you want to steal HTTP requests that match **any** of the patterns specified, use `any_of`.
+For example, this filter steals HTTP requests to endpoint `/api/my-endpoint`
+**and** HTTP requests that contain header `x-debug-session` with value `121212`.
+```json
+{
+ "any_of": [
+   { "path": "^/api/my-endpoint$"},
+   { "header": "^x-debug-session: 121212$" }
+ ]
+}
+
+##### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
+
+An array of HTTP filters.
+
+Each inner filter specifies either header or path regex.
+Requests must match all of the filters to be stolen.
+
 Cannot be an empty list.
 
-#### feature.network.incoming.http_filter.any_of {#feature-network-incoming-http_filter-any_of}
+Example:
+```json
+{
+  "all_of": [
+    { "header": "x-user: my-user$" },
+    { "path": "^/api/v1/my-endpoint" }
+  ]
+}
+```
 
-Messages must match any of the specified filters.
+##### feature.network.incoming.http_filter.any_of {#feature-network-incoming-http_filter-any_of}
+
+An array of HTTP filters.
+
+Each inner filter specifies either header or path regex.
+Requests must match at least one of the filters to be stolen.
+
 Cannot be an empty list.
+
+Example:
+```json
+{
+  "any_of": [
+    { "header": "^x-user: my-user$" },
+    { "path": "^/api/v1/my-endpoint" }
+  ]
+}
+```
 
 ##### feature.network.incoming.http_filter.header_filter {#feature-network-incoming-http-header-filter}
 

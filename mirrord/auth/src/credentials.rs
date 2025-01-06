@@ -3,9 +3,10 @@ use std::fmt::Debug;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 pub use x509_certificate;
+use x509_certificate::{asn1time::Time, rfc5280};
+#[cfg(feature = "client")]
 use x509_certificate::{
-    asn1time::Time, rfc2986, rfc5280, InMemorySigningKeyPair, X509CertificateBuilder,
-    X509CertificateError,
+    rfc2986, InMemorySigningKeyPair, X509CertificateBuilder, X509CertificateError,
 };
 
 use crate::{certificate::Certificate, key_pair::KeyPair};
@@ -38,6 +39,7 @@ impl Credentials {
     }
 
     /// Creates [`rfc2986::CertificationRequest`] for [`Certificate`] generation in the operator.
+    #[cfg(feature = "client")]
     fn certificate_request(
         common_name: &str,
         key_pair: &InMemorySigningKeyPair,

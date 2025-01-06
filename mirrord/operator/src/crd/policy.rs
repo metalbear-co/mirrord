@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -51,6 +53,11 @@ pub struct MirrordPolicySpec {
     // TODO: make the k8s list type be set/map to prevent duplicates.
     /// List of features and operations blocked by this policy.
     pub block: Vec<BlockedFeature>,
+
+    /// Controls how mirrord-operator handles user requests to fetch environment variables from the
+    /// target.
+    #[serde(default)]
+    pub env: EnvPolicy,
 }
 
 /// Custom cluster-wide resource for policies that limit what mirrord features users can use.
@@ -78,6 +85,26 @@ pub struct MirrordClusterPolicySpec {
     // TODO: make the k8s list type be set/map to prevent duplicates.
     /// List of features and operations blocked by this policy.
     pub block: Vec<BlockedFeature>,
+
+    /// Controls how mirrord-operator handles user requests to fetch environment variables from the
+    /// target.
+    #[serde(default)]
+    pub env: EnvPolicy,
+}
+
+/// Policy for controlling environment variables access from mirrord instances.
+#[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub struct EnvPolicy {
+    /// List of environment variables that should be excluded when using mirrord.
+    ///
+    /// These environment variables won't be retrieved from the target even if the user
+    /// specifies them in their `feature.env.include` mirrord config.
+    ///
+    /// Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of
+    /// any character and `*` matches arbitrary many (including zero) occurrences of any character,
+    /// e.g. `DATABASE_*` will match `DATABASE_URL` and `DATABASE_PORT`.
+    pub exclude: HashSet<String>,
 }
 
 #[test]
