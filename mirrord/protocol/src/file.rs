@@ -26,7 +26,7 @@ pub static MKDIR_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.13.0".parse().expect("Bad Identifier"));
 
 pub static OPEN_LOCAL_VERSION: LazyLock<VersionReq> =
-    LazyLock::new(|| ">=1.13.0".parse().expect("Bad Identifier"));
+    LazyLock::new(|| ">=1.13.1".parse().expect("Bad Identifier"));
 
 /// Internal version of Metadata across operating system (macOS, Linux)
 /// Only mutual attributes
