@@ -9,6 +9,8 @@ use tracing::Level;
 
 use crate::error::AgentError;
 
+/// Incremented whenever we get a new client in `ClientConnectionHandler`, and decremented
+/// when this client is dropped.
 pub(crate) static CLIENT_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
     register_int_gauge!(
         "mirrord_agent_client_count",
@@ -17,6 +19,8 @@ pub(crate) static CLIENT_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
     .expect("Valid at initialization!")
 });
 
+/// Incremented whenever we handle a new `DnsCommand`, and decremented after the result of
+/// `do_lookup` has been sent back through the response channel.
 pub(crate) static DNS_REQUEST_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
     register_int_gauge!(
         "mirrord_agent_dns_request_count",
@@ -25,6 +29,8 @@ pub(crate) static DNS_REQUEST_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
     .expect("Valid at initialization!")
 });
 
+/// Incremented and decremented in _open-ish_/_close-ish_ file operations in `FileManager`,
+/// Also gets decremented when `FileManager` is dropped.
 pub(crate) static OPEN_FD_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
     register_int_gauge!(
         "mirrord_agent_open_fd_count",
@@ -33,6 +39,9 @@ pub(crate) static OPEN_FD_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
     .expect("Valid at initialization!")
 });
 
+/// Follows the amount of subscribed ports in `update_packet_filter`. We don't really
+/// increment/decrement this one, and mostly `set` it to the latest amount of ports, zeroing it when
+/// the `TcpConnectionSniffer` gets dropped.
 pub(crate) static MIRROR_PORT_SUBSCRIPTION: LazyLock<IntGauge> = LazyLock::new(|| {
     register_int_gauge!(
         "mirrord_agent_mirror_port_subscription_count",
