@@ -30,7 +30,7 @@ use crate::{
     error::{KubeApiError, Result},
 };
 
-#[cfg(not(feature = "incluster"))]
+#[cfg(feature = "portforward")]
 pub mod portforwarder;
 pub mod rollout;
 pub mod seeker;
@@ -142,8 +142,8 @@ impl KubernetesAPI {
     }
 
     /// Connects to the agent using kube's [`Api::portforward`].
-    #[cfg(not(feature = "incluster"))]
-    pub async fn create_connection(
+    #[cfg(feature = "portforward")]
+    pub async fn create_connection_portforward(
         &self,
         connect_info: AgentKubernetesConnectInfo,
     ) -> Result<Box<dyn UnpinStream>> {
@@ -268,9 +268,9 @@ impl KubernetesAPI {
     }
 }
 
-/// Trait for IO streams returned from [`KubernetesAPI::create_connection`].
+/// Trait for IO streams returned from [`KubernetesAPI::create_connection_portforward`].
 /// It's here only to group the exisiting traits we actually need and return a `Box<dyn ...>`
-#[cfg(not(feature = "incluster"))]
+#[cfg(feature = "portforward")]
 pub trait UnpinStream:
     tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static
 {
@@ -278,7 +278,7 @@ pub trait UnpinStream:
 
 /// Any type that implements bidirectional IO and can be sent to a different [`tokio::task`] is good
 /// enough.
-#[cfg(not(feature = "incluster"))]
+#[cfg(feature = "portforward")]
 impl<T> UnpinStream for T where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static
 {

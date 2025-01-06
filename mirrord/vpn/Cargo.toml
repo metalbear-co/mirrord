@@ -23,7 +23,6 @@ futures.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true
 ipnet.workspace = true
-paste = "1"
 pnet_packet = "0.35"
 semver.workspace = true
 serde_yaml.workspace = true

@@ -16,7 +16,7 @@ edition.workspace = true
 [lints]
 workspace = true
 
-[dependencies]
+[target.'cfg(target_os = "macos")'.dependencies]
 # we don't like upstream apple-platform-rs because it depends on RSA which has an open CVE.
 apple-codesign = { git = "https://github.com/metalbear-co/apple-platform-rs-mini", version = "0.27", default-features = false }
 object = "0.36"
@@ -28,5 +28,5 @@ thiserror.workspace = true
 which.workspace = true
 
 
-[dev-dependencies]
+[target.'cfg(target_os = "macos")'.dev-dependencies]
 tempfile.workspace = true

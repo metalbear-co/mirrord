@@ -7,7 +7,6 @@ use std::{
 
 use k8s_openapi::api::core::v1::Pod;
 use kube::{Api, Client};
-use pin_project_lite::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_retry::{
     strategy::{jitter, ExponentialBackoff},
@@ -19,13 +18,10 @@ use crate::{
     error::{KubeApiError, Result},
 };
 
-pin_project! {
-    /// A wrapper for [`AsyncRead`] & [`AsyncWrite`] that dosn't call shutdown from [`AsyncWrite`] api
-    /// but it is done manually with `manual_shutdown`
-    struct ManualShutdown<S> {
-        #[pin]
-        inner: S,
-    }
+/// A wrapper for [`AsyncRead`] & [`AsyncWrite`] that dosn't call shutdown from [`AsyncWrite`] api
+/// but it is done manually with `manual_shutdown`
+struct ManualShutdown<S> {
+    inner: S,
 }
 
 impl<S> ManualShutdown<S> {
@@ -45,31 +41,31 @@ where
 
 impl<S> AsyncRead for ManualShutdown<S>
 where
-    S: AsyncRead,
+    S: AsyncRead + Unpin,
 {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
-        self.project().inner.poll_read(cx, buf)
+        Pin::new(&mut self.get_mut().inner).poll_read(cx, buf)
     }
 }
 
 impl<S> AsyncWrite for ManualShutdown<S>
 where
-    S: AsyncWrite,
+    S: AsyncWrite + Unpin,
 {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, std::io::Error>> {
-        self.project().inner.poll_write(cx, buf)
+        Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
-        self.project().inner.poll_flush(cx)
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
     }
 
     /// Does nothing, call `manual_shutdown` for actuall inner shutdown call

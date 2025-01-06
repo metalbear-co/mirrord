@@ -834,6 +834,13 @@ pub struct RuntimeArgs {
 /// Supported command for using mirrord with container runtimes.
 #[derive(Subcommand, Debug, Clone)]
 pub(super) enum ContainerRuntimeCommand {
+    /// Execute a `<RUNTIME> create` command with mirrord loaded. (not supported with )
+    #[command(hide = true)]
+    Create {
+        /// Arguments that will be propogated to underlying `<RUNTIME> create` command.
+        #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
+        runtime_args: Vec<String>,
+    },
     /// Execute a `<RUNTIME> run` command with mirrord loaded.
     Run {
         /// Arguments that will be propogated to underlying `<RUNTIME> run` command.
@@ -843,14 +850,17 @@ pub(super) enum ContainerRuntimeCommand {
 }
 
 impl ContainerRuntimeCommand {
-    pub fn run<T: Into<String>>(runtime_args: impl IntoIterator<Item = T>) -> Self {
-        ContainerRuntimeCommand::Run {
+    pub fn create<T: Into<String>>(runtime_args: impl IntoIterator<Item = T>) -> Self {
+        ContainerRuntimeCommand::Create {
             runtime_args: runtime_args.into_iter().map(T::into).collect(),
         }
     }
 
     pub fn has_publish(&self) -> bool {
-        let ContainerRuntimeCommand::Run { runtime_args } = self;
+        let runtime_args = match self {
+            ContainerRuntimeCommand::Run { runtime_args } => runtime_args,
+            _ => return false,
+        };
 
         let mut hit_trailing_token = false;
 
@@ -859,6 +869,15 @@ impl ContainerRuntimeCommand {
 
             !hit_trailing_token && matches!(runtime_arg.as_str(), "-p" | "--publish")
         })
+    }
+
+    pub fn into_parts(self) -> (Vec<String>, Vec<String>) {
+        match self {
+            ContainerRuntimeCommand::Create { runtime_args } => {
+                (vec!["create".to_owned()], runtime_args)
+            }
+            ContainerRuntimeCommand::Run { runtime_args } => (vec!["run".to_owned()], runtime_args),
+        }
     }
 }
 
@@ -947,7 +966,9 @@ mod tests {
 
         assert_eq!(runtime_args.runtime, ContainerRuntime::Podman);
 
-        let ContainerRuntimeCommand::Run { runtime_args } = runtime_args.command;
+        let ContainerRuntimeCommand::Run { runtime_args } = runtime_args.command else {
+            panic!("expected run command");
+        };
 
         assert_eq!(runtime_args, vec!["-it", "--rm", "debian"]);
     }
@@ -965,7 +986,9 @@ mod tests {
 
         assert_eq!(runtime_args.runtime, ContainerRuntime::Podman);
 
-        let ContainerRuntimeCommand::Run { runtime_args } = runtime_args.command;
+        let ContainerRuntimeCommand::Run { runtime_args } = runtime_args.command else {
+            panic!("expected run command");
+        };
 
         assert_eq!(runtime_args, vec!["-it", "--rm", "debian"]);
     }

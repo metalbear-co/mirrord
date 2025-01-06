@@ -1,6 +1,7 @@
 #![feature(iter_intersperse)]
 #![warn(clippy::indexing_slicing)]
 #![cfg(target_os = "macos")]
+#![deny(unused_crate_dependencies)]
 
 mod codesign;
 mod error;

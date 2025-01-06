@@ -17,10 +17,6 @@ pub struct RuntimeCommandBuilder<T = Empty> {
 }
 
 impl<T> RuntimeCommandBuilder<T> {
-    pub(super) fn runtime(&self) -> &ContainerRuntime {
-        &self.runtime
-    }
-
     fn push_arg<V>(&mut self, value: V)
     where
         V: Into<String>,
@@ -152,13 +148,12 @@ impl RuntimeCommandBuilder<WithCommand> {
             step,
         } = self;
 
-        let (runtime_command, runtime_args) = match step.command {
-            ContainerRuntimeCommand::Run { runtime_args } => ("run".to_owned(), runtime_args),
-        };
+        let (runtime_command, runtime_args) = step.command.into_parts();
 
         (
             runtime.to_string(),
-            std::iter::once(runtime_command)
+            runtime_command
+                .into_iter()
                 .chain(extra_args)
                 .chain(runtime_args),
         )
