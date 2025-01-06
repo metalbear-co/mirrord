@@ -128,6 +128,7 @@ pub struct FsPolicy {
 
     #[serde(default)]
     pub not_found: HashSet<String>,
+    pub exclude: HashSet<String>,
 }
 
 #[test]

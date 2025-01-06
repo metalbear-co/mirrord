@@ -206,7 +206,11 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
 
     ensure_not_ignored!(path, open_options.is_write());
 
-    let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)?;
+    let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)
+        .or_else(|fail| match fail {
+            HookError::ResponseError(ResponseError::OpenLocal) => Detour::Bypass(Bypass::OpenLocal),
+            other => Detour::Error(other),
+        })?;
 
     // TODO: Need a way to say "open a directory", right now `is_dir` always returns false.
     // This requires having a fake directory name (`/fake`, for example), instead of just converting

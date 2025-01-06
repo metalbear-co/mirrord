@@ -215,6 +215,8 @@ pub(crate) enum Bypass {
     /// Useful for operations that are version gated, and we want to bypass when the protocol
     /// doesn't support them.
     NotImplemented,
+
+    OpenLocal,
 }
 
 impl Bypass {
