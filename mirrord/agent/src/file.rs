@@ -535,7 +535,7 @@ impl FileManager {
         }
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self))]  
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(crate) fn rmdir(&mut self, path: &Path) -> RemoteResult<()> {
         let path = resolve_path(path, &self.root_path)?;
 
@@ -544,7 +544,6 @@ impl FileManager {
 
     #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(crate) fn unlink(&mut self, path: &Path) -> RemoteResult<()> {
-
         let path = resolve_path(path, &self.root_path)?;
 
         match nix::unistd::unlink(path.as_path()) {
@@ -562,7 +561,6 @@ impl FileManager {
         path: &Path,
         flags: u32,
     ) -> RemoteResult<()> {
-
         let path = match dirfd {
             Some(dirfd) => {
                 let relative_dir = self

@@ -286,7 +286,6 @@ impl FilesProxy {
         message_id: MessageId,
         message_bus: &mut MessageBus<Self>,
     ) {
-        
         // Not supported in old `mirrord-protocol` versions.
         if let Err(response) = self.is_request_supported(&request) {
             message_bus
@@ -300,16 +299,6 @@ impl FilesProxy {
         }
 
         match request {
-
-                message_bus
-                    .send(ToLayer {
-                        message_id,
-                        layer_id,
-                        message: ProxyToLayerMessage::File(response),
-                    })
-                    .await;
-            }
-
             // Should trigger remote close only when the fd is closed in all layer instances.
             FileRequest::Close(close) => {
                 if self.remote_files.remove(layer_id, close.fd) {
