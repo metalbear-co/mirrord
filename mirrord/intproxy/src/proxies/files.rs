@@ -253,20 +253,28 @@ impl FilesProxy {
         self.protocol_version.replace(version);
     }
 
-    fn is_request_supported(&self, request: &FileRequest) -> bool {
+    /// Checks if the mirrord protocol version supports this [`FileRequest`].
+    fn is_request_supported(&self, request: &FileRequest) -> Result<(), FileResponse> {
         let protocol_version = self.protocol_version.as_ref();
 
         match request {
-            FileRequest::ReadLink(..) => {
-                protocol_version.is_some_and(|version| READLINK_VERSION.matches(version))
+            FileRequest::ReadLink(..)
+                if protocol_version.is_some_and(|version| !READLINK_VERSION.matches(version)) =>
+            {
+                return Err(FileResponse::ReadLink(Err(ResponseError::NotImplemented)));
             }
-            FileRequest::MakeDir(..) | FileRequest::MakeDirAt(..) => {
-                protocol_version.is_some_and(|version| MKDIR_VERSION.matches(version))
+            FileRequest::MakeDir(..) | FileRequest::MakeDirAt(..)
+                if protocol_version.is_some_and(|version| !MKDIR_VERSION.matches(version)) =>
+            {
+                return Err(FileResponse::MakeDir(Err(ResponseError::NotImplemented)));
             }
-            FileRequest::RemoveDir(..) | FileRequest::Unlink(..) | FileRequest::UnlinkAt(..) => {
-                protocol_version.is_some_and(|version| RMDIR_VERSION.matches(version))
+            FileRequest::RemoveDir(..) | FileRequest::Unlink(..) | FileRequest::UnlinkAt(..)
+                if protocol_version
+                    .is_some_and(|version: &Version| !RMDIR_VERSION.matches(version)) =>
+            {
+                return Err(FileResponse::RemoveDir(Err(ResponseError::NotImplemented)));
             }
-            _ => true,
+            _ => Ok(()),
         }
     }
 
@@ -278,24 +286,20 @@ impl FilesProxy {
         message_id: MessageId,
         message_bus: &mut MessageBus<Self>,
     ) {
+        
+        // Not supported in old `mirrord-protocol` versions.
+        if let Err(response) = self.is_request_supported(&request) {
+            message_bus
+                .send(ToLayer {
+                    message_id,
+                    layer_id,
+                    message: ProxyToLayerMessage::File(response),
+                })
+                .await;
+            return;
+        }
+
         match request {
-            // Not supported in old `mirrord-protocol` versions.
-            r if !self.is_request_supported(&request) => {
-                let response = match r {
-                    FileRequest::ReadLink(..) => {
-                        FileResponse::ReadLink(Err(ResponseError::NotImplemented))
-                    }
-                    FileRequest::MakeDir(..) | FileRequest::MakeDirAt(..) => {
-                        FileResponse::MakeDir(Err(ResponseError::NotImplemented))
-                    }
-                    FileRequest::RemoveDir(..) => {
-                        FileResponse::RemoveDir(Err(ResponseError::NotImplemented))
-                    }
-                    FileRequest::Unlink(..) | FileRequest::UnlinkAt(..) => {
-                        FileResponse::Unlink(Err(ResponseError::NotImplemented))
-                    }
-                    _ => unreachable!(),
-                };
 
                 message_bus
                     .send(ToLayer {

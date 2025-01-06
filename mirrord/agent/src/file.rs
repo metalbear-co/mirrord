@@ -535,16 +535,15 @@ impl FileManager {
         }
     }
 
+    #[tracing::instrument(level = Level::TRACE, skip(self))]  
     pub(crate) fn rmdir(&mut self, path: &Path) -> RemoteResult<()> {
-        trace!("FileManager::rmdir -> path {:#?}", path);
-
         let path = resolve_path(path, &self.root_path)?;
 
         std::fs::remove_dir(path.as_path()).map_err(ResponseError::from)
     }
 
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(crate) fn unlink(&mut self, path: &Path) -> RemoteResult<()> {
-        trace!("FileManager::unlink -> path {:#?}", path);
 
         let path = resolve_path(path, &self.root_path)?;
 
@@ -556,18 +555,13 @@ impl FileManager {
         }
     }
 
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(crate) fn unlinkat(
         &mut self,
         dirfd: Option<u64>,
         path: &Path,
         flags: u32,
     ) -> RemoteResult<()> {
-        trace!(
-            "FileManager::unlinkat -> dirfd {:#?} | path {:#?} | flags {:#?}",
-            dirfd,
-            path,
-            flags
-        );
 
         let path = match dirfd {
             Some(dirfd) => {

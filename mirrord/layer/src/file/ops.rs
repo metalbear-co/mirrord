@@ -407,7 +407,7 @@ pub(crate) fn rmdir(pathname: Detour<PathBuf>) -> Detour<()> {
     }
 }
 
-#[mirrord_layer_macro::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn unlink(pathname: Detour<PathBuf>) -> Detour<()> {
     let pathname = pathname?;
 
@@ -427,7 +427,7 @@ pub(crate) fn unlink(pathname: Detour<PathBuf>) -> Detour<()> {
     }
 }
 
-#[mirrord_layer_macro::instrument(level = "trace")]
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn unlinkat(dirfd: RawFd, pathname: Detour<PathBuf>, flags: u32) -> Detour<()> {
     let pathname = pathname?;
 
