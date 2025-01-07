@@ -174,7 +174,7 @@ impl Serialize for FoundTargetsList<'_> {
 
 /// Controls whether we support listing all targets or just the open source ones.
 static ALL_TARGETS_SUPPORTED_OPERATOR_VERSION: LazyLock<VersionReq> =
-    LazyLock::new(|| ">=3.84.0".parse().expect("verion should be valid"));
+    LazyLock::new(|| ">=3.84.0".parse().expect("version should be valid"));
 
 /// Fetches mirrord targets from the cluster and prints output to stdout.
 pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> CliResult<()> {
