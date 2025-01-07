@@ -22,7 +22,6 @@ static TCP_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
 pub(crate) struct MeshRedirect<IPT: IPTables> {
     prerouting: PreroutingRedirect<IPT>,
     output: OutputRedirect<false, IPT>,
-    vendor: MeshVendor,
 }
 
 impl<IPT> MeshRedirect<IPT>
@@ -41,18 +40,16 @@ where
         Ok(MeshRedirect {
             prerouting,
             output,
-            vendor,
         })
     }
 
-    pub fn load(ipt: Arc<IPT>, vendor: MeshVendor) -> Result<Self> {
+    pub fn load(ipt: Arc<IPT>, _vendor: MeshVendor) -> Result<Self> {
         let prerouting = PreroutingRedirect::load(ipt.clone())?;
         let output = OutputRedirect::load(ipt, IPTABLE_MESH.to_string())?;
 
         Ok(MeshRedirect {
             prerouting,
             output,
-            vendor,
         })
     }
 
