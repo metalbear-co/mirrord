@@ -586,7 +586,7 @@ pub async fn run_exec(
     // minikube load image test:latest
     let mut base_env = HashMap::new();
     base_env.insert("MIRRORD_AGENT_IMAGE", "test");
-    base_env.insert("MIRRORD_AGENT_TTL", "20");
+    base_env.insert("MIRRORD_AGENT_TTL", "30");
     base_env.insert("MIRRORD_CHECK_VERSION", "false");
     base_env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
     base_env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
