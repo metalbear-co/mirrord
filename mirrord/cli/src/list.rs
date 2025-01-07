@@ -151,6 +151,9 @@ impl FoundTargets {
 
 /// Thin wrapper over [`FoundTargets`] that implements [`Serialize`].
 /// Its serialized format is a sequence of available target paths.
+///
+/// Used to print available targets when the plugin/extension does not support the full format (backward
+/// compatibility).
 struct FoundTargetsList<'a>(&'a FoundTargets);
 
 impl Serialize for FoundTargetsList<'_> {
