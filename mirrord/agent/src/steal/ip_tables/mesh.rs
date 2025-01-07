@@ -92,7 +92,6 @@ where
     }
 
     async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        // Always add PREROUTING rules, even for IstioCni
         self.prerouting
             .add_redirect(redirected_port, target_port)
             .await?;
@@ -104,7 +103,6 @@ where
     }
 
     async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        // Always remove PREROUTING rules, even for IstioCni
         self.prerouting
             .remove_redirect(redirected_port, target_port)
             .await?;
