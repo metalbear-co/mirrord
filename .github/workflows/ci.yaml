@@ -580,6 +580,7 @@ jobs:
           kubectl get all
           kubectl describe pods
           cat /tmp/mirrord-intproxy-*.log
+          kubectl get nodes -o wide
 
   lint_markdown:
     runs-on: ubuntu-24.04
