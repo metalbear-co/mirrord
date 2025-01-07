@@ -37,20 +37,14 @@ where
 
         let output = OutputRedirect::create(ipt, IPTABLE_MESH.to_string(), pod_ips)?;
 
-        Ok(MeshRedirect {
-            prerouting,
-            output,
-        })
+        Ok(MeshRedirect { prerouting, output })
     }
 
     pub fn load(ipt: Arc<IPT>, _vendor: MeshVendor) -> Result<Self> {
         let prerouting = PreroutingRedirect::load(ipt.clone())?;
         let output = OutputRedirect::load(ipt, IPTABLE_MESH.to_string())?;
 
-        Ok(MeshRedirect {
-            prerouting,
-            output,
-        })
+        Ok(MeshRedirect { prerouting, output })
     }
 
     fn get_skip_ports(ipt: &IPT, vendor: &MeshVendor) -> Result<Vec<String>> {
