@@ -546,12 +546,8 @@ impl FileManager {
     pub(crate) fn unlink(&mut self, path: &Path) -> RemoteResult<()> {
         let path = resolve_path(path, &self.root_path)?;
 
-        match nix::unistd::unlink(path.as_path()) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(ResponseError::from(std::io::Error::from_raw_os_error(
-                err as i32,
-            ))),
-        }
+        nix::unistd::unlink(path.as_path())
+            .map_err(|error| ResponseError::from(std::io::Error::from_raw_os_error(error as i32)))
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self))]
@@ -584,12 +580,8 @@ impl FileManager {
 
         let fd: Option<RawFd> = dirfd.map(|fd| fd as RawFd);
 
-        match nix::unistd::unlinkat(fd, path.as_path(), flags) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(ResponseError::from(std::io::Error::from_raw_os_error(
-                err as i32,
-            ))),
-        }
+        nix::unistd::unlinkat(fd, path.as_path(), flags)
+            .map_err(|error| ResponseError::from(std::io::Error::from_raw_os_error(error as i32)))
     }
 
     pub(crate) fn seek(&mut self, fd: u64, seek_from: SeekFrom) -> RemoteResult<SeekFileResponse> {
