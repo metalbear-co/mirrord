@@ -101,11 +101,10 @@ where
     }
 
     async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        if self.vendor != MeshVendor::IstioCni {
-            self.prerouting
-                .add_redirect(redirected_port, target_port)
-                .await?;
-        }
+        // Always add PREROUTING rules, even for IstioCni
+        self.prerouting
+            .add_redirect(redirected_port, target_port)
+            .await?;
         self.output
             .add_redirect(redirected_port, target_port)
             .await?;
@@ -114,11 +113,10 @@ where
     }
 
     async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        if self.vendor != MeshVendor::IstioCni {
-            self.prerouting
-                .remove_redirect(redirected_port, target_port)
-                .await?;
-        }
+        // Always remove PREROUTING rules, even for IstioCni
+        self.prerouting
+            .remove_redirect(redirected_port, target_port)
+            .await?;
         self.output
             .remove_redirect(redirected_port, target_port)
             .await?;
