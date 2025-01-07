@@ -156,11 +156,24 @@ impl From<AddrParseError> for RemoteError {
 
 /// Our internal version of Rust's `std::io::Error` that can be passed between mirrord-layer and
 /// mirrord-agent.
-#[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
-#[error("Failed performing `getaddrinfo` with {raw_os_error:?} and kind {kind:?}!")]
+///
+/// ### `Display`
+///
+/// We manually implement `Display` as this error is mostly seen from a [`ResponseError`] context.
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Eq)]
 pub struct RemoteIOError {
     pub raw_os_error: Option<i32>,
     pub kind: ErrorKindInternal,
+}
+
+impl core::fmt::Display for RemoteIOError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.kind)?;
+        if let Some(code) = self.raw_os_error {
+            write!(f, " (error code {code})")?;
+        }
+        Ok(())
+    }
 }
 
 /// Our internal version of Rust's `std::io::Error` that can be passed between mirrord-layer and
