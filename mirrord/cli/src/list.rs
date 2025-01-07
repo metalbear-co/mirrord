@@ -177,6 +177,9 @@ static ALL_TARGETS_SUPPORTED_OPERATOR_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=3.84.0".parse().expect("version should be valid"));
 
 /// Fetches mirrord targets from the cluster and prints output to stdout.
+/// 
+/// When `rich_output` is set, targets info is printed as a JSON object containing extra data.
+/// Otherwise, targets are printed as a plain JSON array of strings (backward compatibility).
 pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> CliResult<()> {
     let mut layer_config = if let Some(config) = &args.config_file {
         let mut cfg_context = ConfigContext::default();
