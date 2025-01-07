@@ -151,9 +151,9 @@ impl FoundTargets {
 
 /// Thin wrapper over [`FoundTargets`] that implements [`Serialize`].
 /// Its serialized format is a sequence of available target paths.
-struct SimpleDisplay<'a>(&'a FoundTargets);
+struct FoundTargetsList<'a>(&'a FoundTargets);
 
-impl Serialize for SimpleDisplay<'_> {
+impl Serialize for FoundTargetsList<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -174,7 +174,7 @@ static ALL_TARGETS_SUPPORTED_OPERATOR_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=3.84.0".parse().expect("verion should be valid"));
 
 /// Fetches mirrord targets from the cluster and prints output to stdout.
-pub async fn print_targets(args: ListTargetArgs, rich_output: bool) -> CliResult<()> {
+pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> CliResult<()> {
     let mut layer_config = if let Some(config) = &args.config_file {
         let mut cfg_context = ConfigContext::default();
         LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?
@@ -197,7 +197,7 @@ pub async fn print_targets(args: ListTargetArgs, rich_output: bool) -> CliResult
             let serialized = if rich_output {
                 serde_json::to_string(&targets).unwrap()
             } else {
-                serde_json::to_string(&SimpleDisplay(&targets)).unwrap()
+                serde_json::to_string(&FoundTargetsList(&targets)).unwrap()
             };
 
             println!("{serialized}");
