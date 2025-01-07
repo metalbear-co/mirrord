@@ -22,6 +22,7 @@ static TCP_SKIP_PORTS_LOOKUP_REGEX: LazyLock<Regex> =
 pub(crate) struct MeshRedirect<IPT: IPTables> {
     prerouting: PreroutingRedirect<IPT>,
     output: OutputRedirect<false, IPT>,
+    vendor: MeshVendor,
 }
 
 impl<IPT> MeshRedirect<IPT>
@@ -37,14 +38,22 @@ where
 
         let output = OutputRedirect::create(ipt, IPTABLE_MESH.to_string(), pod_ips)?;
 
-        Ok(MeshRedirect { prerouting, output })
+        Ok(MeshRedirect {
+            prerouting,
+            output,
+            vendor,
+        })
     }
 
-    pub fn load(ipt: Arc<IPT>, _vendor: MeshVendor) -> Result<Self> {
+    pub fn load(ipt: Arc<IPT>, vendor: MeshVendor) -> Result<Self> {
         let prerouting = PreroutingRedirect::load(ipt.clone())?;
         let output = OutputRedirect::load(ipt, IPTABLE_MESH.to_string())?;
 
-        Ok(MeshRedirect { prerouting, output })
+        Ok(MeshRedirect {
+            prerouting,
+            output,
+            vendor,
+        })
     }
 
     fn get_skip_ports(ipt: &IPT, vendor: &MeshVendor) -> Result<Vec<String>> {
@@ -92,9 +101,11 @@ where
     }
 
     async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.prerouting
-            .add_redirect(redirected_port, target_port)
-            .await?;
+        if self.vendor != MeshVendor::IstioCni {
+            self.prerouting
+                .add_redirect(redirected_port, target_port)
+                .await?;
+        }
         self.output
             .add_redirect(redirected_port, target_port)
             .await?;
@@ -103,9 +114,11 @@ where
     }
 
     async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
-        self.prerouting
-            .remove_redirect(redirected_port, target_port)
-            .await?;
+        if self.vendor != MeshVendor::IstioCni {
+            self.prerouting
+                .remove_redirect(redirected_port, target_port)
+                .await?;
+        }
         self.output
             .remove_redirect(redirected_port, target_port)
             .await?;

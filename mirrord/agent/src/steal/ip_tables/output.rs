@@ -36,6 +36,14 @@ where
                 warn!("Unable to create iptable rule with \"--gid-owner {gid}\" filter")
             })?;
 
+        // Return immediately if traffic is going out via loopback interface.
+        // i.e., skip redirect for local->local connections that cause loops.
+        managed
+            .add_rule("-o lo -j RETURN")
+            .inspect_err(|_| {
+                warn!("Unable to create iptable rule that excludes local loopback traffic");
+            })?;
+
         Ok(OutputRedirect { managed })
     }
 
