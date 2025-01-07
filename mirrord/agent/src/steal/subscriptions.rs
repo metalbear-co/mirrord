@@ -79,6 +79,15 @@ impl PortRedirector for IptablesListener {
         } else {
             let safe = crate::steal::ip_tables::SafeIpTables::create(
                 if self.ipv6 {
+                    liblmod::modprobe(
+                        "ip6table_nat".to_string(),
+                        "".to_string(),
+                        liblmod::Selection::Current,
+                    )
+                    .map_err(|e| {
+                        tracing::warn!(%e, "modprobe ip6_tables failed");
+                        AgentError::IPTablesError(format!("modprobe failed: {e:?}"))
+                    })?;
                     new_ip6tables()
                 } else {
                     new_iptables()
