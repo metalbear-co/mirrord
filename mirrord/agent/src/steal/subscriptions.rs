@@ -79,6 +79,17 @@ impl PortRedirector for IptablesListener {
         } else {
             let safe = crate::steal::ip_tables::SafeIpTables::create(
                 if self.ipv6 {
+                    let output = std::process::Command::new("modprobe")
+                        .arg("ip6table_nat")
+                        .output()
+                        .map_err(|e| {
+                            tracing::warn!(%e, "modprobe ip6_tables failed");
+                            AgentError::IPTablesError(format!("modprobe failed: {e:?}"))
+                        })?
+                        .stdout;
+
+                    let output = String::from_utf8_lossy(&output);
+                    tracing::info!("modprobe output: {output}");
                     liblmod::modprobe(
                         "ip6table_nat".to_string(),
                         "".to_string(),
@@ -87,7 +98,8 @@ impl PortRedirector for IptablesListener {
                     .map_err(|e| {
                         tracing::warn!(%e, "modprobe ip6_tables failed");
                         AgentError::IPTablesError(format!("modprobe failed: {e:?}"))
-                    })?;
+                    })
+                    .ok();
                     new_ip6tables()
                 } else {
                     new_iptables()
