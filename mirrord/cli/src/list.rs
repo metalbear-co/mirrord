@@ -9,7 +9,7 @@ use mirrord_config::{
     LayerConfig, LayerFileConfig,
 };
 use mirrord_kube::{
-    api::kubernetes::{create_kube_config, list, seeker::KubeResourceSeeker},
+    api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
 use mirrord_operator::client::OperatorApi;
@@ -129,7 +129,8 @@ impl FoundTargets {
             .to_owned();
 
         let namespaces = if fetch_namespaces {
-            list::list_all_clusterwide::<Namespace>(client, None)
+            seeker
+                .list_all_clusterwide::<Namespace>(None)
                 .try_filter_map(|namespace| std::future::ready(Ok(namespace.metadata.name)))
                 .try_collect::<Vec<_>>()
                 .await
@@ -152,8 +153,8 @@ impl FoundTargets {
 /// Thin wrapper over [`FoundTargets`] that implements [`Serialize`].
 /// Its serialized format is a sequence of available target paths.
 ///
-/// Used to print available targets when the plugin/extension does not support the full format (backward
-/// compatibility).
+/// Used to print available targets when the plugin/extension does not support the full format
+/// (backward compatibility).
 struct FoundTargetsList<'a>(&'a FoundTargets);
 
 impl Serialize for FoundTargetsList<'_> {
@@ -177,7 +178,7 @@ static ALL_TARGETS_SUPPORTED_OPERATOR_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=3.84.0".parse().expect("version should be valid"));
 
 /// Fetches mirrord targets from the cluster and prints output to stdout.
-/// 
+///
 /// When `rich_output` is set, targets info is printed as a JSON object containing extra data.
 /// Otherwise, targets are printed as a plain JSON array of strings (backward compatibility).
 pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> CliResult<()> {

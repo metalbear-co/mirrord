@@ -1,20 +1,22 @@
 use std::fmt;
 
-use futures::{stream, StreamExt, TryStreamExt};
+use futures::{stream, Stream, StreamExt, TryStreamExt};
 use k8s_openapi::{
     api::{
         apps::v1::{Deployment, StatefulSet},
         batch::v1::{CronJob, Job},
         core::v1::Pod,
     },
-    Metadata, NamespaceResourceScope,
+    ClusterResourceScope, Metadata, NamespaceResourceScope,
 };
-use kube::Resource;
-use serde::de;
+use kube::{api::ListParams, Api, Resource};
+use serde::de::{self, DeserializeOwned};
 
-use super::list;
 use crate::{
-    api::{container::SKIP_NAMES, kubernetes::rollout::Rollout},
+    api::{
+        container::SKIP_NAMES,
+        kubernetes::{get_k8s_resource_api, rollout::Rollout},
+    },
     error::{KubeApiError, Result},
 };
 
@@ -92,27 +94,23 @@ impl KubeResourceSeeker<'_> {
             Some((name, containers))
         }
 
-        list::list_all_namespaced(
-            self.client.clone(),
-            self.namespace.unwrap_or(self.client.default_namespace()),
-            Some("status.phase=Running"),
-        )
-        .try_filter(|pod| std::future::ready(check_pod_status(pod)))
-        .try_filter_map(|pod| std::future::ready(Ok(create_pod_container_map(pod))))
-        .map_ok(|(pod, containers)| {
-            stream::iter(if containers.len() == 1 {
-                vec![Ok(format!("pod/{pod}"))]
-            } else {
-                containers
-                    .iter()
-                    .map(move |container| Ok(format!("pod/{pod}/container/{container}")))
-                    .collect()
+        self.list_all_namespaced(Some("status.phase=Running"))
+            .try_filter(|pod| std::future::ready(check_pod_status(pod)))
+            .try_filter_map(|pod| std::future::ready(Ok(create_pod_container_map(pod))))
+            .map_ok(|(pod, containers)| {
+                stream::iter(if containers.len() == 1 {
+                    vec![Ok(format!("pod/{pod}"))]
+                } else {
+                    containers
+                        .iter()
+                        .map(move |container| Ok(format!("pod/{pod}/container/{container}")))
+                        .collect()
+                })
             })
-        })
-        .try_flatten()
-        .try_collect()
-        .await
-        .map_err(KubeApiError::KubeError)
+            .try_flatten()
+            .try_collect()
+            .await
+            .map_err(KubeApiError::KubeError)
     }
 
     /// The list of deployments that have at least 1 `Replicas` and a deployment name.
@@ -125,22 +123,18 @@ impl KubeResourceSeeker<'_> {
                 .unwrap_or(false)
         }
 
-        list::list_all_namespaced::<Deployment>(
-            self.client.clone(),
-            self.namespace.unwrap_or(self.client.default_namespace()),
-            None,
-        )
-        .filter(|response| std::future::ready(response.is_ok()))
-        .try_filter(|deployment| std::future::ready(check_deployment_replicas(deployment)))
-        .try_filter_map(|deployment| {
-            std::future::ready(Ok(deployment
-                .metadata
-                .name
-                .map(|name| format!("deployment/{name}"))))
-        })
-        .try_collect()
-        .await
-        .map_err(From::from)
+        self.list_all_namespaced::<Deployment>(None)
+            .filter(|response| std::future::ready(response.is_ok()))
+            .try_filter(|deployment| std::future::ready(check_deployment_replicas(deployment)))
+            .try_filter_map(|deployment| {
+                std::future::ready(Ok(deployment
+                    .metadata
+                    .name
+                    .map(|name| format!("deployment/{name}"))))
+            })
+            .try_collect()
+            .await
+            .map_err(From::from)
     }
 
     async fn simple_list_resource<'s, R>(&self, prefix: &'s str) -> Result<Vec<String>>
@@ -153,21 +147,101 @@ impl KubeResourceSeeker<'_> {
             + Metadata
             + Send,
     {
-        list::list_all_namespaced::<R>(
-            self.client.clone(),
-            self.namespace.unwrap_or(self.client.default_namespace()),
-            None,
-        )
-        .filter(|response| std::future::ready(response.is_ok()))
-        .try_filter_map(|rollout| {
-            std::future::ready(Ok(rollout
-                .meta()
-                .name
-                .as_ref()
-                .map(|name| format!("{prefix}/{name}"))))
-        })
-        .try_collect()
-        .await
-        .map_err(From::from)
+        self.list_all_namespaced::<R>(None)
+            .filter(|response| std::future::ready(response.is_ok()))
+            .try_filter_map(|rollout| {
+                std::future::ready(Ok(rollout
+                    .meta()
+                    .name
+                    .as_ref()
+                    .map(|name| format!("{prefix}/{name}"))))
+            })
+            .try_collect()
+            .await
+            .map_err(From::from)
+    }
+
+    /// Prepares [`ListParams`] that:
+    /// 1. Excludes our own resources
+    /// 2. Adds a limit for item count in a response
+    fn make_list_params(field_selector: Option<&str>) -> ListParams {
+        ListParams {
+            label_selector: Some("app!=mirrord,!operator.metalbear.co/owner".to_string()),
+            field_selector: field_selector.map(ToString::to_string),
+            limit: Some(500),
+            ..Default::default()
+        }
+    }
+
+    /// Returns a [`Stream`] of all objects in this [`KubeResourceSeeker`]'s namespace.
+    ///
+    /// 1. `field_selector` can be used for filtering.
+    /// 2. Our own resources are excluded.
+    pub fn list_all_namespaced<R>(
+        &self,
+        field_selector: Option<&str>,
+    ) -> impl 'static + Stream<Item = kube::Result<R>> + Send
+    where
+        R: 'static
+            + Resource<DynamicType = (), Scope = NamespaceResourceScope>
+            + fmt::Debug
+            + Clone
+            + DeserializeOwned
+            + Send,
+    {
+        let api = get_k8s_resource_api(self.client, self.namespace);
+        let mut params = Self::make_list_params(field_selector);
+
+        async_stream::stream! {
+            loop {
+                let response = api.list(&params).await?;
+
+                for resource in response.items {
+                    yield Ok(resource);
+                }
+
+                let continue_token = response.metadata.continue_.unwrap_or_default();
+                if continue_token.is_empty() {
+                    break;
+                }
+                params.continue_token.replace(continue_token);
+            }
+        }
+    }
+
+    /// Returns a [`Stream`] of all objects in the cluster.
+    ///
+    /// 1. `field_selector` can be used for filtering.
+    /// 2. Our own resources are excluded.
+    pub fn list_all_clusterwide<R>(
+        &self,
+        field_selector: Option<&str>,
+    ) -> impl 'static + Stream<Item = kube::Result<R>> + Send
+    where
+        R: 'static
+            + Resource<DynamicType = (), Scope = ClusterResourceScope>
+            + fmt::Debug
+            + Clone
+            + DeserializeOwned
+            + Send,
+    {
+        let api = Api::all(self.client.clone());
+        let mut params = Self::make_list_params(field_selector);
+
+        async_stream::stream! {
+            loop {
+                let response = api.list(&params).await?;
+
+                for resource in response.items {
+                    yield Ok(resource);
+                }
+
+                let continue_token = response.metadata.continue_.unwrap_or_default();
+                if continue_token.is_empty() {
+                    break;
+                }
+                params.continue_token.replace(continue_token);
+            }
+        }
     }
 }
