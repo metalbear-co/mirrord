@@ -100,6 +100,15 @@ impl PortRedirector for IptablesListener {
                     let output = String::from_utf8_lossy(&output);
                     tracing::info!("modprobe output: {output}");
                     liblmod::modprobe(
+                        "ip6_tables".to_string(),
+                        "".to_string(),
+                        liblmod::Selection::Current,
+                    )
+                    .map_err(|e| {
+                        tracing::warn!(%e, "modprobe ip6_tables failed");
+                        AgentError::IPTablesError(format!("modprobe failed: {e:?}"))
+                    })?;
+                    liblmod::modprobe(
                         "ip6table_nat".to_string(),
                         "".to_string(),
                         liblmod::Selection::Current,
@@ -107,8 +116,7 @@ impl PortRedirector for IptablesListener {
                     .map_err(|e| {
                         tracing::warn!(%e, "modprobe ip6_tables failed");
                         AgentError::IPTablesError(format!("modprobe failed: {e:?}"))
-                    })
-                    .ok();
+                    })?;
                     new_ip6tables()
                 } else {
                     new_iptables()
