@@ -48,5 +48,6 @@ RUN cp /app/target/$(cat /.platform)/release/mirrord-agent /mirrord-agent
 
 FROM ghcr.io/metalbear-co/ci-agent-runtime:latest
 COPY --from=builder /mirrord-agent /
+RUN apt install -y kmod
 
 CMD ["./mirrord-agent"]
