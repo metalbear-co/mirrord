@@ -208,6 +208,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
 
     let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)
         .or_else(|fail| match fail {
+            // The operator has a policy that matches this `path` as local-only.
             HookError::ResponseError(ResponseError::OpenLocal) => Detour::Bypass(Bypass::OpenLocal),
             other => Detour::Error(other),
         })?;

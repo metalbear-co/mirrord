@@ -216,6 +216,8 @@ pub(crate) enum Bypass {
     /// doesn't support them.
     NotImplemented,
 
+    /// File `open` (any `open`-ish operation) was forced to be local, instead of remote, most
+    /// likely due to an operator fs policy.
     OpenLocal,
 }
 

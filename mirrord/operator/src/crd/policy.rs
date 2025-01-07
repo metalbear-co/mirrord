@@ -59,6 +59,8 @@ pub struct MirrordPolicySpec {
     #[serde(default)]
     pub env: EnvPolicy,
 
+    /// Overrides fs ops behaviour, granting control over them to the operator policy, instead of
+    /// the user config.
     #[serde(default)]
     pub fs: FsPolicy,
 }
@@ -94,6 +96,8 @@ pub struct MirrordClusterPolicySpec {
     #[serde(default)]
     pub env: EnvPolicy,
 
+    /// Overrides fs ops behaviour, granting control over them to the operator policy, instead of
+    /// the user config.
     #[serde(default)]
     pub fs: FsPolicy,
 }
@@ -114,18 +118,29 @@ pub struct EnvPolicy {
     pub exclude: HashSet<String>,
 }
 
+/// File operations policy that mimics the mirrord fs config.
+///
+/// Allows the operator control over remote file ops behaviour, overriding what the user has set in
+/// their mirrord config file, if it matches something in one of the lists (regex sets) of this
+/// struct.
 #[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct FsPolicy {
+    /// The file can only be opened in read-only mode, otherwise the operator returns an IO error.
     #[serde(default)]
     pub read_only: HashSet<String>,
 
+    /// The file may be opened in read-write mode.
     #[serde(default)]
     pub read_write: HashSet<String>,
 
+    /// The file cannot be opened in the remote target.
+    ///
+    /// `open` calls that match this are forced to be opened in the local user's machine.
     #[serde(default)]
     pub local: HashSet<String>,
 
+    /// Any file that matches this returns a file not found error from the operator.
     #[serde(default)]
     pub not_found: HashSet<String>,
 }
