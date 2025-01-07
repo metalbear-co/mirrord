@@ -579,6 +579,7 @@ jobs:
           kubectl logs -l app==mirrord --tail -1
           kubectl get all
           kubectl describe pods
+          cat /tmp/mirrord-intproxy-*.log
 
   lint_markdown:
     runs-on: ubuntu-24.04
