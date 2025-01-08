@@ -79,7 +79,7 @@ impl PortRedirector for IptablesListener {
         } else {
             let safe = crate::steal::ip_tables::SafeIpTables::create(
                 if self.ipv6 {
-                    let output = std::process::Command::new("modprobe")
+                    std::process::Command::new("modprobe")
                         .arg("ip6table_nat")
                         .output()
                         .map_err(|e| {
@@ -87,11 +87,8 @@ impl PortRedirector for IptablesListener {
                             AgentError::IPTablesError(format!(
                                 "manual modprobe ip6table_nat failed: {e:?}"
                             ))
-                        })?
-                        .stdout;
-                    let output = String::from_utf8_lossy(&output);
-                    tracing::info!("modprobe output: {output}");
-                    let output = std::process::Command::new("modprobe")
+                        })?;
+                    std::process::Command::new("modprobe")
                         .arg("ip6_tables")
                         .output()
                         .map_err(|e| {
@@ -99,9 +96,8 @@ impl PortRedirector for IptablesListener {
                             AgentError::IPTablesError(format!(
                                 "manual modprobe ip6_tables failed: {e:?}"
                             ))
-                        })?
-                        .stdout;
-                    let output = std::process::Command::new("modprobe")
+                        })?;
+                    std::process::Command::new("modprobe")
                         .arg("nf_nat_ipv6")
                         .output()
                         .map_err(|e| {
@@ -109,9 +105,8 @@ impl PortRedirector for IptablesListener {
                             AgentError::IPTablesError(format!(
                                 "manual modprobe nf_nat_ipv6 failed: {e:?}"
                             ))
-                        })?
-                        .stdout;
-                    let output = std::process::Command::new("modprobe")
+                        })?;
+                    std::process::Command::new("modprobe")
                         .arg("nf_conntrack_ipv6")
                         .output()
                         .map_err(|e| {
@@ -119,8 +114,7 @@ impl PortRedirector for IptablesListener {
                             AgentError::IPTablesError(format!(
                                 "manual modprobe nf_conntrack_ipv6 failed: {e:?}"
                             ))
-                        })?
-                        .stdout;
+                        })?;
                     new_ip6tables()
                 } else {
                     new_iptables()
