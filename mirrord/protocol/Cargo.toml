@@ -18,12 +18,12 @@ workspace = true
 
 [dependencies]
 actix-codec.workspace = true
+bincode.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
 hickory-resolver.workspace = true
 hickory-proto.workspace = true
 serde.workspace = true
-bincode.workspace = true
 tracing.workspace = true
 hyper = { workspace = true, features = ["client"] }
 http-serde = "2"
