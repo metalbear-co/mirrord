@@ -79,44 +79,48 @@ impl PortRedirector for IptablesListener {
         } else {
             let safe = crate::steal::ip_tables::SafeIpTables::create(
                 if self.ipv6 {
-                    let output = std::process::Command::new("which")
-                        .arg("modprobe")
-                        .output()
-                        .map_err(|e| {
-                            tracing::warn!(%e, "`which modprobe` failed");
-                            AgentError::IPTablesError(format!("which modprobe failed: {e:?}"))
-                        })?
-                        .stdout;
-                    let output = String::from_utf8_lossy(&output);
-                    tracing::info!("which modprobe: {output}");
                     let output = std::process::Command::new("modprobe")
                         .arg("ip6table_nat")
                         .output()
                         .map_err(|e| {
                             tracing::warn!(%e, "manual modprobe ip6_tables failed");
-                            AgentError::IPTablesError(format!("manual modprobe failed: {e:?}"))
+                            AgentError::IPTablesError(format!(
+                                "manual modprobe ip6table_nat failed: {e:?}"
+                            ))
                         })?
                         .stdout;
                     let output = String::from_utf8_lossy(&output);
                     tracing::info!("modprobe output: {output}");
-                    liblmod::modprobe(
-                        "ip6_tables".to_string(),
-                        "".to_string(),
-                        liblmod::Selection::Current,
-                    )
-                    .map_err(|e| {
-                        tracing::warn!(%e, "modprobe ip6_tables failed");
-                        AgentError::IPTablesError(format!("modprobe failed: {e:?}"))
-                    })?;
-                    liblmod::modprobe(
-                        "ip6table_nat".to_string(),
-                        "".to_string(),
-                        liblmod::Selection::Current,
-                    )
-                    .map_err(|e| {
-                        tracing::warn!(%e, "modprobe ip6_tables failed");
-                        AgentError::IPTablesError(format!("modprobe failed: {e:?}"))
-                    })?;
+                    let output = std::process::Command::new("modprobe")
+                        .arg("ip6_tables")
+                        .output()
+                        .map_err(|e| {
+                            tracing::warn!(%e, "manual modprobe ip6_tables failed");
+                            AgentError::IPTablesError(format!(
+                                "manual modprobe ip6_tables failed: {e:?}"
+                            ))
+                        })?
+                        .stdout;
+                    let output = std::process::Command::new("modprobe")
+                        .arg("nf_nat_ipv6")
+                        .output()
+                        .map_err(|e| {
+                            tracing::warn!(%e, "manual modprobe ip6_tables failed");
+                            AgentError::IPTablesError(format!(
+                                "manual modprobe nf_nat_ipv6 failed: {e:?}"
+                            ))
+                        })?
+                        .stdout;
+                    let output = std::process::Command::new("modprobe")
+                        .arg("nf_conntrack_ipv6")
+                        .output()
+                        .map_err(|e| {
+                            tracing::warn!(%e, "manual modprobe ip6_tables failed");
+                            AgentError::IPTablesError(format!(
+                                "manual modprobe nf_conntrack_ipv6 failed: {e:?}"
+                            ))
+                        })?
+                        .stdout;
                     new_ip6tables()
                 } else {
                     new_iptables()
