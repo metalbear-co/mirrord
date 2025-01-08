@@ -18,6 +18,8 @@ use crate::utils::{
     config_dir, kube_client, service, Application, KubeService, ResourceGuard, TestProcess,
 };
 
+mod fs;
+
 /// Guard that deletes a mirrord policy when dropped.
 struct PolicyGuard {
     _inner: ResourceGuard,
