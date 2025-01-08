@@ -79,42 +79,6 @@ impl PortRedirector for IptablesListener {
         } else {
             let safe = crate::steal::ip_tables::SafeIpTables::create(
                 if self.ipv6 {
-                    std::process::Command::new("modprobe")
-                        .arg("ip6table_nat")
-                        .output()
-                        .map_err(|e| {
-                            tracing::warn!(%e, "manual modprobe ip6_tables failed");
-                            AgentError::IPTablesError(format!(
-                                "manual modprobe ip6table_nat failed: {e:?}"
-                            ))
-                        })?;
-                    std::process::Command::new("modprobe")
-                        .arg("ip6_tables")
-                        .output()
-                        .map_err(|e| {
-                            tracing::warn!(%e, "manual modprobe ip6_tables failed");
-                            AgentError::IPTablesError(format!(
-                                "manual modprobe ip6_tables failed: {e:?}"
-                            ))
-                        })?;
-                    std::process::Command::new("modprobe")
-                        .arg("nf_nat_ipv6")
-                        .output()
-                        .map_err(|e| {
-                            tracing::warn!(%e, "manual modprobe ip6_tables failed");
-                            AgentError::IPTablesError(format!(
-                                "manual modprobe nf_nat_ipv6 failed: {e:?}"
-                            ))
-                        })?;
-                    std::process::Command::new("modprobe")
-                        .arg("nf_conntrack_ipv6")
-                        .output()
-                        .map_err(|e| {
-                            tracing::warn!(%e, "manual modprobe ip6_tables failed");
-                            AgentError::IPTablesError(format!(
-                                "manual modprobe nf_conntrack_ipv6 failed: {e:?}"
-                            ))
-                        })?;
                     new_ip6tables()
                 } else {
                     new_iptables()
