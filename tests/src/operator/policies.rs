@@ -1,5 +1,5 @@
 #![cfg(test)]
-#![cfg(feature = "operator")]
+// #![cfg(feature = "operator")]
 //! Test that mirrordpolicies work and features are blocked.
 
 use std::{collections::BTreeMap, time::Duration};
@@ -18,7 +18,7 @@ use crate::utils::{
     config_dir, kube_client, service, Application, KubeService, ResourceGuard, TestProcess,
 };
 
-// mod fs;
+mod fs;
 
 /// Guard that deletes a mirrord policy when dropped.
 struct PolicyGuard {

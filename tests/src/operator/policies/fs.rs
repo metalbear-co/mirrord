@@ -1,6 +1,6 @@
 use std::{collections::HashSet, time::Duration};
 
-use mirrord_operator::crd::policy::{FsPolicy, MirrordClusterPolicy, MirrordClusterPolicySpec};
+use mirrord_operator::crd::policy::{FsPolicy, MirrordPolicy, MirrordPolicySpec};
 use rstest::{fixture, rstest};
 
 use crate::{
@@ -34,11 +34,12 @@ pub async fn create_cluster_fs_policy_and_try_file_operations(
     let service = service.await;
 
     // Create policy, delete it when test exits.
-    let _policy_guard = PolicyGuard::clusterwide(
+    // TODO(alex) [high]: Should probably be namespaced, to avoid it infecting other tests?
+    let _policy_guard = PolicyGuard::namespaced(
         kube_client,
-        &MirrordClusterPolicy::new(
+        &MirrordPolicy::new(
             "e2e-test-block-mirror-with-path-pattern",
-            MirrordClusterPolicySpec {
+            MirrordPolicySpec {
                 target_path: Some("fs_policy_e2e-test-*".into()),
                 selector: None,
                 block: Default::default(),
@@ -51,6 +52,7 @@ pub async fn create_cluster_fs_policy_and_try_file_operations(
                 },
             },
         ),
+        &service.namespace,
     )
     .await;
 
