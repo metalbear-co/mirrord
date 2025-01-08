@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::source::MirrordConfigSource;
 
@@ -23,7 +23,7 @@ pub static MIRRORD_EXTERNAL_TLS_KEY_ENV: &str = "MIRRORD_EXTERNAL_TLS_KEY";
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Clone, Debug, Serialize)]
+#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize)]
 #[config(map_to = "ExternalProxyFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct ExternalProxyConfig {

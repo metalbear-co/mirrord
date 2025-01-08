@@ -17,8 +17,8 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-mirrord-config-derive = { path = "./derive"}
-mirrord-analytics = { path = "../analytics"}
+mirrord-config-derive = { path = "./derive" }
+mirrord-analytics = { path = "../analytics" }
 
 serde.workspace = true
 serde_json.workspace = true
@@ -27,13 +27,14 @@ tracing.workspace = true
 serde_yaml.workspace = true
 toml = "0.8"
 schemars.workspace = true
-bimap = "0.6"
+bimap = { version = "0.6", features = ["serde"] }
 nom = "7.1"
 ipnet.workspace = true
 bitflags = "2"
 k8s-openapi = { workspace = true, features = ["schemars", "earliest"] }
 tera = "1"
 fancy-regex.workspace = true
+base64.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true
