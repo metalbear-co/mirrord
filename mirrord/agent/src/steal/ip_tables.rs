@@ -1,6 +1,5 @@
 use std::{
     fmt::Debug,
-    process::Command,
     sync::{Arc, LazyLock},
 };
 
@@ -119,14 +118,6 @@ pub fn new_ip6tables() -> iptables::IPTables {
     {
         iptables::new_with_cmd("/usr/sbin/ip6tables-nft")
     } else {
-        let output = Command::new("/usr/sbin/ip6tables-legacy")
-            .arg("--version")
-            .output()
-            .unwrap()
-            .stdout;
-        let version = String::from_utf8_lossy(&output);
-        tracing::info!("Using ip6tables-legacy, version: {version}");
-
         iptables::new_with_cmd("/usr/sbin/ip6tables-legacy")
     }
     .expect("IPTables initialization may not fail!")
