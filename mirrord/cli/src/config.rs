@@ -712,9 +712,16 @@ pub(super) struct ListTargetArgs {
     #[arg(short = 'n', long = "namespace")]
     pub namespace: Option<String>,
 
-    /// Specify config file to use
+    /// Specify config file to use.
     #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
     pub config_file: Option<PathBuf>,
+}
+
+impl ListTargetArgs {
+    /// Controls the output of `mirrord ls`.
+    /// If set to `true`, the command outputs a JSON object that contains more data.
+    /// Otherwise, it outputs a plain array of target paths.
+    pub(super) const RICH_OUTPUT_ENV: &str = "MIRRORD_LS_RICH_OUTPUT";
 }
 
 #[derive(Args, Debug)]
