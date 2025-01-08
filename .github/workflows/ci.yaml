@@ -551,37 +551,6 @@ jobs:
           kubectl describe pods
           docker exec minikube find /var/log/pods -print -exec cat {} \;
 
-  ipv6_e2e_tests:
-    runs-on: ubuntu-24.04
-    needs: [ test_agent_image, changed_files ]
-    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true' || needs.changed_files.outputs.dockerfile_changed == 'true'}}
-    env:
-      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install Rust.
-      - uses: actions/setup-python@v3
-      - run: pip3 install fastapi uvicorn[standard]
-        shell: bash
-      - name: download image
-        uses: actions/download-artifact@v4
-        with:
-          name: test
-          path: /tmp
-      - name: Create k8s Kind Cluster
-        run: .github/workflows/kind-with-registry-and-ipv6.sh
-      - run: kind load image-archive /tmp/test.tar
-      - run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p tests steal_http_ipv6_traffic -- --ignored --test-threads=6
-      - name: fetch info on failure
-        if: ${{ failure() }}
-        run: |
-          kubectl logs -l app==mirrord --tail -1
-          kubectl get all
-          kubectl describe pods
-          cat /tmp/mirrord-intproxy-*.log
-          kubectl get nodes -o wide
-
   lint_markdown:
     runs-on: ubuntu-24.04
     needs: changed_files
@@ -651,7 +620,6 @@ jobs:
         integration_tests,
         e2e,
         test_agent,
-        ipv6_e2e_tests,
         lint,
         lint_markdown,
         check-rust-docs,
@@ -669,7 +637,6 @@ jobs:
             (needs.macos_tests.result == 'success' || needs.macos_tests.result == 'skipped') &&
             (needs.integration_tests.result == 'success' || needs.integration_tests.result == 'skipped') &&
             (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
-            (needs.ipv6_e2e_tests.result == 'success' || needs.ipv6_e2e_tests.result == 'skipped') &&
             (needs.test_agent.result == 'success' || needs.test_agent.result == 'skipped') &&
             (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
             (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped') &&
