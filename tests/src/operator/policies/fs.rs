@@ -26,12 +26,12 @@ async fn fs_service(#[future] kube_client: kube::Client) -> KubeService {
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(60))]
-pub async fn create_cluster_fs_policy_and_try_file_operations(
-    #[future] service: KubeService,
+pub async fn create_namespaced_fs_policy_and_try_file_open(
+    #[future] fs_service: KubeService,
     #[future] kube_client: kube::Client,
 ) {
     let kube_client = kube_client.await;
-    let service = service.await;
+    let service = fs_service.await;
 
     // Create policy, delete it when test exits.
     let _policy_guard = PolicyGuard::namespaced(
