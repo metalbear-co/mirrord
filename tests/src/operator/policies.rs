@@ -18,6 +18,8 @@ use crate::utils::{
     config_dir, kube_client, service, Application, KubeService, ResourceGuard, TestProcess,
 };
 
+mod fs;
+
 /// Guard that deletes a mirrord policy when dropped.
 struct PolicyGuard {
     _inner: ResourceGuard,
@@ -128,6 +130,7 @@ fn block_steal_without_qualifiers() -> PolicyTestCase {
                 selector: None,
                 block: vec![BlockedFeature::Steal],
                 env: Default::default(),
+                fs: Default::default(),
             },
         ),
         service_b_can_steal: No,
@@ -147,6 +150,7 @@ fn block_steal_with_path_pattern() -> PolicyTestCase {
                 selector: None,
                 block: vec![BlockedFeature::Steal],
                 env: Default::default(),
+                fs: Default::default(),
             },
         ),
         service_b_can_steal: EvenWithoutFilter,
@@ -166,6 +170,7 @@ fn block_unfiltered_steal_with_path_pattern() -> PolicyTestCase {
                 selector: None,
                 block: vec![BlockedFeature::StealWithoutFilter],
                 env: Default::default(),
+                fs: Default::default(),
             },
         ),
         service_b_can_steal: EvenWithoutFilter,
@@ -185,6 +190,7 @@ fn block_unfiltered_steal_with_deployment_path_pattern() -> PolicyTestCase {
                 selector: None,
                 block: vec![BlockedFeature::StealWithoutFilter],
                 env: Default::default(),
+                fs: Default::default(),
             },
         ),
         service_a_can_steal: OnlyWithFilter,
@@ -210,6 +216,7 @@ fn block_steal_with_label_selector() -> PolicyTestCase {
                 }),
                 block: vec![BlockedFeature::Steal],
                 env: Default::default(),
+                fs: Default::default(),
             },
         ),
         service_b_can_steal: EvenWithoutFilter,
@@ -236,6 +243,7 @@ fn block_steal_with_unmatching_policy() -> PolicyTestCase {
                 }),
                 block: vec![BlockedFeature::Steal],
                 env: Default::default(),
+                fs: Default::default(),
             },
         ),
         service_b_can_steal: EvenWithoutFilter,
@@ -377,6 +385,7 @@ pub async fn create_cluster_policy_and_try_to_mirror(
                 selector: None,
                 block: vec![BlockedFeature::Mirror],
                 env: Default::default(),
+                fs: Default::default(),
             },
         ),
     )

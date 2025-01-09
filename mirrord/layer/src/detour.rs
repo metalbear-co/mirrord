@@ -215,6 +215,10 @@ pub(crate) enum Bypass {
     /// Useful for operations that are version gated, and we want to bypass when the protocol
     /// doesn't support them.
     NotImplemented,
+
+    /// File `open` (any `open`-ish operation) was forced to be local, instead of remote, most
+    /// likely due to an operator fs policy.
+    OpenLocal,
 }
 
 impl Bypass {

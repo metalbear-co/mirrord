@@ -100,6 +100,11 @@ pub enum Application {
     PythonCloseSocketKeepConnection,
     RustWebsockets,
     RustSqs,
+    /// Tries to open files in the remote target, but these operations should succeed or fail based
+    /// on mirrord `FsPolicy`.
+    ///
+    /// - `node-e2e/fspolicy/test_operator_fs_policy.mjs`
+    NodeFsPolicy,
 }
 
 #[derive(Debug)]
@@ -407,6 +412,9 @@ impl Application {
             Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
             Application::NodeHTTP2 => {
                 vec!["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
+            }
+            Application::NodeFsPolicy => {
+                vec!["node", "node-e2e/fspolicy/test_operator_fs_policy.mjs"]
             }
             Application::Go21HTTP => vec!["go-e2e/21.go_test_app"],
             Application::Go22HTTP => vec!["go-e2e/22.go_test_app"],
