@@ -85,6 +85,4 @@ pub async fn create_cluster_fs_policy_and_try_file_operations(
     test_process
         .assert_stdout_contains("SUCCESS /app/file.read-write")
         .await;
-
-    test_process.child.kill().await.unwrap()
 }
