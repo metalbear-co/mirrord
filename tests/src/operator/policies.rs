@@ -1,5 +1,5 @@
 #![cfg(test)]
-// #![cfg(feature = "operator")]
+#![cfg(feature = "operator")]
 //! Test that mirrordpolicies work and features are blocked.
 
 use std::{collections::BTreeMap, time::Duration};

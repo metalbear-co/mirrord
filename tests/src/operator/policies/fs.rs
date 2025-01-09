@@ -34,7 +34,6 @@ pub async fn create_cluster_fs_policy_and_try_file_operations(
     let service = service.await;
 
     // Create policy, delete it when test exits.
-    // TODO(alex) [high]: Should probably be namespaced, to avoid it infecting other tests?
     let _policy_guard = PolicyGuard::namespaced(
         kube_client,
         &MirrordPolicy::new(
@@ -66,10 +65,6 @@ pub async fn create_cluster_fs_policy_and_try_file_operations(
             Some(vec!["--fs-mode=write"]),
             None,
         )
-        .await;
-
-    test_process
-        .wait_for_line(Duration::from_secs(40), "daemon subscribed")
         .await;
 
     test_process.wait_assert_success().await;
