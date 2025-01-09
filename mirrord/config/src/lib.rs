@@ -340,8 +340,7 @@ impl LayerConfig {
             .map_err(|error| ConfigError::EnvVarDecodeError(error.to_string()))?;
         let serialized = std::str::from_utf8(&decoded)
             .map_err(|error| ConfigError::EnvVarDecodeError(error.to_string()))?;
-        dbg!(&serialized);
-        Ok(serde_json::from_str::<Self>(&serialized)?) // FIX: deser. fails with missing field err
+        Ok(serde_json::from_str::<Self>(&serialized)?)
     }
 
     /// Generate a config from the environment variables and/or a config file.

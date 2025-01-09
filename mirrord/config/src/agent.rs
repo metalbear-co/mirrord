@@ -354,7 +354,7 @@ pub struct AgentConfig {
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
     #[cfg(all(debug_assertions, not(test)))] // not(test) so that it's not included in the schema json.
-    #[serde(skip_serializing)]
+    #[serde(skip_serializing, skip_deserializing)]
     #[config(env = "MIRRORD_AGENT_TEST_ERROR", default = false, unstable)]
     pub test_error: bool,
 }
