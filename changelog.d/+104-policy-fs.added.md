@@ -1,1 +1,1 @@
-Add policy to control file ops.
+Add policy to control file ops from the operator.
