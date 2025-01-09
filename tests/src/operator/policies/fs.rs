@@ -59,7 +59,7 @@ pub async fn create_cluster_fs_policy_and_try_file_operations(
 
     let mut test_process = application
         .run(
-            &service.target,
+            &service.pod_container_target(),
             Some(&service.namespace),
             Some(vec!["--fs-mode=write"]),
             None,

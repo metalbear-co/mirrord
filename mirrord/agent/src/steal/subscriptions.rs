@@ -1,16 +1,20 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
-    net::{Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    ops::Not,
     sync::Arc,
 };
 
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use mirrord_protocol::{Port, RemoteResult, ResponseError};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    select,
+};
 
 use super::{
     http::HttpFilter,
-    ip_tables::{new_iptables, IPTablesWrapper, SafeIpTables},
+    ip_tables::{new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables},
 };
 use crate::{error::AgentError, util::ClientId};
 
@@ -47,70 +51,46 @@ pub trait PortRedirector {
     async fn next_connection(&mut self) -> Result<(TcpStream, SocketAddr), Self::Error>;
 }
 
-/// Implementation of [`PortRedirector`] that manipulates iptables to steal connections by
-/// redirecting TCP packets to inner [`TcpListener`].
-pub(crate) struct IpTablesRedirector {
+/// A TCP listener, together with an iptables wrapper to set rules that send traffic to the
+/// listener.
+pub(crate) struct IptablesListener {
     /// For altering iptables rules.
     iptables: Option<SafeIpTables<IPTablesWrapper>>,
-    /// Whether exisiting connections should be flushed when adding new redirects.
-    flush_connections: bool,
-    /// Port of [`IpTablesRedirector::listener`].
+    /// Port of [`listener`](Self::listener).
     redirect_to: Port,
     /// Listener to which redirect all connections.
     listener: TcpListener,
-
+    /// Optional comma-seperated list of IPs of the pod, originating in the pod's `Status.PodIps`
     pod_ips: Option<String>,
-}
-
-impl IpTablesRedirector {
-    /// Create a new instance of this struct. Open an IPv4 TCP listener on an
-    /// [`Ipv4Addr::UNSPECIFIED`] address and a random port. This listener will be used to accept
-    /// redirected connections.
-    ///
-    /// # Note
-    ///
-    /// Does not yet alter iptables.
-    ///
-    /// # Params
-    ///
-    /// * `flush_connections` - whether exisitng connections should be flushed when adding new
-    ///   redirects
-    pub(crate) async fn new(
-        flush_connections: bool,
-        pod_ips: Option<String>,
-    ) -> Result<Self, AgentError> {
-        let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await?;
-        let redirect_to = listener.local_addr()?.port();
-
-        Ok(Self {
-            iptables: None,
-            flush_connections,
-            redirect_to,
-            listener,
-            pod_ips,
-        })
-    }
+    /// Whether existing connections should be flushed when adding new redirects.
+    flush_connections: bool,
+    /// Is this for connections incoming over IPv6
+    ipv6: bool,
 }
 
 #[async_trait::async_trait]
-impl PortRedirector for IpTablesRedirector {
+impl PortRedirector for IptablesListener {
     type Error = AgentError;
 
+    #[tracing::instrument(skip(self), err, ret, level=tracing::Level::DEBUG, fields(self.ipv6 = %self.ipv6))]
     async fn add_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
-        let iptables = match self.iptables.as_ref() {
-            Some(iptables) => iptables,
-            None => {
-                let iptables = new_iptables();
-                let safe = SafeIpTables::create(
-                    iptables.into(),
-                    self.flush_connections,
-                    self.pod_ips.as_deref(),
-                )
-                .await?;
-                self.iptables.insert(safe)
-            }
+        let iptables = if let Some(iptables) = self.iptables.as_ref() {
+            iptables
+        } else {
+            let safe = crate::steal::ip_tables::SafeIpTables::create(
+                if self.ipv6 {
+                    new_ip6tables()
+                } else {
+                    new_iptables()
+                }
+                .into(),
+                self.flush_connections,
+                self.pod_ips.as_deref(),
+                self.ipv6,
+            )
+            .await?;
+            self.iptables.insert(safe)
         };
-
         iptables.add_redirect(from, self.redirect_to).await
     }
 
@@ -132,6 +112,193 @@ impl PortRedirector for IpTablesRedirector {
 
     async fn next_connection(&mut self) -> Result<(TcpStream, SocketAddr), Self::Error> {
         self.listener.accept().await.map_err(Into::into)
+    }
+}
+
+/// Implementation of [`PortRedirector`] that manipulates iptables to steal connections by
+/// redirecting TCP packets to inner [`TcpListener`].
+///
+/// Holds TCP listeners + iptables, for redirecting IPv4 and/or IPv6 connections.
+pub(crate) enum IpTablesRedirector {
+    Ipv4Only(IptablesListener),
+    /// Could be used if IPv6 support is enabled, and we cannot bind an IPv4 address.
+    Ipv6Only(IptablesListener),
+    Dual {
+        ipv4_listener: IptablesListener,
+        ipv6_listener: IptablesListener,
+    },
+}
+
+impl IpTablesRedirector {
+    /// Create a new instance of this struct. Open an IPv4 TCP listener on an
+    /// [`Ipv4Addr::UNSPECIFIED`] address and a random port. This listener will be used to accept
+    /// redirected connections.
+    ///
+    /// If `support_ipv6` is set, will also listen on IPv6, and a fail to listen over IPv4 will be
+    /// accepted.
+    ///
+    /// # Note
+    ///
+    /// Does not yet alter iptables.
+    ///
+    /// # Params
+    ///
+    /// * `flush_connections` - whether existing connections should be flushed when adding new
+    ///   redirects
+    pub(crate) async fn new(
+        flush_connections: bool,
+        pod_ips: Option<String>,
+        support_ipv6: bool,
+    ) -> Result<Self, AgentError> {
+        let (pod_ips4, pod_ips6) = pod_ips.map_or_else(
+            || (None, None),
+            |ips| {
+                // TODO: probably nicer to split at the client and avoid the conversion to and back
+                //   from a string.
+                let (ip4s, ip6s): (Vec<_>, Vec<_>) = ips.split(',').partition(|ip_str| {
+                    ip_str
+                        .parse::<IpAddr>()
+                        .inspect_err(|e| tracing::warn!(%e, "failed to parse pod IP {ip_str}"))
+                        .as_ref()
+                        .map(IpAddr::is_ipv4)
+                        .unwrap_or_default()
+                });
+                // Convert to options, `None` if vector is empty.
+                (
+                    ip4s.is_empty().not().then(|| ip4s.join(",")),
+                    ip6s.is_empty().not().then(|| ip6s.join(",")),
+                )
+            },
+        );
+        tracing::debug!("pod IPv4 addresses: {pod_ips4:?}, pod IPv6 addresses: {pod_ips6:?}");
+
+        tracing::debug!("Creating IPv4 iptables redirection listener");
+        let listener4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await
+                .inspect_err(
+                    |err| tracing::debug!(%err, "Could not bind IPv4, continuing with IPv6 only."),
+                )
+                .ok()
+                .and_then(|listener| {
+                    let redirect_to = listener
+                        .local_addr()
+                        .inspect_err(
+                            |err| tracing::debug!(%err, "Get IPv4 listener address, continuing with IPv6 only."),
+                        )
+                        .ok()?
+                        .port();
+                    Some(IptablesListener {
+                        iptables: None,
+                        redirect_to,
+                        listener,
+                        pod_ips: pod_ips4,
+                        flush_connections,
+                        ipv6: false,
+                    })
+                });
+        tracing::debug!("Creating IPv6 iptables redirection listener");
+        let listener6 = if support_ipv6 {
+            TcpListener::bind((Ipv6Addr::UNSPECIFIED, 0)).await
+                    .inspect_err(
+                        |err| tracing::debug!(%err, "Could not bind IPv6, continuing with IPv4 only."),
+                    )
+                    .ok()
+                    .and_then(|listener| {
+                        let redirect_to = listener
+                            .local_addr()
+                            .inspect_err(
+                                |err| tracing::debug!(%err, "Get IPv6 listener address, continuing with IPv4 only."),
+                            )
+                            .ok()?
+                            .port();
+                        Some(IptablesListener {
+                            iptables: None,
+                            redirect_to,
+                            listener,
+                            pod_ips: pod_ips6,
+                            flush_connections,
+                            ipv6: true,
+                        })
+                    })
+        } else {
+            None
+        };
+        match (listener4, listener6) {
+            (None, None) => Err(AgentError::CannotListenForStolenConnections),
+            (Some(ipv4_listener), None) => Ok(Self::Ipv4Only(ipv4_listener)),
+            (None, Some(ipv6_listener)) => Ok(Self::Ipv6Only(ipv6_listener)),
+            (Some(ipv4_listener), Some(ipv6_listener)) => Ok(Self::Dual {
+                ipv4_listener,
+                ipv6_listener,
+            }),
+        }
+    }
+
+    pub(crate) fn get_listeners_mut(
+        &mut self,
+    ) -> (Option<&mut IptablesListener>, Option<&mut IptablesListener>) {
+        match self {
+            IpTablesRedirector::Ipv4Only(ipv4_listener) => (Some(ipv4_listener), None),
+            IpTablesRedirector::Ipv6Only(ipv6_listener) => (None, Some(ipv6_listener)),
+            IpTablesRedirector::Dual {
+                ipv4_listener,
+                ipv6_listener,
+            } => (Some(ipv4_listener), Some(ipv6_listener)),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl PortRedirector for IpTablesRedirector {
+    type Error = AgentError;
+
+    async fn add_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
+        let (ipv4_listener, ipv6_listener) = self.get_listeners_mut();
+        if let Some(ip4_listener) = ipv4_listener {
+            tracing::debug!("Adding IPv4 redirection from port {from}");
+            ip4_listener.add_redirection(from).await?;
+        }
+        if let Some(ip6_listener) = ipv6_listener {
+            tracing::debug!("Adding IPv6 redirection from port {from}");
+            ip6_listener.add_redirection(from).await?;
+        }
+        Ok(())
+    }
+
+    async fn remove_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
+        let (ipv4_listener, ipv6_listener) = self.get_listeners_mut();
+        if let Some(ip4_listener) = ipv4_listener {
+            ip4_listener.remove_redirection(from).await?;
+        }
+        if let Some(ip6_listener) = ipv6_listener {
+            ip6_listener.remove_redirection(from).await?;
+        }
+        Ok(())
+    }
+
+    async fn cleanup(&mut self) -> Result<(), Self::Error> {
+        let (ipv4_listener, ipv6_listener) = self.get_listeners_mut();
+        if let Some(ip4_listener) = ipv4_listener {
+            ip4_listener.cleanup().await?;
+        }
+        if let Some(ip6_listener) = ipv6_listener {
+            ip6_listener.cleanup().await?;
+        }
+        Ok(())
+    }
+
+    async fn next_connection(&mut self) -> Result<(TcpStream, SocketAddr), Self::Error> {
+        match self {
+            Self::Dual {
+                ipv4_listener,
+                ipv6_listener,
+            } => {
+                select! {
+                    con = ipv4_listener.next_connection() => con,
+                    con = ipv6_listener.next_connection() => con,
+                }
+            }
+            Self::Ipv4Only(listener) | Self::Ipv6Only(listener) => listener.next_connection().await,
+        }
     }
 }
 

@@ -1268,7 +1268,7 @@
     },
     "IncomingFileConfig": {
       "title": "incoming (network)",
-      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it to the local process, see [`steal`](##steal);\n\n### Minimal `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": \"steal\" } } } ```\n\n### Advanced `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] \"listen_ports\": [[80, 8111]] } } } } ```",
+      "description": "Controls the incoming TCP traffic feature.\n\nSee the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more details.\n\nIncoming traffic supports 2 modes of operation:\n\n1. Mirror (**default**): Sniffs the TCP data from a port, and forwards a copy to the interested listeners;\n\n2. Steal: Captures the TCP data from a port, and forwards it to the local process, see [`steal`](##steal);\n\n### Minimal `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": \"steal\" } } } ```\n\n### Advanced `incoming` config\n\n```json { \"feature\": { \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000], \"listen_ports\": [[80, 8111]] } } } } ```",
       "anyOf": [
         {
           "anyOf": [
@@ -1472,6 +1472,14 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "ipv6": {
+          "title": "feature.network.ipv6 {#feature-network-dns}",
+          "description": "Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6.",
+          "type": [
+            "boolean",
+            "null"
           ]
         },
         "outgoing": {

@@ -282,7 +282,7 @@ async fn run_mirrord_and_verify_steal_result(
     let target = if target_deployment {
         format!("deploy/{}", kube_service.name)
     } else {
-        kube_service.target.clone()
+        kube_service.pod_container_target()
     };
 
     let test_proc = application
@@ -301,7 +301,7 @@ async fn run_mirrord_and_verify_steal_result(
 
     let test_proc = application
         .run(
-            &kube_service.target,
+            &kube_service.pod_container_target(),
             Some(&kube_service.namespace),
             Some(vec!["--config-file", config_path.to_str().unwrap()]),
             None,
@@ -355,7 +355,7 @@ async fn run_mirrord_and_verify_mirror_result(kube_service: &KubeService, expect
 
     let test_proc = application
         .run(
-            &kube_service.target,
+            &kube_service.pod_container_target(),
             Some(&kube_service.namespace),
             Some(vec!["--fs-mode=local"]),
             None,
