@@ -130,10 +130,6 @@ pub struct FsPolicy {
     #[serde(default)]
     pub read_only: HashSet<String>,
 
-    /// The file may be opened in read-write mode.
-    #[serde(default)]
-    pub read_write: HashSet<String>,
-
     /// The file cannot be opened in the remote target.
     ///
     /// `open` calls that match this are forced to be opened in the local user's machine.

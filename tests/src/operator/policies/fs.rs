@@ -45,7 +45,6 @@ pub async fn create_cluster_fs_policy_and_try_file_operations(
                 env: Default::default(),
                 fs: FsPolicy {
                     read_only: HashSet::from_iter(vec!["file.read-only".to_string()]),
-                    read_write: HashSet::from_iter(vec!["file.read-write".to_string()]),
                     local: HashSet::from_iter(vec!["file.local".to_string()]),
                     not_found: HashSet::from_iter(vec!["file.not-found".to_string()]),
                 },
