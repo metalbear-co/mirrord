@@ -37,7 +37,7 @@ pub async fn create_cluster_fs_policy_and_try_file_operations(
     let _policy_guard = PolicyGuard::namespaced(
         kube_client,
         &MirrordPolicy::new(
-            "e2e-test-block-mirror-with-path-pattern",
+            "e2e-test-fs-policy-with-path-pattern",
             MirrordPolicySpec {
                 target_path: Some("fs_policy_e2e-test-*".into()),
                 selector: None,
