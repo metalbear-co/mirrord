@@ -85,9 +85,9 @@ mod steal_tests {
 
         let mut flags = vec!["--steal"];
 
-        // if cfg!(feature = "ephemeral") {
-        //     flags.extend(["-e"].into_iter());
-        // }
+        if cfg!(feature = "ephemeral") {
+            flags.extend(["-e"].into_iter());
+        }
 
         let mut process = application
             .run(
