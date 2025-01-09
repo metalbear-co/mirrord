@@ -340,7 +340,8 @@ impl LayerConfig {
             .map_err(|error| ConfigError::EnvVarDecodeError(error.to_string()))?;
         let serialized = std::str::from_utf8(&decoded)
             .map_err(|error| ConfigError::EnvVarDecodeError(error.to_string()))?;
-        Ok(serde_json::from_str::<Self>(&serialized)?)
+        dbg!(&serialized);
+        Ok(serde_json::from_str::<Self>(&serialized)?) // FIX: deser. fails with missing field err
     }
 
     /// Generate a config from the environment variables and/or a config file.
@@ -349,24 +350,26 @@ impl LayerConfig {
     pub fn from_env_with_warnings() -> Result<(Self, ConfigContext), ConfigError> {
         let mut cfg_context = ConfigContext::default();
 
-        if let Ok(value) = std::env::var(MIRRORD_RESOLVED_CONFIG_ENV) {
-            LayerConfig::from_env_var(value)
-        } else {
-            // the resolved config is not present in env, so resolve it and then set into env var
-            let config = if let Ok(path) = std::env::var(MIRRORD_CONFIG_FILE_ENV) {
-                LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
-            } else {
-                LayerFileConfig::default().generate_config(&mut cfg_context)
-            }?;
+        match std::env::var(MIRRORD_RESOLVED_CONFIG_ENV) {
+            Ok(value) if !value.is_empty() => LayerConfig::from_env_var(value),
+            _ => {
+                // the resolved config is not present in env, so resolve it and then set into env
+                // var
+                let config = if let Ok(path) = std::env::var(MIRRORD_CONFIG_FILE_ENV) {
+                    LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
+                } else {
+                    LayerFileConfig::default().generate_config(&mut cfg_context)
+                }?;
 
-            // serialise the config and encode as base64
-            let serialized = serde_json::to_string(&config)
-                .map_err(|error| ConfigError::EnvVarEncodeError(error.to_string()))?;
-            std::env::set_var(
-                MIRRORD_RESOLVED_CONFIG_ENV,
-                BASE64_STANDARD.encode(serialized),
-            );
-            Ok(config)
+                // serialise the config and encode as base64
+                let serialized = serde_json::to_string(&config)
+                    .map_err(|error| ConfigError::EnvVarEncodeError(error.to_string()))?;
+                std::env::set_var(
+                    MIRRORD_RESOLVED_CONFIG_ENV,
+                    BASE64_STANDARD.encode(serialized),
+                );
+                Ok(config)
+            }
         }
         .map(|config| (config, cfg_context))
     }
