@@ -16,8 +16,8 @@ mod traffic_tests {
     use tokio::{fs::File, io::AsyncWriteExt};
 
     use crate::utils::{
-        config_dir, hostname_service, kube_client, run_exec_with_target, service,
-        udp_logger_service, KubeService, CONTAINER_NAME,
+        config_dir, hostname_service, ipv6::ipv6_service, kube_client, run_exec_with_target,
+        service, udp_logger_service, KubeService, CONTAINER_NAME,
     };
 
     #[cfg_attr(not(feature = "job"), ignore)]
@@ -107,6 +107,28 @@ mod traffic_tests {
             None,
             None,
             None,
+        )
+        .await;
+
+        let res = process.wait().await;
+        assert!(res.success());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore]
+    pub async fn outgoing_traffic_single_request_ipv6_enabled(#[future] ipv6_service: KubeService) {
+        let service = ipv6_service.await;
+        let node_command = vec![
+            "node",
+            "node-e2e/outgoing/test_outgoing_traffic_single_request_ipv6.mjs",
+        ];
+        let mut process = run_exec_with_target(
+            node_command,
+            &service.pod_container_target(),
+            None,
+            None,
+            Some(vec![("MIRRORD_ENABLE_IPV6", "true")]),
         )
         .await;
 
