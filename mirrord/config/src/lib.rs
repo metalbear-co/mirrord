@@ -340,7 +340,7 @@ impl LayerConfig {
             .map_err(|error| ConfigError::EnvVarDecodeError(error.to_string()))?;
         let serialized = std::str::from_utf8(&decoded)
             .map_err(|error| ConfigError::EnvVarDecodeError(error.to_string()))?;
-        Ok(serde_json::from_str::<Self>(&serialized)?)
+        Ok(serde_json::from_str::<Self>(serialized)?)
     }
 
     pub fn to_env_var(&self) -> Result<String, ConfigError> {
