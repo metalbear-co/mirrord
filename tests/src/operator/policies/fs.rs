@@ -39,14 +39,14 @@ pub async fn create_namespaced_fs_policy_and_try_file_open(
         &MirrordPolicy::new(
             "e2e-test-fs-policy-with-path-pattern",
             MirrordPolicySpec {
-                target_path: Some("fs_policy_e2e-test-*".into()),
+                target_path: Some("*fs-policy-e2e-test-*".into()),
                 selector: None,
                 block: Default::default(),
                 env: Default::default(),
                 fs: FsPolicy {
-                    read_only: HashSet::from_iter(vec!["file.read-only".to_string()]),
-                    local: HashSet::from_iter(vec!["file.local".to_string()]),
-                    not_found: HashSet::from_iter(vec!["file.not-found".to_string()]),
+                    read_only: HashSet::from_iter(vec!["file\\.read-only".to_string()]),
+                    local: HashSet::from_iter(vec!["file\\.local".to_string()]),
+                    not_found: HashSet::from_iter(vec!["file\\.not-found".to_string()]),
                 },
             },
         ),
@@ -68,20 +68,25 @@ pub async fn create_namespaced_fs_policy_and_try_file_open(
 
     test_process.wait_assert_success().await;
 
-    test_process
-        .assert_stderr_contains("FAIL /app/file.local")
-        .await;
-    test_process
-        .assert_stderr_contains("FAIL /app/file.not-found")
-        .await;
-    test_process
-        .assert_stderr_contains("FAIL r+ /app/file.read-only")
-        .await;
+    let stdout = test_process.get_stdout().await;
 
-    test_process
-        .assert_stdout_contains("SUCCESS /app/file.read-only")
-        .await;
-    test_process
-        .assert_stdout_contains("SUCCESS /app/file.read-write")
-        .await;
+    let reading_local_failed = stdout.contains("FAIL r /app/file.local");
+    let reading_not_found_failed = stdout.contains("FAIL r /app/file.not-found");
+    let reading_read_only_succeeded = stdout.contains("SUCCESS r /app/file.read-only");
+    let writing_read_only_failed = stdout.contains("FAIL r+ /app/file.read-only");
+    let writing_read_write_succeeded = stdout.contains("SUCCESS r+ /app/file.read-write");
+
+    assert!(
+        reading_local_failed
+            && reading_not_found_failed
+            && reading_read_only_succeeded
+            && writing_read_only_failed
+            && writing_read_write_succeeded,
+        "some file operations did not finish as expected:\n
+        \treading_local_failed={reading_local_failed}\n
+        \treading_not_found_failed={reading_not_found_failed}\n
+        \treading_read_only_succeeded={reading_read_only_succeeded} \n
+        \twriting_read_only_failed={writing_read_only_failed}\n
+        \twriting_read_write_succeeded={writing_read_write_succeeded}",
+    )
 }

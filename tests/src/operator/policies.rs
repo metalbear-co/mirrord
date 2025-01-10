@@ -33,28 +33,18 @@ impl PolicyGuard {
     ) -> Self {
         let policy_api: Api<MirrordPolicy> = Api::namespaced(kube_client.clone(), namespace);
         PolicyGuard {
-            _inner: ResourceGuard::create(
-                policy_api,
-                policy.metadata.name.clone().unwrap(),
-                policy,
-                true,
-            )
-            .await
-            .expect("Could not create policy in E2E test."),
+            _inner: ResourceGuard::create(policy_api, policy, true)
+                .await
+                .expect("Could not create policy in E2E test."),
         }
     }
 
     pub async fn clusterwide(kube_client: kube::Client, policy: &MirrordClusterPolicy) -> Self {
         let policy_api: Api<MirrordClusterPolicy> = Api::all(kube_client.clone());
         PolicyGuard {
-            _inner: ResourceGuard::create(
-                policy_api,
-                policy.metadata.name.clone().unwrap(),
-                policy,
-                true,
-            )
-            .await
-            .expect("Could not create policy in E2E test."),
+            _inner: ResourceGuard::create(policy_api, policy, true)
+                .await
+                .expect("Could not create policy in E2E test."),
         }
     }
 }
