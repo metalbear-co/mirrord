@@ -12,7 +12,7 @@ static DEFAULT_CLI_IMAGE: &str = concat!(
 );
 
 /// Unstable: `mirrord container` command specific config.
-#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize)]
+#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[config(map_to = "ContainerFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct ContainerConfig {

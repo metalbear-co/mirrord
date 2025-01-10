@@ -75,7 +75,7 @@ impl FromMirrordConfig for CopyTargetConfig {
 ///   }
 /// }
 /// ```
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CopyTargetConfig {
     pub enabled: bool,
 

@@ -47,7 +47,7 @@ pub const MIRRORD_OVERRIDE_ENV_FILE_ENV: &str = "MIRRORD_OVERRIDE_ENV_VARS_FILE"
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize)]
+#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[config(map_to = "EnvFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct EnvConfig {

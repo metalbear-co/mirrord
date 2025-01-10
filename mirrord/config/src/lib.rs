@@ -178,7 +178,7 @@ pub static MIRRORD_RESOLVED_CONFIG_ENV: &str = "MIRRORD_RESOLVED_CONFIG";
 /// ```
 ///
 /// # Options {#root-options}
-#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize)]
+#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct LayerConfig {
@@ -343,6 +343,12 @@ impl LayerConfig {
         Ok(serde_json::from_str::<Self>(&serialized)?)
     }
 
+    pub fn to_env_var(&self) -> Result<String, ConfigError> {
+        let serialized = serde_json::to_string(self)
+            .map_err(|error| ConfigError::EnvVarEncodeError(error.to_string()))?;
+        Ok(BASE64_STANDARD.encode(serialized))
+    }
+
     /// Generate a config from the environment variables and/or a config file.
     /// On success, returns the config and a vec of warnings.
     /// To be used from CLI to verify config and print warnings
@@ -361,12 +367,7 @@ impl LayerConfig {
                 }?;
 
                 // serialise the config and encode as base64
-                let serialized = serde_json::to_string(&config)
-                    .map_err(|error| ConfigError::EnvVarEncodeError(error.to_string()))?;
-                std::env::set_var(
-                    MIRRORD_RESOLVED_CONFIG_ENV,
-                    BASE64_STANDARD.encode(serialized),
-                );
+                std::env::set_var(MIRRORD_RESOLVED_CONFIG_ENV, config.to_env_var()?);
                 Ok(config)
             }
         }
@@ -1018,5 +1019,21 @@ mod tests {
             .read_to_string(&mut existing_content);
 
         assert_eq!(existing_content.replace("\r\n", "\n"), compare_content);
+    }
+
+    /// related to issue #2936: https://github.com/metalbear-co/mirrord/issues/2936
+    /// checks that resolved config written to [`MIRRORD_RESOLVED_CONFIG_ENV`] can be
+    /// transformed back into a [`LayerConfig`]
+    #[test]
+    fn encode_and_decode_config() {
+        let mut cfg_context = ConfigContext::default();
+        let resolved_config = LayerFileConfig::default()
+            .generate_config(&mut cfg_context)
+            .expect("Default config should be generated from default 'LayerFileConfig'");
+
+        let encoded = resolved_config.to_env_var().unwrap();
+        let decoded = LayerConfig::from_env_var(encoded).unwrap();
+
+        assert_eq!(decoded, resolved_config);
     }
 }

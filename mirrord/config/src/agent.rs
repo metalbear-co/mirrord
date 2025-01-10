@@ -67,7 +67,7 @@ impl fmt::Display for LinuxCapability {
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize)]
+#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[config(map_to = "AgentFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct AgentConfig {

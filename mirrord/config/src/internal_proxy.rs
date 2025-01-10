@@ -26,7 +26,7 @@ pub static MIRRORD_INTPROXY_CLIENT_TLS_KEY_ENV: &str = "MIRRORD_INTPROXY_CLIENT_
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize)]
+#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[config(map_to = "InternalProxyFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct InternalProxyConfig {
