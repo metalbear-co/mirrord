@@ -209,7 +209,8 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
 /// If the socket is not found in [`SOCKETS`], bypass.
 /// Otherwise, if it's not an ignored port, bind (possibly with a fallback to random port) and
 /// update socket state in [`SOCKETS`]. If it's an ignored port, remove the socket from [`SOCKETS`].
-#[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret, skip(raw_address))]
+#[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret, skip(raw_address)
+)]
 pub(super) fn bind(
     sockfd: c_int,
     raw_address: *const sockaddr,
@@ -324,9 +325,9 @@ pub(super) fn bind(
             }
         })
     }
-    .ok()
-    .and_then(|(_, address)| address.as_socket())
-    .bypass(Bypass::AddressConversion)?;
+        .ok()
+        .and_then(|(_, address)| address.as_socket())
+        .bypass(Bypass::AddressConversion)?;
 
     Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound(Bound {
         requested_address,
@@ -957,14 +958,15 @@ pub(super) fn getaddrinfo(
 
     // TODO(alex): Use more fields from `raw_hints` to respect the user's `getaddrinfo` call.
     let libc::addrinfo {
+        ai_family,
         ai_socktype,
         ai_protocol,
         ..
     } = raw_hints;
 
     // Some apps (gRPC on Python) use `::` to listen on all interfaces, and usually that just means
-    // resolve on unspecified. So we just return that in IpV4 because we don't support ipv6.
-    let resolved_addr = if node == "::" {
+    // resolve on unspecified. So we just return that in IPv4 if that's the used IP family.
+    let resolved_addr = if (ai_family == libc::AF_INET) && (node == "::") {
         // name is "" because that's what happens in real flow.
         vec![("".to_string(), IpAddr::V4(Ipv4Addr::UNSPECIFIED))]
     } else {
