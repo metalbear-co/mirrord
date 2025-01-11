@@ -73,3 +73,15 @@ impl Deref for GetAddrInfoResponse {
 pub struct GetAddrInfoRequest {
     pub node: String,
 }
+
+/// Newer, advanced version of [`GetAddrInfoRequest`]
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct GetAddrInfoRequestV2 {
+    pub node: String,
+    pub service: String,
+    // TODO: should I use c_int?
+    pub flags: i32,
+    pub family: i32,
+    pub socktype: i32,
+    pub protocol: i32,
+}
