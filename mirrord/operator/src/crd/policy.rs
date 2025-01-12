@@ -104,7 +104,7 @@ pub struct MirrordClusterPolicySpec {
 
 /// Policy for controlling environment variables access from mirrord instances.
 #[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 pub struct EnvPolicy {
     /// List of environment variables that should be excluded when using mirrord.
     ///
