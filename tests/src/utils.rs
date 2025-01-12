@@ -4,7 +4,7 @@
 use std::{
     collections::HashMap,
     fmt::Debug,
-    net::Ipv4Addr,
+    net::IpAddr,
     ops::Not,
     path::PathBuf,
     process::{ExitStatus, Stdio},
@@ -39,6 +39,7 @@ use tokio::{
     task::JoinHandle,
 };
 
+pub(crate) mod ipv6;
 pub mod sqs_resources;
 
 const TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
@@ -90,6 +91,7 @@ fn format_time() -> String {
 pub enum Application {
     PythonFlaskHTTP,
     PythonFastApiHTTP,
+    PythonFastApiHTTPIPv6,
     NodeHTTP,
     NodeHTTP2,
     Go21HTTP,
@@ -100,6 +102,11 @@ pub enum Application {
     PythonCloseSocketKeepConnection,
     RustWebsockets,
     RustSqs,
+    /// Tries to open files in the remote target, but these operations should succeed or fail based
+    /// on mirrord `FsPolicy`.
+    ///
+    /// - `node-e2e/fspolicy/test_operator_fs_policy.mjs`
+    NodeFsPolicy,
 }
 
 #[derive(Debug)]
@@ -394,6 +401,15 @@ impl Application {
                     "app_fastapi:app",
                 ]
             }
+            Application::PythonFastApiHTTPIPv6 => {
+                vec![
+                    "uvicorn",
+                    "--port=80",
+                    "--host=::",
+                    "--app-dir=./python-e2e/",
+                    "app_fastapi:app",
+                ]
+            }
             Application::PythonCloseSocket => {
                 vec!["python3", "-u", "python-e2e/close_socket.py"]
             }
@@ -407,6 +423,9 @@ impl Application {
             Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
             Application::NodeHTTP2 => {
                 vec!["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
+            }
+            Application::NodeFsPolicy => {
+                vec!["node", "node-e2e/fspolicy/test_operator_fs_policy.mjs"]
             }
             Application::Go21HTTP => vec!["go-e2e/21.go_test_app"],
             Application::Go22HTTP => vec!["go-e2e/22.go_test_app"],
@@ -439,7 +458,7 @@ impl Application {
     }
 
     pub async fn assert(&self, process: &TestProcess) {
-        if let Application::PythonFastApiHTTP = self {
+        if matches!(self, Self::PythonFastApiHTTP | Self::PythonFastApiHTTPIPv6) {
             process.assert_log_level(true, "ERROR").await;
             process.assert_log_level(false, "ERROR").await;
             process.assert_log_level(true, "CRITICAL").await;
@@ -720,14 +739,18 @@ impl Drop for ResourceGuard {
 pub struct KubeService {
     pub name: String,
     pub namespace: String,
-    pub target: String,
     guards: Vec<ResourceGuard>,
     namespace_guard: Option<ResourceGuard>,
+    pub pod_name: String,
 }
 
 impl KubeService {
     pub fn deployment_target(&self) -> String {
         format!("deployment/{}", self.name)
+    }
+
+    pub fn pod_container_target(&self) -> String {
+        format!("pod/{}/container/{CONTAINER_NAME}", self.pod_name)
     }
 }
 
@@ -807,6 +830,17 @@ fn deployment_from_json(name: &str, image: &str, env: Value) -> Deployment {
         }
     }))
     .expect("Failed creating `deployment` from json spec!")
+}
+
+/// Change the `ipFamilies` and `ipFamilyPolicy` fields to make the service IPv6-only.
+///
+/// # Panics
+///
+/// Will panic if the given service does not have a spec.
+fn set_ipv6_only(service: &mut Service) {
+    let spec = service.spec.as_mut().unwrap();
+    spec.ip_families = Some(vec!["IPv6".to_string()]);
+    spec.ip_family_policy = Some("SingleStack".to_string());
 }
 
 fn service_from_json(name: &str, service_type: &str) -> Service {
@@ -1057,6 +1091,7 @@ pub async fn service(
         randomize_name,
         kube_client.await,
         default_env(),
+        false,
     )
     .await
 }
@@ -1085,6 +1120,7 @@ pub async fn service_with_env(
         randomize_name,
         kube_client,
         env,
+        false,
     )
     .await
 }
@@ -1100,6 +1136,7 @@ pub async fn service_with_env(
 /// This behavior can be changed, see [`PRESERVE_FAILED_ENV_NAME`].
 /// * `randomize_name` - whether a random suffix should be added to the end of the resource names
 /// * `env` - `Value`, should be `Value::Array` of kubernetes container env var definitions.
+#[allow(clippy::too_many_arguments)]
 async fn internal_service(
     namespace: &str,
     service_type: &str,
@@ -1108,6 +1145,7 @@ async fn internal_service(
     randomize_name: bool,
     kube_client: Client,
     env: Value,
+    ipv6_only: bool,
 ) -> KubeService {
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
 
@@ -1174,7 +1212,10 @@ async fn internal_service(
     watch_resource_exists(&deployment_api, &name).await;
 
     // `Service`
-    let service = service_from_json(&name, service_type);
+    let mut service = service_from_json(&name, service_type);
+    if ipv6_only {
+        set_ipv6_only(&mut service);
+    }
     let service_guard = ResourceGuard::create(
         service_api.clone(),
         name.clone(),
@@ -1185,13 +1226,13 @@ async fn internal_service(
     .unwrap();
     watch_resource_exists(&service_api, "default").await;
 
-    let target = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
+    let pod_name = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
         .await
         .unwrap();
 
     let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
 
-    await_condition(pod_api, &target, is_pod_running())
+    await_condition(pod_api, &pod_name, is_pod_running())
         .await
         .unwrap();
 
@@ -1203,7 +1244,7 @@ async fn internal_service(
     KubeService {
         name,
         namespace: namespace.to_string(),
-        target: format!("pod/{target}/container/{CONTAINER_NAME}"),
+        pod_name,
         guards: vec![pod_guard, service_guard],
         namespace_guard,
     }
@@ -1296,13 +1337,13 @@ pub async fn service_for_mirrord_ls(
     .unwrap();
     watch_resource_exists(&service_api, "default").await;
 
-    let target = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
+    let pod_name = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
         .await
         .unwrap();
 
     let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
 
-    await_condition(pod_api, &target, is_pod_running())
+    await_condition(pod_api, &pod_name, is_pod_running())
         .await
         .unwrap();
 
@@ -1314,7 +1355,7 @@ pub async fn service_for_mirrord_ls(
     KubeService {
         name,
         namespace: namespace.to_string(),
-        target: format!("pod/{target}/container/{CONTAINER_NAME}"),
+        pod_name,
         guards: vec![pod_guard, service_guard],
         namespace_guard,
     }
@@ -1450,13 +1491,13 @@ pub async fn service_for_mirrord_ls(
             .unwrap();
     watch_resource_exists(&job_api, &name).await;
 
-    let target = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
+    let pod_name = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
         .await
         .unwrap();
 
     let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
 
-    await_condition(pod_api, &target, is_pod_running())
+    await_condition(pod_api, &pod_name, is_pod_running())
         .await
         .unwrap();
 
@@ -1468,7 +1509,6 @@ pub async fn service_for_mirrord_ls(
     KubeService {
         name,
         namespace: namespace.to_string(),
-        target: format!("pod/{target}/container/{CONTAINER_NAME}"),
         guards: vec![
             pod_guard,
             service_guard,
@@ -1477,6 +1517,7 @@ pub async fn service_for_mirrord_ls(
             job_guard,
         ],
         namespace_guard,
+        pod_name,
     }
 }
 
@@ -1599,12 +1640,15 @@ async fn get_pod_or_node_host(kube_client: Client, name: &str, namespace: &str) 
         .next()
         .and_then(|pod| pod.status)
         .and_then(|status| status.host_ip)
-        .and_then(|ip| {
-            ip.parse::<Ipv4Addr>()
-                .unwrap()
-                .is_private()
-                .not()
-                .then_some(ip)
+        .filter(|ip| {
+            // use this IP only if it's a public one.
+            match ip.parse::<IpAddr>().unwrap() {
+                IpAddr::V4(ip4) => ip4.is_private(),
+                IpAddr::V6(ip6) => {
+                    ip6.is_unicast_link_local() || ip6.is_unique_local() || ip6.is_loopback()
+                }
+            }
+            .not()
         })
         .unwrap_or_else(resolve_node_host)
 }

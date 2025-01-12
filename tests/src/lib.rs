@@ -1,4 +1,5 @@
 #![feature(stmt_expr_attributes)]
+#![feature(ip)]
 #![warn(clippy::indexing_slicing)]
 
 #[cfg(feature = "cli")]

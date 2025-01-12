@@ -58,7 +58,7 @@ use http_filter::*;
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
-///         "ignore_ports": [9999, 10000]
+///         "ignore_ports": [9999, 10000],
 ///         "listen_ports": [[80, 8111]]
 ///       }
 ///     }
@@ -96,9 +96,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .unwrap_or_default(),
                 http_filter: HttpFilterFileConfig::default().generate_config(context)?,
                 on_concurrent_steal: FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
-                    .layer(|layer| {
-                        Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer)
-                    })
+                    .layer(|layer| Unstable::new("incoming", "on_concurrent_steal", layer))
                     .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
@@ -129,9 +127,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .unwrap_or_default(),
                 on_concurrent_steal: FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
                     .or(advanced.on_concurrent_steal)
-                    .layer(|layer| {
-                        Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer)
-                    })
+                    .layer(|layer| Unstable::new("incoming", "on_concurrent_steal", layer))
                     .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
@@ -149,7 +145,7 @@ impl MirrordToggleableConfig for IncomingFileConfig {
             .unwrap_or_else(|| Ok(IncomingMode::Off))?;
 
         let on_concurrent_steal = FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
-            .layer(|layer| Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer))
+            .layer(|layer| Unstable::new("incoming", "on_concurrent_steal", layer))
             .source_value(context)
             .transpose()?
             .unwrap_or_default();
