@@ -22,7 +22,7 @@ use mirrord_intproxy_protocol::{
     OutgoingConnectResponse, PortSubscribe,
 };
 use mirrord_protocol::{
-    dns::{GetAddrInfoRequest, LookupRecord},
+    dns::{GetAddrInfoRequestV2, LookupRecord},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
 use nix::sys::socket::{sockopt, SockaddrIn, SockaddrIn6, SockaddrLike, SockaddrStorage};
@@ -891,8 +891,23 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
 ///
 /// This function updates the mapping in [`REMOTE_DNS_REVERSE_MAPPING`].
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret, err)]
-pub(super) fn remote_getaddrinfo(node: String) -> HookResult<Vec<(String, IpAddr)>> {
-    let addr_info_list = common::make_proxy_request_with_response(GetAddrInfoRequest { node })?.0?;
+pub(super) fn remote_getaddrinfo(
+    node: String,
+    service_port: u16,
+    flags: c_int,
+    family: c_int,
+    socktype: c_int,
+    protocol: c_int,
+) -> HookResult<Vec<(String, IpAddr)>> {
+    let addr_info_list = common::make_proxy_request_with_response(GetAddrInfoRequestV2 {
+        node,
+        service_port,
+        flags,
+        family,
+        socktype,
+        protocol,
+    })?
+    .0?;
 
     let mut remote_dns_reverse_mapping = REMOTE_DNS_REVERSE_MAPPING.lock()?;
     addr_info_list.iter().for_each(|lookup| {
@@ -947,6 +962,8 @@ pub(super) fn getaddrinfo(
 
             Bypass::CStrConversion
         })?
+        // TODO: according to the man page, service could also be a service name, it doesn't have to
+        //   be a port number.
         .and_then(|service| service.parse::<u16>().ok())
         .unwrap_or(0);
 
@@ -956,11 +973,11 @@ pub(super) fn getaddrinfo(
         .cloned()
         .unwrap_or_else(|| unsafe { mem::zeroed() });
 
-    // TODO(alex): Use more fields from `raw_hints` to respect the user's `getaddrinfo` call.
     let libc::addrinfo {
         ai_family,
         ai_socktype,
         ai_protocol,
+        ai_flags,
         ..
     } = raw_hints;
 
@@ -970,7 +987,14 @@ pub(super) fn getaddrinfo(
         // name is "" because that's what happens in real flow.
         vec![("".to_string(), IpAddr::V4(Ipv4Addr::UNSPECIFIED))]
     } else {
-        remote_getaddrinfo(node.clone())?
+        remote_getaddrinfo(
+            node.clone(),
+            service,
+            ai_flags,
+            ai_family,
+            ai_socktype,
+            ai_protocol,
+        )?
     };
 
     let mut managed_addr_info = MANAGED_ADDRINFO.lock()?;
@@ -1069,7 +1093,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
 
     crate::setup().dns_selector().check_query(&name, 0)?;
 
-    let hosts_and_ips = remote_getaddrinfo(name.clone())?;
+    let hosts_and_ips = remote_getaddrinfo(name.clone(), 0, 0, 0, 0, 0)?;
 
     // We could `unwrap` here, as this would have failed on the previous conversion.
     let host_name = CString::new(name)?;

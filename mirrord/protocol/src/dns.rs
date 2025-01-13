@@ -1,11 +1,16 @@
 extern crate alloc;
 use core::ops::Deref;
-use std::net::IpAddr;
+use std::{net::IpAddr, sync::LazyLock};
 
 use bincode::{Decode, Encode};
 use hickory_resolver::{lookup_ip::LookupIp, proto::rr::resource::RecordParts};
+use semver::VersionReq;
 
 use crate::RemoteResult;
+
+/// Minimal mirrord-protocol version that allows [`GetAddrInfoRequestV2`].
+pub static ADDRINFO_V2_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.14.0".parse().expect("Bad Identifier"));
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct LookupRecord {
@@ -74,11 +79,18 @@ pub struct GetAddrInfoRequest {
     pub node: String,
 }
 
+/// For when the new request is not supported, and we have to fall back to the old version.
+impl From<GetAddrInfoRequestV2> for GetAddrInfoRequest {
+    fn from(value: GetAddrInfoRequestV2) -> Self {
+        Self { node: value.node }
+    }
+}
+
 /// Newer, advanced version of [`GetAddrInfoRequest`]
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct GetAddrInfoRequestV2 {
     pub node: String,
-    pub service: String,
+    pub service_port: u16,
     // TODO: should I use c_int?
     pub flags: i32,
     pub family: i32,

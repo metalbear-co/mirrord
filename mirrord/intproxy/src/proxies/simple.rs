@@ -5,9 +5,10 @@ use std::collections::HashMap;
 
 use mirrord_intproxy_protocol::{LayerId, MessageId, ProxyToLayerMessage};
 use mirrord_protocol::{
-    dns::{GetAddrInfoRequest, GetAddrInfoResponse},
+    dns::{GetAddrInfoRequestV2, GetAddrInfoResponse, ADDRINFO_V2_VERSION},
     ClientMessage, DaemonMessage, GetEnvVarsRequest, RemoteResult,
 };
+use semver::Version;
 use thiserror::Error;
 
 use crate::{
@@ -20,10 +21,12 @@ use crate::{
 
 #[derive(Debug)]
 pub enum SimpleProxyMessage {
-    AddrInfoReq(MessageId, LayerId, GetAddrInfoRequest),
+    AddrInfoReq(MessageId, LayerId, GetAddrInfoRequestV2),
     AddrInfoRes(GetAddrInfoResponse),
     GetEnvReq(MessageId, LayerId, GetEnvVarsRequest),
     GetEnvRes(RemoteResult<HashMap<String, String>>),
+    /// Protocol version was negotiated with the agent.
+    ProtocolVersion(Version),
 }
 
 #[derive(Error, Debug)]
@@ -38,6 +41,23 @@ pub struct SimpleProxy {
     addr_info_reqs: RequestQueue,
     /// For [`GetEnvVarsRequest`]s.
     get_env_reqs: RequestQueue,
+    /// [`mirrord_protocol`] version negotiated with the agent.
+    /// Determines whether we can use `GetAddrInfoRequestV2`.
+    protocol_version: Option<Version>,
+}
+
+impl SimpleProxy {
+    #[tracing::instrument(skip(self), level = tracing::Level::TRACE)]
+    fn protocol_version(&mut self, version: Version) {
+        self.protocol_version.replace(version);
+    }
+
+    /// Returns whether [`mirrord_protocol`] version allows for a V2 addrinfo request.
+    fn addr_info_v2(&self) -> bool {
+        self.protocol_version
+            .as_ref()
+            .is_some_and(|version| ADDRINFO_V2_VERSION.matches(version))
+    }
 }
 
 impl BackgroundTask for SimpleProxy {
@@ -52,9 +72,15 @@ impl BackgroundTask for SimpleProxy {
             match msg {
                 SimpleProxyMessage::AddrInfoReq(message_id, session_id, req) => {
                     self.addr_info_reqs.push_back(message_id, session_id);
-                    message_bus
-                        .send(ClientMessage::GetAddrInfoRequest(req))
-                        .await;
+                    if self.addr_info_v2() {
+                        message_bus
+                            .send(ClientMessage::GetAddrInfoRequestV2(req))
+                            .await;
+                    } else {
+                        message_bus
+                            .send(ClientMessage::GetAddrInfoRequest(req.into()))
+                            .await;
+                    }
                 }
                 SimpleProxyMessage::AddrInfoRes(res) => {
                     let (message_id, layer_id) =
@@ -88,6 +114,7 @@ impl BackgroundTask for SimpleProxy {
                         })
                         .await
                 }
+                SimpleProxyMessage::ProtocolVersion(version) => self.protocol_version(version),
             }
         }
 

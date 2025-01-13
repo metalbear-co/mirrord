@@ -439,10 +439,22 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
             return Ok(false);
         }
 
+        let family = if address.is_ipv4() {
+            libc::AF_INET
+        } else {
+            libc::AF_INET6
+        };
+
+        let addr_protocol = if matches!(protocol, NetProtocol::Stream) {
+            libc::SOCK_STREAM
+        } else {
+            libc::SOCK_DGRAM
+        };
+
         match &self.address {
             AddressFilter::Name(name, port) => {
                 let resolved_ips = if crate::setup().remote_dns_enabled() && !force_local_dns {
-                    match remote_getaddrinfo(name.to_string()) {
+                    match remote_getaddrinfo(name.to_string(), *port, 0, family, 0, addr_protocol) {
                         Ok(res) => res.into_iter().map(|(_, ip)| ip).collect(),
                         Err(HookError::ResponseError(ResponseError::DnsLookup(
                             DnsLookupError {

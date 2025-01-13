@@ -3,7 +3,7 @@
 //! The proxy utilizes multiple background tasks to split the code into more self-contained parts.
 //! Structs in this module aim to ease managing their state.
 //!
-//! Each background task implement the [`BackgroundTask`] trait, which specifies its properties and
+//! Each background task implements the [`BackgroundTask`] trait, which specifies its properties and
 //! allows for managing groups of related tasks with one [`BackgroundTasks`] instance.
 
 use std::{collections::HashMap, fmt, future::Future, hash::Hash};
