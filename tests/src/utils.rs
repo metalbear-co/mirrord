@@ -6,6 +6,7 @@ use std::{
     fmt::Debug,
     net::IpAddr,
     ops::Not,
+    os::unix::process::ExitStatusExt,
     path::PathBuf,
     process::{ExitStatus, Stdio},
     sync::{Arc, Once},
@@ -24,7 +25,7 @@ use kube::{
     api::{DeleteParams, ListParams, PostParams, WatchParams},
     core::WatchEvent,
     runtime::wait::{await_condition, conditions::is_pod_running},
-    Api, Client, Config, Error,
+    Api, Client, Config, Error, Resource,
 };
 use rand::{distributions::Alphanumeric, Rng};
 use reqwest::{RequestBuilder, StatusCode};
@@ -155,68 +156,111 @@ impl TestProcess {
 
     pub async fn assert_log_level(&self, stderr: bool, level: &str) {
         if stderr {
-            assert!(!self.stderr_data.read().await.contains(level));
+            assert!(
+                self.stderr_data.read().await.contains(level).not(),
+                "application stderr should not contain `{level}`"
+            );
         } else {
-            assert!(!self.stdout_data.read().await.contains(level));
+            assert!(
+                self.stdout_data.read().await.contains(level).not(),
+                "application stdout should not contain `{level}`"
+            );
         }
     }
 
     pub async fn assert_python_fileops_stderr(&self) {
-        assert!(!self.stderr_data.read().await.contains("FAILED"));
+        assert!(
+            self.stderr_data.read().await.contains("FAILED").not(),
+            "application stderr should not contain `FAILED`"
+        );
     }
 
     pub async fn wait_assert_success(&mut self) {
         let output = self.wait().await;
-        assert!(output.success());
+        assert!(
+            output.success(),
+            "application unexpectedly failed: exit code {:?}, signal code {:?}",
+            output.code(),
+            output.signal(),
+        );
     }
 
     pub async fn wait_assert_fail(&mut self) {
         let output = self.wait().await;
-        assert!(!output.success());
+        assert!(
+            output.success().not(),
+            "application unexpectedly succeeded: exit code {:?}, signal code {:?}",
+            output.code(),
+            output.signal()
+        );
     }
 
     pub async fn assert_stdout_contains(&self, string: &str) {
-        assert!(self.get_stdout().await.contains(string));
+        assert!(
+            self.get_stdout().await.contains(string),
+            "application stdout should contain `{string}`",
+        );
     }
 
     pub async fn assert_stdout_doesnt_contain(&self, string: &str) {
-        assert!(!self.get_stdout().await.contains(string));
+        assert!(
+            self.get_stdout().await.contains(string).not(),
+            "application stdout should not contain `{string}`",
+        );
     }
 
     pub async fn assert_stderr_contains(&self, string: &str) {
-        assert!(self.get_stderr().await.contains(string));
+        assert!(
+            self.get_stderr().await.contains(string),
+            "application stderr should contain `{string}`",
+        );
     }
 
     pub async fn assert_stderr_doesnt_contain(&self, string: &str) {
-        assert!(!self.get_stderr().await.contains(string));
+        assert!(
+            self.get_stderr().await.contains(string).not(),
+            "application stderr should not contain `{string}`",
+        );
     }
 
     pub async fn assert_no_error_in_stdout(&self) {
-        assert!(!self
-            .error_capture
-            .is_match(&self.stdout_data.read().await)
-            .unwrap());
+        assert!(
+            self.error_capture
+                .is_match(&self.stdout_data.read().await)
+                .unwrap()
+                .not(),
+            "application stdout contains an error"
+        );
     }
 
     pub async fn assert_no_error_in_stderr(&self) {
-        assert!(!self
-            .error_capture
-            .is_match(&self.stderr_data.read().await)
-            .unwrap());
+        assert!(
+            self.error_capture
+                .is_match(&self.stderr_data.read().await)
+                .unwrap()
+                .not(),
+            "application stderr contains an error"
+        );
     }
 
     pub async fn assert_no_warn_in_stdout(&self) {
-        assert!(!self
-            .warn_capture
-            .is_match(&self.stdout_data.read().await)
-            .unwrap());
+        assert!(
+            self.warn_capture
+                .is_match(&self.stdout_data.read().await)
+                .unwrap()
+                .not(),
+            "application stdout contains a warning"
+        );
     }
 
     pub async fn assert_no_warn_in_stderr(&self) {
-        assert!(!self
-            .warn_capture
-            .is_match(&self.stderr_data.read().await)
-            .unwrap());
+        assert!(
+            self.warn_capture
+                .is_match(&self.stderr_data.read().await)
+                .unwrap()
+                .not(),
+            "application stderr contains a warning"
+        );
     }
 
     pub async fn wait_for_line(&self, timeout: Duration, line: &str) {
@@ -673,23 +717,27 @@ pub(crate) struct ResourceGuard {
 impl ResourceGuard {
     /// Create a kube resource and spawn a task to delete it when this guard is dropped.
     /// Return [`Error`] if creating the resource failed.
-    pub async fn create<K: Debug + Clone + DeserializeOwned + Serialize + 'static>(
+    pub async fn create<
+        K: Resource<DynamicType = ()> + Debug + Clone + DeserializeOwned + Serialize + 'static,
+    >(
         api: Api<K>,
-        name: String,
         data: &K,
         delete_on_fail: bool,
     ) -> Result<ResourceGuard, Error> {
+        let name = data.meta().name.clone().unwrap();
+        println!("Creating {} `{name}`: {data:?}", K::kind(&()));
         api.create(&PostParams::default(), data).await?;
+        println!("Created {} `{name}`", K::kind(&()));
 
         let deleter = async move {
-            println!("Deleting resource `{name}`");
+            println!("Deleting {} `{name}`", K::kind(&()));
             let delete_params = DeleteParams {
                 grace_period_seconds: Some(0),
                 ..Default::default()
             };
             let res = api.delete(&name, &delete_params).await;
             if let Err(e) = res {
-                println!("Failed to delete resource `{name}`: {e:?}");
+                println!("Failed to delete {} `{name}`: {e:?}", K::kind(&()));
             }
         };
 
@@ -1171,7 +1219,7 @@ async fn internal_service(
     };
 
     println!(
-        "{} creating service {name:?} in namespace {namespace:?}",
+        "{} creating service {name} in namespace {namespace}",
         format_time()
     );
 
@@ -1189,7 +1237,6 @@ async fn internal_service(
     // Create namespace and wrap it in ResourceGuard if it does not yet exist.
     let namespace_guard = ResourceGuard::create(
         namespace_api.clone(),
-        namespace.to_string(),
         &namespace_resource,
         delete_after_fail,
     )
@@ -1201,14 +1248,9 @@ async fn internal_service(
 
     // `Deployment`
     let deployment = deployment_from_json(&name, image, env);
-    let pod_guard = ResourceGuard::create(
-        deployment_api.clone(),
-        name.to_string(),
-        &deployment,
-        delete_after_fail,
-    )
-    .await
-    .unwrap();
+    let pod_guard = ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
+        .await
+        .unwrap();
     watch_resource_exists(&deployment_api, &name).await;
 
     // `Service`
@@ -1216,14 +1258,9 @@ async fn internal_service(
     if ipv6_only {
         set_ipv6_only(&mut service);
     }
-    let service_guard = ResourceGuard::create(
-        service_api.clone(),
-        name.clone(),
-        &service,
-        delete_after_fail,
-    )
-    .await
-    .unwrap();
+    let service_guard = ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
+        .await
+        .unwrap();
     watch_resource_exists(&service_api, "default").await;
 
     let pod_name = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
@@ -1237,8 +1274,8 @@ async fn internal_service(
         .unwrap();
 
     println!(
-        "{:?} done creating service {name:?} in namespace {namespace:?}",
-        Utc::now()
+        "{} done creating service {name} in namespace {namespace}",
+        format_time(),
     );
 
     KubeService {
@@ -1303,7 +1340,6 @@ pub async fn service_for_mirrord_ls(
     // Create namespace and wrap it in ResourceGuard if it does not yet exist.
     let namespace_guard = ResourceGuard::create(
         namespace_api.clone(),
-        namespace.to_string(),
         &namespace_resource,
         delete_after_fail,
     )
@@ -1315,26 +1351,16 @@ pub async fn service_for_mirrord_ls(
 
     // `Deployment`
     let deployment = deployment_from_json(&name, image, default_env());
-    let pod_guard = ResourceGuard::create(
-        deployment_api.clone(),
-        name.to_string(),
-        &deployment,
-        delete_after_fail,
-    )
-    .await
-    .unwrap();
+    let pod_guard = ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
+        .await
+        .unwrap();
     watch_resource_exists(&deployment_api, &name).await;
 
     // `Service`
     let service = service_from_json(&name, service_type);
-    let service_guard = ResourceGuard::create(
-        service_api.clone(),
-        name.clone(),
-        &service,
-        delete_after_fail,
-    )
-    .await
-    .unwrap();
+    let service_guard = ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
+        .await
+        .unwrap();
     watch_resource_exists(&service_api, "default").await;
 
     let pod_name = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
@@ -1425,7 +1451,6 @@ pub async fn service_for_mirrord_ls(
     // Create namespace and wrap it in ResourceGuard if it does not yet exist.
     let namespace_guard = ResourceGuard::create(
         namespace_api.clone(),
-        namespace.to_string(),
         &namespace_resource,
         delete_after_fail,
     )
@@ -1437,58 +1462,38 @@ pub async fn service_for_mirrord_ls(
 
     // `Deployment`
     let deployment = deployment_from_json(&name, image, default_env());
-    let pod_guard = ResourceGuard::create(
-        deployment_api.clone(),
-        name.to_string(),
-        &deployment,
-        delete_after_fail,
-    )
-    .await
-    .unwrap();
+    let pod_guard = ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
+        .await
+        .unwrap();
     watch_resource_exists(&deployment_api, &name).await;
 
     // `Service`
     let service = service_from_json(&name, service_type);
-    let service_guard = ResourceGuard::create(
-        service_api.clone(),
-        name.clone(),
-        &service,
-        delete_after_fail,
-    )
-    .await
-    .unwrap();
+    let service_guard = ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
+        .await
+        .unwrap();
     watch_resource_exists(&service_api, "default").await;
 
     // `StatefulSet`
     let stateful_set = stateful_set_from_json(&name, image);
-    let stateful_set_guard = ResourceGuard::create(
-        stateful_set_api.clone(),
-        name.to_string(),
-        &stateful_set,
-        delete_after_fail,
-    )
-    .await
-    .unwrap();
+    let stateful_set_guard =
+        ResourceGuard::create(stateful_set_api.clone(), &stateful_set, delete_after_fail)
+            .await
+            .unwrap();
     watch_resource_exists(&stateful_set_api, &name).await;
 
     // `CronJob`
     let cron_job = cron_job_from_json(&name, image);
-    let cron_job_guard = ResourceGuard::create(
-        cron_job_api.clone(),
-        name.to_string(),
-        &cron_job,
-        delete_after_fail,
-    )
-    .await
-    .unwrap();
+    let cron_job_guard = ResourceGuard::create(cron_job_api.clone(), &cron_job, delete_after_fail)
+        .await
+        .unwrap();
     watch_resource_exists(&cron_job_api, &name).await;
 
     // `Job`
     let job = job_from_json(&name, image);
-    let job_guard =
-        ResourceGuard::create(job_api.clone(), name.to_string(), &job, delete_after_fail)
-            .await
-            .unwrap();
+    let job_guard = ResourceGuard::create(job_api.clone(), &job, delete_after_fail)
+        .await
+        .unwrap();
     watch_resource_exists(&job_api, &name).await;
 
     let pod_name = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)

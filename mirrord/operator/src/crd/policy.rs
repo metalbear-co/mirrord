@@ -104,7 +104,7 @@ pub struct MirrordClusterPolicySpec {
 
 /// Policy for controlling environment variables access from mirrord instances.
 #[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 pub struct EnvPolicy {
     /// List of environment variables that should be excluded when using mirrord.
     ///
@@ -123,20 +123,29 @@ pub struct EnvPolicy {
 /// Allows the operator control over remote file ops behaviour, overriding what the user has set in
 /// their mirrord config file, if it matches something in one of the lists (regex sets) of this
 /// struct.
+///
+/// If the file path matches regexes in multiple sets, priority is as follows:
+/// 1. `local`
+/// 2. `notFound`
+/// 3. `readOnly`
 #[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 pub struct FsPolicy {
-    /// The file can only be opened in read-only mode, otherwise the operator returns an IO error.
+    /// Files that cannot be opened for writing.
+    ///
+    /// Opening the file for writing is rejected with an IO error.
     #[serde(default)]
     pub read_only: HashSet<String>,
 
-    /// The file cannot be opened in the remote target.
+    /// Files that cannot be opened at all.
     ///
-    /// `open` calls that match this are forced to be opened in the local user's machine.
+    /// Opening the file will be rejected and mirrord will open the file locally instead.
     #[serde(default)]
     pub local: HashSet<String>,
 
-    /// Any file that matches this returns a file not found error from the operator.
+    /// Files that cannot be opened at all.
+    ///
+    /// Opening the file is rejected with an IO error.
     #[serde(default)]
     pub not_found: HashSet<String>,
 }
