@@ -1,0 +1,1 @@
+Pinned `cargo-chef` version to `0.1.68` in the dockerfiles.
