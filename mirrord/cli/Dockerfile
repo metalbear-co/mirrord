@@ -8,7 +8,8 @@ RUN ./platform.sh
 # this takes around 1 minute since libgit2 is slow https://github.com/rust-lang/cargo/issues/9167
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
-RUN cargo install cargo-chef
+# cargo-chef 0.1.69 breaks the build
+RUN cargo install cargo-chef@0.1.68
 
 FROM chef AS planner
 
