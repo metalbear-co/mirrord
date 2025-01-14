@@ -599,40 +599,16 @@ impl TcpConnectionStealer {
     async fn send_http_response(&mut self, client_id: ClientId, response: HttpResponseFallback) {
         let connection_id = response.connection_id();
         let request_id = response.request_id();
-
-        match response.into_hyper::<hyper::Error>() {
-            Ok(response) => {
-                self.connections
-                    .send(
-                        connection_id,
-                        ConnectionMessageIn::Response {
-                            client_id,
-                            request_id,
-                            response,
-                        },
-                    )
-                    .await;
-            }
-            Err(error) => {
-                tracing::warn!(
-                    ?error,
-                    connection_id,
-                    request_id,
+        self.connections
+            .send(
+                connection_id,
+                ConnectionMessageIn::Response {
                     client_id,
-                    "Failed to transform client message into a hyper response",
-                );
-
-                self.connections
-                    .send(
-                        connection_id,
-                        ConnectionMessageIn::ResponseFailed {
-                            client_id,
-                            request_id,
-                        },
-                    )
-                    .await;
-            }
-        }
+                    request_id,
+                    response: response.into_hyper::<hyper::Error>(),
+                },
+            )
+            .await;
     }
 
     /// Handles [`Command`]s that were received by [`TcpConnectionStealer::command_rx`].

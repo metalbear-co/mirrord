@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, convert::Infallible};
 
 use bytes::Bytes;
 use hyper::body::Frame;
@@ -40,7 +40,7 @@ pub(crate) struct TcpStealerApi {
     /// View on the stealer task's status.
     task_status: TaskStatus,
 
-    response_body_txs: HashMap<(ConnectionId, RequestId), Sender<hyper::Result<Frame<Bytes>>>>,
+    response_body_txs: HashMap<(ConnectionId, RequestId), Sender<Result<Frame<Bytes>, Infallible>>>,
 }
 
 impl TcpStealerApi {
@@ -196,7 +196,7 @@ impl TcpStealerApi {
                     let key = (response.connection_id, response.request_id);
                     self.response_body_txs.insert(key, tx.clone());
 
-                    self.http_response(HttpResponseFallback::Streamed(http_response, None))
+                    self.http_response(HttpResponseFallback::Streamed(http_response))
                         .await?;
 
                     for frame in response.internal_response.body {

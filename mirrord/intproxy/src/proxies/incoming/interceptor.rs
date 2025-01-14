@@ -10,7 +10,7 @@ use std::{
 use bytes::{Bytes, BytesMut};
 use hyper::{body::Frame, upgrade::OnUpgrade, Response, StatusCode};
 use hyper_util::rt::TokioIo;
-use mirrord_protocol::tcp::{HttpRequest, HttpResponse, InternalHttpResponse, StreamingBody};
+use mirrord_protocol::tcp::{HttpRequest, HttpResponse, InternalHttpResponse};
 use thiserror::Error;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -19,7 +19,10 @@ use tokio::{
 };
 use tracing::Level;
 
-use super::http::{LocalHttpClient, LocalHttpError, PeekedBody};
+use super::{
+    http::{LocalHttpClient, LocalHttpError, PeekedBody},
+    streaming_body::StreamingBody,
+};
 use crate::{
     background_tasks::{BackgroundTask, MessageBus, PeekableMessageBus},
     proxies::incoming::bound_socket::BoundTcpSocket,
@@ -362,9 +365,7 @@ mod test {
         Method, Request, Response, Version,
     };
     use hyper_util::rt::TokioIo;
-    use mirrord_protocol::tcp::{
-        HttpRequest, InternalHttpBodyFrame, InternalHttpRequest, StreamingBody,
-    };
+    use mirrord_protocol::tcp::{HttpRequest, InternalHttpBodyFrame, InternalHttpRequest};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,

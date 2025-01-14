@@ -8,15 +8,12 @@ use hyper::{
     Request, Response, Version,
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use mirrord_protocol::{
-    batched_body::BatchedBody,
-    tcp::{HttpRequest, StreamingBody},
-};
+use mirrord_protocol::{batched_body::BatchedBody, tcp::HttpRequest};
 use thiserror::Error;
 use tokio::{net::TcpStream, time};
 use tracing::Level;
 
-use super::bound_socket::BoundTcpSocket;
+use super::{bound_socket::BoundTcpSocket, streaming_body::StreamingBody};
 
 /// A retrying HTTP client used to pass requests to the user application.
 pub struct LocalHttpClient {

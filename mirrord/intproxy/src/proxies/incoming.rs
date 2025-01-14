@@ -20,11 +20,11 @@ use mirrord_protocol::{
     tcp::{
         ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, ChunkedResponse, DaemonTcp,
         HttpResponse, InternalHttpBody, InternalHttpBodyFrame, LayerTcp, LayerTcpSteal,
-        NewTcpConnection, StreamingBody, TcpData, HTTP_CHUNKED_RESPONSE_VERSION,
-        HTTP_FRAMED_VERSION,
+        NewTcpConnection, TcpData, HTTP_CHUNKED_RESPONSE_VERSION, HTTP_FRAMED_VERSION,
     },
     ClientMessage, ConnectionId, Port, RequestId, ResponseError,
 };
+use streaming_body::StreamingBody;
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Sender};
 use tokio_stream::{StreamMap, StreamNotifyClose};
@@ -46,6 +46,7 @@ mod http;
 mod interceptor;
 mod metadata_store;
 pub mod port_subscription_ext;
+mod streaming_body;
 mod subscriptions;
 
 /// Id of a single [`Interceptor`] task. Used to manage interceptor tasks with the
