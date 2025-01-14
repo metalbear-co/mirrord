@@ -8,6 +8,7 @@
 
 use std::{collections::HashMap, fmt, future::Future, hash::Hash};
 
+use thiserror::Error;
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
@@ -217,12 +218,14 @@ where
 }
 
 /// An error that can occur when executing a [`BackgroundTask`].
-#[derive(Debug)]
+#[derive(Debug, Error)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum TaskError<Err> {
     /// An internal task error.
+    #[error(transparent)]
     Error(Err),
     /// A panic.
+    #[error("task panicked")]
     Panic,
 }
 

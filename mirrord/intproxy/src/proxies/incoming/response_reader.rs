@@ -1,4 +1,4 @@
-use std::convert::Infallible;
+use std::{convert::Infallible, time::Instant};
 
 use http_body_util::BodyExt;
 use hyper::body::{Frame, Incoming};
@@ -10,6 +10,7 @@ use mirrord_protocol::{
     },
     ConnectionId, RequestId,
 };
+use tracing::Level;
 
 use super::http::PeekedBody;
 use crate::{
@@ -27,23 +28,67 @@ pub enum HttpResponseReader {
     },
 }
 
+impl HttpResponseReader {
+    fn request_id(&self) -> RequestId {
+        match self {
+            Self::Legacy(response) => response.request_id,
+            Self::Framed(response) => response.request_id,
+            Self::Chunked { request_id, .. } => *request_id,
+        }
+    }
+
+    fn connection_id(&self) -> ConnectionId {
+        match self {
+            Self::Legacy(response) => response.connection_id,
+            Self::Framed(response) => response.connection_id,
+            Self::Chunked { connection_id, .. } => *connection_id,
+        }
+    }
+}
+
 impl BackgroundTask for HttpResponseReader {
     type Error = Infallible;
     type MessageIn = Infallible;
     type MessageOut = LayerTcpSteal;
 
+    #[tracing::instrument(
+        level = Level::TRACE,
+        name = "http_response_reader_main_loop",
+        fields(
+            connection_id = self.connection_id(),
+            request_id = self.request_id(),
+        ),
+        skip_all, err,
+    )]
     async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         match self {
             Self::Legacy(mut response) => {
                 let tail = match response.internal_response.body.tail.take() {
                     Some(incoming) => {
+                        let start = Instant::now();
                         tokio::select! {
-                            _ = message_bus.recv() => return Ok(()),
+                            _ = message_bus.recv() => {
+                                tracing::trace!("Message bus closed, exiting");
+                                return Ok(());
+                            },
 
                             result = incoming.collect() => match result {
-                                Ok(data) => Vec::from(data.to_bytes()),
+                                Ok(data) => {
+                                    tracing::trace!(
+                                        elapsed_s = start.elapsed().as_secs_f32(),
+                                        "Collected the whole body.",
+                                    );
+                                    Vec::from(data.to_bytes())
+                                },
 
                                 Err(error) => {
+                                    tracing::warn!(
+                                        connection_id = response.connection_id,
+                                        request_id = response.request_id,
+                                        %error,
+                                        "Failed to read the response body.",
+                                    );
+
                                     let response = LocalHttpError::ReadBodyFailed(error)
                                         .as_error_response(
                                             response.internal_response.version,
@@ -52,6 +97,7 @@ impl BackgroundTask for HttpResponseReader {
                                             response.port,
                                         );
                                     message_bus.send(LayerTcpSteal::HttpResponse(response)).await;
+
                                     return Ok(());
                                 }
                             }
@@ -88,19 +134,35 @@ impl BackgroundTask for HttpResponseReader {
 
             Self::Framed(mut response) => {
                 if let Some(mut incoming) = response.internal_response.body.tail.take() {
+                    let start = Instant::now();
                     loop {
                         tokio::select! {
-                            _ = message_bus.recv() => return Ok(()),
+                            _ = message_bus.recv() => {
+                                tracing::trace!("Message bus closed, exiting");
+                                return Ok(());
+                            },
 
                             result = incoming.next_frames() => match result {
                                 Ok(data) => {
                                     response.internal_response.body.head.extend(data.frames);
+
                                     if data.is_last {
+                                        tracing::trace!(
+                                            elapsed_s = start.elapsed().as_secs_f32(),
+                                            "Collected the whole response body."
+                                        );
                                         break;
                                     }
                                 },
 
                                 Err(error) => {
+                                    tracing::warn!(
+                                        connection_id = response.connection_id,
+                                        request_id = response.request_id,
+                                        %error,
+                                        "Failed to read the response body.",
+                                    );
+
                                     let response = LocalHttpError::ReadBodyFailed(error)
                                         .as_error_response(
                                             response.internal_response.version,
@@ -109,6 +171,7 @@ impl BackgroundTask for HttpResponseReader {
                                             response.port,
                                         );
                                     message_bus.send(LayerTcpSteal::HttpResponse(response)).await;
+
                                     return Ok(());
                                 }
                             }
@@ -134,37 +197,54 @@ impl BackgroundTask for HttpResponseReader {
                 connection_id,
                 request_id,
                 mut body,
-            } => loop {
-                tokio::select! {
-                    _ = message_bus.recv() => return Ok(()),
-
-                    result = body.next_frames() => match result {
-                        Ok(data) => {
-                            let message = LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Body(ChunkedHttpBody {
-                                frames: data.frames.into_iter().map(InternalHttpBodyFrame::from).collect(),
-                                is_last: data.is_last,
-                                connection_id,
-                                request_id,
-                            }));
-                            message_bus.send(message).await;
-
-                            if data.is_last {
-                                break;
-                            }
+            } => {
+                let start = Instant::now();
+                loop {
+                    tokio::select! {
+                        _ = message_bus.recv() => {
+                            tracing::trace!("Message bus closed, exiting");
+                            return Ok(())
                         },
 
-                        Err(..) => {
-                            let message = LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Error(ChunkedHttpError {
-                                connection_id,
-                                request_id,
-                            }));
-                            message_bus.send(message).await;
+                        result = body.next_frames() => match result {
+                            Ok(data) => {
+                                let message = LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Body(ChunkedHttpBody {
+                                    frames: data.frames.into_iter().map(InternalHttpBodyFrame::from).collect(),
+                                    is_last: data.is_last,
+                                    connection_id,
+                                    request_id,
+                                }));
+                                message_bus.send(message).await;
 
-                            return Ok(());
+                                if data.is_last {
+                                    tracing::trace!(
+                                        elapsed_s = start.elapsed().as_secs_f32(),
+                                        "Collected the whole response body."
+                                    );
+                                    break;
+                                }
+                            },
+
+                            Err(error) => {
+                                tracing::warn!(
+                                    connection_id,
+                                    request_id,
+                                    %error,
+                                    "Failed to read the response body.",
+                                );
+
+                                let message = LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Error(ChunkedHttpError {
+                                    connection_id,
+                                    request_id,
+                                }));
+                                message_bus.send(message).await;
+
+                                return Ok(());
+                            }
                         }
                     }
                 }
-            },
+            }
         }
 
         Ok(())

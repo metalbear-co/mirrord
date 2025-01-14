@@ -1,4 +1,10 @@
-use std::{error::Error, fmt, io, net::SocketAddr, ops::Not, time::Duration};
+use std::{
+    error::Error,
+    fmt, io,
+    net::SocketAddr,
+    ops::Not,
+    time::{Duration, Instant},
+};
 
 use bytes::Bytes;
 use exponential_backoff::Backoff;
@@ -52,28 +58,48 @@ impl LocalHttpClient {
     }
 
     /// Reuses or creates a new [`HttpSender`].
-    #[tracing::instrument(level = Level::TRACE, err(level = Level::TRACE))]
     async fn get_sender(&mut self, version: Version) -> Result<HttpSender, LocalHttpError> {
         if let Some(sender) = self.sender.take() {
             if sender.version_matches(version) {
+                tracing::trace!("Reusing the HTTP connection.");
                 return Ok(sender);
+            } else {
+                tracing::trace!("HTTP connection found, but the HTTP version does not match.");
             }
         }
 
         let stream = match self.stream.take() {
-            Some(stream) => stream,
+            Some(stream) => {
+                tracing::trace!("Reusing the TCP connection.");
+                stream
+            }
             None => {
                 let socket =
                     BoundTcpSocket::bind_specified_or_localhost(self.local_server_address.ip())
                         .map_err(LocalHttpError::SocketSetupFailed)?;
-                socket
+
+                let start = Instant::now();
+                let socket = socket
                     .connect(self.local_server_address)
                     .await
-                    .map_err(LocalHttpError::ConnectTcpFailed)?
+                    .map_err(LocalHttpError::ConnectTcpFailed)?;
+                tracing::trace!(
+                    elapsed_s = start.elapsed().as_secs_f32(),
+                    "Made the TCP connection"
+                );
+
+                socket
             }
         };
 
-        HttpSender::handshake(version, stream).await
+        let start = Instant::now();
+        let sender = HttpSender::handshake(version, stream).await?;
+        tracing::trace!(
+            elapsed_s = start.elapsed().as_secs_f32(),
+            "Made the HTTP connection"
+        );
+
+        Ok(sender)
     }
 
     /// Tries to send the given `request` to the user application's HTTP server.
@@ -84,7 +110,14 @@ impl LocalHttpClient {
         request: &HttpRequest<StreamingBody>,
     ) -> Result<Response<PeekedBody>, LocalHttpError> {
         let mut sender = self.get_sender(request.version()).await?;
+
+        let start = Instant::now();
         let response = sender.send_request(request.clone()).await?;
+        tracing::trace!(
+            elapsed_s = start.elapsed().as_secs_f32(),
+            "Sent the HTTP request"
+        );
+
         let (parts, mut body) = response.into_parts();
 
         let frames = body
@@ -122,10 +155,6 @@ impl LocalHttpClient {
             tracing::trace!(attempt, "Trying to send the request");
             match (self.try_send_request(request).await, backoffs.next()) {
                 (Ok(response), _) => {
-                    tracing::trace!(
-                        attempt,
-                        "Successfully sent the request and peeked first frames"
-                    );
                     break Ok(response);
                 }
 
@@ -267,7 +296,6 @@ enum HttpSender {
 
 impl HttpSender {
     /// Performs an HTTP handshake over the given [`TcpStream`].
-    #[tracing::instrument(level = Level::DEBUG, skip(target_stream), err(level = Level::WARN))]
     async fn handshake(version: Version, target_stream: TcpStream) -> Result<Self, LocalHttpError> {
         let local_addr = target_stream
             .local_addr()
@@ -321,13 +349,6 @@ impl HttpSender {
     }
 
     /// Tries to send the given [`HttpRequest`] to the server.
-    #[tracing::instrument(
-        level = Level::DEBUG,
-        skip(self, request),
-        fields(connection_id = request.connection_id, request_id = request.request_id),
-        ret,
-        err(level = Level::WARN),
-    )]
     async fn send_request(
         &mut self,
         request: HttpRequest<StreamingBody>,

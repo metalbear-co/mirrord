@@ -120,7 +120,12 @@ impl BackgroundTask for Interceptor {
     type MessageIn = MessageIn;
     type MessageOut = MessageOut;
 
-    #[tracing::instrument(level = Level::TRACE, skip_all, err)]
+    #[tracing::instrument(
+        level = Level::TRACE,
+        name = "incoming_interceptor_main_loop",
+        skip_all, fields(peer_addr = %self.peer),
+        err(level = Level::WARN)
+    )]
     async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         let stream = self
             .socket
@@ -136,25 +141,28 @@ impl BackgroundTask for Interceptor {
             // We should not block until the agent has something, we don't know what this protocol looks like.
             result = stream.readable() => {
                 result.map_err(InterceptorError::IoFailed)?;
-                return RawConnection { stream }.run(message_bus).await;
+                tracing::trace!("TCP connection became readable, assuming raw TCP");
+                RawConnection { stream }.run(message_bus).await
             }
 
             message = message_bus.peek() => match message {
-                Some(MessageIn::Http(..)) => {}
-
-                Some(MessageIn::Raw(..)) => {
-                    return RawConnection { stream }.run(message_bus).await;
+                Some(MessageIn::Http(..)) => {
+                    tracing::trace!("Next message on the message bus is an HTTP request, running as an HTTP gateway");
+                    HttpConnection {
+                        local_client: LocalHttpClient::new_for_stream(stream)?,
+                    }
+                    .run(message_bus)
+                    .await
                 }
 
-                None => return Ok(()),
+                Some(MessageIn::Raw(..)) => {
+                    tracing::trace!("Next message on the message bus is raw TCP data, running as a TCP proxy");
+                    RawConnection { stream }.run(message_bus).await
+                },
+
+                None => Ok(()),
             }
         }
-
-        let http_conn = HttpConnection {
-            local_client: LocalHttpClient::new_for_stream(stream)?,
-        };
-
-        http_conn.run(message_bus).await
     }
 }
 
@@ -229,7 +237,12 @@ impl HttpConnection {
     ///
     /// When an HTTP upgrade happens, the underlying [`TcpStream`] is reclaimed and wrapped
     /// in a [`RawConnection`], which handles the rest of the connection.
-    #[tracing::instrument(level = Level::TRACE, skip_all, ret, err)]
+    #[tracing::instrument(
+        level = Level::TRACE,
+        name = "http_connection_main_loop",
+        skip_all, ret,
+        err(level = Level::WARN),
+    )]
     async fn run(
         mut self,
         mut message_bus: PeekableMessageBus<'_, Interceptor>,
@@ -250,6 +263,7 @@ impl HttpConnection {
                     message_bus.send(MessageOut::Http(res)).await;
 
                     if let Some(on_upgrade) = on_upgrade {
+                        tracing::trace!("Detected an HTTP upgrade");
                         break on_upgrade
                             .await
                             .map_err(InterceptorError::HttpUpgradeFailed)?;
@@ -293,6 +307,12 @@ impl RawConnection {
     ///
     /// 3. This implementation exits only when an error is encountered or the [`MessageBus`] is
     ///    closed.
+    #[tracing::instrument(
+        level = Level::TRACE,
+        name = "raw_connection_main_loop",
+        skip_all, ret,
+        err(level = Level::WARN),
+    )]
     async fn run(
         mut self,
         mut message_bus: PeekableMessageBus<'_, Interceptor>,
@@ -310,7 +330,7 @@ impl RawConnection {
                     Err(e) => break Err(InterceptorError::IoFailed(e)),
                     Ok(..) => {
                         if buf.is_empty() {
-                            tracing::trace!("incoming interceptor -> layer shutdown, sending a 0-sized read to inform the agent");
+                            tracing::trace!("layer shutdown, sending a 0-sized read to inform the agent");
                             reading_closed = true;
                         }
                         message_bus.send(MessageOut::Raw(buf.to_vec())).await;
@@ -320,12 +340,12 @@ impl RawConnection {
 
                 msg = message_bus.recv(), if !remote_closed => match msg {
                     None => {
-                        tracing::trace!("incoming interceptor -> message bus closed, waiting 1 second before exiting");
+                        tracing::trace!("message bus closed, waiting 1 second before exiting");
                         remote_closed = true;
                     },
                     Some(MessageIn::Raw(data)) => {
                         if data.is_empty() {
-                            tracing::trace!("incoming interceptor -> agent shutdown, shutting down connection with layer");
+                            tracing::trace!("agent shutdown, shutting down connection with layer");
                             self.stream.shutdown().await.map_err(InterceptorError::IoFailed)?;
                         } else {
                             self.stream.write_all(&data).await.map_err(InterceptorError::IoFailed)?;
@@ -335,7 +355,7 @@ impl RawConnection {
                 },
 
                 _ = time::sleep(Duration::from_secs(1)), if remote_closed => {
-                    tracing::trace!("incoming interceptor -> layer silent for 1 second and message bus is closed, exiting");
+                    tracing::trace!("layer silent for 1 second and message bus is closed, exiting");
 
                     break Ok(());
                 },
