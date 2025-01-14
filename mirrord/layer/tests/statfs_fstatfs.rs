@@ -23,13 +23,13 @@ async fn mkdir(dylib_path: &Path) {
         .await;
 
     println!("waiting for file request.");
+    intproxy.expect_statfs("/statfs_fstatfs_test_path").await;
+
+    println!("waiting for file request.");
     let fd: u64 = 1;
     intproxy
         .expect_file_open_for_reading("/statfs_fstatfs_test_path", fd)
         .await;
-
-    println!("waiting for file request.");
-    intproxy.expect_statfs("/statfs_fstatfs_test_path").await;
 
     println!("waiting for file request.");
     intproxy.expect_fstatfs(fd).await;
