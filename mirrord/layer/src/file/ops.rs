@@ -9,7 +9,7 @@ use mirrord_protocol::{
     file::{
         MakeDirAtRequest, MakeDirRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
         ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse, SeekFileResponse,
-        WriteFileResponse, XstatFsResponse, XstatResponse,
+        StatFsRequest, WriteFileResponse, XstatFsResponse, XstatResponse,
     },
     ResponseError,
 };
@@ -665,6 +665,16 @@ pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponse> {
     let fd = get_remote_fd(fd)?;
 
     let lstatfs = XstatFsRequest { fd };
+
+    let response = common::make_proxy_request_with_response(lstatfs)??;
+
+    Detour::Success(response)
+}
+
+#[mirrord_layer_macro::instrument(level = "trace")]
+pub(crate) fn statfs(path: Detour<PathBuf>) -> Detour<XstatFsResponse> {
+    let path = path?;
+    let lstatfs = StatFsRequest { path };
 
     let response = common::make_proxy_request_with_response(lstatfs)??;
 

@@ -101,6 +101,8 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                         .into()
                 }
                 libc::SYS_fstat => fstat_detour(param1 as _, param2 as _) as i64,
+                libc::SYS_statfs => statfs_detour(param1 as _, param2 as _) as i64,
+                libc::SYS_fstatfs => fstatfs_detour(param1 as _, param2 as _) as i64,
                 libc::SYS_fsync => fsync_detour(param1 as _) as i64,
                 libc::SYS_fdatasync => fsync_detour(param1 as _) as i64,
                 libc::SYS_openat => {

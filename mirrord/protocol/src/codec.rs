@@ -71,6 +71,7 @@ pub enum FileRequest {
     Access(AccessFileRequest),
     Xstat(XstatRequest),
     XstatFs(XstatFsRequest),
+    StatFs(StatFsRequest),
     FdOpenDir(FdOpenDirRequest),
     ReadDir(ReadDirRequest),
     CloseDir(CloseDirRequest),

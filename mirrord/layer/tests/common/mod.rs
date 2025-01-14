@@ -17,7 +17,7 @@ use mirrord_intproxy::{agent_conn::AgentConnection, IntProxy};
 use mirrord_protocol::{
     file::{
         AccessFileRequest, AccessFileResponse, OpenFileRequest, OpenOptionsInternal,
-        ReadFileRequest, SeekFromInternal, XstatRequest, XstatResponse,
+        ReadFileRequest, SeekFromInternal, XstatFsResponse, XstatRequest, XstatResponse,
     },
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
@@ -487,6 +487,48 @@ impl TestIntProxy {
             .unwrap();
     }
 
+    /// Makes a [`FileRequest::Statefs`] and answers it.
+    pub async fn expect_statfs(&mut self, expected_path: &str) {
+        // Expecting `statfs` call with path.
+        assert_matches!(
+            self.recv().await,
+            ClientMessage::FileRequest(FileRequest::StatFs(
+                mirrord_protocol::file::StatFsRequest { path }
+            )) if path.to_str().unwrap() == expected_path
+        );
+
+        // Answer `statfs`.
+        self.codec
+            .send(DaemonMessage::File(FileResponse::XstatFs(Ok(
+                XstatFsResponse {
+                    metadata: Default::default(),
+                },
+            ))))
+            .await
+            .unwrap();
+    }
+
+    /// Makes a [`FileRequest::Xstatefs`] and answers it.
+    pub async fn expect_fstatfs(&mut self, expected_fd: Option<u64>) {
+        // Expecting `fstatfs` call with path.
+        assert_matches!(
+            self.recv().await,
+            ClientMessage::FileRequest(FileRequest::XstatFs(
+                mirrord_protocol::file::XstatFsRequest { fd }
+            )) if expected_fd.is_none() || expected_fd.unwrap() == fd
+        );
+
+        // Answer `fstatfs`.
+        self.codec
+            .send(DaemonMessage::File(FileResponse::XstatFs(Ok(
+                XstatFsResponse {
+                    metadata: Default::default(),
+                },
+            ))))
+            .await
+            .unwrap();
+    }
+
     /// Verify that the passed message (not the next message from self.codec!) is a file read.
     /// Return buffer size.
     pub async fn expect_message_file_read(message: ClientMessage, expected_fd: u64) -> u64 {
@@ -763,6 +805,7 @@ pub enum Application {
     Fork,
     ReadLink,
     MakeDir,
+    StatfsFstatfs,
     OpenFile,
     CIssue2055,
     CIssue2178,
@@ -819,6 +862,7 @@ impl Application {
             Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
             Application::ReadLink => String::from("tests/apps/readlink/out.c_test_app"),
             Application::MakeDir => String::from("tests/apps/mkdir/out.c_test_app"),
+            Application::StatfsFstatfs => String::from("tests/apps/statfs_fstatfs/out.c_test_app"),
             Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
             Application::NodeHTTP | Application::NodeIssue2283 | Application::NodeIssue2807 => {
                 String::from("node")
@@ -1057,6 +1101,7 @@ impl Application {
             | Application::Fork
             | Application::ReadLink
             | Application::MakeDir
+            | Application::StatfsFstatfs
             | Application::Realpath
             | Application::RustFileOps
             | Application::RustIssue1123
@@ -1135,6 +1180,7 @@ impl Application {
             | Application::Fork
             | Application::ReadLink
             | Application::MakeDir
+            | Application::StatfsFstatfs
             | Application::Realpath
             | Application::Go21Issue834
             | Application::Go22Issue834

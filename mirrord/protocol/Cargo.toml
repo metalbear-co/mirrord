@@ -1,6 +1,6 @@
 [package]
 name = "mirrord-protocol"
-version = "1.13.3"
+version = "1.14.0"
 authors.workspace = true
 description.workspace = true
 documentation.workspace = true

@@ -223,8 +223,12 @@ impl FileManager {
                 Some(FileResponse::Xstat(xstat_result))
             }
             FileRequest::XstatFs(XstatFsRequest { fd }) => {
-                let xstat_result = self.xstatfs(fd);
-                Some(FileResponse::XstatFs(xstat_result))
+                let xstatfs_result = self.xstatfs(fd);
+                Some(FileResponse::XstatFs(xstatfs_result))
+            }
+            FileRequest::StatFs(StatFsRequest { path }) => {
+                let statfs_result = self.statfs(path);
+                Some(FileResponse::XstatFs(statfs_result))
             }
 
             // dir operations
@@ -683,6 +687,18 @@ impl FileManager {
             RemoteFile::Directory(path) => nix::sys::statfs::statfs(path)
                 .map_err(|err| std::io::Error::from_raw_os_error(err as i32))?,
         };
+
+        Ok(XstatFsResponse {
+            metadata: statfs.into(),
+        })
+    }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn statfs(&mut self, path: PathBuf) -> RemoteResult<XstatFsResponse> {
+        let path = resolve_path(path, &self.root_path)?;
+
+        let statfs = nix::sys::statfs::statfs(&path)
+            .map_err(|err| std::io::Error::from_raw_os_error(err as i32))?;
 
         Ok(XstatFsResponse {
             metadata: statfs.into(),
