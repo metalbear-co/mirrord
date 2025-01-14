@@ -509,13 +509,13 @@ impl TestIntProxy {
     }
 
     /// Makes a [`FileRequest::Xstatefs`] and answers it.
-    pub async fn expect_fstatfs(&mut self, expected_fd: Option<u64>) {
+    pub async fn expect_fstatfs(&mut self, expected_fd: u64) {
         // Expecting `fstatfs` call with path.
         assert_matches!(
             self.recv().await,
             ClientMessage::FileRequest(FileRequest::XstatFs(
                 mirrord_protocol::file::XstatFsRequest { fd }
-            )) if expected_fd.is_none() || expected_fd.unwrap() == fd
+            )) if expected_fd == fd
         );
 
         // Answer `fstatfs`.
