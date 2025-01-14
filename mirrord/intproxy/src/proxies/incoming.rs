@@ -11,6 +11,7 @@ use futures::StreamExt;
 use http::RETRY_ON_RESET_ATTEMPTS;
 use http_body_util::StreamBody;
 use hyper::body::Frame;
+use metadata_store::MetadataStore;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
     MessageId, PortSubscribe, PortSubscription, PortUnsubscribe, ProxyToLayerMessage,
@@ -46,6 +47,7 @@ use crate::{
 
 mod http;
 mod interceptor;
+mod metadata_store;
 pub mod port_subscription_ext;
 mod subscriptions;
 
@@ -118,36 +120,6 @@ struct InterceptorHandle {
     tx: TaskSender<Interceptor>,
     /// Port subscription that the intercepted connection belongs to.
     subscription: PortSubscription,
-}
-
-/// Store for mapping [`Interceptor`] socket addresses to addresses of the original peers.
-#[derive(Default)]
-struct MetadataStore {
-    prepared_responses: HashMap<ConnMetadataRequest, ConnMetadataResponse>,
-    expected_requests: HashMap<InterceptorId, ConnMetadataRequest>,
-}
-
-impl MetadataStore {
-    fn get(&mut self, req: ConnMetadataRequest) -> ConnMetadataResponse {
-        self.prepared_responses
-            .remove(&req)
-            .unwrap_or_else(|| ConnMetadataResponse {
-                remote_source: req.peer_address,
-                local_address: req.listener_address.ip(),
-            })
-    }
-
-    fn expect(&mut self, req: ConnMetadataRequest, from: InterceptorId, res: ConnMetadataResponse) {
-        self.expected_requests.insert(from, req.clone());
-        self.prepared_responses.insert(req, res);
-    }
-
-    fn no_longer_expect(&mut self, from: InterceptorId) {
-        let Some(req) = self.expected_requests.remove(&from) else {
-            return;
-        };
-        self.prepared_responses.remove(&req);
-    }
 }
 
 /// Handles logic and state of the `incoming` feature.
@@ -390,7 +362,7 @@ impl IncomingProxy {
                         listener_address: subscription.listening_on,
                         peer_address: interceptor_socket.local_addr()?,
                     },
-                    id,
+                    id.0,
                     ConnMetadataResponse {
                         remote_source: SocketAddr::new(remote_address, source_port),
                         local_address,
@@ -527,7 +499,7 @@ impl BackgroundTask for IncomingProxy {
                     (id, TaskUpdate::Finished(res)) => {
                         tracing::trace!("{id} finished: {res:?}");
 
-                        self.metadata_store.no_longer_expect(id);
+                        self.metadata_store.no_longer_expect(id.0);
 
                         let msg = self.get_subscription(id).map(|s| s.wrap_agent_unsubscribe_connection(id.0));
                         if let Some(msg) = msg {
