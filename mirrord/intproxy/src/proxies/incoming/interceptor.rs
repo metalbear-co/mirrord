@@ -184,22 +184,17 @@ impl HttpConnection {
             }
 
             Err(error) => {
-                let message_frame = Frame::data(Bytes::from_owner(format!("mirrord: {error}")));
-                let body = PeekedBody {
-                    head: vec![message_frame],
-                    tail: None,
-                };
-                let response = HttpResponse {
-                    port: request.port,
-                    connection_id: request.connection_id,
-                    request_id: request.request_id,
-                    internal_response: InternalHttpResponse {
-                        status: StatusCode::BAD_GATEWAY,
-                        version: request.internal_request.version,
-                        headers: Default::default(),
-                        body,
-                    },
-                };
+                let response = error
+                    .as_error_response(
+                        request.internal_request.version,
+                        request.request_id,
+                        request.connection_id,
+                        request.port,
+                    )
+                    .map_body(|body| PeekedBody {
+                        head: vec![Frame::data(Bytes::from_owner(body))],
+                        tail: None,
+                    });
 
                 Ok((response, None))
             }

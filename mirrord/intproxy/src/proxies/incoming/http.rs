@@ -5,10 +5,14 @@ use exponential_backoff::Backoff;
 use hyper::{
     body::{Frame, Incoming},
     client::conn::{http1, http2},
-    Request, Response, Version,
+    Request, Response, StatusCode, Version,
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use mirrord_protocol::{batched_body::BatchedBody, tcp::HttpRequest};
+use mirrord_protocol::{
+    batched_body::BatchedBody,
+    tcp::{HttpRequest, HttpResponse, InternalHttpResponse},
+    ConnectionId, Port, RequestId,
+};
 use thiserror::Error;
 use tokio::{net::TcpStream, time};
 use tracing::Level;
@@ -85,7 +89,7 @@ impl LocalHttpClient {
 
         let frames = body
             .ready_frames()
-            .map_err(LocalHttpError::PeekBodyFailed)?;
+            .map_err(LocalHttpError::ReadBodyFailed)?;
         let body = PeekedBody {
             head: frames.frames,
             tail: frames.is_last.not().then_some(body),
@@ -182,8 +186,8 @@ pub enum LocalHttpError {
     #[error("making a TPC connection failed: {0}")]
     ConnectTcpFailed(#[source] io::Error),
 
-    #[error("reading first frames of the response body failed: {0}")]
-    PeekBodyFailed(#[source] hyper::Error),
+    #[error("reading the response body failed: {0}")]
+    ReadBodyFailed(#[source] hyper::Error),
 }
 
 impl LocalHttpError {
@@ -210,9 +214,30 @@ impl LocalHttpError {
         match self {
             Self::SocketSetupFailed(..) | Self::UnsupportedHttpVersion(..) => false,
             Self::ConnectTcpFailed(..) => true,
-            Self::HandshakeFailed(err) | Self::SendFailed(err) | Self::PeekBodyFailed(err) => {
+            Self::HandshakeFailed(err) | Self::SendFailed(err) | Self::ReadBodyFailed(err) => {
                 err.is_closed() || err.is_incomplete_message() || Self::is_h2_reset(err)
             }
+        }
+    }
+
+    /// Produces a [`StatusCode::BAD_GATEWAY`] response from this error.
+    pub fn as_error_response(
+        &self,
+        version: Version,
+        request_id: RequestId,
+        connection_id: ConnectionId,
+        port: Port,
+    ) -> HttpResponse<Vec<u8>> {
+        HttpResponse {
+            request_id,
+            connection_id,
+            port,
+            internal_response: InternalHttpResponse {
+                status: StatusCode::BAD_GATEWAY,
+                version,
+                headers: Default::default(),
+                body: format!("mirrord: {self}").into_bytes(),
+            },
         }
     }
 }
