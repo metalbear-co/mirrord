@@ -16,6 +16,8 @@ use crate::{
     watched_task::TaskStatus,
 };
 
+type ResponseBodyTx = Sender<Result<Frame<Bytes>, Infallible>>;
+
 /// Bridges the communication between the agent and the [`TcpConnectionStealer`] task.
 /// There is an API instance for each connected layer ("client"). All API instances send commands
 /// On the same stealer command channel, where the layer-independent stealer listens to them.
@@ -37,7 +39,7 @@ pub(crate) struct TcpStealerApi {
     /// View on the stealer task's status.
     task_status: TaskStatus,
 
-    response_body_txs: HashMap<(ConnectionId, RequestId), Sender<Result<Frame<Bytes>, Infallible>>>,
+    response_body_txs: HashMap<(ConnectionId, RequestId), ResponseBodyTx>,
 }
 
 impl TcpStealerApi {

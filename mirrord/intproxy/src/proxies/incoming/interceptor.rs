@@ -293,9 +293,9 @@ impl RawConnection {
     ///
     /// 3. This implementation exits only when an error is encountered or the [`MessageBus`] is
     ///    closed.
-    async fn run<'a>(
+    async fn run(
         mut self,
-        mut message_bus: PeekableMessageBus<'a, Interceptor>,
+        mut message_bus: PeekableMessageBus<'_, Interceptor>,
     ) -> InterceptorResult<()> {
         let mut buf = BytesMut::with_capacity(64 * 1024);
         let mut reading_closed = false;

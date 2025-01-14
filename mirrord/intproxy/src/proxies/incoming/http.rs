@@ -120,7 +120,7 @@ impl LocalHttpClient {
         loop {
             attempt += 1;
             tracing::trace!(attempt, "Trying to send the request");
-            match (self.try_send_request(&request).await, backoffs.next()) {
+            match (self.try_send_request(request).await, backoffs.next()) {
                 (Ok(response), _) => {
                     tracing::trace!(
                         attempt,
