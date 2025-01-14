@@ -19,14 +19,23 @@
 int main()
 {
   char *tmp_test_path = "/statfs_fstatfs_test_path";
-  int fd = mkdir(tmp_test_path, 0777);
+  mkdir(tmp_test_path, 0777);
 
+  // statfs
   struct statfs statfs_buf;
   if (statfs(tmp_test_path, &statfs_buf) == -1)
   {
     perror("statfs failed");
-    close(fd);
     return EXIT_FAILURE;
+  }
+
+  // fstatfs
+  int fd = open(tmp_test_path, O_RDONLY);
+
+  if (fd == -1)
+  {
+    perror("Error opening tmp_test_path");
+    return 1;
   }
 
   struct statfs fstatfs_buf;
