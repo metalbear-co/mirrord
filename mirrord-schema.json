@@ -752,7 +752,7 @@
         },
         "mapping": {
           "title": "feature.env.mapping {#feature-env-mapping}",
-          "description": "Specify map of patterns that if matched will replace the value according to specification.\n\n*Capture groups are allowed.*\n\nExample: ```json { \".+_TIMEOUT\": \"10000\" \"LOG_.+_VERBOSITY\": \"debug\" \"(\\w+)_(\\d+)\": \"magic-value\" } ```\n\nWill do the next replacements for environment variables that match:\n\n`CONNECTION_TIMEOUT: 500` => `CONNECTION_TIMEOUT: 10000` `LOG_FILE_VERBOSITY: info` => `LOG_FILE_VERBOSITY: debug` `DATA_1234: common-value` => `DATA_1234: magic-value`",
+          "description": "Specify map of patterns that if matched will replace the value according to specification.\n\n*Capture groups are allowed.*\n\nExample: ```json { \".+_TIMEOUT\": \"10000\" \"LOG_.+_VERBOSITY\": \"debug\" \"(\\w+)_(\\d+)\": \"magic-value\" } ```\n\nWill do the next replacements for environment variables that match:\n\n- `CONNECTION_TIMEOUT: 500` => `CONNECTION_TIMEOUT: 10000` - `LOG_FILE_VERBOSITY: info` => `LOG_FILE_VERBOSITY: debug` - `DATA_1234: common-value` => `DATA_1234: magic-value`",
           "type": [
             "object",
             "null"
