@@ -15,9 +15,8 @@ use mirrord_protocol::{
     batched_body::{BatchedBody, Frames},
     tcp::{
         ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, DaemonTcp, HttpRequest,
-        HttpResponseFallback, InternalHttpBody, InternalHttpBodyFrame, InternalHttpRequest,
-        StealType, TcpClose, TcpData, HTTP_CHUNKED_REQUEST_VERSION, HTTP_FILTERED_UPGRADE_VERSION,
-        HTTP_FRAMED_VERSION,
+        InternalHttpBody, InternalHttpBodyFrame, InternalHttpRequest, StealType, TcpClose, TcpData,
+        HTTP_CHUNKED_REQUEST_VERSION, HTTP_FILTERED_UPGRADE_VERSION, HTTP_FRAMED_VERSION,
     },
     ConnectionId, Port,
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
@@ -31,6 +30,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
+use super::http::HttpResponseFallback;
 use crate::{
     error::{AgentError, Result},
     steal::{

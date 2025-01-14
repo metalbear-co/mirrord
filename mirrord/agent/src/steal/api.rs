@@ -3,16 +3,13 @@ use std::{collections::HashMap, convert::Infallible};
 use bytes::Bytes;
 use hyper::body::Frame;
 use mirrord_protocol::{
-    tcp::{
-        ChunkedResponse, DaemonTcp, HttpResponse, HttpResponseFallback, InternalHttpResponse,
-        LayerTcpSteal, ReceiverStreamBody, TcpData,
-    },
+    tcp::{ChunkedResponse, DaemonTcp, HttpResponse, InternalHttpResponse, LayerTcpSteal, TcpData},
     RequestId,
 };
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_stream::wrappers::ReceiverStream;
 
-use super::*;
+use super::{http::ReceiverStreamBody, *};
 use crate::{
     error::{AgentError, Result},
     util::ClientId,

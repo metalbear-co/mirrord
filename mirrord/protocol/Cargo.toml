@@ -32,7 +32,6 @@ http-body-util = { workspace = true }
 fancy-regex = { workspace = true }
 socket2.workspace = true
 semver = { workspace = true, features = ["serde"] }
-tokio-stream.workspace = true
 
 mirrord-macros = { path = "../macros" }
 

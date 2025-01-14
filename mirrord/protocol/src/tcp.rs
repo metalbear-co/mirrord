@@ -11,7 +11,7 @@ use std::{
 
 use bincode::{Decode, Encode};
 use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt, Full, StreamBody};
+use http_body_util::BodyExt;
 use hyper::{
     body::{Body, Frame},
     HeaderMap, Method, Request, Response, StatusCode, Uri, Version,
@@ -19,7 +19,6 @@ use hyper::{
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
-use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{ConnectionId, Port, RemoteResult, RequestId};
 
@@ -283,6 +282,7 @@ impl<B> From<InternalHttpRequest<B>> for Request<B> {
             version,
             body,
         } = value;
+
         let mut request = Request::new(body);
         *request.method_mut() = method;
         *request.uri_mut() = uri;
@@ -392,6 +392,24 @@ impl<B> InternalHttpResponse<B> {
     }
 }
 
+impl<B> From<InternalHttpResponse<B>> for Response<B> {
+    fn from(value: InternalHttpResponse<B>) -> Self {
+        let InternalHttpResponse {
+            status,
+            version,
+            headers,
+            body,
+        } = value;
+
+        let mut response = Response::new(body);
+        *response.status_mut() = status;
+        *response.version_mut() = version;
+        *response.headers_mut() = headers;
+
+        response
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
 pub struct InternalHttpBody(pub VecDeque<InternalHttpBodyFrame>);
 
@@ -457,41 +475,6 @@ impl fmt::Debug for InternalHttpBodyFrame {
     }
 }
 
-pub type ReceiverStreamBody = StreamBody<ReceiverStream<Result<Frame<Bytes>, Infallible>>>;
-
-#[derive(Debug)]
-pub enum HttpResponseFallback {
-    Framed(HttpResponse<InternalHttpBody>),
-    Fallback(HttpResponse<Vec<u8>>),
-    Streamed(HttpResponse<ReceiverStreamBody>),
-}
-
-impl HttpResponseFallback {
-    pub fn connection_id(&self) -> ConnectionId {
-        match self {
-            HttpResponseFallback::Framed(req) => req.connection_id,
-            HttpResponseFallback::Fallback(req) => req.connection_id,
-            HttpResponseFallback::Streamed(req) => req.connection_id,
-        }
-    }
-
-    pub fn request_id(&self) -> RequestId {
-        match self {
-            HttpResponseFallback::Framed(req) => req.request_id,
-            HttpResponseFallback::Fallback(req) => req.request_id,
-            HttpResponseFallback::Streamed(req) => req.request_id,
-        }
-    }
-
-    pub fn into_hyper<E>(self) -> Response<BoxBody<Bytes, E>> {
-        match self {
-            HttpResponseFallback::Framed(req) => req.internal_response.into(),
-            HttpResponseFallback::Fallback(req) => req.internal_response.into(),
-            HttpResponseFallback::Streamed(req) => req.internal_response.into(),
-        }
-    }
-}
-
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 #[bincode(bounds = "for<'de> B: Serialize + Deserialize<'de>")]
 pub struct HttpResponse<B> {
@@ -515,63 +498,5 @@ impl<B> HttpResponse<B> {
             port: self.port,
             internal_response: self.internal_response.map_body(cb),
         }
-    }
-}
-
-impl<E> From<InternalHttpResponse<Vec<u8>>> for Response<BoxBody<Bytes, E>> {
-    fn from(value: InternalHttpResponse<Vec<u8>>) -> Self {
-        let InternalHttpResponse {
-            status,
-            version,
-            headers,
-            body,
-        } = value;
-
-        let mut response = Response::new(
-            Full::new(Bytes::from_owner(body))
-                .map_err(|_| unreachable!())
-                .boxed(),
-        );
-        *response.status_mut() = status;
-        *response.version_mut() = version;
-        *response.headers_mut() = headers;
-
-        response
-    }
-}
-
-impl<E> From<InternalHttpResponse<InternalHttpBody>> for Response<BoxBody<Bytes, E>> {
-    fn from(value: InternalHttpResponse<InternalHttpBody>) -> Self {
-        let InternalHttpResponse {
-            status,
-            version,
-            headers,
-            body,
-        } = value;
-
-        let mut response = Response::new(body.map_err(|_| unreachable!()).boxed());
-        *response.status_mut() = status;
-        *response.version_mut() = version;
-        *response.headers_mut() = headers;
-
-        response
-    }
-}
-
-impl<E> From<InternalHttpResponse<ReceiverStreamBody>> for Response<BoxBody<Bytes, E>> {
-    fn from(value: InternalHttpResponse<ReceiverStreamBody>) -> Self {
-        let InternalHttpResponse {
-            status,
-            version,
-            headers,
-            body,
-        } = value;
-
-        let mut response = Response::new(body.map_err(|_| unreachable!()).boxed());
-        *response.status_mut() = status;
-        *response.version_mut() = version;
-        *response.headers_mut() = headers;
-
-        response
     }
 }
