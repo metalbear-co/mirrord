@@ -19,7 +19,7 @@ use mirrord_protocol::tcp::{
 use thiserror::Error;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpSocket, TcpStream},
+    net::TcpStream,
     time::{self, sleep},
 };
 use tracing::Level;
@@ -27,7 +27,7 @@ use tracing::Level;
 use super::http::HttpSender;
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    proxies::incoming::http::RETRY_ON_RESET_ATTEMPTS,
+    proxies::incoming::{bound_socket::BoundTcpSocket, http::RETRY_ON_RESET_ATTEMPTS},
 };
 
 /// Messages consumed by the [`Interceptor`] when it runs as a [`BackgroundTask`].
@@ -126,7 +126,7 @@ pub type InterceptorResult<T, E = InterceptorError> = core::result::Result<T, E>
 /// When it received [`MessageIn::Http`], it starts acting as an HTTP gateway.
 pub struct Interceptor {
     /// Socket that should be used to make the first connection (should already be bound).
-    socket: TcpSocket,
+    socket: BoundTcpSocket,
     /// Address of user app's listener.
     peer: SocketAddr,
     /// Version of [`mirrord_protocol`] negotiated with the agent.
@@ -141,7 +141,7 @@ impl Interceptor {
     ///
     /// The socket can be replaced when retrying HTTP requests.
     pub fn new(
-        socket: TcpSocket,
+        socket: BoundTcpSocket,
         peer: SocketAddr,
         agent_protocol_version: Option<semver::Version>,
     ) -> Self {
@@ -418,7 +418,7 @@ impl HttpConnection {
                     sleep(backoff).await;
 
                     // Create a new connection for the next attempt.
-                    let socket = super::bind_similar(self.peer)?;
+                    let socket = BoundTcpSocket::bind_specified_or_localhost(self.peer.ip())?;
                     let stream = socket.connect(self.peer).await?;
                     let new_sender = super::http::handshake(request.version(), stream).await?;
                     self.sender = new_sender;
@@ -554,6 +554,7 @@ impl RawConnection {
 mod test {
     use std::{
         convert::Infallible,
+        net::Ipv4Addr,
         sync::{Arc, Mutex},
     };
 
@@ -681,8 +682,8 @@ mod test {
 
         let mut tasks: BackgroundTasks<(), MessageOut, InterceptorError> = Default::default();
         let interceptor = {
-            let socket = TcpSocket::new_v4().unwrap();
-            socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            let socket =
+                BoundTcpSocket::bind_specified_or_localhost(Ipv4Addr::LOCALHOST.into()).unwrap();
             tasks.register(
                 Interceptor::new(
                     socket,
@@ -765,8 +766,8 @@ mod test {
         let local_destination = listener.local_addr().unwrap();
 
         let mut tasks: BackgroundTasks<(), MessageOut, InterceptorError> = Default::default();
-        let socket = TcpSocket::new_v4().unwrap();
-        socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let socket =
+            BoundTcpSocket::bind_specified_or_localhost(Ipv4Addr::LOCALHOST.into()).unwrap();
         let interceptor = Interceptor::new(
             socket,
             local_destination,

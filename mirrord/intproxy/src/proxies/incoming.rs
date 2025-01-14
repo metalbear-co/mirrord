@@ -3,9 +3,10 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt, io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::SocketAddr,
 };
 
+use bound_socket::BoundTcpSocket;
 use bytes::Bytes;
 use futures::StreamExt;
 use http::RETRY_ON_RESET_ATTEMPTS;
@@ -27,10 +28,7 @@ use mirrord_protocol::{
     ClientMessage, ConnectionId, RequestId, ResponseError,
 };
 use thiserror::Error;
-use tokio::{
-    net::TcpSocket,
-    sync::mpsc::{self, Sender},
-};
+use tokio::sync::mpsc::{self, Sender};
 use tokio_stream::{wrappers::ReceiverStream, StreamMap, StreamNotifyClose};
 use tracing::{debug, Level};
 
@@ -45,43 +43,12 @@ use crate::{
     ProxyMessage,
 };
 
+mod bound_socket;
 mod http;
 mod interceptor;
 mod metadata_store;
 pub mod port_subscription_ext;
 mod subscriptions;
-
-/// Creates and binds a new [`TcpSocket`].
-/// The socket has the same IP version and address as the given `addr`.
-///
-/// # Exception
-///
-/// If the given `addr` is unspecified, this function binds to localhost.
-#[tracing::instrument(level = Level::TRACE, ret, err)]
-fn bind_similar(addr: SocketAddr) -> io::Result<TcpSocket> {
-    match addr.ip() {
-        IpAddr::V4(Ipv4Addr::UNSPECIFIED) => {
-            let socket = TcpSocket::new_v4()?;
-            socket.bind(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))?;
-            Ok(socket)
-        }
-        IpAddr::V6(Ipv6Addr::UNSPECIFIED) => {
-            let socket = TcpSocket::new_v6()?;
-            socket.bind(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0))?;
-            Ok(socket)
-        }
-        addr @ IpAddr::V4(..) => {
-            let socket = TcpSocket::new_v4()?;
-            socket.bind(SocketAddr::new(addr, 0))?;
-            Ok(socket)
-        }
-        addr @ IpAddr::V6(..) => {
-            let socket = TcpSocket::new_v6()?;
-            socket.bind(SocketAddr::new(addr, 0))?;
-            Ok(socket)
-        }
-    }
-}
 
 /// Id of a single [`Interceptor`] task. Used to manage interceptor tasks with the
 /// [`BackgroundTasks`] struct.
@@ -212,7 +179,8 @@ impl IncomingProxy {
                     return Ok(None);
                 };
 
-                let interceptor_socket = bind_similar(subscription.listening_on)?;
+                let interceptor_socket =
+                    BoundTcpSocket::bind_specified_or_localhost(subscription.listening_on.ip())?;
 
                 let interceptor = self.background_tasks.register(
                     Interceptor::new(
@@ -353,7 +321,8 @@ impl IncomingProxy {
                     return Ok(());
                 };
 
-                let interceptor_socket = bind_similar(subscription.listening_on)?;
+                let interceptor_socket =
+                    BoundTcpSocket::bind_specified_or_localhost(subscription.listening_on.ip())?;
 
                 let id = InterceptorId(connection_id);
 
