@@ -86,6 +86,8 @@ struct InterceptorHandle {
     tx: TaskSender<Interceptor>,
     /// Port subscription that the intercepted connection belongs to.
     subscription: PortSubscription,
+    /// Senders for the bodies of in-progress HTTP requests.
+    request_body_txs: HashMap<RequestId, Sender<InternalHttpBodyFrame>>,
 }
 
 /// Handles logic and state of the `incoming` feature.
@@ -108,8 +110,6 @@ pub struct IncomingProxy {
     background_tasks: BackgroundTasks<InterceptorId, MessageOut, InterceptorError>,
     /// For managing intercepted connections metadata.
     metadata_store: MetadataStore,
-    /// For managing streamed [`DaemonTcp::HttpRequestChunked`] request channels.
-    request_body_txs: HashMap<(ConnectionId, RequestId), Sender<InternalHttpBodyFrame>>,
     /// For managing streamed [`LayerTcpSteal::HttpResponseChunked`] response streams.
     response_body_rxs:
         StreamMap<(ConnectionId, RequestId), StreamNotifyClose<BodyStream<Incoming>>>,
@@ -165,7 +165,7 @@ impl IncomingProxy {
         connection_id: ConnectionId,
         port: Port,
         message_bus: &MessageBus<Self>,
-    ) -> Result<Option<&TaskSender<Interceptor>>, IncomingProxyError> {
+    ) -> Result<Option<&mut InterceptorHandle>, IncomingProxyError> {
         let id: InterceptorId = InterceptorId(connection_id);
 
         let interceptor = match self.interceptors.entry(id) {
@@ -201,11 +201,12 @@ impl IncomingProxy {
                 e.insert(InterceptorHandle {
                     tx: interceptor,
                     subscription: subscription.subscription.clone(),
+                    request_body_txs: Default::default(),
                 })
             }
         };
 
-        Ok(Some(&interceptor.tx))
+        Ok(Some(interceptor))
     }
 
     /// Handles all agent messages.
@@ -220,8 +221,6 @@ impl IncomingProxy {
             DaemonTcp::Close(close) => {
                 self.interceptors
                     .remove(&InterceptorId(close.connection_id));
-                self.request_body_txs
-                    .retain(|(connection_id, _), _| *connection_id != close.connection_id);
                 let keys: Vec<(ConnectionId, RequestId)> = self
                     .response_body_rxs
                     .keys()
@@ -256,6 +255,7 @@ impl IncomingProxy {
 
                 if let Some(interceptor) = interceptor {
                     interceptor
+                        .tx
                         .send(request.map_body(StreamingBody::from))
                         .await;
                 }
@@ -272,6 +272,7 @@ impl IncomingProxy {
 
                 if let Some(interceptor) = interceptor {
                     interceptor
+                        .tx
                         .send(request.map_body(StreamingBody::from))
                         .await;
                 }
@@ -291,9 +292,8 @@ impl IncomingProxy {
                         if let Some(interceptor) = interceptor {
                             let (tx, rx) = mpsc::channel::<InternalHttpBodyFrame>(128);
                             let request = request.map_body(|frames| StreamingBody::new(rx, frames));
-                            let key = (request.connection_id, request.request_id);
-                            interceptor.send(request).await;
-                            self.request_body_txs.insert(key, tx);
+                            interceptor.request_body_txs.insert(request.request_id, tx);
+                            interceptor.tx.send(request).await;
                         }
                     }
 
@@ -303,25 +303,34 @@ impl IncomingProxy {
                         connection_id,
                         request_id,
                     }) => {
-                        if let Some(tx) = self.request_body_txs.get(&(connection_id, request_id)) {
-                            let mut send_err = false;
+                        let Some(interceptor) =
+                            self.interceptors.get_mut(&InterceptorId(connection_id))
+                        else {
+                            return Ok(());
+                        };
 
-                            for frame in frames {
-                                if let Err(err) = tx.send(frame).await {
-                                    send_err = true;
-                                    tracing::debug!(
-                                        frame = ?err.0,
-                                        connection_id,
-                                        request_id,
-                                        "Failed to send an HTTP request body frame to the interceptor, channel is closed"
-                                    );
-                                    break;
-                                }
-                            }
+                        let Entry::Occupied(tx) = interceptor.request_body_txs.entry(request_id)
+                        else {
+                            return Ok(());
+                        };
 
-                            if send_err || is_last {
-                                self.request_body_txs.remove(&(connection_id, request_id));
+                        let mut send_err = false;
+
+                        for frame in frames {
+                            if let Err(err) = tx.get().send(frame).await {
+                                send_err = true;
+                                tracing::debug!(
+                                    frame = ?err.0,
+                                    connection_id,
+                                    request_id,
+                                    "Failed to send an HTTP request body frame to the interceptor, channel is closed"
+                                );
+                                break;
                             }
+                        }
+
+                        if send_err || is_last {
+                            tx.remove();
                         }
                     }
 
@@ -329,7 +338,12 @@ impl IncomingProxy {
                         connection_id,
                         request_id,
                     }) => {
-                        self.request_body_txs.remove(&(connection_id, request_id));
+                        if let Some(interceptor) =
+                            self.interceptors.get_mut(&InterceptorId(connection_id))
+                        {
+                            interceptor.request_body_txs.remove(&request_id);
+                        };
+
                         tracing::debug!(
                             connection_id,
                             request_id,
@@ -391,6 +405,7 @@ impl IncomingProxy {
                     InterceptorHandle {
                         tx: interceptor,
                         subscription: subscription.subscription.clone(),
+                        request_body_txs: Default::default(),
                     },
                 );
             }
@@ -607,7 +622,7 @@ impl BackgroundTask for IncomingProxy {
                             message_bus.send(msg).await;
                         }
 
-                        self.request_body_txs.retain(|(connection_id, _), _| *connection_id != id.0);
+                        self.interceptors.remove(&id);
                     },
 
                     (id, TaskUpdate::Message(msg)) => {
