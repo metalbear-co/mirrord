@@ -21,7 +21,7 @@ use hyper::{
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{self, Receiver};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, Level};
 
@@ -255,11 +255,8 @@ pub struct InternalHttpRequest<Body> {
     pub body: Body,
 }
 
-impl<E> From<InternalHttpRequest<InternalHttpBody>> for Request<BoxBody<Bytes, E>>
-where
-    E: From<Infallible>,
-{
-    fn from(value: InternalHttpRequest<InternalHttpBody>) -> Self {
+impl<Body> From<InternalHttpRequest<Body>> for Request<Body> {
+    fn from(value: InternalHttpRequest<Body>) -> Self {
         let InternalHttpRequest {
             method,
             uri,
@@ -267,53 +264,7 @@ where
             version,
             body,
         } = value;
-        let mut request = Request::new(BoxBody::new(body.map_err(|e| e.into())));
-        *request.method_mut() = method;
-        *request.uri_mut() = uri;
-        *request.version_mut() = version;
-        *request.headers_mut() = headers;
-
-        request
-    }
-}
-
-impl<E> From<InternalHttpRequest<Vec<u8>>> for Request<BoxBody<Bytes, E>>
-where
-    E: From<Infallible>,
-{
-    fn from(value: InternalHttpRequest<Vec<u8>>) -> Self {
-        let InternalHttpRequest {
-            method,
-            uri,
-            headers,
-            version,
-            body,
-        } = value;
-        let mut request = Request::new(BoxBody::new(
-            Full::new(Bytes::from(body)).map_err(|e| e.into()),
-        ));
-        *request.method_mut() = method;
-        *request.uri_mut() = uri;
-        *request.version_mut() = version;
-        *request.headers_mut() = headers;
-
-        request
-    }
-}
-
-impl<E> From<InternalHttpRequest<StreamingBody>> for Request<BoxBody<Bytes, E>>
-where
-    E: From<Infallible>,
-{
-    fn from(value: InternalHttpRequest<StreamingBody>) -> Self {
-        let InternalHttpRequest {
-            method,
-            uri,
-            headers,
-            version,
-            body,
-        } = value;
-        let mut request = Request::new(BoxBody::new(body.map_err(|e| e.into())));
+        let mut request = Request::new(body);
         *request.method_mut() = method;
         *request.uri_mut() = uri;
         *request.version_mut() = version;
@@ -333,11 +284,16 @@ pub enum HttpRequestFallback {
     },
 }
 
-#[derive(Debug)]
+/// [`Body`] implementation that reads [`Frame`]s from an [`mpsc::channel`] and caches them
+/// internally in a shared vector.
+///
+/// This struct maintains its position in the shared vector.
+/// When cloned, it resets the index. This allows for replaying the body even though it is streamed
+/// from a channel.
 pub struct StreamingBody {
     /// Shared with instances acquired via [`Clone`].
     /// Allows the clones to receive a copy of the data.
-    origin: Arc<Mutex<(Receiver<InternalHttpBodyFrame>, Vec<InternalHttpBodyFrame>)>>,
+    shared_state: Arc<Mutex<(Receiver<InternalHttpBodyFrame>, Vec<InternalHttpBodyFrame>)>>,
     /// Index of the next frame to return from the buffer.
     /// If outside of the buffer, we need to poll the stream to get the next frame.
     /// Local state of this instance, zeroed when cloning.
@@ -345,9 +301,16 @@ pub struct StreamingBody {
 }
 
 impl StreamingBody {
-    pub fn new(rx: Receiver<InternalHttpBodyFrame>) -> Self {
+    /// Creates a new instance of this [`Body`].
+    ///
+    /// It will first read all frames from the vector given as `first_frames`.
+    /// Following frames will be fetched from the given `rx`.
+    pub fn new(
+        rx: Receiver<InternalHttpBodyFrame>,
+        first_frames: Vec<InternalHttpBodyFrame>,
+    ) -> Self {
         Self {
-            origin: Arc::new(Mutex::new((rx, vec![]))),
+            shared_state: Arc::new(Mutex::new((rx, first_frames))),
             idx: 0,
         }
     }
@@ -356,7 +319,8 @@ impl StreamingBody {
 impl Clone for StreamingBody {
     fn clone(&self) -> Self {
         Self {
-            origin: self.origin.clone(),
+            shared_state: self.shared_state.clone(),
+            // Setting idx to 0 in order to replay the previous frames.
             idx: 0,
         }
     }
@@ -372,7 +336,7 @@ impl Body for StreamingBody {
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         let this = self.get_mut();
-        let mut guard = this.origin.lock().unwrap();
+        let mut guard = this.shared_state.lock().unwrap();
 
         if let Some(frame) = guard.1.get(this.idx) {
             this.idx += 1;
@@ -387,6 +351,37 @@ impl Body for StreamingBody {
                 Poll::Ready(Some(Ok(frame.into())))
             }
         }
+    }
+}
+
+impl Default for StreamingBody {
+    fn default() -> Self {
+        let (_, dummy_rx) = mpsc::channel(1); // `mpsc::channel` panics on capacity 0
+        Self {
+            shared_state: Arc::new(Mutex::new((dummy_rx, Default::default()))),
+            idx: 0,
+        }
+    }
+}
+
+impl From<Vec<u8>> for StreamingBody {
+    fn from(value: Vec<u8>) -> Self {
+        let (_, dummy_rx) = mpsc::channel(1); // `mpsc::channel` panics on capacity 0
+        let frames = vec![InternalHttpBodyFrame::Data(value)];
+        Self::new(dummy_rx, frames)
+    }
+}
+
+impl From<InternalHttpBody> for StreamingBody {
+    fn from(value: InternalHttpBody) -> Self {
+        let (_, dummy_rx) = mpsc::channel(1); // `mpsc::channel` panics on capacity 0
+        Self::new(dummy_rx, value.0.into_iter().collect())
+    }
+}
+
+impl From<Receiver<InternalHttpBodyFrame>> for StreamingBody {
+    fn from(value: Receiver<InternalHttpBodyFrame>) -> Self {
+        Self::new(value, Default::default())
     }
 }
 
@@ -422,16 +417,24 @@ impl HttpRequestFallback {
             HttpRequestFallback::Streamed { request: req, .. } => req.version(),
         }
     }
+}
 
-    pub fn into_hyper<E>(self) -> Request<BoxBody<Bytes, E>>
-    where
-        E: From<Infallible>,
-    {
-        match self {
-            HttpRequestFallback::Framed(req) => req.internal_request.into(),
-            HttpRequestFallback::Fallback(req) => req.internal_request.into(),
-            HttpRequestFallback::Streamed { request: req, .. } => req.internal_request.into(),
+impl fmt::Debug for StreamingBody {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("StreamingBody");
+        s.field("idx", &self.idx);
+
+        match self.shared_state.try_lock() {
+            Ok(guard) => {
+                s.field("frame_rx_closed", &guard.0.is_closed());
+                s.field("cached_frames", &guard.1);
+            }
+            Err(error) => {
+                s.field("lock_error", &error);
+            }
         }
+
+        s.finish()
     }
 }
 
@@ -478,6 +481,21 @@ impl<B> HttpRequest<B> {
     pub fn version(&self) -> Version {
         self.internal_request.version
     }
+
+    pub fn map_body<B2, F: FnOnce(B) -> B2>(self, map: F) -> HttpRequest<B2> {
+        HttpRequest {
+            connection_id: self.connection_id,
+            request_id: self.request_id,
+            port: self.port,
+            internal_request: InternalHttpRequest {
+                method: self.internal_request.method,
+                uri: self.internal_request.uri,
+                headers: self.internal_request.headers,
+                version: self.internal_request.version,
+                body: map(self.internal_request.body),
+            },
+        }
+    }
 }
 
 /// (De-)Serializable HTTP response.
@@ -517,7 +535,7 @@ impl<B> InternalHttpResponse<B> {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
-pub struct InternalHttpBody(VecDeque<InternalHttpBodyFrame>);
+pub struct InternalHttpBody(pub VecDeque<InternalHttpBodyFrame>);
 
 impl InternalHttpBody {
     pub fn from_bytes(bytes: &[u8]) -> Self {
@@ -708,6 +726,22 @@ pub struct HttpResponse<Body> {
     pub request_id: RequestId,
     #[bincode(with_serde)]
     pub internal_response: InternalHttpResponse<Body>,
+}
+
+impl<Body> HttpResponse<Body> {
+    pub fn map_body<B2, F: FnOnce(Body) -> B2>(self, map: F) -> HttpResponse<B2> {
+        HttpResponse {
+            connection_id: self.connection_id,
+            request_id: self.request_id,
+            port: self.port,
+            internal_response: InternalHttpResponse {
+                status: self.internal_response.status,
+                version: self.internal_response.version,
+                headers: self.internal_response.headers,
+                body: map(self.internal_response.body),
+            },
+        }
+    }
 }
 
 impl HttpResponse<InternalHttpBody> {

@@ -22,6 +22,14 @@ pub struct MessageBus<T: BackgroundTask> {
 }
 
 impl<T: BackgroundTask> MessageBus<T> {
+    /// Wraps this message bus into a struct that allows for peeking the next incoming message.
+    pub fn peekable(&mut self) -> PeekableMessageBus<'_, T> {
+        PeekableMessageBus {
+            peeked: None,
+            message_bus: self,
+        }
+    }
+
     /// Attempts to send a message to this task's parent.
     pub async fn send<M: Into<T::MessageOut>>(&self, msg: M) {
         let _ = self.tx.send(msg.into()).await;
@@ -33,6 +41,50 @@ impl<T: BackgroundTask> MessageBus<T> {
         tokio::select! {
             _ = self.tx.closed() => None,
             msg = self.rx.recv() => msg,
+        }
+    }
+}
+
+/// Wrapper over [`MessageBus`].
+///
+/// Allows for peeking the next incoming message.
+pub struct PeekableMessageBus<'a, T: BackgroundTask> {
+    peeked: Option<T::MessageIn>,
+    message_bus: &'a mut MessageBus<T>,
+}
+
+impl<'a, T: BackgroundTask> PeekableMessageBus<'a, T> {
+    /// Attempts to send a message to this task's parent.
+    pub async fn send<M: Into<T::MessageOut>>(&self, msg: M) {
+        let _ = self.message_bus.tx.send(msg.into()).await;
+    }
+
+    /// Receives a message from this task's parent.
+    /// [`None`] means that the channel is closed and there will be no more messages.
+    pub async fn recv(&mut self) -> Option<T::MessageIn> {
+        if self.peeked.is_some() {
+            return self.peeked.take();
+        }
+
+        tokio::select! {
+            _ = self.message_bus.tx.closed() => None,
+            msg = self.message_bus.rx.recv() => msg,
+        }
+    }
+
+    /// Peeks the next message from this task's parent.
+    /// [`None`] means that the channel is closed and there will be no more messages.
+    pub async fn peek(&mut self) -> Option<&T::MessageIn> {
+        if self.peeked.is_some() {
+            return self.peeked.as_ref();
+        }
+
+        tokio::select! {
+            _ = self.message_bus.tx.closed() => None,
+            msg = self.message_bus.rx.recv() => {
+                self.peeked = msg;
+                self.peeked.as_ref()
+            },
         }
     }
 }
