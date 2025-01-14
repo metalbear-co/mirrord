@@ -352,6 +352,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
         std::env::set_var(name, value);
     }
 
+    // LayerConfig must be created after setting relevant env vars
     let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
@@ -472,6 +473,7 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
         std::env::set_var("MIRRORD_CONFIG_FILE", config_file);
     }
 
+    // LayerConfig must be created after setting relevant env vars
     let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
     let mut analytics = AnalyticsReporter::new(config.telemetry, ExecutionKind::PortForward, watch);

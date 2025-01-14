@@ -289,10 +289,9 @@ impl MirrordExecution {
             })?;
 
         // Provide details for layer to connect to agent via internal proxy
-        env_vars.insert(
-            MIRRORD_CONNECT_TCP_ENV.to_string(),
-            format!("127.0.0.1:{}", address.port()),
-        );
+        let mut config = config.clone();
+        config.connect_tcp = Some(format!("127.0.0.1:{}", address.port()));
+        config.update_env()?;
 
         // Fixes <https://github.com/metalbear-co/mirrord/issues/1745>
         // by disabling the fork safety check in the Objective-C runtime.

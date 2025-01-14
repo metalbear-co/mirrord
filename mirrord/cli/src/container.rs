@@ -333,6 +333,7 @@ pub(crate) async fn container_command(
         (CONTAINER_EXECUTION_KIND as u32).to_string(),
     );
 
+    // LayerConfig must be created after setting relevant env vars
     let (mut config, mut analytics) = create_config_and_analytics(&mut progress, watch)?;
 
     let (_internal_proxy_tls_guards, _external_proxy_tls_guards) =
@@ -427,6 +428,7 @@ pub(crate) async fn container_ext_command(
         env.insert("MIRRORD_IMPERSONATED_TARGET".into(), target.to_string());
     }
 
+    // LayerConfig must be created after setting relevant env vars
     let (mut config, mut analytics) = create_config_and_analytics(&mut progress, watch)?;
 
     let (_internal_proxy_tls_guards, _external_proxy_tls_guards) =

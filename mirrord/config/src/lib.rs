@@ -349,6 +349,11 @@ impl LayerConfig {
         Ok(BASE64_STANDARD.encode(serialized))
     }
 
+    pub fn update_env(&self) -> Result<(), ConfigError> {
+        std::env::set_var(MIRRORD_RESOLVED_CONFIG_ENV, self.to_env_var()?);
+        Ok(())
+    }
+
     /// Generate a config from the environment variables and/or a config file.
     /// On success, returns the config and a vec of warnings.
     /// To be used from CLI to verify config and print warnings
