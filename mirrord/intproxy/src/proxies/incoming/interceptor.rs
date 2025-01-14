@@ -327,7 +327,7 @@ impl HttpConnection {
                     HttpRequestFallback::Framed(..) => {
                         HttpResponse::<InternalHttpBody>::from_hyper_response(
                             res,
-                            self.peer.port(),
+                            request.port(),
                             request.connection_id(),
                             request.request_id(),
                         )
@@ -337,7 +337,7 @@ impl HttpConnection {
                     HttpRequestFallback::Fallback(..) => {
                         HttpResponse::<Vec<u8>>::from_hyper_response(
                             res,
-                            self.peer.port(),
+                            request.port(),
                             request.connection_id(),
                             request.request_id(),
                         )
@@ -349,7 +349,7 @@ impl HttpConnection {
                     {
                         HttpResponse::<ReceiverStreamBody>::from_hyper_response(
                             res,
-                            self.peer.port(),
+                            request.port(),
                             request.connection_id(),
                             request.request_id(),
                         )
@@ -361,7 +361,7 @@ impl HttpConnection {
                     HttpRequestFallback::Streamed { .. } => {
                         HttpResponse::<InternalHttpBody>::from_hyper_response(
                             res,
-                            self.peer.port(),
+                            request.port(),
                             request.connection_id(),
                             request.request_id(),
                         )

@@ -782,10 +782,13 @@ pub enum Application {
         /// Mode to use when opening the file, accepted as `-m` param.
         mode: u32,
     },
-    // For running applications with the executable and arguments determined at runtime.
+    /// For running applications with the executable and arguments determined at runtime.
     DynamicApp(String, Vec<String>),
-    // Go app that only checks whether Linux pidfd syscalls are supported.
+    /// Go app that only checks whether Linux pidfd syscalls are supported.
     Go23Issue2988,
+    /// Python HTTP server that returns large (200kb) chunked responses
+    /// and processes one request at a time.
+    PythonHTTPChunked,
 }
 
 impl Application {
@@ -814,7 +817,8 @@ impl Application {
             Application::PythonFlaskHTTP
             | Application::PythonSelfConnect
             | Application::PythonDontLoad
-            | Application::PythonListen => Self::get_python3_executable().await,
+            | Application::PythonListen
+            | Application::PythonHTTPChunked => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP | Application::PythonIssue864 => String::from("uvicorn"),
             Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
             Application::ReadLink => String::from("tests/apps/readlink/out.c_test_app"),
@@ -1105,6 +1109,10 @@ impl Application {
                 ]
             }
             Application::DynamicApp(_, args) => args.to_owned(),
+            Application::PythonHTTPChunked => {
+                app_path.push("app_chunked.py");
+                vec![String::from("-u"), app_path.to_string_lossy().to_string()]
+            }
         }
     }
 
@@ -1118,7 +1126,8 @@ impl Application {
             | Application::Go23FileOps
             | Application::NodeHTTP
             | Application::RustIssue1054
-            | Application::PythonFlaskHTTP => 80,
+            | Application::PythonFlaskHTTP
+            | Application::PythonHTTPChunked => 80,
             // mapped from 9999 in `configs/port_mapping.json`
             Application::PythonFastApiHTTP | Application::PythonIssue864 => 1234,
             Application::RustIssue1123 => 41222,
