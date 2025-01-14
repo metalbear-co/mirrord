@@ -18,7 +18,7 @@ use mirrord_intproxy_protocol::{
     MessageId, PortSubscribe, PortSubscription, PortUnsubscribe, ProxyToLayerMessage,
 };
 use mirrord_protocol::{
-    body_chunks::BodyExt,
+    batched_body::BatchedBody,
     tcp::{
         ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, ChunkedResponse, DaemonTcp, HttpRequest,
         HttpRequestFallback, HttpResponse, HttpResponseFallback, InternalHttpBodyFrame,
@@ -529,8 +529,7 @@ impl IncomingProxy {
         match response
             .internal_response
             .body
-            .next_frames(true)
-            .await
+            .ready_frames()
             .map_err(InterceptorError::from)
         {
             Ok(frames) => {

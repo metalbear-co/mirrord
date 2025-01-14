@@ -12,7 +12,7 @@ use hyper::{
     http::{header::UPGRADE, request::Parts},
 };
 use mirrord_protocol::{
-    body_chunks::{BodyExt as _, Frames},
+    batched_body::{BatchedBody, Frames},
     tcp::{
         ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, DaemonTcp, HttpRequest,
         HttpResponseFallback, InternalHttpBody, InternalHttpBodyFrame, InternalHttpRequest,
@@ -173,7 +173,7 @@ impl Client {
                     },
                     mut body,
                 ) = request.request.into_parts();
-                match body.next_frames(true).await {
+                match body.ready_frames() {
                     Err(..) => return,
                     // We don't check is_last here since loop will finish when body.next_frames()
                     // returns None
@@ -205,7 +205,7 @@ impl Client {
                 }
 
                 loop {
-                    match body.next_frames(false).await {
+                    match body.next_frames().await {
                         Ok(Frames { frames, is_last }) => {
                             let frames = frames
                                 .into_iter()

@@ -4485,6 +4485,7 @@ dependencies = [
  "bincode",
  "bytes",
  "fancy-regex",
+ "futures",
  "hickory-proto",
  "hickory-resolver",
  "http-body-util",

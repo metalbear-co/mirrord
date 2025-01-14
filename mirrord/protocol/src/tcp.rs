@@ -25,7 +25,7 @@ use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, Level};
 
-use crate::{body_chunks::BodyExt as _, ConnectionId, Port, RemoteResult, RequestId};
+use crate::{batched_body::BatchedBody, ConnectionId, Port, RemoteResult, RequestId};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnection {
@@ -921,7 +921,7 @@ impl HttpResponse<ReceiverStreamBody> {
             mut body,
         ) = response.into_parts();
 
-        let frames = body.next_frames(true).await?;
+        let frames = body.ready_frames()?;
         let (tx, rx) = tokio::sync::mpsc::channel(frames.frames.len().max(12));
         for frame in frames.frames {
             tx.try_send(Ok(frame))
