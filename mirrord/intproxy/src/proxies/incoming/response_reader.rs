@@ -14,7 +14,7 @@ use tracing::Level;
 
 use super::http::PeekedBody;
 use crate::{
-    background_tasks::{BackgroundTask, MessageBus},
+    background_tasks::{unless_bus_closed, BackgroundTask, MessageBus},
     proxies::incoming::http::LocalHttpError,
 };
 
@@ -62,13 +62,9 @@ impl HttpResponseReader {
         let tail = match response.internal_response.body.tail.take() {
             Some(incoming) => {
                 let start = Instant::now();
-                let result = tokio::select! {
-                    _ = message_bus.recv() => {
-                        tracing::trace!("Message bus closed, exiting");
-                        return;
-                    },
-
-                    result = incoming.collect() => result,
+                let Some(result) = unless_bus_closed(message_bus, incoming.collect()).await else {
+                    tracing::trace!("Message bus closed, exiting");
+                    return;
                 };
 
                 match result {
@@ -140,13 +136,10 @@ impl HttpResponseReader {
         if let Some(mut incoming) = response.internal_response.body.tail.take() {
             let start = Instant::now();
             loop {
-                let result = tokio::select! {
-                    _ = message_bus.recv() => {
-                        tracing::trace!("Message bus closed, exiting");
-                        return;
-                    },
-
-                    result = incoming.next_frames() => result,
+                let Some(result) = unless_bus_closed(message_bus, incoming.next_frames()).await
+                else {
+                    tracing::trace!("Message bus closed, exiting");
+                    return;
                 };
 
                 match result {
@@ -208,13 +201,9 @@ impl HttpResponseReader {
     ) {
         let start = Instant::now();
         loop {
-            let result = tokio::select! {
-                _ = message_bus.recv() => {
-                    tracing::trace!("Message bus closed, exiting");
-                    return;
-                },
-
-                result = body.next_frames() => result,
+            let Some(result) = unless_bus_closed(message_bus, body.next_frames()).await else {
+                tracing::trace!("Message bus closed, exiting");
+                return;
             };
 
             match result {

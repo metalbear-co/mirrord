@@ -46,6 +46,21 @@ impl<T: BackgroundTask> MessageBus<T> {
     }
 }
 
+/// Runs the given [`Future`] and returns its output, unless the given [`MessageBus`] gets closed
+/// first. In that case, returns [`None`].
+///
+/// Can be used to make sure [`BackgroundTask`]s don't linger when they are no longer needed.
+pub async fn unless_bus_closed<F, T>(message_bus: &MessageBus<T>, future: F) -> Option<F::Output>
+where
+    F: Future,
+    T: BackgroundTask,
+{
+    tokio::select! {
+        _ = message_bus.tx.closed() => None,
+        output = future => Some(output),
+    }
+}
+
 /// Wrapper over [`MessageBus`].
 ///
 /// Allows for peeking the next incoming message.
@@ -87,6 +102,11 @@ impl<'a, T: BackgroundTask> PeekableMessageBus<'a, T> {
                 self.peeked.as_ref()
             },
         }
+    }
+
+    /// Returns an immutable reference to the wrapped [`MessageBus`].
+    pub fn inner(&self) -> &MessageBus<T> {
+        self.message_bus
     }
 }
 

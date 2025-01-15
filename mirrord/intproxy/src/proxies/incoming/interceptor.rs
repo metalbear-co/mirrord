@@ -24,7 +24,7 @@ use super::{
     streaming_body::StreamingBody,
 };
 use crate::{
-    background_tasks::{BackgroundTask, MessageBus, PeekableMessageBus},
+    background_tasks::{unless_bus_closed, BackgroundTask, MessageBus, PeekableMessageBus},
     proxies::incoming::bound_socket::BoundTcpSocket,
 };
 
@@ -127,11 +127,12 @@ impl BackgroundTask for Interceptor {
         err(level = Level::WARN)
     )]
     async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        let stream = self
-            .socket
-            .connect(self.peer)
-            .await
-            .map_err(InterceptorError::ConnectFailed)?;
+        let Some(result) = unless_bus_closed(message_bus, self.socket.connect(self.peer)).await
+        else {
+            tracing::trace!("Message bus closed, exiting");
+            return Ok(());
+        };
+        let stream = result.map_err(InterceptorError::ConnectFailed)?;
         let mut message_bus = message_bus.peekable();
 
         tokio::select! {
@@ -258,16 +259,30 @@ impl HttpConnection {
                 }
 
                 Some(MessageIn::Http(request)) => {
-                    let result = self.local_client.send_request(&request).await;
+                    let Some(result) = unless_bus_closed(
+                        message_bus.inner(),
+                        self.local_client.send_request(&request),
+                    )
+                    .await
+                    else {
+                        tracing::trace!("Message bus closed, exiting");
+                        return Ok(());
+                    };
                     let (res, on_upgrade) = Self::handle_send_result(request, result)?;
                     message_bus.send(MessageOut::Http(res)).await;
 
-                    if let Some(on_upgrade) = on_upgrade {
-                        tracing::trace!("Detected an HTTP upgrade");
-                        break on_upgrade
-                            .await
-                            .map_err(InterceptorError::HttpUpgradeFailed)?;
-                    }
+                    let Some(on_upgrade) = on_upgrade else {
+                        continue;
+                    };
+
+                    tracing::trace!("Detected an HTTP upgrade");
+                    let Some(result) = unless_bus_closed(message_bus.inner(), on_upgrade).await
+                    else {
+                        tracing::trace!("Message bus closed, exiting");
+                        return Ok(());
+                    };
+
+                    break result.map_err(InterceptorError::HttpUpgradeFailed)?;
                 }
             }
         };

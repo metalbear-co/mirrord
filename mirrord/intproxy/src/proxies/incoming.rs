@@ -1,4 +1,10 @@
 //! Handles the logic of the `incoming` feature.
+//!
+//!
+//! Background tasks:
+//! 1. TcpProxy - always handles remote connection first. Attempts to connect a couple times. Waits
+//!    until connection becomes readable (is TCP) or receives an http request.
+//! 2. HttpSender -
 
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
