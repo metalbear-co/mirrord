@@ -17,7 +17,7 @@ use super::{
     ip_tables::{new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables},
 };
 use crate::{
-    error::AgentError,
+    error::{AgentError, AgentResult},
     metrics::{STEAL_FILTERED_PORT_SUBSCRIPTION, STEAL_UNFILTERED_PORT_SUBSCRIPTION},
     util::ClientId,
 };
@@ -153,7 +153,7 @@ impl IpTablesRedirector {
         flush_connections: bool,
         pod_ips: Option<String>,
         support_ipv6: bool,
-    ) -> Result<Self, AgentError> {
+    ) -> AgentResult<Self> {
         let (pod_ips4, pod_ips6) = pod_ips.map_or_else(
             || (None, None),
             |ips| {

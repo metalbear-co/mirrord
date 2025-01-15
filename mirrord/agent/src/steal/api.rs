@@ -11,12 +11,11 @@ use mirrord_protocol::{
 };
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::Level;
 
 use super::*;
 use crate::{
-    error::{AgentError, AgentResult},
-    metrics::HTTP_REQUEST_IN_PROGRESS_COUNT,
-    util::ClientId,
+    error::AgentResult, metrics::HTTP_REQUEST_IN_PROGRESS_COUNT, util::ClientId,
     watched_task::TaskStatus,
 };
 
@@ -53,14 +52,14 @@ impl Drop for TcpStealerApi {
 impl TcpStealerApi {
     /// Initializes a [`TcpStealerApi`] and sends a message to [`TcpConnectionStealer`] signaling
     /// that we have a new client.
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = Level::TRACE, err)]
     pub(crate) async fn new(
         client_id: ClientId,
         command_tx: Sender<StealerCommand>,
         task_status: TaskStatus,
         channel_size: usize,
         protocol_version: semver::Version,
-    ) -> AgentResult<Self, AgentError> {
+    ) -> AgentResult<Self> {
         let (daemon_tx, daemon_rx) = mpsc::channel(channel_size);
 
         command_tx
@@ -116,10 +115,7 @@ impl TcpStealerApi {
     /// agent, to an internal stealer command [`Command::PortSubscribe`].
     ///
     /// The actual handling of this message is done in [`TcpConnectionStealer`].
-    pub(crate) async fn port_subscribe(
-        &mut self,
-        port_steal: StealType,
-    ) -> AgentResult<(), AgentError> {
+    pub(crate) async fn port_subscribe(&mut self, port_steal: StealType) -> AgentResult<()> {
         self.send_command(Command::PortSubscribe(port_steal)).await
     }
 
@@ -127,7 +123,7 @@ impl TcpStealerApi {
     /// agent, to an internal stealer command [`Command::PortUnsubscribe`].
     ///
     /// The actual handling of this message is done in [`TcpConnectionStealer`].
-    pub(crate) async fn port_unsubscribe(&mut self, port: Port) -> AgentResult<(), AgentError> {
+    pub(crate) async fn port_unsubscribe(&mut self, port: Port) -> AgentResult<()> {
         self.send_command(Command::PortUnsubscribe(port)).await
     }
 
@@ -138,7 +134,7 @@ impl TcpStealerApi {
     pub(crate) async fn connection_unsubscribe(
         &mut self,
         connection_id: ConnectionId,
-    ) -> AgentResult<(), AgentError> {
+    ) -> AgentResult<()> {
         self.send_command(Command::ConnectionUnsubscribe(connection_id))
             .await
     }
@@ -147,7 +143,7 @@ impl TcpStealerApi {
     /// agent, to an internal stealer command [`Command::ResponseData`].
     ///
     /// The actual handling of this message is done in [`TcpConnectionStealer`].
-    pub(crate) async fn client_data(&mut self, tcp_data: TcpData) -> AgentResult<(), AgentError> {
+    pub(crate) async fn client_data(&mut self, tcp_data: TcpData) -> AgentResult<()> {
         self.send_command(Command::ResponseData(tcp_data)).await
     }
 
@@ -158,14 +154,14 @@ impl TcpStealerApi {
     pub(crate) async fn http_response(
         &mut self,
         response: HttpResponseFallback,
-    ) -> AgentResult<(), AgentError> {
+    ) -> AgentResult<()> {
         self.send_command(Command::HttpResponse(response)).await
     }
 
     pub(crate) async fn switch_protocol_version(
         &mut self,
         version: semver::Version,
-    ) -> AgentResult<(), AgentError> {
+    ) -> AgentResult<()> {
         self.send_command(Command::SwitchProtocolVersion(version))
             .await
     }

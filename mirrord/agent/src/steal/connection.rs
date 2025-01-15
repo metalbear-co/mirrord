@@ -32,7 +32,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{warn, Level};
 
 use crate::{
-    error::{AgentError, AgentResult},
+    error::AgentResult,
     metrics::HTTP_REQUEST_IN_PROGRESS_COUNT,
     steal::{
         connections::{
@@ -360,10 +360,7 @@ impl TcpConnectionStealer {
     ///
     /// 4. Handling the cancellation of the whole stealer thread (given `cancellation_token`).
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) async fn start(
-        mut self,
-        cancellation_token: CancellationToken,
-    ) -> AgentResult<(), AgentError> {
+    pub(crate) async fn start(mut self, cancellation_token: CancellationToken) -> AgentResult<()> {
         loop {
             tokio::select! {
                 command = self.command_rx.recv() => {
@@ -441,10 +438,7 @@ impl TcpConnectionStealer {
 
     /// Handles an update from one of the connections in [`Self::connections`].
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn handle_connection_update(
-        &mut self,
-        update: ConnectionMessageOut,
-    ) -> AgentResult<(), AgentError> {
+    async fn handle_connection_update(&mut self, update: ConnectionMessageOut) -> AgentResult<()> {
         match update {
             ConnectionMessageOut::Closed {
                 connection_id,
@@ -612,7 +606,7 @@ impl TcpConnectionStealer {
     /// their subscriptions from [`Self::port_subscriptions`] and all their open
     /// connections.
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn close_client(&mut self, client_id: ClientId) -> AgentResult<(), AgentError> {
+    async fn close_client(&mut self, client_id: ClientId) -> AgentResult<()> {
         self.port_subscriptions.remove_all(client_id).await?;
 
         let client = self.clients.remove(&client_id).expect("client not found");
@@ -669,7 +663,7 @@ impl TcpConnectionStealer {
 
     /// Handles [`Command`]s that were received by [`TcpConnectionStealer::command_rx`].
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    async fn handle_command(&mut self, command: StealerCommand) -> AgentResult<(), AgentError> {
+    async fn handle_command(&mut self, command: StealerCommand) -> AgentResult<()> {
         let StealerCommand { client_id, command } = command;
 
         match command {

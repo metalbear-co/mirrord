@@ -14,7 +14,10 @@ use tokio_stream::{
     StreamMap, StreamNotifyClose,
 };
 
-use super::messages::{SniffedConnection, SnifferCommand, SnifferCommandInner};
+use super::{
+    messages::{SniffedConnection, SnifferCommand, SnifferCommandInner},
+    AgentResult,
+};
 use crate::{error::AgentError, util::ClientId, watched_task::TaskStatus};
 
 /// Interface used by clients to interact with the
@@ -57,7 +60,7 @@ impl TcpSnifferApi {
         client_id: ClientId,
         sniffer_sender: Sender<SnifferCommand>,
         mut task_status: TaskStatus,
-    ) -> Result<Self, AgentError> {
+    ) -> AgentResult<Self> {
         let (sender, receiver) = mpsc::channel(Self::CONNECTION_CHANNEL_SIZE);
 
         let command = SnifferCommand {
@@ -81,7 +84,7 @@ impl TcpSnifferApi {
 
     /// Send the given command to the connected
     /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
-    async fn send_command(&mut self, command: SnifferCommandInner) -> Result<(), AgentError> {
+    async fn send_command(&mut self, command: SnifferCommandInner) -> AgentResult<()> {
         let command = SnifferCommand {
             client_id: self.client_id,
             command,
@@ -96,7 +99,7 @@ impl TcpSnifferApi {
 
     /// Return the next message from the connected
     /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
-    pub async fn recv(&mut self) -> Result<(DaemonTcp, Option<LogMessage>), AgentError> {
+    pub async fn recv(&mut self) -> AgentResult<(DaemonTcp, Option<LogMessage>)> {
         tokio::select! {
             conn = self.receiver.recv() => match conn {
                 Some(conn) => {
@@ -162,7 +165,7 @@ impl TcpSnifferApi {
 
     /// Tansforms a [`LayerTcp`] message into a [`SnifferCommand`] and passes it to the connected
     /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
-    pub async fn handle_client_message(&mut self, message: LayerTcp) -> Result<(), AgentError> {
+    pub async fn handle_client_message(&mut self, message: LayerTcp) -> AgentResult<()> {
         match message {
             LayerTcp::PortSubscribe(port) => {
                 let (tx, rx) = oneshot::channel();

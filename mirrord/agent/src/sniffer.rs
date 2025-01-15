@@ -24,7 +24,7 @@ use self::{
     tcp_capture::RawSocketTcpCapture,
 };
 use crate::{
-    error::AgentError,
+    error::AgentResult,
     http::HttpVersion,
     metrics::{MIRROR_CONNECTION_SUBSCRIPTION, MIRROR_PORT_SUBSCRIPTION},
     util::{ChannelClosedFuture, ClientId, Subscriptions},
@@ -171,7 +171,7 @@ impl TcpConnectionSniffer<RawSocketTcpCapture> {
         command_rx: Receiver<SnifferCommand>,
         network_interface: Option<String>,
         is_mesh: bool,
-    ) -> Result<Self, AgentError> {
+    ) -> AgentResult<Self> {
         let tcp_capture = RawSocketTcpCapture::new(network_interface, is_mesh).await?;
 
         Ok(Self {
@@ -198,7 +198,7 @@ where
 
     /// Runs the sniffer loop, capturing packets.
     #[tracing::instrument(level = Level::DEBUG, skip(cancel_token), err)]
-    pub async fn start(mut self, cancel_token: CancellationToken) -> Result<(), AgentError> {
+    pub async fn start(mut self, cancel_token: CancellationToken) -> AgentResult<()> {
         loop {
             select! {
                 command = self.command_rx.recv() => {
@@ -240,7 +240,7 @@ where
     /// Removes the client with `client_id`, and also unsubscribes its port.
     /// Adjusts BPF filter if needed.
     #[tracing::instrument(level = Level::TRACE, err)]
-    fn handle_client_closed(&mut self, client_id: ClientId) -> Result<(), AgentError> {
+    fn handle_client_closed(&mut self, client_id: ClientId) -> AgentResult<()> {
         self.client_txs.remove(&client_id);
 
         if self.port_subscriptions.remove_client(client_id) {
@@ -253,7 +253,7 @@ where
     /// Updates BPF filter used by [`Self::tcp_capture`] to match state of
     /// [`Self::port_subscriptions`].
     #[tracing::instrument(level = Level::TRACE, err)]
-    fn update_packet_filter(&mut self) -> Result<(), AgentError> {
+    fn update_packet_filter(&mut self) -> AgentResult<()> {
         let ports = self.port_subscriptions.get_subscribed_topics();
         MIRROR_PORT_SUBSCRIPTION.set(ports.len() as i64);
 
@@ -270,7 +270,7 @@ where
     }
 
     #[tracing::instrument(level = Level::TRACE, err)]
-    fn handle_command(&mut self, command: SnifferCommand) -> Result<(), AgentError> {
+    fn handle_command(&mut self, command: SnifferCommand) -> AgentResult<()> {
         match command {
             SnifferCommand {
                 client_id,
@@ -334,7 +334,7 @@ where
         &mut self,
         identifier: TcpSessionIdentifier,
         tcp_packet: TcpPacketData,
-    ) -> Result<(), AgentError> {
+    ) -> AgentResult<()> {
         let data_tx = match self.sessions.entry(identifier) {
             Entry::Occupied(e) => e,
             Entry::Vacant(e) => {

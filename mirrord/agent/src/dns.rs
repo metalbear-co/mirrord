@@ -16,11 +16,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
 
-use crate::{
-    error::{AgentError, AgentResult},
-    metrics::DNS_REQUEST_COUNT,
-    watched_task::TaskStatus,
-};
+use crate::{error::AgentResult, metrics::DNS_REQUEST_COUNT, watched_task::TaskStatus};
 
 #[derive(Debug)]
 pub(crate) struct DnsCommand {
@@ -141,10 +137,7 @@ impl DnsWorker {
         tokio::spawn(lookup_future);
     }
 
-    pub(crate) async fn run(
-        mut self,
-        cancellation_token: CancellationToken,
-    ) -> AgentResult<(), AgentError> {
+    pub(crate) async fn run(mut self, cancellation_token: CancellationToken) -> AgentResult<()> {
         loop {
             tokio::select! {
                 _ = cancellation_token.cancelled() => break Ok(()),
@@ -177,10 +170,7 @@ impl DnsApi {
 
     /// Schedules a new DNS request.
     /// Results of scheduled requests are available via [`Self::recv`] (order is preserved).
-    pub(crate) async fn make_request(
-        &mut self,
-        request: GetAddrInfoRequest,
-    ) -> AgentResult<(), AgentError> {
+    pub(crate) async fn make_request(&mut self, request: GetAddrInfoRequest) -> AgentResult<()> {
         let (response_tx, response_rx) = oneshot::channel();
 
         let command = DnsCommand {
@@ -199,7 +189,7 @@ impl DnsApi {
     /// Returns the result of the oldest outstanding DNS request issued with this struct (see
     /// [`Self::make_request`]).
     #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
-    pub(crate) async fn recv(&mut self) -> AgentResult<GetAddrInfoResponse, AgentError> {
+    pub(crate) async fn recv(&mut self) -> AgentResult<GetAddrInfoResponse> {
         let Some(response) = self.responses.next().await else {
             return future::pending().await;
         };
