@@ -121,12 +121,14 @@ impl DnsWorker {
             options.timeout = timeout;
             options.attempts = attempts;
             options.ip_strategy = if support_ipv6 {
+                tracing::debug!("IPv6 support enabled. Respecting client IP family.");
                 match request.family {
                     libc::AF_INET => hickory_resolver::config::LookupIpStrategy::Ipv4Only,
                     libc::AF_INET6 => hickory_resolver::config::LookupIpStrategy::Ipv6Only,
                     _ => hickory_resolver::config::LookupIpStrategy::Ipv4AndIpv6,
                 }
             } else {
+                tracing::debug!("IPv6 support disabled. Resolving IPv4 only.");
                 hickory_resolver::config::LookupIpStrategy::Ipv4Only
             };
 
