@@ -373,7 +373,7 @@ impl ClientConnectionHandler {
                     Ok(message) => self.respond(DaemonMessage::TcpOutgoing(message)).await?,
                     Err(e) => break e,
                 },
-                message = self.udp_outgoing_api.daemon_message() => match message {
+                message = self.udp_outgoing_api.recv_from_task() => match message {
                     Ok(message) => self.respond(DaemonMessage::UdpOutgoing(message)).await?,
                     Err(e) => break e,
                 },
@@ -424,7 +424,7 @@ impl ClientConnectionHandler {
                 self.tcp_outgoing_api.send_to_task(layer_message).await?
             }
             ClientMessage::UdpOutgoing(layer_message) => {
-                self.udp_outgoing_api.layer_message(layer_message).await?
+                self.udp_outgoing_api.send_to_task(layer_message).await?
             }
             ClientMessage::GetEnvVarsRequest(GetEnvVarsRequest {
                 env_vars_filter,
