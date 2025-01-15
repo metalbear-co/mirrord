@@ -131,6 +131,12 @@ In order to test IPv6 on a local cluster on macOS, you can use Kind:
 3. `kind create cluster --config kind-config.yaml`
 4. When you run `kubectl get svc -o wide --all-namespaces` you should see IPv6 addresses.
 
+In order to use an agent image from a local registry, you can load the image to kind's registry with:
+
+```
+kind load docker-image test:latest
+```
+
 
 ### Cleanup
 

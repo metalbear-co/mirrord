@@ -3,7 +3,7 @@ use std::{future, path::PathBuf, time::Duration};
 use futures::{stream::FuturesOrdered, StreamExt};
 use hickory_resolver::{system_conf::parse_resolv_conf, Hosts, Resolver};
 use mirrord_protocol::{
-    dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse},
+    dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse},
     DnsLookupError, RemoteResult, ResolveErrorKindInternal, ResponseError,
 };
 use tokio::{
@@ -22,8 +22,23 @@ use crate::{
 };
 
 #[derive(Debug)]
+pub(crate) enum ClientGetAddrInfoRequest {
+    Old(GetAddrInfoRequest),
+    V2(GetAddrInfoRequestV2),
+}
+
+impl ClientGetAddrInfoRequest {
+    pub(crate) fn into_v2(self) -> GetAddrInfoRequestV2 {
+        match self {
+            ClientGetAddrInfoRequest::Old(old_req) => old_req.into(),
+            ClientGetAddrInfoRequest::V2(v2_req) => v2_req,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct DnsCommand {
-    request: GetAddrInfoRequest,
+    request: ClientGetAddrInfoRequest,
     response_tx: oneshot::Sender<RemoteResult<DnsLookup>>,
 }
 
@@ -34,6 +49,7 @@ pub(crate) struct DnsWorker {
     request_rx: Receiver<DnsCommand>,
     attempts: usize,
     timeout: Duration,
+    support_ipv6: bool,
 }
 
 impl DnsWorker {
@@ -45,7 +61,11 @@ impl DnsWorker {
     /// # Note
     ///
     /// `pid` is used to find the correct path of `etc` directory.
-    pub(crate) fn new(pid: Option<u64>, request_rx: Receiver<DnsCommand>) -> Self {
+    pub(crate) fn new(
+        pid: Option<u64>,
+        request_rx: Receiver<DnsCommand>,
+        support_ipv6: bool,
+    ) -> Self {
         let etc_path = pid
             .map(|pid| {
                 PathBuf::from("/proc")
@@ -66,6 +86,7 @@ impl DnsWorker {
                 .ok()
                 .and_then(|attempts| attempts.parse().ok())
                 .unwrap_or(1),
+            support_ipv6,
         }
     }
 
@@ -79,9 +100,10 @@ impl DnsWorker {
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn do_lookup(
         etc_path: PathBuf,
-        host: String,
+        request: GetAddrInfoRequestV2,
         attempts: usize,
         timeout: Duration,
+        support_ipv6: bool,
     ) -> RemoteResult<DnsLookup> {
         // Prepares the `Resolver` after reading some `/etc` DNS files.
         //
@@ -98,7 +120,15 @@ impl DnsWorker {
                 hickory_resolver::config::ServerOrderingStrategy::UserProvidedOrder;
             options.timeout = timeout;
             options.attempts = attempts;
-            options.ip_strategy = hickory_resolver::config::LookupIpStrategy::Ipv4Only;
+            options.ip_strategy = if support_ipv6 {
+                match request.family {
+                    libc::AF_INET => hickory_resolver::config::LookupIpStrategy::Ipv4Only,
+                    libc::AF_INET6 => hickory_resolver::config::LookupIpStrategy::Ipv6Only,
+                    _ => hickory_resolver::config::LookupIpStrategy::Ipv4AndIpv6,
+                }
+            } else {
+                hickory_resolver::config::LookupIpStrategy::Ipv4Only
+            };
 
             let mut resolver = Resolver::tokio(config, options);
 
@@ -111,7 +141,7 @@ impl DnsWorker {
 
         let lookup = resolver
             .inspect_err(|fail| tracing::error!(?fail, "Failed to build DNS resolver"))?
-            .lookup_ip(host)
+            .lookup_ip(request.node)
             .await
             .inspect(|lookup| tracing::trace!(?lookup, "Lookup finished"))?
             .into();
@@ -125,8 +155,16 @@ impl DnsWorker {
         let etc_path = self.etc_path.clone();
         let timeout = self.timeout;
         let attempts = self.attempts;
+        let support_ipv6 = self.support_ipv6;
         let lookup_future = async move {
-            let result = Self::do_lookup(etc_path, message.request.node, attempts, timeout).await;
+            let result = Self::do_lookup(
+                etc_path,
+                message.request.into_v2(),
+                attempts,
+                timeout,
+                support_ipv6,
+            )
+            .await;
 
             if let Err(result) = message.response_tx.send(result) {
                 tracing::error!(?result, "Failed to send query response");
@@ -174,7 +212,7 @@ impl DnsApi {
     /// Results of scheduled requests are available via [`Self::recv`] (order is preserved).
     pub(crate) async fn make_request(
         &mut self,
-        request: GetAddrInfoRequest,
+        request: ClientGetAddrInfoRequest,
     ) -> Result<(), AgentError> {
         let (response_tx, response_rx) = oneshot::channel();
 

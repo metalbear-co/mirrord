@@ -10,7 +10,7 @@ use std::{
 };
 
 use client_connection::AgentTlsConnector;
-use dns::{DnsCommand, DnsWorker};
+use dns::{ClientGetAddrInfoRequest, DnsCommand, DnsWorker};
 use futures::TryFutureExt;
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use sniffer::tcp_capture::RawSocketTcpCapture;
@@ -433,7 +433,14 @@ impl ClientConnectionHandler {
                     .await?
             }
             ClientMessage::GetAddrInfoRequest(request) => {
-                self.dns_api.make_request(request).await?;
+                self.dns_api
+                    .make_request(ClientGetAddrInfoRequest::Old(request))
+                    .await?;
+            }
+            ClientMessage::GetAddrInfoRequestV2(request) => {
+                self.dns_api
+                    .make_request(ClientGetAddrInfoRequest::V2(request))
+                    .await?;
             }
             ClientMessage::Ping => self.respond(DaemonMessage::Pong).await?,
             ClientMessage::Tcp(message) => {
@@ -613,7 +620,8 @@ async fn start_agent(args: Args) -> Result<()> {
         let cancellation_token = cancellation_token.clone();
         let watched_task = WatchedTask::new(
             DnsWorker::TASK_NAME,
-            DnsWorker::new(state.container_pid(), dns_command_rx).run(cancellation_token),
+            DnsWorker::new(state.container_pid(), dns_command_rx, args.ipv6)
+                .run(cancellation_token),
         );
         let status = watched_task.status();
         let task = run_thread_in_namespace(

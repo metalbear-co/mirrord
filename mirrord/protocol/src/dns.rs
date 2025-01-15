@@ -97,3 +97,16 @@ pub struct GetAddrInfoRequestV2 {
     pub socktype: i32,
     pub protocol: i32,
 }
+
+impl From<GetAddrInfoRequest> for GetAddrInfoRequestV2 {
+    fn from(value: GetAddrInfoRequest) -> Self {
+        Self {
+            node: value.node,
+            service_port: 0,
+            flags: 0,
+            family: 0,
+            socktype: 0,
+            protocol: 0,
+        }
+    }
+}
