@@ -20,8 +20,11 @@ where
 {
     const ENTRYPOINT: &'static str = "OUTPUT";
 
+    #[tracing::instrument(level = tracing::Level::TRACE, skip(ipt), err)]
     pub fn create(ipt: Arc<IPT>, chain_name: String, pod_ips: Option<&str>) -> AgentResult<Self> {
-        let managed = IPTableChain::create(ipt, chain_name)?;
+        let managed = IPTableChain::create(ipt, chain_name.clone()).inspect_err(
+            |e| tracing::error!(%e, "Could not create iptables chain \"{chain_name}\"."),
+        )?;
 
         let exclude_source_ips = pod_ips
             .map(|pod_ips| format!("! -s {pod_ips}"))

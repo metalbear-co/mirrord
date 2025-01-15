@@ -58,6 +58,11 @@ pub struct MirrordPolicySpec {
     /// target.
     #[serde(default)]
     pub env: EnvPolicy,
+
+    /// Overrides fs ops behaviour, granting control over them to the operator policy, instead of
+    /// the user config.
+    #[serde(default)]
+    pub fs: FsPolicy,
 }
 
 /// Custom cluster-wide resource for policies that limit what mirrord features users can use.
@@ -90,11 +95,16 @@ pub struct MirrordClusterPolicySpec {
     /// target.
     #[serde(default)]
     pub env: EnvPolicy,
+
+    /// Overrides fs ops behaviour, granting control over them to the operator policy, instead of
+    /// the user config.
+    #[serde(default)]
+    pub fs: FsPolicy,
 }
 
 /// Policy for controlling environment variables access from mirrord instances.
 #[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "camelCase")]
 pub struct EnvPolicy {
     /// List of environment variables that should be excluded when using mirrord.
     ///
@@ -104,7 +114,40 @@ pub struct EnvPolicy {
     /// Variable names can be matched using `*` and `?` where `?` matches exactly one occurrence of
     /// any character and `*` matches arbitrary many (including zero) occurrences of any character,
     /// e.g. `DATABASE_*` will match `DATABASE_URL` and `DATABASE_PORT`.
+    #[serde(default)]
     pub exclude: HashSet<String>,
+}
+
+/// File operations policy that mimics the mirrord fs config.
+///
+/// Allows the operator control over remote file ops behaviour, overriding what the user has set in
+/// their mirrord config file, if it matches something in one of the lists (regex sets) of this
+/// struct.
+///
+/// If the file path matches regexes in multiple sets, priority is as follows:
+/// 1. `local`
+/// 2. `notFound`
+/// 3. `readOnly`
+#[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FsPolicy {
+    /// Files that cannot be opened for writing.
+    ///
+    /// Opening the file for writing is rejected with an IO error.
+    #[serde(default)]
+    pub read_only: HashSet<String>,
+
+    /// Files that cannot be opened at all.
+    ///
+    /// Opening the file will be rejected and mirrord will open the file locally instead.
+    #[serde(default)]
+    pub local: HashSet<String>,
+
+    /// Files that cannot be opened at all.
+    ///
+    /// Opening the file is rejected with an IO error.
+    #[serde(default)]
+    pub not_found: HashSet<String>,
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
 use fancy_regex::Regex;
@@ -308,6 +308,9 @@ pub(crate) struct TcpConnectionStealer {
 
     /// Set of active connections stolen by [`Self::port_subscriptions`].
     connections: StolenConnections,
+
+    /// Shen set, the stealer will use IPv6 if needed.
+    support_ipv6: bool,
 }
 
 impl TcpConnectionStealer {
@@ -316,14 +319,21 @@ impl TcpConnectionStealer {
     /// Initializes a new [`TcpConnectionStealer`], but doesn't start the actual work.
     /// You need to call [`TcpConnectionStealer::start`] to do so.
     #[tracing::instrument(level = Level::TRACE, err)]
-    pub(crate) async fn new(command_rx: Receiver<StealerCommand>) -> AgentResult<Self, AgentError> {
+    pub(crate) async fn new(
+        command_rx: Receiver<StealerCommand>,
+        support_ipv6: bool,
+    ) -> AgentResult<Self> {
         let config = envy::prefixed("MIRRORD_AGENT_")
             .from_env::<TcpStealerConfig>()
             .unwrap_or_default();
 
         let port_subscriptions = {
-            let redirector =
-                IpTablesRedirector::new(config.stealer_flush_connections, config.pod_ips).await?;
+            let redirector = IpTablesRedirector::new(
+                config.stealer_flush_connections,
+                config.pod_ips,
+                support_ipv6,
+            )
+            .await?;
 
             PortSubscriptions::new(redirector, 4)
         };
@@ -334,6 +344,7 @@ impl TcpConnectionStealer {
             clients: HashMap::with_capacity(8),
             clients_closed: Default::default(),
             connections: StolenConnections::with_capacity(8),
+            support_ipv6,
         })
     }
 
@@ -396,9 +407,14 @@ impl TcpConnectionStealer {
         peer: SocketAddr,
     ) -> AgentResult<()> {
         let mut real_address = orig_dst::orig_dst_addr(&stream)?;
+        let localhost = if self.support_ipv6 && real_address.is_ipv6() {
+            IpAddr::V6(Ipv6Addr::LOCALHOST)
+        } else {
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        };
         // If we use the original IP we would go through prerouting and hit a loop.
         // localhost should always work.
-        real_address.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
+        real_address.set_ip(localhost);
 
         let Some(port_subscription) = self.port_subscriptions.get(real_address.port()).cloned()
         else {

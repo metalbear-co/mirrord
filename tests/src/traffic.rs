@@ -30,8 +30,14 @@ mod traffic_tests {
             "node",
             "node-e2e/remote_dns/test_remote_dns_enabled_works.mjs",
         ];
-        let mut process =
-            run_exec_with_target(node_command, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(
+            node_command,
+            &service.pod_container_target(),
+            None,
+            None,
+            None,
+        )
+        .await;
 
         let res = process.wait().await;
         assert!(res.success());
@@ -47,8 +53,14 @@ mod traffic_tests {
             "node",
             "node-e2e/remote_dns/test_remote_dns_lookup_google.mjs",
         ];
-        let mut process =
-            run_exec_with_target(node_command, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(
+            node_command,
+            &service.pod_container_target(),
+            None,
+            None,
+            None,
+        )
+        .await;
 
         let res = process.wait().await;
         assert!(res.success());
@@ -66,8 +78,14 @@ mod traffic_tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
         ];
-        let mut process =
-            run_exec_with_target(node_command, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(
+            node_command,
+            &service.pod_container_target(),
+            None,
+            None,
+            None,
+        )
+        .await;
 
         let res = process.wait().await;
         assert!(res.success());
@@ -83,8 +101,14 @@ mod traffic_tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_single_request_ipv6.mjs",
         ];
-        let mut process =
-            run_exec_with_target(node_command, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(
+            node_command,
+            &service.pod_container_target(),
+            None,
+            None,
+            None,
+        )
+        .await;
 
         let res = process.wait().await;
         assert!(res.success());
@@ -102,7 +126,7 @@ mod traffic_tests {
         let mirrord_args = vec!["--no-outgoing"];
         let mut process = run_exec_with_target(
             node_command,
-            &service.target,
+            &service.pod_container_target(),
             None,
             Some(mirrord_args),
             None,
@@ -122,8 +146,14 @@ mod traffic_tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_make_request_after_listen.mjs",
         ];
-        let mut process =
-            run_exec_with_target(node_command, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(
+            node_command,
+            &service.pod_container_target(),
+            None,
+            None,
+            None,
+        )
+        .await;
         let res = process.wait().await;
         assert!(res.success());
     }
@@ -137,8 +167,14 @@ mod traffic_tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_make_request_localhost.mjs",
         ];
-        let mut process =
-            run_exec_with_target(node_command, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(
+            node_command,
+            &service.pod_container_target(),
+            None,
+            None,
+            None,
+        )
+        .await;
         let res = process.wait().await;
         assert!(res.success());
     }
@@ -185,7 +221,7 @@ mod traffic_tests {
         let mirrord_no_outgoing = vec!["--no-outgoing"];
         let mut process = run_exec_with_target(
             node_command.clone(),
-            &target_service.target,
+            &target_service.pod_container_target(),
             Some(&target_service.namespace),
             Some(mirrord_no_outgoing),
             None,
@@ -193,18 +229,13 @@ mod traffic_tests {
         .await;
         let res = process.wait().await;
         assert!(res.success()); // The test does not fail, because UDP does not report dropped datagrams.
-        let stripped_target = internal_service
-            .target
-            .split('/')
-            .nth(1)
-            .expect("malformed target");
-        let logs = pod_api.logs(stripped_target, &lp).await;
+        let logs = pod_api.logs(&internal_service.pod_name, &lp).await;
         assert_eq!(logs.unwrap(), ""); // Assert that the target service did not get the message.
 
         // Run mirrord with outgoing enabled.
         let mut process = run_exec_with_target(
             node_command,
-            &target_service.target,
+            &target_service.pod_container_target(),
             Some(&target_service.namespace),
             None,
             None,
@@ -217,7 +248,7 @@ mod traffic_tests {
         lp.follow = true; // Follow log stream.
 
         let mut log_lines = pod_api
-            .log_stream(stripped_target, &lp)
+            .log_stream(&internal_service.pod_name, &lp)
             .await
             .unwrap()
             .lines();
@@ -278,7 +309,7 @@ mod traffic_tests {
         // If this verification fails, the test itself is invalid.
         let mut process = run_exec_with_target(
             node_command.clone(),
-            &target_service.target,
+            &target_service.pod_container_target(),
             Some(&target_service.namespace),
             None,
             Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
@@ -286,12 +317,7 @@ mod traffic_tests {
         .await;
         let res = process.wait().await;
         assert!(!res.success()); // Should fail because local process cannot reach service.
-        let stripped_target = internal_service
-            .target
-            .split('/')
-            .nth(1)
-            .expect("malformed target");
-        let logs = pod_api.logs(stripped_target, &lp).await;
+        let logs = pod_api.logs(&internal_service.pod_name, &lp).await;
         assert_eq!(logs.unwrap(), "");
 
         // Create remote filter file with service name so we can test DNS outgoing filter.
@@ -326,7 +352,7 @@ mod traffic_tests {
         // Run mirrord with outgoing enabled.
         let mut process = run_exec_with_target(
             node_command,
-            &target_service.target,
+            &target_service.pod_container_target(),
             Some(&target_service.namespace),
             None,
             Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
@@ -339,7 +365,7 @@ mod traffic_tests {
         lp.follow = true; // Follow log stream.
 
         let mut log_lines = pod_api
-            .log_stream(stripped_target, &lp)
+            .log_stream(&internal_service.pod_name, &lp)
             .await
             .unwrap()
             .lines();
@@ -376,7 +402,7 @@ mod traffic_tests {
         let mirrord_args = vec!["--no-outgoing"];
         let mut process = run_exec_with_target(
             node_command,
-            &service.target,
+            &service.pod_container_target(),
             None,
             Some(mirrord_args),
             None,
@@ -395,7 +421,8 @@ mod traffic_tests {
 
     pub async fn test_go(service: impl Future<Output = KubeService>, command: Vec<&str>) {
         let service = service.await;
-        let mut process = run_exec_with_target(command, &service.target, None, None, None).await;
+        let mut process =
+            run_exec_with_target(command, &service.pod_container_target(), None, None, None).await;
         let res = process.wait().await;
         assert!(res.success());
     }
@@ -458,8 +485,14 @@ mod traffic_tests {
     pub async fn listen_localhost(#[future] service: KubeService) {
         let service = service.await;
         let node_command = vec!["node", "node-e2e/listen/test_listen_localhost.mjs"];
-        let mut process =
-            run_exec_with_target(node_command, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(
+            node_command,
+            &service.pod_container_target(),
+            None,
+            None,
+            None,
+        )
+        .await;
         let res = process.wait().await;
         assert!(res.success());
     }
@@ -471,8 +504,14 @@ mod traffic_tests {
     pub async fn gethostname_remote_result(#[future] hostname_service: KubeService) {
         let service = hostname_service.await;
         let node_command = vec!["python3", "-u", "python-e2e/hostname.py"];
-        let mut process =
-            run_exec_with_target(node_command, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(
+            node_command,
+            &service.pod_container_target(),
+            None,
+            None,
+            None,
+        )
+        .await;
 
         let res = process.wait().await;
         assert!(res.success());
@@ -511,7 +550,9 @@ mod traffic_tests {
             "MIRRORD_OUTGOING_REMOTE_UNIX_STREAMS",
             "/app/unix-socket-server.sock",
         )]);
-        let mut process = run_exec_with_target(executable, &service.target, None, None, env).await;
+        let mut process =
+            run_exec_with_target(executable, &service.pod_container_target(), None, None, env)
+                .await;
         let res = process.wait().await;
 
         // The test application panics if it does not successfully connect to the socket, send data,
@@ -534,7 +575,14 @@ mod traffic_tests {
             .to_string();
         let executable = vec![app_path.as_str()];
 
-        let mut process = run_exec_with_target(executable, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(
+            executable,
+            &service.pod_container_target(),
+            None,
+            None,
+            None,
+        )
+        .await;
         let res = process.wait().await;
 
         // The test application panics if it does not successfully connect to the socket, send data,
@@ -551,8 +599,14 @@ mod traffic_tests {
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
         ];
-        let mut process =
-            run_exec_with_target(node_command, &service.target, None, None, None).await;
+        let mut process = run_exec_with_target(
+            node_command,
+            &service.pod_container_target(),
+            None,
+            None,
+            None,
+        )
+        .await;
 
         let res = process.child.wait().await.unwrap();
         assert!(res.success());
@@ -571,7 +625,7 @@ mod traffic_tests {
         let mirrord_args = vec!["--no-outgoing"];
         let mut process = run_exec_with_target(
             node_command,
-            &service.target,
+            &service.pod_container_target(),
             None,
             Some(mirrord_args),
             None,

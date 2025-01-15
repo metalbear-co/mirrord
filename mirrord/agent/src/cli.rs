@@ -4,7 +4,8 @@ use std::net::SocketAddr;
 
 use clap::{Parser, Subcommand};
 use mirrord_protocol::{
-    MeshVendor, AGENT_METRICS_ENV, AGENT_NETWORK_INTERFACE_ENV, AGENT_OPERATOR_CERT_ENV,
+    MeshVendor, AGENT_IPV6_ENV, AGENT_METRICS_ENV, AGENT_NETWORK_INTERFACE_ENV,
+    AGENT_OPERATOR_CERT_ENV,
 };
 
 const DEFAULT_RUNTIME: &str = "containerd";
@@ -58,6 +59,13 @@ pub struct Args {
         env = "MIRRORD_AGENT_IN_SERVICE_MESH"
     )]
     pub is_mesh: bool,
+
+    /// Enable support for IPv6-only clusters
+    ///
+    /// Only when this option is set will take the needed steps to run on an IPv6 single stack
+    /// cluster.
+    #[arg(long, default_value_t = false, env = AGENT_IPV6_ENV)]
+    pub ipv6: bool,
 }
 
 impl Args {

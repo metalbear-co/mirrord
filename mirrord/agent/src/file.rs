@@ -143,7 +143,7 @@ pub fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt:
 
 impl FileManager {
     /// Executes the request and returns the response.
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::DEBUG))]
     pub(crate) fn handle_message(
         &mut self,
         request: FileRequest,
@@ -254,7 +254,7 @@ impl FileManager {
         })
     }
 
-    #[tracing::instrument(level = Level::TRACE)]
+    #[tracing::instrument(level = Level::TRACE, ret)]
     pub fn new(pid: Option<u64>) -> Self {
         let root_path = get_root_path_from_optional_pid(pid);
         trace!("Agent root path >> {root_path:?}");
@@ -268,7 +268,7 @@ impl FileManager {
         }
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), err(level = Level::DEBUG))]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::DEBUG))]
     fn open(
         &mut self,
         path: PathBuf,
@@ -297,7 +297,7 @@ impl FileManager {
         Ok(OpenFileResponse { fd })
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), err(level = Level::DEBUG))]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::DEBUG))]
     fn open_relative(
         &mut self,
         relative_fd: u64,

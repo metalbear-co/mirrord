@@ -67,6 +67,9 @@ pub enum ResponseError {
 
     #[error("Failed stripping path with `{0}`!")]
     StripPrefix(String),
+
+    #[error("File has to be opened locally!")]
+    OpenLocal,
 }
 
 impl From<StripPrefixError> for ResponseError {

@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     mem,
-    net::{Ipv4Addr, SocketAddrV4},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
     path::PathBuf,
     sync::{
         atomic::{AtomicU32, Ordering},
@@ -405,7 +405,7 @@ impl ClientConnectionHandler {
     /// Handles incoming messages from the connected client (`mirrord-layer`).
     ///
     /// Returns `false` if the client disconnected.
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::DEBUG))]
     async fn handle_client_message(&mut self, message: ClientMessage) -> AgentResult<bool> {
         match message {
             ClientMessage::FileRequest(req) => {
@@ -501,11 +501,33 @@ impl ClientConnectionHandler {
 async fn start_agent(args: Args) -> AgentResult<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
 
-    let listener = TcpListener::bind(SocketAddrV4::new(
+    // listen for client connections
+    let ipv4_listener_result = TcpListener::bind(SocketAddrV4::new(
         Ipv4Addr::UNSPECIFIED,
         args.communicate_port,
     ))
-    .await?;
+    .await;
+
+    let listener = if args.ipv6 && ipv4_listener_result.is_err() {
+        debug!("IPv6 Support enabled, and IPv4 bind failed, binding IPv6 listener");
+        TcpListener::bind(SocketAddrV6::new(
+            Ipv6Addr::UNSPECIFIED,
+            args.communicate_port,
+            0,
+            0,
+        ))
+        .await
+    } else {
+        ipv4_listener_result
+    }?;
+
+    match listener.local_addr() {
+        Ok(addr) => debug!(
+            client_listener_address = addr.to_string(),
+            "Created listener."
+        ),
+        Err(err) => error!(%err, "listener local address error"),
+    }
 
     let state = State::new(&args).await?;
 
@@ -587,13 +609,15 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         let cancellation_token = cancellation_token.clone();
         let watched_task = WatchedTask::new(
             TcpConnectionStealer::TASK_NAME,
-            TcpConnectionStealer::new(stealer_command_rx).and_then(|stealer| async move {
-                let res = stealer.start(cancellation_token).await;
-                if let Err(err) = res.as_ref() {
-                    error!("Stealer failed: {err}");
-                }
-                res
-            }),
+            TcpConnectionStealer::new(stealer_command_rx, args.ipv6).and_then(
+                |stealer| async move {
+                    let res = stealer.start(cancellation_token).await;
+                    if let Err(err) = res.as_ref() {
+                        error!("Stealer failed: {err}");
+                    }
+                    res
+                },
+            ),
         );
         let status = watched_task.status();
         let task = run_thread_in_namespace(

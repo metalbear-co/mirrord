@@ -879,6 +879,7 @@ mod tests {
                         udp: Some(false),
                         ..Default::default()
                     })),
+                    ipv6: None,
                 })),
                 copy_target: None,
                 hostname: None,
