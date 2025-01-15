@@ -83,7 +83,7 @@ impl DnsWorker {
         // Prepares the `Resolver` after reading some `/etc` DNS files.
         //
         // We care about logging these errors, at an `error!` level.
-        let resolver: AgentResult<_, ResponseError> = try {
+        let resolver: Result<_, ResponseError> = try {
             let resolv_conf_path = etc_path.join("resolv.conf");
             let hosts_path = etc_path.join("hosts");
 

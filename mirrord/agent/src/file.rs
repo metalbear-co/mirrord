@@ -866,7 +866,7 @@ impl FileManager {
             // buffer (and there was no error converting to a
             // `DirEntryInternal`.
             while let Some(entry) = entry_results
-                .next_if(|entry_res: &AgentResult<DirEntryInternal, io::Error>| {
+                .next_if(|entry_res: &Result<DirEntryInternal, io::Error>| {
                     entry_res.as_ref().is_ok_and(|entry| {
                         entry.get_d_reclen64() as u64 + result_size <= buffer_size
                     })

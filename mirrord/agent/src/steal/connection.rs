@@ -72,7 +72,7 @@ impl MatchedHttpRequest {
         }
     }
 
-    async fn into_serializable(self) -> AgentResult<HttpRequest<InternalHttpBody>, hyper::Error> {
+    async fn into_serializable(self) -> Result<HttpRequest<InternalHttpBody>, hyper::Error> {
         let (
             Parts {
                 method,
@@ -102,7 +102,7 @@ impl MatchedHttpRequest {
         })
     }
 
-    async fn into_serializable_fallback(self) -> AgentResult<HttpRequest<Vec<u8>>, hyper::Error> {
+    async fn into_serializable_fallback(self) -> Result<HttpRequest<Vec<u8>>, hyper::Error> {
         let (
             Parts {
                 method,

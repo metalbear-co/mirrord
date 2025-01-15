@@ -198,7 +198,7 @@ impl TcpOutgoingTask {
         &mut self,
         connection_id: ConnectionId,
         read: io::Result<Option<Bytes>>,
-    ) -> AgentResult<(), SendError<DaemonTcpOutgoing>> {
+    ) -> Result<(), SendError<DaemonTcpOutgoing>> {
         match read {
             // New bytes came in from a peer connection.
             // We pass them to the layer.
@@ -272,7 +272,7 @@ impl TcpOutgoingTask {
     async fn handle_layer_msg(
         &mut self,
         message: LayerTcpOutgoing,
-    ) -> AgentResult<(), SendError<DaemonTcpOutgoing>> {
+    ) -> Result<(), SendError<DaemonTcpOutgoing>> {
         match message {
             // We make connection to the requested address, split the stream into halves with
             // `io::split`, and put them into respective maps.

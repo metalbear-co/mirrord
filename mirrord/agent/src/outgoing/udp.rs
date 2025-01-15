@@ -128,7 +128,7 @@ impl UdpOutgoingTask {
         &mut self,
         connection_id: ConnectionId,
         read: io::Result<Option<Bytes>>,
-    ) -> AgentResult<(), SendError<DaemonUdpOutgoing>> {
+    ) -> Result<(), SendError<DaemonUdpOutgoing>> {
         match read {
             Ok(Some(read)) => {
                 let message = DaemonUdpOutgoing::Read(Ok(DaemonRead {
@@ -175,7 +175,7 @@ impl UdpOutgoingTask {
     async fn handle_layer_msg(
         &mut self,
         message: LayerUdpOutgoing,
-    ) -> AgentResult<(), SendError<DaemonUdpOutgoing>> {
+    ) -> Result<(), SendError<DaemonUdpOutgoing>> {
         match message {
             // [user] -> [layer] -> [agent] -> [layer]
             // `user` is asking us to connect to some remote host.
@@ -296,7 +296,7 @@ pub(crate) struct UdpOutgoingApi {
 /// 3. User is trying to use `sendto` and `recvfrom`, we use the same hack as in DNS to fake a
 ///    connection.
 #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::DEBUG))]
-async fn connect(remote_address: SocketAddress) -> AgentResult<UdpSocket, ResponseError> {
+async fn connect(remote_address: SocketAddress) -> Result<UdpSocket, ResponseError> {
     let remote_address = remote_address.try_into()?;
     let mirror_address = match remote_address {
         std::net::SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
