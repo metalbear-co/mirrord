@@ -119,8 +119,10 @@ impl Drop for RemoteFile {
         // operation to complete. The write operation is hooked and at some point tries to lock
         // `OPEN_FILES`, which means the thread deadlocks with itself (we call
         // `OPEN_FILES.lock()?.remove()` and then while still locked, `OPEN_FILES.lock()` again)
-        Self::remote_close(self.fd).expect(
-            "mirrord failed to send close file message to main layer thread. Error: {err:?}",
+        let result = Self::remote_close(self.fd);
+        assert!(
+            result.is_ok(),
+            "mirrord failed to send close file message to main layer thread. Error: {result:?}",
         );
     }
 }

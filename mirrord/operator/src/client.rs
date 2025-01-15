@@ -404,7 +404,6 @@ where
             layer_config.kube_context.clone(),
         )
         .await
-        .map_err(KubeApiError::from)
         .map_err(OperatorApiError::CreateKubeClient)?;
 
         client_config.headers.push((
