@@ -318,7 +318,7 @@ impl From<io::ErrorKind> for ErrorKindInternal {
             io::ErrorKind::WriteZero => ErrorKindInternal::WriteZero,
             io::ErrorKind::StorageFull => ErrorKindInternal::StorageFull,
             io::ErrorKind::NotSeekable => ErrorKindInternal::NotSeekable,
-            io::ErrorKind::FilesystemQuotaExceeded => ErrorKindInternal::FilesystemQuotaExceeded,
+            io::ErrorKind::QuotaExceeded => ErrorKindInternal::FilesystemQuotaExceeded,
             io::ErrorKind::FileTooLarge => ErrorKindInternal::FileTooLarge,
             io::ErrorKind::ResourceBusy => ErrorKindInternal::ResourceBusy,
             io::ErrorKind::ExecutableFileBusy => ErrorKindInternal::ExecutableFileBusy,
