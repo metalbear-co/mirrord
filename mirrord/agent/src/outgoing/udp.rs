@@ -37,6 +37,7 @@ use crate::{
 struct UdpOutgoingTask {
     next_connection_id: ConnectionId,
     /// Writing halves of peer connections made on layer's requests.
+    #[allow(clippy::type_complexity)]
     writers: HashMap<
         ConnectionId,
         (
@@ -169,6 +170,7 @@ impl UdpOutgoingTask {
     }
 
     /// Returns [`Err`] only when the client has disconnected.
+    #[allow(clippy::type_complexity)]
     #[tracing::instrument(level = Level::TRACE, ret)]
     async fn handle_layer_msg(
         &mut self,
