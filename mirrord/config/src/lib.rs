@@ -333,8 +333,8 @@ pub struct LayerConfig {
 impl LayerConfig {
     /// Given an encoded complete config from the [`MIRRORD_RESOLVED_CONFIG_ENV`]
     /// env var, attempt to decode it into [`LayerConfig`].
-    /// Intended to avoid re-resolving the config in every process mirrord in loaded into
-    pub fn from_env_var(encoded_value: String) -> Result<Self, ConfigError> {
+    /// Intended to avoid re-resolving the config in every process mirrord is loaded into.
+    fn from_env_var(encoded_value: String) -> Result<Self, ConfigError> {
         let decoded = BASE64_STANDARD
             .decode(encoded_value)
             .map_err(|error| ConfigError::EnvVarDecodeError(error.to_string()))?;
@@ -343,13 +343,18 @@ impl LayerConfig {
         Ok(serde_json::from_str::<Self>(serialized)?)
     }
 
-    pub fn to_env_var(&self) -> Result<String, ConfigError> {
+    /// Given a [`LayerConfig`], serialise it and convert to base 64 so it can be
+    /// set into [`MIRRORD_RESOLVED_CONFIG_ENV`].
+    fn to_env_var(&self) -> Result<String, ConfigError> {
         let serialized = serde_json::to_string(self)
             .map_err(|error| ConfigError::EnvVarEncodeError(error.to_string()))?;
         Ok(BASE64_STANDARD.encode(serialized))
     }
 
-    pub fn update_env(&self) -> Result<(), ConfigError> {
+    /// Given the encoded config as a string, set it into [`MIRRORD_RESOLVED_CONFIG_ENV`].
+    /// Must be used when updating [`LayerConfig`] after creation in order for the config
+    /// in env to reflect the change.
+    pub fn update_env_var(&self) -> Result<(), ConfigError> {
         std::env::set_var(MIRRORD_RESOLVED_CONFIG_ENV, self.to_env_var()?);
         Ok(())
     }
@@ -372,7 +377,7 @@ impl LayerConfig {
                 }?;
 
                 // serialise the config and encode as base64
-                std::env::set_var(MIRRORD_RESOLVED_CONFIG_ENV, config.to_env_var()?);
+                config.update_env_var()?;
                 Ok(config)
             }
         }
@@ -1030,7 +1035,7 @@ mod tests {
     /// checks that resolved config written to [`MIRRORD_RESOLVED_CONFIG_ENV`] can be
     /// transformed back into a [`LayerConfig`]
     #[test]
-    fn encode_and_decode_config() {
+    fn encode_and_decode_default_config() {
         let mut cfg_context = ConfigContext::default();
         let resolved_config = LayerFileConfig::default()
             .generate_config(&mut cfg_context)
@@ -1040,5 +1045,58 @@ mod tests {
         let decoded = LayerConfig::from_env_var(encoded).unwrap();
 
         assert_eq!(decoded, resolved_config);
+    }
+
+    #[test]
+    fn encode_and_decode_advanced_config() {
+        let mut cfg_context = ConfigContext::default();
+
+        // this config includes template variables, so it needs to be rendered first
+        let mut template_engine = Tera::default();
+        template_engine
+            .add_raw_template("main", get_advanced_config().as_str())
+            .unwrap();
+        let rendered = template_engine
+            .render("main", &tera::Context::new())
+            .expect("Tera should render JSON config file contents");
+        let resolved_config = ConfigType::Json
+            .parse(rendered.as_str())
+            .generate_config(&mut cfg_context)
+            .expect("Layer config should be generated from JSON config file contents");
+
+        let encoded = resolved_config.to_env_var().unwrap();
+        let decoded = LayerConfig::from_env_var(encoded).unwrap();
+
+        assert_eq!(decoded, resolved_config);
+    }
+
+    fn get_advanced_config() -> String {
+        r#"
+            {
+                "accept_invalid_certificates": false,
+                "target": {
+                    "path": "pod/test-service-abcdefg-abcd",
+                    "namespace": "default"
+                },
+                "feature": {
+                    "env": true,
+                    "fs": "write",
+                    "network": {
+                        "dns": false,
+                        "incoming": {
+                            "mode": "steal",
+                            "http_filter": {
+                                "header_filter": "x-intercept: {{ get_env(name="USER") }}"
+                            }
+                        },
+                        "outgoing": {
+                            "tcp": true,
+                            "udp": false
+                        }
+                    }
+                }
+            }
+        "#
+        .to_string()
     }
 }

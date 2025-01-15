@@ -177,7 +177,7 @@ impl MirrordExecution {
     /// [`tokio::time::sleep`] or [`tokio::task::yield_now`] after calling this function.
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     pub(crate) async fn start<P>(
-        config: &LayerConfig,
+        config: &mut LayerConfig,
         // We only need the executable on macos, for SIP handling.
         #[cfg(target_os = "macos")] executable: Option<&str>,
         progress: &mut P,
@@ -289,9 +289,8 @@ impl MirrordExecution {
             })?;
 
         // Provide details for layer to connect to agent via internal proxy
-        let mut config = config.clone();
         config.connect_tcp = Some(format!("127.0.0.1:{}", address.port()));
-        config.update_env()?;
+        config.update_env_var()?;
 
         // Fixes <https://github.com/metalbear-co/mirrord/issues/1745>
         // by disabling the fork safety check in the Objective-C runtime.
