@@ -81,16 +81,17 @@ struct HttpGatewayHandle {
 /// Handles logic and state of the `incoming` feature.
 /// Run as a [`BackgroundTask`].
 ///
-/// Handles port subscriptions state of the connected layers. Utilizes multiple background tasks
-/// ([`Interceptor`]s and [`HttpResponseReader`]s) to handle incoming connections.
+/// Handles port subscriptions state of the connected layers.
+/// Utilizes multiple background tasks ([`TcpProxyTask`]s and [`HttpGatewayTask`]s) to handle
+/// incoming connections and requests.
 ///
-/// Each connection is managed by a single [`Interceptor`],
-/// that establishes a TCP connection with the user application's port and proxies data.
+/// Each connection stolen/mirrored in whole is managed by a single [`TcpProxyTask`].
 ///
-/// Bodies of HTTP responses from the user application are polled by [`HttpResponseReader`]s.
+/// Each request stolen with a filter is managed by a single [`HttpGatewayTask`].
 ///
-/// Incoming connections are created by the agent either explicitly ([`NewTcpConnection`] message)
-/// or implicitly ([`HttpRequest`](mirrord_protocol::tcp::HttpRequest)).
+/// Incoming connections are created by the agent either explicitly ([`NewTcpConnection`] message,
+/// connections stolen/mirrord in whole) or implicitly ([`HttpRequest`] message, requests stolen
+/// with a filter).
 #[derive(Default)]
 pub struct IncomingProxy {
     /// Active port subscriptions for all layers.
@@ -531,14 +532,12 @@ impl IncomingProxy {
                             ))
                             .await;
                     }
-                } else {
-                    if self.mirror_tcp_proxies.remove(&connection_id).is_some() {
-                        message_bus
-                            .send(ClientMessage::Tcp(LayerTcp::ConnectionUnsubscribe(
-                                connection_id,
-                            )))
-                            .await;
-                    }
+                } else if self.mirror_tcp_proxies.remove(&connection_id).is_some() {
+                    message_bus
+                        .send(ClientMessage::Tcp(LayerTcp::ConnectionUnsubscribe(
+                            connection_id,
+                        )))
+                        .await;
                 }
             }
 

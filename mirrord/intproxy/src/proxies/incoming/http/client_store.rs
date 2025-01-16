@@ -79,10 +79,7 @@ impl ClientStore {
                 idle.client.handles_version(version)
                     && idle.client.local_server_address() == server_addr
             });
-            match position {
-                Some(position) => Some(guard.swap_remove(position)),
-                None => None,
-            }
+            position.map(|position| guard.swap_remove(position))
         };
 
         if let Some(ready) = ready {
