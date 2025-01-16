@@ -1,4 +1,4 @@
-use std::{error::Error, fmt, io, net::SocketAddr};
+use std::{fmt, io, net::SocketAddr};
 
 use hyper::{
     body::Incoming,
@@ -107,23 +107,6 @@ pub enum LocalHttpError {
 }
 
 impl LocalHttpError {
-    /// Checks if the given [`hyper::Error`] originates from [`h2::Error`] `RST_STREAM`.
-    ///
-    /// This requires that we use the same [`h2`] version as [`hyper`],
-    /// which is verified in the `hyper_and_h2_versions_in_sync` test below.
-    pub fn is_h2_reset(error: &hyper::Error) -> bool {
-        let mut cause = error.source();
-        while let Some(err) = cause {
-            if let Some(typed) = err.downcast_ref::<h2::Error>() {
-                return typed.is_reset();
-            };
-
-            cause = err.source();
-        }
-
-        false
-    }
-
     /// Checks if we can retry sending the request, given that the previous attempt resulted in this
     /// error.
     pub fn can_retry(&self) -> bool {
@@ -131,7 +114,10 @@ impl LocalHttpError {
             Self::SocketSetupFailed(..) | Self::UnsupportedHttpVersion(..) => false,
             Self::ConnectTcpFailed(..) => true,
             Self::HandshakeFailed(err) | Self::SendFailed(err) | Self::ReadBodyFailed(err) => {
-                err.is_closed() || err.is_incomplete_message() || Self::is_h2_reset(err)
+                !(err.is_parse()
+                    || err.is_parse_status()
+                    || err.is_parse_too_large()
+                    || err.is_user())
             }
         }
     }
@@ -261,70 +247,5 @@ impl HttpSender {
                     .map_err(LocalHttpError::SendFailed)
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use std::{
-        convert::Infallible,
-        error::Error,
-        net::{Ipv4Addr, SocketAddr},
-    };
-
-    use bytes::Bytes;
-    use http_body_util::Full;
-    use hyper::{server::conn::http2, service::service_fn, Response};
-    use hyper_util::rt::{TokioExecutor, TokioIo};
-    use tokio::net::TcpListener;
-
-    /// Checks that [`hyper`] and [`h2`] crate versions are in sync with each other.
-    ///
-    /// In [`LocalHttpError::is_h2_reset`](super::LocalHttpError::is_h2_reset) we use
-    /// `source.downcast_ref::<h2::Error>` to drill down on [`h2`] errors from [`hyper`], we
-    /// need these two crates to stay in sync, otherwise we could always fail some of our checks
-    /// that rely on this `downcast` working.
-    ///
-    /// Even though we're using [`h2::Error::is_reset`] in intproxy, this test can be
-    /// for any error, and thus here we do it for [`h2::Error::is_go_away`] which is
-    /// easier to trigger.
-    #[tokio::test]
-    async fn hyper_and_h2_versions_in_sync() {
-        let listener = TcpListener::bind(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
-            .await
-            .unwrap();
-        let listener_address = listener.local_addr().unwrap();
-
-        let handle = tokio::spawn(async move {
-            let stream = listener.accept().await.unwrap().0;
-            http2::Builder::new(TokioExecutor::default())
-                .serve_connection(
-                    TokioIo::new(stream),
-                    service_fn(|_| async move {
-                        Ok::<_, Infallible>(Response::new(Full::new(Bytes::from("Heresy!"))))
-                    }),
-                )
-                .await
-        });
-
-        assert!(reqwest::get(format!("https://{listener_address}"))
-            .await
-            .is_err());
-
-        let conn_result = handle.await.unwrap();
-        assert!(
-            conn_result
-                .as_ref()
-                .err()
-                .and_then(Error::source)
-                .and_then(|source| source.downcast_ref::<h2::Error>())
-                .is_some_and(h2::Error::is_go_away),
-            r"The request is supposed to fail with `GO_AWAY`! 
-            Something is wrong if it didn't!
-
-            >> If you're seeing this error, the cause is likely that `hyper` and `h2`
-            versions are out of sync, and we can't have that due to our use of
-            `downcast_ref` on some `h2` errors!"
-        );
     }
 }

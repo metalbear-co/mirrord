@@ -8,6 +8,7 @@ use tokio::{
 
 use super::{LocalHttpClient, LocalHttpError};
 
+#[derive(Debug)]
 struct IdleLocalClient {
     client: LocalHttpClient,
     last_used: Instant,
@@ -18,16 +19,20 @@ pub struct ClientStore(watch::Sender<Vec<IdleLocalClient>>);
 
 impl Default for ClientStore {
     fn default() -> Self {
-        let (tx, _) = watch::channel(Default::default());
-
-        tokio::spawn(cleanup_task(tx.clone()));
-
-        Self(tx)
+        Self::new_with_timeout(Self::IDLE_CLIENT_TIMEOUT)
     }
 }
 
 impl ClientStore {
     const IDLE_CLIENT_TIMEOUT: Duration = Duration::from_secs(3);
+
+    pub fn new_with_timeout(timeout: Duration) -> Self {
+        let (tx, _) = watch::channel(Default::default());
+
+        tokio::spawn(cleanup_task(tx.clone(), timeout));
+
+        Self(tx)
+    }
 
     pub async fn get(
         &self,
@@ -37,6 +42,7 @@ impl ClientStore {
         let mut ready = None;
 
         self.0.send_if_modified(|clients| {
+            println!("ready clients: {clients:?}");
             let position = clients.iter().position(|idle| {
                 idle.client.handles_version(version)
                     && idle.client.local_server_address() == server_addr
@@ -52,6 +58,7 @@ impl ClientStore {
         });
 
         if let Some(ready) = ready {
+            println!("found ready client");
             return Ok(ready);
         }
 
@@ -64,6 +71,7 @@ impl ClientStore {
     }
 
     pub fn push_idle(&self, client: LocalHttpClient) {
+        println!("storing idle client {client:?}");
         self.0.send_modify(|clients| {
             clients.push(IdleLocalClient {
                 client,
@@ -105,7 +113,7 @@ impl ClientStore {
     }
 }
 
-async fn cleanup_task(clients: watch::Sender<Vec<IdleLocalClient>>) {
+async fn cleanup_task(clients: watch::Sender<Vec<IdleLocalClient>>, idle_client_timeout: Duration) {
     loop {
         let now = Instant::now();
         let mut min_last_used = None;
@@ -114,7 +122,7 @@ async fn cleanup_task(clients: watch::Sender<Vec<IdleLocalClient>>) {
             let mut removed = false;
 
             clients.retain(|client| {
-                if client.last_used + ClientStore::IDLE_CLIENT_TIMEOUT > now {
+                if client.last_used + idle_client_timeout > now {
                     min_last_used = min_last_used
                         .map(|previous| cmp::min(previous, client.last_used))
                         .or(Some(client.last_used));
@@ -130,7 +138,7 @@ async fn cleanup_task(clients: watch::Sender<Vec<IdleLocalClient>>) {
         });
 
         if let Some(min_last_used) = min_last_used {
-            time::sleep_until(min_last_used + ClientStore::IDLE_CLIENT_TIMEOUT).await;
+            time::sleep_until(min_last_used + idle_client_timeout).await;
         } else {
             clients
                 .subscribe()

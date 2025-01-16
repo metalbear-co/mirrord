@@ -33,8 +33,6 @@ tokio.workspace = true
 tracing.workspace = true
 tokio-stream.workspace = true
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
-# For checking the `RST_STREAM` error from HTTP2 stealer + filter.
-h2 = "0.4"
 hyper-util.workspace = true
 http-body-util.workspace = true
 bytes.workspace = true
@@ -45,5 +43,4 @@ rustls-pemfile.workspace = true
 exponential-backoff = "2"
 
 [dev-dependencies]
-reqwest.workspace = true
 rstest.workspace = true

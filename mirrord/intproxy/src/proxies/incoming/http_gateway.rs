@@ -41,10 +41,12 @@ impl HttpGatewayTask {
     }
 
     async fn send_attempt(&self, message_bus: &mut MessageBus<Self>) -> Result<(), LocalHttpError> {
+        println!("making send attempt");
         let mut client = self
             .client_store
             .get(self.server_addr, self.request.version())
             .await?;
+        println!("got client");
         let mut response = client.send_request(self.request.clone()).await?;
         let on_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS)
             .then(|| hyper::upgrade::on(&mut response));
@@ -181,6 +183,7 @@ impl BackgroundTask for HttpGatewayTask {
                         .then(|| backoffs.next())
                         .flatten()
                         .flatten();
+                    println!("send attempt failed with {error}, backoff={backoff:?}");
                     let Some(backoff) = backoff else {
                         break error;
                     };
@@ -330,8 +333,10 @@ mod test {
         }
     }
 
+    /// Verifies that [`HttpGatewayTask`] and [`TcpProxyTask`] together correctly handle HTTP
+    /// upgrades.
     #[tokio::test]
-    async fn upgrade_test() {
+    async fn handles_http_upgrades() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_destination = listener.local_addr().unwrap();
 
@@ -450,12 +455,17 @@ mod test {
         server_task.await.expect("dummy echo server panicked");
     }
 
+    /// Verifies that [`HttpGatewayTask`] produces correct variant of the [`HttpResponse`].
+    ///
+    /// Verifies that body of
+    /// [`LayerTcpSteal::HttpResponseChunked`](mirrord_protocol::tcp::LayerTcpSteal::HttpResponseChunked)
+    /// is streamed.
     #[rstest]
     #[case::basic(ResponseMode::Basic)]
     #[case::framed(ResponseMode::Framed)]
     #[case::chunked(ResponseMode::Chunked)]
     #[tokio::test]
-    async fn receive_correct_response_variant(#[case] response_mode: ResponseMode) {
+    async fn produces_correct_response_variant(#[case] response_mode: ResponseMode) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let semaphore: Arc<Semaphore> = Arc::new(Semaphore::const_new(0));
@@ -507,9 +517,8 @@ mod test {
         };
 
         let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> = Default::default();
-        let client_store = ClientStore::default();
         let _gateway = tasks.register(
-            HttpGatewayTask::new(request, client_store.clone(), response_mode, addr),
+            HttpGatewayTask::new(request, ClientStore::default(), response_mode, addr),
             (),
             8,
         );
@@ -593,8 +602,10 @@ mod test {
         conn_task.await.unwrap();
     }
 
+    /// Verifies that [`HttpGateway`] sends request body frames to the server as soon as they are
+    /// available.
     #[tokio::test]
-    async fn streams_request_frames() {
+    async fn streams_request_body_frames() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
@@ -678,5 +689,86 @@ mod test {
         }
 
         conn_task.await.unwrap();
+    }
+
+    /// Verifies that [`HttpGateway`] reuses already established HTTP connections.
+    #[tokio::test]
+    async fn reuses_client_connections() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let service = service_fn(|_req: Request<Incoming>| {
+                std::future::ready(Ok::<_, Infallible>(Response::new(Empty::<Bytes>::new())))
+            });
+
+            let (connection, _) = listener.accept().await.unwrap();
+            std::mem::drop(listener);
+            http1::Builder::new()
+                .serve_connection(TokioIo::new(connection), service)
+                .await
+                .unwrap()
+        });
+
+        let mut request = HttpRequest {
+            connection_id: 0,
+            request_id: 0,
+            port: 80,
+            internal_request: InternalHttpRequest {
+                method: Method::GET,
+                uri: "/".parse().unwrap(),
+                headers: Default::default(),
+                version: Version::HTTP_11,
+                body: Default::default(),
+            },
+        };
+        request
+            .internal_request
+            .headers
+            .insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
+
+        let mut tasks: BackgroundTasks<u32, InProxyTaskMessage, Infallible> = Default::default();
+        let client_store = ClientStore::new_with_timeout(Duration::from_secs(1337 * 21 * 37));
+        let _gateway_1 = tasks.register(
+            HttpGatewayTask::new(
+                request.clone(),
+                client_store.clone(),
+                ResponseMode::Basic,
+                addr,
+            ),
+            0,
+            8,
+        );
+        let _gateway_2 = tasks.register(
+            HttpGatewayTask::new(
+                request.clone(),
+                client_store.clone(),
+                ResponseMode::Basic,
+                addr,
+            ),
+            1,
+            8,
+        );
+
+        let mut finished = 0;
+        let mut responses = 0;
+
+        while finished < 2 && responses < 2 {
+            match tasks.next().await.unwrap() {
+                (id, TaskUpdate::Finished(Ok(()))) => {
+                    println!("gateway {id} finished");
+                    finished += 1;
+                }
+                (
+                    id,
+                    TaskUpdate::Message(InProxyTaskMessage::Http(HttpOut::ResponseBasic(response))),
+                ) => {
+                    println!("gateway {id} returned a response");
+                    assert_eq!(response.internal_response.status, StatusCode::OK);
+                    responses += 1;
+                }
+                other => panic!("unexpected task update: {other:?}"),
+            }
+        }
     }
 }

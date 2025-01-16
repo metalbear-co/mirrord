@@ -4313,7 +4313,6 @@ version = "3.128.0"
 dependencies = [
  "bytes",
  "exponential-backoff",
- "h2 0.4.7",
  "http-body-util",
  "hyper 1.5.2",
  "hyper-util",
@@ -4324,7 +4323,6 @@ dependencies = [
  "mirrord-operator",
  "mirrord-protocol",
  "rand",
- "reqwest 0.12.12",
  "rstest",
  "rustls 0.23.20",
  "rustls-pemfile 2.2.0",
