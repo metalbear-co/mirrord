@@ -54,6 +54,10 @@ pub enum InProxyTask {
     HttpGateway(HttpGatewayId),
 }
 
+/// Identifies a [`HttpGatewayTask`](super::http_gateway::HttpGatewayTask).
+///
+/// ([`ConnectionId`], [`RequestId`]) would suffice, but storing extra data allows us to produce an
+/// error response in case the task somehow panics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HttpGatewayId {
     pub connection_id: ConnectionId,

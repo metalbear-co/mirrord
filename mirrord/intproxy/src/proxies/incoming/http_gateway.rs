@@ -18,14 +18,22 @@ use super::{
 };
 use crate::background_tasks::{BackgroundTask, MessageBus};
 
+/// [`BackgroundTask`] used by the [`IncomingProxy`](super::IncomingProxy).
+///
+/// Responsible for delivering a single HTTP request to the user application.
 pub struct HttpGatewayTask {
+    /// Request to deliver.
     request: HttpRequest<StreamingBody>,
+    /// Shared cache of [`LocalHttpClient`](super::http::LocalHttpClient)s.
     client_store: ClientStore,
+    /// Determines response variant.
     response_mode: ResponseMode,
+    /// Address of the HTTP server in the user application.
     server_addr: SocketAddr,
 }
 
 impl HttpGatewayTask {
+    /// Creates a new gateway task.
     pub fn new(
         request: HttpRequest<StreamingBody>,
         client_store: ClientStore,
@@ -40,13 +48,16 @@ impl HttpGatewayTask {
         }
     }
 
+    /// Makes an attempt to send the request and read the whole response.
+    ///
+    /// [`Err`] is handled in the caller and, if we run out of send attempts, converted to an error
+    /// response. Because of this, this function should not return any error that happened after
+    /// sending [`ChunkedResponse::Start`]. The agent would get a duplicated response.
     async fn send_attempt(&self, message_bus: &mut MessageBus<Self>) -> Result<(), LocalHttpError> {
-        println!("making send attempt");
         let mut client = self
             .client_store
             .get(self.server_addr, self.request.version())
             .await?;
-        println!("got client");
         let mut response = client.send_request(self.request.clone()).await?;
         let on_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS)
             .then(|| hyper::upgrade::on(&mut response));
@@ -183,7 +194,6 @@ impl BackgroundTask for HttpGatewayTask {
                         .then(|| backoffs.next())
                         .flatten()
                         .flatten();
-                    println!("send attempt failed with {error}, backoff={backoff:?}");
                     let Some(backoff) = backoff else {
                         break error;
                     };
