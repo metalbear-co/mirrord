@@ -371,7 +371,6 @@ impl LayerConfig {
                 // the resolved config is not present in env, so resolve it and then set into env
                 // var
                 let config = if let Ok(path) = std::env::var(MIRRORD_CONFIG_FILE_ENV) {
-                    dbg!(&path);
                     LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
                 } else {
                     LayerFileConfig::default().generate_config(&mut cfg_context)

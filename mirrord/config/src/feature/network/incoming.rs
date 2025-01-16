@@ -3,7 +3,7 @@ use std::{collections::HashSet, fmt, str::FromStr};
 use bimap::BiMap;
 use mirrord_analytics::{AnalyticValue, Analytics, CollectAnalytics};
 use schemars::JsonSchema;
-use serde::{de, Deserialize, Serialize};
+use serde::{de, ser, ser::SerializeSeq as _, Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
@@ -306,6 +306,34 @@ pub struct IncomingAdvancedFileConfig {
     pub ports: Option<Vec<u16>>,
 }
 
+fn serialize_bi_map<S>(map: &BiMap<u16, u16>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: ser::Serializer,
+{
+    // NB: this serialises the BiMap to a vec
+    let mut seq = serializer.serialize_seq(Some(map.len()))?;
+
+    for (key, value) in map {
+        seq.serialize_element(&[key, value])?;
+    }
+
+    seq.end()
+}
+
+fn deserialize_bi_map<'de, D>(deserializer: D) -> Result<BiMap<u16, u16>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    // NB: this deserialises the BiMap from a vec
+    let vec: Vec<(u16, u16)> = Vec::deserialize(deserializer)?;
+
+    let mut elements = BiMap::new();
+    vec.iter().for_each(|(key, value)| {
+        elements.insert(*key, *value);
+    });
+    Ok(elements)
+}
+
 /// Controls the incoming TCP traffic feature.
 ///
 /// See the incoming [reference](https://mirrord.dev/docs/reference/traffic/#incoming) for more
@@ -383,6 +411,10 @@ pub struct IncomingConfig {
     /// This is useful when you want to mirror/steal a port to a different port on the remote
     /// machine. For example, your local process listens on port `9333` and the container listens
     /// on port `80`. You'd use `[[9333, 80]]`
+    #[serde(
+        serialize_with = "serialize_bi_map",
+        deserialize_with = "deserialize_bi_map"
+    )]
     pub port_mapping: BiMap<u16, u16>,
 
     /// #### feature.network.incoming.ignore_localhost {#feature-network-incoming-ignore_localhost}
@@ -420,6 +452,10 @@ pub struct IncomingConfig {
     /// you probably can't listen on `80` without sudo, so you can use `[[80, 4480]]`
     /// then access it on `4480` while getting traffic from remote `80`.
     /// The value of `port_mapping` doesn't affect this.
+    #[serde(
+        serialize_with = "serialize_bi_map",
+        deserialize_with = "deserialize_bi_map"
+    )]
     pub listen_ports: BiMap<u16, u16>,
 
     /// #### feature.network.incoming.on_concurrent_steal {#feature-network-incoming-on_concurrent_steal}
