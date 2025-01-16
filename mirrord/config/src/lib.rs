@@ -391,13 +391,13 @@ impl LayerConfig {
         Self::from_env_with_warnings().map(|(config, _)| config)
     }
 
-    ///
+    /// forcefully recalculate the config using [`Self::from_env_with_warnings()`]
     pub fn recalculate_from_env_with_warnings() -> Result<(Self, ConfigContext), ConfigError> {
         std::env::remove_var(MIRRORD_RESOLVED_CONFIG_ENV);
         Self::from_env_with_warnings()
     }
 
-    ///
+    /// forcefully recalculate the config using [`Self::from_env_with_warnings()`] without warnings
     pub fn recalculate_from_env() -> Result<Self, ConfigError> {
         Self::recalculate_from_env_with_warnings().map(|(config, _)| config)
     }
