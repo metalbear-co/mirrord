@@ -28,6 +28,8 @@ pub struct LocalHttpClient {
     sender: HttpSender,
     /// Address of the user application's HTTP server.
     local_server_address: SocketAddr,
+    /// Address of this client's TCP socket.
+    self_address: SocketAddr,
 }
 
 impl LocalHttpClient {
@@ -42,11 +44,15 @@ impl LocalHttpClient {
         let local_server_address = stream
             .peer_addr()
             .map_err(LocalHttpError::SocketSetupFailed)?;
+        let self_address = stream
+            .local_addr()
+            .map_err(LocalHttpError::SocketSetupFailed)?;
         let sender = HttpSender::handshake(version, stream).await?;
 
         Ok(Self {
             sender,
             local_server_address,
+            self_address,
         })
     }
 
@@ -80,6 +86,8 @@ impl fmt::Debug for LocalHttpClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LocalHttpClient")
             .field("local_server_address", &self.local_server_address)
+            .field("self_address", &self.self_address)
+            .field("is_http_1", &matches!(self.sender, HttpSender::V1(..)))
             .finish()
     }
 }

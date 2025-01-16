@@ -1,5 +1,5 @@
 use std::{
-    cmp,
+    cmp, fmt,
     net::SocketAddr,
     sync::{Arc, Mutex},
     time::Duration,
@@ -10,20 +10,29 @@ use tokio::{
     sync::Notify,
     time::{self, Instant},
 };
+use tracing::Level;
 
 use super::{LocalHttpClient, LocalHttpError};
 
 /// Idle [`LocalHttpClient`] caches in [`ClientStore`].
-#[derive(Debug)]
 struct IdleLocalClient {
     client: LocalHttpClient,
     last_used: Instant,
 }
 
+impl fmt::Debug for IdleLocalClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("IdleLocalClient")
+            .field("client", &self.client)
+            .field("idle_for_s", &self.last_used.elapsed().as_secs_f32())
+            .finish()
+    }
+}
+
 /// Cache for unused [`LocalHttpClient`]s.
 ///
 /// [`LocalHttpClient`] that have not been used for some time are dropped in the background by a
-/// dedicated [`tokio::task`].
+/// dedicated [`tokio::task`]. This timeout defaults to [`Self::IDLE_CLIENT_DEFAULT_TIMEOUT`].
 #[derive(Clone)]
 pub struct ClientStore {
     clients: Arc<Mutex<Vec<IdleLocalClient>>>,
@@ -36,12 +45,12 @@ pub struct ClientStore {
 
 impl Default for ClientStore {
     fn default() -> Self {
-        Self::new_with_timeout(Self::IDLE_CLIENT_TIMEOUT)
+        Self::new_with_timeout(Self::IDLE_CLIENT_DEFAULT_TIMEOUT)
     }
 }
 
 impl ClientStore {
-    const IDLE_CLIENT_TIMEOUT: Duration = Duration::from_secs(3);
+    pub const IDLE_CLIENT_DEFAULT_TIMEOUT: Duration = Duration::from_secs(3);
 
     /// Creates a new store.
     ///
@@ -58,6 +67,7 @@ impl ClientStore {
     }
 
     /// Reuses or creates a new [`LocalHttpClient`].
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::WARN))]
     pub async fn get(
         &self,
         server_addr: SocketAddr,
@@ -76,6 +86,7 @@ impl ClientStore {
         };
 
         if let Some(ready) = ready {
+            tracing::trace!(?ready, "Reused an idle client");
             return Ok(ready.client);
         }
 
@@ -83,11 +94,15 @@ impl ClientStore {
 
         tokio::select! {
             result = connect_task => result.expect("this task should not panic"),
-            ready = self.wait_for_ready(server_addr, version) => Ok(ready),
+            ready = self.wait_for_ready(server_addr, version) => {
+                tracing::trace!(?ready, "Reused an idle client");
+                Ok(ready)
+            },
         }
     }
 
     /// Stores an unused [`LocalHttpClient`], so that it can be reused later.
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub fn push_idle(&self, client: LocalHttpClient) {
         let mut guard = self.clients.lock().unwrap();
         guard.push(IdleLocalClient {
@@ -142,6 +157,7 @@ async fn cleanup_task(store: ClientStore, idle_client_timeout: Duration) {
 
                     true
                 } else {
+                    tracing::trace!(?client, "Dropping an idle client");
                     false
                 }
             });
