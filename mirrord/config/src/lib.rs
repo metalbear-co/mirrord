@@ -371,6 +371,7 @@ impl LayerConfig {
                 // the resolved config is not present in env, so resolve it and then set into env
                 // var
                 let config = if let Ok(path) = std::env::var(MIRRORD_CONFIG_FILE_ENV) {
+                    dbg!(&path);
                     LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
                 } else {
                     LayerFileConfig::default().generate_config(&mut cfg_context)
@@ -389,6 +390,17 @@ impl LayerConfig {
     /// To be used from parts that load configuration but aren't the first one to do so
     pub fn from_env() -> Result<Self, ConfigError> {
         Self::from_env_with_warnings().map(|(config, _)| config)
+    }
+
+    ///
+    pub fn recalculate_from_env_with_warnings() -> Result<(Self, ConfigContext), ConfigError> {
+        std::env::remove_var(MIRRORD_RESOLVED_CONFIG_ENV);
+        Self::from_env_with_warnings()
+    }
+
+    ///
+    pub fn recalculate_from_env() -> Result<Self, ConfigError> {
+        Self::recalculate_from_env_with_warnings().map(|(config, _)| config)
     }
 
     /// Verify that there are no conflicting settings.
