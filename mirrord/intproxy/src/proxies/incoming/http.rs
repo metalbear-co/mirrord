@@ -56,9 +56,7 @@ impl LocalHttpClient {
         })
     }
 
-    /// Tries to send the given `request` to the user application's HTTP server.
-    ///
-    /// Retries on known errors (see [`LocalHttpError::can_retry`]).
+    /// Send the given `request` to the user application's HTTP server.
     #[tracing::instrument(level = Level::DEBUG, err(level = Level::WARN), ret)]
     pub async fn send_request(
         &mut self,

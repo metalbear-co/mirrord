@@ -1,4 +1,10 @@
-use std::{convert::Infallible, net::SocketAddr, time::Duration};
+use std::{
+    convert::Infallible,
+    error::Error,
+    fmt,
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
 
 use exponential_backoff::Backoff;
 use http_body_util::BodyExt;
@@ -11,6 +17,7 @@ use mirrord_protocol::{
     },
 };
 use tokio::time;
+use tracing::Level;
 
 use super::{
     http::{mirrord_error_response, ClientStore, LocalHttpError, ResponseMode, StreamingBody},
@@ -30,6 +37,16 @@ pub struct HttpGatewayTask {
     response_mode: ResponseMode,
     /// Address of the HTTP server in the user application.
     server_addr: SocketAddr,
+}
+
+impl fmt::Debug for HttpGatewayTask {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HttpGatewayTask")
+            .field("request", &self.request)
+            .field("response_mode", &self.response_mode)
+            .field("server_addr", &self.server_addr)
+            .finish()
+    }
 }
 
 impl HttpGatewayTask {
@@ -53,6 +70,7 @@ impl HttpGatewayTask {
     /// [`Err`] is handled in the caller and, if we run out of send attempts, converted to an error
     /// response. Because of this, this function should not return any error that happened after
     /// sending [`ChunkedResponse::Start`]. The agent would get a duplicated response.
+    #[tracing::instrument(level = Level::TRACE, skip_all, err(level = Level::WARN))]
     async fn send_attempt(&self, message_bus: &mut MessageBus<Self>) -> Result<(), LocalHttpError> {
         let mut client = self
             .client_store
@@ -65,12 +83,19 @@ impl HttpGatewayTask {
 
         match self.response_mode {
             ResponseMode::Basic => {
+                let start = Instant::now();
                 let body: Vec<u8> = body
                     .collect()
                     .await
                     .map_err(LocalHttpError::ReadBodyFailed)?
                     .to_bytes()
                     .into();
+                tracing::trace!(
+                    body_len = body.len(),
+                    elapsed_ms = start.elapsed().as_millis(),
+                    "Collected the whole response body",
+                );
+
                 let response = HttpResponse {
                     port: self.request.port,
                     connection_id: self.request.connection_id,
@@ -85,9 +110,16 @@ impl HttpGatewayTask {
                 message_bus.send(HttpOut::ResponseBasic(response)).await
             }
             ResponseMode::Framed => {
+                let start = Instant::now();
                 let body = InternalHttpBody::from_body(body)
                     .await
                     .map_err(LocalHttpError::ReadBodyFailed)?;
+                tracing::trace!(
+                    ?body,
+                    elapsed_ms = start.elapsed().as_millis(),
+                    "Collected the whole response body",
+                );
+
                 let response = HttpResponse {
                     port: self.request.port,
                     connection_id: self.request.connection_id,
@@ -109,6 +141,11 @@ impl HttpGatewayTask {
                     .into_iter()
                     .map(InternalHttpBodyFrame::from)
                     .collect();
+                tracing::trace!(
+                    ?ready_frames,
+                    "Some response body frames were instantly ready"
+                );
+
                 let response = HttpResponse {
                     port: self.request.port,
                     connection_id: self.request.connection_id,
@@ -125,30 +162,48 @@ impl HttpGatewayTask {
                     .await;
 
                 loop {
+                    let start = Instant::now();
                     match body.next_frames().await {
                         Ok(frames) => {
+                            let body_finished = frames.is_last;
+                            let frames = frames
+                                .frames
+                                .into_iter()
+                                .map(InternalHttpBodyFrame::from)
+                                .collect::<Vec<_>>();
+                            tracing::trace!(
+                                ?frames,
+                                body_finished,
+                                elapsed_ms = start.elapsed().as_millis(),
+                                "Received next response body frames",
+                            );
+
                             message_bus
                                 .send(HttpOut::ResponseChunked(ChunkedResponse::Body(
                                     ChunkedHttpBody {
-                                        frames: frames
-                                            .frames
-                                            .into_iter()
-                                            .map(InternalHttpBodyFrame::from)
-                                            .collect(),
-                                        is_last: frames.is_last,
+                                        frames: frames,
+                                        is_last: body_finished,
                                         connection_id: self.request.connection_id,
                                         request_id: self.request.request_id,
                                     },
                                 )))
                                 .await;
-                            if frames.is_last {
+
+                            if body_finished {
                                 break;
                             }
                         }
                         // Do not return any error here,
                         // as it would be transformed into an error response by the caller.
                         // We already send the request head to the agent.
-                        Err(..) => {
+                        Err(error) => {
+                            tracing::warn!(
+                                error = ?ErrorWithSources(&error),
+                                elapsed_ms = start.elapsed().as_millis(),
+                                gateway = ?self,
+                                "Failed to read next response body frames",
+                            );
+
                             message_bus
                                 .send(HttpOut::ResponseChunked(ChunkedResponse::Error(
                                     ChunkedHttpError {
@@ -180,12 +235,16 @@ impl BackgroundTask for HttpGatewayTask {
     type MessageIn = Infallible;
     type MessageOut = InProxyTaskMessage;
 
+    #[tracing::instrument(level = Level::TRACE, name = "http_gateway_task_main_loop", skip(message_bus))]
     async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         let mut backoffs =
             Backoff::new(10, Duration::from_millis(50), Duration::from_millis(500)).into_iter();
         let guard = message_bus.closed();
 
+        let mut attempt = 0;
         let error = loop {
+            attempt += 1;
+            tracing::trace!(attempt, "Starting send attempt");
             match guard.cancel_on_close(self.send_attempt(message_bus)).await {
                 None | Some(Ok(())) => return Ok(()),
                 Some(Err(error)) => {
@@ -195,8 +254,22 @@ impl BackgroundTask for HttpGatewayTask {
                         .flatten()
                         .flatten();
                     let Some(backoff) = backoff else {
+                        tracing::warn!(
+                            gateway = ?self,
+                            failed_attempts = attempt,
+                            error = ?ErrorWithSources(&error),
+                            "Failed to send an HTTP request",
+                        );
+
                         break error;
                     };
+
+                    tracing::trace!(
+                        backoff_ms = backoff.as_millis(),
+                        failed_attempts = attempt,
+                        error = ?ErrorWithSources(&error),
+                        "Trying again after backoff",
+                    );
 
                     if guard.cancel_on_close(time::sleep(backoff)).await.is_none() {
                         return Ok(());
@@ -215,6 +288,27 @@ impl BackgroundTask for HttpGatewayTask {
         message_bus.send(HttpOut::ResponseBasic(response)).await;
 
         Ok(())
+    }
+}
+
+/// Helper struct for tracing an [`Error`] along with all its sources,
+/// down to the root cause.
+///
+/// Might help when inspecting [`hyper`] errors.
+struct ErrorWithSources<'a>(&'a dyn Error);
+
+impl fmt::Debug for ErrorWithSources<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut list = f.debug_list();
+        list.entry(&self.0);
+
+        let mut source = self.0.source();
+        while let Some(error) = source {
+            list.entry(&error);
+            source = error.source();
+        }
+
+        list.finish()
     }
 }
 
