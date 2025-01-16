@@ -7,15 +7,14 @@
 //! 2. HttpSender -
 
 use std::{
-    collections::{hash_map::Entry, HashMap, VecDeque},
-    convert::Infallible,
+    collections::{hash_map::Entry, HashMap},
     io,
     net::SocketAddr,
 };
 
 use bound_socket::BoundTcpSocket;
-use http::PeekedBody;
-use hyper::body::Frame;
+use http::{ClientStore, ResponseMode, StreamingBody};
+use http_gateway::HttpGatewayTask;
 use metadata_store::MetadataStore;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
@@ -23,23 +22,18 @@ use mirrord_intproxy_protocol::{
 };
 use mirrord_protocol::{
     tcp::{
-        ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, ChunkedResponse, DaemonTcp,
-        HttpResponse, InternalHttpBody, InternalHttpBodyFrame, LayerTcp, LayerTcpSteal,
-        NewTcpConnection, TcpData, HTTP_CHUNKED_RESPONSE_VERSION, HTTP_FRAMED_VERSION,
+        ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, DaemonTcp, HttpRequest,
+        InternalHttpBodyFrame, LayerTcp, LayerTcpSteal, NewTcpConnection, StealType, TcpData,
     },
-    ClientMessage, ConnectionId, Port, RequestId, ResponseError,
+    ClientMessage, ConnectionId, RequestId, ResponseError,
 };
-use response_reader::HttpResponseReader;
-use streaming_body::StreamingBody;
+use tasks::{HttpGatewayId, HttpOut, InProxyTask, InProxyTaskError, InProxyTaskMessage};
+use tcp_proxy::{LocalTcpConnection, TcpProxyTask};
 use thiserror::Error;
-use tokio::sync::mpsc::{self, Sender};
+use tokio::sync::mpsc;
 use tracing::Level;
 
-use self::{
-    interceptor::{Interceptor, InterceptorError, MessageOut},
-    port_subscription_ext::PortSubscriptionExt,
-    subscriptions::SubscriptionsManager,
-};
+use self::subscriptions::SubscriptionsManager;
 use crate::{
     background_tasks::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
@@ -50,23 +44,20 @@ use crate::{
 
 mod bound_socket;
 mod http;
-mod interceptor;
+mod http_gateway;
 mod metadata_store;
 pub mod port_subscription_ext;
-mod response_reader;
-mod streaming_body;
 mod subscriptions;
-
-/// Identifies an [`HttpResponseReader`].
-type ReaderId = (ConnectionId, RequestId);
+mod tasks;
+mod tcp_proxy;
 
 /// Errors that can occur when handling the `incoming` feature.
 #[derive(Error, Debug)]
 pub enum IncomingProxyError {
-    #[error(transparent)]
-    Io(#[from] io::Error),
+    #[error("failed to prepare a TPC socket: {0}")]
+    SocketSetupFailed(#[source] io::Error),
     #[error("subscribing port failed: {0}")]
-    SubscriptionFailed(ResponseError),
+    SubscriptionFailed(#[source] ResponseError),
 }
 
 /// Messages consumed by [`IncomingProxy`] running as a [`BackgroundTask`].
@@ -81,14 +72,9 @@ pub enum IncomingProxyMessage {
     AgentProtocolVersion(semver::Version),
 }
 
-/// Handle for an [`Interceptor`].
-struct InterceptorHandle {
-    /// A channel for sending messages to the [`Interceptor`] task.
-    tx: TaskSender<Interceptor>,
-    /// Port subscription that the intercepted connection belongs to.
-    subscription: PortSubscription,
-    /// Senders for the bodies of in-progress HTTP requests.
-    request_body_txs: HashMap<RequestId, Sender<InternalHttpBodyFrame>>,
+struct HttpGatewayHandle {
+    _tx: TaskSender<HttpGatewayTask>,
+    body_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
 }
 
 /// Handles logic and state of the `incoming` feature.
@@ -110,20 +96,16 @@ pub struct IncomingProxy {
     subscriptions: SubscriptionsManager,
     /// For managing intercepted connections metadata.
     metadata_store: MetadataStore,
-    /// Determines which version of [`LayerTcpSteal`] we use to send HTTP responses to the agent.
-    agent_protocol_version: Option<semver::Version>,
-
-    /// [`TaskSender`]s for active [`Interceptor`]s.
-    interceptor_handles: HashMap<ConnectionId, InterceptorHandle>,
-    /// For receiving updates from [`Interceptor`]s.
-    interceptors: BackgroundTasks<ConnectionId, MessageOut, InterceptorError>,
-
-    /// [TaskSender]s for active [`HttpResponseReader`]s.
-    ///
-    /// Keep the readers alive.
-    readers_txs: HashMap<ReaderId, TaskSender<HttpResponseReader>>,
-    /// For reading bodies of user app's HTTP responses.
-    readers: BackgroundTasks<ReaderId, LayerTcpSteal, Infallible>,
+    response_mode: ResponseMode,
+    /// Cache for [`LocalHttpClient`](http::LocalHttpClient)s.
+    client_store: ClientStore,
+    /// Each mirrored remote connection is mapped to a [TcpProxyTask] in mirror mode.
+    mirror_tcp_proxies: HashMap<ConnectionId, TaskSender<TcpProxyTask>>,
+    /// Each remote connection stolen in whole is mapped to a [TcpProxyTask] in steal mode.
+    steal_tcp_proxies: HashMap<ConnectionId, TaskSender<TcpProxyTask>>,
+    /// Each remote connection stolen with a filter is mapped to [HttpGatewayTask]s.
+    http_gateways: HashMap<ConnectionId, HashMap<RequestId, HttpGatewayHandle>>,
+    tasks: BackgroundTasks<InProxyTask, InProxyTaskMessage, InProxyTaskError>,
 }
 
 impl IncomingProxy {
@@ -133,52 +115,93 @@ impl IncomingProxy {
     /// Retrieves or creates an [`Interceptor`] for the given [`HttpRequestFallback`].
     /// The request may or may not belong to an existing connection (when stealing with an http
     /// filter, connections are created implicitly).
-    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus), err)]
-    async fn get_or_create_http_interceptor(
+    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
+    async fn start_http_gateway(
         &mut self,
-        connection_id: ConnectionId,
-        port: Port,
+        request: HttpRequest<StreamingBody>,
+        body_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
         message_bus: &MessageBus<Self>,
-    ) -> Result<Option<&mut InterceptorHandle>, IncomingProxyError> {
-        let interceptor = match self.interceptor_handles.entry(connection_id) {
-            Entry::Occupied(e) => e.into_mut(),
+    ) {
+        let subscription = self.subscriptions.get(request.port).filter(|subscription| {
+            matches!(
+                subscription.subscription,
+                PortSubscription::Steal(
+                    StealType::FilteredHttp(..) | StealType::FilteredHttpEx(..)
+                )
+            )
+        });
+        let Some(subscription) = subscription else {
+            tracing::debug!(
+                port = request.port,
+                connection_id = request.connection_id,
+                request_id = request.request_id,
+                "Received a new request within a stale port subscription, sending an unsubscribe request or an error response."
+            );
 
-            Entry::Vacant(e) => {
-                let Some(subscription) = self.subscriptions.get(port) else {
-                    tracing::debug!(
-                        port,
-                        connection_id,
-                        "Received a new connection for a port that is no longer subscribed, \
-                        sending an unsubscribe request.",
-                    );
-
+            match self.http_gateways.entry(request.connection_id) {
+                // This is a new connection, we can just unsubscribe it.
+                Entry::Vacant(..) => {
                     message_bus
                         .send(ClientMessage::TcpSteal(
-                            LayerTcpSteal::ConnectionUnsubscribe(connection_id),
+                            LayerTcpSteal::ConnectionUnsubscribe(request.connection_id),
                         ))
                         .await;
+                }
 
-                    return Ok(None);
-                };
+                // This is not a new connection, but we don't have any requests in progress.
+                // We can still unsubscribe it.
+                Entry::Occupied(e) if e.get().is_empty() => {
+                    message_bus
+                        .send(ClientMessage::TcpSteal(
+                            LayerTcpSteal::ConnectionUnsubscribe(request.connection_id),
+                        ))
+                        .await;
+                    e.remove();
+                }
 
-                let interceptor_socket =
-                    BoundTcpSocket::bind_specified_or_localhost(subscription.listening_on.ip())?;
-
-                let interceptor = self.interceptors.register(
-                    Interceptor::new(interceptor_socket, subscription.listening_on),
-                    connection_id,
-                    Self::CHANNEL_SIZE,
-                );
-
-                e.insert(InterceptorHandle {
-                    tx: interceptor,
-                    subscription: subscription.subscription.clone(),
-                    request_body_txs: Default::default(),
-                })
+                // This is not a new connection, and we have requests in progress.
+                // We can only send an error response.
+                Entry::Occupied(..) => {
+                    let response = http::mirrord_error_response(
+                        "port no longer subscribed with an HTTP filter",
+                        request.version(),
+                        request.connection_id,
+                        request.request_id,
+                        request.port,
+                    );
+                    message_bus
+                        .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(
+                            response,
+                        )))
+                        .await;
+                }
             }
+
+            return;
         };
 
-        Ok(Some(interceptor))
+        let connection_id = request.connection_id;
+        let request_id = request.request_id;
+        let id = HttpGatewayId {
+            connection_id,
+            request_id,
+            port: request.port,
+            version: request.version(),
+        };
+        let tx = self.tasks.register(
+            HttpGatewayTask::new(
+                request,
+                self.client_store.clone(),
+                self.response_mode,
+                subscription.listening_on,
+            ),
+            InProxyTask::HttpGateway(id),
+            Self::CHANNEL_SIZE,
+        );
+        self.http_gateways
+            .entry(connection_id)
+            .or_default()
+            .insert(request_id, HttpGatewayHandle { _tx: tx, body_tx });
     }
 
     /// Handles all agent messages.
@@ -191,72 +214,49 @@ impl IncomingProxy {
     ) -> Result<(), IncomingProxyError> {
         match message {
             DaemonTcp::Close(close) => {
-                self.readers_txs.retain(|id, _| id.0 != close.connection_id);
-                self.interceptor_handles.remove(&close.connection_id);
+                if is_steal {
+                    self.steal_tcp_proxies.remove(&close.connection_id);
+                    self.http_gateways.remove(&close.connection_id);
+                } else {
+                    self.mirror_tcp_proxies.remove(&close.connection_id);
+                }
             }
 
             DaemonTcp::Data(data) => {
-                if let Some(interceptor) = self.interceptor_handles.get(&data.connection_id) {
-                    interceptor.tx.send(data.bytes).await;
+                let tx: Option<&TaskSender<TcpProxyTask>> = if is_steal {
+                    self.steal_tcp_proxies.get(&data.connection_id)
+                } else {
+                    self.mirror_tcp_proxies.get(&data.connection_id)
+                };
+
+                if let Some(tx) = tx {
+                    tx.send(data.bytes).await;
                 } else {
                     tracing::debug!(
                         connection_id = data.connection_id,
-                        "Received new data for a connection that is already closed",
+                        "Received new data for a connection that does not belong to any TcpProxy task",
                     );
                 }
             }
 
             DaemonTcp::HttpRequest(request) => {
-                let interceptor = self
-                    .get_or_create_http_interceptor(
-                        request.connection_id,
-                        request.port,
-                        message_bus,
-                    )
-                    .await?;
-
-                if let Some(interceptor) = interceptor {
-                    interceptor
-                        .tx
-                        .send(request.map_body(StreamingBody::from))
-                        .await;
-                }
+                self.start_http_gateway(request.map_body(From::from), None, message_bus)
+                    .await;
             }
 
             DaemonTcp::HttpRequestFramed(request) => {
-                let interceptor = self
-                    .get_or_create_http_interceptor(
-                        request.connection_id,
-                        request.port,
-                        message_bus,
-                    )
-                    .await?;
-
-                if let Some(interceptor) = interceptor {
-                    interceptor
-                        .tx
-                        .send(request.map_body(StreamingBody::from))
-                        .await;
-                }
+                self.start_http_gateway(request.map_body(From::from), None, message_bus)
+                    .await;
             }
 
             DaemonTcp::HttpRequestChunked(request) => {
                 match request {
                     ChunkedRequest::Start(request) => {
-                        let interceptor = self
-                            .get_or_create_http_interceptor(
-                                request.connection_id,
-                                request.port,
-                                message_bus,
-                            )
-                            .await?;
-
-                        if let Some(interceptor) = interceptor {
-                            let (tx, rx) = mpsc::channel::<InternalHttpBodyFrame>(128);
-                            let request = request.map_body(|frames| StreamingBody::new(rx, frames));
-                            interceptor.request_body_txs.insert(request.request_id, tx);
-                            interceptor.tx.send(request).await;
-                        }
+                        let (body_tx, body_rx) = mpsc::channel(128);
+                        let request =
+                            request.map_body(|frames| StreamingBody::new(body_rx, frames));
+                        self.start_http_gateway(request, Some(body_tx), message_bus)
+                            .await;
                     }
 
                     ChunkedRequest::Body(ChunkedHttpBody {
@@ -265,33 +265,32 @@ impl IncomingProxy {
                         connection_id,
                         request_id,
                     }) => {
-                        let Some(interceptor) = self.interceptor_handles.get_mut(&connection_id)
-                        else {
+                        let gateway = self
+                            .http_gateways
+                            .get_mut(&connection_id)
+                            .and_then(|gateways| gateways.get_mut(&request_id));
+                        let Some(gateway) = gateway else {
                             return Ok(());
                         };
 
-                        let Entry::Occupied(tx) = interceptor.request_body_txs.entry(request_id)
-                        else {
+                        let Some(tx) = gateway.body_tx.as_ref() else {
                             return Ok(());
                         };
-
-                        let mut send_err = false;
 
                         for frame in frames {
-                            if let Err(err) = tx.get().send(frame).await {
-                                send_err = true;
+                            if let Err(err) = tx.send(frame).await {
                                 tracing::debug!(
                                     frame = ?err.0,
                                     connection_id,
                                     request_id,
-                                    "Failed to send an HTTP request body frame to the interceptor, channel is closed"
+                                    "Failed to send an HTTP request body frame to the HttpGateway task, channel is closed"
                                 );
                                 break;
                             }
                         }
 
-                        if send_err || is_last {
-                            tx.remove();
+                        if is_last {
+                            gateway.body_tx = None;
                         }
                     }
 
@@ -299,16 +298,15 @@ impl IncomingProxy {
                         connection_id,
                         request_id,
                     }) => {
-                        if let Some(interceptor) = self.interceptor_handles.get_mut(&connection_id)
-                        {
-                            interceptor.request_body_txs.remove(&request_id);
-                        };
-
                         tracing::debug!(
                             connection_id,
                             request_id,
                             "Received an error in an HTTP request body",
                         );
+
+                        if let Some(gateways) = self.http_gateways.get_mut(&connection_id) {
+                            gateways.remove(&request_id);
+                        };
                     }
                 };
             }
@@ -320,12 +318,19 @@ impl IncomingProxy {
                 source_port,
                 local_address,
             }) => {
-                let Some(subscription) = self.subscriptions.get(destination_port) else {
+                let subscription =
+                    self.subscriptions
+                        .get(destination_port)
+                        .filter(|subscription| match &subscription.subscription {
+                            PortSubscription::Mirror(..) if !is_steal => true,
+                            PortSubscription::Steal(StealType::All(..)) if is_steal => true,
+                            _ => false,
+                        });
+                let Some(subscription) = subscription else {
                     tracing::debug!(
                         port = destination_port,
                         connection_id,
-                        "Received a new connection for a port that is no longer subscribed, \
-                        sending an unsubscribe request.",
+                        "Received a new connection within a stale port subscription, sending an unsubscribe request.",
                     );
 
                     let message = if is_steal {
@@ -338,13 +343,16 @@ impl IncomingProxy {
                     return Ok(());
                 };
 
-                let interceptor_socket =
-                    BoundTcpSocket::bind_specified_or_localhost(subscription.listening_on.ip())?;
+                let socket =
+                    BoundTcpSocket::bind_specified_or_localhost(subscription.listening_on.ip())
+                        .map_err(IncomingProxyError::SocketSetupFailed)?;
 
                 self.metadata_store.expect(
                     ConnMetadataRequest {
                         listener_address: subscription.listening_on,
-                        peer_address: interceptor_socket.local_addr()?,
+                        peer_address: socket
+                            .local_addr()
+                            .map_err(IncomingProxyError::SocketSetupFailed)?,
                     },
                     connection_id,
                     ConnMetadataResponse {
@@ -353,20 +361,28 @@ impl IncomingProxy {
                     },
                 );
 
-                let interceptor = self.interceptors.register(
-                    Interceptor::new(interceptor_socket, subscription.listening_on),
-                    connection_id,
+                let id = if is_steal {
+                    InProxyTask::StealTcpProxy(connection_id)
+                } else {
+                    InProxyTask::MirrorTcpProxy(connection_id)
+                };
+                let tx = self.tasks.register(
+                    TcpProxyTask::new(
+                        LocalTcpConnection::FromTheStart {
+                            socket,
+                            peer: subscription.listening_on,
+                        },
+                        !is_steal,
+                    ),
+                    id,
                     Self::CHANNEL_SIZE,
                 );
 
-                self.interceptor_handles.insert(
-                    connection_id,
-                    InterceptorHandle {
-                        tx: interceptor,
-                        subscription: subscription.subscription.clone(),
-                        request_body_txs: Default::default(),
-                    },
-                );
+                if is_steal {
+                    self.steal_tcp_proxies.insert(connection_id, tx);
+                } else {
+                    self.mirror_tcp_proxies.insert(connection_id, tx);
+                }
             }
 
             DaemonTcp::SubscribeResult(result) => {
@@ -379,110 +395,6 @@ impl IncomingProxy {
         }
 
         Ok(())
-    }
-
-    /// Handles an HTTP response coming from one of the interceptors.
-    ///
-    /// If all response frames are already available, sends the response in a single message.
-    /// Otherwise, starts a response reader to handle the response.
-    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
-    async fn handle_http_response(
-        &mut self,
-        mut response: HttpResponse<PeekedBody>,
-        message_bus: &mut MessageBus<Self>,
-    ) {
-        let tail = match response.internal_response.body.tail.take() {
-            Some(tail) => tail,
-
-            // All frames are already fetched, we don't have to wait for the body.
-            // We can send just one message.
-            None => {
-                let message = if self.agent_handles_framed_responses() {
-                    let response = response.map_body(|body| {
-                        InternalHttpBody(
-                            body.head
-                                .into_iter()
-                                .map(InternalHttpBodyFrame::from)
-                                .collect::<VecDeque<_>>(),
-                        )
-                    });
-                    LayerTcpSteal::HttpResponseFramed(response)
-                } else {
-                    // Agent does not support `LayerTcpSteal::HttpResponseFramed`.
-                    // We can only use legacy `LayerTcpSteal::HttpResponse`,
-                    // which drops trailing headers.
-                    let connection_id = response.connection_id;
-                    let request_id = response.request_id;
-                    let response = response.map_body(|body| {
-                        let mut new_body = Vec::with_capacity(body.head.iter().filter_map(Frame::data_ref).map(|data| data.len()).sum());
-                        body.head.into_iter().for_each(|frame| match frame.into_data() {
-                            Ok(data) => new_body.extend(data),
-                            Err(frame) => {
-                                if let Some(headers) = frame.trailers_ref() {
-                                    tracing::warn!(
-                                        connection_id,
-                                        request_id,
-                                        agent_protocol_version = ?self.agent_protocol_version,
-                                        ?headers,
-                                        "Agent uses an outdated version of mirrord protocol, \
-                                        we can't send trailing headers from the local application's HTTP response."
-                                    )
-                                }
-                            }
-                        });
-                        new_body
-                    });
-                    LayerTcpSteal::HttpResponse(response)
-                };
-
-                message_bus.send(ClientMessage::TcpSteal(message)).await;
-
-                return;
-            }
-        };
-
-        let reader_id = (response.connection_id, response.request_id);
-        let response_reader = if self.agent_handles_streamed_responses() {
-            let response = response.map_body(|body| {
-                body.head
-                    .into_iter()
-                    .map(InternalHttpBodyFrame::from)
-                    .collect::<Vec<_>>()
-            });
-            let connection_id = response.connection_id;
-            let request_id = response.request_id;
-            let message = ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
-                ChunkedResponse::Start(response),
-            ));
-            message_bus.send(message).await;
-            HttpResponseReader::Chunked {
-                connection_id,
-                request_id,
-                body: tail,
-            }
-        } else if self.agent_handles_framed_responses() {
-            response.internal_response.body.tail.replace(tail);
-            HttpResponseReader::Framed(response)
-        } else {
-            response.internal_response.body.tail.replace(tail);
-            HttpResponseReader::Legacy(response)
-        };
-
-        self.readers.register(response_reader, reader_id, 16);
-    }
-
-    fn agent_handles_framed_responses(&self) -> bool {
-        self.agent_protocol_version
-            .as_ref()
-            .map(|version| HTTP_FRAMED_VERSION.matches(version))
-            .unwrap_or_default()
-    }
-
-    fn agent_handles_streamed_responses(&self) -> bool {
-        self.agent_protocol_version
-            .as_ref()
-            .map(|version| HTTP_CHUNKED_RESPONSE_VERSION.matches(version))
-            .unwrap_or_default()
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self, message_bus), err)]
@@ -544,7 +456,7 @@ impl IncomingProxy {
             }
 
             IncomingProxyMessage::AgentProtocolVersion(version) => {
-                self.agent_protocol_version.replace(version);
+                self.response_mode = ResponseMode::from(&version);
             }
         }
 
@@ -552,92 +464,162 @@ impl IncomingProxy {
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
-    async fn handle_interceptor_update(
+    async fn handle_task_update(
         &mut self,
-        connection_id: ConnectionId,
-        update: TaskUpdate<MessageOut, InterceptorError>,
+        id: InProxyTask,
+        update: TaskUpdate<InProxyTaskMessage, InProxyTaskError>,
         message_bus: &mut MessageBus<Self>,
     ) {
-        match update {
-            TaskUpdate::Finished(res) => {
-                if let Err(error) = res {
-                    tracing::warn!(connection_id, %error, "Incoming interceptor failed");
-                }
+        match (id, update) {
+            (InProxyTask::MirrorTcpProxy(connection_id), TaskUpdate::Finished(result)) => {
+                match result {
+                    Err(TaskError::Error(error)) => {
+                        tracing::warn!(connection_id, %error, "MirrorTcpProxy task failed");
+                    }
+                    Err(TaskError::Panic) => {
+                        tracing::error!(connection_id, "MirrorTcpProxy task panicked");
+                    }
+                    Ok(()) => {}
+                };
 
                 self.metadata_store.no_longer_expect(connection_id);
 
-                let msg = self
-                    .interceptor_handles
-                    .get(&connection_id)
-                    .map(|interceptor| {
-                        interceptor
-                            .subscription
-                            .wrap_agent_unsubscribe_connection(connection_id)
-                    });
-                if let Some(msg) = msg {
-                    message_bus.send(msg).await;
-                }
-
-                self.interceptor_handles.remove(&connection_id);
-            }
-
-            TaskUpdate::Message(msg) => {
-                let Some(PortSubscription::Steal(_)) = self
-                    .interceptor_handles
-                    .get(&connection_id)
-                    .map(|interceptor| &interceptor.subscription)
-                else {
-                    return;
-                };
-
-                match msg {
-                    MessageOut::Raw(bytes) => {
-                        let msg = ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
-                            connection_id,
-                            bytes,
-                        }));
-
-                        message_bus.send(msg).await;
-                    }
-
-                    MessageOut::Http(response) => {
-                        self.handle_http_response(response, message_bus).await;
-                    }
-                };
-            }
-        }
-    }
-
-    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
-    async fn handle_response_reader_update(
-        &mut self,
-        connection_id: ConnectionId,
-        request_id: RequestId,
-        update: TaskUpdate<LayerTcpSteal, Infallible>,
-        message_bus: &mut MessageBus<Self>,
-    ) {
-        match update {
-            TaskUpdate::Finished(Ok(())) => {
-                self.readers_txs.remove(&(connection_id, request_id));
-            }
-
-            TaskUpdate::Finished(Err(TaskError::Panic)) => {
-                tracing::error!(connection_id, request_id, "HttpResponseReader panicked");
-
-                self.readers_txs.remove(&(connection_id, request_id));
-                if let Some(interceptor) = self.interceptor_handles.remove(&connection_id) {
+                if self.mirror_tcp_proxies.remove(&connection_id).is_some() {
                     message_bus
-                        .send(
-                            interceptor
-                                .subscription
-                                .wrap_agent_unsubscribe_connection(connection_id),
-                        )
+                        .send(ClientMessage::Tcp(LayerTcp::ConnectionUnsubscribe(
+                            connection_id,
+                        )))
                         .await;
                 }
             }
 
-            TaskUpdate::Message(msg) => {
-                message_bus.send(ClientMessage::TcpSteal(msg)).await;
+            (InProxyTask::MirrorTcpProxy(..), TaskUpdate::Message(..)) => unreachable!(),
+
+            (InProxyTask::StealTcpProxy(connection_id), TaskUpdate::Finished(result)) => {
+                match result {
+                    Err(TaskError::Error(error)) => {
+                        tracing::warn!(connection_id, %error, "StealTcpProxy task failed");
+                    }
+                    Err(TaskError::Panic) => {
+                        tracing::error!(connection_id, "StealTcpProxy task panicked");
+                    }
+                    Ok(()) => {}
+                };
+
+                self.metadata_store.no_longer_expect(connection_id);
+
+                if self.steal_tcp_proxies.remove(&connection_id).is_some() {
+                    message_bus
+                        .send(ClientMessage::Tcp(LayerTcp::ConnectionUnsubscribe(
+                            connection_id,
+                        )))
+                        .await;
+                }
+            }
+
+            (
+                InProxyTask::StealTcpProxy(connection_id),
+                TaskUpdate::Message(InProxyTaskMessage::Tcp(bytes)),
+            ) => {
+                if self.steal_tcp_proxies.contains_key(&connection_id) {
+                    message_bus
+                        .send(ClientMessage::TcpSteal(LayerTcpSteal::Data(TcpData {
+                            connection_id,
+                            bytes,
+                        })))
+                        .await;
+                }
+            }
+
+            (InProxyTask::StealTcpProxy(..), TaskUpdate::Message(InProxyTaskMessage::Http(..))) => {
+                unreachable!()
+            }
+
+            (InProxyTask::HttpGateway(id), TaskUpdate::Finished(result)) => {
+                let respond_on_panic = self
+                    .http_gateways
+                    .get_mut(&id.connection_id)
+                    .and_then(|gateways| gateways.remove(&id.request_id))
+                    .is_some();
+
+                match result {
+                    Ok(()) => {}
+                    Err(TaskError::Error(
+                        InProxyTaskError::IoError(..) | InProxyTaskError::UpgradeError(..),
+                    )) => unreachable!(),
+                    Err(TaskError::Panic) => {
+                        tracing::error!(
+                            connection_id = id.connection_id,
+                            request_id = id.request_id,
+                            "HttpGatewayTask panicked",
+                        );
+
+                        if respond_on_panic {
+                            let response = http::mirrord_error_response(
+                                "HTTP gateway task panicked",
+                                id.version,
+                                id.connection_id,
+                                id.request_id,
+                                id.port,
+                            );
+                            message_bus
+                                .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(
+                                    response,
+                                )))
+                                .await;
+                        }
+                    }
+                }
+            }
+
+            (
+                InProxyTask::HttpGateway(id),
+                TaskUpdate::Message(InProxyTaskMessage::Http(message)),
+            ) => {
+                let exists = self
+                    .http_gateways
+                    .get(&id.connection_id)
+                    .and_then(|gateways| gateways.get(&id.request_id))
+                    .is_some();
+                if !exists {
+                    return;
+                }
+
+                match message {
+                    HttpOut::ResponseBasic(response) => {
+                        message_bus
+                            .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(
+                                response,
+                            )))
+                            .await
+                    }
+                    HttpOut::ResponseFramed(response) => {
+                        message_bus
+                            .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(
+                                response,
+                            )))
+                            .await
+                    }
+                    HttpOut::ResponseChunked(response) => {
+                        message_bus
+                            .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
+                                response,
+                            )))
+                            .await;
+                    }
+                    HttpOut::Upgraded(on_upgrade) => {
+                        let proxy = self.tasks.register(
+                            TcpProxyTask::new(LocalTcpConnection::AfterUpgrade(on_upgrade), false),
+                            InProxyTask::StealTcpProxy(id.connection_id),
+                            Self::CHANNEL_SIZE,
+                        );
+                        self.steal_tcp_proxies.insert(id.connection_id, proxy);
+                    }
+                }
+            }
+
+            (InProxyTask::HttpGateway(..), TaskUpdate::Message(InProxyTaskMessage::Tcp(..))) => {
+                unreachable!()
             }
         }
     }
@@ -660,9 +642,7 @@ impl BackgroundTask for IncomingProxy {
                     Some(message) => self.handle_message(message, message_bus).await?,
                 },
 
-                Some((id, update)) = self.interceptors.next() => self.handle_interceptor_update(id, update, message_bus).await,
-
-                Some((id, update)) = self.readers.next() => self.handle_response_reader_update(id.0, id.1, update, message_bus).await,
+                Some((id, update)) = self.tasks.next() => self.handle_task_update(id, update, message_bus).await,
             }
         }
     }

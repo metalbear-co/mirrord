@@ -4313,7 +4313,6 @@ version = "3.128.0"
 dependencies = [
  "bytes",
  "exponential-backoff",
- "futures",
  "h2 0.4.7",
  "http-body-util",
  "hyper 1.5.2",

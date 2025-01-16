@@ -1,136 +1,53 @@
-use std::{
-    error::Error,
-    fmt, io,
-    net::SocketAddr,
-    ops::Not,
-    time::{Duration, Instant},
-};
+use std::{error::Error, fmt, io, net::SocketAddr};
 
-use bytes::Bytes;
-use exponential_backoff::Backoff;
 use hyper::{
-    body::{Frame, Incoming},
+    body::Incoming,
     client::conn::{http1, http2},
     Request, Response, StatusCode, Version,
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use mirrord_protocol::{
-    batched_body::BatchedBody,
     tcp::{HttpRequest, HttpResponse, InternalHttpResponse},
     ConnectionId, Port, RequestId,
 };
 use thiserror::Error;
-use tokio::{net::TcpStream, time};
+use tokio::net::TcpStream;
 use tracing::Level;
 
-use super::{bound_socket::BoundTcpSocket, streaming_body::StreamingBody};
+mod client_store;
+mod response_mode;
+mod streaming_body;
 
-/// A retrying HTTP client used to pass requests to the user application.
+pub use client_store::ClientStore;
+pub use response_mode::ResponseMode;
+pub use streaming_body::StreamingBody;
+
+/// An HTTP client used to pass requests to the user application.
 pub struct LocalHttpClient {
     /// Established HTTP connection with the user application.
-    sender: Option<HttpSender>,
-    /// Established TCP connection with the user application.
-    stream: Option<TcpStream>,
+    sender: HttpSender,
     /// Address of the user application's HTTP server.
     local_server_address: SocketAddr,
 }
 
 impl LocalHttpClient {
-    /// How many times we attempt to send any given request.
-    ///
-    /// See [`LocalHttpError::can_retry`].
-    const MAX_SEND_ATTEMPTS: u32 = 10;
-    const MIN_SEND_BACKOFF: Duration = Duration::from_millis(10);
-    const MAX_SEND_BACKOFF: Duration = Duration::from_millis(250);
-
-    /// Crates a new client that will initially use the given `stream` (connection with the user
-    /// application's HTTP server).
-    pub fn new_for_stream(stream: TcpStream) -> Result<Self, LocalHttpError> {
+    /// Makes an HTTP connection with the given server and creates a new client.
+    pub async fn new(
+        local_server_address: SocketAddr,
+        version: Version,
+    ) -> Result<Self, LocalHttpError> {
+        let stream = TcpStream::connect(local_server_address)
+            .await
+            .map_err(LocalHttpError::ConnectTcpFailed)?;
         let local_server_address = stream
             .peer_addr()
             .map_err(LocalHttpError::SocketSetupFailed)?;
+        let sender = HttpSender::handshake(version, stream).await?;
 
         Ok(Self {
-            sender: None,
-            stream: Some(stream),
+            sender,
             local_server_address,
         })
-    }
-
-    /// Reuses or creates a new [`HttpSender`].
-    async fn get_sender(&mut self, version: Version) -> Result<HttpSender, LocalHttpError> {
-        if let Some(sender) = self.sender.take() {
-            if sender.version_matches(version) {
-                tracing::trace!("Reusing the HTTP connection.");
-                return Ok(sender);
-            } else {
-                tracing::trace!("HTTP connection found, but the HTTP version does not match.");
-            }
-        }
-
-        let stream = match self.stream.take() {
-            Some(stream) => {
-                tracing::trace!("Reusing the TCP connection.");
-                stream
-            }
-            None => {
-                let socket =
-                    BoundTcpSocket::bind_specified_or_localhost(self.local_server_address.ip())
-                        .map_err(LocalHttpError::SocketSetupFailed)?;
-
-                let start = Instant::now();
-                let socket = socket
-                    .connect(self.local_server_address)
-                    .await
-                    .map_err(LocalHttpError::ConnectTcpFailed)?;
-                tracing::trace!(
-                    elapsed_s = start.elapsed().as_secs_f32(),
-                    "Made the TCP connection"
-                );
-
-                socket
-            }
-        };
-
-        let start = Instant::now();
-        let sender = HttpSender::handshake(version, stream).await?;
-        tracing::trace!(
-            elapsed_s = start.elapsed().as_secs_f32(),
-            "Made the HTTP connection"
-        );
-
-        Ok(sender)
-    }
-
-    /// Tries to send the given `request` to the user application's HTTP server.
-    ///
-    /// Checks whether some reponse [`Frame`]s are instantly available.
-    async fn try_send_request(
-        &mut self,
-        request: &HttpRequest<StreamingBody>,
-    ) -> Result<Response<PeekedBody>, LocalHttpError> {
-        let mut sender = self.get_sender(request.version()).await?;
-
-        let start = Instant::now();
-        let response = sender.send_request(request.clone()).await?;
-        tracing::trace!(
-            elapsed_s = start.elapsed().as_secs_f32(),
-            "Sent the HTTP request"
-        );
-
-        let (parts, mut body) = response.into_parts();
-
-        let frames = body
-            .ready_frames()
-            .map_err(LocalHttpError::ReadBodyFailed)?;
-        let body = PeekedBody {
-            head: frames.frames,
-            tail: frames.is_last.not().then_some(body),
-        };
-
-        self.sender.replace(sender);
-
-        Ok(Response::from_parts(parts, body))
     }
 
     /// Tries to send the given `request` to the user application's HTTP server.
@@ -139,50 +56,22 @@ impl LocalHttpClient {
     #[tracing::instrument(level = Level::DEBUG, err(level = Level::WARN), ret)]
     pub async fn send_request(
         &mut self,
-        request: &HttpRequest<StreamingBody>,
-    ) -> Result<Response<PeekedBody>, LocalHttpError> {
-        let mut backoffs = Backoff::new(
-            Self::MAX_SEND_ATTEMPTS,
-            Self::MIN_SEND_BACKOFF,
-            Self::MAX_SEND_BACKOFF,
-        )
-        .into_iter()
-        .flatten();
+        request: HttpRequest<StreamingBody>,
+    ) -> Result<Response<Incoming>, LocalHttpError> {
+        self.sender.send_request(request).await
+    }
 
-        let mut attempt = 0;
-        loop {
-            attempt += 1;
-            tracing::trace!(attempt, "Trying to send the request");
-            match (self.try_send_request(request).await, backoffs.next()) {
-                (Ok(response), _) => {
-                    break Ok(response);
-                }
+    /// Returns the address of the local server to which this client is connected.
+    pub fn local_server_address(&self) -> SocketAddr {
+        self.local_server_address
+    }
 
-                (Err(error), Some(backoff)) if error.can_retry() => {
-                    tracing::warn!(
-                        attempt,
-                        connection_id = request.connection_id,
-                        request_id = request.request_id,
-                        %error,
-                        backoff_s = backoff.as_secs_f32(),
-                        "Failed to send the request to the local application, retrying",
-                    );
-
-                    time::sleep(backoff).await;
-                }
-
-                (Err(error), _) => {
-                    tracing::warn!(
-                        attempts = attempt,
-                        connection_id = request.connection_id,
-                        request_id = request.request_id,
-                        %error,
-                        "Failed to send the request to the local application",
-                    );
-
-                    break Err(error);
-                }
-            }
+    pub fn handles_version(&self, version: Version) -> bool {
+        match (&self.sender, version) {
+            (_, Version::HTTP_3) => false,
+            (HttpSender::V2(..), Version::HTTP_2) => true,
+            (HttpSender::V1(..), _) => true,
+            (HttpSender::V2(..), _) => false,
         }
     }
 }
@@ -190,8 +79,6 @@ impl LocalHttpClient {
 impl fmt::Debug for LocalHttpClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LocalHttpClient")
-            .field("has_sender", &self.sender.is_some())
-            .field("has_stream", &self.stream.is_some())
             .field("local_server_address", &self.local_server_address)
             .finish()
     }
@@ -200,7 +87,7 @@ impl fmt::Debug for LocalHttpClient {
 /// Errors that can occur when sending an HTTP request to the user application.
 #[derive(Error, Debug)]
 pub enum LocalHttpError {
-    #[error("HTTP handshake failed: {0}")]
+    #[error("handshake failed: {0}")]
     HandshakeFailed(#[source] hyper::Error),
 
     #[error("{0:?} is not supported")]
@@ -248,43 +135,26 @@ impl LocalHttpError {
             }
         }
     }
-
-    /// Produces a [`StatusCode::BAD_GATEWAY`] response from this error.
-    pub fn as_error_response(
-        &self,
-        version: Version,
-        request_id: RequestId,
-        connection_id: ConnectionId,
-        port: Port,
-    ) -> HttpResponse<Vec<u8>> {
-        HttpResponse {
-            request_id,
-            connection_id,
-            port,
-            internal_response: InternalHttpResponse {
-                status: StatusCode::BAD_GATEWAY,
-                version,
-                headers: Default::default(),
-                body: format!("mirrord: {self}").into_bytes(),
-            },
-        }
-    }
 }
 
-/// Response body returned from [`LocalHttpClient`].
-pub struct PeekedBody {
-    /// [`Frame`]s that were instantly available.
-    pub head: Vec<Frame<Bytes>>,
-    /// The rest of the response's body.
-    pub tail: Option<Incoming>,
-}
-
-impl fmt::Debug for PeekedBody {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PeekedBody")
-            .field("head", &self.head)
-            .field("has_tail", &self.tail.is_some())
-            .finish()
+/// Produces a mirrord-specific [`StatusCode::BAD_GATEWAY`] response.
+pub fn mirrord_error_response<M: fmt::Display>(
+    message: M,
+    version: Version,
+    connection_id: ConnectionId,
+    request_id: RequestId,
+    port: Port,
+) -> HttpResponse<Vec<u8>> {
+    HttpResponse {
+        connection_id,
+        port,
+        request_id,
+        internal_response: InternalHttpResponse {
+            status: StatusCode::BAD_GATEWAY,
+            version,
+            headers: Default::default(),
+            body: format!("mirrord: {message}\n").into_bytes(),
+        },
     }
 }
 
@@ -390,16 +260,6 @@ impl HttpSender {
                     .await
                     .map_err(LocalHttpError::SendFailed)
             }
-        }
-    }
-
-    /// Returns whether this [`HttpSender`] can handle requests of the given [`Version`].
-    fn version_matches(&self, version: Version) -> bool {
-        match (version, self) {
-            (Version::HTTP_2, Self::V2(..)) => true,
-            (Version::HTTP_3, _) => false,
-            (_, Self::V1(..)) => true,
-            _ => false,
         }
     }
 }

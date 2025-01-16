@@ -23,14 +23,6 @@ pub struct MessageBus<T: BackgroundTask> {
 }
 
 impl<T: BackgroundTask> MessageBus<T> {
-    /// Wraps this message bus into a struct that allows for peeking the next incoming message.
-    pub fn peekable(&mut self) -> PeekableMessageBus<'_, T> {
-        PeekableMessageBus {
-            peeked: None,
-            message_bus: self,
-        }
-    }
-
     /// Attempts to send a message to this task's parent.
     pub async fn send<M: Into<T::MessageOut>>(&self, msg: M) {
         let _ = self.tx.send(msg.into()).await;
@@ -44,69 +36,20 @@ impl<T: BackgroundTask> MessageBus<T> {
             msg = self.rx.recv() => msg,
         }
     }
-}
 
-/// Runs the given [`Future`] and returns its output, unless the given [`MessageBus`] gets closed
-/// first. In that case, returns [`None`].
-///
-/// Can be used to make sure [`BackgroundTask`]s don't linger when they are no longer needed.
-pub async fn unless_bus_closed<F, T>(message_bus: &MessageBus<T>, future: F) -> Option<F::Output>
-where
-    F: Future,
-    T: BackgroundTask,
-{
-    tokio::select! {
-        _ = message_bus.tx.closed() => None,
-        output = future => Some(output),
+    pub fn closed(&self) -> Closed<T> {
+        Closed(self.tx.clone())
     }
 }
 
-/// Wrapper over [`MessageBus`].
-///
-/// Allows for peeking the next incoming message.
-pub struct PeekableMessageBus<'a, T: BackgroundTask> {
-    peeked: Option<T::MessageIn>,
-    message_bus: &'a mut MessageBus<T>,
-}
+pub struct Closed<T: BackgroundTask>(Sender<T::MessageOut>);
 
-impl<'a, T: BackgroundTask> PeekableMessageBus<'a, T> {
-    /// Attempts to send a message to this task's parent.
-    pub async fn send<M: Into<T::MessageOut>>(&self, msg: M) {
-        let _ = self.message_bus.tx.send(msg.into()).await;
-    }
-
-    /// Receives a message from this task's parent.
-    /// [`None`] means that the channel is closed and there will be no more messages.
-    pub async fn recv(&mut self) -> Option<T::MessageIn> {
-        if self.peeked.is_some() {
-            return self.peeked.take();
-        }
-
+impl<T: BackgroundTask> Closed<T> {
+    pub async fn cancel_on_close<F: Future>(&self, future: F) -> Option<F::Output> {
         tokio::select! {
-            _ = self.message_bus.tx.closed() => None,
-            msg = self.message_bus.rx.recv() => msg,
+            _ = self.0.closed() => None,
+            output = future => Some(output)
         }
-    }
-
-    /// Peeks the next message from this task's parent.
-    /// [`None`] means that the channel is closed and there will be no more messages.
-    pub async fn peek(&mut self) -> Option<&T::MessageIn> {
-        if self.peeked.is_some() {
-            return self.peeked.as_ref();
-        }
-
-        tokio::select! {
-            _ = self.message_bus.tx.closed() => None,
-            msg = self.message_bus.rx.recv() => {
-                self.peeked = msg;
-                self.peeked.as_ref()
-            },
-        }
-    }
-
-    /// Returns an immutable reference to the wrapped [`MessageBus`].
-    pub fn inner(&self) -> &MessageBus<T> {
-        self.message_bus
     }
 }
 

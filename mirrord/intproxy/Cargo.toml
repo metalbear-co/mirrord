@@ -45,6 +45,5 @@ rustls-pemfile.workspace = true
 exponential-backoff = "2"
 
 [dev-dependencies]
-futures.workspace = true
 reqwest.workspace = true
 rstest.workspace = true
