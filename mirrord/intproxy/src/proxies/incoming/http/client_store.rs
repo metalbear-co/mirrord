@@ -1,21 +1,38 @@
-use std::{cmp, net::SocketAddr, time::Duration};
+use std::{
+    cmp,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use hyper::Version;
 use tokio::{
-    sync::watch,
+    sync::Notify,
     time::{self, Instant},
 };
 
 use super::{LocalHttpClient, LocalHttpError};
 
+/// Idle [`LocalHttpClient`] caches in [`ClientStore`].
 #[derive(Debug)]
 struct IdleLocalClient {
     client: LocalHttpClient,
     last_used: Instant,
 }
 
+/// Cache for unused [`LocalHttpClient`]s.
+///
+/// [`LocalHttpClient`] that have not been used for some time are dropped in the background by a
+/// dedicated [`tokio::task`].
 #[derive(Clone)]
-pub struct ClientStore(watch::Sender<Vec<IdleLocalClient>>);
+pub struct ClientStore {
+    clients: Arc<Mutex<Vec<IdleLocalClient>>>,
+    /// Used to notify other tasks when there is a new client in the store.
+    ///
+    /// Make sure to only call [`Notify::notify_waiters`] and [`Notify::notified`] when holding a
+    /// lock on [`Self::clients`]. Otherwise you'll have a race condition.
+    notify: Arc<Notify>,
+}
 
 impl Default for ClientStore {
     fn default() -> Self {
@@ -26,40 +43,40 @@ impl Default for ClientStore {
 impl ClientStore {
     const IDLE_CLIENT_TIMEOUT: Duration = Duration::from_secs(3);
 
+    /// Creates a new store.
+    ///
+    /// The store will keep unused clients alive for at least the given time.
     pub fn new_with_timeout(timeout: Duration) -> Self {
-        let (tx, _) = watch::channel(Default::default());
+        let store = Self {
+            clients: Default::default(),
+            notify: Default::default(),
+        };
 
-        tokio::spawn(cleanup_task(tx.clone(), timeout));
+        tokio::spawn(cleanup_task(store.clone(), timeout));
 
-        Self(tx)
+        store
     }
 
+    /// Reuses or creates a new [`LocalHttpClient`].
     pub async fn get(
         &self,
         server_addr: SocketAddr,
         version: Version,
     ) -> Result<LocalHttpClient, LocalHttpError> {
-        let mut ready = None;
-
-        self.0.send_if_modified(|clients| {
-            println!("ready clients: {clients:?}");
-            let position = clients.iter().position(|idle| {
+        let ready = {
+            let mut guard = self.clients.lock().unwrap();
+            let position = guard.iter().position(|idle| {
                 idle.client.handles_version(version)
                     && idle.client.local_server_address() == server_addr
             });
-
-            let Some(position) = position else {
-                return false;
-            };
-
-            let client = clients.swap_remove(position).client;
-            ready.replace(client);
-            true
-        });
+            match position {
+                Some(position) => Some(guard.swap_remove(position)),
+                None => None,
+            }
+        };
 
         if let Some(ready) = ready {
-            println!("found ready client");
-            return Ok(ready);
+            return Ok(ready.client);
         }
 
         let connect_task = tokio::spawn(LocalHttpClient::new(server_addr, version));
@@ -70,58 +87,54 @@ impl ClientStore {
         }
     }
 
+    /// Stores an unused [`LocalHttpClient`], so that it can be reused later.
     pub fn push_idle(&self, client: LocalHttpClient) {
-        println!("storing idle client {client:?}");
-        self.0.send_modify(|clients| {
-            clients.push(IdleLocalClient {
-                client,
-                last_used: Instant::now(),
-            })
+        let mut guard = self.clients.lock().unwrap();
+        guard.push(IdleLocalClient {
+            client,
+            last_used: Instant::now(),
         });
+        self.notify.notify_waiters();
     }
 
+    /// Waits until there is a ready unused client.
     async fn wait_for_ready(&self, server_addr: SocketAddr, version: Version) -> LocalHttpClient {
-        let mut recevier = self.0.subscribe();
-
         loop {
-            let mut ready = None;
-
-            self.0.send_if_modified(|clients| {
-                let position = clients.iter().position(|idle| {
+            let notified = {
+                let mut guard = self.clients.lock().unwrap();
+                let position = guard.iter().position(|idle| {
                     idle.client.handles_version(version)
                         && idle.client.local_server_address() == server_addr
                 });
-                let Some(position) = position else {
-                    return false;
-                };
 
-                let client = clients.swap_remove(position).client;
-                ready.replace(client);
+                match position {
+                    Some(position) => return guard.swap_remove(position).client,
+                    None => self.notify.notified(),
+                }
+            };
 
-                true
-            });
-
-            if let Some(ready) = ready {
-                break ready;
-            }
-
-            recevier
-                .changed()
-                .await
-                .expect("sender alive in this struct");
+            notified.await;
         }
     }
 }
 
-async fn cleanup_task(clients: watch::Sender<Vec<IdleLocalClient>>, idle_client_timeout: Duration) {
+/// Cleans up stale [`LocalHttpClient`]s from the [`ClientStore`].
+async fn cleanup_task(store: ClientStore, idle_client_timeout: Duration) {
+    let clients = Arc::downgrade(&store.clients);
+    let notify = store.notify.clone();
+    std::mem::drop(store);
+
     loop {
+        let Some(clients) = clients.upgrade() else {
+            break;
+        };
+
         let now = Instant::now();
         let mut min_last_used = None;
-
-        clients.send_if_modified(|clients| {
-            let mut removed = false;
-
-            clients.retain(|client| {
+        let notified = {
+            let mut guard = clients.lock().unwrap();
+            let notified = notify.notified();
+            guard.retain(|client| {
                 if client.last_used + idle_client_timeout > now {
                     min_last_used = min_last_used
                         .map(|previous| cmp::min(previous, client.last_used))
@@ -129,22 +142,16 @@ async fn cleanup_task(clients: watch::Sender<Vec<IdleLocalClient>>, idle_client_
 
                     true
                 } else {
-                    removed = true;
                     false
                 }
             });
-
-            removed
-        });
+            notified
+        };
 
         if let Some(min_last_used) = min_last_used {
             time::sleep_until(min_last_used + idle_client_timeout).await;
         } else {
-            clients
-                .subscribe()
-                .changed()
-                .await
-                .expect("sender alive in this function");
+            notified.await;
         }
     }
 }
@@ -155,7 +162,9 @@ mod test {
 
     use bytes::Bytes;
     use http_body_util::Empty;
-    use hyper::{body::Incoming, server::conn::http1, service::service_fn, Request, Response, Version};
+    use hyper::{
+        body::Incoming, server::conn::http1, service::service_fn, Request, Response, Version,
+    };
     use hyper_util::rt::TokioIo;
     use tokio::{net::TcpListener, time};
 
@@ -186,6 +195,6 @@ mod test {
 
         time::sleep(Duration::from_millis(100)).await;
 
-        assert!(client_store.0.borrow().is_empty());
+        assert!(client_store.clients.lock().unwrap().is_empty());
     }
 }
