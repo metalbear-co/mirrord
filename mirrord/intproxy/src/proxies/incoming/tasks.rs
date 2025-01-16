@@ -1,4 +1,4 @@
-use std::{convert::Infallible, io};
+use std::{convert::Infallible, fmt, io};
 
 use hyper::{upgrade::OnUpgrade, Version};
 use mirrord_protocol::{
@@ -7,10 +7,21 @@ use mirrord_protocol::{
 };
 use thiserror::Error;
 
-#[derive(Debug)]
 pub enum InProxyTaskMessage {
     Tcp(Vec<u8>),
     Http(HttpOut),
+}
+
+impl fmt::Debug for InProxyTaskMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Tcp(data) => f
+                .debug_tuple("Tcp")
+                .field(&format_args!("{} bytes", data.len()))
+                .finish(),
+            Self::Http(msg) => f.debug_tuple("Http").field(msg).finish(),
+        }
+    }
 }
 
 #[derive(Debug)]
