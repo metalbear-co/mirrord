@@ -15,20 +15,33 @@ use super::{
 };
 use crate::background_tasks::{BackgroundTask, MessageBus};
 
+/// Local TCP connections between the [`TcpProxyTask`] and the user application.
 pub enum LocalTcpConnection {
+    /// Not yet established. Should be made by the [`TcpProxyTask`] from the given
+    /// [`BoundTcpSocket`].
     FromTheStart {
         socket: BoundTcpSocket,
         peer: SocketAddr,
     },
+    /// Upgraded HTTP connection from a previously stolen HTTP request.
     AfterUpgrade(OnUpgrade),
 }
 
+/// [`BackgroundTask`] of [`IncomingProxy`](super::IncomingProxy) that handles a remote
+/// stolen/mirrored TCP connection.
 pub struct TcpProxyTask {
+    /// The local connection between this task and the user application.
     connection: LocalTcpConnection,
+    /// Whether this task should silently discard data coming from the user application.
     discard_data: bool,
 }
 
 impl TcpProxyTask {
+    /// Creates a new task.
+    ///
+    /// * This task will talk with the user application using the given [`LocalTcpConnection`].
+    /// * If `discard_data` is set, this task will silently discard all data coming from the user
+    ///   application.
     pub fn new(connection: LocalTcpConnection, discard_data: bool) -> Self {
         Self {
             connection,
