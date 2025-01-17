@@ -68,19 +68,23 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
     schema.into()
 }
 
-// - Only path is `Some` -> use current namespace.
-// - Only namespace is `Some` -> this should only happen in `mirrord ls`. In `mirrord exec`
-//   namespace without a path does not mean anything and therefore should be prevented by returning
-//   an error. The error is not returned when parsing the configuration because it's not an error
-//   for `mirrord ls`.
-// - Both are `None` -> targetless.
-/// Specifies the target and namespace to mirror, see [`path`](#target-path) for a list of
-/// accepted values for the `target` option.
+/// Specifies the target and namespace to target.
 ///
 /// The simplified configuration supports:
 ///
-/// - `pod/{sample-pod}/[container]/{sample-container}`;
-/// - `deployment/{sample-deployment}/[container]/{sample-container}`;
+/// - `targetless`
+/// - `pod/{pod-name}[/container/{container-name}]`;
+/// - `deployment/{deployment-name}[/container/{container-name}]`;
+/// - `rollout/{rollout-name}[/container/{container-name}]`;
+/// - `job/{job-name}[/container/{container-name}]`;
+/// - `cronjob/{cronjob-name}[/container/{container-name}]`;
+/// - `statefulset/{statefulset-name}[/container/{container-name}]`;
+/// - `service/{service-name}[/container/{container-name}]`;
+///
+/// Please note that:
+///
+/// - `job`, `cronjob`, `statefulset` and `service` targets require the mirrord Operator
+/// - `job` and `cronjob` targets require the [`copy_target`](#feature-copy_target) feature
 ///
 /// Shortened setup:
 ///
@@ -90,34 +94,59 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
 /// }
 /// ```
 ///
+/// Setup above will result in a session targeting the `bear-pod` Kubernetes pod
+/// in the user's default namespace. Target container will be chosen by mirrord.
+///
+/// Shortened setup with target container:
+///
+/// ```json
+/// {
+///   "target": "pod/bear-pod/container/bear-pod-container"
+/// }
+/// ```
+///
+/// Setup above will result in a session targeting the `bear-pod-container` container
+/// in the `bear-pod` Kubernetes pod in the user's default namespace.
+///
 /// Complete setup:
 ///
 /// ```json
 /// {
 ///  "target": {
 ///    "path": {
-///      "pod": "bear-pod"
+///      "pod": "bear-pod",
+///      "container": "bear-pod-container"
 ///    },
-///    "namespace": "default"
+///    "namespace": "bear-pod-namespace"
 ///  }
 /// }
 /// ```
+///
+/// Setup above will result in a session targeting the `bear-pod-container` container
+/// in the `bear-pod` Kubernetes pod in the `bear-pod-namespace` namespace.
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct TargetConfig {
     /// ### target.path {#target-path}
     ///
-    /// Specifies the running pod (or deployment) to mirror.
+    /// Specifies the Kubernetes resource to target.
     ///
-    /// Note: Deployment level steal/mirroring is available only in mirrord for Teams
-    /// If you use it without it, it will choose a random pod replica to work with.
+    /// Note: targeting services and whole workloads is available only in mirrord for Teams.
+    /// If you target a workload without the mirrord Operator, it will choose a random pod replica
+    /// to work with.
     ///
     /// Supports:
-    /// - `pod/{sample-pod}`;
-    /// - `deployment/{sample-deployment}`;
-    /// - `container/{sample-container}`;
-    /// - `containername/{sample-container}`.
-    /// - `job/{sample-job}` (only when [`copy_target`](#feature-copy_target) is enabled).
+    /// - `targetless`
+    /// - `pod/{pod-name}[/container/{container-name}]`;
+    /// - `deployment/{deployment-name}[/container/{container-name}]`;
+    /// - `rollout/{rollout-name}[/container/{container-name}]`;
+    /// - `job/{job-name}[/container/{container-name}]`; (requires mirrord Operator and the
+    ///   [`copy_target`](#feature-copy_target) feature)
+    /// - `cronjob/{cronjob-name}[/container/{container-name}]`; (requires mirrord Operator and the
+    ///   [`copy_target`](#feature-copy_target) feature)
+    /// - `statefulset/{statefulset-name}[/container/{container-name}]`; (requires mirrord
+    ///   Operator)
+    /// - `service/{service-name}[/container/{container-name}]`; (requires mirrord Operator)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<Target>,
 
@@ -125,7 +154,7 @@ pub struct TargetConfig {
     ///
     /// Namespace where the target lives.
     ///
-    /// Defaults to `"default"`.
+    /// Defaults to Kubernetes user's default namespace (defined in Kubernetes context).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
 }
@@ -184,17 +213,18 @@ const FAIL_PARSE_DEPLOYMENT_OR_POD: &str = r#"
 mirrord-layer failed to parse the provided target!
 
 - Valid format:
-    >> deployment/<deployment-name>[/container/container-name]
-    >> deploy/<deployment-name>[/container/container-name]
-    >> pod/<pod-name>[/container/container-name]
-    >> job/<job-name>[/container/container-name]
-    >> cronjob/<cronjob-name>[/container/container-name]
-    >> statefulset/<statefulset-name>[/container/container-name]
-    >> service/<service-name>[/container/container-name]
+    >> `targetless`
+    >> `pod/{pod-name}[/container/{container-name}]`;
+    >> `deployment/{deployment-name}[/container/{container-name}]`;
+    >> `rollout/{rollout-name}[/container/{container-name}]`;
+    >> `job/{job-name}[/container/{container-name}]`;
+    >> `cronjob/{cronjob-name}[/container/{container-name}]`;
+    >> `statefulset/{statefulset-name}[/container/{container-name}]`;
+    >> `service/{service-name}[/container/{container-name}]`;
 
 - Note:
-    >> specifying container name is optional, defaults to the first container in the provided pod/deployment target.
-    >> specifying the pod name is optional, defaults to the first pod in case the target is a deployment.
+    >> specifying container name is optional, defaults to a container chosen by mirrord
+    >> targeting a workload without the mirrord Operator results in a session targeting a random pod replica
 
 - Suggestions:
     >> check for typos in the provided target.
@@ -208,14 +238,14 @@ mirrord-layer failed to parse the provided target!
 /// Specifies the running pod (or deployment) to mirror.
 ///
 /// Supports:
-/// - `pod/{sample-pod}`;
-/// - `deployment/{sample-deployment}`;
-/// - `container/{sample-container}`;
-/// - `containername/{sample-container}`.
-/// - `job/{sample-job}`;
-/// - `cronjob/{sample-cronjob}`;
-/// - `statefulset/{sample-statefulset}`;
-/// - `service/{sample-service}`;
+/// - `targetless`
+/// - `pod/{pod-name}[/container/{container-name}]`;
+/// - `deployment/{deployment-name}[/container/{container-name}]`;
+/// - `rollout/{rollout-name}[/container/{container-name}]`;
+/// - `job/{job-name}[/container/{container-name}]`;
+/// - `cronjob/{cronjob-name}[/container/{container-name}]`;
+/// - `statefulset/{statefulset-name}[/container/{container-name}]`;
+/// - `service/{service-name}[/container/{container-name}]`;
 #[warn(clippy::wildcard_enum_match_arm)]
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
