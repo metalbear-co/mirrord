@@ -37,7 +37,7 @@ pub struct SimpleProxyError(#[from] UnexpectedAgentMessage);
 /// Run as a [`BackgroundTask`].
 #[derive(Default)]
 pub struct SimpleProxy {
-    /// For [`GetAddrInfoRequest`]s.
+    /// For [`GetAddrInfoRequestV2`]s.
     addr_info_reqs: RequestQueue,
     /// For [`GetEnvVarsRequest`]s.
     get_env_reqs: RequestQueue,
