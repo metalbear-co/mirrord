@@ -484,6 +484,14 @@ impl LayerConfig {
                 ));
             }
 
+            if matches!(self.target.path, Some(Target::Service(..))) {
+                return Err(ConfigError::Conflict(
+                    "The copy target feature is not yet supported with service targets, \
+                    please either disable this option or specify an exact workload covered by this service."
+                        .into()
+                ));
+            }
+
             if !self.feature.network.incoming.is_steal() {
                 context.add_warning(
                     "Using copy target feature without steal mode \

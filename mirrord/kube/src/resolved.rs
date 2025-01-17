@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use k8s_openapi::api::{
     apps::v1::{Deployment, StatefulSet},
     batch::v1::{CronJob, Job},
-    core::v1::Pod,
+    core::v1::{Pod, Service},
 };
 use kube::{Client, Resource, ResourceExt};
 use mirrord_config::{feature::network::incoming::ConcurrentSteal, target::Target};
@@ -20,6 +20,7 @@ pub mod deployment;
 pub mod job;
 pub mod pod;
 pub mod rollout;
+pub mod service;
 pub mod stateful_set;
 
 /// Helper struct for resolving user-provided [`Target`] to Kubernetes resources.
@@ -39,6 +40,7 @@ pub enum ResolvedTarget<const CHECKED: bool> {
     Job(ResolvedResource<Job>),
     CronJob(ResolvedResource<CronJob>),
     StatefulSet(ResolvedResource<StatefulSet>),
+    Service(ResolvedResource<Service>),
 
     /// [`Pod`] is a special case, in that it does not implement [`RuntimeDataFromLabels`],
     /// and instead we implement a `runtime_data` method directly in its
@@ -84,6 +86,9 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::StatefulSet(ResolvedResource { resource, .. }) => {
                 resource.metadata.name.as_deref()
             }
+            ResolvedTarget::Service(ResolvedResource { resource, .. }) => {
+                resource.metadata.name.as_deref()
+            }
             ResolvedTarget::Targetless(_) => None,
         }
     }
@@ -96,6 +101,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::Job(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::CronJob(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::StatefulSet(ResolvedResource { resource, .. }) => resource.name_any(),
+            ResolvedTarget::Service(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::Targetless(..) => "targetless".to_string(),
         }
     }
@@ -120,6 +126,9 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::StatefulSet(ResolvedResource { resource, .. }) => {
                 resource.metadata.namespace.as_deref()
             }
+            ResolvedTarget::Service(ResolvedResource { resource, .. }) => {
+                resource.metadata.namespace.as_deref()
+            }
             ResolvedTarget::Targetless(namespace) => Some(namespace),
         }
     }
@@ -137,6 +146,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::StatefulSet(ResolvedResource { resource, .. }) => {
                 resource.metadata.labels
             }
+            ResolvedTarget::Service(ResolvedResource { resource, .. }) => resource.metadata.labels,
             ResolvedTarget::Targetless(_) => None,
         }
     }
@@ -149,6 +159,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::Job(_) => "job",
             ResolvedTarget::CronJob(_) => "cronjob",
             ResolvedTarget::StatefulSet(_) => "statefulset",
+            ResolvedTarget::Service(_) => "service",
             ResolvedTarget::Targetless(_) => "targetless",
         }
     }
@@ -160,6 +171,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             | ResolvedTarget::Job(ResolvedResource { container, .. })
             | ResolvedTarget::CronJob(ResolvedResource { container, .. })
             | ResolvedTarget::StatefulSet(ResolvedResource { container, .. })
+            | ResolvedTarget::Service(ResolvedResource { container, .. })
             | ResolvedTarget::Pod(ResolvedResource { container, .. }) => container.as_deref(),
             ResolvedTarget::Targetless(..) => None,
         }
@@ -173,6 +185,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             | ResolvedTarget::Job(ResolvedResource { container, .. })
             | ResolvedTarget::CronJob(ResolvedResource { container, .. })
             | ResolvedTarget::StatefulSet(ResolvedResource { container, .. })
+            | ResolvedTarget::Service(ResolvedResource { container, .. })
             | ResolvedTarget::Pod(ResolvedResource { container, .. }) => container.as_deref(),
             ResolvedTarget::Targetless(..) => None,
         }
@@ -225,7 +238,8 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
                 .spec
                 .as_ref()
                 .map(|pod_spec| pod_spec.containers.len()),
-            ResolvedTarget::Targetless(..) => Some(1),
+            ResolvedTarget::Service(..) => None,
+            ResolvedTarget::Targetless(..) => None,
         }
         .unwrap_or(1)
     }
@@ -295,6 +309,15 @@ impl ResolvedTarget<false> {
                         container: target.container.clone(),
                     })
                 }),
+            Target::Service(target) => get_k8s_resource_api::<Service>(client, namespace)
+                .get(&target.service)
+                .await
+                .map(|resource| {
+                    ResolvedTarget::Service(ResolvedResource {
+                        resource,
+                        container: target.container.clone(),
+                    })
+                }),
             Target::Targetless => Ok(ResolvedTarget::Targetless(
                 namespace.unwrap_or("default").to_string(),
             )),
@@ -305,11 +328,14 @@ impl ResolvedTarget<false> {
 
     /// Check if the target can be used as a mirrord target.
     ///
-    /// 1. [`ResolvedTarget::Deployment`] or [`ResolvedTarget::Rollout`] - has available replicas
-    ///    and the target container, if specified, is found in the spec
+    /// 1. [`ResolvedTarget::Deployment`], [`ResolvedTarget::Rollout`] and
+    ///    [`ResolvedTarget::StatefulSet`] - has available replicas and the target container, if
+    ///    specified, is found in the spec
     /// 2. [`ResolvedTarget::Pod`] - passes target-readiness check, see [`RuntimeData::from_pod`].
-    /// 3. [`ResolvedTarget::Job`] - error, as this is `copy_target` exclusive
-    /// 4. [`ResolvedTarget::Targetless`] - no check
+    /// 3. [`ResolvedTarget::Job`] and [`ResolvedTarget::CronJob`] - error, as this is `copy_target`
+    ///    exclusive
+    /// 4. [`ResolvedTarget::Targetless`] - no check (not applicable)
+    /// 5. [`ResolvedTarget::Service`] - no check (not trivial, done in the operator)
     #[tracing::instrument(level = Level::DEBUG, skip(client), ret, err)]
     pub async fn assert_valid_mirrord_target(
         self,
@@ -355,6 +381,7 @@ impl ResolvedTarget<false> {
                     container,
                 }))
             }
+
             ResolvedTarget::Pod(ResolvedResource {
                 resource,
                 container,
@@ -404,9 +431,11 @@ impl ResolvedTarget<false> {
             ResolvedTarget::Job(..) => {
                 return Err(KubeApiError::requires_copy::<Job>());
             }
+
             ResolvedTarget::CronJob(..) => {
                 return Err(KubeApiError::requires_copy::<CronJob>());
             }
+
             ResolvedTarget::StatefulSet(ResolvedResource {
                 resource,
                 container,
@@ -446,6 +475,14 @@ impl ResolvedTarget<false> {
                     container,
                 }))
             }
+
+            ResolvedTarget::Service(ResolvedResource {
+                resource,
+                container,
+            }) => Ok(ResolvedTarget::Service(ResolvedResource {
+                resource,
+                container,
+            })),
 
             ResolvedTarget::Targetless(namespace) => {
                 // no check needed here

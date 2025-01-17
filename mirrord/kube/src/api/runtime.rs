@@ -3,6 +3,7 @@ use std::{
     collections::BTreeMap,
     convert::Infallible,
     fmt::{self, Display, Formatter},
+    future::Future,
     net::IpAddr,
     ops::FromResidual,
     str::FromStr,
@@ -17,6 +18,7 @@ use mirrord_config::target::Target;
 use mirrord_protocol::MeshVendor;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
+use tracing::Level;
 
 use crate::{
     api::{
@@ -32,6 +34,7 @@ pub mod deployment;
 pub mod job;
 pub mod pod;
 pub mod rollout;
+pub mod service;
 pub mod stateful_set;
 
 #[derive(Debug)]
@@ -207,7 +210,7 @@ impl RuntimeData {
         })
     }
 
-    #[tracing::instrument(level = "trace", skip(client), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip(client), ret)]
     pub async fn check_node(&self, client: &kube::Client) -> NodeCheck {
         let node_api: Api<Node> = Api::all(client.clone());
         let pod_api: Api<Pod> = Api::all(client.clone());
@@ -271,8 +274,11 @@ where
 }
 
 pub trait RuntimeDataProvider {
-    #[allow(async_fn_in_trait)]
-    async fn runtime_data(&self, client: &Client, namespace: Option<&str>) -> Result<RuntimeData>;
+    fn runtime_data(
+        &self,
+        client: &Client,
+        namespace: Option<&str>,
+    ) -> impl Future<Output = Result<RuntimeData>>;
 }
 
 pub trait RuntimeDataFromLabels {
@@ -281,10 +287,9 @@ pub trait RuntimeDataFromLabels {
         + DeserializeOwned
         + fmt::Debug;
 
-    #[allow(async_fn_in_trait)]
-    async fn get_selector_match_labels(
+    fn get_selector_match_labels(
         resource: &Self::Resource,
-    ) -> Result<BTreeMap<String, String>>;
+    ) -> impl Future<Output = Result<BTreeMap<String, String>>>;
 
     fn name(&self) -> Cow<str>;
 
@@ -344,6 +349,7 @@ impl RuntimeDataProvider for Target {
             Target::Job(target) => target.runtime_data(client, namespace).await,
             Target::CronJob(target) => target.runtime_data(client, namespace).await,
             Target::StatefulSet(target) => target.runtime_data(client, namespace).await,
+            Target::Service(target) => target.runtime_data(client, namespace).await,
             Target::Targetless => Err(KubeApiError::MissingRuntimeData),
         }
     }
@@ -358,6 +364,7 @@ impl RuntimeDataProvider for ResolvedTarget<true> {
             Self::Job(target) => target.runtime_data(client, namespace).await,
             Self::CronJob(target) => target.runtime_data(client, namespace).await,
             Self::StatefulSet(target) => target.runtime_data(client, namespace).await,
+            Self::Service(target) => target.runtime_data(client, namespace).await,
             Self::Targetless(_) => Err(KubeApiError::MissingRuntimeData),
         }
     }
@@ -365,7 +372,9 @@ impl RuntimeDataProvider for ResolvedTarget<true> {
 
 #[cfg(test)]
 mod tests {
-    use mirrord_config::target::{deployment::DeploymentTarget, job::JobTarget, pod::PodTarget};
+    use mirrord_config::target::{
+        deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, service::ServiceTarget,
+    };
     use rstest::rstest;
 
     use super::*;
@@ -378,6 +387,8 @@ mod tests {
     #[case("deployment/nginx-deployment/container/container-name", Target::Deployment(DeploymentTarget {deployment: "nginx-deployment".to_string(), container: Some("container-name".to_string())}))]
     #[case("job/foo", Target::Job(JobTarget { job: "foo".to_string(), container: None }))]
     #[case("job/foo/container/baz", Target::Job(JobTarget { job: "foo".to_string(), container: Some("baz".to_string()) }))]
+    #[case("service/foo", Target::Service(ServiceTarget { service: "foo".into(), container: None }))]
+    #[case("service/foo/container/baz", Target::Service(ServiceTarget { service: "foo".into(), container: Some("baz".into()) }))]
     fn target_parses(#[case] target: &str, #[case] expected: Target) {
         let target = target.parse::<Target>().unwrap();
         assert_eq!(target, expected)

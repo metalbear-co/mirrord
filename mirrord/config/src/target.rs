@@ -5,9 +5,11 @@ use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
 use schemars::{gen::SchemaGenerator, schema::SchemaObject, JsonSchema};
 use serde::{Deserialize, Serialize};
-use stateful_set::StatefulSetTarget;
 
-use self::{deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, rollout::RolloutTarget};
+use self::{
+    deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, rollout::RolloutTarget,
+    service::ServiceTarget, stateful_set::StatefulSetTarget,
+};
 use crate::{
     config::{
         from_env::{FromEnv, FromEnvWithError},
@@ -22,6 +24,7 @@ pub mod deployment;
 pub mod job;
 pub mod pod;
 pub mod rollout;
+pub mod service;
 pub mod stateful_set;
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
@@ -187,6 +190,7 @@ mirrord-layer failed to parse the provided target!
     >> job/<job-name>[/container/container-name]
     >> cronjob/<cronjob-name>[/container/container-name]
     >> statefulset/<statefulset-name>[/container/container-name]
+    >> service/<service-name>[/container/container-name]
 
 - Note:
     >> specifying container name is optional, defaults to the first container in the provided pod/deployment target.
@@ -216,36 +220,36 @@ mirrord-layer failed to parse the provided target!
 #[serde(untagged, deny_unknown_fields)]
 pub enum Target {
     /// <!--${internal}-->
-    /// Mirror a deployment.
+    /// [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/).
     Deployment(deployment::DeploymentTarget),
 
     /// <!--${internal}-->
-    /// Mirror a pod.
+    /// [Pod](https://kubernetes.io/docs/concepts/workloads/pods/).
     Pod(pod::PodTarget),
 
     /// <!--${internal}-->
-    /// Mirror a rollout.
+    /// [Rollout](https://argoproj.github.io/argo-rollouts/#how-does-it-work).
     Rollout(rollout::RolloutTarget),
 
     /// <!--${internal}-->
-    /// Mirror a Job.
+    /// [Job](https://kubernetes.io/docs/concepts/workloads/controllers/job/).
     ///
     /// Only supported when `copy_target` is enabled.
     Job(job::JobTarget),
 
     /// <!--${internal}-->
-    /// Targets a
     /// [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/).
     ///
     /// Only supported when `copy_target` is enabled.
     CronJob(cron_job::CronJobTarget),
 
     /// <!--${internal}-->
-    /// Targets a
     /// [StatefulSet](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/).
-    ///
-    /// Only supported when `copy_target` is enabled.
     StatefulSet(stateful_set::StatefulSetTarget),
+
+    /// <!--${internal}-->
+    /// [Service](https://kubernetes.io/docs/concepts/services-networking/service/).
+    Service(service::ServiceTarget),
 
     /// <!--${internal}-->
     /// Spawn a new pod.
@@ -269,6 +273,7 @@ impl FromStr for Target {
             Some("job") => job::JobTarget::from_split(&mut split).map(Target::Job),
             Some("cronjob") => cron_job::CronJobTarget::from_split(&mut split).map(Target::CronJob),
             Some("statefulset") => stateful_set::StatefulSetTarget::from_split(&mut split).map(Target::StatefulSet),
+            Some("service") => service::ServiceTarget::from_split(&mut split).map(Target::Service),
             _ => Err(ConfigError::InvalidTarget(format!(
                 "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
@@ -286,6 +291,7 @@ impl Target {
             Target::Job(target) => target.job.clone(),
             Target::CronJob(target) => target.cron_job.clone(),
             Target::StatefulSet(target) => target.stateful_set.clone(),
+            Target::Service(target) => target.service.clone(),
             Target::Targetless => {
                 unreachable!("this shouldn't happen - called from operator on a flow where it's not targetless.")
             }
@@ -301,7 +307,7 @@ impl Target {
     pub(super) fn requires_operator(&self) -> bool {
         matches!(
             self,
-            Target::Job(_) | Target::CronJob(_) | Target::StatefulSet(_)
+            Target::Job(_) | Target::CronJob(_) | Target::StatefulSet(_) | Target::Service(_)
         )
     }
 }
@@ -361,6 +367,7 @@ impl_target_display!(RolloutTarget, rollout, "rollout");
 impl_target_display!(JobTarget, job, "job");
 impl_target_display!(CronJobTarget, cron_job, "cronjob");
 impl_target_display!(StatefulSetTarget, stateful_set, "statefulset");
+impl_target_display!(ServiceTarget, service, "service");
 
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -372,6 +379,7 @@ impl fmt::Display for Target {
             Target::Job(target) => target.fmt(f),
             Target::CronJob(target) => target.fmt(f),
             Target::StatefulSet(target) => target.fmt(f),
+            Target::Service(target) => target.fmt(f),
         }
     }
 }
@@ -386,6 +394,7 @@ impl TargetDisplay for Target {
             Target::Job(target) => target.type_(),
             Target::CronJob(target) => target.type_(),
             Target::StatefulSet(target) => target.type_(),
+            Target::Service(target) => target.type_(),
         }
     }
 
@@ -398,6 +407,7 @@ impl TargetDisplay for Target {
             Target::Job(target) => target.name(),
             Target::CronJob(target) => target.name(),
             Target::StatefulSet(target) => target.name(),
+            Target::Service(target) => target.name(),
         }
     }
 
@@ -410,6 +420,7 @@ impl TargetDisplay for Target {
             Target::Job(target) => target.container(),
             Target::CronJob(target) => target.container(),
             Target::StatefulSet(target) => target.container(),
+            Target::Service(target) => target.container(),
         }
     }
 }
@@ -426,6 +437,7 @@ bitflags::bitflags! {
         const JOB = 32;
         const CRON_JOB = 64;
         const STATEFUL_SET = 128;
+        const SERVICE = 256;
     }
 }
 
@@ -469,6 +481,12 @@ impl CollectAnalytics for &TargetConfig {
                 }
                 Target::StatefulSet(target) => {
                     flags |= TargetAnalyticFlags::STATEFUL_SET;
+                    if target.container.is_some() {
+                        flags |= TargetAnalyticFlags::CONTAINER;
+                    }
+                }
+                Target::Service(target) => {
+                    flags |= TargetAnalyticFlags::SERVICE;
                     if target.container.is_some() {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }
