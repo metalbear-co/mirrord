@@ -4,10 +4,15 @@ use mirrord_protocol::tcp::{HTTP_CHUNKED_RESPONSE_VERSION, HTTP_FRAMED_VERSION};
 /// responses.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum ResponseMode {
+    /// Agent supports
     /// [`LayerTcpSteal::HttpResponseChunked`](mirrord_protocol::tcp::LayerTcpSteal::HttpResponseChunked)
+    /// and the previous variants.
     Chunked,
+    /// Agent supports
     /// [`LayerTcpSteal::HttpResponseFramed`](mirrord_protocol::tcp::LayerTcpSteal::HttpResponseFramed)
+    /// and the previous variant.
     Framed,
+    /// Agent supports only
     /// [`LayerTcpSteal::HttpResponse`](mirrord_protocol::tcp::LayerTcpSteal::HttpResponse)
     #[default]
     Basic,

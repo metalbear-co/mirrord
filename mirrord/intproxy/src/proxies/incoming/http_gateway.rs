@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     convert::Infallible,
     error::Error,
     fmt,
@@ -134,16 +135,46 @@ impl HttpGatewayTask {
                 message_bus.send(HttpOut::ResponseFramed(response)).await
             }
             ResponseMode::Chunked => {
-                let ready_frames = body
+                let frames = body
                     .ready_frames()
-                    .map_err(LocalHttpError::ReadBodyFailed)?
+                    .map_err(LocalHttpError::ReadBodyFailed)?;
+
+                if frames.is_last {
+                    let ready_frames = frames
+                        .frames
+                        .into_iter()
+                        .map(InternalHttpBodyFrame::from)
+                        .collect::<VecDeque<_>>();
+
+                    tracing::trace!(
+                        ?ready_frames,
+                        "All response body frames were instantly ready, sending full response"
+                    );
+                    let response = HttpResponse {
+                        port: self.request.port,
+                        connection_id: self.request.connection_id,
+                        request_id: self.request.request_id,
+                        internal_response: InternalHttpResponse {
+                            status: parts.status,
+                            version: parts.version,
+                            headers: parts.headers,
+                            body: InternalHttpBody(ready_frames),
+                        },
+                    };
+                    message_bus.send(HttpOut::ResponseFramed(response)).await;
+
+                    return Ok(());
+                }
+
+                let ready_frames = frames
                     .frames
                     .into_iter()
                     .map(InternalHttpBodyFrame::from)
-                    .collect();
+                    .collect::<Vec<_>>();
                 tracing::trace!(
                     ?ready_frames,
-                    "Some response body frames were instantly ready"
+                    "Some response body frames were instantly ready, \
+                    but response body may not be finished yet"
                 );
 
                 let response = HttpResponse {

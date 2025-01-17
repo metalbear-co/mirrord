@@ -42,7 +42,7 @@ mod bound_socket;
 mod http;
 mod http_gateway;
 mod metadata_store;
-pub mod port_subscription_ext;
+mod port_subscription_ext;
 mod subscriptions;
 mod tasks;
 mod tcp_proxy;
