@@ -17,7 +17,7 @@ mod traffic_tests {
 
     use crate::utils::{
         config_dir, hostname_service, ipv6::ipv6_service, kube_client, run_exec_with_target,
-        service, udp_logger_service, KubeService, CONTAINER_NAME,
+        service, udp_logger_service, Application, KubeService, CONTAINER_NAME,
     };
 
     #[cfg_attr(not(feature = "job"), ignore)]
@@ -134,6 +134,21 @@ mod traffic_tests {
 
         let res = process.wait().await;
         assert!(res.success());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(30))]
+    #[ignore]
+    pub async fn connect_to_kubernetes_api_service_over_ipv6() {
+        let app = Application::CurlToKubeApi;
+        let mut process = app
+            .run_targetless(None, None, Some(vec![("MIRRORD_ENABLE_IPV6", "true")]))
+            .await;
+        let res = process.wait().await;
+        assert!(res.success());
+        let stdout = process.get_stdout().await;
+        assert!(stdout.contains(r#""apiVersion": "v1""#))
     }
 
     #[cfg_attr(not(feature = "job"), ignore)]

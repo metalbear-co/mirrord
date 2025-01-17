@@ -99,6 +99,7 @@ pub enum Application {
     Go22HTTP,
     Go23HTTP,
     CurlToKubeApi,
+    CurlToKubeApiOverIpv6,
     PythonCloseSocket,
     PythonCloseSocketKeepConnection,
     RustWebsockets,
@@ -476,6 +477,9 @@ impl Application {
             Application::Go23HTTP => vec!["go-e2e/23.go_test_app"],
             Application::CurlToKubeApi => {
                 vec!["curl", "https://kubernetes/api", "--insecure"]
+            }
+            Application::CurlToKubeApiOverIpv6 => {
+                vec!["curl", "-6", "https://kubernetes/api", "--insecure"]
             }
             Application::RustWebsockets => vec!["../target/debug/rust-websockets"],
             Application::RustSqs => vec!["../target/debug/rust-sqs-printer"],
