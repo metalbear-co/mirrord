@@ -611,7 +611,9 @@ impl OperatorApi<PreparedClientCert> {
                     .and_then(|copy_crd| copy_crd.creator_session.id),
             )
         } else {
-            let target = target.assert_valid_mirrord_target(self.client()).await?;
+            let target = target
+                .operator_target_preliminary_check(self.client())
+                .await?;
 
             // `targetless` has no `RuntimeData`!
             if matches!(target, ResolvedTarget::Targetless(_)).not() {

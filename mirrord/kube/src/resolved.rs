@@ -46,8 +46,11 @@ pub enum ResolvedTarget<const CHECKED: bool> {
     /// and instead we implement a `runtime_data` method directly in its
     /// [`ResolvedResource<Pod>`] impl.
     Pod(ResolvedResource<Pod>),
-    /// Holds the `namespace` for this target.
-    Targetless(String),
+
+    Targetless(
+        /// Agent pod's namespace.
+        String,
+    ),
 }
 
 /// A kubernetes [`Resource`], and container pair to be used based on the target we
@@ -164,19 +167,6 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
         }
     }
 
-    pub fn get_container(&self) -> Option<&str> {
-        match self {
-            ResolvedTarget::Deployment(ResolvedResource { container, .. })
-            | ResolvedTarget::Rollout(ResolvedResource { container, .. })
-            | ResolvedTarget::Job(ResolvedResource { container, .. })
-            | ResolvedTarget::CronJob(ResolvedResource { container, .. })
-            | ResolvedTarget::StatefulSet(ResolvedResource { container, .. })
-            | ResolvedTarget::Service(ResolvedResource { container, .. })
-            | ResolvedTarget::Pod(ResolvedResource { container, .. }) => container.as_deref(),
-            ResolvedTarget::Targetless(..) => None,
-        }
-    }
-
     /// Convenient way of getting the container from this target.
     pub fn container(&self) -> Option<&str> {
         match self {
@@ -202,46 +192,6 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
         } else {
             false
         }
-    }
-
-    /// Returns the number of containers for this [`ResolvedTarget`], defaulting to 1.
-    pub fn containers_status(&self) -> usize {
-        match self {
-            ResolvedTarget::Deployment(ResolvedResource { resource, .. }) => resource
-                .spec
-                .as_ref()
-                .and_then(|spec| spec.template.spec.as_ref())
-                .map(|pod_spec| pod_spec.containers.len()),
-            ResolvedTarget::Rollout(ResolvedResource { resource, .. }) => resource
-                .spec
-                .as_ref()
-                .and_then(|spec| spec.template.as_ref())
-                .and_then(|pod_template| pod_template.spec.as_ref())
-                .map(|pod_spec| pod_spec.containers.len()),
-            ResolvedTarget::StatefulSet(ResolvedResource { resource, .. }) => resource
-                .spec
-                .as_ref()
-                .and_then(|spec| spec.template.spec.as_ref())
-                .map(|pod_spec| pod_spec.containers.len()),
-            ResolvedTarget::CronJob(ResolvedResource { resource, .. }) => resource
-                .spec
-                .as_ref()
-                .and_then(|spec| spec.job_template.spec.as_ref())
-                .and_then(|job_spec| job_spec.template.spec.as_ref())
-                .map(|pod_spec| pod_spec.containers.len()),
-            ResolvedTarget::Job(ResolvedResource { resource, .. }) => resource
-                .spec
-                .as_ref()
-                .and_then(|spec| spec.template.spec.as_ref())
-                .map(|pod_spec| pod_spec.containers.len()),
-            ResolvedTarget::Pod(ResolvedResource { resource, .. }) => resource
-                .spec
-                .as_ref()
-                .map(|pod_spec| pod_spec.containers.len()),
-            ResolvedTarget::Service(..) => None,
-            ResolvedTarget::Targetless(..) => None,
-        }
-        .unwrap_or(1)
     }
 }
 
@@ -326,8 +276,11 @@ impl ResolvedTarget<false> {
         Ok(target)
     }
 
-    /// Check if the target can be used as a mirrord target.
+    /// Checks if the target can be used as a via the mirrord Operator.
     ///
+    /// This is implemented in the CLI only to improve the UX (skip roundtrip to the operator).
+    ///
+    /// Performs only basic checks:
     /// 1. [`ResolvedTarget::Deployment`], [`ResolvedTarget::Rollout`] and
     ///    [`ResolvedTarget::StatefulSet`] - has available replicas and the target container, if
     ///    specified, is found in the spec
@@ -337,7 +290,7 @@ impl ResolvedTarget<false> {
     /// 4. [`ResolvedTarget::Targetless`] - no check (not applicable)
     /// 5. [`ResolvedTarget::Service`] - no check (not trivial, done in the operator)
     #[tracing::instrument(level = Level::DEBUG, skip(client), ret, err)]
-    pub async fn assert_valid_mirrord_target(
+    pub async fn operator_target_preliminary_check(
         self,
         client: &Client,
     ) -> Result<ResolvedTarget<true>, KubeApiError> {
