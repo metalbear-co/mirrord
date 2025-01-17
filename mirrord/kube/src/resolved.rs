@@ -26,12 +26,12 @@ pub mod stateful_set;
 /// Helper struct for resolving user-provided [`Target`] to Kubernetes resources.
 ///
 /// It has 3 implementations based on `CHECKED`, which indicates if this target has been
-/// checked with [`ResolvedTarget::operator_target_preliminary_check`].
+/// checked with [`ResolvedTarget::assert_valid_mirrord_target`].
 ///
 /// 1. A generic implementation with helper methods for getting strings such as names, types and so
 ///    on;
 /// 2. `CHECKED = false` that may be used to build the struct, and to call
-///    [`ResolvedTarget::operator_target_preliminary_check`] (along with the generic methods);
+///    [`ResolvedTarget::assert_valid_mirrord_target`] (along with the generic methods);
 /// 3. `CHECKED = true` which is how we get a connection url for the target;
 #[derive(Debug, Clone)]
 pub enum ResolvedTarget<const CHECKED: bool> {
@@ -281,16 +281,15 @@ impl ResolvedTarget<false> {
     /// This is implemented in the CLI only to improve the UX (skip roundtrip to the operator).
     ///
     /// Performs only basic checks:
-    /// 1. [`ResolvedTarget::Deployment`], [`ResolvedTarget::Rollout`] and
-    ///    [`ResolvedTarget::StatefulSet`] - has available replicas and the target container, if
-    ///    specified, is found in the spec
+    /// 1. [`ResolvedTarget::Deployment`], [`ResolvedTarget::Rollout`],
+    ///    [`ResolvedTarget::StatefulSet`] and [`ResolvedTarget::Service`] - has available replicas
+    ///    and the target container, if specified, is found in the spec
     /// 2. [`ResolvedTarget::Pod`] - passes target-readiness check, see [`RuntimeData::from_pod`].
     /// 3. [`ResolvedTarget::Job`] and [`ResolvedTarget::CronJob`] - error, as this is `copy_target`
     ///    exclusive
     /// 4. [`ResolvedTarget::Targetless`] - no check (not applicable)
-    /// 5. [`ResolvedTarget::Service`] - no check (not trivial, done in the operator)
     #[tracing::instrument(level = Level::DEBUG, skip(client), ret, err)]
-    pub async fn operator_target_preliminary_check(
+    pub async fn assert_valid_mirrord_target(
         self,
         client: &Client,
     ) -> Result<ResolvedTarget<true>, KubeApiError> {
@@ -432,10 +431,35 @@ impl ResolvedTarget<false> {
             ResolvedTarget::Service(ResolvedResource {
                 resource,
                 container,
-            }) => Ok(ResolvedTarget::Service(ResolvedResource {
-                resource,
-                container,
-            })),
+            }) => {
+                let pods = ResolvedResource::<Service>::get_pods(&resource, client).await?;
+
+                if pods.is_empty() {
+                    return Err(KubeApiError::invalid_state(
+                        &resource,
+                        "no pods matching the labels were found",
+                    ));
+                }
+
+                if let Some(container) = &container {
+                    let exists_in_a_pod = pods
+                        .iter()
+                        .flat_map(|pod| pod.spec.as_ref())
+                        .flat_map(|spec| &spec.containers)
+                        .any(|found_container| found_container.name == *container);
+                    if !exists_in_a_pod {
+                        return Err(KubeApiError::invalid_state(
+                            &resource,
+                            format_args!("none of the pods that match the labels contain the target container `{container}`"
+                        )));
+                    }
+                }
+
+                Ok(ResolvedTarget::Service(ResolvedResource {
+                    resource,
+                    container,
+                }))
+            }
 
             ResolvedTarget::Targetless(namespace) => {
                 // no check needed here

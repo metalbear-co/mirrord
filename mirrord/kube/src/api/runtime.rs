@@ -287,9 +287,42 @@ pub trait RuntimeDataFromLabels {
         + DeserializeOwned
         + fmt::Debug;
 
-    fn get_selector_match_labels(
+    fn get_selector_match_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>>;
+
+    /// Returns a list of pods matching the selector of the given `resource`.
+    fn get_pods(
         resource: &Self::Resource,
-    ) -> impl Future<Output = Result<BTreeMap<String, String>>>;
+        client: &Client,
+    ) -> impl Future<Output = Result<Vec<Pod>>> {
+        async {
+            let api: Api<<Self as RuntimeDataFromLabels>::Resource> =
+                get_k8s_resource_api(client, resource.meta().namespace.as_deref());
+            let name = resource
+                .meta()
+                .name
+                .as_deref()
+                .ok_or_else(|| KubeApiError::missing_field(resource, ".metadata.name"))?;
+            let resource = api.get(name).await?;
+
+            let labels = Self::get_selector_match_labels(&resource)?;
+
+            let formatted_labels = labels
+                .iter()
+                .map(|(key, value)| format!("{key}={value}"))
+                .collect::<Vec<String>>()
+                .join(",");
+            let list_params = ListParams {
+                label_selector: Some(formatted_labels),
+                ..Default::default()
+            };
+
+            let pod_api: Api<Pod> =
+                get_k8s_resource_api(client, resource.meta().namespace.as_deref());
+            let pods = pod_api.list(&list_params).await?;
+
+            Ok(pods.items)
+        }
+    }
 
     fn name(&self) -> Cow<str>;
 
@@ -304,37 +337,22 @@ where
         let api: Api<<Self as RuntimeDataFromLabels>::Resource> =
             get_k8s_resource_api(client, namespace);
         let resource = api.get(&self.name()).await?;
+        let pods = Self::get_pods(&resource, client).await?;
 
-        let labels = Self::get_selector_match_labels(&resource).await?;
-
-        let formatted_labels = labels
-            .iter()
-            .map(|(key, value)| format!("{key}={value}"))
-            .collect::<Vec<String>>()
-            .join(",");
-        let list_params = ListParams {
-            label_selector: Some(formatted_labels),
-            ..Default::default()
-        };
-
-        let pod_api: Api<Pod> = get_k8s_resource_api(client, namespace);
-        let pods = pod_api.list(&list_params).await?;
-
-        if pods.items.is_empty() {
+        if pods.is_empty() {
             return Err(KubeApiError::invalid_state(
                 &resource,
-                "no pods matching labels found",
+                "no pods matching the labels were found",
             ));
         }
 
-        pods.items
-            .iter()
+        pods.iter()
             .filter_map(|pod| RuntimeData::from_pod(pod, self.container()).ok())
             .next()
             .ok_or_else(|| {
                 KubeApiError::invalid_state(
                     &resource,
-                    "no pod matching labels is ready to be targeted",
+                    "no pod matching the labels is ready to be targeted",
                 )
             })
     }
