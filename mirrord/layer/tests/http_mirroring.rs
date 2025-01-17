@@ -30,6 +30,8 @@ async fn mirroring_with_http(
     dylib_path: &Path,
     config_dir: &Path,
 ) {
+    let _guard = init_tracing();
+
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer_and_port(
             dylib_path,

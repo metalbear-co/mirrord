@@ -8,6 +8,7 @@ use tokio::{
     net::TcpStream,
     time,
 };
+use tracing::Level;
 
 use super::{
     bound_socket::BoundTcpSocket,
@@ -16,6 +17,7 @@ use super::{
 use crate::background_tasks::{BackgroundTask, MessageBus};
 
 /// Local TCP connections between the [`TcpProxyTask`] and the user application.
+#[derive(Debug)]
 pub enum LocalTcpConnection {
     /// Not yet established. Should be made by the [`TcpProxyTask`] from the given
     /// [`BoundTcpSocket`].
@@ -29,6 +31,7 @@ pub enum LocalTcpConnection {
 
 /// [`BackgroundTask`] of [`IncomingProxy`](super::IncomingProxy) that handles a remote
 /// stolen/mirrored TCP connection.
+#[derive(Debug)]
 pub struct TcpProxyTask {
     /// The local connection between this task and the user application.
     connection: LocalTcpConnection,
@@ -55,6 +58,7 @@ impl BackgroundTask for TcpProxyTask {
     type MessageIn = Vec<u8>;
     type MessageOut = InProxyTaskMessage;
 
+    #[tracing::instrument(level = Level::TRACE, name = "tcp_proxy_task_main_loop", skip(message_bus), err(level = Level::WARN))]
     async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         let mut stream = match self.connection {
             LocalTcpConnection::FromTheStart { socket, peer } => {
@@ -85,6 +89,9 @@ impl BackgroundTask for TcpProxyTask {
             }
         };
 
+        let peer_addr = stream.peer_addr()?;
+        let self_addr = stream.local_addr()?;
+
         let mut buf = BytesMut::with_capacity(64 * 1024);
         let mut reading_closed = false;
         let mut is_lingering = false;
@@ -97,6 +104,19 @@ impl BackgroundTask for TcpProxyTask {
                     Ok(..) => {
                         if buf.is_empty() {
                             reading_closed = true;
+
+                            tracing::trace!(
+                                peer_addr = %peer_addr,
+                                self_addr = %self_addr,
+                                "The user application shut down its side of the connection",
+                            )
+                        } else {
+                            tracing::trace!(
+                                data_len = buf.len(),
+                                peer_addr = %peer_addr,
+                                self_addr = %self_addr,
+                                "Received some data from the user application",
+                            );
                         }
 
                         if !self.discard_data {
@@ -108,23 +128,53 @@ impl BackgroundTask for TcpProxyTask {
                 },
 
                 msg = message_bus.recv(), if !is_lingering => match msg {
-                    None => {
-                        if self.discard_data {
-                            break Ok(());
-                        }
+                    None if self.discard_data => {
+                        tracing::trace!(
+                            peer_addr = %peer_addr,
+                            self_addr = %self_addr,
+                            "Message bus closed, waiting until the connection is silent",
+                        );
 
                         is_lingering = true;
                     }
+                    None => {
+                        tracing::trace!(
+                            peer_addr = %peer_addr,
+                            self_addr = %self_addr,
+                            "Message bus closed, exiting",
+                        );
+
+                        break Ok(());
+                    }
                     Some(data) => {
                         if data.is_empty() {
+                            tracing::trace!(
+                                peer_addr = %peer_addr,
+                                self_addr = %self_addr,
+                                "The agent shut down its side of the connection",
+                            );
+
                             stream.shutdown().await?;
                         } else {
+                            tracing::trace!(
+                                data_len = data.len(),
+                                peer_addr = %peer_addr,
+                                self_addr = %self_addr,
+                                "Received some data from the agent",
+                            );
+
                             stream.write_all(&data).await?;
                         }
                     },
                 },
 
                 _ = time::sleep(Duration::from_secs(1)), if is_lingering => {
+                    tracing::trace!(
+                        peer_addr = %peer_addr,
+                        self_addr = %self_addr,
+                        "Message bus is closed and the connection is silent, exiting",
+                    );
+
                     break Ok(());
                 }
             }
