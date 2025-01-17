@@ -4,12 +4,13 @@ use std::{
     error::Error,
     fmt,
     net::SocketAddr,
+    ops::ControlFlow,
     time::{Duration, Instant},
 };
 
 use exponential_backoff::Backoff;
 use http_body_util::BodyExt;
-use hyper::StatusCode;
+use hyper::{body::Incoming, http::response::Parts, StatusCode};
 use mirrord_protocol::{
     batched_body::BatchedBody,
     tcp::{
@@ -66,6 +67,137 @@ impl HttpGatewayTask {
         }
     }
 
+    /// Handles the response if we operate in [`ResponseMode::Chunked`].
+    ///
+    /// # Returns
+    ///
+    /// * An error if we failed before sending the [`ChunkedResponse::Start`] message through the
+    ///   [`MessageBus`] (we can still retry the request)
+    /// * [`ControlFlow::Break`] if we failed after sending the [`ChunkedResponse::Start`] message
+    /// * [`ControlFlow::Continue`] if we succeeded
+    async fn handle_response_chunked(
+        &self,
+        parts: Parts,
+        mut body: Incoming,
+        message_bus: &mut MessageBus<Self>,
+    ) -> Result<ControlFlow<()>, LocalHttpError> {
+        let frames = body
+            .ready_frames()
+            .map_err(LocalHttpError::ReadBodyFailed)?;
+
+        if frames.is_last {
+            let ready_frames = frames
+                .frames
+                .into_iter()
+                .map(InternalHttpBodyFrame::from)
+                .collect::<VecDeque<_>>();
+
+            tracing::trace!(
+                ?ready_frames,
+                "All response body frames were instantly ready, sending full response"
+            );
+            let response = HttpResponse {
+                port: self.request.port,
+                connection_id: self.request.connection_id,
+                request_id: self.request.request_id,
+                internal_response: InternalHttpResponse {
+                    status: parts.status,
+                    version: parts.version,
+                    headers: parts.headers,
+                    body: InternalHttpBody(ready_frames),
+                },
+            };
+            message_bus.send(HttpOut::ResponseFramed(response)).await;
+
+            return Ok(ControlFlow::Continue(()));
+        }
+
+        let ready_frames = frames
+            .frames
+            .into_iter()
+            .map(InternalHttpBodyFrame::from)
+            .collect::<Vec<_>>();
+        tracing::trace!(
+            ?ready_frames,
+            "Some response body frames were instantly ready, \
+            but response body may not be finished yet"
+        );
+
+        let response = HttpResponse {
+            port: self.request.port,
+            connection_id: self.request.connection_id,
+            request_id: self.request.request_id,
+            internal_response: InternalHttpResponse {
+                status: parts.status,
+                version: parts.version,
+                headers: parts.headers,
+                body: ready_frames,
+            },
+        };
+        message_bus
+            .send(HttpOut::ResponseChunked(ChunkedResponse::Start(response)))
+            .await;
+
+        loop {
+            let start = Instant::now();
+            match body.next_frames().await {
+                Ok(frames) => {
+                    let is_last = frames.is_last;
+                    let frames = frames
+                        .frames
+                        .into_iter()
+                        .map(InternalHttpBodyFrame::from)
+                        .collect::<Vec<_>>();
+                    tracing::trace!(
+                        ?frames,
+                        is_last,
+                        elapsed_ms = start.elapsed().as_millis(),
+                        "Received a next batch of response body frames",
+                    );
+
+                    message_bus
+                        .send(HttpOut::ResponseChunked(ChunkedResponse::Body(
+                            ChunkedHttpBody {
+                                frames,
+                                is_last,
+                                connection_id: self.request.connection_id,
+                                request_id: self.request.request_id,
+                            },
+                        )))
+                        .await;
+
+                    if is_last {
+                        break;
+                    }
+                }
+
+                // Do not return any error here, as it would later be transformed into an error
+                // response. We already send the request head to the agent.
+                Err(error) => {
+                    tracing::warn!(
+                        error = ?ErrorWithSources(&error),
+                        elapsed_ms = start.elapsed().as_millis(),
+                        gateway = ?self,
+                        "Failed to read next response body frames",
+                    );
+
+                    message_bus
+                        .send(HttpOut::ResponseChunked(ChunkedResponse::Error(
+                            ChunkedHttpError {
+                                connection_id: self.request.connection_id,
+                                request_id: self.request.request_id,
+                            },
+                        )))
+                        .await;
+
+                    return Ok(ControlFlow::Break(()));
+                }
+            }
+        }
+
+        Ok(ControlFlow::Continue(()))
+    }
+
     /// Makes an attempt to send the request and read the whole response.
     ///
     /// [`Err`] is handled in the caller and, if we run out of send attempts, converted to an error
@@ -78,11 +210,13 @@ impl HttpGatewayTask {
             .get(self.server_addr, self.request.version())
             .await?;
         let mut response = client.send_request(self.request.clone()).await?;
-        let on_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS)
-            .then(|| hyper::upgrade::on(&mut response));
-        let (parts, mut body) = response.into_parts();
+        let on_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS).then(|| {
+            tracing::trace!("Detected an HTTP upgrade");
+            hyper::upgrade::on(&mut response)
+        });
+        let (parts, body) = response.into_parts();
 
-        match self.response_mode {
+        let flow = match self.response_mode {
             ResponseMode::Basic => {
                 let start = Instant::now();
                 let body: Vec<u8> = body
@@ -108,7 +242,9 @@ impl HttpGatewayTask {
                         body,
                     },
                 };
-                message_bus.send(HttpOut::ResponseBasic(response)).await
+                message_bus.send(HttpOut::ResponseBasic(response)).await;
+
+                ControlFlow::Continue(())
             }
             ResponseMode::Framed => {
                 let start = Instant::now();
@@ -132,130 +268,26 @@ impl HttpGatewayTask {
                         body,
                     },
                 };
-                message_bus.send(HttpOut::ResponseFramed(response)).await
+                message_bus.send(HttpOut::ResponseFramed(response)).await;
+
+                ControlFlow::Continue(())
             }
             ResponseMode::Chunked => {
-                let frames = body
-                    .ready_frames()
-                    .map_err(LocalHttpError::ReadBodyFailed)?;
-
-                if frames.is_last {
-                    let ready_frames = frames
-                        .frames
-                        .into_iter()
-                        .map(InternalHttpBodyFrame::from)
-                        .collect::<VecDeque<_>>();
-
-                    tracing::trace!(
-                        ?ready_frames,
-                        "All response body frames were instantly ready, sending full response"
-                    );
-                    let response = HttpResponse {
-                        port: self.request.port,
-                        connection_id: self.request.connection_id,
-                        request_id: self.request.request_id,
-                        internal_response: InternalHttpResponse {
-                            status: parts.status,
-                            version: parts.version,
-                            headers: parts.headers,
-                            body: InternalHttpBody(ready_frames),
-                        },
-                    };
-                    message_bus.send(HttpOut::ResponseFramed(response)).await;
-
-                    return Ok(());
-                }
-
-                let ready_frames = frames
-                    .frames
-                    .into_iter()
-                    .map(InternalHttpBodyFrame::from)
-                    .collect::<Vec<_>>();
-                tracing::trace!(
-                    ?ready_frames,
-                    "Some response body frames were instantly ready, \
-                    but response body may not be finished yet"
-                );
-
-                let response = HttpResponse {
-                    port: self.request.port,
-                    connection_id: self.request.connection_id,
-                    request_id: self.request.request_id,
-                    internal_response: InternalHttpResponse {
-                        status: parts.status,
-                        version: parts.version,
-                        headers: parts.headers,
-                        body: ready_frames,
-                    },
-                };
-                message_bus
-                    .send(HttpOut::ResponseChunked(ChunkedResponse::Start(response)))
-                    .await;
-
-                loop {
-                    let start = Instant::now();
-                    match body.next_frames().await {
-                        Ok(frames) => {
-                            let is_last = frames.is_last;
-                            let frames = frames
-                                .frames
-                                .into_iter()
-                                .map(InternalHttpBodyFrame::from)
-                                .collect::<Vec<_>>();
-                            tracing::trace!(
-                                ?frames,
-                                is_last,
-                                elapsed_ms = start.elapsed().as_millis(),
-                                "Received a next batch of response body frames",
-                            );
-
-                            message_bus
-                                .send(HttpOut::ResponseChunked(ChunkedResponse::Body(
-                                    ChunkedHttpBody {
-                                        frames,
-                                        is_last,
-                                        connection_id: self.request.connection_id,
-                                        request_id: self.request.request_id,
-                                    },
-                                )))
-                                .await;
-
-                            if is_last {
-                                break;
-                            }
-                        }
-                        // Do not return any error here,
-                        // as it would be transformed into an error response by the caller.
-                        // We already send the request head to the agent.
-                        Err(error) => {
-                            tracing::warn!(
-                                error = ?ErrorWithSources(&error),
-                                elapsed_ms = start.elapsed().as_millis(),
-                                gateway = ?self,
-                                "Failed to read next response body frames",
-                            );
-
-                            message_bus
-                                .send(HttpOut::ResponseChunked(ChunkedResponse::Error(
-                                    ChunkedHttpError {
-                                        connection_id: self.request.connection_id,
-                                        request_id: self.request.request_id,
-                                    },
-                                )))
-                                .await;
-
-                            return Ok(());
-                        }
-                    }
-                }
+                self.handle_response_chunked(parts, body, message_bus)
+                    .await?
             }
+        };
+
+        if flow.is_break() {
+            return Ok(());
         }
 
         if let Some(on_upgrade) = on_upgrade {
             message_bus.send(HttpOut::Upgraded(on_upgrade)).await;
+        } else {
+            // If there was no upgrade and no error, the client can be reused.
+            self.client_store.push_idle(client);
         }
-
-        self.client_store.push_idle(client);
 
         Ok(())
     }

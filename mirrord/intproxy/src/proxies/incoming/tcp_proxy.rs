@@ -81,7 +81,9 @@ impl BackgroundTask for TcpProxyTask {
                 let stream = parts.io.into_inner();
                 let read_buf = parts.read_buf;
 
-                if !self.discard_data {
+                if !self.discard_data && !read_buf.is_empty() {
+                    // We don't send empty data,
+                    // because the agent recognizes it as a shutdown from the user application.
                     message_bus.send(Vec::from(read_buf)).await;
                 }
 
