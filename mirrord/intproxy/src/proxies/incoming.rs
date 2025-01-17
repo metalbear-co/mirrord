@@ -85,13 +85,36 @@ struct HttpGatewayHandle {
 /// Utilizes multiple background tasks ([`TcpProxyTask`]s and [`HttpGatewayTask`]s) to handle
 /// incoming connections and requests.
 ///
-/// Each connection stolen/mirrored in whole is managed by a single [`TcpProxyTask`].
+/// # Connections stolen/mirrored in whole
 ///
-/// Each request stolen with a filter is managed by a single [`HttpGatewayTask`].
+/// Each such connection exists in two places:
 ///
-/// Incoming connections are created by the agent either explicitly ([`NewTcpConnection`] message,
-/// connections stolen/mirrord in whole) or implicitly ([`HttpRequest`] message, requests stolen
-/// with a filter).
+/// 1. Here, between the intproxy and the user application. Managed by a single [`TcpProxyTask`].
+/// 2. In the cluster, between the agent and the original TCP client.
+///
+/// We are notified about such connections with the [`NewTcpConnection`] message.
+///
+/// # Requests stolen with a filter
+///
+/// In the cluster, we have a real persistent connection between the agent and the original HTTP
+/// client. From this connection, intproxy receives a subset of requests.
+///
+/// Locally, we don't have a concept of a filered connection.
+/// Each request is handled independently by a single [`HttpGatewayTask`].
+/// Also:
+/// 1. Local HTTP connections are reused when possible.
+/// 2. Unless the error is fatal, each requests are retried a couple times.
+/// 3. We never send [`LayerTcpSteal::ConnectionUnsubscribe`] (due to requests being handled
+///    independently). If a request fails locally, we send a
+///    [`StatusCode::BAD_GATEWAY`](hyper::http::StatusCode::BAD_GATEWAY) response.
+///
+/// We are notified about stolen requests with the [`HttpRequest`] messages.
+///
+/// # HTTP upgrades
+///
+/// An HTTP request stolen with a filter can result in an HTTP upgrade.
+/// When this happens, the TPC connection is recovered and passed to a new [`TcpProxyTask`].
+/// The TCP connection is then treated as stolen in whole.
 #[derive(Default)]
 pub struct IncomingProxy {
     /// Active port subscriptions for all layers.
