@@ -26,12 +26,12 @@ pub mod stateful_set;
 /// Helper struct for resolving user-provided [`Target`] to Kubernetes resources.
 ///
 /// It has 3 implementations based on `CHECKED`, which indicates if this target has been
-/// checked with [`ResolvedTarget::assert_valid_mirrord_target`].
+/// checked with [`ResolvedTarget::operator_target_preliminary_check`].
 ///
 /// 1. A generic implementation with helper methods for getting strings such as names, types and so
 ///    on;
 /// 2. `CHECKED = false` that may be used to build the struct, and to call
-///    `assert_valid_mirrord_target` (along with the generic methods);
+///    [`ResolvedTarget::operator_target_preliminary_check`] (along with the generic methods);
 /// 3. `CHECKED = true` which is how we get a connection url for the target;
 #[derive(Debug, Clone)]
 pub enum ResolvedTarget<const CHECKED: bool> {
