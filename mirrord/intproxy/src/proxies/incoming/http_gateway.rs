@@ -165,7 +165,7 @@ impl HttpGatewayTask {
                     let start = Instant::now();
                     match body.next_frames().await {
                         Ok(frames) => {
-                            let body_finished = frames.is_last;
+                            let is_last = frames.is_last;
                             let frames = frames
                                 .frames
                                 .into_iter()
@@ -173,23 +173,23 @@ impl HttpGatewayTask {
                                 .collect::<Vec<_>>();
                             tracing::trace!(
                                 ?frames,
-                                body_finished,
+                                is_last,
                                 elapsed_ms = start.elapsed().as_millis(),
-                                "Received next response body frames",
+                                "Received a next batch of response body frames",
                             );
 
                             message_bus
                                 .send(HttpOut::ResponseChunked(ChunkedResponse::Body(
                                     ChunkedHttpBody {
-                                        frames: frames,
-                                        is_last: body_finished,
+                                        frames,
+                                        is_last,
                                         connection_id: self.request.connection_id,
                                         request_id: self.request.request_id,
                                     },
                                 )))
                                 .await;
 
-                            if body_finished {
+                            if is_last {
                                 break;
                             }
                         }
