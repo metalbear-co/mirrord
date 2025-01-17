@@ -22,7 +22,7 @@ use mirrord_intproxy_protocol::{
     OutgoingConnectResponse, PortSubscribe,
 };
 use mirrord_protocol::{
-    dns::{GetAddrInfoRequestV2, LookupRecord},
+    dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
 use nix::sys::socket::{sockopt, SockaddrIn, SockaddrIn6, SockaddrLike, SockaddrStorage};
@@ -899,6 +899,16 @@ pub(super) fn remote_getaddrinfo(
     socktype: c_int,
     protocol: c_int,
 ) -> HookResult<Vec<(String, IpAddr)>> {
+    let family = match family {
+        libc::AF_INET => AddressFamily::Ipv4Only,
+        libc::AF_INET6 => AddressFamily::Ipv6Only,
+        _ => AddressFamily::Both,
+    };
+    let socktype = match socktype {
+        libc::SOCK_STREAM => SockType::Stream,
+        libc::SOCK_DGRAM => SockType::Dgram,
+        _ => SockType::Any,
+    };
     let addr_info_list = common::make_proxy_request_with_response(GetAddrInfoRequestV2 {
         node,
         service_port,

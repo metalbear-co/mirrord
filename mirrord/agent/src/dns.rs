@@ -116,23 +116,22 @@ impl DnsWorker {
             let hosts_conf = fs::read(hosts_path).await?;
 
             let (config, mut options) = parse_resolv_conf(resolv_conf)?;
+            tracing::debug!(?config, ?options, "parsed config options");
             options.server_ordering_strategy =
                 hickory_resolver::config::ServerOrderingStrategy::UserProvidedOrder;
             options.timeout = timeout;
             options.attempts = attempts;
             options.ip_strategy = if support_ipv6 {
                 tracing::debug!("IPv6 support enabled. Respecting client IP family.");
-                match request.family {
-                    libc::AF_INET => hickory_resolver::config::LookupIpStrategy::Ipv4Only,
-                    libc::AF_INET6 => hickory_resolver::config::LookupIpStrategy::Ipv6Only,
-                    _ => hickory_resolver::config::LookupIpStrategy::Ipv4AndIpv6,
-                }
+                request.family.into()
             } else {
                 tracing::debug!("IPv6 support disabled. Resolving IPv4 only.");
                 hickory_resolver::config::LookupIpStrategy::Ipv4Only
             };
+            tracing::debug!(?config, ?options, "updated config options");
 
             let mut resolver = Resolver::tokio(config, options);
+            tracing::debug!(?resolver, "tokio resolver");
 
             let mut hosts = Hosts::default();
             hosts.read_hosts_conf(hosts_conf.as_slice())?;
@@ -145,7 +144,8 @@ impl DnsWorker {
             .inspect_err(|fail| tracing::error!(?fail, "Failed to build DNS resolver"))?
             .lookup_ip(request.node)
             .await
-            .inspect(|lookup| tracing::trace!(?lookup, "Lookup finished"))?
+            .inspect(|lookup| tracing::trace!(?lookup, "Lookup finished"))
+            .inspect_err(|e| tracing::trace!(%e, "lookup failed"))?
             .into();
 
         Ok(lookup)

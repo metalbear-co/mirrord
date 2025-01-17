@@ -86,15 +86,43 @@ impl From<GetAddrInfoRequestV2> for GetAddrInfoRequest {
     }
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Copy, Clone)]
+pub enum AddressFamily {
+    Ipv4Only,
+    Ipv6Only,
+    Both,
+}
+
+impl From<AddressFamily> for hickory_resolver::config::LookupIpStrategy {
+    fn from(value: AddressFamily) -> Self {
+        match value {
+            AddressFamily::Ipv4Only => Self::Ipv4Only,
+            AddressFamily::Ipv6Only => Self::Ipv6Only,
+            AddressFamily::Both => Self::Ipv4AndIpv6,
+        }
+    }
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum SockType {
+    Stream,
+    Dgram,
+    Any,
+}
+
 /// Newer, advanced version of [`GetAddrInfoRequest`]
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct GetAddrInfoRequestV2 {
     pub node: String,
+    /// Currently not respected by the agent, there for future use.
     pub service_port: u16,
-    // TODO: should I use c_int?
+    pub family: AddressFamily,
+    pub socktype: SockType,
+    /// Including these fields so we can use them in the future without introducing a new request
+    /// type. But note that the constants are different on macOS and Linux so they should be
+    /// converted to the linux values first (on the client, because the agent does not know the
+    /// client is macOS).
     pub flags: i32,
-    pub family: i32,
-    pub socktype: i32,
     pub protocol: i32,
 }
 
@@ -104,8 +132,8 @@ impl From<GetAddrInfoRequest> for GetAddrInfoRequestV2 {
             node: value.node,
             service_port: 0,
             flags: 0,
-            family: 0,
-            socktype: 0,
+            family: AddressFamily::Ipv4Only,
+            socktype: SockType::Any,
             protocol: 0,
         }
     }

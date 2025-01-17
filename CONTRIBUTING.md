@@ -137,6 +137,11 @@ In order to use an agent image from a local registry, you can load the image to 
 kind load docker-image test:latest
 ```
 
+In order to test on EKS, I used this blueprint: https://github.com/aws-ia/terraform-aws-eks-blueprints/tree/main/patterns/ipv6-eks-cluster
+
+After creating the cluster, I had to give myself permissions to the K8s objects, I did that via the AWS console (in the browser).
+Feel free to add instructions on how to make that "manual" step unnecessary.
+
 
 ### Cleanup
 
