@@ -215,6 +215,7 @@ mirrord-layer failed to parse the provided target!
 /// - `job/{sample-job}`;
 /// - `cronjob/{sample-cronjob}`;
 /// - `statefulset/{sample-statefulset}`;
+/// - `service/{sample-service}`;
 #[warn(clippy::wildcard_enum_match_arm)]
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
