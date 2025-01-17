@@ -8,7 +8,7 @@ use rstest::rstest;
 mod common;
 pub use common::*;
 use mirrord_protocol::{
-    dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse, LookupRecord},
+    dns::{DnsLookup, GetAddrInfoRequestV2, GetAddrInfoResponse, LookupRecord},
     ClientMessage, DaemonMessage, DnsLookupError,
     ResolveErrorKindInternal::NoRecordsFound,
 };
@@ -25,7 +25,7 @@ async fn test_dns_resolve(
         .await;
 
     let msg = intproxy.recv().await;
-    let ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node }) = msg else {
+    let ClientMessage::GetAddrInfoRequestV2(GetAddrInfoRequestV2 { node, .. }) = msg else {
         panic!("Invalid message received from layer: {msg:?}");
     };
 
@@ -39,7 +39,7 @@ async fn test_dns_resolve(
         .await;
 
     let msg = intproxy.recv().await;
-    let ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node: _ }) = msg else {
+    let ClientMessage::GetAddrInfoRequestV2(GetAddrInfoRequestV2 { .. }) = msg else {
         panic!("Invalid message received from layer: {msg:?}");
     };
 
