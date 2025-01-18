@@ -24,23 +24,7 @@ where
             frames: vec![],
             is_last: false,
         };
-
-        loop {
-            match self.frame().now_or_never() {
-                None => {
-                    frames.is_last = false;
-                    break;
-                }
-                Some(None) => {
-                    frames.is_last = true;
-                    break;
-                }
-                Some(Some(result)) => {
-                    frames.frames.push(result?);
-                }
-            }
-        }
-
+        extend_with_ready(self, &mut frames)?;
         Ok(frames)
     }
 
@@ -60,24 +44,35 @@ where
             }
         }
 
-        loop {
-            match self.frame().now_or_never() {
-                None => {
-                    frames.is_last = false;
-                    break;
-                }
-                Some(None) => {
-                    frames.is_last = true;
-                    break;
-                }
-                Some(Some(result)) => {
-                    frames.frames.push(result?);
-                }
-            }
-        }
+        extend_with_ready(self, &mut frames)?;
 
         Ok(frames)
     }
+}
+
+/// Extends the given [`Frames`] instance with [`Frame`]s that are available without blocking.
+fn extend_with_ready<B: Body + Unpin>(
+    body: &mut B,
+    frames: &mut Frames<B::Data>,
+) -> Result<(), B::Error> {
+    loop {
+        match body.frame().now_or_never() {
+            None => {
+                frames.is_last = false;
+                break;
+            }
+            Some(None) => {
+                frames.is_last = true;
+                break;
+            }
+            Some(Some(result)) => {
+                frames.frames.push(result?);
+                frames.is_last = false;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// A batch of body [`Frame`]s.
