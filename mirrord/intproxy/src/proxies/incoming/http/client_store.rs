@@ -74,7 +74,10 @@ impl ClientStore {
         version: Version,
     ) -> Result<LocalHttpClient, LocalHttpError> {
         let ready = {
-            let mut guard = self.clients.lock().unwrap();
+            let mut guard = self
+                .clients
+                .lock()
+                .expect("ClientStore mutex is poisoned, this is a bug");
             let position = guard.iter().position(|idle| {
                 idle.client.handles_version(version)
                     && idle.client.local_server_address() == server_addr
@@ -101,7 +104,10 @@ impl ClientStore {
     /// Stores an unused [`LocalHttpClient`], so that it can be reused later.
     #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub fn push_idle(&self, client: LocalHttpClient) {
-        let mut guard = self.clients.lock().unwrap();
+        let mut guard = self
+            .clients
+            .lock()
+            .expect("ClientStore mutex is poisoned, this is a bug");
         guard.push(IdleLocalClient {
             client,
             last_used: Instant::now(),
@@ -113,7 +119,10 @@ impl ClientStore {
     async fn wait_for_ready(&self, server_addr: SocketAddr, version: Version) -> LocalHttpClient {
         loop {
             let notified = {
-                let mut guard = self.clients.lock().unwrap();
+                let mut guard = self
+                    .clients
+                    .lock()
+                    .expect("ClientStore mutex is poisoned, this is a bug");
                 let position = guard.iter().position(|idle| {
                     idle.client.handles_version(version)
                         && idle.client.local_server_address() == server_addr
@@ -144,7 +153,9 @@ async fn cleanup_task(store: ClientStore, idle_client_timeout: Duration) {
         let now = Instant::now();
         let mut min_last_used = None;
         let notified = {
-            let mut guard = clients.lock().unwrap();
+            let mut guard = clients
+                .lock()
+                .expect("ClientStore mutex is poisoned, this is a bug");
             let notified = notify.notified();
             guard.retain(|client| {
                 if client.last_used + idle_client_timeout > now {
