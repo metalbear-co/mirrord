@@ -80,7 +80,12 @@ where
     }
 }
 
+/// A batch of body [`Frame`]s.
+///
+/// `D` parameter determines [`Body::Data`] type.
 pub struct Frames<D> {
+    /// A batch of consecutive [`Frames`].
     pub frames: Vec<Frame<D>>,
+    /// Whether the [`Body`] has finished and this is the last batch.
     pub is_last: bool,
 }
