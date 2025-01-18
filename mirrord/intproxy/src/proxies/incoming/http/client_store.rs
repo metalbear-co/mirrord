@@ -147,6 +147,8 @@ async fn cleanup_task(store: ClientStore, idle_client_timeout: Duration) {
 
     loop {
         let Some(clients) = clients.upgrade() else {
+            // Failed `upgrade` means that all `ClientStore` instances were dropped.
+            // This task is no longer needed.
             break;
         };
 
@@ -159,12 +161,14 @@ async fn cleanup_task(store: ClientStore, idle_client_timeout: Duration) {
             let notified = notify.notified();
             guard.retain(|client| {
                 if client.last_used + idle_client_timeout > now {
+                    // We determine how long to sleep before cleaning the store again.
                     min_last_used = min_last_used
                         .map(|previous| cmp::min(previous, client.last_used))
                         .or(Some(client.last_used));
 
                     true
                 } else {
+                    // We drop the idle clients that have gone beyond the timeout.
                     tracing::trace!(?client, "Dropping an idle client");
                     false
                 }
