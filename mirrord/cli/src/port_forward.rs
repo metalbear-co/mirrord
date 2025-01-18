@@ -1071,25 +1071,19 @@ mod test {
 
                 match message {
                     ClientMessage::Ping => {
-                        if tx_to_port_forwarder
+                        tx_to_port_forwarder
                             .send(DaemonMessage::Pong)
                             .await
-                            .is_err()
-                        {
-                            break;
-                        }
+                            .unwrap();
                     }
                     ClientMessage::ReadyForLogs => {}
                     ClientMessage::SwitchProtocolVersion(version) => {
-                        if tx_to_port_forwarder
+                        tx_to_port_forwarder
                             .send(DaemonMessage::SwitchProtocolVersionResponse(
                                 std::cmp::min(&version, &*mirrord_protocol::VERSION).clone(),
                             ))
                             .await
-                            .is_err()
-                        {
-                            break;
-                        }
+                            .unwrap();
                     }
                     other => tx_to_test_code.send(other).await.unwrap(),
                 }
