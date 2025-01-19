@@ -155,10 +155,11 @@ async fn cleanup_task(store: ClientStore, idle_client_timeout: Duration) {
         let now = Instant::now();
         let mut min_last_used = None;
         let notified = {
-            let mut guard = clients
-                .lock()
-                .expect("ClientStore mutex is poisoned, this is a bug");
-            let notified = notify.notified();
+            let Ok(mut guard) = clients.lock() else {
+                tracing::error!("ClientStore mutex is poisoned, this is a bug");
+                return;
+            };
+
             guard.retain(|client| {
                 if client.last_used + idle_client_timeout > now {
                     // We determine how long to sleep before cleaning the store again.
@@ -173,7 +174,10 @@ async fn cleanup_task(store: ClientStore, idle_client_timeout: Duration) {
                     false
                 }
             });
-            notified
+
+            // Acquire [`Notified`] while still holding the lock.
+            // Prevents missed updates.
+            notify.notified()
         };
 
         if let Some(min_last_used) = min_last_used {
