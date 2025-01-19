@@ -37,14 +37,60 @@ impl<T: BackgroundTask> MessageBus<T> {
         }
     }
 
+    /// Returns a [`Closed`] instance for this [`MessageBus`].
     pub fn closed(&self) -> Closed<T> {
         Closed(self.tx.clone())
     }
 }
 
+/// A helper struct bound to some [`MessageBus`] instance.
+///
+/// Used in [`BackgroundTask`]s to `.await` on [`Future`]s without lingering after their
+/// [`MessageBus`] is closed.
+///
+/// It's lifetime does not depend on the origin [`MessageBus`] and it does not hold any references
+/// to it, so that you can use it **and** the [`MessageBus`] at the same time.
+///
+/// # Usage example
+///
+/// ```rust
+/// use std::convert::Infallible;
+///
+/// use mirrord_intproxy::background_tasks::{BackgroundTask, Closed, MessageBus};
+///
+/// struct ExampleTask;
+///
+/// impl ExampleTask {
+///     /// Thanks to the usage of [`Closed`] in [`Self::run`],
+///     /// this function can freely resolve [`Future`]s and use the [`MessageBus`].
+///     /// When the [`MessageBus`] is closed, the whole task will exit.
+///     ///
+///     /// To achieve the same without [`Closed`], you'd need to wrap each
+///     /// [`Future`] resolution with [`tokio::select`].
+///     async fn do_work(&self, message_bus: &mut MessageBus<Self>) {}
+/// }
+///
+/// impl BackgroundTask for ExampleTask {
+///     type MessageIn = Infallible;
+///     type MessageOut = Infallible;
+///     type Error = Infallible;
+///
+///     async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+///         let closed: Closed<Self> = message_bus.closed();
+///         closed.cancel_on_close(self.do_work(message_bus)).await;
+///         Ok(())
+///     }
+/// }
+/// ```
 pub struct Closed<T: BackgroundTask>(Sender<T::MessageOut>);
 
 impl<T: BackgroundTask> Closed<T> {
+    /// Resolves the given [`Future`], unless the origin [`MessageBus`] closes first.
+    ///
+    /// # Returns
+    ///
+    /// * [`Some`] holding the future output - if the future resolved first
+    /// * [`None`] - if the [`MessageBus`] closed first
     pub async fn cancel_on_close<F: Future>(&self, future: F) -> Option<F::Output> {
         tokio::select! {
             _ = self.0.closed() => None,
