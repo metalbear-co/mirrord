@@ -38,7 +38,7 @@ impl<T: BackgroundTask> MessageBus<T> {
     }
 
     /// Returns a [`Closed`] instance for this [`MessageBus`].
-    pub fn closed(&self) -> Closed<T> {
+    pub(crate) fn closed(&self) -> Closed<T> {
         Closed(self.tx.clone())
     }
 }
@@ -82,7 +82,7 @@ impl<T: BackgroundTask> MessageBus<T> {
 ///     }
 /// }
 /// ```
-pub struct Closed<T: BackgroundTask>(Sender<T::MessageOut>);
+pub(crate) struct Closed<T: BackgroundTask>(Sender<T::MessageOut>);
 
 impl<T: BackgroundTask> Closed<T> {
     /// Resolves the given [`Future`], unless the origin [`MessageBus`] closes first.
@@ -91,7 +91,7 @@ impl<T: BackgroundTask> Closed<T> {
     ///
     /// * [`Some`] holding the future output - if the future resolved first
     /// * [`None`] - if the [`MessageBus`] closed first
-    pub async fn cancel_on_close<F: Future>(&self, future: F) -> Option<F::Output> {
+    pub(crate) async fn cancel_on_close<F: Future>(&self, future: F) -> Option<F::Output> {
         tokio::select! {
             _ = self.0.closed() => None,
             output = future => Some(output)
