@@ -22,14 +22,16 @@ use tokio::sync::mpsc::{self, Receiver};
 /// When polled with [`Body::poll_frame`], an instance tries to return a cached frame.
 ///
 /// Thanks to this, each clone returns all frames from the start when polled with
-/// [`Body::poll_frame`].
+/// [`Body::poll_frame`]. As you'd expect from a cloneable [`Body`] implementation.
 pub struct StreamingBody {
     /// Shared with instances acquired via [`Clone`].
-    /// Allows the clones to receive a copy of the data.
+    ///
+    /// Allows the clones to access previously fetched [`Frame`]s.
     shared_state: Arc<Mutex<(Receiver<InternalHttpBodyFrame>, Vec<InternalHttpBodyFrame>)>>,
-    /// Index of the next frame to return from the buffer.
+    /// Index of the next frame to return from the buffer, not shared with other instances acquired
+    /// via [`Clone`].
+    ///
     /// If outside of the buffer, we need to poll the stream to get the next frame.
-    /// Local state of this instance, zeroed when cloning.
     idx: usize,
 }
 
