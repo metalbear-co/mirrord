@@ -977,7 +977,9 @@ pub(super) fn getaddrinfo(
         .and_then(|service| service.parse::<u16>().ok())
         .unwrap_or(0);
 
-    crate::setup().dns_selector().check_query(&node, service)?;
+    let setup = crate::setup();
+    setup.dns_selector().check_query(&node, service)?;
+    let ipv6_enabled = setup.layer_config().feature.network.ipv6;
 
     let raw_hints = raw_hints
         .cloned()
@@ -992,8 +994,8 @@ pub(super) fn getaddrinfo(
     } = raw_hints;
 
     // Some apps (gRPC on Python) use `::` to listen on all interfaces, and usually that just means
-    // resolve on unspecified. So we just return that in IPv4 if that's the used IP family.
-    let resolved_addr = if (ai_family == libc::AF_INET) && (node == "::") {
+    // resolve on unspecified. So we just return that in IPv4, if IPv6 support is disabled.
+    let resolved_addr = if ipv6_enabled.not() && (node == "::") {
         // name is "" because that's what happens in real flow.
         vec![("".to_string(), IpAddr::V4(Ipv4Addr::UNSPECIFIED))]
     } else {
