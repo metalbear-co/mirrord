@@ -89,7 +89,7 @@ pub enum OutgoingFilterConfig {
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize)]
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[config(map_to = "OutgoingFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct OutgoingConfig {
