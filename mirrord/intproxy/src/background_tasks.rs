@@ -48,7 +48,7 @@ impl<T: BackgroundTask> MessageBus<T> {
 /// Used in [`BackgroundTask`]s to `.await` on [`Future`]s without lingering after their
 /// [`MessageBus`] is closed.
 ///
-/// It's lifetime does not depend on the origin [`MessageBus`] and it does not hold any references
+/// Its lifetime does not depend on the origin [`MessageBus`] and it does not hold any references
 /// to it, so that you can use it **and** the [`MessageBus`] at the same time.
 ///
 /// # Usage example
