@@ -149,6 +149,7 @@ impl IncomingProxy {
     ///
     /// If we don't have a [`PortSubscription`] for the port, the task is not started.
     /// Instead, we respond immediately to the agent.
+    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
     async fn start_http_gateway(
         &mut self,
         request: HttpRequest<StreamingBody>,
@@ -227,6 +228,7 @@ impl IncomingProxy {
     ///
     /// If we don't have a [`PortSubscription`] for the port, the task is not started.
     /// Instead, we respond immediately to the agent.
+    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
     async fn handle_new_connection(
         &mut self,
         connection: NewTcpConnection,
