@@ -87,8 +87,9 @@ impl UdpOutgoingTask {
         }
     }
 
-    /// Runs this task as long as the channels connecting it with [`TcpOutgoingApi`] are open.
-    /// This routine never fails and returns [`Result`] only due to [`WatchedTask`] constraints.
+    /// Runs this task as long as the channels connecting it with [`UdpOutgoingApi`] are open.
+    /// This routine never fails and returns [`AgentResult`] only due to [`WatchedTask`]
+    /// constraints.
     #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(super) async fn run(mut self) -> AgentResult<()> {
         loop {
