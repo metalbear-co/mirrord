@@ -42,9 +42,8 @@ pub(crate) struct TcpStealerApi {
     /// [`Sender`]s that allow us to provide body [`Frame`]s of responses to filtered HTTP
     /// requests.
     ///
-    /// With [`LayerTcpSteal::HttpResponseChunked`](mirrord_protocol::tcp::LayerTcpSteal::HttpResponseChunked)
-    /// Response bodies come from the client in a series of
-    /// [`ChunkedResponse::Body`](mirrord_protocol::tcp::ChunkedResponse::Body) messages.
+    /// With [`LayerTcpSteal::HttpResponseChunked`], response bodies come from the client
+    /// in a series of [`ChunkedResponse::Body`] messages.
     ///
     /// Thus, we use [`ReceiverStreamBody`] for [`Response`](hyper::Response)'s body type and
     /// pipe the [`Frame`]s through an [`mpsc::channel`].
