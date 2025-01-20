@@ -113,7 +113,7 @@ struct HttpGatewayHandle {
 /// # HTTP upgrades
 ///
 /// An HTTP request stolen with a filter can result in an HTTP upgrade.
-/// When this happens, the TPC connection is recovered and passed to a new [`TcpProxyTask`].
+/// When this happens, the TCP connection is recovered and passed to a new [`TcpProxyTask`].
 /// The TCP connection is then treated as stolen in whole.
 #[derive(Default)]
 pub struct IncomingProxy {
