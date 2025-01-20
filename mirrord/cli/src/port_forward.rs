@@ -583,7 +583,9 @@ impl ReversePortForwarder {
 
             TaskUpdate::Finished(result) => match result {
                 Ok(()) => {
-                    return Err(PortForwardError::IncomingProxyExited);
+                    unreachable!(
+                        "IncomingProxy should not finish, task sender is alive in this struct"
+                    );
                 }
                 Err(TaskError::Error(e)) => {
                     return Err(e.into());
@@ -950,9 +952,6 @@ pub enum PortForwardError {
 
     #[error("error from the IncomingProxy task: {0}")]
     IncomingProxyError(#[from] IncomingProxyError),
-
-    #[error("IncomingProxy task unexpectedly exited")]
-    IncomingProxyExited,
 
     #[error("IncomingProxy task panicked")]
     IncomingProxyPanicked,
