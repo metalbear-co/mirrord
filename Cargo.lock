@@ -4278,6 +4278,7 @@ dependencies = [
 name = "mirrord-config"
 version = "3.129.0"
 dependencies = [
+ "base64 0.22.1",
  "bimap",
  "bitflags 2.8.0",
  "fancy-regex",
