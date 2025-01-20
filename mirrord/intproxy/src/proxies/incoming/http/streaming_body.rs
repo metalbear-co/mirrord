@@ -11,12 +11,18 @@ use hyper::body::{Body, Frame};
 use mirrord_protocol::tcp::{InternalHttpBody, InternalHttpBodyFrame};
 use tokio::sync::mpsc::{self, Receiver};
 
-/// [`Body`] implementation that reads [`Frame`]s from an [`mpsc::channel`] and caches them
-/// internally in a shared vector.
+/// Cheaply cloneable [`Body`] implementation that reads [`Frame`]s from an [`mpsc::channel`].
 ///
-/// This struct maintains its position in the shared vector.
-/// When cloned, it resets the index. This allows for replaying the body even though it is streamed
-/// from a channel.
+/// # Clone behavior
+///
+/// All instances acquired via [`Clone`] share the [`mpsc::Receiver`] and a vector of previously
+/// read frames. Each instance maintains its own position in the shared vector, and a new clone
+/// starts at 0.
+///
+/// When polled with [`Body::poll_frame`], an instance tries to return a cached frame.
+///
+/// Thanks to this, each clone returns all frames from the start when polled with
+/// [`Body::poll_frame`].
 pub struct StreamingBody {
     /// Shared with instances acquired via [`Clone`].
     /// Allows the clones to receive a copy of the data.
