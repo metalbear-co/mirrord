@@ -60,7 +60,7 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 }
 
 pub async fn proxy(listen_port: u16, watch: drain::Watch) -> CliResult<()> {
-    let config = LayerConfig::from_env()?;
+    let config = LayerConfig::recalculate_from_env()?;
 
     init_extproxy_tracing_registry(&config)?;
     tracing::info!(?config, "external_proxy starting");

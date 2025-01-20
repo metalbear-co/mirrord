@@ -50,7 +50,7 @@ pub(crate) async fn proxy(
     listen_port: u16,
     watch: drain::Watch,
 ) -> CliResult<(), InternalProxyError> {
-    let config = LayerConfig::from_env()?;
+    let config = LayerConfig::recalculate_from_env()?;
 
     init_intproxy_tracing_registry(&config)?;
     tracing::info!(?config, "internal_proxy starting");

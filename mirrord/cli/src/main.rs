@@ -64,7 +64,7 @@ pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
 async fn exec_process<P>(
-    config: LayerConfig,
+    mut config: LayerConfig,
     args: &ExecArgs,
     progress: &P,
     analytics: &mut AnalyticsReporter,
@@ -75,10 +75,15 @@ where
     let mut sub_progress = progress.subtask("preparing to launch process");
 
     #[cfg(target_os = "macos")]
-    let execution_info =
-        MirrordExecution::start(&config, Some(&args.binary), &mut sub_progress, analytics).await?;
+    let execution_info = MirrordExecution::start(
+        &mut config,
+        Some(&args.binary),
+        &mut sub_progress,
+        analytics,
+    )
+    .await?;
     #[cfg(not(target_os = "macos"))]
-    let execution_info = MirrordExecution::start(&config, &mut sub_progress, analytics).await?;
+    let execution_info = MirrordExecution::start(&mut config, &mut sub_progress, analytics).await?;
 
     // This is not being yielded, as this is not proper async, something along those lines.
     // We need an `await` somewhere in this function to drive our socket IO that happens
@@ -352,6 +357,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
         std::env::set_var(name, value);
     }
 
+    // LayerConfig must be created after setting relevant env vars
     let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
@@ -472,6 +478,7 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
         std::env::set_var("MIRRORD_CONFIG_FILE", config_file);
     }
 
+    // LayerConfig must be created after setting relevant env vars
     let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
     let mut analytics = AnalyticsReporter::new(config.telemetry, ExecutionKind::PortForward, watch);
