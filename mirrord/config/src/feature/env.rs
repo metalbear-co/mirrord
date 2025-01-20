@@ -134,9 +134,11 @@ pub struct EnvConfig {
     ///
     /// Will do the next replacements for environment variables that match:
     ///
-    /// `CONNECTION_TIMEOUT: 500` => `CONNECTION_TIMEOUT: 10000`
-    /// `LOG_FILE_VERBOSITY: info` => `LOG_FILE_VERBOSITY: debug`
-    /// `DATA_1234: common-value` => `DATA_1234: magic-value`
+    /// * `CONNECTION_TIMEOUT: 500` => `CONNECTION_TIMEOUT: 10000`
+    ///
+    /// * `LOG_FILE_VERBOSITY: info` => `LOG_FILE_VERBOSITY: debug`
+    ///
+    /// * `DATA_1234: common-value` => `DATA_1234: magic-value`
     pub mapping: Option<HashMap<String, String>>,
 }
 
