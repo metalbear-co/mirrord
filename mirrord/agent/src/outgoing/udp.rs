@@ -47,7 +47,7 @@ struct UdpOutgoingTask {
     >,
     /// Reading halves of peer connections made on layer's requests.
     readers: StreamMap<ConnectionId, SplitStream<UdpFramed<BytesCodec>>>,
-    /// Optional pid of agent's target. Used in [`SocketStream::connect`].
+    /// Optional pid of agent's target. Used in `SocketStream::connect`.
     pid: Option<u64>,
     layer_rx: Receiver<LayerUdpOutgoing>,
     daemon_tx: Sender<DaemonUdpOutgoing>,
