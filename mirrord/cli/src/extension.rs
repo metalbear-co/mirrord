@@ -10,7 +10,7 @@ use crate::{config::ExtensionExecArgs, error::CliError, execution::MirrordExecut
 async fn mirrord_exec<P>(
     #[cfg(target_os = "macos")] executable: Option<&str>,
     env: HashMap<String, String>,
-    config: LayerConfig,
+    mut config: LayerConfig,
     mut progress: P,
     analytics: &mut AnalyticsReporter,
 ) -> CliResult<()>
@@ -21,9 +21,9 @@ where
     // or run tasks before actually launching.
     #[cfg(target_os = "macos")]
     let mut execution_info =
-        MirrordExecution::start(&config, executable, &mut progress, analytics).await?;
+        MirrordExecution::start(&mut config, executable, &mut progress, analytics).await?;
     #[cfg(not(target_os = "macos"))]
-    let mut execution_info = MirrordExecution::start(&config, &mut progress, analytics).await?;
+    let mut execution_info = MirrordExecution::start(&mut config, &mut progress, analytics).await?;
 
     // We don't execute so set envs aren't passed, so we need to add config file and target to
     // env.
