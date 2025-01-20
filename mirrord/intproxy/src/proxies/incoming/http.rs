@@ -93,22 +93,22 @@ impl fmt::Debug for LocalHttpClient {
 /// Errors that can occur when sending an HTTP request to the user application.
 #[derive(Error, Debug)]
 pub enum LocalHttpError {
-    #[error("handshake failed: {0}")]
+    #[error("failed to make an HTTP handshake with the local application's HTTP server: {0}")]
     HandshakeFailed(#[source] hyper::Error),
 
-    #[error("{0:?} is not supported")]
+    #[error("{0:?} is not supported in the local HTTP proxy")]
     UnsupportedHttpVersion(Version),
 
-    #[error("sending the request failed: {0}")]
+    #[error("failed to send the request to the local application's HTTP server: {0}")]
     SendFailed(#[source] hyper::Error),
 
-    #[error("setting up TCP socket failed: {0}")]
+    #[error("failed to prepare a local TCP socket: {0}")]
     SocketSetupFailed(#[source] io::Error),
 
-    #[error("making a TPC connection failed: {0}")]
+    #[error("failed to make a TPC connection with the local application's HTTP server: {0}")]
     ConnectTcpFailed(#[source] io::Error),
 
-    #[error("reading the response body failed: {0}")]
+    #[error("failed to read the body of the local application's HTTP server response: {0}")]
     ReadBodyFailed(#[source] hyper::Error),
 }
 
