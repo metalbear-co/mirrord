@@ -133,7 +133,7 @@ pub struct IncomingProxy {
     ///
     /// Each entry here maps to a connection that is in progress both locally and remotely.
     steal_tcp_proxies: HashMap<ConnectionId, TaskSender<TcpProxyTask>>,
-    /// Each remote HTTP request stolen with a filter is mapped to a [HttpGatewayTask].
+    /// Each remote HTTP request stolen with a filter is mapped to a [`HttpGatewayTask`].
     ///
     /// Each entry here maps to a request that is in progress both locally and remotely.
     http_gateways: HashMap<ConnectionId, HashMap<RequestId, HttpGatewayHandle>>,
