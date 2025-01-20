@@ -36,6 +36,8 @@ pub struct TcpProxyTask {
     /// The local connection between this task and the user application.
     connection: LocalTcpConnection,
     /// Whether this task should silently discard data coming from the user application.
+    ///
+    /// The data is discarded only when the remote connection is mirrored.
     discard_data: bool,
 }
 
