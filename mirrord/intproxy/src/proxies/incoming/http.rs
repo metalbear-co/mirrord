@@ -1,4 +1,4 @@
-use std::{fmt, io, net::SocketAddr};
+use std::{fmt, io, net::SocketAddr, ops::Not};
 
 use hyper::{
     body::Incoming,
@@ -119,12 +119,12 @@ impl LocalHttpError {
         match self {
             Self::SocketSetupFailed(..) | Self::UnsupportedHttpVersion(..) => false,
             Self::ConnectTcpFailed(..) => true,
-            Self::HandshakeFailed(err) | Self::SendFailed(err) | Self::ReadBodyFailed(err) => {
-                !(err.is_parse()
-                    || err.is_parse_status()
-                    || err.is_parse_too_large()
-                    || err.is_user())
-            }
+            Self::HandshakeFailed(err) | Self::SendFailed(err) | Self::ReadBodyFailed(err) => (err
+                .is_parse()
+                || err.is_parse_status()
+                || err.is_parse_too_large()
+                || err.is_user())
+            .not(),
         }
     }
 }
