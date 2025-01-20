@@ -125,11 +125,11 @@ pub struct IncomingProxy {
     response_mode: ResponseMode,
     /// Cache for [`LocalHttpClient`](http::LocalHttpClient)s.
     client_store: ClientStore,
-    /// Each mirrored remote connection is mapped to a [TcpProxyTask] in mirror mode.
+    /// Each mirrored remote connection is mapped to a [`TcpProxyTask`] in mirror mode.
     ///
     /// Each entry here maps to a connection that is in progress both locally and remotely.
     mirror_tcp_proxies: HashMap<ConnectionId, TaskSender<TcpProxyTask>>,
-    /// Each remote connection stolen in whole is mapped to a [TcpProxyTask] in steal mode.
+    /// Each remote connection stolen in whole is mapped to a [`TcpProxyTask`] in steal mode.
     ///
     /// Each entry here maps to a connection that is in progress both locally and remotely.
     steal_tcp_proxies: HashMap<ConnectionId, TaskSender<TcpProxyTask>>,
