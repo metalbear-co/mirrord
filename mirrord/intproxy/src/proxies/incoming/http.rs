@@ -34,6 +34,7 @@ pub struct LocalHttpClient {
 
 impl LocalHttpClient {
     /// Makes an HTTP connection with the given server and creates a new client.
+    #[tracing::instrument(level = Level::TRACE, err(level = Level::WARN), ret)]
     pub async fn new(
         local_server_address: SocketAddr,
         version: Version,
