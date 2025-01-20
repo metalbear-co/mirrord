@@ -103,7 +103,7 @@ struct HttpGatewayHandle {
 /// Each request is handled independently by a single [`HttpGatewayTask`].
 /// Also:
 /// 1. Local HTTP connections are reused when possible.
-/// 2. Unless the error is fatal, each requests are retried a couple times.
+/// 2. Unless the error is fatal, each request is retried a couple of times.
 /// 3. We never send [`LayerTcpSteal::ConnectionUnsubscribe`] (due to requests being handled
 ///    independently). If a request fails locally, we send a
 ///    [`StatusCode::BAD_GATEWAY`](hyper::http::StatusCode::BAD_GATEWAY) response.
