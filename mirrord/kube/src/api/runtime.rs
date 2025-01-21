@@ -281,6 +281,12 @@ pub trait RuntimeDataProvider {
     ) -> impl Future<Output = Result<RuntimeData>>;
 }
 
+/// Trait for resources that abstract a set of pods
+/// defined by a label selector.
+///
+/// Implementors are provided with an implementation of [`RuntimeDataProvider`].
+/// When resolving [`RuntimeData`], the set of pods is fetched and [`RuntimeData`] is extracted from
+/// the first pod on the list. If the set is empty, resolution fails.
 pub trait RuntimeDataFromLabels {
     type Resource: Resource<DynamicType = (), Scope = NamespaceResourceScope>
         + Clone
