@@ -50,7 +50,7 @@ mod tcp_proxy;
 /// Errors that can occur when handling the `incoming` feature.
 #[derive(Error, Debug)]
 pub enum IncomingProxyError {
-    #[error("failed to prepare a TPC socket: {0}")]
+    #[error("failed to prepare a TCP socket: {0}")]
     SocketSetupFailed(#[source] io::Error),
     #[error("subscribing port failed: {0}")]
     SubscriptionFailed(#[source] ResponseError),

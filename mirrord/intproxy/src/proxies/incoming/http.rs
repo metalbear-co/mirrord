@@ -106,7 +106,7 @@ pub enum LocalHttpError {
     #[error("failed to prepare a local TCP socket: {0}")]
     SocketSetupFailed(#[source] io::Error),
 
-    #[error("failed to make a TPC connection with the local application's HTTP server: {0}")]
+    #[error("failed to make a TCP connection with the local application's HTTP server: {0}")]
     ConnectTcpFailed(#[source] io::Error),
 
     #[error("failed to read the body of the local application's HTTP server response: {0}")]
