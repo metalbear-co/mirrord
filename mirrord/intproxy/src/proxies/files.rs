@@ -6,7 +6,7 @@ use mirrord_protocol::{
     file::{
         CloseDirRequest, CloseFileRequest, DirEntryInternal, ReadDirBatchRequest, ReadDirResponse,
         ReadFileResponse, ReadLimitedFileRequest, SeekFromInternal, MKDIR_VERSION,
-        READDIR_BATCH_VERSION, READLINK_VERSION, STATFS_VERSION,
+        READDIR_BATCH_VERSION, READLINK_VERSION, RMDIR_VERSION, STATFS_VERSION,
     },
     ClientMessage, DaemonMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError,
     ResponseError,
@@ -267,6 +267,12 @@ impl FilesProxy {
                 if protocol_version.is_some_and(|version| !MKDIR_VERSION.matches(version)) =>
             {
                 Err(FileResponse::MakeDir(Err(ResponseError::NotImplemented)))
+            }
+            FileRequest::RemoveDir(..) | FileRequest::Unlink(..) | FileRequest::UnlinkAt(..)
+                if protocol_version
+                    .is_some_and(|version: &Version| !RMDIR_VERSION.matches(version)) =>
+            {
+                Err(FileResponse::RemoveDir(Err(ResponseError::NotImplemented)))
             }
             FileRequest::StatFs(..)
                 if protocol_version
@@ -532,30 +538,6 @@ impl FilesProxy {
                 message_bus
                     .send(ClientMessage::FileRequest(FileRequest::Seek(seek)))
                     .await;
-            }
-
-            FileRequest::MakeDir(_) | FileRequest::MakeDirAt(_) => {
-                let supported = self
-                    .protocol_version
-                    .as_ref()
-                    .is_some_and(|version| MKDIR_VERSION.matches(version));
-
-                if supported {
-                    self.request_queue.push_back(message_id, layer_id);
-                    message_bus
-                        .send(ProxyMessage::ToAgent(ClientMessage::FileRequest(request)))
-                        .await;
-                } else {
-                    let file_response = FileResponse::MakeDir(Err(ResponseError::NotImplemented));
-
-                    message_bus
-                        .send(ToLayer {
-                            message_id,
-                            message: ProxyToLayerMessage::File(file_response),
-                            layer_id,
-                        })
-                        .await;
-                }
             }
 
             // Doesn't require any special logic.

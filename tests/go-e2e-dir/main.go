@@ -37,6 +37,12 @@ func main() {
 		os.Exit(-1)
 	}
 
+	err = os.Remove("/app/test_mkdir")
+	if err != nil {
+		fmt.Printf("Rmdir error: %s\n", err)
+		os.Exit(-1)
+	}
+
 	// let close requests be sent for test
 	time.Sleep(1 * time.Second)
 	os.Exit(0)
