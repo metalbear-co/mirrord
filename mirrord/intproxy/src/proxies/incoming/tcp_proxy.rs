@@ -31,6 +31,13 @@ pub enum LocalTcpConnection {
 
 /// [`BackgroundTask`] of [`IncomingProxy`](super::IncomingProxy) that handles a remote
 /// stolen/mirrored TCP connection.
+///
+/// In steal mode, exits immediately when it's [`TaskSender`](crate::background_tasks::TaskSender)
+/// is dropped.
+///
+/// In mirror mode, when it's [`TaskSender`](crate::background_tasks::TaskSender) is dropped,
+/// this proxy keeps reading data from the user application and exits after
+/// [`Self::MIRROR_MODE_LINGER_TIMEOUT`] of silence.
 #[derive(Debug)]
 pub struct TcpProxyTask {
     /// The local connection between this task and the user application.
@@ -42,6 +49,10 @@ pub struct TcpProxyTask {
 }
 
 impl TcpProxyTask {
+    /// Mirror mode only: how long do we wait before exiting after the [`MessageBus`] is closed
+    /// and user application doesn't send any data.
+    pub const MIRROR_MODE_LINGER_TIMEOUT: Duration = Duration::from_secs(1);
+
     /// Creates a new task.
     ///
     /// * This task will talk with the user application using the given [`LocalTcpConnection`].
@@ -172,7 +183,7 @@ impl BackgroundTask for TcpProxyTask {
                     },
                 },
 
-                _ = time::sleep(Duration::from_secs(1)), if is_lingering => {
+                _ = time::sleep(Self::MIRROR_MODE_LINGER_TIMEOUT), if is_lingering => {
                     tracing::trace!(
                         peer_addr = %peer_addr,
                         self_addr = %self_addr,

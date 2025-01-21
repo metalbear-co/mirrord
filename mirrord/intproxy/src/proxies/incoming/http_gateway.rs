@@ -30,6 +30,8 @@ use crate::background_tasks::{BackgroundTask, MessageBus};
 /// [`BackgroundTask`] used by the [`IncomingProxy`](super::IncomingProxy).
 ///
 /// Responsible for delivering a single HTTP request to the user application.
+///
+/// Exits immediately when it's [`TaskSender`](crate::background_tasks::TaskSender) is dropped.
 pub struct HttpGatewayTask {
     /// Request to deliver.
     request: HttpRequest<StreamingBody>,

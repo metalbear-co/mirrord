@@ -94,6 +94,11 @@ struct HttpGatewayHandle {
 ///
 /// We are notified about such connections with the [`NewTcpConnection`] message.
 ///
+/// The local connection lives until the agent or the user application closes it, or a local IO
+/// error occurs. When we want to close this connection, we simply drop the [`TcpProxyTask`]'s
+/// [`TaskSender`]. When a local IO error occurs, the [`TcpProxyTask`] finishes with an
+/// [`InProxyTaskError`].
+///
 /// # Requests stolen with a filter
 ///
 /// In the cluster, we have a real persistent connection between the agent and the original HTTP
@@ -109,6 +114,12 @@ struct HttpGatewayHandle {
 ///    [`StatusCode::BAD_GATEWAY`](hyper::http::StatusCode::BAD_GATEWAY) response.
 ///
 /// We are notified about stolen requests with the [`HttpRequest`] messages.
+///
+/// The request can be cancelled only when one of the following happen:
+/// 1. The agent closes the remote connection to which this request belongs
+/// 2. The agent informs us that it failed to read request body ([`ChunkedRequest::Error`])
+///
+/// When we want to cancel the request, we drop the [`HttpGatewayTask`]'s [`TaskSender`].
 ///
 /// # HTTP upgrades
 ///
