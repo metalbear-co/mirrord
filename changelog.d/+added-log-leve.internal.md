@@ -1,0 +1,1 @@
+Extended `mirrord-protocol` with info logs from the agent.

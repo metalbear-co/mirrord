@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use mirrord_analytics::{AnalyticValue, CollectAnalytics};
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{FsModeConfig, FsUserConfig};
 use crate::{
@@ -80,7 +80,7 @@ use crate::{
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Default, Clone, PartialEq, Eq, Debug, Serialize)]
+#[derive(MirrordConfig, Default, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[config(
     map_to = "AdvancedFsUserConfig",
     derive = "PartialEq,Eq,JsonSchema",

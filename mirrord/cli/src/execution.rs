@@ -27,7 +27,7 @@ use tokio::{
     sync::mpsc::{self, UnboundedReceiver},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, trace, warn, Level};
+use tracing::{debug, error, info, trace, warn, Level};
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use crate::extract::extract_arm64;
@@ -177,7 +177,7 @@ impl MirrordExecution {
     /// [`tokio::time::sleep`] or [`tokio::task::yield_now`] after calling this function.
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     pub(crate) async fn start<P>(
-        config: &LayerConfig,
+        config: &mut LayerConfig,
         // We only need the executable on macos, for SIP handling.
         #[cfg(target_os = "macos")] executable: Option<&str>,
         progress: &mut P,
@@ -289,10 +289,8 @@ impl MirrordExecution {
             })?;
 
         // Provide details for layer to connect to agent via internal proxy
-        env_vars.insert(
-            MIRRORD_CONNECT_TCP_ENV.to_string(),
-            format!("127.0.0.1:{}", address.port()),
-        );
+        config.connect_tcp = Some(format!("127.0.0.1:{}", address.port()));
+        config.update_env_var()?;
 
         // Fixes <https://github.com/metalbear-co/mirrord/issues/1745>
         // by disabling the fork safety check in the Objective-C runtime.
@@ -552,6 +550,7 @@ impl MirrordExecution {
                     match msg.level {
                         LogLevel::Error => error!("Agent log: {}", msg.message),
                         LogLevel::Warn => warn!("Agent log: {}", msg.message),
+                        LogLevel::Info => info!("Agent log: {}", msg.message),
                     }
 
                     continue;
