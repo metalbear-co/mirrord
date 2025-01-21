@@ -61,7 +61,7 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch)
     #[cfg(target_os = "macos")]
     let execution_result = mirrord_exec(
         args.executable.as_deref(),
-        env,
+        Default::default(),
         config,
         progress,
         &mut analytics,
