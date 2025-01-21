@@ -85,7 +85,7 @@ struct HttpGatewayHandle {
 /// Utilizes multiple background tasks ([`TcpProxyTask`]s and [`HttpGatewayTask`]s) to handle
 /// incoming connections and requests.
 ///
-/// # Connections stolen/mirrored in whole
+/// # Connections mirrored or stolen without a filter
 ///
 /// Each such connection exists in two places:
 ///
@@ -114,7 +114,7 @@ struct HttpGatewayHandle {
 ///
 /// An HTTP request stolen with a filter can result in an HTTP upgrade.
 /// When this happens, the TCP connection is recovered and passed to a new [`TcpProxyTask`].
-/// The TCP connection is then treated as stolen in whole.
+/// The TCP connection is then treated as stolen without a filter.
 #[derive(Default)]
 pub struct IncomingProxy {
     /// Active port subscriptions for all layers.
@@ -129,7 +129,8 @@ pub struct IncomingProxy {
     ///
     /// Each entry here maps to a connection that is in progress both locally and remotely.
     mirror_tcp_proxies: HashMap<ConnectionId, TaskSender<TcpProxyTask>>,
-    /// Each remote connection stolen in whole is mapped to a [`TcpProxyTask`] in steal mode.
+    /// Each remote connection stolen without a filter is mapped to a [`TcpProxyTask`] in steal
+    /// mode.
     ///
     /// Each entry here maps to a connection that is in progress both locally and remotely.
     steal_tcp_proxies: HashMap<ConnectionId, TaskSender<TcpProxyTask>>,
