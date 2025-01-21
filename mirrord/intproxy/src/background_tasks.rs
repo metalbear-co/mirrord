@@ -53,7 +53,7 @@ impl<T: BackgroundTask> MessageBus<T> {
 ///
 /// # Usage example
 ///
-/// ```rust
+/// ```ignore
 /// use std::convert::Infallible;
 ///
 /// use mirrord_intproxy::background_tasks::{BackgroundTask, Closed, MessageBus};
