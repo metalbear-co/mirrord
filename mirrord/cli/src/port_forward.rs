@@ -315,6 +315,7 @@ impl PortForwarder {
             DaemonMessage::LogMessage(log_message) => match log_message.level {
                 LogLevel::Warn => tracing::warn!("agent log: {}", log_message.message),
                 LogLevel::Error => tracing::error!("agent log: {}", log_message.message),
+                LogLevel::Info => tracing::info!("agent log: {}", log_message.message),
             },
             DaemonMessage::Close(error) => {
                 return Err(PortForwardError::AgentError(error));
@@ -556,6 +557,7 @@ impl ReversePortForwarder {
             DaemonMessage::LogMessage(log_message) => match log_message.level {
                 LogLevel::Warn => tracing::warn!("agent log: {}", log_message.message),
                 LogLevel::Error => tracing::error!("agent log: {}", log_message.message),
+                LogLevel::Info => tracing::info!("agent log: {}", log_message.message),
             },
             DaemonMessage::Close(error) => {
                 return Err(PortForwardError::AgentError(error));
