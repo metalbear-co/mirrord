@@ -381,7 +381,8 @@ pub struct FilteredStealTask<T> {
 impl<T> Drop for FilteredStealTask<T> {
     fn drop(&mut self) {
         if self.metrics_updated.not() {
-            STEAL_FILTERED_CONNECTION_SUBSCRIPTION.dec();
+            STEAL_FILTERED_CONNECTION_SUBSCRIPTION
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         }
     }
 }
@@ -459,7 +460,7 @@ where
             }
         };
 
-        STEAL_FILTERED_CONNECTION_SUBSCRIPTION.inc();
+        STEAL_FILTERED_CONNECTION_SUBSCRIPTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         Self {
             connection_id,
@@ -658,7 +659,7 @@ where
                         self.subscribed.insert(client_id, false);
                         self.blocked_requests.retain(|key, _| key.0 != client_id);
 
-                        STEAL_FILTERED_CONNECTION_SUBSCRIPTION.dec();
+                        STEAL_FILTERED_CONNECTION_SUBSCRIPTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                     },
                 },
 
@@ -668,7 +669,7 @@ where
                     // No more requests from the `FilteringService`.
                     // HTTP connection is closed and possibly upgraded.
                     None => {
-                        STEAL_FILTERED_CONNECTION_SUBSCRIPTION.dec();
+                        STEAL_FILTERED_CONNECTION_SUBSCRIPTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                         break
                     }
                 }
@@ -812,7 +813,7 @@ where
     ) -> Result<(), ConnectionTaskError> {
         let res = self.run_until_http_ends(tx.clone(), rx).await;
 
-        STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.dec();
+        STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         self.metrics_updated = true;
 
         let res = match res {

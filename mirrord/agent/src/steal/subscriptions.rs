@@ -316,8 +316,8 @@ pub struct PortSubscriptions<R: PortRedirector> {
 
 impl<R: PortRedirector> Drop for PortSubscriptions<R> {
     fn drop(&mut self) {
-        STEAL_FILTERED_PORT_SUBSCRIPTION.set(0);
-        STEAL_UNFILTERED_PORT_SUBSCRIPTION.set(0);
+        STEAL_FILTERED_PORT_SUBSCRIPTION.store(0, std::sync::atomic::Ordering::Relaxed);
+        STEAL_UNFILTERED_PORT_SUBSCRIPTION.store(0, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -365,9 +365,11 @@ impl<R: PortRedirector> PortSubscriptions<R> {
                 let filtered = filter.is_some();
                 if e.get_mut().try_extend(client_id, filter) {
                     if filtered {
-                        STEAL_FILTERED_PORT_SUBSCRIPTION.inc();
+                        STEAL_FILTERED_PORT_SUBSCRIPTION
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     } else {
-                        STEAL_UNFILTERED_PORT_SUBSCRIPTION.inc();
+                        STEAL_UNFILTERED_PORT_SUBSCRIPTION
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
 
                     Ok(false)
@@ -378,9 +380,11 @@ impl<R: PortRedirector> PortSubscriptions<R> {
 
             Entry::Vacant(e) => {
                 if filter.is_some() {
-                    STEAL_FILTERED_PORT_SUBSCRIPTION.inc();
+                    STEAL_FILTERED_PORT_SUBSCRIPTION
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 } else {
-                    STEAL_UNFILTERED_PORT_SUBSCRIPTION.inc();
+                    STEAL_UNFILTERED_PORT_SUBSCRIPTION
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
 
                 e.insert(PortSubscription::new(client_id, filter));
@@ -419,14 +423,16 @@ impl<R: PortRedirector> PortSubscriptions<R> {
         let remove_redirect = match e.get_mut() {
             PortSubscription::Unfiltered(subscribed_client) if *subscribed_client == client_id => {
                 e.remove();
-                STEAL_UNFILTERED_PORT_SUBSCRIPTION.dec();
+                STEAL_UNFILTERED_PORT_SUBSCRIPTION
+                    .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
                 true
             }
             PortSubscription::Unfiltered(..) => false,
             PortSubscription::Filtered(filters) => {
                 if filters.remove(&client_id).is_some() {
-                    STEAL_FILTERED_PORT_SUBSCRIPTION.dec();
+                    STEAL_FILTERED_PORT_SUBSCRIPTION
+                        .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                 }
 
                 if filters.is_empty() {

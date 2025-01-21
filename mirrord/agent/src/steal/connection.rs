@@ -62,7 +62,7 @@ impl MatchedHttpRequest {
         request_id: RequestId,
         request: Request<Incoming>,
     ) -> Self {
-        HTTP_REQUEST_IN_PROGRESS_COUNT.inc();
+        HTTP_REQUEST_IN_PROGRESS_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         Self {
             connection_id,

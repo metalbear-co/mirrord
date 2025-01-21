@@ -80,7 +80,7 @@ impl Drop for FileManager {
     fn drop(&mut self) {
         let descriptors =
             self.open_files.len() + self.dir_streams.len() + self.getdents_streams.len();
-        OPEN_FD_COUNT.sub(descriptors as i64);
+        OPEN_FD_COUNT.fetch_sub(descriptors as i64, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -306,7 +306,7 @@ impl FileManager {
         };
 
         if self.open_files.insert(fd, remote_file).is_none() {
-            OPEN_FD_COUNT.inc();
+            OPEN_FD_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
 
         Ok(OpenFileResponse { fd })
@@ -342,7 +342,7 @@ impl FileManager {
             };
 
             if self.open_files.insert(fd, remote_file).is_none() {
-                OPEN_FD_COUNT.inc();
+                OPEN_FD_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
 
             Ok(OpenFileResponse { fd })
@@ -643,7 +643,7 @@ impl FileManager {
         if self.open_files.remove(&fd).is_none() {
             error!(fd, "fd not found!");
         } else {
-            OPEN_FD_COUNT.dec();
+            OPEN_FD_COUNT.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         }
 
         None
@@ -657,10 +657,10 @@ impl FileManager {
         let closed_getdents_stream = self.getdents_streams.remove(&fd);
 
         if closed_dir_stream.is_some() && closed_getdents_stream.is_some() {
-            OPEN_FD_COUNT.dec();
-            OPEN_FD_COUNT.dec();
+            // Closed `dirstream` and `dentsstream`
+            OPEN_FD_COUNT.fetch_sub(2, std::sync::atomic::Ordering::Relaxed);
         } else if closed_dir_stream.is_some() || closed_getdents_stream.is_some() {
-            OPEN_FD_COUNT.dec();
+            OPEN_FD_COUNT.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         } else {
             error!("FileManager::close_dir -> fd {:#?} not found", fd);
         }
@@ -788,7 +788,7 @@ impl FileManager {
         let dir_stream = path.read_dir()?.enumerate();
 
         if self.dir_streams.insert(fd, dir_stream).is_none() {
-            OPEN_FD_COUNT.inc();
+            OPEN_FD_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
 
         Ok(OpenDirResponse { fd })
@@ -851,7 +851,7 @@ impl FileManager {
                     let current_and_parent = Self::get_current_and_parent_entries(dir);
                     let stream =
                         GetDEnts64Stream::new(dir.read_dir()?, current_and_parent).peekable();
-                    OPEN_FD_COUNT.inc();
+                    OPEN_FD_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     Ok(e.insert(stream))
                 }
             },

@@ -123,7 +123,7 @@ impl DnsWorker {
         let timeout = self.timeout;
         let attempts = self.attempts;
 
-        DNS_REQUEST_COUNT.inc();
+        DNS_REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let lookup_future = async move {
             let result = Self::do_lookup(etc_path, message.request.node, attempts, timeout).await;
@@ -131,7 +131,7 @@ impl DnsWorker {
             if let Err(result) = message.response_tx.send(result) {
                 tracing::error!(?result, "Failed to send query response");
             }
-            DNS_REQUEST_COUNT.dec();
+            DNS_REQUEST_COUNT.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         };
 
         tokio::spawn(lookup_future);

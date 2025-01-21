@@ -1,6 +1,9 @@
-use std::{net::SocketAddr, sync::LazyLock};
+use std::{
+    net::SocketAddr,
+    sync::{atomic::AtomicI64, Arc},
+};
 
-use axum::{routing::get, Router};
+use axum::{extract::State, routing::get, Router};
 use http::StatusCode;
 use prometheus::{register_int_gauge, IntGauge};
 use tokio::net::TcpListener;
@@ -11,114 +14,185 @@ use crate::error::AgentError;
 
 /// Incremented whenever we get a new client in `ClientConnectionHandler`, and decremented
 /// when this client is dropped.
-pub(crate) static CLIENT_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
-    register_int_gauge!(
-        "mirrord_agent_client_count",
-        "amount of connected clients to this mirrord-agent"
-    )
-    .expect("Valid at initialization!")
-});
+pub(crate) static CLIENT_COUNT: AtomicI64 = AtomicI64::new(0);
 
 /// Incremented whenever we handle a new `DnsCommand`, and decremented after the result of
 /// `do_lookup` has been sent back through the response channel.
-pub(crate) static DNS_REQUEST_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
-    register_int_gauge!(
-        "mirrord_agent_dns_request_count",
-        "amount of in-progress dns requests in the mirrord-agent"
-    )
-    .expect("Valid at initialization!")
-});
+pub(crate) static DNS_REQUEST_COUNT: AtomicI64 = AtomicI64::new(0);
 
 /// Incremented and decremented in _open-ish_/_close-ish_ file operations in `FileManager`,
 /// Also gets decremented when `FileManager` is dropped.
-pub(crate) static OPEN_FD_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
-    register_int_gauge!(
-        "mirrord_agent_open_fd_count",
-        "amount of open file descriptors in mirrord-agent file manager"
-    )
-    .expect("Valid at initialization!")
-});
+pub(crate) static OPEN_FD_COUNT: AtomicI64 = AtomicI64::new(0);
 
 /// Follows the amount of subscribed ports in `update_packet_filter`. We don't really
 /// increment/decrement this one, and mostly `set` it to the latest amount of ports, zeroing it when
 /// the `TcpConnectionSniffer` gets dropped.
-pub(crate) static MIRROR_PORT_SUBSCRIPTION: LazyLock<IntGauge> = LazyLock::new(|| {
-    register_int_gauge!(
-        "mirrord_agent_mirror_port_subscription_count",
-        "amount of mirror port subscriptions in mirror-agent"
-    )
-    .expect("Valid at initialization")
-});
+pub(crate) static MIRROR_PORT_SUBSCRIPTION: AtomicI64 = AtomicI64::new(0);
 
-pub(crate) static MIRROR_CONNECTION_SUBSCRIPTION: LazyLock<IntGauge> = LazyLock::new(|| {
-    register_int_gauge!(
-        "mirrord_agent_mirror_connection_subscription_count",
-        "amount of connections in mirror mode in mirrord-agent"
-    )
-    .expect("Valid at initialization!")
-});
+pub(crate) static MIRROR_CONNECTION_SUBSCRIPTION: AtomicI64 = AtomicI64::new(0);
 
-pub(crate) static STEAL_FILTERED_PORT_SUBSCRIPTION: LazyLock<IntGauge> = LazyLock::new(|| {
-    register_int_gauge!(
-        "mirrord_agent_steal_filtered_port_subscription_count",
-        "amount of filtered steal port subscriptions in mirrord-agent"
-    )
-    .expect("Valid at initialization!")
-});
+pub(crate) static STEAL_FILTERED_PORT_SUBSCRIPTION: AtomicI64 = AtomicI64::new(0);
 
-pub(crate) static STEAL_UNFILTERED_PORT_SUBSCRIPTION: LazyLock<IntGauge> = LazyLock::new(|| {
-    register_int_gauge!(
-        "mirrord_agent_steal_unfiltered_port_subscription_count",
-        "amount of unfiltered steal port subscriptions in mirrord-agent"
-    )
-    .expect("Valid at initialization!")
-});
+pub(crate) static STEAL_UNFILTERED_PORT_SUBSCRIPTION: AtomicI64 = AtomicI64::new(0);
 
-pub(crate) static STEAL_FILTERED_CONNECTION_SUBSCRIPTION: LazyLock<IntGauge> =
-    LazyLock::new(|| {
-        register_int_gauge!(
+pub(crate) static STEAL_FILTERED_CONNECTION_SUBSCRIPTION: AtomicI64 = AtomicI64::new(0);
+
+pub(crate) static STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION: AtomicI64 = AtomicI64::new(0);
+
+pub(crate) static HTTP_REQUEST_IN_PROGRESS_COUNT: AtomicI64 = AtomicI64::new(0);
+
+pub(crate) static TCP_OUTGOING_CONNECTION: AtomicI64 = AtomicI64::new(0);
+
+pub(crate) static UDP_OUTGOING_CONNECTION: AtomicI64 = AtomicI64::new(0);
+
+#[derive(Debug)]
+struct Metrics {
+    client_count: IntGauge,
+    dns_request_count: IntGauge,
+    open_fd_count: IntGauge,
+    mirror_port_subscription: IntGauge,
+    mirror_connection_subscription: IntGauge,
+    steal_filtered_port_subscription: IntGauge,
+    steal_unfiltered_port_subscription: IntGauge,
+    steal_filtered_connection_subscription: IntGauge,
+    steal_unfiltered_connection_subscription: IntGauge,
+    http_request_in_progress_count: IntGauge,
+    tcp_outgoing_connection: IntGauge,
+    udp_outgoing_connection: IntGauge,
+}
+
+impl Metrics {
+    fn new() -> Self {
+        let client_count = register_int_gauge!(
+            "mirrord_agent_client_count",
+            "amount of connected clients to this mirrord-agent"
+        )
+        .expect("Valid at initialization!");
+
+        let dns_request_count = register_int_gauge!(
+            "mirrord_agent_dns_request_count",
+            "amount of in-progress dns requests in the mirrord-agent"
+        )
+        .expect("Valid at initialization!");
+
+        let open_fd_count = register_int_gauge!(
+            "mirrord_agent_open_fd_count",
+            "amount of open file descriptors in mirrord-agent file manager"
+        )
+        .expect("Valid at initialization!");
+
+        let mirror_port_subscription = register_int_gauge!(
+            "mirrord_agent_mirror_port_subscription_count",
+            "amount of mirror port subscriptions in mirror-agent"
+        )
+        .expect("Valid at initialization");
+
+        let mirror_connection_subscription = register_int_gauge!(
+            "mirrord_agent_mirror_connection_subscription_count",
+            "amount of connections in mirror mode in mirrord-agent"
+        )
+        .expect("Valid at initialization!");
+
+        let steal_filtered_port_subscription = register_int_gauge!(
+            "mirrord_agent_steal_filtered_port_subscription_count",
+            "amount of filtered steal port subscriptions in mirrord-agent"
+        )
+        .expect("Valid at initialization!");
+
+        let steal_unfiltered_port_subscription = register_int_gauge!(
+            "mirrord_agent_steal_unfiltered_port_subscription_count",
+            "amount of unfiltered steal port subscriptions in mirrord-agent"
+        )
+        .expect("Valid at initialization!");
+
+        let steal_filtered_connection_subscription = register_int_gauge!(
             "mirrord_agent_steal_connection_subscription_count",
             "amount of filtered connections in steal mode in mirrord-agent"
         )
-        .expect("Valid at initialization!")
-    });
+        .expect("Valid at initialization!");
 
-pub(crate) static STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION: LazyLock<IntGauge> =
-    LazyLock::new(|| {
-        register_int_gauge!(
+        let steal_unfiltered_connection_subscription = register_int_gauge!(
             "mirrord_agent_steal_connection_subscription_count",
             "amount of unfiltered connections in steal mode in mirrord-agent"
         )
-        .expect("Valid at initialization!")
-    });
+        .expect("Valid at initialization!");
 
-pub(crate) static HTTP_REQUEST_IN_PROGRESS_COUNT: LazyLock<IntGauge> = LazyLock::new(|| {
-    register_int_gauge!(
-        "mirrord_agent_http_request_in_progress_count",
-        "amount of in-progress http requests in the mirrord-agent"
-    )
-    .expect("Valid at initialization!")
-});
+        let http_request_in_progress_count = register_int_gauge!(
+            "mirrord_agent_http_request_in_progress_count",
+            "amount of in-progress http requests in the mirrord-agent"
+        )
+        .expect("Valid at initialization!");
 
-pub(crate) static TCP_OUTGOING_CONNECTION: LazyLock<IntGauge> = LazyLock::new(|| {
-    register_int_gauge!(
-        "mirrord_agent_tcp_outgoing_connection_count",
-        "amount of tcp outgoing connections in mirrord-agent"
-    )
-    .expect("Valid at initialization!")
-});
+        let tcp_outgoing_connection = register_int_gauge!(
+            "mirrord_agent_tcp_outgoing_connection_count",
+            "amount of tcp outgoing connections in mirrord-agent"
+        )
+        .expect("Valid at initialization!");
 
-pub(crate) static UDP_OUTGOING_CONNECTION: LazyLock<IntGauge> = LazyLock::new(|| {
-    register_int_gauge!(
-        "mirrord_agent_udp_outgoing_connection_count",
-        "amount of udp outgoing connections in mirrord-agent"
-    )
-    .expect("Valid at initialization!")
-});
+        let udp_outgoing_connection = register_int_gauge!(
+            "mirrord_agent_udp_outgoing_connection_count",
+            "amount of udp outgoing connections in mirrord-agent"
+        )
+        .expect("Valid at initialization!");
+
+        Self {
+            client_count,
+            dns_request_count,
+            open_fd_count,
+            mirror_port_subscription,
+            mirror_connection_subscription,
+            steal_filtered_port_subscription,
+            steal_unfiltered_port_subscription,
+            steal_filtered_connection_subscription,
+            steal_unfiltered_connection_subscription,
+            http_request_in_progress_count,
+            tcp_outgoing_connection,
+            udp_outgoing_connection,
+        }
+    }
+
+    fn update_gauges(&self) {
+        use std::sync::atomic::Ordering;
+
+        let Self {
+            client_count,
+            dns_request_count,
+            open_fd_count,
+            mirror_port_subscription,
+            mirror_connection_subscription,
+            steal_filtered_port_subscription,
+            steal_unfiltered_port_subscription,
+            steal_filtered_connection_subscription,
+            steal_unfiltered_connection_subscription,
+            http_request_in_progress_count,
+            tcp_outgoing_connection,
+            udp_outgoing_connection,
+        } = self;
+
+        client_count.set(CLIENT_COUNT.load(Ordering::Relaxed));
+        dns_request_count.set(DNS_REQUEST_COUNT.load(Ordering::Relaxed));
+        open_fd_count.set(OPEN_FD_COUNT.load(Ordering::Relaxed));
+        mirror_port_subscription.set(MIRROR_PORT_SUBSCRIPTION.load(Ordering::Relaxed));
+        mirror_connection_subscription.set(MIRROR_CONNECTION_SUBSCRIPTION.load(Ordering::Relaxed));
+        steal_filtered_port_subscription
+            .set(STEAL_FILTERED_PORT_SUBSCRIPTION.load(Ordering::Relaxed));
+        steal_unfiltered_port_subscription
+            .set(STEAL_UNFILTERED_PORT_SUBSCRIPTION.load(Ordering::Relaxed));
+        steal_filtered_connection_subscription
+            .set(STEAL_FILTERED_CONNECTION_SUBSCRIPTION.load(Ordering::Relaxed));
+        steal_unfiltered_connection_subscription
+            .set(STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.load(Ordering::Relaxed));
+        http_request_in_progress_count.set(HTTP_REQUEST_IN_PROGRESS_COUNT.load(Ordering::Relaxed));
+        tcp_outgoing_connection.set(TCP_OUTGOING_CONNECTION.load(Ordering::Relaxed));
+        udp_outgoing_connection.set(UDP_OUTGOING_CONNECTION.load(Ordering::Relaxed));
+    }
+}
 
 #[tracing::instrument(level = Level::TRACE, ret)]
-async fn get_metrics() -> (StatusCode, String) {
+async fn get_metrics(State(state): State<Arc<Metrics>>) -> (StatusCode, String) {
     use prometheus::TextEncoder;
+
+    state.update_gauges();
 
     let metric_families = prometheus::gather();
     match TextEncoder.encode_to_string(&metric_families) {
@@ -135,7 +209,11 @@ pub(crate) async fn start_metrics(
     address: SocketAddr,
     cancellation_token: CancellationToken,
 ) -> Result<(), axum::BoxError> {
-    let app = Router::new().route("/metrics", get(get_metrics));
+    let metrics_state = Arc::new(Metrics::new());
+
+    let app = Router::new()
+        .route("/metrics", get(get_metrics))
+        .with_state(metrics_state);
 
     let listener = TcpListener::bind(address)
         .await
@@ -158,7 +236,7 @@ pub(crate) async fn start_metrics(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{sync::atomic::Ordering, time::Duration};
 
     use tokio_util::sync::CancellationToken;
 
@@ -177,7 +255,7 @@ mod tests {
                 .unwrap()
         });
 
-        OPEN_FD_COUNT.inc();
+        OPEN_FD_COUNT.fetch_add(1, Ordering::Relaxed);
 
         // Give the server some time to start.
         tokio::time::sleep(Duration::from_secs(1)).await;

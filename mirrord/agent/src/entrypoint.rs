@@ -208,7 +208,7 @@ struct ClientConnectionHandler {
 
 impl Drop for ClientConnectionHandler {
     fn drop(&mut self) {
-        CLIENT_COUNT.dec();
+        CLIENT_COUNT.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -245,7 +245,7 @@ impl ClientConnectionHandler {
             ready_for_logs: false,
         };
 
-        CLIENT_COUNT.inc();
+        CLIENT_COUNT.fetch_add(1, Ordering::Relaxed);
 
         Ok(client_handler)
     }

@@ -116,7 +116,7 @@ struct TcpOutgoingTask {
 impl Drop for TcpOutgoingTask {
     fn drop(&mut self) {
         let connections = self.readers.keys().chain(self.writers.keys()).count();
-        TCP_OUTGOING_CONNECTION.sub(connections as i64);
+        TCP_OUTGOING_CONNECTION.fetch_sub(connections as i64, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -224,7 +224,7 @@ impl TcpOutgoingTask {
 
                 self.readers.remove(&connection_id);
                 self.writers.remove(&connection_id);
-                TCP_OUTGOING_CONNECTION.dec();
+                TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
                 let daemon_message = DaemonTcpOutgoing::Close(connection_id);
                 self.daemon_tx.send(daemon_message).await?;
@@ -255,7 +255,7 @@ impl TcpOutgoingTask {
                         "Layer connection is shut down as well, sending close message.",
                     );
 
-                    TCP_OUTGOING_CONNECTION.dec();
+                    TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
                     self.daemon_tx
                         .send(DaemonTcpOutgoing::Close(connection_id))
@@ -298,7 +298,7 @@ impl TcpOutgoingTask {
                         connection_id,
                         ReaderStream::with_capacity(read_half, Self::READ_BUFFER_SIZE),
                     );
-                    TCP_OUTGOING_CONNECTION.inc();
+                    TCP_OUTGOING_CONNECTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                     Ok(DaemonConnect {
                         connection_id,
@@ -356,7 +356,8 @@ impl TcpOutgoingTask {
                                 connection_id,
                                 "Peer connection is shut down as well, sending close message to the client.",
                             );
-                            TCP_OUTGOING_CONNECTION.dec();
+                            TCP_OUTGOING_CONNECTION
+                                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
                             self.daemon_tx
                                 .send(DaemonTcpOutgoing::Close(connection_id))
@@ -371,7 +372,7 @@ impl TcpOutgoingTask {
                     Err(error) => {
                         self.writers.remove(&connection_id);
                         self.readers.remove(&connection_id);
-                        TCP_OUTGOING_CONNECTION.dec();
+                        TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
                         tracing::trace!(
                             connection_id,
@@ -392,7 +393,7 @@ impl TcpOutgoingTask {
             LayerTcpOutgoing::Close(LayerClose { connection_id }) => {
                 self.writers.remove(&connection_id);
                 self.readers.remove(&connection_id);
-                TCP_OUTGOING_CONNECTION.dec();
+                TCP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
                 Ok(())
             }

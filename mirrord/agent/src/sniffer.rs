@@ -144,8 +144,8 @@ pub(crate) struct TcpConnectionSniffer<T> {
 
 impl<T> Drop for TcpConnectionSniffer<T> {
     fn drop(&mut self) {
-        MIRROR_PORT_SUBSCRIPTION.set(0);
-        MIRROR_CONNECTION_SUBSCRIPTION.set(0);
+        MIRROR_PORT_SUBSCRIPTION.store(0, std::sync::atomic::Ordering::Relaxed);
+        MIRROR_CONNECTION_SUBSCRIPTION.store(0, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -255,7 +255,7 @@ where
     #[tracing::instrument(level = Level::TRACE, err)]
     fn update_packet_filter(&mut self) -> AgentResult<()> {
         let ports = self.port_subscriptions.get_subscribed_topics();
-        MIRROR_PORT_SUBSCRIPTION.set(ports.len() as i64);
+        MIRROR_PORT_SUBSCRIPTION.store(ports.len() as i64, std::sync::atomic::Ordering::Relaxed);
 
         let filter = if ports.is_empty() {
             tracing::trace!("No ports subscribed, setting dummy bpf");
@@ -403,7 +403,7 @@ where
                     }
                 }
 
-                MIRROR_CONNECTION_SUBSCRIPTION.inc();
+                MIRROR_CONNECTION_SUBSCRIPTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 e.insert_entry(data_tx)
             }
         };

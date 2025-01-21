@@ -56,7 +56,7 @@ struct UdpOutgoingTask {
 impl Drop for UdpOutgoingTask {
     fn drop(&mut self) {
         let connections = self.readers.keys().chain(self.writers.keys()).count();
-        UDP_OUTGOING_CONNECTION.sub(connections as i64);
+        UDP_OUTGOING_CONNECTION.fetch_sub(connections as i64, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -152,7 +152,7 @@ impl UdpOutgoingTask {
 
                 self.readers.remove(&connection_id);
                 self.writers.remove(&connection_id);
-                UDP_OUTGOING_CONNECTION.dec();
+                UDP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
                 let daemon_message = DaemonUdpOutgoing::Close(connection_id);
                 self.daemon_tx.send(daemon_message).await?;
@@ -160,7 +160,7 @@ impl UdpOutgoingTask {
             Ok(None) => {
                 self.writers.remove(&connection_id);
                 self.readers.remove(&connection_id);
-                UDP_OUTGOING_CONNECTION.dec();
+                UDP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
                 let daemon_message = DaemonUdpOutgoing::Close(connection_id);
                 self.daemon_tx.send(daemon_message).await?;
@@ -201,7 +201,8 @@ impl UdpOutgoingTask {
 
                             self.writers.insert(connection_id, (sink, peer_address));
                             self.readers.insert(connection_id, stream);
-                            UDP_OUTGOING_CONNECTION.inc();
+                            UDP_OUTGOING_CONNECTION
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                             Ok(DaemonConnect {
                                 connection_id,
@@ -244,7 +245,7 @@ impl UdpOutgoingTask {
                     Err(error) => {
                         self.writers.remove(&connection_id);
                         self.readers.remove(&connection_id);
-                        UDP_OUTGOING_CONNECTION.dec();
+                        UDP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
                         tracing::trace!(
                             connection_id,
@@ -264,7 +265,7 @@ impl UdpOutgoingTask {
             LayerUdpOutgoing::Close(LayerClose { ref connection_id }) => {
                 self.writers.remove(connection_id);
                 self.readers.remove(connection_id);
-                UDP_OUTGOING_CONNECTION.dec();
+                UDP_OUTGOING_CONNECTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
                 Ok(())
             }
