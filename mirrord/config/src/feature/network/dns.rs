@@ -87,7 +87,7 @@ pub enum DnsFilterConfig {
 ///   `read_only: ["/etc/resolv.conf"]`.
 /// - DNS filter currently works only with frameworks that use `getaddrinfo`/`gethostbyname`
 ///   functions.
-#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize)]
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[config(map_to = "DnsFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct DnsConfig {

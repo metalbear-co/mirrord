@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::source::MirrordConfigSource;
 
@@ -12,7 +12,7 @@ static DEFAULT_CLI_IMAGE: &str = concat!(
 );
 
 /// Unstable: `mirrord container` command specific config.
-#[derive(MirrordConfig, Clone, Debug, Serialize)]
+#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[config(map_to = "ContainerFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct ContainerConfig {
