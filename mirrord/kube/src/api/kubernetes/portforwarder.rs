@@ -167,6 +167,10 @@ impl SinglePortForwarder {
                 error = error_future.as_mut() => {
                     if let Some(error) = error {
                         tracing::warn!(?connect_info, %error, "error while performing port-forward");
+                    } else {
+                        tracing::warn!(?connect_info, "connection exited without error");
+
+                        break;
                     }
 
                     if retry_strategy.peek().is_none() {

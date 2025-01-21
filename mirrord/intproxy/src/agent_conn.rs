@@ -6,20 +6,21 @@ use std::{
     io,
     io::BufReader,
     net::{IpAddr, SocketAddr},
+    ops::ControlFlow,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
-use mirrord_analytics::Reporter;
+use mirrord_analytics::{NullReporter, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_kube::{
-    api::{
-        kubernetes::{AgentKubernetesConnectInfo, KubernetesAPI},
-        wrap_raw_connection,
-    },
+    api::{kubernetes::AgentKubernetesConnectInfo, wrap_raw_connection},
     error::KubeApiError,
 };
-use mirrord_operator::client::{error::OperatorApiError, OperatorApi, OperatorSession};
+use mirrord_operator::client::{
+    error::OperatorApiError, OperatorApi, OperatorSession, WebSocketStreamId,
+};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -30,13 +31,19 @@ use tokio::{
         mpsc::{Receiver, Sender},
     },
 };
+use tokio_retry::{
+    strategy::{jitter, ExponentialBackoff},
+    Retry,
+};
 use tokio_rustls::TlsConnector;
 use tracing::Level;
 
 use crate::{
-    background_tasks::{BackgroundTask, MessageBus},
+    background_tasks::{BackgroundTask, MessageBus, RestartableBackgroundTask},
     ProxyMessage,
 };
+
+mod portforward;
 
 /// Errors that can occur when the internal proxy tries to establish a connection with the agent.
 #[derive(Error, Debug)]
@@ -97,6 +104,18 @@ pub enum AgentConnectInfo {
     DirectKubernetes(AgentKubernetesConnectInfo),
 }
 
+#[derive(Debug, Default)]
+pub enum ReconnectParams {
+    ConnectInfo {
+        config: LayerConfig,
+        connect_info: AgentConnectInfo,
+        websocket_stream_id: WebSocketStreamId,
+    },
+
+    #[default]
+    Break,
+}
+
 /// Handles logic of the `proxy <-> agent` connection as a [`BackgroundTask`].
 ///
 /// # Note
@@ -107,6 +126,7 @@ pub enum AgentConnectInfo {
 pub struct AgentConnection {
     pub agent_tx: Sender<ClientMessage>,
     pub agent_rx: Receiver<DaemonMessage>,
+    pub reconnect: ReconnectParams,
 }
 
 impl AgentConnection {
@@ -115,13 +135,27 @@ impl AgentConnection {
     pub async fn new<R: Reporter>(
         config: &LayerConfig,
         connect_info: Option<AgentConnectInfo>,
+        websocket_stream_id: Option<WebSocketStreamId>,
         analytics: &mut R,
     ) -> Result<Self, AgentConnectionError> {
-        let (agent_tx, agent_rx) = match connect_info {
+        let (agent_tx, agent_rx, reconnect) = match connect_info {
             Some(AgentConnectInfo::Operator(session)) => {
-                let connection =
-                    OperatorApi::connect_in_existing_session(config, session, analytics).await?;
-                (connection.tx, connection.rx)
+                let connection = OperatorApi::connect_in_existing_session(
+                    config,
+                    session.clone(),
+                    websocket_stream_id,
+                    analytics,
+                )
+                .await?;
+                (
+                    connection.tx,
+                    connection.rx,
+                    ReconnectParams::ConnectInfo {
+                        config: config.clone(),
+                        connect_info: AgentConnectInfo::Operator(session),
+                        websocket_stream_id: connection.stream_id,
+                    },
+                )
             }
 
             Some(AgentConnectInfo::ExternalProxy(proxy_addr)) => {
@@ -131,7 +165,7 @@ impl AgentConnection {
 
                 let stream = socket.connect(proxy_addr).await?;
 
-                if config.external_proxy.tls_enable
+                let (tx, rx) = if config.external_proxy.tls_enable
                     && let (
                         Some(tls_certificate),
                         Some(client_tls_certificate),
@@ -140,8 +174,7 @@ impl AgentConnection {
                         config.external_proxy.tls_certificate.as_ref(),
                         config.internal_proxy.client_tls_certificate.as_ref(),
                         config.internal_proxy.client_tls_key.as_ref(),
-                    )
-                {
+                    ) {
                     wrap_connection_with_tls(
                         stream,
                         proxy_addr.ip(),
@@ -152,20 +185,14 @@ impl AgentConnection {
                     .await?
                 } else {
                     wrap_raw_connection(stream)
-                }
+                };
+
+                (tx, rx, ReconnectParams::default())
             }
 
             Some(AgentConnectInfo::DirectKubernetes(connect_info)) => {
-                let k8s_api = KubernetesAPI::create(config)
-                    .await
-                    .map_err(AgentConnectionError::Kube)?;
-
-                let stream = k8s_api
-                    .create_connection_portforward(connect_info.clone())
-                    .await
-                    .map_err(AgentConnectionError::Kube)?;
-
-                wrap_raw_connection(stream)
+                let (tx, rx) = portforward::create_connection(config, connect_info.clone()).await?;
+                (tx, rx, ReconnectParams::default())
             }
 
             None => {
@@ -174,18 +201,27 @@ impl AgentConnection {
                     .as_ref()
                     .ok_or(AgentConnectionError::NoConnectionMethod)?;
                 let stream = TcpStream::connect(address).await?;
-                wrap_raw_connection(stream)
+                let (tx, rx) = wrap_raw_connection(stream);
+                (tx, rx, ReconnectParams::default())
             }
         };
 
-        Ok(Self { agent_tx, agent_rx })
+        Ok(Self {
+            agent_tx,
+            agent_rx,
+            reconnect,
+        })
     }
 
     pub async fn new_for_raw_address(address: SocketAddr) -> Result<Self, AgentConnectionError> {
         let stream = TcpStream::connect(address).await?;
         let (agent_tx, agent_rx) = wrap_raw_connection(stream);
 
-        Ok(Self { agent_tx, agent_rx })
+        Ok(Self {
+            agent_tx,
+            agent_rx,
+            reconnect: ReconnectParams::Break,
+        })
     }
 
     #[tracing::instrument(level = Level::TRACE, name = "send_agent_message", skip(self), ret)]
@@ -205,7 +241,9 @@ impl BackgroundTask for AgentConnection {
     type MessageIn = ClientMessage;
     type MessageOut = ProxyMessage;
 
-    async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+        let mut sleep = Box::pin(tokio::time::sleep(Duration::from_secs(30)));
+
         loop {
             tokio::select! {
                 msg = message_bus.recv() => match msg {
@@ -227,6 +265,57 @@ impl BackgroundTask for AgentConnection {
                         break Err(AgentChannelError);
                     }
                     Some(msg) => message_bus.send(ProxyMessage::FromAgent(msg)).await,
+                },
+
+                _ = sleep.as_mut() => {
+                    break Err(AgentChannelError);
+                }
+            }
+        }
+    }
+}
+
+impl RestartableBackgroundTask for AgentConnection {
+    #[tracing::instrument(level = Level::TRACE, skip(self, _bus), ret)]
+    async fn restart(
+        &mut self,
+        error: Self::Error,
+        _bus: &mut MessageBus<Self>,
+    ) -> ControlFlow<Self::Error> {
+        match &self.reconnect {
+            ReconnectParams::Break => ControlFlow::Break(error),
+            ReconnectParams::ConnectInfo {
+                config,
+                connect_info,
+                websocket_stream_id,
+            } => {
+                let retry_strategy = ExponentialBackoff::from_millis(50).map(jitter).take(10);
+
+                let connection = Retry::spawn(retry_strategy, || async move {
+                    AgentConnection::new(
+                        config,
+                        connect_info.clone().into(),
+                        Some(websocket_stream_id.clone()),
+                        &mut NullReporter::default(),
+                    )
+                    .await
+                    .inspect_err(
+                        |err| tracing::error!(error = ?err, "unable to connect to agent upon retry"),
+                    )
+                })
+                .await;
+
+                match connection {
+                    Ok(connection) => {
+                        *self = connection;
+
+                        ControlFlow::Continue(())
+                    }
+                    Err(error) => {
+                        tracing::error!(?error, "unable to reconnect agent");
+
+                        ControlFlow::Break(AgentChannelError)
+                    }
                 }
             }
         }

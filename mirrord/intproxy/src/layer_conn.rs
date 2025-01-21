@@ -51,7 +51,7 @@ impl BackgroundTask for LayerConnection {
     type MessageIn = LocalMessage<ProxyToLayerMessage>;
     type MessageOut = ProxyMessage;
 
-    async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), CodecError> {
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), CodecError> {
         loop {
             tokio::select! {
                 res = self.layer_codec_rx.receive() => match res {

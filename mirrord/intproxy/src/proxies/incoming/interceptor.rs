@@ -126,7 +126,7 @@ pub type InterceptorResult<T, E = InterceptorError> = core::result::Result<T, E>
 /// When it received [`MessageIn::Http`], it starts acting as an HTTP gateway.
 pub struct Interceptor {
     /// Socket that should be used to make the first connection (should already be bound).
-    socket: TcpSocket,
+    socket: Option<TcpSocket>,
     /// Address of user app's listener.
     peer: SocketAddr,
     /// Version of [`mirrord_protocol`] negotiated with the agent.
@@ -146,7 +146,7 @@ impl Interceptor {
         agent_protocol_version: Option<semver::Version>,
     ) -> Self {
         Self {
-            socket,
+            socket: Some(socket),
             peer,
             agent_protocol_version,
         }
@@ -159,8 +159,15 @@ impl BackgroundTask for Interceptor {
     type MessageOut = MessageOut;
 
     #[tracing::instrument(level = Level::TRACE, skip_all, err)]
-    async fn run(self, message_bus: &mut MessageBus<Self>) -> InterceptorResult<(), Self::Error> {
-        let mut stream = self.socket.connect(self.peer).await?;
+    async fn run(
+        &mut self,
+        message_bus: &mut MessageBus<Self>,
+    ) -> InterceptorResult<(), Self::Error> {
+        let Some(socket) = self.socket.take() else {
+            return Ok(());
+        };
+
+        let mut stream = socket.connect(self.peer).await?;
 
         // First, we determine whether this is a raw TCP connection or an HTTP connection.
         // If we receive an HTTP request from our parent task, this must be an HTTP connection.

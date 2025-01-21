@@ -774,7 +774,7 @@ impl BackgroundTask for FilesProxy {
     type MessageOut = ProxyMessage;
     type Error = FilesProxyError;
 
-    async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         while let Some(message) = message_bus.recv().await {
             tracing::trace!(?message, "new message in message_bus");
 

@@ -45,7 +45,7 @@ impl BackgroundTask for SimpleProxy {
     type MessageIn = SimpleProxyMessage;
     type MessageOut = ProxyMessage;
 
-    async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         while let Some(msg) = message_bus.recv().await {
             tracing::trace!(?msg, "new message in message_bus");
 

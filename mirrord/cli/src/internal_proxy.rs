@@ -161,7 +161,7 @@ pub(crate) async fn connect_and_ping(
     connect_info: Option<AgentConnectInfo>,
     analytics: &mut AnalyticsReporter,
 ) -> CliResult<AgentConnection, InternalProxyError> {
-    let mut agent_conn = AgentConnection::new(config, connect_info, analytics)
+    let mut agent_conn = AgentConnection::new(config, connect_info, None, analytics)
         .await
         .map_err(IntProxyError::from)?;
 

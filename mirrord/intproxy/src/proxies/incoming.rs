@@ -453,7 +453,7 @@ impl BackgroundTask for IncomingProxy {
     type MessageOut = ProxyMessage;
 
     #[tracing::instrument(level = Level::TRACE, skip_all, err)]
-    async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         loop {
             tokio::select! {
                 Some(((connection_id, request_id), stream_item)) = self.response_body_rxs.next() => match stream_item {

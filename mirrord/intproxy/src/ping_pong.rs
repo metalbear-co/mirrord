@@ -66,7 +66,7 @@ impl BackgroundTask for PingPong {
     ///
     /// When the time comes to ping the agent and the previous ping was not answered, this task
     /// exits with an error.
-    async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         loop {
             tokio::select! {
                 _ = self.ticker.tick() => {

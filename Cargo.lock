@@ -4307,6 +4307,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.9",
  "tokio",
+ "tokio-retry",
  "tokio-rustls 0.26.1",
  "tokio-stream",
  "tracing",

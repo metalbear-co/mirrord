@@ -6,7 +6,7 @@
 //! Each background task implement the [`BackgroundTask`] trait, which specifies its properties and
 //! allows for managing groups of related tasks with one [`BackgroundTasks`] instance.
 
-use std::{collections::HashMap, fmt, future::Future, hash::Hash};
+use std::{collections::HashMap, fmt, future::Future, hash::Hash, ops::ControlFlow};
 
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
@@ -35,6 +35,13 @@ impl<T: BackgroundTask> MessageBus<T> {
             msg = self.rx.recv() => msg,
         }
     }
+
+    pub fn cast<R>(&mut self) -> &mut MessageBus<R>
+    where
+        R: BackgroundTask<MessageIn = T::MessageIn, MessageOut = T::MessageOut>,
+    {
+        unsafe { &mut *(self as *mut MessageBus<T> as *mut MessageBus<R>) }
+    }
 }
 
 /// Common trait for all background tasks in the internal proxy.
@@ -51,9 +58,61 @@ pub trait BackgroundTask: Sized {
     /// When the [`MessageBus`] has no more messages to be consumed, the task should exit without
     /// errors.
     fn run(
-        self,
+        &mut self,
         message_bus: &mut MessageBus<Self>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+pub trait RestartableBackgroundTask: BackgroundTask {
+    fn restart(
+        &mut self,
+        run_error: Self::Error,
+        message_bus: &mut MessageBus<Self>,
+    ) -> impl Future<Output = ControlFlow<Self::Error>> + Send;
+}
+
+pub struct RestartableBackgroundTaskWrapper<T: RestartableBackgroundTask> {
+    task: T,
+}
+
+impl<T> BackgroundTask for RestartableBackgroundTaskWrapper<T>
+where
+    T: RestartableBackgroundTask + Send,
+    T::MessageIn: Send,
+    T::MessageOut: Send,
+    T::Error: Send,
+{
+    type Error = T::Error;
+    type MessageIn = T::MessageIn;
+    type MessageOut = T::MessageOut;
+
+    async fn run(&mut self, bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+        let RestartableBackgroundTaskWrapper { task } = self;
+        let task_bus = bus.cast();
+
+        match task.run(task_bus).await {
+            Err(run_error) => {
+                let mut run_error = Some(run_error);
+
+                loop {
+                    match task
+                        .restart(run_error.take().expect("should contain an error"), task_bus)
+                        .await
+                    {
+                        ControlFlow::Break(err) => return Err(err),
+                        ControlFlow::Continue(()) => {
+                            if let Err(err) = task.run(task_bus).await {
+                                run_error = Some(err);
+                            } else {
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(()) => Ok(()),
+        }
+    }
 }
 
 /// A struct for managing groups of related [`BackgroundTasks`].
@@ -92,7 +151,7 @@ where
     /// # Panics
     ///
     /// This method panics when attempting to register a task with a duplicate id.
-    pub fn register<T>(&mut self, task: T, id: Id, channel_size: usize) -> TaskSender<T>
+    pub fn register<T>(&mut self, mut task: T, id: Id, channel_size: usize) -> TaskSender<T>
     where
         T: 'static + BackgroundTask<MessageOut = MOut> + Send,
         Err: From<T::Error>,
@@ -121,6 +180,21 @@ where
         );
 
         TaskSender(in_msg_tx)
+    }
+
+    pub fn register_restartable<T>(
+        &mut self,
+        task: T,
+        id: Id,
+        channel_size: usize,
+    ) -> TaskSender<RestartableBackgroundTaskWrapper<T>>
+    where
+        T: 'static + RestartableBackgroundTask<MessageOut = MOut> + Send,
+        Err: From<T::Error>,
+        T::MessageIn: Send,
+        T::Error: Send,
+    {
+        self.register(RestartableBackgroundTaskWrapper { task }, id, channel_size)
     }
 
     /// Returns the next update from one of registered tasks.

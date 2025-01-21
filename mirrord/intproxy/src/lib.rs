@@ -22,7 +22,9 @@ use tokio::{net::TcpListener, time};
 use tracing::Level;
 
 use crate::{
-    agent_conn::AgentConnection, background_tasks::TaskError, error::IntProxyError,
+    agent_conn::AgentConnection,
+    background_tasks::{RestartableBackgroundTaskWrapper, TaskError},
+    error::IntProxyError,
     main_tasks::LayerClosed,
 };
 
@@ -41,7 +43,7 @@ mod request_queue;
 struct TaskTxs {
     layers: HashMap<LayerId, TaskSender<LayerConnection>>,
     _layer_initializer: TaskSender<LayerInitializer>,
-    agent: TaskSender<AgentConnection>,
+    agent: TaskSender<RestartableBackgroundTaskWrapper<AgentConnection>>,
     simple: TaskSender<SimpleProxy>,
     outgoing: TaskSender<OutgoingProxy>,
     incoming: TaskSender<IncomingProxy>,
@@ -77,8 +79,11 @@ impl IntProxy {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
             Default::default();
 
-        let agent =
-            background_tasks.register(agent_conn, MainTaskId::AgentConnection, Self::CHANNEL_SIZE);
+        let agent = background_tasks.register_restartable(
+            agent_conn,
+            MainTaskId::AgentConnection,
+            Self::CHANNEL_SIZE,
+        );
         let layer_initializer = background_tasks.register(
             LayerInitializer::new(listener),
             MainTaskId::LayerInitializer,
