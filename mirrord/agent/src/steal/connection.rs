@@ -12,12 +12,11 @@ use hyper::{
     http::{header::UPGRADE, request::Parts},
 };
 use mirrord_protocol::{
-    body_chunks::{BodyExt as _, Frames},
+    batched_body::{BatchedBody, Frames},
     tcp::{
         ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, DaemonTcp, HttpRequest,
-        HttpResponseFallback, InternalHttpBody, InternalHttpBodyFrame, InternalHttpRequest,
-        StealType, TcpClose, TcpData, HTTP_CHUNKED_REQUEST_VERSION, HTTP_FILTERED_UPGRADE_VERSION,
-        HTTP_FRAMED_VERSION,
+        InternalHttpBody, InternalHttpBodyFrame, InternalHttpRequest, StealType, TcpClose, TcpData,
+        HTTP_CHUNKED_REQUEST_VERSION, HTTP_FILTERED_UPGRADE_VERSION, HTTP_FRAMED_VERSION,
     },
     ConnectionId, Port,
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
@@ -31,6 +30,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{warn, Level};
 
+use super::http::HttpResponseFallback;
 use crate::{
     error::AgentResult,
     metrics::HTTP_REQUEST_IN_PROGRESS_COUNT,
@@ -190,7 +190,7 @@ impl Client {
                     },
                     mut body,
                 ) = request.request.into_parts();
-                match body.next_frames(true).await {
+                match body.ready_frames() {
                     Err(..) => return,
                     // We don't check is_last here since loop will finish when body.next_frames()
                     // returns None
@@ -222,7 +222,7 @@ impl Client {
                 }
 
                 loop {
-                    match body.next_frames(false).await {
+                    match body.next_frames().await {
                         Ok(Frames { frames, is_last }) => {
                             let frames = frames
                                 .into_iter()
@@ -625,40 +625,16 @@ impl TcpConnectionStealer {
     async fn send_http_response(&mut self, client_id: ClientId, response: HttpResponseFallback) {
         let connection_id = response.connection_id();
         let request_id = response.request_id();
-
-        match response.into_hyper::<hyper::Error>() {
-            Ok(response) => {
-                self.connections
-                    .send(
-                        connection_id,
-                        ConnectionMessageIn::Response {
-                            client_id,
-                            request_id,
-                            response,
-                        },
-                    )
-                    .await;
-            }
-            Err(error) => {
-                tracing::warn!(
-                    ?error,
-                    connection_id,
-                    request_id,
+        self.connections
+            .send(
+                connection_id,
+                ConnectionMessageIn::Response {
                     client_id,
-                    "Failed to transform client message into a hyper response",
-                );
-
-                self.connections
-                    .send(
-                        connection_id,
-                        ConnectionMessageIn::ResponseFailed {
-                            client_id,
-                            request_id,
-                        },
-                    )
-                    .await;
-            }
-        }
+                    request_id,
+                    response: response.into_hyper::<hyper::Error>(),
+                },
+            )
+            .await;
     }
 
     /// Handles [`Command`]s that were received by [`TcpConnectionStealer::command_rx`].

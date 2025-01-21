@@ -3,7 +3,7 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
-pub mod body_chunks;
+pub mod batched_body;
 pub mod codec;
 pub mod dns;
 pub mod error;

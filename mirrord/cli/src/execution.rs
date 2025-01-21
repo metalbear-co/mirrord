@@ -27,7 +27,7 @@ use tokio::{
     sync::mpsc::{self, UnboundedReceiver},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, trace, warn, Level};
+use tracing::{debug, error, info, trace, warn, Level};
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use crate::extract::extract_arm64;
@@ -550,6 +550,7 @@ impl MirrordExecution {
                     match msg.level {
                         LogLevel::Error => error!("Agent log: {}", msg.message),
                         LogLevel::Warn => warn!("Agent log: {}", msg.message),
+                        LogLevel::Info => info!("Agent log: {}", msg.message),
                     }
 
                     continue;

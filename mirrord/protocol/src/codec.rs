@@ -24,10 +24,16 @@ use crate::{
     ResponseError,
 };
 
+/// Minimal mirrord-protocol version that that allows [`LogLevel::Info`].
+pub static INFO_LOG_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.13.4".parse().expect("Bad Identifier"));
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
 pub enum LogLevel {
     Warn,
     Error,
+    /// Supported from [`INFO_LOG_VERSION`].
+    Info,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -85,6 +91,9 @@ pub enum FileRequest {
     ReadDirBatch(ReadDirBatchRequest),
     MakeDir(MakeDirRequest),
     MakeDirAt(MakeDirAtRequest),
+    RemoveDir(RemoveDirRequest),
+    Unlink(UnlinkRequest),
+    UnlinkAt(UnlinkAtRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -148,6 +157,8 @@ pub enum FileResponse {
     ReadLink(RemoteResult<ReadLinkFileResponse>),
     ReadDirBatch(RemoteResult<ReadDirBatchResponse>),
     MakeDir(RemoteResult<()>),
+    RemoveDir(RemoteResult<()>),
+    Unlink(RemoteResult<()>),
 }
 
 /// `-agent` --> `-layer` messages.
