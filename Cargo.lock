@@ -4262,6 +4262,7 @@ dependencies = [
 name = "mirrord-config"
 version = "3.129.0"
 dependencies = [
+ "base64 0.22.1",
  "bimap",
  "bitflags 2.6.0",
  "fancy-regex",
@@ -4479,7 +4480,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.14.0"
+version = "1.15.0"
 dependencies = [
  "actix-codec",
  "bincode",

@@ -329,6 +329,7 @@ impl IntProxy {
             DaemonMessage::LogMessage(log) => match log.level {
                 LogLevel::Error => tracing::error!("agent log: {}", log.message),
                 LogLevel::Warn => tracing::warn!("agent log: {}", log.message),
+                LogLevel::Info => tracing::info!("agent log: {}", log.message),
             },
             DaemonMessage::GetEnvVarsResponse(res) => {
                 self.task_txs
