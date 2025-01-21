@@ -325,6 +325,27 @@ impl_request!(
 );
 
 impl_request!(
+    req = RemoveDirRequest,
+    res = RemoteResult<()>,
+    req_path = LayerToProxyMessage::File => FileRequest::RemoveDir,
+    res_path = ProxyToLayerMessage::File => FileResponse::RemoveDir,
+);
+
+impl_request!(
+    req = UnlinkRequest,
+    res = RemoteResult<()>,
+    req_path = LayerToProxyMessage::File => FileRequest::Unlink,
+    res_path = ProxyToLayerMessage::File => FileResponse::Unlink,
+);
+
+impl_request!(
+    req = UnlinkAtRequest,
+    res = RemoteResult<()>,
+    req_path = LayerToProxyMessage::File => FileRequest::UnlinkAt,
+    res_path = ProxyToLayerMessage::File => FileResponse::Unlink,
+);
+
+impl_request!(
     req = SeekFileRequest,
     res = RemoteResult<SeekFileResponse>,
     req_path = LayerToProxyMessage::File => FileRequest::Seek,
