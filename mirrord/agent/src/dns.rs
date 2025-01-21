@@ -123,7 +123,17 @@ impl DnsWorker {
             options.attempts = attempts;
             options.ip_strategy = if support_ipv6 {
                 tracing::debug!("IPv6 support enabled. Respecting client IP family.");
-                request.family.into()
+                request
+                    .family
+                    .try_into()
+                    .inspect_err(|e| {
+                        tracing::error!(%e,
+                        "Unknown address family in addrinfo request. Using IPv4 and IPv6.")
+                    })
+                    // If the agent gets some new, unknown variant of family address, it's the
+                    // client's fault, so the agent queries both IPv4 and IPv6 and if that's not
+                    // good enough for the client, the client can error out.
+                    .unwrap_or(hickory_resolver::config::LookupIpStrategy::Ipv4AndIpv6)
             } else {
                 tracing::debug!("IPv6 support disabled. Resolving IPv4 only.");
                 hickory_resolver::config::LookupIpStrategy::Ipv4Only

@@ -86,28 +86,54 @@ impl From<GetAddrInfoRequestV2> for GetAddrInfoRequest {
     }
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Encode, Decode, Debug, PartialEq, Eq, Copy, Clone,
+)]
 pub enum AddressFamily {
     Ipv4Only,
     Ipv6Only,
     Both,
+    Any,
+    /// If we add a variant and a new client sends an old agent the new variant, the agent will see
+    /// this variant.
+    #[serde(other, skip_serializing)]
+    UnknownAddressFamilyFromNewerClient,
 }
 
-impl From<AddressFamily> for hickory_resolver::config::LookupIpStrategy {
-    fn from(value: AddressFamily) -> Self {
+#[derive(thiserror::Error, Debug)]
+pub enum AddressFamilyError {
+    #[error(
+        "The agent received a GetAddrInfoRequestV2 with an address family that is not yet known \
+        to this version of the agent."
+    )]
+    UnsupportedFamily,
+}
+
+impl TryFrom<AddressFamily> for hickory_resolver::config::LookupIpStrategy {
+    type Error = AddressFamilyError;
+
+    fn try_from(value: AddressFamily) -> Result<Self, Self::Error> {
         match value {
-            AddressFamily::Ipv4Only => Self::Ipv4Only,
-            AddressFamily::Ipv6Only => Self::Ipv6Only,
-            AddressFamily::Both => Self::Ipv4AndIpv6,
+            AddressFamily::Ipv4Only => Ok(Self::Ipv4Only),
+            AddressFamily::Ipv6Only => Ok(Self::Ipv6Only),
+            AddressFamily::Both => Ok(Self::Ipv4AndIpv6),
+            AddressFamily::Any => Ok(Self::Ipv4thenIpv6),
+            AddressFamily::UnknownAddressFamilyFromNewerClient => {
+                Err(AddressFamilyError::UnsupportedFamily)
+            }
         }
     }
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum SockType {
     Stream,
     Dgram,
     Any,
+    /// If we add a variant and a new client sends an old agent the new variant, the agent will see
+    /// this variant.
+    #[serde(other, skip_serializing)]
+    UnknownSockTypeFromNewerClient,
 }
 
 /// Newer, advanced version of [`GetAddrInfoRequest`]
