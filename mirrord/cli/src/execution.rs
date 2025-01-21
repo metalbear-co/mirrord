@@ -7,7 +7,7 @@ use std::{
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::{
     config::ConfigError, feature::env::mapper::EnvVarsRemapper,
-    internal_proxy::MIRRORD_INTPROXY_CONNECT_TCP_ENV, LayerConfig,
+    internal_proxy::MIRRORD_INTPROXY_CONNECT_TCP_ENV, LayerConfig, MIRRORD_RESOLVED_CONFIG_ENV,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_operator::client::OperatorSession;
@@ -269,7 +269,7 @@ impl MirrordExecution {
 
         let stdout = proxy_process.stdout.take().expect("stdout was piped");
 
-        let address: SocketAddr = BufReader::new(stdout)
+        let intproxy_address: SocketAddr = BufReader::new(stdout)
             .lines()
             .next_line()
             .await
@@ -288,9 +288,10 @@ impl MirrordExecution {
                 ))
             })?;
 
-        // Provide details for layer to connect to agent via internal proxy
-        config.connect_tcp = Some(format!("127.0.0.1:{}", address.port()));
+        config.connect_tcp.replace(intproxy_address.to_string());
         config.update_env_var()?;
+        let config_as_env = config.to_env_var()?;
+        env_vars.insert(MIRRORD_RESOLVED_CONFIG_ENV.to_string(), config_as_env);
 
         // Fixes <https://github.com/metalbear-co/mirrord/issues/1745>
         // by disabling the fork safety check in the Objective-C runtime.
