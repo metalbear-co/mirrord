@@ -112,7 +112,7 @@ impl Metrics {
         .expect("Valid at initialization!");
 
         let steal_unfiltered_connection_subscription = register_int_gauge!(
-            "mirrord_agent_steal_connection_subscription_count",
+            "mirrord_agent_steal_unfiltered_connection_subscription_count",
             "amount of unfiltered connections in steal mode in mirrord-agent"
         )
         .expect("Valid at initialization!");
