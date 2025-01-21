@@ -29,7 +29,7 @@ pub static OPEN_LOCAL_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.13.3".parse().expect("Bad Identifier"));
 
 pub static STATFS_VERSION: LazyLock<VersionReq> =
-    LazyLock::new(|| ">=1.14.0".parse().expect("Bad Identifier"));
+    LazyLock::new(|| ">=1.15.0".parse().expect("Bad Identifier"));
 
 /// Internal version of Metadata across operating system (macOS, Linux)
 /// Only mutual attributes
