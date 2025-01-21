@@ -8,6 +8,40 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.130.0](https://github.com/metalbear-co/mirrord/tree/3.130.0) - 2025-01-21
+
+
+### Added
+
+- Added support for `rmdir`, `unlink` and `unlinkat`.
+  [#2221](https://github.com/metalbear-co/mirrord/issues/2221)
+
+
+### Changed
+
+- Updated `configuration.md` and improved `.feature.env.mapping` doc.
+
+
+### Fixed
+
+- Stopped mirrord entering a crash loop when trying to load into some processes
+  like VSCode's `watchdog.js` when the user config contained a call to
+  `get_env()`, which occurred due to missing env - the config is now only
+  rendered once and set into an env var.
+  [#2936](https://github.com/metalbear-co/mirrord/issues/2936)
+- Fixed an issue where HTTP requests stolen with a filter would hang with a
+  single-threaded local HTTP server.
+  Improved handling of incoming connections on the local machine (e.g
+  introduces reuse of local HTTP connections).
+  [#3013](https://github.com/metalbear-co/mirrord/issues/3013)
+- Moved to an older builder base image for aarch64 to support centos-7 libc.
+  [#3024](https://github.com/metalbear-co/mirrord/issues/3024)
+
+
+### Internal
+
+- Extended `mirrord-protocol` with info logs from the agent.
+
 ## [3.129.0](https://github.com/metalbear-co/mirrord/tree/3.129.0) - 2025-01-14
 
 
