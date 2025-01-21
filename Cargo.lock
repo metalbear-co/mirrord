@@ -4314,8 +4314,6 @@ version = "3.129.0"
 dependencies = [
  "bytes",
  "exponential-backoff",
- "futures",
- "h2 0.4.7",
  "http-body-util",
  "hyper 1.5.2",
  "hyper-util",
@@ -4326,7 +4324,6 @@ dependencies = [
  "mirrord-operator",
  "mirrord-protocol",
  "rand",
- "reqwest 0.12.12",
  "rstest",
  "rustls 0.23.20",
  "rustls-pemfile 2.2.0",
@@ -4486,6 +4483,7 @@ dependencies = [
  "bincode",
  "bytes",
  "fancy-regex",
+ "futures",
  "hickory-proto",
  "hickory-resolver",
  "http-body-util",
@@ -4498,8 +4496,6 @@ dependencies = [
  "serde",
  "socket2",
  "thiserror 2.0.9",
- "tokio",
- "tokio-stream",
  "tracing",
 ]
 

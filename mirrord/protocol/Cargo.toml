@@ -21,6 +21,7 @@ actix-codec.workspace = true
 bincode.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
+futures.workspace = true
 hickory-resolver.workspace = true
 hickory-proto.workspace = true
 serde.workspace = true
@@ -31,8 +32,6 @@ http-body-util = { workspace = true }
 fancy-regex = { workspace = true }
 socket2.workspace = true
 semver = { workspace = true, features = ["serde"] }
-tokio-stream.workspace = true
-tokio.workspace = true
 
 mirrord-macros = { path = "../macros" }
 

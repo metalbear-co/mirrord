@@ -1,23 +1,22 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, convert::Infallible};
 
 use bytes::Bytes;
 use hyper::body::Frame;
 use mirrord_protocol::{
-    tcp::{
-        ChunkedResponse, DaemonTcp, HttpResponse, HttpResponseFallback, InternalHttpResponse,
-        LayerTcpSteal, ReceiverStreamBody, TcpData,
-    },
+    tcp::{ChunkedResponse, DaemonTcp, HttpResponse, InternalHttpResponse, LayerTcpSteal, TcpData},
     RequestId,
 };
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_stream::wrappers::ReceiverStream;
 
-use super::*;
+use super::{http::ReceiverStreamBody, *};
 use crate::{
     error::{AgentError, Result},
     util::ClientId,
     watched_task::TaskStatus,
 };
+
+type ResponseBodyTx = Sender<Result<Frame<Bytes>, Infallible>>;
 
 /// Bridges the communication between the agent and the [`TcpConnectionStealer`] task.
 /// There is an API instance for each connected layer ("client"). All API instances send commands
@@ -40,7 +39,15 @@ pub(crate) struct TcpStealerApi {
     /// View on the stealer task's status.
     task_status: TaskStatus,
 
-    response_body_txs: HashMap<(ConnectionId, RequestId), Sender<hyper::Result<Frame<Bytes>>>>,
+    /// [`Sender`]s that allow us to provide body [`Frame`]s of responses to filtered HTTP
+    /// requests.
+    ///
+    /// With [`LayerTcpSteal::HttpResponseChunked`], response bodies come from the client
+    /// in a series of [`ChunkedResponse::Body`] messages.
+    ///
+    /// Thus, we use [`ReceiverStreamBody`] for [`Response`](hyper::Response)'s body type and
+    /// pipe the [`Frame`]s through an [`mpsc::channel`].
+    response_body_txs: HashMap<(ConnectionId, RequestId), ResponseBodyTx>,
 }
 
 impl TcpStealerApi {
@@ -196,7 +203,7 @@ impl TcpStealerApi {
                     let key = (response.connection_id, response.request_id);
                     self.response_body_txs.insert(key, tx.clone());
 
-                    self.http_response(HttpResponseFallback::Streamed(http_response, None))
+                    self.http_response(HttpResponseFallback::Streamed(http_response))
                         .await?;
 
                     for frame in response.internal_response.body {
