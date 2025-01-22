@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use mirrord_intproxy_protocol::{LayerId, MessageId, ProxyToLayerMessage};
 use mirrord_protocol::{
-    dns::{GetAddrInfoRequestV2, GetAddrInfoResponse, ADDRINFO_V2_VERSION},
+    dns::{AddressFamily, GetAddrInfoRequestV2, GetAddrInfoResponse, ADDRINFO_V2_VERSION},
     ClientMessage, DaemonMessage, GetEnvVarsRequest, RemoteResult,
 };
 use semver::Version;
@@ -77,6 +77,14 @@ impl BackgroundTask for SimpleProxy {
                             .send(ClientMessage::GetAddrInfoRequestV2(req))
                             .await;
                     } else {
+                        if matches!(req.family, AddressFamily::Ipv6Only) {
+                            tracing::warn!(
+                                "The agent version you're using does not support DNS\
+                                queries for IPv6 addresses. This version will only fetch IPv4\
+                                address. Please update to a newer agent image for better IPv6\
+                                support."
+                            )
+                        }
                         message_bus
                             .send(ClientMessage::GetAddrInfoRequest(req.into()))
                             .await;
