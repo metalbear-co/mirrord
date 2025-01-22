@@ -5,7 +5,7 @@ use std::{
 
 use axum::{extract::State, routing::get, Router};
 use http::StatusCode;
-use prometheus::{register_int_gauge, IntGauge};
+use prometheus::{proto::MetricFamily, IntGauge, Registry};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
@@ -47,6 +47,7 @@ pub(crate) static UDP_OUTGOING_CONNECTION: AtomicI64 = AtomicI64::new(0);
 
 #[derive(Debug)]
 struct Metrics {
+    registry: Registry,
     client_count: IntGauge,
     dns_request_count: IntGauge,
     open_fd_count: IntGauge,
@@ -61,81 +62,144 @@ struct Metrics {
     udp_outgoing_connection: IntGauge,
 }
 
+macro_rules! register_unique_only {
+    ($registry: ident, $gauge: ident) => {
+        match $registry.register(Box::new($gauge.clone())) {
+            Ok(()) => Ok(()),
+            Err(prometheus::Error::AlreadyReg) => Ok(()),
+            Err(fail) => Err(fail),
+        }
+    };
+}
+
 impl Metrics {
     fn new() -> Self {
-        let client_count = register_int_gauge!(
-            "mirrord_agent_client_count",
-            "amount of connected clients to this mirrord-agent"
-        )
-        .expect("Valid at initialization!");
+        use prometheus::Opts;
 
-        let dns_request_count = register_int_gauge!(
-            "mirrord_agent_dns_request_count",
-            "amount of in-progress dns requests in the mirrord-agent"
-        )
-        .expect("Valid at initialization!");
+        let registry = Registry::new();
 
-        let open_fd_count = register_int_gauge!(
-            "mirrord_agent_open_fd_count",
-            "amount of open file descriptors in mirrord-agent file manager"
-        )
-        .expect("Valid at initialization!");
+        let client_count = {
+            let opts = Opts::new(
+                "mirrord_agent_client_count",
+                "amount of connected clients to this mirrord-agent",
+            );
+            IntGauge::with_opts(opts).expect("Valid at initialization!")
+        };
 
-        let mirror_port_subscription = register_int_gauge!(
-            "mirrord_agent_mirror_port_subscription_count",
-            "amount of mirror port subscriptions in mirror-agent"
-        )
-        .expect("Valid at initialization");
+        let dns_request_count = {
+            let opts = Opts::new(
+                "mirrord_agent_dns_request_count",
+                "amount of in-progress dns requests in the mirrord-agent",
+            );
+            IntGauge::with_opts(opts).expect("Valid at initialization!")
+        };
 
-        let mirror_connection_subscription = register_int_gauge!(
-            "mirrord_agent_mirror_connection_subscription_count",
-            "amount of connections in mirror mode in mirrord-agent"
-        )
-        .expect("Valid at initialization!");
+        let open_fd_count = {
+            let opts = Opts::new(
+                "mirrord_agent_open_fd_count",
+                "amount of open file descriptors in mirrord-agent file manager",
+            );
+            IntGauge::with_opts(opts).expect("Valid at initialization!")
+        };
 
-        let steal_filtered_port_subscription = register_int_gauge!(
-            "mirrord_agent_steal_filtered_port_subscription_count",
-            "amount of filtered steal port subscriptions in mirrord-agent"
-        )
-        .expect("Valid at initialization!");
+        let mirror_port_subscription = {
+            let opts = Opts::new(
+                "mirrord_agent_mirror_port_subscription_count",
+                "amount of mirror port subscriptions in mirror-agent",
+            );
+            IntGauge::with_opts(opts).expect("Valid at initialization!")
+        };
 
-        let steal_unfiltered_port_subscription = register_int_gauge!(
-            "mirrord_agent_steal_unfiltered_port_subscription_count",
-            "amount of unfiltered steal port subscriptions in mirrord-agent"
-        )
-        .expect("Valid at initialization!");
+        let mirror_connection_subscription = {
+            let opts = Opts::new(
+                "mirrord_agent_mirror_connection_subscription_count",
+                "amount of connections in mirror mode in mirrord-agent",
+            );
+            IntGauge::with_opts(opts).expect("Valid at initialization!")
+        };
 
-        let steal_filtered_connection_subscription = register_int_gauge!(
-            "mirrord_agent_steal_connection_subscription_count",
-            "amount of filtered connections in steal mode in mirrord-agent"
-        )
-        .expect("Valid at initialization!");
+        let steal_filtered_port_subscription = {
+            let opts = Opts::new(
+                "mirrord_agent_steal_filtered_port_subscription_count",
+                "amount of filtered steal port subscriptions in mirrord-agent",
+            );
+            IntGauge::with_opts(opts).expect("Valid at initialization!")
+        };
 
-        let steal_unfiltered_connection_subscription = register_int_gauge!(
-            "mirrord_agent_steal_unfiltered_connection_subscription_count",
-            "amount of unfiltered connections in steal mode in mirrord-agent"
-        )
-        .expect("Valid at initialization!");
+        let steal_unfiltered_port_subscription = {
+            let opts = Opts::new(
+                "mirrord_agent_steal_unfiltered_port_subscription_count",
+                "amount of unfiltered steal port subscriptions in mirrord-agent",
+            );
+            IntGauge::with_opts(opts).expect("Valid at initialization!")
+        };
 
-        let http_request_in_progress_count = register_int_gauge!(
-            "mirrord_agent_http_request_in_progress_count",
-            "amount of in-progress http requests in the mirrord-agent"
-        )
-        .expect("Valid at initialization!");
+        let steal_filtered_connection_subscription = {
+            let opts = Opts::new(
+                "mirrord_agent_steal_connection_subscription_count",
+                "amount of filtered connections in steal mode in mirrord-agent",
+            );
+            IntGauge::with_opts(opts).expect("Valid at initialization!")
+        };
 
-        let tcp_outgoing_connection = register_int_gauge!(
-            "mirrord_agent_tcp_outgoing_connection_count",
-            "amount of tcp outgoing connections in mirrord-agent"
-        )
-        .expect("Valid at initialization!");
+        let steal_unfiltered_connection_subscription = {
+            let opts = Opts::new(
+                "mirrord_agent_steal_unfiltered_connection_subscription_count",
+                "amount of unfiltered connections in steal mode in mirrord-agent",
+            );
+            IntGauge::with_opts(opts).expect("Valid at initialization!")
+        };
 
-        let udp_outgoing_connection = register_int_gauge!(
-            "mirrord_agent_udp_outgoing_connection_count",
-            "amount of udp outgoing connections in mirrord-agent"
-        )
-        .expect("Valid at initialization!");
+        let http_request_in_progress_count = {
+            let opts = Opts::new(
+                "mirrord_agent_http_request_in_progress_count",
+                "amount of in-progress http requests in the mirrord-agent",
+            );
+            IntGauge::with_opts(opts).expect("Valid at initialization!")
+        };
+
+        let tcp_outgoing_connection = {
+            let opts = Opts::new(
+                "mirrord_agent_tcp_outgoing_connection_count",
+                "amount of tcp outgoing connections in mirrord-agent",
+            );
+            IntGauge::with_opts(opts).expect("Valid at initialization!")
+        };
+
+        let udp_outgoing_connection = {
+            let opts = Opts::new(
+                "mirrord_agent_udp_outgoing_connection_count",
+                "amount of udp outgoing connections in mirrord-agent",
+            );
+            IntGauge::with_opts(opts).expect("Valid at initialization!")
+        };
+
+        register_unique_only!(registry, client_count).expect("Only `AlreadyReg` error is ignored!");
+        register_unique_only!(registry, dns_request_count)
+            .expect("Only `AlreadyReg` error is ignored!");
+        register_unique_only!(registry, open_fd_count)
+            .expect("Only `AlreadyReg` error is ignored!");
+        register_unique_only!(registry, mirror_port_subscription)
+            .expect("Only `AlreadyReg` error is ignored!");
+        register_unique_only!(registry, mirror_connection_subscription)
+            .expect("Only `AlreadyReg` error is ignored!");
+        register_unique_only!(registry, steal_filtered_port_subscription)
+            .expect("Only `AlreadyReg` error is ignored!");
+        register_unique_only!(registry, steal_unfiltered_port_subscription)
+            .expect("Only `AlreadyReg` error is ignored!");
+        register_unique_only!(registry, steal_filtered_connection_subscription)
+            .expect("Only `AlreadyReg` error is ignored!");
+        register_unique_only!(registry, steal_unfiltered_connection_subscription)
+            .expect("Only `AlreadyReg` error is ignored!");
+        register_unique_only!(registry, http_request_in_progress_count)
+            .expect("Only `AlreadyReg` error is ignored!");
+        register_unique_only!(registry, tcp_outgoing_connection)
+            .expect("Only `AlreadyReg` error is ignored!");
+        register_unique_only!(registry, udp_outgoing_connection)
+            .expect("Only `AlreadyReg` error is ignored!");
 
         Self {
+            registry,
             client_count,
             dns_request_count,
             open_fd_count,
@@ -151,10 +215,11 @@ impl Metrics {
         }
     }
 
-    fn update_gauges(&self) {
+    fn gather_metrics(&self) -> Vec<MetricFamily> {
         use std::sync::atomic::Ordering;
 
         let Self {
+            registry,
             client_count,
             dns_request_count,
             open_fd_count,
@@ -185,6 +250,8 @@ impl Metrics {
         http_request_in_progress_count.set(HTTP_REQUEST_IN_PROGRESS_COUNT.load(Ordering::Relaxed));
         tcp_outgoing_connection.set(TCP_OUTGOING_CONNECTION.load(Ordering::Relaxed));
         udp_outgoing_connection.set(UDP_OUTGOING_CONNECTION.load(Ordering::Relaxed));
+
+        registry.gather()
     }
 }
 
@@ -192,9 +259,7 @@ impl Metrics {
 async fn get_metrics(State(state): State<Arc<Metrics>>) -> (StatusCode, String) {
     use prometheus::TextEncoder;
 
-    state.update_gauges();
-
-    let metric_families = prometheus::gather();
+    let metric_families = state.gather_metrics();
     match TextEncoder.encode_to_string(&metric_families) {
         Ok(response) => (StatusCode::OK, response),
         Err(fail) => {
