@@ -77,7 +77,6 @@ pub enum FileRequest {
     Access(AccessFileRequest),
     Xstat(XstatRequest),
     XstatFs(XstatFsRequest),
-    StatFs(StatFsRequest),
     FdOpenDir(FdOpenDirRequest),
     ReadDir(ReadDirRequest),
     CloseDir(CloseDirRequest),
@@ -95,6 +94,7 @@ pub enum FileRequest {
     RemoveDir(RemoveDirRequest),
     Unlink(UnlinkRequest),
     UnlinkAt(UnlinkAtRequest),
+    StatFs(StatFsRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.

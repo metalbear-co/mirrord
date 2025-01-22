@@ -259,24 +259,24 @@ impl FilesProxy {
 
         match request {
             FileRequest::ReadLink(..)
-                if protocol_version.is_some_and(|version| !READLINK_VERSION.matches(version)) =>
+                if protocol_version.is_none_or(|version| !READLINK_VERSION.matches(version)) =>
             {
                 Err(FileResponse::ReadLink(Err(ResponseError::NotImplemented)))
             }
             FileRequest::MakeDir(..) | FileRequest::MakeDirAt(..)
-                if protocol_version.is_some_and(|version| !MKDIR_VERSION.matches(version)) =>
+                if protocol_version.is_none_or(|version| !MKDIR_VERSION.matches(version)) =>
             {
                 Err(FileResponse::MakeDir(Err(ResponseError::NotImplemented)))
             }
             FileRequest::RemoveDir(..) | FileRequest::Unlink(..) | FileRequest::UnlinkAt(..)
                 if protocol_version
-                    .is_some_and(|version: &Version| !RMDIR_VERSION.matches(version)) =>
+                    .is_none_or(|version: &Version| !RMDIR_VERSION.matches(version)) =>
             {
                 Err(FileResponse::RemoveDir(Err(ResponseError::NotImplemented)))
             }
             FileRequest::StatFs(..)
                 if protocol_version
-                    .is_some_and(|version: &Version| !STATFS_VERSION.matches(version)) =>
+                    .is_none_or(|version: &Version| !STATFS_VERSION.matches(version)) =>
             {
                 Err(FileResponse::XstatFs(Err(ResponseError::NotImplemented)))
             }
