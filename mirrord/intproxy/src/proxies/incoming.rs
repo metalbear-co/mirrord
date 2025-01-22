@@ -110,6 +110,7 @@ pub enum IncomingProxyMessage {
     AgentSteal(DaemonTcp),
     /// Agent responded to [`ClientMessage::SwitchProtocolVersion`].
     AgentProtocolVersion(semver::Version),
+    ConnectionRefresh,
 }
 
 /// Handle for an [`Interceptor`].
@@ -520,6 +521,22 @@ impl BackgroundTask for IncomingProxy {
                     Some(IncomingProxyMessage::LayerForked(msg)) => self.handle_layer_fork(msg),
                     Some(IncomingProxyMessage::AgentProtocolVersion(version)) => {
                         self.agent_protocol_version.replace(version);
+                    }
+                    Some(IncomingProxyMessage::ConnectionRefresh) => {
+                        self.request_body_txs.clear();
+                        self.response_body_rxs.clear();
+
+                        for (interceptor_id, _) in self.interceptors.drain() {
+                            self.background_tasks.kill_task(interceptor_id).await;
+                        }
+
+                        for subscription in self.subscriptions.iter_mut() {
+                            tracing::debug!(?subscription, "resubscribing");
+
+                            for message in subscription.resubscribe() {
+                                message_bus.send(ProxyMessage::ToAgent(message)).await
+                            }
+                        }
                     }
                 },
 

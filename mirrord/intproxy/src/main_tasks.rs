@@ -19,6 +19,8 @@ pub enum ProxyMessage {
     FromLayer(FromLayer),
     /// New layer instance to serve.
     NewLayer(NewLayer),
+    /// Connection to agent was dropped and need reload.
+    ConnectionRefresh,
 }
 
 #[cfg(test)]

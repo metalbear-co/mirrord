@@ -276,11 +276,11 @@ impl BackgroundTask for AgentConnection {
 }
 
 impl RestartableBackgroundTask for AgentConnection {
-    #[tracing::instrument(level = Level::TRACE, skip(self, _bus), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus), ret)]
     async fn restart(
         &mut self,
         error: Self::Error,
-        _bus: &mut MessageBus<Self>,
+        message_bus: &mut MessageBus<Self>,
     ) -> ControlFlow<Self::Error> {
         match &self.reconnect {
             ReconnectParams::Break => ControlFlow::Break(error),
@@ -295,7 +295,7 @@ impl RestartableBackgroundTask for AgentConnection {
                     AgentConnection::new(
                         config,
                         connect_info.clone().into(),
-                        Some(websocket_stream_id.clone()),
+                        Some(*websocket_stream_id),
                         &mut NullReporter::default(),
                     )
                     .await
@@ -308,6 +308,7 @@ impl RestartableBackgroundTask for AgentConnection {
                 match connection {
                     Ok(connection) => {
                         *self = connection;
+                        message_bus.send(ProxyMessage::ConnectionRefresh).await;
 
                         ControlFlow::Continue(())
                     }

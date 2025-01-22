@@ -197,6 +197,15 @@ where
         self.register(RestartableBackgroundTaskWrapper { task }, id, channel_size)
     }
 
+    pub async fn kill_task(&mut self, id: Id) {
+        self.streams.remove(&id);
+        let Some(task) = self.handles.remove(&id) else {
+            return;
+        };
+
+        task.abort();
+    }
+
     /// Returns the next update from one of registered tasks.
     pub async fn next(&mut self) -> Option<(Id, TaskUpdate<MOut, Err>)> {
         let (id, msg) = self.streams.next().await?;
@@ -210,7 +219,10 @@ where
                     .expect("task handles and streams are out of sync")
                     .await;
                 match res {
-                    Err(..) => (id, TaskUpdate::Finished(Err(TaskError::Panic))),
+                    Err(error) => {
+                        tracing::error!(?error, "task panicked");
+                        (id, TaskUpdate::Finished(Err(TaskError::Panic)))
+                    }
                     Ok(res) => (id, TaskUpdate::Finished(res.map_err(TaskError::Error))),
                 }
             }
@@ -228,7 +240,10 @@ where
         let mut results = Vec::with_capacity(self.handles.len());
         for (id, handle) in self.handles {
             let result = match handle.await {
-                Err(..) => Err(TaskError::Panic),
+                Err(error) => {
+                    tracing::error!(?error, "task panicked");
+                    Err(TaskError::Panic)
+                }
                 Ok(res) => res.map_err(TaskError::Error),
             };
             results.push((id, result));

@@ -25,7 +25,7 @@ struct Source {
 
 /// Represents a port subscription in the agent.
 #[derive(Debug)]
-struct Subscription {
+pub struct Subscription {
     /// Previous sources of this subscription. Each of these was at some point active, but was
     /// later overwritten.
     queued_sources: Vec<Source>,
@@ -144,6 +144,15 @@ impl Subscription {
             )),
         }
     }
+
+    pub fn resubscribe(&mut self) -> Vec<ClientMessage> {
+        self.confirmed = false;
+
+        std::iter::once(&self.active_source)
+            .chain(self.queued_sources.iter())
+            .map(|source| source.request.subscription.agent_subscribe())
+            .collect()
+    }
 }
 
 /// Manages port subscriptions across all connected layers.
@@ -154,7 +163,7 @@ impl Subscription {
 ///    subscription requests
 /// 4. Subscription response from the agent most of the time cannot be tracked down to its
 ///    subscription request
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct SubscriptionsManager {
     remote_ports: RemoteResources<(Port, SocketAddr)>,
     subscriptions: HashMap<Port, Subscription>,
@@ -297,6 +306,10 @@ impl SubscriptionsManager {
     /// Notifies this struct about layer forking.
     pub fn layer_forked(&mut self, parent: LayerId, child: LayerId) {
         self.remote_ports.clone_all(parent, child);
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Subscription> + '_ {
+        self.subscriptions.values_mut()
     }
 }
 
