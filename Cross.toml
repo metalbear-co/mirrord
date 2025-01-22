@@ -5,7 +5,7 @@ passthrough = [
 # Dockerfile used for building mirrord-layer for x64 with very old libc
 # this to support centos7 or Amazon Linux 2.
 [target.x86_64-unknown-linux-gnu]
-image = "ghcr.io/metalbear-co/ci-layer-build:8ca4a4e9757a5749c384c57c3435e56c2b442458e14e4cb7ecbaec4d557f5d69"
+image = "ghcr.io/metalbear-co/ci-layer-build:latest"
 
 [target.aarch64-unknown-linux-gnu]
-image = "ghcr.io/metalbear-co/ci-layer-build-aarch64:4c99d799d297ddec935914907b94d899bd0a2349155cec934492ef19a69ddbf0"
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main"
