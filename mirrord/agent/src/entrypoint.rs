@@ -434,7 +434,7 @@ impl ClientConnectionHandler {
             }
             ClientMessage::GetAddrInfoRequest(request) => {
                 self.dns_api
-                    .make_request(ClientGetAddrInfoRequest::Old(request))
+                    .make_request(ClientGetAddrInfoRequest::V1(request))
                     .await?;
             }
             ClientMessage::GetAddrInfoRequestV2(request) => {

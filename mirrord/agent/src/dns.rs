@@ -23,14 +23,14 @@ use crate::{
 
 #[derive(Debug)]
 pub(crate) enum ClientGetAddrInfoRequest {
-    Old(GetAddrInfoRequest),
+    V1(GetAddrInfoRequest),
     V2(GetAddrInfoRequestV2),
 }
 
 impl ClientGetAddrInfoRequest {
     pub(crate) fn into_v2(self) -> GetAddrInfoRequestV2 {
         match self {
-            ClientGetAddrInfoRequest::Old(old_req) => old_req.into(),
+            ClientGetAddrInfoRequest::V1(old_req) => old_req.into(),
             ClientGetAddrInfoRequest::V2(v2_req) => v2_req,
         }
     }
