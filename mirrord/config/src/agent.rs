@@ -245,7 +245,7 @@ pub struct AgentConfig {
     /// ```json
     /// [
     ///   {
-    ///     "operator": "Exists"
+    ///     "key": "meow", "operator": "Exists", "effect": "NoSchedule"
     ///   }
     /// ]
     /// ```
