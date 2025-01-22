@@ -44,7 +44,7 @@ pub const RUST_OUTGOING_LOCAL: &str = "4.4.4.4:4444";
 ///
 /// We take advantage of how Rust's thread naming scheme for tests to create the log files,
 /// and if we have no thread name, then we just write the logs to `stderr`.
-pub fn init_tracing() -> Result<DefaultGuard, Box<dyn std::error::Error>> {
+pub fn init_tracing() -> DefaultGuard {
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::new("mirrord=trace"))
         .without_time()
@@ -61,7 +61,7 @@ pub fn init_tracing() -> Result<DefaultGuard, Box<dyn std::error::Error>> {
         .map(|name| name.replace(':', "_"))
     {
         Some(test_name) => {
-            let mut logs_file = PathBuf::from_str("/tmp/intproxy_logs")?;
+            let mut logs_file = PathBuf::from("/tmp/intproxy_logs");
 
             #[cfg(target_os = "macos")]
             logs_file.push("macos");
@@ -71,26 +71,28 @@ pub fn init_tracing() -> Result<DefaultGuard, Box<dyn std::error::Error>> {
             let _ = std::fs::create_dir_all(&logs_file).ok();
 
             logs_file.push(&test_name);
-            match File::create(logs_file) {
+            match File::create(&logs_file) {
+                // Writes the logs to the file.
                 Ok(file) => {
+                    println!("Created intproxy log file: {}", logs_file.display());
                     let subscriber = subscriber.with_writer(Arc::new(file)).finish();
-
-                    // Writes the logs to a file.
-                    Ok(tracing::subscriber::set_default(subscriber))
+                    tracing::subscriber::set_default(subscriber)
                 }
-                Err(_) => {
+                // File creation failure makes the output go to `stderr`.
+                Err(error) => {
+                    println!("Failed to create intproxy log file at {}: {error}. Intproxy logs will be flushed to stderr", logs_file.display());
                     let subscriber = subscriber.with_writer(io::stderr).finish();
-
-                    // File creation failure makes the output go to `stderr`.
-                    Ok(tracing::subscriber::set_default(subscriber))
+                    tracing::subscriber::set_default(subscriber)
                 }
             }
         }
+        // No thread name makes the output go to `stderr`.
         None => {
+            println!(
+                "Failed to obtain current thread name, intproxy logs will be flushed to stderr"
+            );
             let subscriber = subscriber.with_writer(io::stderr).finish();
-
-            // No thread name makes the output go to `stderr`.
-            Ok(tracing::subscriber::set_default(subscriber))
+            tracing::subscriber::set_default(subscriber)
         }
     }
 }
@@ -487,6 +489,25 @@ impl TestIntProxy {
             .unwrap();
     }
 
+    /// Makes a [`FileRequest::RemoveDir`] and answers it.
+    pub async fn expect_remove_dir(&mut self, expected_dir_name: &str) {
+        // Expecting `rmdir` call with path.
+        assert_matches!(
+            self.recv().await,
+            ClientMessage::FileRequest(FileRequest::RemoveDir(
+                mirrord_protocol::file::RemoveDirRequest { pathname }
+            )) if pathname.to_str().unwrap() == expected_dir_name
+        );
+
+        // Answer `rmdir`.
+        self.codec
+            .send(DaemonMessage::File(
+                mirrord_protocol::FileResponse::RemoveDir(Ok(())),
+            ))
+            .await
+            .unwrap();
+    }
+
     /// Verify that the passed message (not the next message from self.codec!) is a file read.
     /// Return buffer size.
     pub async fn expect_message_file_read(message: ClientMessage, expected_fd: u64) -> u64 {
@@ -763,6 +784,7 @@ pub enum Application {
     Fork,
     ReadLink,
     MakeDir,
+    RemoveDir,
     OpenFile,
     CIssue2055,
     CIssue2178,
@@ -782,9 +804,9 @@ pub enum Application {
         /// Mode to use when opening the file, accepted as `-m` param.
         mode: u32,
     },
-    // For running applications with the executable and arguments determined at runtime.
+    /// For running applications with the executable and arguments determined at runtime.
     DynamicApp(String, Vec<String>),
-    // Go app that only checks whether Linux pidfd syscalls are supported.
+    /// Go app that only checks whether Linux pidfd syscalls are supported.
     Go23Issue2988,
 }
 
@@ -819,6 +841,7 @@ impl Application {
             Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
             Application::ReadLink => String::from("tests/apps/readlink/out.c_test_app"),
             Application::MakeDir => String::from("tests/apps/mkdir/out.c_test_app"),
+            Application::RemoveDir => String::from("tests/apps/rmdir/out.c_test_app"),
             Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
             Application::NodeHTTP | Application::NodeIssue2283 | Application::NodeIssue2807 => {
                 String::from("node")
@@ -1057,6 +1080,7 @@ impl Application {
             | Application::Fork
             | Application::ReadLink
             | Application::MakeDir
+            | Application::RemoveDir
             | Application::Realpath
             | Application::RustFileOps
             | Application::RustIssue1123
@@ -1135,6 +1159,7 @@ impl Application {
             | Application::Fork
             | Application::ReadLink
             | Application::MakeDir
+            | Application::RemoveDir
             | Application::Realpath
             | Application::Go21Issue834
             | Application::Go22Issue834

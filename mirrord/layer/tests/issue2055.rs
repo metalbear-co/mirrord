@@ -2,7 +2,7 @@
 use std::{net::IpAddr, path::Path, time::Duration};
 
 use mirrord_protocol::{
-    dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse, LookupRecord},
+    dns::{DnsLookup, GetAddrInfoRequestV2, GetAddrInfoResponse, LookupRecord},
     ClientMessage, DaemonMessage, DnsLookupError,
     ResolveErrorKindInternal::NoRecordsFound,
     ResponseError,
@@ -23,10 +23,10 @@ async fn issue_2055(dylib_path: &Path) {
         .start_process_with_layer(dylib_path, vec![("MIRRORD_REMOTE_DNS", "true")], None)
         .await;
 
-    println!("Application started, waiting for `GetAddrInfoRequest`.");
+    println!("Application started, waiting for `GetAddrInfoRequestV2`.");
 
     let msg = intproxy.recv().await;
-    let ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node }) = msg else {
+    let ClientMessage::GetAddrInfoRequestV2(GetAddrInfoRequestV2 { node, .. }) = msg else {
         panic!("Invalid message received from layer: {msg:?}");
     };
 
@@ -40,7 +40,7 @@ async fn issue_2055(dylib_path: &Path) {
         .await;
 
     let msg = intproxy.recv().await;
-    let ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node: _ }) = msg else {
+    let ClientMessage::GetAddrInfoRequestV2(GetAddrInfoRequestV2 { .. }) = msg else {
         panic!("Invalid message received from layer: {msg:?}");
     };
 

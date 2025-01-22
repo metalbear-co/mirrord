@@ -345,15 +345,15 @@ impl LayerConfig {
 
     /// Given a [`LayerConfig`], serialise it and convert to base 64 so it can be
     /// set into [`MIRRORD_RESOLVED_CONFIG_ENV`].
-    fn to_env_var(&self) -> Result<String, ConfigError> {
+    pub fn to_env_var(&self) -> Result<String, ConfigError> {
         let serialized = serde_json::to_string(self)
             .map_err(|error| ConfigError::EnvVarEncodeError(error.to_string()))?;
         Ok(BASE64_STANDARD.encode(serialized))
     }
 
-    /// Given the encoded config as a string, set it into [`MIRRORD_RESOLVED_CONFIG_ENV`].
-    /// Must be used when updating [`LayerConfig`] after creation in order for the config
-    /// in env to reflect the change.
+    /// Encode this config with [`Self::to_env_var`] and set it into
+    /// [`MIRRORD_RESOLVED_CONFIG_ENV`]. Must be used when updating [`LayerConfig`] after
+    /// creation in order for the config in env to reflect the change.
     pub fn update_env_var(&self) -> Result<(), ConfigError> {
         std::env::set_var(MIRRORD_RESOLVED_CONFIG_ENV, self.to_env_var()?);
         Ok(())

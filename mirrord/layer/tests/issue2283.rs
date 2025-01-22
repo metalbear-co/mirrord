@@ -3,7 +3,7 @@
 use std::{assert_matches::assert_matches, net::SocketAddr, path::Path, time::Duration};
 
 use mirrord_protocol::{
-    dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoResponse, LookupRecord},
+    dns::{DnsLookup, GetAddrInfoRequestV2, GetAddrInfoResponse, LookupRecord},
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         DaemonConnect, DaemonRead, LayerConnect, SocketAddress,
@@ -48,7 +48,7 @@ async fn test_issue2283(
     }
 
     let message = intproxy.recv().await;
-    assert_matches!(message, ClientMessage::GetAddrInfoRequest(GetAddrInfoRequest { node }) if node == "test-server");
+    assert_matches!(message, ClientMessage::GetAddrInfoRequestV2(GetAddrInfoRequestV2 { node, .. }) if node == "test-server");
 
     let address = "1.2.3.4:80".parse::<SocketAddr>().unwrap();
 

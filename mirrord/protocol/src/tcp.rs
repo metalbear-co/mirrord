@@ -5,27 +5,22 @@ use std::{
     fmt,
     net::IpAddr,
     pin::Pin,
-    sync::{Arc, LazyLock, Mutex},
+    sync::LazyLock,
     task::{Context, Poll},
 };
 
 use bincode::{Decode, Encode};
 use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt, Full, StreamBody};
+use http_body_util::BodyExt;
 use hyper::{
-    body::{Body, Frame, Incoming},
-    http,
-    http::response::Parts,
+    body::{Body, Frame},
     HeaderMap, Method, Request, Response, StatusCode, Uri, Version,
 };
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::Receiver;
-use tokio_stream::wrappers::ReceiverStream;
-use tracing::{error, Level};
 
-use crate::{body_chunks::BodyExt as _, ConnectionId, Port, RemoteResult, RequestId};
+use crate::{ConnectionId, Port, RemoteResult, RequestId};
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnection {
@@ -120,7 +115,7 @@ pub struct Filter(String);
 impl Filter {
     pub fn new(filter_str: String) -> Result<Self, Box<fancy_regex::Error>> {
         let _ = fancy_regex::Regex::new(&filter_str).inspect_err(|fail| {
-            error!(
+            tracing::error!(
                 r"
                 Something went wrong while creating a regex for [{filter_str:#?}]!
 
@@ -239,7 +234,7 @@ pub enum ChunkedResponse {
 
 /// (De-)Serializable HTTP request.
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-pub struct InternalHttpRequest<Body> {
+pub struct InternalHttpRequest<B> {
     #[serde(with = "http_serde::method")]
     pub method: Method,
 
@@ -252,186 +247,49 @@ pub struct InternalHttpRequest<Body> {
     #[serde(with = "http_serde::version")]
     pub version: Version,
 
-    pub body: Body,
+    pub body: B,
 }
 
-impl<E> From<InternalHttpRequest<InternalHttpBody>> for Request<BoxBody<Bytes, E>>
-where
-    E: From<Infallible>,
-{
-    fn from(value: InternalHttpRequest<InternalHttpBody>) -> Self {
-        let InternalHttpRequest {
-            method,
-            uri,
-            headers,
-            version,
-            body,
-        } = value;
-        let mut request = Request::new(BoxBody::new(body.map_err(|e| e.into())));
-        *request.method_mut() = method;
-        *request.uri_mut() = uri;
-        *request.version_mut() = version;
-        *request.headers_mut() = headers;
-
-        request
-    }
-}
-
-impl<E> From<InternalHttpRequest<Vec<u8>>> for Request<BoxBody<Bytes, E>>
-where
-    E: From<Infallible>,
-{
-    fn from(value: InternalHttpRequest<Vec<u8>>) -> Self {
-        let InternalHttpRequest {
-            method,
-            uri,
-            headers,
-            version,
-            body,
-        } = value;
-        let mut request = Request::new(BoxBody::new(
-            Full::new(Bytes::from(body)).map_err(|e| e.into()),
-        ));
-        *request.method_mut() = method;
-        *request.uri_mut() = uri;
-        *request.version_mut() = version;
-        *request.headers_mut() = headers;
-
-        request
-    }
-}
-
-impl<E> From<InternalHttpRequest<StreamingBody>> for Request<BoxBody<Bytes, E>>
-where
-    E: From<Infallible>,
-{
-    fn from(value: InternalHttpRequest<StreamingBody>) -> Self {
-        let InternalHttpRequest {
-            method,
-            uri,
-            headers,
-            version,
-            body,
-        } = value;
-        let mut request = Request::new(BoxBody::new(body.map_err(|e| e.into())));
-        *request.method_mut() = method;
-        *request.uri_mut() = uri;
-        *request.version_mut() = version;
-        *request.headers_mut() = headers;
-
-        request
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum HttpRequestFallback {
-    Framed(HttpRequest<InternalHttpBody>),
-    Fallback(HttpRequest<Vec<u8>>),
-    Streamed {
-        request: HttpRequest<StreamingBody>,
-        retries: u32,
-    },
-}
-
-#[derive(Debug)]
-pub struct StreamingBody {
-    /// Shared with instances acquired via [`Clone`].
-    /// Allows the clones to receive a copy of the data.
-    origin: Arc<Mutex<(Receiver<InternalHttpBodyFrame>, Vec<InternalHttpBodyFrame>)>>,
-    /// Index of the next frame to return from the buffer.
-    /// If outside of the buffer, we need to poll the stream to get the next frame.
-    /// Local state of this instance, zeroed when cloning.
-    idx: usize,
-}
-
-impl StreamingBody {
-    pub fn new(rx: Receiver<InternalHttpBodyFrame>) -> Self {
-        Self {
-            origin: Arc::new(Mutex::new((rx, vec![]))),
-            idx: 0,
-        }
-    }
-}
-
-impl Clone for StreamingBody {
-    fn clone(&self) -> Self {
-        Self {
-            origin: self.origin.clone(),
-            idx: 0,
-        }
-    }
-}
-
-impl Body for StreamingBody {
-    type Data = Bytes;
-
-    type Error = Infallible;
-
-    fn poll_frame(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        let this = self.get_mut();
-        let mut guard = this.origin.lock().unwrap();
-
-        if let Some(frame) = guard.1.get(this.idx) {
-            this.idx += 1;
-            return Poll::Ready(Some(Ok(frame.clone().into())));
-        }
-
-        match std::task::ready!(guard.0.poll_recv(cx)) {
-            None => Poll::Ready(None),
-            Some(frame) => {
-                guard.1.push(frame.clone());
-                this.idx += 1;
-                Poll::Ready(Some(Ok(frame.into())))
-            }
-        }
-    }
-}
-
-impl HttpRequestFallback {
-    pub fn connection_id(&self) -> ConnectionId {
-        match self {
-            HttpRequestFallback::Framed(req) => req.connection_id,
-            HttpRequestFallback::Fallback(req) => req.connection_id,
-            HttpRequestFallback::Streamed { request: req, .. } => req.connection_id,
-        }
-    }
-
-    pub fn port(&self) -> Port {
-        match self {
-            HttpRequestFallback::Framed(req) => req.port,
-            HttpRequestFallback::Fallback(req) => req.port,
-            HttpRequestFallback::Streamed { request: req, .. } => req.port,
-        }
-    }
-
-    pub fn request_id(&self) -> RequestId {
-        match self {
-            HttpRequestFallback::Framed(req) => req.request_id,
-            HttpRequestFallback::Fallback(req) => req.request_id,
-            HttpRequestFallback::Streamed { request: req, .. } => req.request_id,
-        }
-    }
-
-    pub fn version(&self) -> Version {
-        match self {
-            HttpRequestFallback::Framed(req) => req.version(),
-            HttpRequestFallback::Fallback(req) => req.version(),
-            HttpRequestFallback::Streamed { request: req, .. } => req.version(),
-        }
-    }
-
-    pub fn into_hyper<E>(self) -> Request<BoxBody<Bytes, E>>
+impl<B> InternalHttpRequest<B> {
+    pub fn map_body<T, F>(self, cb: F) -> InternalHttpRequest<T>
     where
-        E: From<Infallible>,
+        F: FnOnce(B) -> T,
     {
-        match self {
-            HttpRequestFallback::Framed(req) => req.internal_request.into(),
-            HttpRequestFallback::Fallback(req) => req.internal_request.into(),
-            HttpRequestFallback::Streamed { request: req, .. } => req.internal_request.into(),
+        let InternalHttpRequest {
+            version,
+            headers,
+            method,
+            uri,
+            body,
+        } = self;
+
+        InternalHttpRequest {
+            version,
+            headers,
+            method,
+            uri,
+            body: cb(body),
         }
+    }
+}
+
+impl<B> From<InternalHttpRequest<B>> for Request<B> {
+    fn from(value: InternalHttpRequest<B>) -> Self {
+        let InternalHttpRequest {
+            method,
+            uri,
+            headers,
+            version,
+            body,
+        } = value;
+
+        let mut request = Request::new(body);
+        *request.method_mut() = method;
+        *request.uri_mut() = uri;
+        *request.version_mut() = version;
+        *request.headers_mut() = headers;
+
+        request
     }
 }
 
@@ -478,6 +336,24 @@ impl<B> HttpRequest<B> {
     pub fn version(&self) -> Version {
         self.internal_request.version
     }
+
+    pub fn map_body<T, F>(self, map: F) -> HttpRequest<T>
+    where
+        F: FnOnce(B) -> T,
+    {
+        HttpRequest {
+            connection_id: self.connection_id,
+            request_id: self.request_id,
+            port: self.port,
+            internal_request: InternalHttpRequest {
+                method: self.internal_request.method,
+                uri: self.internal_request.uri,
+                headers: self.internal_request.headers,
+                version: self.internal_request.version,
+                body: map(self.internal_request.body),
+            },
+        }
+    }
 }
 
 /// (De-)Serializable HTTP response.
@@ -516,16 +392,28 @@ impl<B> InternalHttpResponse<B> {
     }
 }
 
+impl<B> From<InternalHttpResponse<B>> for Response<B> {
+    fn from(value: InternalHttpResponse<B>) -> Self {
+        let InternalHttpResponse {
+            status,
+            version,
+            headers,
+            body,
+        } = value;
+
+        let mut response = Response::new(body);
+        *response.status_mut() = status;
+        *response.version_mut() = version;
+        *response.headers_mut() = headers;
+
+        response
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
-pub struct InternalHttpBody(VecDeque<InternalHttpBodyFrame>);
+pub struct InternalHttpBody(pub VecDeque<InternalHttpBodyFrame>);
 
 impl InternalHttpBody {
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        InternalHttpBody(VecDeque::from([InternalHttpBodyFrame::Data(
-            bytes.to_vec(),
-        )]))
-    }
-
     pub async fn from_body<B>(mut body: B) -> Result<Self, B::Error>
     where
         B: Body<Data = Bytes> + Unpin,
@@ -565,15 +453,11 @@ pub enum InternalHttpBodyFrame {
 
 impl From<Frame<Bytes>> for InternalHttpBodyFrame {
     fn from(frame: Frame<Bytes>) -> Self {
-        if frame.is_data() {
-            InternalHttpBodyFrame::Data(frame.into_data().expect("Malfromed data frame").to_vec())
-        } else if frame.is_trailers() {
-            InternalHttpBodyFrame::Trailers(
-                frame.into_trailers().expect("Malfromed trailers frame"),
-            )
-        } else {
-            panic!("Malfromed frame type")
-        }
+        frame
+            .into_data()
+            .map(|bytes| Self::Data(bytes.into()))
+            .or_else(|frame| frame.into_trailers().map(Self::Trailers))
+            .expect("malformed frame type")
     }
 }
 
@@ -591,463 +475,28 @@ impl fmt::Debug for InternalHttpBodyFrame {
     }
 }
 
-pub type ReceiverStreamBody = StreamBody<ReceiverStream<hyper::Result<Frame<Bytes>>>>;
-
-#[derive(Debug)]
-pub enum HttpResponseFallback {
-    Framed(HttpResponse<InternalHttpBody>),
-    Fallback(HttpResponse<Vec<u8>>),
-
-    /// Holds the [`HttpResponse`] that we're supposed to send back to the agent.
-    ///
-    /// It also holds the original http request [`HttpRequestFallback`], so we can retry
-    /// if our hyper server sent us a
-    /// [`RST_STREAM`](https://docs.rs/h2/latest/h2/struct.Error.html#method.is_reset).
-    Streamed(
-        HttpResponse<ReceiverStreamBody>,
-        Option<HttpRequestFallback>,
-    ),
-}
-
-impl HttpResponseFallback {
-    pub fn connection_id(&self) -> ConnectionId {
-        match self {
-            HttpResponseFallback::Framed(req) => req.connection_id,
-            HttpResponseFallback::Fallback(req) => req.connection_id,
-            HttpResponseFallback::Streamed(req, _) => req.connection_id,
-        }
-    }
-
-    pub fn request_id(&self) -> RequestId {
-        match self {
-            HttpResponseFallback::Framed(req) => req.request_id,
-            HttpResponseFallback::Fallback(req) => req.request_id,
-            HttpResponseFallback::Streamed(req, _) => req.request_id,
-        }
-    }
-
-    #[tracing::instrument(level = Level::TRACE, err(level = Level::WARN))]
-    pub fn into_hyper<E>(self) -> Result<Response<BoxBody<Bytes, E>>, http::Error>
-    where
-        E: From<hyper::Error>,
-    {
-        match self {
-            HttpResponseFallback::Framed(req) => req.internal_response.try_into(),
-            HttpResponseFallback::Fallback(req) => req.internal_response.try_into(),
-            HttpResponseFallback::Streamed(req, _) => req.internal_response.try_into(),
-        }
-    }
-
-    /// Produces an [`HttpResponseFallback`] to the given [`HttpRequestFallback`].
-    ///
-    /// # Note on picking response variant
-    ///
-    /// Variant of returned [`HttpResponseFallback`] is picked based on the variant of given
-    /// [`HttpRequestFallback`] and agent protocol version. We need to consider both due
-    /// to:
-    /// 1. Old agent versions always responding with client's `mirrord_protocol` version to
-    ///    [`ClientMessage::SwitchProtocolVersion`](super::ClientMessage::SwitchProtocolVersion),
-    /// 2. [`LayerTcpSteal::HttpResponseChunked`] being introduced after
-    ///    [`DaemonTcp::HttpRequestChunked`].
-    pub fn response_from_request(
-        request: HttpRequestFallback,
-        status: StatusCode,
-        message: &str,
-        agent_protocol_version: Option<&semver::Version>,
-    ) -> Self {
-        let agent_supports_streaming_response = agent_protocol_version
-            .map(|version| HTTP_CHUNKED_RESPONSE_VERSION.matches(version))
-            .unwrap_or(false);
-
-        match request.clone() {
-            // We received `DaemonTcp::HttpRequestFramed` from the agent,
-            // so we know it supports `LayerTcpSteal::HttpResponseFramed` (both were introduced in
-            // the same `mirrord_protocol` version).
-            HttpRequestFallback::Framed(request) => HttpResponseFallback::Framed(
-                HttpResponse::<InternalHttpBody>::response_from_request(request, status, message),
-            ),
-
-            // We received `DaemonTcp::HttpRequest` from the agent, so we assume it only supports
-            // `LayerTcpSteal::HttpResponse`.
-            HttpRequestFallback::Fallback(request) => HttpResponseFallback::Fallback(
-                HttpResponse::<Vec<u8>>::response_from_request(request, status, message),
-            ),
-
-            // We received `DaemonTcp::HttpRequestChunked` and the agent supports
-            // `LayerTcpSteal::HttpResponseChunked`.
-            HttpRequestFallback::Streamed {
-                request: streamed_request,
-                ..
-            } if agent_supports_streaming_response => HttpResponseFallback::Streamed(
-                HttpResponse::<ReceiverStreamBody>::response_from_request(
-                    streamed_request,
-                    status,
-                    message,
-                ),
-                Some(request),
-            ),
-
-            // We received `DaemonTcp::HttpRequestChunked` from the agent,
-            // but the agent does not support `LayerTcpSteal::HttpResponseChunked`.
-            // However, it must support the older `LayerTcpSteal::HttpResponseFramed`
-            // variant (was introduced before `DaemonTcp::HttpRequestChunked`).
-            HttpRequestFallback::Streamed { request, .. } => HttpResponseFallback::Framed(
-                HttpResponse::<InternalHttpBody>::response_from_request(request, status, message),
-            ),
-        }
-    }
-}
-
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-#[bincode(bounds = "for<'de> Body: Serialize + Deserialize<'de>")]
-pub struct HttpResponse<Body> {
+#[bincode(bounds = "for<'de> B: Serialize + Deserialize<'de>")]
+pub struct HttpResponse<B> {
     /// This is used to make sure the response is sent in its turn, after responses to all earlier
     /// requests were already sent.
     pub port: Port,
     pub connection_id: ConnectionId,
     pub request_id: RequestId,
     #[bincode(with_serde)]
-    pub internal_response: InternalHttpResponse<Body>,
+    pub internal_response: InternalHttpResponse<B>,
 }
 
-impl HttpResponse<InternalHttpBody> {
-    /// We cannot implement this with the [`From`] trait as it doesn't support `async` conversions,
-    /// and we also need some extra parameters.
-    ///
-    /// So this is our alternative implementation to `From<Response<Incoming>>`.
-    #[tracing::instrument(level = Level::TRACE, err(level = Level::WARN))]
-    pub async fn from_hyper_response(
-        response: Response<Incoming>,
-        port: Port,
-        connection_id: ConnectionId,
-        request_id: RequestId,
-    ) -> Result<HttpResponse<InternalHttpBody>, hyper::Error> {
-        let (
-            Parts {
-                status,
-                version,
-                headers,
-                ..
-            },
-            body,
-        ) = response.into_parts();
-
-        let body = InternalHttpBody::from_body(body).await?;
-
-        let internal_response = InternalHttpResponse {
-            status,
-            headers,
-            version,
-            body,
-        };
-
-        Ok(HttpResponse {
-            request_id,
-            port,
-            connection_id,
-            internal_response,
-        })
-    }
-
-    pub fn response_from_request<B>(
-        request: HttpRequest<B>,
-        status: StatusCode,
-        message: &str,
-    ) -> Self {
-        let HttpRequest {
-            internal_request: InternalHttpRequest { version, .. },
-            connection_id,
-            request_id,
-            port,
-        } = request;
-
-        let body = InternalHttpBody::from_bytes(
-            format!(
-                "{} {}\n{}\n",
-                status.as_str(),
-                status.canonical_reason().unwrap_or_default(),
-                message
-            )
-            .as_bytes(),
-        );
-
-        Self {
-            port,
-            connection_id,
-            request_id,
-            internal_response: InternalHttpResponse {
-                status,
-                version,
-                headers: Default::default(),
-                body,
-            },
+impl<B> HttpResponse<B> {
+    pub fn map_body<T, F>(self, cb: F) -> HttpResponse<T>
+    where
+        F: FnOnce(B) -> T,
+    {
+        HttpResponse {
+            connection_id: self.connection_id,
+            request_id: self.request_id,
+            port: self.port,
+            internal_response: self.internal_response.map_body(cb),
         }
-    }
-
-    pub fn empty_response_from_request(
-        request: HttpRequest<InternalHttpBody>,
-        status: StatusCode,
-    ) -> Self {
-        let HttpRequest {
-            internal_request: InternalHttpRequest { version, .. },
-            connection_id,
-            request_id,
-            port,
-        } = request;
-
-        Self {
-            port,
-            connection_id,
-            request_id,
-            internal_response: InternalHttpResponse {
-                status,
-                version,
-                headers: Default::default(),
-                body: Default::default(),
-            },
-        }
-    }
-}
-
-impl HttpResponse<Vec<u8>> {
-    /// We cannot implement this with the [`From`] trait as it doesn't support `async` conversions,
-    /// and we also need some extra parameters.
-    ///
-    /// So this is our alternative implementation to `From<Response<Incoming>>`.
-    #[tracing::instrument(level = Level::TRACE, err(level = Level::WARN))]
-    pub async fn from_hyper_response(
-        response: Response<Incoming>,
-        port: Port,
-        connection_id: ConnectionId,
-        request_id: RequestId,
-    ) -> Result<HttpResponse<Vec<u8>>, hyper::Error> {
-        let (
-            Parts {
-                status,
-                version,
-                headers,
-                ..
-            },
-            body,
-        ) = response.into_parts();
-
-        let body = body.collect().await?.to_bytes().to_vec();
-
-        let internal_response = InternalHttpResponse {
-            status,
-            headers,
-            version,
-            body,
-        };
-
-        Ok(HttpResponse {
-            request_id,
-            port,
-            connection_id,
-            internal_response,
-        })
-    }
-
-    pub fn response_from_request(
-        request: HttpRequest<Vec<u8>>,
-        status: StatusCode,
-        message: &str,
-    ) -> Self {
-        let HttpRequest {
-            internal_request: InternalHttpRequest { version, .. },
-            connection_id,
-            request_id,
-            port,
-        } = request;
-
-        let body = format!(
-            "{} {}\n{}\n",
-            status.as_str(),
-            status.canonical_reason().unwrap_or_default(),
-            message
-        )
-        .into_bytes();
-
-        Self {
-            port,
-            connection_id,
-            request_id,
-            internal_response: InternalHttpResponse {
-                status,
-                version,
-                headers: Default::default(),
-                body,
-            },
-        }
-    }
-
-    pub fn empty_response_from_request(request: HttpRequest<Vec<u8>>, status: StatusCode) -> Self {
-        let HttpRequest {
-            internal_request: InternalHttpRequest { version, .. },
-            connection_id,
-            request_id,
-            port,
-        } = request;
-
-        Self {
-            port,
-            connection_id,
-            request_id,
-            internal_response: InternalHttpResponse {
-                status,
-                version,
-                headers: Default::default(),
-                body: Default::default(),
-            },
-        }
-    }
-}
-
-impl HttpResponse<ReceiverStreamBody> {
-    #[tracing::instrument(level = Level::TRACE, err(level = Level::WARN))]
-    pub async fn from_hyper_response(
-        response: Response<Incoming>,
-        port: Port,
-        connection_id: ConnectionId,
-        request_id: RequestId,
-    ) -> Result<HttpResponse<ReceiverStreamBody>, hyper::Error> {
-        let (
-            Parts {
-                status,
-                version,
-                headers,
-                ..
-            },
-            mut body,
-        ) = response.into_parts();
-
-        let frames = body.next_frames(true).await?;
-        let (tx, rx) = tokio::sync::mpsc::channel(frames.frames.len().max(12));
-        for frame in frames.frames {
-            tx.try_send(Ok(frame))
-                .expect("Channel is open, capacity sufficient")
-        }
-        if !frames.is_last {
-            tokio::spawn(async move {
-                while let Some(frame) = body.frame().await {
-                    if tx.send(frame).await.is_err() {
-                        return;
-                    }
-                }
-            });
-        };
-
-        let body = StreamBody::new(ReceiverStream::from(rx));
-
-        let internal_response = InternalHttpResponse {
-            status,
-            headers,
-            version,
-            body,
-        };
-
-        Ok(HttpResponse {
-            request_id,
-            port,
-            connection_id,
-            internal_response,
-        })
-    }
-
-    #[tracing::instrument(level = Level::TRACE, ret)]
-    pub fn response_from_request(
-        request: HttpRequest<StreamingBody>,
-        status: StatusCode,
-        message: &str,
-    ) -> Self {
-        let HttpRequest {
-            internal_request: InternalHttpRequest { version, .. },
-            connection_id,
-            request_id,
-            port,
-        } = request;
-
-        let (tx, rx) = tokio::sync::mpsc::channel(1);
-        let frame = Frame::data(Bytes::copy_from_slice(message.as_bytes()));
-        tx.try_send(Ok(frame))
-            .expect("channel is open, capacity is sufficient");
-        let body = StreamBody::new(ReceiverStream::new(rx));
-
-        Self {
-            port,
-            connection_id,
-            request_id,
-            internal_response: InternalHttpResponse {
-                status,
-                version,
-                headers: Default::default(),
-                body,
-            },
-        }
-    }
-}
-
-impl<E> TryFrom<InternalHttpResponse<InternalHttpBody>> for Response<BoxBody<Bytes, E>> {
-    type Error = http::Error;
-
-    fn try_from(value: InternalHttpResponse<InternalHttpBody>) -> Result<Self, Self::Error> {
-        let InternalHttpResponse {
-            status,
-            version,
-            headers,
-            body,
-        } = value;
-
-        let mut builder = Response::builder().status(status).version(version);
-        if let Some(h) = builder.headers_mut() {
-            *h = headers;
-        }
-
-        builder.body(BoxBody::new(body.map_err(|_| unreachable!())))
-    }
-}
-
-impl<E> TryFrom<InternalHttpResponse<Vec<u8>>> for Response<BoxBody<Bytes, E>> {
-    type Error = http::Error;
-
-    fn try_from(value: InternalHttpResponse<Vec<u8>>) -> Result<Self, Self::Error> {
-        let InternalHttpResponse {
-            status,
-            version,
-            headers,
-            body,
-        } = value;
-
-        let mut builder = Response::builder().status(status).version(version);
-        if let Some(h) = builder.headers_mut() {
-            *h = headers;
-        }
-
-        builder.body(BoxBody::new(
-            Full::new(Bytes::from(body)).map_err(|_| unreachable!()),
-        ))
-    }
-}
-
-impl<E> TryFrom<InternalHttpResponse<ReceiverStreamBody>> for Response<BoxBody<Bytes, E>>
-where
-    E: From<hyper::Error>,
-{
-    type Error = http::Error;
-
-    fn try_from(value: InternalHttpResponse<ReceiverStreamBody>) -> Result<Self, Self::Error> {
-        let InternalHttpResponse {
-            status,
-            version,
-            headers,
-            body,
-        } = value;
-
-        let mut builder = Response::builder().status(status).version(version);
-        if let Some(h) = builder.headers_mut() {
-            *h = headers;
-        }
-
-        builder.body(BoxBody::new(body.map_err(|e| e.into())))
     }
 }

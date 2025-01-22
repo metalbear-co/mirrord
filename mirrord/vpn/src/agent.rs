@@ -134,6 +134,9 @@ impl Stream for VpnAgent {
                     LogLevel::Warn => {
                         tracing::warn!(message = %message.message, "agent sent warn message")
                     }
+                    LogLevel::Info => {
+                        tracing::info!(message = %message.message, "agent sent info message")
+                    }
                 }
 
                 self.poll_next(cx)
