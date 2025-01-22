@@ -45,6 +45,13 @@ pub(crate) static TCP_OUTGOING_CONNECTION: AtomicI64 = AtomicI64::new(0);
 
 pub(crate) static UDP_OUTGOING_CONNECTION: AtomicI64 = AtomicI64::new(0);
 
+/// The state with all the metrics [`IntGauge`]s and the prometheus [`Registry`] where we keep them.
+///
+/// **Do not** modify the gauges directly!
+///
+/// Instead rely on [`Metrics::gather_metrics`], as we actually use a bunch of [`AtomicI64`]s to
+/// keep track of the values, they are the ones being (de|in)cremented. These gauges are just set
+/// when it's time to send them via [`get_metrics`].
 #[derive(Debug)]
 struct Metrics {
     registry: Registry,
@@ -62,17 +69,8 @@ struct Metrics {
     udp_outgoing_connection: IntGauge,
 }
 
-macro_rules! register_unique_only {
-    ($registry: ident, $gauge: ident) => {
-        match $registry.register(Box::new($gauge.clone())) {
-            Ok(()) => Ok(()),
-            Err(prometheus::Error::AlreadyReg) => Ok(()),
-            Err(fail) => Err(fail),
-        }
-    };
-}
-
 impl Metrics {
+    /// Creates a [`Registry`] to ... register our [`IntGauge`]s.
     fn new() -> Self {
         use prometheus::Opts;
 
@@ -174,29 +172,42 @@ impl Metrics {
             IntGauge::with_opts(opts).expect("Valid at initialization!")
         };
 
-        register_unique_only!(registry, client_count).expect("Only `AlreadyReg` error is ignored!");
-        register_unique_only!(registry, dns_request_count)
-            .expect("Only `AlreadyReg` error is ignored!");
-        register_unique_only!(registry, open_fd_count)
-            .expect("Only `AlreadyReg` error is ignored!");
-        register_unique_only!(registry, mirror_port_subscription)
-            .expect("Only `AlreadyReg` error is ignored!");
-        register_unique_only!(registry, mirror_connection_subscription)
-            .expect("Only `AlreadyReg` error is ignored!");
-        register_unique_only!(registry, steal_filtered_port_subscription)
-            .expect("Only `AlreadyReg` error is ignored!");
-        register_unique_only!(registry, steal_unfiltered_port_subscription)
-            .expect("Only `AlreadyReg` error is ignored!");
-        register_unique_only!(registry, steal_filtered_connection_subscription)
-            .expect("Only `AlreadyReg` error is ignored!");
-        register_unique_only!(registry, steal_unfiltered_connection_subscription)
-            .expect("Only `AlreadyReg` error is ignored!");
-        register_unique_only!(registry, http_request_in_progress_count)
-            .expect("Only `AlreadyReg` error is ignored!");
-        register_unique_only!(registry, tcp_outgoing_connection)
-            .expect("Only `AlreadyReg` error is ignored!");
-        register_unique_only!(registry, udp_outgoing_connection)
-            .expect("Only `AlreadyReg` error is ignored!");
+        registry
+            .register(Box::new(client_count.clone()))
+            .expect("Register must be valid at initialization!");
+        registry
+            .register(Box::new(dns_request_count.clone()))
+            .expect("Register must be valid at initialization!");
+        registry
+            .register(Box::new(open_fd_count.clone()))
+            .expect("Register must be valid at initialization!");
+        registry
+            .register(Box::new(mirror_port_subscription.clone()))
+            .expect("Register must be valid at initialization!");
+        registry
+            .register(Box::new(mirror_connection_subscription.clone()))
+            .expect("Register must be valid at initialization!");
+        registry
+            .register(Box::new(steal_filtered_port_subscription.clone()))
+            .expect("Register must be valid at initialization!");
+        registry
+            .register(Box::new(steal_unfiltered_port_subscription.clone()))
+            .expect("Register must be valid at initialization!");
+        registry
+            .register(Box::new(steal_filtered_connection_subscription.clone()))
+            .expect("Register must be valid at initialization!");
+        registry
+            .register(Box::new(steal_unfiltered_connection_subscription.clone()))
+            .expect("Register must be valid at initialization!");
+        registry
+            .register(Box::new(http_request_in_progress_count.clone()))
+            .expect("Register must be valid at initialization!");
+        registry
+            .register(Box::new(tcp_outgoing_connection.clone()))
+            .expect("Register must be valid at initialization!");
+        registry
+            .register(Box::new(udp_outgoing_connection.clone()))
+            .expect("Register must be valid at initialization!");
 
         Self {
             registry,
@@ -215,6 +226,11 @@ impl Metrics {
         }
     }
 
+    /// Calls [`IntGauge::set`] on every [`IntGauge`] of `Self`, setting it to the value of
+    /// the corresponding [`AtomicI64`] global (the uppercase named version of the gauge).
+    ///
+    /// Returns the list of [`MetricFamily`] registered in our [`Metrics::registry`], ready to be
+    /// encoded and sent to prometheus.
     fn gather_metrics(&self) -> Vec<MetricFamily> {
         use std::sync::atomic::Ordering;
 
@@ -255,6 +271,10 @@ impl Metrics {
     }
 }
 
+/// `GET /metrics`
+///
+/// Prepares all the metrics with [`Metrics::gather_metrics`], and responds to the prometheus
+/// request.
 #[tracing::instrument(level = Level::TRACE, ret)]
 async fn get_metrics(State(state): State<Arc<Metrics>>) -> (StatusCode, String) {
     use prometheus::TextEncoder;
