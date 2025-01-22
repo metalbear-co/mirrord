@@ -99,6 +99,7 @@ pub enum Application {
     Go22HTTP,
     Go23HTTP,
     CurlToKubeApi,
+    CurlToKubeApiOverIpv6,
     PythonCloseSocket,
     PythonCloseSocketKeepConnection,
     RustWebsockets,
@@ -477,6 +478,9 @@ impl Application {
             Application::CurlToKubeApi => {
                 vec!["curl", "https://kubernetes/api", "--insecure"]
             }
+            Application::CurlToKubeApiOverIpv6 => {
+                vec!["curl", "-6", "https://kubernetes/api", "--insecure"]
+            }
             Application::RustWebsockets => vec!["../target/debug/rust-websockets"],
             Application::RustSqs => vec!["../target/debug/rust-sqs-printer"],
         }
@@ -633,11 +637,17 @@ pub async fn run_exec(
         .into_iter()
         .chain(process_cmd.into_iter())
         .collect();
+    let agent_image_env = "MIRRORD_AGENT_IMAGE";
+    let agent_image_from_devs_env = std::env::var(agent_image_env);
     // used by the CI, to load the image locally:
     // docker build -t test . -f mirrord/agent/Dockerfile
     // minikube load image test:latest
     let mut base_env = HashMap::new();
-    base_env.insert("MIRRORD_AGENT_IMAGE", "test");
+    base_env.insert(
+        agent_image_env,
+        // Let devs running the test specify an agent image per env var.
+        agent_image_from_devs_env.as_deref().unwrap_or("test"),
+    );
     base_env.insert("MIRRORD_CHECK_VERSION", "false");
     base_env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
     base_env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");

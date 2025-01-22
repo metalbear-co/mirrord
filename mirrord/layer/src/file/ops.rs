@@ -14,7 +14,9 @@ use mirrord_protocol::{
     ResponseError,
 };
 use rand::distributions::{Alphanumeric, DistString};
-use tracing::{error, trace, Level};
+#[cfg(debug_assertions)]
+use tracing::Level;
+use tracing::{error, trace};
 
 use super::{hooks::FN_OPEN, open_dirs::OPEN_DIRS, *};
 #[cfg(target_os = "linux")]

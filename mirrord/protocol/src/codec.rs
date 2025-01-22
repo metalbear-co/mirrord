@@ -12,7 +12,7 @@ use mirrord_macros::protocol_break;
 use semver::VersionReq;
 
 use crate::{
-    dns::{GetAddrInfoRequest, GetAddrInfoResponse},
+    dns::{GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse},
     file::*,
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -135,6 +135,7 @@ pub enum ClientMessage {
     SwitchProtocolVersion(#[bincode(with_serde)] semver::Version),
     ReadyForLogs,
     Vpn(ClientVpn),
+    GetAddrInfoRequestV2(GetAddrInfoRequestV2),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.

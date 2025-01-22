@@ -10,7 +10,7 @@ use crate::{
     util::MirrordToggleableConfig,
 };
 
-const IPV6_ENV_VAR: &str = "MIRRORD_INCOMING_ENABLE_IPV6";
+const IPV6_ENV_VAR: &str = "MIRRORD_ENABLE_IPV6";
 
 pub mod dns;
 pub mod filter;
