@@ -13,7 +13,7 @@ use tokio::process::Command;
 use tracing::warn;
 
 use crate::{
-    error::Result,
+    error::AgentResult,
     steal::ip_tables::{chain::IPTableChain, redirect::Redirect, IPTables, IPTABLE_INPUT},
 };
 
@@ -33,7 +33,7 @@ where
     const ENTRYPOINT: &'static str = "INPUT";
 
     #[tracing::instrument(level = "trace", skip(ipt, inner))]
-    pub fn create(ipt: Arc<IPT>, inner: Box<T>) -> Result<Self> {
+    pub fn create(ipt: Arc<IPT>, inner: Box<T>) -> AgentResult<Self> {
         let managed =
             IPTableChain::create(ipt.with_table("filter").into(), IPTABLE_INPUT.to_string())?;
 
@@ -48,7 +48,7 @@ where
     }
 
     #[tracing::instrument(level = "trace", skip(ipt, inner))]
-    pub fn load(ipt: Arc<IPT>, inner: Box<T>) -> Result<Self> {
+    pub fn load(ipt: Arc<IPT>, inner: Box<T>) -> AgentResult<Self> {
         let managed =
             IPTableChain::load(ipt.with_table("filter").into(), IPTABLE_INPUT.to_string())?;
 
@@ -63,7 +63,7 @@ where
     T: Redirect + Send + Sync,
 {
     #[tracing::instrument(level = "trace", skip(self), ret)]
-    async fn mount_entrypoint(&self) -> Result<()> {
+    async fn mount_entrypoint(&self) -> AgentResult<()> {
         self.inner.mount_entrypoint().await?;
 
         self.managed.inner().add_rule(
@@ -75,7 +75,7 @@ where
     }
 
     #[tracing::instrument(level = "trace", skip(self), ret)]
-    async fn unmount_entrypoint(&self) -> Result<()> {
+    async fn unmount_entrypoint(&self) -> AgentResult<()> {
         self.inner.unmount_entrypoint().await?;
 
         self.managed.inner().remove_rule(
@@ -87,7 +87,7 @@ where
     }
 
     #[tracing::instrument(level = "trace", skip(self), ret)]
-    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> AgentResult<()> {
         self.inner
             .add_redirect(redirected_port, target_port)
             .await?;
@@ -115,7 +115,7 @@ where
     }
 
     #[tracing::instrument(level = "trace", skip(self), ret)]
-    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> AgentResult<()> {
         self.inner
             .remove_redirect(redirected_port, target_port)
             .await?;
