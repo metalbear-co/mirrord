@@ -90,7 +90,7 @@ mod steal_tests {
                 &service.pod_container_target(),
                 Some(&service.namespace),
                 Some(flags),
-                Some(vec![("MIRRORD_INCOMING_ENABLE_IPV6", "true")]),
+                Some(vec![("MIRRORD_ENABLE_IPV6", "true")]),
             )
             .await;
 

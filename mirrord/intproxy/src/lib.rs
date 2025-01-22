@@ -322,6 +322,13 @@ impl IntProxy {
                     .await;
 
                 self.task_txs
+                    .simple
+                    .send(SimpleProxyMessage::ProtocolVersion(
+                        protocol_version.clone(),
+                    ))
+                    .await;
+
+                self.task_txs
                     .incoming
                     .send(IncomingProxyMessage::AgentProtocolVersion(protocol_version))
                     .await;
