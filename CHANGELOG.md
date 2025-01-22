@@ -34,8 +34,6 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
   Improved handling of incoming connections on the local machine (e.g
   introduces reuse of local HTTP connections).
   [#3013](https://github.com/metalbear-co/mirrord/issues/3013)
-- Moved to an older builder base image for aarch64 to support centos-7 libc.
-  [#3024](https://github.com/metalbear-co/mirrord/issues/3024)
 
 
 ### Internal
