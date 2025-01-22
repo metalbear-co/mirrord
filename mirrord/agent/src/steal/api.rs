@@ -8,11 +8,11 @@ use mirrord_protocol::{
 };
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::Level;
 
 use super::{http::ReceiverStreamBody, *};
 use crate::{
-    error::{AgentError, Result},
-    util::ClientId,
+    error::AgentResult, metrics::HTTP_REQUEST_IN_PROGRESS_COUNT, util::ClientId,
     watched_task::TaskStatus,
 };
 
@@ -50,17 +50,23 @@ pub(crate) struct TcpStealerApi {
     response_body_txs: HashMap<(ConnectionId, RequestId), ResponseBodyTx>,
 }
 
+impl Drop for TcpStealerApi {
+    fn drop(&mut self) {
+        HTTP_REQUEST_IN_PROGRESS_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 impl TcpStealerApi {
     /// Initializes a [`TcpStealerApi`] and sends a message to [`TcpConnectionStealer`] signaling
     /// that we have a new client.
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = Level::TRACE, err)]
     pub(crate) async fn new(
         client_id: ClientId,
         command_tx: Sender<StealerCommand>,
         task_status: TaskStatus,
         channel_size: usize,
         protocol_version: semver::Version,
-    ) -> Result<Self, AgentError> {
+    ) -> AgentResult<Self> {
         let (daemon_tx, daemon_rx) = mpsc::channel(channel_size);
 
         command_tx
@@ -80,7 +86,7 @@ impl TcpStealerApi {
     }
 
     /// Send `command` to stealer, with the client id of the client that is using this API instance.
-    async fn send_command(&mut self, command: Command) -> Result<()> {
+    async fn send_command(&mut self, command: Command) -> AgentResult<()> {
         let command = StealerCommand {
             client_id: self.client_id,
             command,
@@ -98,12 +104,16 @@ impl TcpStealerApi {
     ///
     /// Called in the `ClientConnectionHandler`.
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) async fn recv(&mut self) -> Result<DaemonTcp> {
+    pub(crate) async fn recv(&mut self) -> AgentResult<DaemonTcp> {
         match self.daemon_rx.recv().await {
             Some(msg) => {
                 if let DaemonTcp::Close(close) = &msg {
                     self.response_body_txs
                         .retain(|(key_id, _), _| *key_id != close.connection_id);
+                    HTTP_REQUEST_IN_PROGRESS_COUNT.store(
+                        self.response_body_txs.len() as i64,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
                 }
                 Ok(msg)
             }
@@ -115,7 +125,7 @@ impl TcpStealerApi {
     /// agent, to an internal stealer command [`Command::PortSubscribe`].
     ///
     /// The actual handling of this message is done in [`TcpConnectionStealer`].
-    pub(crate) async fn port_subscribe(&mut self, port_steal: StealType) -> Result<(), AgentError> {
+    pub(crate) async fn port_subscribe(&mut self, port_steal: StealType) -> AgentResult<()> {
         self.send_command(Command::PortSubscribe(port_steal)).await
     }
 
@@ -123,7 +133,7 @@ impl TcpStealerApi {
     /// agent, to an internal stealer command [`Command::PortUnsubscribe`].
     ///
     /// The actual handling of this message is done in [`TcpConnectionStealer`].
-    pub(crate) async fn port_unsubscribe(&mut self, port: Port) -> Result<(), AgentError> {
+    pub(crate) async fn port_unsubscribe(&mut self, port: Port) -> AgentResult<()> {
         self.send_command(Command::PortUnsubscribe(port)).await
     }
 
@@ -134,7 +144,7 @@ impl TcpStealerApi {
     pub(crate) async fn connection_unsubscribe(
         &mut self,
         connection_id: ConnectionId,
-    ) -> Result<(), AgentError> {
+    ) -> AgentResult<()> {
         self.send_command(Command::ConnectionUnsubscribe(connection_id))
             .await
     }
@@ -143,7 +153,7 @@ impl TcpStealerApi {
     /// agent, to an internal stealer command [`Command::ResponseData`].
     ///
     /// The actual handling of this message is done in [`TcpConnectionStealer`].
-    pub(crate) async fn client_data(&mut self, tcp_data: TcpData) -> Result<(), AgentError> {
+    pub(crate) async fn client_data(&mut self, tcp_data: TcpData) -> AgentResult<()> {
         self.send_command(Command::ResponseData(tcp_data)).await
     }
 
@@ -154,24 +164,32 @@ impl TcpStealerApi {
     pub(crate) async fn http_response(
         &mut self,
         response: HttpResponseFallback,
-    ) -> Result<(), AgentError> {
+    ) -> AgentResult<()> {
         self.send_command(Command::HttpResponse(response)).await
     }
 
     pub(crate) async fn switch_protocol_version(
         &mut self,
         version: semver::Version,
-    ) -> Result<(), AgentError> {
+    ) -> AgentResult<()> {
         self.send_command(Command::SwitchProtocolVersion(version))
             .await
     }
 
-    pub(crate) async fn handle_client_message(&mut self, message: LayerTcpSteal) -> Result<()> {
+    pub(crate) async fn handle_client_message(
+        &mut self,
+        message: LayerTcpSteal,
+    ) -> AgentResult<()> {
         match message {
             LayerTcpSteal::PortSubscribe(port_steal) => self.port_subscribe(port_steal).await,
             LayerTcpSteal::ConnectionUnsubscribe(connection_id) => {
                 self.response_body_txs
                     .retain(|(key_id, _), _| *key_id != connection_id);
+                HTTP_REQUEST_IN_PROGRESS_COUNT.store(
+                    self.response_body_txs.len() as i64,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+
                 self.connection_unsubscribe(connection_id).await
             }
             LayerTcpSteal::PortUnsubscribe(port) => self.port_unsubscribe(port).await,
@@ -202,6 +220,10 @@ impl TcpStealerApi {
 
                     let key = (response.connection_id, response.request_id);
                     self.response_body_txs.insert(key, tx.clone());
+                    HTTP_REQUEST_IN_PROGRESS_COUNT.store(
+                        self.response_body_txs.len() as i64,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
 
                     self.http_response(HttpResponseFallback::Streamed(http_response))
                         .await?;
@@ -209,6 +231,10 @@ impl TcpStealerApi {
                     for frame in response.internal_response.body {
                         if let Err(err) = tx.send(Ok(frame.into())).await {
                             self.response_body_txs.remove(&key);
+                            HTTP_REQUEST_IN_PROGRESS_COUNT.store(
+                                self.response_body_txs.len() as i64,
+                                std::sync::atomic::Ordering::Relaxed,
+                            );
                             tracing::trace!(?err, "error while sending streaming response frame");
                         }
                     }
@@ -231,12 +257,20 @@ impl TcpStealerApi {
                     }
                     if send_err || body.is_last {
                         self.response_body_txs.remove(key);
+                        HTTP_REQUEST_IN_PROGRESS_COUNT.store(
+                            self.response_body_txs.len() as i64,
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
                     };
                     Ok(())
                 }
                 ChunkedResponse::Error(err) => {
                     self.response_body_txs
                         .remove(&(err.connection_id, err.request_id));
+                    HTTP_REQUEST_IN_PROGRESS_COUNT.store(
+                        self.response_body_txs.len() as i64,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
                     tracing::trace!(?err, "ChunkedResponse error received");
                     Ok(())
                 }

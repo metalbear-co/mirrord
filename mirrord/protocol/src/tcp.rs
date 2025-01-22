@@ -52,14 +52,31 @@ pub struct TcpClose {
 }
 
 /// Messages related to Tcp handler from client.
+///
+/// Part of the `mirror` feature.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum LayerTcp {
+    /// User is interested in mirroring traffic on this `Port`, so add it to the list of
+    /// ports that the sniffer is filtering.
     PortSubscribe(Port),
+
+    /// User is not interested in the connection with `ConnectionId` anymore.
+    ///
+    /// This means that their app has closed the connection they were `listen`ning on.
+    ///
+    /// There is no `ConnectionSubscribe` counter-part of this variant, the subscription
+    /// happens when the sniffer receives an (agent) internal `SniffedConnection`.
     ConnectionUnsubscribe(ConnectionId),
+
+    /// Removes this `Port` from the sniffer's filter, the traffic won't be cloned to mirrord
+    /// anymore.
     PortUnsubscribe(Port),
 }
 
 /// Messages related to Tcp handler from server.
+///
+/// They are the same for both `steal` and `mirror` modes, even though their layer
+/// counterparts ([`LayerTcpSteal`] and [`LayerTcp`]) are different.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum DaemonTcp {
     NewConnection(NewTcpConnection),
@@ -214,10 +231,38 @@ impl StealType {
 }
 
 /// Messages related to Steal Tcp handler from client.
+///
+/// `PortSubscribe`, `PortUnsubscribe`, and `ConnectionUnsubscribe` variants are similar
+/// to what you'll find in the [`LayerTcp`], but they're handled by different tasks in
+/// the agent.
+///
+/// Stolen traffic might have an additional overhead when compared to mirrored traffic, as
+/// we have an intermmediate HTTP server to handle filtering (based on HTTP headers, etc).
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum LayerTcpSteal {
+    /// User is interested in stealing traffic on this `Port`, so add it to the list of
+    /// ports that the stealer is filtering.
+    ///
+    /// The `TcpConnectionStealer` supports an [`HttpFilter`] granting the ability to steal
+    /// only traffic that matches the user configured filter. It's also possible to just steal
+    /// all traffic (which we refer as `Unfiltered`). For more info see [`StealType`].
+    ///
+    /// This variant is somewhat related to [`LayerTcpSteal::ConnectionUnsubscribe`], since
+    /// we don't have a `ConnectionSubscribe` message anywhere, instead what we do is: when
+    /// a new connection comes in one of the ports we are subscribed to, we consider it a
+    /// connection subscription (so this mechanism represents the **non-existing**
+    /// `ConnectionSubscribe` variant).
     PortSubscribe(StealType),
+
+    /// User has stopped stealing from this connection with [`ConnectionId`].
+    ///
+    /// We do **not** have a `ConnectionSubscribe` variant/message. What happens instead is that we
+    /// call a _connection subscription_ the act of `accept`ing a new connection on one of the
+    /// ports we are subscribed to. See the [`LayerTcpSteal::PortSubscribe`] for more info.
     ConnectionUnsubscribe(ConnectionId),
+
+    /// Removes this `Port` from the stealers's filter, the traffic won't be stolen by mirrord
+    /// anymore.
     PortUnsubscribe(Port),
     Data(TcpData),
     HttpResponse(HttpResponse<Vec<u8>>),

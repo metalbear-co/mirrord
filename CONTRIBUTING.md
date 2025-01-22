@@ -131,6 +131,21 @@ In order to test IPv6 on a local cluster on macOS, you can use Kind:
 3. `kind create cluster --config kind-config.yaml`
 4. When you run `kubectl get svc -o wide --all-namespaces` you should see IPv6 addresses.
 
+In order to use an agent image from a local registry, you can load the image to kind's registry with:
+
+```
+kind load docker-image test:latest
+```
+
+In order to test on EKS, I used this blueprint: https://github.com/aws-ia/terraform-aws-eks-blueprints/tree/main/patterns/ipv6-eks-cluster
+
+After creating the cluster, I had to give myself permissions to the K8s objects, I did that via the AWS console (in the browser).
+Feel free to add instructions on how to make that "manual" step unnecessary.
+
+IPv6 tests (they currently don't run in the CI):
+- steal_http_ipv6_traffic
+- connect_to_kubernetes_api_service_over_ipv6
+
 
 ### Cleanup
 

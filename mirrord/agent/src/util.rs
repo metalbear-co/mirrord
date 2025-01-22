@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use tracing::error;
 
 use crate::{
-    error::AgentError,
+    error::AgentResult,
     namespace::{set_namespace, NamespaceType},
 };
 
@@ -151,7 +151,7 @@ where
 /// Many of the agent's TCP/UDP connections require that they're made from the `pid`'s namespace to
 /// work.
 #[tracing::instrument(level = "trace")]
-pub(crate) fn enter_namespace(pid: Option<u64>, namespace: &str) -> Result<(), AgentError> {
+pub(crate) fn enter_namespace(pid: Option<u64>, namespace: &str) -> AgentResult<()> {
     if let Some(pid) = pid {
         Ok(set_namespace(pid, NamespaceType::Net).inspect_err(|fail| {
             error!("Failed setting pid {pid:#?} namespace {namespace:#?} with {fail:#?}")

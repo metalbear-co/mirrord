@@ -16,7 +16,11 @@ use super::{
     http::HttpFilter,
     ip_tables::{new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables},
 };
-use crate::{error::AgentError, util::ClientId};
+use crate::{
+    error::{AgentError, AgentResult},
+    metrics::{STEAL_FILTERED_PORT_SUBSCRIPTION, STEAL_UNFILTERED_PORT_SUBSCRIPTION},
+    util::ClientId,
+};
 
 /// For stealing incoming TCP connections.
 #[async_trait::async_trait]
@@ -149,7 +153,7 @@ impl IpTablesRedirector {
         flush_connections: bool,
         pod_ips: Option<String>,
         support_ipv6: bool,
-    ) -> Result<Self, AgentError> {
+    ) -> AgentResult<Self> {
         let (pod_ips4, pod_ips6) = pod_ips.map_or_else(
             || (None, None),
             |ips| {
@@ -310,6 +314,13 @@ pub struct PortSubscriptions<R: PortRedirector> {
     subscriptions: HashMap<Port, PortSubscription>,
 }
 
+impl<R: PortRedirector> Drop for PortSubscriptions<R> {
+    fn drop(&mut self) {
+        STEAL_FILTERED_PORT_SUBSCRIPTION.store(0, std::sync::atomic::Ordering::Relaxed);
+        STEAL_UNFILTERED_PORT_SUBSCRIPTION.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 impl<R: PortRedirector> PortSubscriptions<R> {
     /// Create an empty instance of this struct.
     ///
@@ -351,7 +362,16 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     ) -> Result<RemoteResult<Port>, R::Error> {
         let add_redirect = match self.subscriptions.entry(port) {
             Entry::Occupied(mut e) => {
+                let filtered = filter.is_some();
                 if e.get_mut().try_extend(client_id, filter) {
+                    if filtered {
+                        STEAL_FILTERED_PORT_SUBSCRIPTION
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    } else {
+                        STEAL_UNFILTERED_PORT_SUBSCRIPTION
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+
                     Ok(false)
                 } else {
                     Err(ResponseError::PortAlreadyStolen(port))
@@ -359,6 +379,14 @@ impl<R: PortRedirector> PortSubscriptions<R> {
             }
 
             Entry::Vacant(e) => {
+                if filter.is_some() {
+                    STEAL_FILTERED_PORT_SUBSCRIPTION
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                } else {
+                    STEAL_UNFILTERED_PORT_SUBSCRIPTION
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+
                 e.insert(PortSubscription::new(client_id, filter));
                 Ok(true)
             }
@@ -395,11 +423,17 @@ impl<R: PortRedirector> PortSubscriptions<R> {
         let remove_redirect = match e.get_mut() {
             PortSubscription::Unfiltered(subscribed_client) if *subscribed_client == client_id => {
                 e.remove();
+                STEAL_UNFILTERED_PORT_SUBSCRIPTION
+                    .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+
                 true
             }
             PortSubscription::Unfiltered(..) => false,
             PortSubscription::Filtered(filters) => {
-                filters.remove(&client_id);
+                if filters.remove(&client_id).is_some() {
+                    STEAL_FILTERED_PORT_SUBSCRIPTION
+                        .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                }
 
                 if filters.is_empty() {
                     e.remove();

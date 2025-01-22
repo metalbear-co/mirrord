@@ -96,4 +96,4 @@ impl From<mpsc::error::SendError<StealerCommand>> for AgentError {
     }
 }
 
-pub(crate) type Result<T, E = AgentError> = std::result::Result<T, E>;
+pub(crate) type AgentResult<T, E = AgentError> = std::result::Result<T, E>;

@@ -5,7 +5,7 @@ use fancy_regex::Regex;
 use mirrord_protocol::{MeshVendor, Port};
 
 use crate::{
-    error::Result,
+    error::AgentResult,
     steal::ip_tables::{
         output::OutputRedirect, prerouting::PreroutingRedirect, redirect::Redirect, IPTables,
         IPTABLE_MESH,
@@ -29,7 +29,7 @@ impl<IPT> MeshRedirect<IPT>
 where
     IPT: IPTables,
 {
-    pub fn create(ipt: Arc<IPT>, vendor: MeshVendor, pod_ips: Option<&str>) -> Result<Self> {
+    pub fn create(ipt: Arc<IPT>, vendor: MeshVendor, pod_ips: Option<&str>) -> AgentResult<Self> {
         let prerouting = PreroutingRedirect::create(ipt.clone())?;
 
         for port in Self::get_skip_ports(&ipt, &vendor)? {
@@ -45,7 +45,7 @@ where
         })
     }
 
-    pub fn load(ipt: Arc<IPT>, vendor: MeshVendor) -> Result<Self> {
+    pub fn load(ipt: Arc<IPT>, vendor: MeshVendor) -> AgentResult<Self> {
         let prerouting = PreroutingRedirect::load(ipt.clone())?;
         let output = OutputRedirect::load(ipt, IPTABLE_MESH.to_string())?;
 
@@ -56,7 +56,7 @@ where
         })
     }
 
-    fn get_skip_ports(ipt: &IPT, vendor: &MeshVendor) -> Result<Vec<String>> {
+    fn get_skip_ports(ipt: &IPT, vendor: &MeshVendor) -> AgentResult<Vec<String>> {
         let chain_name = vendor.input_chain();
         let lookup_regex = if let Some(regex) = vendor.skip_ports_regex() {
             regex
@@ -86,21 +86,21 @@ impl<IPT> Redirect for MeshRedirect<IPT>
 where
     IPT: IPTables + Send + Sync,
 {
-    async fn mount_entrypoint(&self) -> Result<()> {
+    async fn mount_entrypoint(&self) -> AgentResult<()> {
         self.prerouting.mount_entrypoint().await?;
         self.output.mount_entrypoint().await?;
 
         Ok(())
     }
 
-    async fn unmount_entrypoint(&self) -> Result<()> {
+    async fn unmount_entrypoint(&self) -> AgentResult<()> {
         self.prerouting.unmount_entrypoint().await?;
         self.output.unmount_entrypoint().await?;
 
         Ok(())
     }
 
-    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> AgentResult<()> {
         if self.vendor != MeshVendor::IstioCni {
             self.prerouting
                 .add_redirect(redirected_port, target_port)
@@ -113,7 +113,7 @@ where
         Ok(())
     }
 
-    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> AgentResult<()> {
         if self.vendor != MeshVendor::IstioCni {
             self.prerouting
                 .remove_redirect(redirected_port, target_port)
@@ -129,13 +129,13 @@ where
 
 /// Extends the [`MeshVendor`] type with methods that are only relevant for the agent.
 pub(super) trait MeshVendorExt: Sized {
-    fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Option<Self>>;
+    fn detect<IPT: IPTables>(ipt: &IPT) -> AgentResult<Option<Self>>;
     fn input_chain(&self) -> &str;
     fn skip_ports_regex(&self) -> Option<&Regex>;
 }
 
 impl MeshVendorExt for MeshVendor {
-    fn detect<IPT: IPTables>(ipt: &IPT) -> Result<Option<Self>> {
+    fn detect<IPT: IPTables>(ipt: &IPT) -> AgentResult<Option<Self>> {
         if let Ok(val) = std::env::var("MIRRORD_AGENT_ISTIO_CNI")
             && val.to_lowercase() == "true"
         {

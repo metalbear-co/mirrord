@@ -24,8 +24,9 @@ use self::{
     tcp_capture::RawSocketTcpCapture,
 };
 use crate::{
-    error::AgentError,
+    error::AgentResult,
     http::HttpVersion,
+    metrics::{MIRROR_CONNECTION_SUBSCRIPTION, MIRROR_PORT_SUBSCRIPTION},
     util::{ChannelClosedFuture, ClientId, Subscriptions},
 };
 
@@ -141,6 +142,13 @@ pub(crate) struct TcpConnectionSniffer<T> {
     clients_closed: FuturesUnordered<ChannelClosedFuture<SniffedConnection>>,
 }
 
+impl<T> Drop for TcpConnectionSniffer<T> {
+    fn drop(&mut self) {
+        MIRROR_PORT_SUBSCRIPTION.store(0, std::sync::atomic::Ordering::Relaxed);
+        MIRROR_CONNECTION_SUBSCRIPTION.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 impl<T> fmt::Debug for TcpConnectionSniffer<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TcpConnectionSniffer")
@@ -163,7 +171,7 @@ impl TcpConnectionSniffer<RawSocketTcpCapture> {
         command_rx: Receiver<SnifferCommand>,
         network_interface: Option<String>,
         is_mesh: bool,
-    ) -> Result<Self, AgentError> {
+    ) -> AgentResult<Self> {
         let tcp_capture = RawSocketTcpCapture::new(network_interface, is_mesh).await?;
 
         Ok(Self {
@@ -190,7 +198,7 @@ where
 
     /// Runs the sniffer loop, capturing packets.
     #[tracing::instrument(level = Level::DEBUG, skip(cancel_token), err)]
-    pub async fn start(mut self, cancel_token: CancellationToken) -> Result<(), AgentError> {
+    pub async fn start(mut self, cancel_token: CancellationToken) -> AgentResult<()> {
         loop {
             select! {
                 command = self.command_rx.recv() => {
@@ -232,7 +240,7 @@ where
     /// Removes the client with `client_id`, and also unsubscribes its port.
     /// Adjusts BPF filter if needed.
     #[tracing::instrument(level = Level::TRACE, err)]
-    fn handle_client_closed(&mut self, client_id: ClientId) -> Result<(), AgentError> {
+    fn handle_client_closed(&mut self, client_id: ClientId) -> AgentResult<()> {
         self.client_txs.remove(&client_id);
 
         if self.port_subscriptions.remove_client(client_id) {
@@ -245,8 +253,9 @@ where
     /// Updates BPF filter used by [`Self::tcp_capture`] to match state of
     /// [`Self::port_subscriptions`].
     #[tracing::instrument(level = Level::TRACE, err)]
-    fn update_packet_filter(&mut self) -> Result<(), AgentError> {
+    fn update_packet_filter(&mut self) -> AgentResult<()> {
         let ports = self.port_subscriptions.get_subscribed_topics();
+        MIRROR_PORT_SUBSCRIPTION.store(ports.len() as i64, std::sync::atomic::Ordering::Relaxed);
 
         let filter = if ports.is_empty() {
             tracing::trace!("No ports subscribed, setting dummy bpf");
@@ -261,7 +270,7 @@ where
     }
 
     #[tracing::instrument(level = Level::TRACE, err)]
-    fn handle_command(&mut self, command: SnifferCommand) -> Result<(), AgentError> {
+    fn handle_command(&mut self, command: SnifferCommand) -> AgentResult<()> {
         match command {
             SnifferCommand {
                 client_id,
@@ -325,7 +334,7 @@ where
         &mut self,
         identifier: TcpSessionIdentifier,
         tcp_packet: TcpPacketData,
-    ) -> Result<(), AgentError> {
+    ) -> AgentResult<()> {
         let data_tx = match self.sessions.entry(identifier) {
             Entry::Occupied(e) => e,
             Entry::Vacant(e) => {
@@ -394,6 +403,7 @@ where
                     }
                 }
 
+                MIRROR_CONNECTION_SUBSCRIPTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 e.insert_entry(data_tx)
             }
         };
@@ -448,6 +458,7 @@ mod test {
         async fn get_api(&mut self) -> TcpSnifferApi {
             let client_id = self.next_client_id;
             self.next_client_id += 1;
+
             TcpSnifferApi::new(client_id, self.command_tx.clone(), self.task_status.clone())
                 .await
                 .unwrap()

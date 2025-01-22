@@ -10,7 +10,7 @@ use std::{
 
 use bincode::{Decode, Encode};
 use mirrord_protocol::{
-    dns::{GetAddrInfoRequest, GetAddrInfoResponse},
+    dns::{GetAddrInfoRequestV2, GetAddrInfoResponse},
     file::*,
     outgoing::SocketAddress,
     tcp::StealType,
@@ -44,7 +44,7 @@ pub enum LayerToProxyMessage {
     /// A file operation request.
     File(FileRequest),
     /// A DNS request.
-    GetAddrInfo(GetAddrInfoRequest),
+    GetAddrInfo(GetAddrInfoRequestV2),
     /// A request to initiate a new outgoing connection.
     OutgoingConnect(OutgoingConnectRequest),
     /// Requests related to incoming connections.
@@ -210,7 +210,7 @@ pub enum ProxyToLayerMessage {
     NewSession(LayerId),
     /// A response to layer's [`FileRequest`].
     File(FileResponse),
-    /// A response to layer's [`GetAddrInfoRequest`].
+    /// A response to layer's [`GetAddrInfoRequestV2`].
     GetAddrInfo(GetAddrInfoResponse),
     /// A response to layer's [`OutgoingConnectRequest`].
     OutgoingConnect(RemoteResult<OutgoingConnectResponse>),
@@ -435,7 +435,7 @@ impl_request!(
 );
 
 impl_request!(
-    req = GetAddrInfoRequest,
+    req = GetAddrInfoRequestV2,
     res = GetAddrInfoResponse,
     req_path = LayerToProxyMessage::GetAddrInfo,
     res_path = ProxyToLayerMessage::GetAddrInfo,
