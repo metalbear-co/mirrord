@@ -48,7 +48,7 @@ pub struct SimpleProxy {
 
 impl SimpleProxy {
     #[tracing::instrument(skip(self), level = tracing::Level::TRACE)]
-    fn protocol_version(&mut self, version: Version) {
+    fn set_protocol_version(&mut self, version: Version) {
         self.protocol_version.replace(version);
     }
 
@@ -114,7 +114,7 @@ impl BackgroundTask for SimpleProxy {
                         })
                         .await
                 }
-                SimpleProxyMessage::ProtocolVersion(version) => self.protocol_version(version),
+                SimpleProxyMessage::ProtocolVersion(version) => self.set_protocol_version(version),
             }
         }
 
