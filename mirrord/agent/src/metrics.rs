@@ -289,6 +289,11 @@ async fn get_metrics(State(state): State<Arc<Metrics>>) -> (StatusCode, String) 
     }
 }
 
+/// Starts the mirrord-agent prometheus metrics service.
+///
+/// You can get the metrics from `GET address/metrics`.
+///
+/// - `address`: comes from a mirrord-agent config.
 #[tracing::instrument(level = Level::TRACE, skip_all, ret ,err)]
 pub(crate) async fn start_metrics(
     address: SocketAddr,
