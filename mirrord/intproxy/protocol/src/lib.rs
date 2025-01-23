@@ -388,6 +388,13 @@ impl_request!(
 );
 
 impl_request!(
+    req = StatFsRequest,
+    res = RemoteResult<XstatFsResponse>,
+    req_path = LayerToProxyMessage::File => FileRequest::StatFs,
+    res_path = ProxyToLayerMessage::File => FileResponse::XstatFs,
+);
+
+impl_request!(
     req = FdOpenDirRequest,
     res = RemoteResult<OpenDirResponse>,
     req_path = LayerToProxyMessage::File => FileRequest::FdOpenDir,

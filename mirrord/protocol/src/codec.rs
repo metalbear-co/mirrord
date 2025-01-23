@@ -94,6 +94,7 @@ pub enum FileRequest {
     RemoveDir(RemoveDirRequest),
     Unlink(UnlinkRequest),
     UnlinkAt(UnlinkAtRequest),
+    StatFs(StatFsRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
