@@ -2,7 +2,7 @@ use std::future::Future;
 
 use tokio::sync::watch::{self, Receiver, Sender};
 
-use crate::error::AgentError;
+use crate::error::{AgentError, AgentResult};
 
 /// A shared clonable view on a background task's status.
 #[derive(Debug, Clone)]
@@ -83,7 +83,7 @@ impl<F> WatchedTask<F> {
 
 impl<T> WatchedTask<T>
 where
-    T: Future<Output = Result<(), AgentError>>,
+    T: Future<Output = AgentResult<()>>,
 {
     /// Execute the wrapped task.
     /// Store its result in the inner [`TaskStatus`].
@@ -94,8 +94,20 @@ where
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use super::*;
+
+    impl TaskStatus {
+        pub fn dummy(
+            task_name: &'static str,
+            result_rx: Receiver<Option<Result<(), AgentError>>>,
+        ) -> Self {
+            Self {
+                task_name,
+                result_rx,
+            }
+        }
+    }
 
     #[tokio::test]
     async fn simple_successful() {

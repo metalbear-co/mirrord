@@ -5,16 +5,20 @@ use std::{
     io::{self, prelude::*, BufReader, SeekFrom},
     iter::{Enumerate, Peekable},
     ops::RangeInclusive,
-    os::unix::{fs::MetadataExt, prelude::FileExt},
+    os::{
+        fd::RawFd,
+        unix::{fs::MetadataExt, prelude::FileExt},
+    },
     path::{Path, PathBuf},
 };
 
 use faccess::{AccessMode, PathExt};
 use libc::DT_DIR;
 use mirrord_protocol::{file::*, FileRequest, FileResponse, RemoteResult, ResponseError};
+use nix::unistd::UnlinkatFlags;
 use tracing::{error, trace, Level};
 
-use crate::error::Result;
+use crate::{error::AgentResult, metrics::OPEN_FD_COUNT};
 
 #[derive(Debug)]
 pub enum RemoteFile {
@@ -72,15 +76,11 @@ pub(crate) struct FileManager {
     fds_iter: RangeInclusive<u64>,
 }
 
-impl Default for FileManager {
-    fn default() -> Self {
-        Self {
-            root_path: Default::default(),
-            open_files: Default::default(),
-            dir_streams: Default::default(),
-            getdents_streams: Default::default(),
-            fds_iter: (0..=u64::MAX),
-        }
+impl Drop for FileManager {
+    fn drop(&mut self) {
+        let descriptors =
+            self.open_files.len() + self.dir_streams.len() + self.getdents_streams.len();
+        OPEN_FD_COUNT.fetch_sub(descriptors as i64, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -147,8 +147,11 @@ pub fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt:
 
 impl FileManager {
     /// Executes the request and returns the response.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub fn handle_message(&mut self, request: FileRequest) -> Result<Option<FileResponse>> {
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::DEBUG))]
+    pub(crate) fn handle_message(
+        &mut self,
+        request: FileRequest,
+    ) -> AgentResult<Option<FileResponse>> {
         Ok(match request {
             FileRequest::Open(OpenFileRequest { path, open_options }) => {
                 // TODO: maybe not agent error on this?
@@ -202,10 +205,7 @@ impl FileManager {
                 let write_result = self.write_limited(remote_fd, start_from, write_bytes);
                 Some(FileResponse::WriteLimited(write_result))
             }
-            FileRequest::Close(CloseFileRequest { fd }) => {
-                self.close(fd);
-                None
-            }
+            FileRequest::Close(CloseFileRequest { fd }) => self.close(fd),
             FileRequest::Access(AccessFileRequest { pathname, mode }) => {
                 let pathname = pathname
                     .strip_prefix("/")
@@ -223,8 +223,12 @@ impl FileManager {
                 Some(FileResponse::Xstat(xstat_result))
             }
             FileRequest::XstatFs(XstatFsRequest { fd }) => {
-                let xstat_result = self.xstatfs(fd);
-                Some(FileResponse::XstatFs(xstat_result))
+                let xstatfs_result = self.xstatfs(fd);
+                Some(FileResponse::XstatFs(xstatfs_result))
+            }
+            FileRequest::StatFs(StatFsRequest { path }) => {
+                let statfs_result = self.statfs(path);
+                Some(FileResponse::XstatFs(statfs_result))
             }
 
             // dir operations
@@ -240,10 +244,7 @@ impl FileManager {
                 let read_dir_result = self.read_dir_batch(remote_fd, amount);
                 Some(FileResponse::ReadDirBatch(read_dir_result))
             }
-            FileRequest::CloseDir(CloseDirRequest { remote_fd }) => {
-                self.close_dir(remote_fd);
-                None
-            }
+            FileRequest::CloseDir(CloseDirRequest { remote_fd }) => self.close_dir(remote_fd),
             FileRequest::GetDEnts64(GetDEnts64Request {
                 remote_fd,
                 buffer_size,
@@ -258,21 +259,35 @@ impl FileManager {
                 pathname,
                 mode,
             }) => Some(FileResponse::MakeDir(self.mkdirat(dirfd, &pathname, mode))),
+            FileRequest::RemoveDir(RemoveDirRequest { pathname }) => {
+                Some(FileResponse::RemoveDir(self.rmdir(&pathname)))
+            }
+            FileRequest::Unlink(UnlinkRequest { pathname }) => {
+                Some(FileResponse::Unlink(self.unlink(&pathname)))
+            }
+            FileRequest::UnlinkAt(UnlinkAtRequest {
+                dirfd,
+                pathname,
+                flags,
+            }) => Some(FileResponse::Unlink(self.unlinkat(dirfd, &pathname, flags))),
         })
     }
 
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = Level::TRACE, ret)]
     pub fn new(pid: Option<u64>) -> Self {
         let root_path = get_root_path_from_optional_pid(pid);
         trace!("Agent root path >> {root_path:?}");
+
         Self {
-            open_files: HashMap::new(),
             root_path,
-            ..Default::default()
+            open_files: Default::default(),
+            dir_streams: Default::default(),
+            getdents_streams: Default::default(),
+            fds_iter: (0..=u64::MAX),
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::DEBUG))]
     fn open(
         &mut self,
         path: PathBuf,
@@ -294,12 +309,14 @@ impl FileManager {
             RemoteFile::File(file)
         };
 
-        self.open_files.insert(fd, remote_file);
+        if self.open_files.insert(fd, remote_file).is_none() {
+            OPEN_FD_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
 
         Ok(OpenFileResponse { fd })
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::DEBUG))]
     fn open_relative(
         &mut self,
         relative_fd: u64,
@@ -328,7 +345,9 @@ impl FileManager {
                 RemoteFile::File(file)
             };
 
-            self.open_files.insert(fd, remote_file);
+            if self.open_files.insert(fd, remote_file).is_none() {
+                OPEN_FD_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
 
             Ok(OpenFileResponse { fd })
         } else {
@@ -520,6 +539,55 @@ impl FileManager {
         }
     }
 
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    pub(crate) fn rmdir(&mut self, path: &Path) -> RemoteResult<()> {
+        let path = resolve_path(path, &self.root_path)?;
+
+        std::fs::remove_dir(path.as_path()).map_err(ResponseError::from)
+    }
+
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    pub(crate) fn unlink(&mut self, path: &Path) -> RemoteResult<()> {
+        let path = resolve_path(path, &self.root_path)?;
+
+        nix::unistd::unlink(path.as_path())
+            .map_err(|error| ResponseError::from(std::io::Error::from_raw_os_error(error as i32)))
+    }
+
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    pub(crate) fn unlinkat(
+        &mut self,
+        dirfd: Option<u64>,
+        path: &Path,
+        flags: u32,
+    ) -> RemoteResult<()> {
+        let path = match dirfd {
+            Some(dirfd) => {
+                let relative_dir = self
+                    .open_files
+                    .get(&dirfd)
+                    .ok_or(ResponseError::NotFound(dirfd))?;
+
+                if let RemoteFile::Directory(relative_dir) = relative_dir {
+                    relative_dir.join(path)
+                } else {
+                    return Err(ResponseError::NotDirectory(dirfd));
+                }
+            }
+            None => resolve_path(path, &self.root_path)?,
+        };
+
+        let flags = match flags {
+            0 => UnlinkatFlags::RemoveDir,
+            _ => UnlinkatFlags::NoRemoveDir,
+        };
+
+        let fd: Option<RawFd> = dirfd.map(|fd| fd as RawFd);
+
+        nix::unistd::unlinkat(fd, path.as_path(), flags)
+            .map_err(|error| ResponseError::from(std::io::Error::from_raw_os_error(error as i32)))
+    }
+
     pub(crate) fn seek(&mut self, fd: u64, seek_from: SeekFrom) -> RemoteResult<SeekFileResponse> {
         trace!(
             "FileManager::seek -> fd {:#?} | seek_from {:#?}",
@@ -572,20 +640,36 @@ impl FileManager {
             })
     }
 
-    pub(crate) fn close(&mut self, fd: u64) {
-        trace!("FileManager::close -> fd {:#?}", fd,);
-
+    /// Always returns `None`, since we don't return any [`FileResponse`] back to mirrord
+    /// on `close` of an fd.
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    pub(crate) fn close(&mut self, fd: u64) -> Option<FileResponse> {
         if self.open_files.remove(&fd).is_none() {
-            error!("FileManager::close -> fd {:#?} not found", fd);
+            error!(fd, "fd not found!");
+        } else {
+            OPEN_FD_COUNT.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         }
+
+        None
     }
 
-    pub(crate) fn close_dir(&mut self, fd: u64) {
-        trace!("FileManager::close_dir -> fd {:#?}", fd,);
+    /// Always returns `None`, since we don't return any [`FileResponse`] back to mirrord
+    /// on `close_dir` of an fd.
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    pub(crate) fn close_dir(&mut self, fd: u64) -> Option<FileResponse> {
+        let closed_dir_stream = self.dir_streams.remove(&fd);
+        let closed_getdents_stream = self.getdents_streams.remove(&fd);
 
-        if self.dir_streams.remove(&fd).is_none() && self.getdents_streams.remove(&fd).is_none() {
+        if closed_dir_stream.is_some() && closed_getdents_stream.is_some() {
+            // Closed `dirstream` and `dentsstream`
+            OPEN_FD_COUNT.fetch_sub(2, std::sync::atomic::Ordering::Relaxed);
+        } else if closed_dir_stream.is_some() || closed_getdents_stream.is_some() {
+            OPEN_FD_COUNT.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        } else {
             error!("FileManager::close_dir -> fd {:#?} not found", fd);
         }
+
+        None
     }
 
     pub(crate) fn access(
@@ -690,6 +774,18 @@ impl FileManager {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
+    pub(crate) fn statfs(&mut self, path: PathBuf) -> RemoteResult<XstatFsResponse> {
+        let path = resolve_path(path, &self.root_path)?;
+
+        let statfs = nix::sys::statfs::statfs(&path)
+            .map_err(|err| std::io::Error::from_raw_os_error(err as i32))?;
+
+        Ok(XstatFsResponse {
+            metadata: statfs.into(),
+        })
+    }
+
+    #[tracing::instrument(level = Level::TRACE, skip(self), err(level = Level::DEBUG))]
     pub(crate) fn fdopen_dir(&mut self, fd: u64) -> RemoteResult<OpenDirResponse> {
         let path = match self
             .open_files
@@ -706,7 +802,10 @@ impl FileManager {
             .ok_or_else(|| ResponseError::IdsExhausted("fdopen_dir".to_string()))?;
 
         let dir_stream = path.read_dir()?.enumerate();
-        self.dir_streams.insert(fd, dir_stream);
+
+        if self.dir_streams.insert(fd, dir_stream).is_none() {
+            OPEN_FD_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
 
         Ok(OpenDirResponse { fd })
     }
@@ -755,7 +854,7 @@ impl FileManager {
     /// The possible remote errors are:
     /// [`ResponseError::NotFound`] if there is not such fd here.
     /// [`ResponseError::NotDirectory`] if the fd points to a file with a non-directory file type.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(crate) fn get_or_create_getdents64_stream(
         &mut self,
         fd: u64,
@@ -768,6 +867,7 @@ impl FileManager {
                     let current_and_parent = Self::get_current_and_parent_entries(dir);
                     let stream =
                         GetDEnts64Stream::new(dir.read_dir()?, current_and_parent).peekable();
+                    OPEN_FD_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     Ok(e.insert(stream))
                 }
             },

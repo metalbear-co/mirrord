@@ -68,7 +68,8 @@ configuration file containing all fields.
     "communication_timeout": 30,
     "startup_timeout": 360,
     "network_interface": "eth0",
-    "flush_connections": true
+    "flush_connections": true,
+    "metrics": "0.0.0.0:9000",
   },
   "feature": {
     "env": {
@@ -166,7 +167,11 @@ Allows setting up custom annotations for the agent Job and Pod.
 
 ```json
 {
-  "annotations": { "cats.io/inject": "enabled" }
+  "annotations": {
+    "cats.io/inject": "enabled"
+    "prometheus.io/scrape": "true",
+    "prometheus.io/port": "9000"
+  }
 }
 ```
 
@@ -296,6 +301,19 @@ with `RUST_LOG`.
   "agent": {
     "log_level": "mirrord=debug,warn"
   }
+}
+```
+
+### agent.metrics {#agent-metrics}
+
+Enables prometheus metrics for the agent pod.
+
+You might need to add annotations to the agent pod depending on how prometheus is
+configured to scrape for metrics.
+
+```json
+{
+  "metrics": "0.0.0.0:9000"
 }
 ```
 
@@ -729,9 +747,11 @@ Example:
 
 Will do the next replacements for environment variables that match:
 
-`CONNECTION_TIMEOUT: 500` => `CONNECTION_TIMEOUT: 10000`
-`LOG_FILE_VERBOSITY: info` => `LOG_FILE_VERBOSITY: debug`
-`DATA_1234: common-value` => `DATA_1234: magic-value`
+* `CONNECTION_TIMEOUT: 500` => `CONNECTION_TIMEOUT: 10000`
+
+* `LOG_FILE_VERBOSITY: info` => `LOG_FILE_VERBOSITY: debug`
+
+* `DATA_1234: common-value` => `DATA_1234: magic-value`
 
 ### feature.env.override {#feature-env-override}
 
@@ -1265,6 +1285,10 @@ List of ports to mirror/steal traffic from. Other ports will remain local.
 
 Mutually exclusive with
 [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
+
+### feature.network.ipv6 {#feature-network-dns}
+
+Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6.
 
 ### feature.network.outgoing {#feature-network-outgoing}
 

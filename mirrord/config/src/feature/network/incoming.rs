@@ -58,7 +58,7 @@ use http_filter::*;
 ///         },
 ///         "port_mapping": [[ 7777, 8888 ]],
 ///         "ignore_localhost": false,
-///         "ignore_ports": [9999, 10000]
+///         "ignore_ports": [9999, 10000],
 ///         "listen_ports": [[80, 8111]]
 ///       }
 ///     }
@@ -96,9 +96,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .unwrap_or_default(),
                 http_filter: HttpFilterFileConfig::default().generate_config(context)?,
                 on_concurrent_steal: FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
-                    .layer(|layer| {
-                        Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer)
-                    })
+                    .layer(|layer| Unstable::new("incoming", "on_concurrent_steal", layer))
                     .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
@@ -129,9 +127,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .unwrap_or_default(),
                 on_concurrent_steal: FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
                     .or(advanced.on_concurrent_steal)
-                    .layer(|layer| {
-                        Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer)
-                    })
+                    .layer(|layer| Unstable::new("incoming", "on_concurrent_steal", layer))
                     .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
@@ -149,7 +145,7 @@ impl MirrordToggleableConfig for IncomingFileConfig {
             .unwrap_or_else(|| Ok(IncomingMode::Off))?;
 
         let on_concurrent_steal = FromEnv::new("MIRRORD_OPERATOR_ON_CONCURRENT_STEAL")
-            .layer(|layer| Unstable::new("IncomingFileConfig", "on_concurrent_steal", layer))
+            .layer(|layer| Unstable::new("incoming", "on_concurrent_steal", layer))
             .source_value(context)
             .transpose()?
             .unwrap_or_default();
@@ -314,6 +310,7 @@ fn serialize_bi_map<S>(map: &BiMap<u16, u16>, serializer: S) -> Result<S::Ok, S:
 where
     S: ser::Serializer,
 {
+    // NB: this serialises the BiMap to a vec
     let mut seq = serializer.serialize_seq(Some(map.len()))?;
 
     for (key, value) in map {
@@ -321,6 +318,20 @@ where
     }
 
     seq.end()
+}
+
+fn deserialize_bi_map<'de, D>(deserializer: D) -> Result<BiMap<u16, u16>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    // NB: this deserialises the BiMap from a vec
+    let vec: Vec<(u16, u16)> = Vec::deserialize(deserializer)?;
+
+    let mut elements = BiMap::new();
+    vec.iter().for_each(|(key, value)| {
+        elements.insert(*key, *value);
+    });
+    Ok(elements)
 }
 
 /// Controls the incoming TCP traffic feature.
@@ -391,7 +402,7 @@ where
 ///   }
 /// }
 /// ```
-#[derive(Default, PartialEq, Eq, Clone, Debug, Serialize)]
+#[derive(Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct IncomingConfig {
     /// #### feature.network.incoming.port_mapping {#feature-network-incoming-port_mapping}
     ///
@@ -400,7 +411,10 @@ pub struct IncomingConfig {
     /// This is useful when you want to mirror/steal a port to a different port on the remote
     /// machine. For example, your local process listens on port `9333` and the container listens
     /// on port `80`. You'd use `[[9333, 80]]`
-    #[serde(serialize_with = "serialize_bi_map")]
+    #[serde(
+        serialize_with = "serialize_bi_map",
+        deserialize_with = "deserialize_bi_map"
+    )]
     pub port_mapping: BiMap<u16, u16>,
 
     /// #### feature.network.incoming.ignore_localhost {#feature-network-incoming-ignore_localhost}
@@ -438,7 +452,10 @@ pub struct IncomingConfig {
     /// you probably can't listen on `80` without sudo, so you can use `[[80, 4480]]`
     /// then access it on `4480` while getting traffic from remote `80`.
     /// The value of `port_mapping` doesn't affect this.
-    #[serde(serialize_with = "serialize_bi_map")]
+    #[serde(
+        serialize_with = "serialize_bi_map",
+        deserialize_with = "deserialize_bi_map"
+    )]
     pub listen_ports: BiMap<u16, u16>,
 
     /// #### feature.network.incoming.on_concurrent_steal {#feature-network-incoming-on_concurrent_steal}

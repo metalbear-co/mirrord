@@ -113,6 +113,40 @@ For example, a test which only tests sanity of the ephemeral container feature s
 
 On Linux, running tests may exhaust a large amount of RAM and crash the machine. To prevent this, limit the number of concurrent jobs by running the command with e.g. `-j 4`
 
+### IPv6
+
+Some tests create a single-stack IPv6 service. They can only be run on clusters with IPv6 enabled.
+In order to test IPv6 on a local cluster on macOS, you can use Kind:
+
+1. `brew install kind`
+2. ```shell
+   cat >kind-config.yaml <<EOF
+   kind: Cluster
+   apiVersion: kind.x-k8s.io/v1alpha4
+   networking:
+     ipFamily: ipv6
+     apiServerAddress: 127.0.0.1
+   EOF
+   ```
+3. `kind create cluster --config kind-config.yaml`
+4. When you run `kubectl get svc -o wide --all-namespaces` you should see IPv6 addresses.
+
+In order to use an agent image from a local registry, you can load the image to kind's registry with:
+
+```
+kind load docker-image test:latest
+```
+
+In order to test on EKS, I used this blueprint: https://github.com/aws-ia/terraform-aws-eks-blueprints/tree/main/patterns/ipv6-eks-cluster
+
+After creating the cluster, I had to give myself permissions to the K8s objects, I did that via the AWS console (in the browser).
+Feel free to add instructions on how to make that "manual" step unnecessary.
+
+IPv6 tests (they currently don't run in the CI):
+- steal_http_ipv6_traffic
+- connect_to_kubernetes_api_service_over_ipv6
+
+
 ### Cleanup
 
 The Kubernetes resources created by the E2E tests are automatically deleted when the test exits. However, you can preserve resources from failed tests for debugging. To do this, set the `MIRRORD_E2E_PRESERVE_FAILED` variable to any value.

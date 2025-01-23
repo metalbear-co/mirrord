@@ -22,8 +22,20 @@ pub static READLINK_VERSION: LazyLock<VersionReq> =
 pub static READDIR_BATCH_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.9.0".parse().expect("Bad Identifier"));
 
+/// Minimal mirrord-protocol version that allows [`MakeDirRequest`] and [`MakeDirAtRequest`].
 pub static MKDIR_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.13.0".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows [`RemoveDirRequest`], [`UnlinkRequest`] and
+/// [`UnlinkAtRequest`]..
+pub static RMDIR_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.14.0".parse().expect("Bad Identifier"));
+
+pub static OPEN_LOCAL_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.13.3".parse().expect("Bad Identifier"));
+
+pub static STATFS_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.16.0".parse().expect("Bad Identifier"));
 
 /// Internal version of Metadata across operating system (macOS, Linux)
 /// Only mutual attributes
@@ -283,6 +295,23 @@ pub struct MakeDirAtRequest {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct RemoveDirRequest {
+    pub pathname: PathBuf,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct UnlinkRequest {
+    pub pathname: PathBuf,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct UnlinkAtRequest {
+    pub dirfd: Option<u64>,
+    pub pathname: PathBuf,
+    pub flags: u32,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct ReadLimitedFileRequest {
     pub remote_fd: u64,
     pub buffer_size: u64,
@@ -385,6 +414,11 @@ pub struct XstatRequest {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct XstatFsRequest {
     pub fd: u64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct StatFsRequest {
+    pub path: PathBuf,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

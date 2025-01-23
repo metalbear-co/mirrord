@@ -8,6 +8,81 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.130.0](https://github.com/metalbear-co/mirrord/tree/3.130.0) - 2025-01-21
+
+
+### Added
+
+- Added support for `rmdir`, `unlink` and `unlinkat`.
+  [#2221](https://github.com/metalbear-co/mirrord/issues/2221)
+
+
+### Changed
+
+- Updated `configuration.md` and improved `.feature.env.mapping` doc.
+
+
+### Fixed
+
+- Stopped mirrord entering a crash loop when trying to load into some processes
+  like VSCode's `watchdog.js` when the user config contained a call to
+  `get_env()`, which occurred due to missing env - the config is now only
+  rendered once and set into an env var.
+  [#2936](https://github.com/metalbear-co/mirrord/issues/2936)
+- Fixed an issue where HTTP requests stolen with a filter would hang with a
+  single-threaded local HTTP server.
+  Improved handling of incoming connections on the local machine (e.g
+  introduces reuse of local HTTP connections).
+  [#3013](https://github.com/metalbear-co/mirrord/issues/3013)
+
+
+### Internal
+
+- Extended `mirrord-protocol` with info logs from the agent.
+
+## [3.129.0](https://github.com/metalbear-co/mirrord/tree/3.129.0) - 2025-01-14
+
+
+### Added
+
+- Support for stealing incoming connections that are over IPv6.
+  [#2956](https://github.com/metalbear-co/mirrord/issues/2956)
+- mirrord policy to control file ops from the operator.
+- mirrord policy to restrict fetching remote environment variables.
+
+
+### Changed
+
+- Updated how intproxy is outputing logfile when using container mode, now logs
+  will be written on host machine.
+  [#2868](https://github.com/metalbear-co/mirrord/issues/2868)
+- Changed log level for debugger ports detection.
+  [#2986](https://github.com/metalbear-co/mirrord/issues/2986)
+- Readonly file buffering is not enabled by default to improve performance
+  [#3004](https://github.com/metalbear-co/mirrord/issues/3004)
+- Extended docs for HTTP filter in the mirrord config.
+
+
+### Fixed
+
+- Fixed panic when Go >=1.23.3 verifies pidfd support on Linux.
+  [#2988](https://github.com/metalbear-co/mirrord/issues/2988)
+- Fix misleading agent IO operation error that always mentioned getaddrinfo.
+  [#2992](https://github.com/metalbear-co/mirrord/issues/2992)
+- Fixed a bug where port mirroring block (due to active mirrord policies) would
+  terminate the mirrord session.
+
+
+### Internal
+
+- Added lint for unused crate dependencies.
+  [#2843](https://github.com/metalbear-co/mirrord/issues/2843)
+- Fixed fs policy E2E test.
+- Pinned `cargo-chef` version to `0.1.68` in the dockerfiles.
+- Added available namespaces to `mirrord ls` output. New output format is
+  enabled with a flag in an environment variable.
+  [#2999](https://github.com/metalbear-co/mirrord/issues/2999)
+
 ## [3.128.0](https://github.com/metalbear-co/mirrord/tree/3.128.0) - 2024-12-19
 
 

@@ -1,5 +1,5 @@
 use mirrord_protocol::{
-    tcp::{DaemonTcp, HttpResponseFallback, StealType, TcpData},
+    tcp::{DaemonTcp, StealType, TcpData},
     ConnectionId, Port,
 };
 use tokio::sync::mpsc::Sender;
@@ -16,6 +16,8 @@ mod subscriptions;
 
 pub(crate) use api::TcpStealerApi;
 pub(crate) use connection::TcpConnectionStealer;
+
+use self::http::HttpResponseFallback;
 
 /// Commands from the agent that are passed down to the stealer worker, through [`TcpStealerApi`].
 ///

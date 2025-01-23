@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, path::Path};
+use std::{collections::HashMap, fmt, net::SocketAddr, path::Path};
 
 use k8s_openapi::api::core::v1::{ResourceRequirements, Toleration};
 use mirrord_analytics::CollectAnalytics;
@@ -67,7 +67,7 @@ impl fmt::Display for LinuxCapability {
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Clone, Debug, Serialize)]
+#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[config(map_to = "AgentFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct AgentConfig {
@@ -322,7 +322,11 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "annotations": { "cats.io/inject": "enabled" }
+    ///   "annotations": {
+    ///     "cats.io/inject": "enabled"
+    ///     "prometheus.io/scrape": "true",
+    ///     "prometheus.io/port": "9000"
+    ///   }
     /// }
     /// ```
     pub annotations: Option<HashMap<String, String>>,
@@ -350,11 +354,25 @@ pub struct AgentConfig {
     /// ```
     pub service_account: Option<String>,
 
+    /// ### agent.metrics {#agent-metrics}
+    ///
+    /// Enables prometheus metrics for the agent pod.
+    ///
+    /// You might need to add annotations to the agent pod depending on how prometheus is
+    /// configured to scrape for metrics.
+    ///
+    /// ```json
+    /// {
+    ///   "metrics": "0.0.0.0:9000"
+    /// }
+    /// ```
+    pub metrics: Option<SocketAddr>,
+
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing
     /// purposes. Only supported with job agents (not with ephemeral agents).
     #[cfg(all(debug_assertions, not(test)))] // not(test) so that it's not included in the schema json.
-    #[serde(skip_serializing)]
+    #[serde(skip)]
     #[config(env = "MIRRORD_AGENT_TEST_ERROR", default = false, unstable)]
     pub test_error: bool,
 }
@@ -477,7 +495,7 @@ impl AgentFileConfig {
     }
 }
 
-#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize)]
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[config(derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct AgentDnsConfig {

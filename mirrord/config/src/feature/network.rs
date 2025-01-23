@@ -2,13 +2,15 @@ use dns::{DnsConfig, DnsFileConfig};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use self::{incoming::*, outgoing::*};
 use crate::{
-    config::{ConfigContext, ConfigError},
+    config::{from_env::FromEnv, source::MirrordConfigSource, ConfigContext, ConfigError},
     util::MirrordToggleableConfig,
 };
+
+const IPV6_ENV_VAR: &str = "MIRRORD_ENABLE_IPV6";
 
 pub mod dns;
 pub mod filter;
@@ -52,7 +54,7 @@ pub mod outgoing;
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize)]
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[config(map_to = "NetworkFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct NetworkConfig {
@@ -67,14 +69,26 @@ pub struct NetworkConfig {
     /// ### feature.network.dns {#feature-network-dns}
     #[config(toggleable, nested)]
     pub dns: DnsConfig,
+
+    /// ### feature.network.ipv6 {#feature-network-dns}
+    ///
+    /// Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6.
+    #[config(env = IPV6_ENV_VAR, default = false)]
+    pub ipv6: bool,
 }
 
 impl MirrordToggleableConfig for NetworkFileConfig {
     fn disabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
+        let ipv6 = FromEnv::new(IPV6_ENV_VAR)
+            .source_value(context)
+            .transpose()?
+            .unwrap_or_default();
+
         Ok(NetworkConfig {
             incoming: IncomingFileConfig::disabled_config(context)?,
             dns: DnsFileConfig::disabled_config(context)?,
             outgoing: OutgoingFileConfig::disabled_config(context)?,
+            ipv6,
         })
     }
 }
@@ -84,6 +98,7 @@ impl CollectAnalytics for &NetworkConfig {
         analytics.add("incoming", &self.incoming);
         analytics.add("outgoing", &self.outgoing);
         analytics.add("dns", &self.dns);
+        analytics.add("ipv6", self.ipv6);
     }
 }
 

@@ -9,7 +9,7 @@ use rand::distributions::{Alphanumeric, DistString};
 use tracing::warn;
 
 use crate::{
-    error::{AgentError, Result},
+    error::{AgentError, AgentResult},
     steal::ip_tables::{
         flush_connections::FlushConnections,
         mesh::{istio::AmbientRedirect, MeshRedirect, MeshVendorExt},
@@ -84,13 +84,13 @@ pub(crate) trait IPTables {
     where
         Self: Sized;
 
-    fn create_chain(&self, name: &str) -> Result<()>;
-    fn remove_chain(&self, name: &str) -> Result<()>;
+    fn create_chain(&self, name: &str) -> AgentResult<()>;
+    fn remove_chain(&self, name: &str) -> AgentResult<()>;
 
-    fn add_rule(&self, chain: &str, rule: &str) -> Result<()>;
-    fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> Result<()>;
-    fn list_rules(&self, chain: &str) -> Result<Vec<String>>;
-    fn remove_rule(&self, chain: &str, rule: &str) -> Result<()>;
+    fn add_rule(&self, chain: &str, rule: &str) -> AgentResult<()>;
+    fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> AgentResult<()>;
+    fn list_rules(&self, chain: &str) -> AgentResult<Vec<String>>;
+    fn remove_rule(&self, chain: &str, rule: &str) -> AgentResult<()>;
 }
 
 #[derive(Clone)]
@@ -107,6 +107,18 @@ pub fn new_iptables() -> iptables::IPTables {
         iptables::new_with_cmd("/usr/sbin/iptables-nft")
     } else {
         iptables::new_with_cmd("/usr/sbin/iptables-legacy")
+    }
+    .expect("IPTables initialization may not fail!")
+}
+
+/// wrapper around iptables::new that uses nft or legacy based on env
+pub fn new_ip6tables() -> iptables::IPTables {
+    if let Ok(val) = std::env::var("MIRRORD_AGENT_NFTABLES")
+        && val.to_lowercase() == "true"
+    {
+        iptables::new_with_cmd("/usr/sbin/ip6tables-nft")
+    } else {
+        iptables::new_with_cmd("/usr/sbin/ip6tables-legacy")
     }
     .expect("IPTables initialization may not fail!")
 }
@@ -140,8 +152,13 @@ impl IPTables for IPTablesWrapper {
         }
     }
 
-    #[tracing::instrument(level = "trace")]
-    fn create_chain(&self, name: &str) -> Result<()> {
+    #[tracing::instrument(
+        level = tracing::Level::TRACE,
+        skip(self),
+        ret,
+        fields(table_name=%self.table_name
+    ))]
+    fn create_chain(&self, name: &str) -> AgentResult<()> {
         self.tables
             .new_chain(self.table_name, name)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
@@ -153,7 +170,7 @@ impl IPTables for IPTablesWrapper {
     }
 
     #[tracing::instrument(level = "trace")]
-    fn remove_chain(&self, name: &str) -> Result<()> {
+    fn remove_chain(&self, name: &str) -> AgentResult<()> {
         self.tables
             .flush_chain(self.table_name, name)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
@@ -165,28 +182,28 @@ impl IPTables for IPTablesWrapper {
     }
 
     #[tracing::instrument(level = "trace", ret)]
-    fn add_rule(&self, chain: &str, rule: &str) -> Result<()> {
+    fn add_rule(&self, chain: &str, rule: &str) -> AgentResult<()> {
         self.tables
             .append(self.table_name, chain, rule)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 
     #[tracing::instrument(level = "trace", ret)]
-    fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> Result<()> {
+    fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> AgentResult<()> {
         self.tables
             .insert(self.table_name, chain, rule, index)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 
     #[tracing::instrument(level = "trace")]
-    fn list_rules(&self, chain: &str) -> Result<Vec<String>> {
+    fn list_rules(&self, chain: &str) -> AgentResult<Vec<String>> {
         self.tables
             .list(self.table_name, chain)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
     }
 
     #[tracing::instrument(level = "trace")]
-    fn remove_rule(&self, chain: &str, rule: &str) -> Result<()> {
+    fn remove_rule(&self, chain: &str, rule: &str) -> AgentResult<()> {
         self.tables
             .delete(self.table_name, chain, rule)
             .map_err(|e| AgentError::IPTablesError(e.to_string()))
@@ -220,7 +237,8 @@ where
         ipt: IPT,
         flush_connections: bool,
         pod_ips: Option<&str>,
-    ) -> Result<Self> {
+        ipv6: bool,
+    ) -> AgentResult<Self> {
         let ipt = Arc::new(ipt);
 
         let mut redirect = if let Some(vendor) = MeshVendor::detect(ipt.as_ref())? {
@@ -231,6 +249,7 @@ where
                 _ => Redirects::Mesh(MeshRedirect::create(ipt.clone(), vendor, pod_ips)?),
             }
         } else {
+            tracing::trace!(ipv6 = ipv6, "creating standard redirect");
             match StandardRedirect::create(ipt.clone(), pod_ips) {
                 Err(err) => {
                     warn!("Unable to create StandardRedirect chain: {err}");
@@ -251,7 +270,7 @@ where
         Ok(Self { redirect })
     }
 
-    pub(crate) async fn load(ipt: IPT, flush_connections: bool) -> Result<Self> {
+    pub(crate) async fn load(ipt: IPT, flush_connections: bool) -> AgentResult<Self> {
         let ipt = Arc::new(ipt);
 
         let mut redirect = if let Some(vendor) = MeshVendor::detect(ipt.as_ref())? {
@@ -280,12 +299,12 @@ where
     /// Adds the redirect rule to iptables.
     ///
     /// Used to redirect packets when mirrord incoming feature is set to `steal`.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip(self))]
     pub(super) async fn add_redirect(
         &self,
         redirected_port: Port,
         target_port: Port,
-    ) -> Result<()> {
+    ) -> AgentResult<()> {
         self.redirect
             .add_redirect(redirected_port, target_port)
             .await
@@ -300,13 +319,13 @@ where
         &self,
         redirected_port: Port,
         target_port: Port,
-    ) -> Result<()> {
+    ) -> AgentResult<()> {
         self.redirect
             .remove_redirect(redirected_port, target_port)
             .await
     }
 
-    pub(crate) async fn cleanup(&self) -> Result<()> {
+    pub(crate) async fn cleanup(&self) -> AgentResult<()> {
         self.redirect.unmount_entrypoint().await
     }
 }
@@ -408,7 +427,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::create(mock, false, None)
+        let ipt = SafeIpTables::create(mock, false, None, false)
             .await
             .expect("Create Failed");
 
@@ -541,7 +560,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let ipt = SafeIpTables::create(mock, false, None)
+        let ipt = SafeIpTables::create(mock, false, None, false)
             .await
             .expect("Create Failed");
 

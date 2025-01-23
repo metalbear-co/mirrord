@@ -4,17 +4,20 @@ use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
 
 #[cfg(target_os = "linux")]
 use libc::{c_char, statx, statx_timestamp};
-use libc::{c_int, iovec, unlink, AT_FDCWD};
+use libc::{c_int, iovec, AT_FDCWD};
 use mirrord_protocol::{
     file::{
         MakeDirAtRequest, MakeDirRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
-        ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse, SeekFileResponse,
-        WriteFileResponse, XstatFsResponse, XstatResponse,
+        ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse, RemoveDirRequest,
+        SeekFileResponse, StatFsRequest, UnlinkAtRequest, WriteFileResponse, XstatFsResponse,
+        XstatResponse,
     },
     ResponseError,
 };
 use rand::distributions::{Alphanumeric, DistString};
-use tracing::{error, trace, Level};
+#[cfg(debug_assertions)]
+use tracing::Level;
+use tracing::{error, trace};
 
 use super::{hooks::FN_OPEN, open_dirs::OPEN_DIRS, *};
 #[cfg(target_os = "linux")]
@@ -157,7 +160,7 @@ fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
         close_remote_file_on_failure(remote_fd)?;
         Detour::Error(HookError::LocalFileCreation(remote_fd, error.0))
     } else {
-        unsafe { unlink(file_path_ptr) };
+        unsafe { libc::unlink(file_path_ptr) };
         Detour::Success(local_file_fd)
     }
 }
@@ -206,7 +209,12 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
 
     ensure_not_ignored!(path, open_options.is_write());
 
-    let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)?;
+    let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)
+        .or_else(|fail| match fail {
+            // The operator has a policy that matches this `path` as local-only.
+            HookError::ResponseError(ResponseError::OpenLocal) => Detour::Bypass(Bypass::OpenLocal),
+            other => Detour::Error(other),
+        })?;
 
     // TODO: Need a way to say "open a directory", right now `is_dir` always returns false.
     // This requires having a fake directory name (`/fake`, for example), instead of just converting
@@ -384,6 +392,69 @@ pub(crate) fn mkdirat(dirfd: RawFd, pathname: Detour<PathBuf>, mode: u32) -> Det
             Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
             Err(fail) => Detour::Error(fail.into()),
         }
+    }
+}
+
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
+pub(crate) fn rmdir(pathname: Detour<PathBuf>) -> Detour<()> {
+    let pathname = pathname?;
+
+    check_relative_paths!(pathname);
+
+    let path = remap_path!(pathname);
+
+    ensure_not_ignored!(path, false);
+
+    let rmdir = RemoveDirRequest { pathname: path };
+
+    // `NotImplemented` error here means that the protocol doesn't support it.
+    match common::make_proxy_request_with_response(rmdir)? {
+        Ok(response) => Detour::Success(response),
+        Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
+        Err(fail) => Detour::Error(fail.into()),
+    }
+}
+
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
+pub(crate) fn unlink(pathname: Detour<PathBuf>) -> Detour<()> {
+    let pathname = pathname?;
+
+    check_relative_paths!(pathname);
+
+    let path = remap_path!(pathname);
+
+    ensure_not_ignored!(path, false);
+
+    let unlink = RemoveDirRequest { pathname: path };
+
+    // `NotImplemented` error here means that the protocol doesn't support it.
+    match common::make_proxy_request_with_response(unlink)? {
+        Ok(response) => Detour::Success(response),
+        Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
+        Err(fail) => Detour::Error(fail.into()),
+    }
+}
+
+#[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
+pub(crate) fn unlinkat(dirfd: RawFd, pathname: Detour<PathBuf>, flags: u32) -> Detour<()> {
+    let pathname = pathname?;
+
+    let optional_dirfd = match pathname.is_absolute() {
+        true => None,
+        false => Some(get_remote_fd(dirfd)?),
+    };
+
+    let unlink = UnlinkAtRequest {
+        dirfd: optional_dirfd,
+        pathname: pathname.clone(),
+        flags,
+    };
+
+    // `NotImplemented` error here means that the protocol doesn't support it.
+    match common::make_proxy_request_with_response(unlink)? {
+        Ok(response) => Detour::Success(response),
+        Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
+        Err(fail) => Detour::Error(fail.into()),
     }
 }
 
@@ -660,6 +731,16 @@ pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponse> {
     let fd = get_remote_fd(fd)?;
 
     let lstatfs = XstatFsRequest { fd };
+
+    let response = common::make_proxy_request_with_response(lstatfs)??;
+
+    Detour::Success(response)
+}
+
+#[mirrord_layer_macro::instrument(level = "trace")]
+pub(crate) fn statfs(path: Detour<PathBuf>) -> Detour<XstatFsResponse> {
+    let path = path?;
+    let lstatfs = StatFsRequest { path };
 
     let response = common::make_proxy_request_with_response(lstatfs)??;
 

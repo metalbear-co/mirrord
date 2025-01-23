@@ -5,7 +5,7 @@
 
 use std::{
     collections::HashMap, env::vars, ffi::CString, net::SocketAddr, os::unix::ffi::OsStrExt,
-    sync::LazyLock, time::Duration,
+    time::Duration,
 };
 
 use clap::{CommandFactory, Parser};
@@ -17,13 +17,10 @@ use diagnose::diagnose_command;
 use execution::MirrordExecution;
 use extension::extension_exec;
 use extract::extract_library;
-use kube::Client;
-use miette::JSONReportHandler;
 use mirrord_analytics::{
-    AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, NullReporter, Reporter,
+    AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
 use mirrord_config::{
-    config::{ConfigContext, MirrordConfig},
     feature::{
         fs::FsModeConfig,
         network::{
@@ -34,18 +31,14 @@ use mirrord_config::{
     LayerConfig, LayerFileConfig, MIRRORD_CONFIG_FILE_ENV,
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
-use mirrord_kube::api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker};
-use mirrord_operator::client::OperatorApi;
 use mirrord_progress::{messages::EXEC_CONTAINER_BINARY, Progress, ProgressTracker};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
 use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
-use semver::{Version, VersionReq};
-use serde_json::json;
+use semver::Version;
 use tracing::{error, info, warn};
-use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 use which::which;
 
 mod config;
@@ -58,8 +51,10 @@ mod extension;
 mod external_proxy;
 mod extract;
 mod internal_proxy;
+mod list;
+mod logging;
 mod operator;
-pub mod port_forward;
+mod port_forward;
 mod teams;
 mod util;
 mod verify_config;
@@ -68,14 +63,8 @@ mod vpn;
 pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
-use crate::util::remove_proxy_env;
-
-/// Controls whether we support listing all targets or just the open source ones.
-static ALL_TARGETS_SUPPORTED_OPERATOR_VERSION: LazyLock<VersionReq> =
-    LazyLock::new(|| ">=3.84.0".parse().expect("verion should be valid"));
-
 async fn exec_process<P>(
-    config: LayerConfig,
+    mut config: LayerConfig,
     args: &ExecArgs,
     progress: &P,
     analytics: &mut AnalyticsReporter,
@@ -86,10 +75,15 @@ where
     let mut sub_progress = progress.subtask("preparing to launch process");
 
     #[cfg(target_os = "macos")]
-    let execution_info =
-        MirrordExecution::start(&config, Some(&args.binary), &mut sub_progress, analytics).await?;
+    let execution_info = MirrordExecution::start(
+        &mut config,
+        Some(&args.binary),
+        &mut sub_progress,
+        analytics,
+    )
+    .await?;
     #[cfg(not(target_os = "macos"))]
-    let execution_info = MirrordExecution::start(&config, &mut sub_progress, analytics).await?;
+    let execution_info = MirrordExecution::start(&mut config, &mut sub_progress, analytics).await?;
 
     // This is not being yielded, as this is not proper async, something along those lines.
     // We need an `await` somewhere in this function to drive our socket IO that happens
@@ -363,6 +357,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
         std::env::set_var(name, value);
     }
 
+    // LayerConfig must be created after setting relevant env vars
     let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
@@ -380,100 +375,6 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
     }
 
     execution_result
-}
-
-/// Lists targets based on whether or not the operator has been enabled in `layer_config`.
-/// If the operator is enabled (and we can reach it), then we list [`KubeResourceSeeker::all`]
-/// targets, otherwise we list [`KubeResourceSeeker::all_open_source`] only.
-async fn list_targets(layer_config: &LayerConfig, args: &ListTargetArgs) -> CliResult<Vec<String>> {
-    let client = create_kube_config(
-        layer_config.accept_invalid_certificates,
-        layer_config.kubeconfig.clone(),
-        layer_config.kube_context.clone(),
-    )
-    .await
-    .and_then(|config| Client::try_from(config).map_err(From::from))
-    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
-
-    let namespace = args
-        .namespace
-        .as_deref()
-        .or(layer_config.target.namespace.as_deref());
-
-    let seeker = KubeResourceSeeker {
-        client: &client,
-        namespace,
-    };
-
-    let mut reporter = NullReporter::default();
-
-    let operator_api = if layer_config.operator != Some(false)
-        && let Some(api) = OperatorApi::try_new(layer_config, &mut reporter).await?
-    {
-        let api = api.prepare_client_cert(&mut reporter).await;
-
-        api.inspect_cert_error(
-            |error| tracing::error!(%error, "failed to prepare client certificate"),
-        );
-
-        Some(api)
-    } else {
-        None
-    };
-
-    match operator_api {
-        None if layer_config.operator == Some(true) => Err(CliError::OperatorNotInstalled),
-        Some(api)
-            if ALL_TARGETS_SUPPORTED_OPERATOR_VERSION
-                .matches(&api.operator().spec.operator_version) =>
-        {
-            seeker.all().await.map_err(|error| {
-                CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
-            })
-        }
-        _ => seeker.all_open_source().await.map_err(|error| {
-            CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
-        }),
-    }
-}
-
-/// Lists all possible target paths.
-/// Tries to use operator if available, otherwise falls back to k8s API (if operator isn't
-/// explicitly true). Example:
-/// ```
-/// [
-///  "pod/metalbear-deployment-85c754c75f-982p5",
-///  "pod/nginx-deployment-66b6c48dd5-dc9wk",
-///  "pod/py-serv-deployment-5c57fbdc98-pdbn4/container/py-serv",
-///  "deployment/nginx-deployment"
-///  "deployment/nginx-deployment/container/nginx"
-///  "rollout/nginx-rollout"
-///  "statefulset/nginx-statefulset"
-///  "statefulset/nginx-statefulset/container/nginx"
-/// ]
-/// ```
-async fn print_targets(args: &ListTargetArgs) -> CliResult<()> {
-    let mut layer_config = if let Some(config) = &args.config_file {
-        let mut cfg_context = ConfigContext::default();
-        LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?
-    } else {
-        LayerConfig::from_env()?
-    };
-
-    if let Some(namespace) = &args.namespace {
-        layer_config.target.namespace = Some(namespace.clone());
-    };
-
-    if !layer_config.use_proxy {
-        remove_proxy_env();
-    }
-
-    // The targets come sorted in the following order:
-    // `deployments - rollouts - statefulsets - cronjobs - jobs - pods`
-    let targets = list_targets(&layer_config, args).await?;
-    let json_obj = json!(targets);
-    println!("{json_obj}");
-    Ok(())
 }
 
 async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<()> {
@@ -577,6 +478,7 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
         std::env::set_var("MIRRORD_CONFIG_FILE", config_file);
     }
 
+    // LayerConfig must be created after setting relevant env vars
     let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
     let mut analytics = AnalyticsReporter::new(config.telemetry, ExecutionKind::PortForward, watch);
@@ -650,21 +552,8 @@ fn main() -> miette::Result<()> {
 
     let (signal, watch) = drain::channel();
 
-    // There are situations where even if running "ext" commands that shouldn't log, we want those
-    // to log to be able to debug issues.
-    let force_log = std::env::var("MIRRORD_FORCE_LOG")
-        .map(|s| s.parse().unwrap_or(false))
-        .unwrap_or(false);
-
     let res: CliResult<(), CliError> = rt.block_on(async move {
-        if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
-            mirrord_console::init_async_logger(&console_addr, watch.clone(), 124).await?;
-        } else if force_log || !init_ext_error_handler(&cli.commands) {
-            registry()
-                .with(fmt::layer().with_writer(std::io::stderr))
-                .with(EnvFilter::from_default_env())
-                .init();
-        }
+        logging::init_tracing_registry(&cli.commands, watch.clone()).await?;
 
         match cli.commands {
             Commands::Exec(args) => exec(&args, watch).await?,
@@ -675,7 +564,14 @@ fn main() -> miette::Result<()> {
                     false,
                 )?;
             }
-            Commands::ListTargets(args) => print_targets(&args).await?,
+            Commands::ListTargets(args) => {
+                let rich_output = std::env::var(ListTargetArgs::RICH_OUTPUT_ENV)
+                    .ok()
+                    .and_then(|value| value.parse::<bool>().ok())
+                    .unwrap_or_default();
+
+                list::print_targets(*args, rich_output).await?
+            }
             Commands::Operator(args) => operator_command(*args).await?,
             Commands::ExtensionExec(args) => {
                 extension_exec(*args, watch).await?;
@@ -718,19 +614,6 @@ fn main() -> miette::Result<()> {
     });
 
     res.map_err(Into::into)
-}
-
-// only ls and ext commands need the errors in json format
-// error logs are disabled for extensions
-fn init_ext_error_handler(commands: &Commands) -> bool {
-    match commands {
-        Commands::ListTargets(_) | Commands::ExtensionExec(_) => {
-            let _ = miette::set_hook(Box::new(|_| Box::new(JSONReportHandler::new())));
-            true
-        }
-        Commands::InternalProxy { .. } | Commands::ExternalProxy { .. } => true,
-        _ => false,
-    }
 }
 
 async fn prompt_outdated_version(progress: &ProgressTracker) {

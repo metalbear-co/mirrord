@@ -4,6 +4,7 @@ use std::{
     collections::HashMap,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
+    ops::Not,
     os::{
         fd::{BorrowedFd, FromRawFd, IntoRawFd},
         unix::io::RawFd,
@@ -21,7 +22,7 @@ use mirrord_intproxy_protocol::{
     OutgoingConnectResponse, PortSubscribe,
 };
 use mirrord_protocol::{
-    dns::{GetAddrInfoRequest, LookupRecord},
+    dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
 use nix::sys::socket::{sockopt, SockaddrIn, SockaddrIn6, SockaddrLike, SockaddrStorage};
@@ -129,7 +130,7 @@ pub(super) fn socket(domain: c_int, type_: c_int, protocol: c_int) -> Detour<Raw
         Ok(())
     }?;
 
-    if domain == libc::AF_INET6 {
+    if domain == libc::AF_INET6 && crate::setup().layer_config().feature.network.ipv6.not() {
         return Detour::Error(HookError::SocketUnsuportedIpv6);
     }
 
@@ -208,7 +209,8 @@ fn is_ignored_tcp_port(addr: &SocketAddr, config: &IncomingConfig) -> bool {
 /// If the socket is not found in [`SOCKETS`], bypass.
 /// Otherwise, if it's not an ignored port, bind (possibly with a fallback to random port) and
 /// update socket state in [`SOCKETS`]. If it's an ignored port, remove the socket from [`SOCKETS`].
-#[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret, skip(raw_address))]
+#[mirrord_layer_macro::instrument(level = Level::TRACE, fields(pid = std::process::id()), ret, skip(raw_address)
+)]
 pub(super) fn bind(
     sockfd: c_int,
     raw_address: *const sockaddr,
@@ -323,9 +325,9 @@ pub(super) fn bind(
             }
         })
     }
-    .ok()
-    .and_then(|(_, address)| address.as_socket())
-    .bypass(Bypass::AddressConversion)?;
+        .ok()
+        .and_then(|(_, address)| address.as_socket())
+        .bypass(Bypass::AddressConversion)?;
 
     Arc::get_mut(&mut socket).unwrap().state = SocketState::Bound(Bound {
         requested_address,
@@ -889,8 +891,33 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
 ///
 /// This function updates the mapping in [`REMOTE_DNS_REVERSE_MAPPING`].
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret, err)]
-pub(super) fn remote_getaddrinfo(node: String) -> HookResult<Vec<(String, IpAddr)>> {
-    let addr_info_list = common::make_proxy_request_with_response(GetAddrInfoRequest { node })?.0?;
+pub(super) fn remote_getaddrinfo(
+    node: String,
+    service_port: u16,
+    flags: c_int,
+    family: c_int,
+    socktype: c_int,
+    protocol: c_int,
+) -> HookResult<Vec<(String, IpAddr)>> {
+    let family = match family {
+        libc::AF_INET => AddressFamily::Ipv4Only,
+        libc::AF_INET6 => AddressFamily::Ipv6Only,
+        _ => AddressFamily::Both,
+    };
+    let socktype = match socktype {
+        libc::SOCK_STREAM => SockType::Stream,
+        libc::SOCK_DGRAM => SockType::Dgram,
+        _ => SockType::Any,
+    };
+    let addr_info_list = common::make_proxy_request_with_response(GetAddrInfoRequestV2 {
+        node,
+        service_port,
+        flags,
+        family,
+        socktype,
+        protocol,
+    })?
+    .0?;
 
     let mut remote_dns_reverse_mapping = REMOTE_DNS_REVERSE_MAPPING.lock()?;
     addr_info_list.iter().for_each(|lookup| {
@@ -945,29 +972,41 @@ pub(super) fn getaddrinfo(
 
             Bypass::CStrConversion
         })?
+        // TODO: according to the man page, service could also be a service name, it doesn't have to
+        //   be a port number.
         .and_then(|service| service.parse::<u16>().ok())
         .unwrap_or(0);
 
-    crate::setup().dns_selector().check_query(&node, service)?;
+    let setup = crate::setup();
+    setup.dns_selector().check_query(&node, service)?;
+    let ipv6_enabled = setup.layer_config().feature.network.ipv6;
 
     let raw_hints = raw_hints
         .cloned()
         .unwrap_or_else(|| unsafe { mem::zeroed() });
 
-    // TODO(alex): Use more fields from `raw_hints` to respect the user's `getaddrinfo` call.
     let libc::addrinfo {
+        ai_family,
         ai_socktype,
         ai_protocol,
+        ai_flags,
         ..
     } = raw_hints;
 
     // Some apps (gRPC on Python) use `::` to listen on all interfaces, and usually that just means
-    // resolve on unspecified. So we just return that in IpV4 because we don't support ipv6.
-    let resolved_addr = if node == "::" {
+    // resolve on unspecified. So we just return that in IPv4, if IPv6 support is disabled.
+    let resolved_addr = if ipv6_enabled.not() && (node == "::") {
         // name is "" because that's what happens in real flow.
         vec![("".to_string(), IpAddr::V4(Ipv4Addr::UNSPECIFIED))]
     } else {
-        remote_getaddrinfo(node.clone())?
+        remote_getaddrinfo(
+            node.clone(),
+            service,
+            ai_flags,
+            ai_family,
+            ai_socktype,
+            ai_protocol,
+        )?
     };
 
     let mut managed_addr_info = MANAGED_ADDRINFO.lock()?;
@@ -1066,7 +1105,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
 
     crate::setup().dns_selector().check_query(&name, 0)?;
 
-    let hosts_and_ips = remote_getaddrinfo(name.clone())?;
+    let hosts_and_ips = remote_getaddrinfo(name.clone(), 0, 0, 0, 0, 0)?;
 
     // We could `unwrap` here, as this would have failed on the previous conversion.
     let host_name = CString::new(name)?;

@@ -1,13 +1,13 @@
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::source::MirrordConfigSource;
 
 /// mirrord Experimental features.
 /// This shouldn't be used unless someone from MetalBear/mirrord tells you to.
-#[derive(MirrordConfig, Clone, Debug, Serialize)]
+#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[config(map_to = "ExperimentalFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct ExperimentalConfig {
@@ -68,7 +68,7 @@ pub struct ExperimentalConfig {
     /// Setting to 0 disables file buffering.
     ///
     /// <https://github.com/metalbear-co/mirrord/issues/2069>
-    #[config(default = 0)]
+    #[config(default = 128000)]
     pub readonly_file_buffer: u64,
 }
 

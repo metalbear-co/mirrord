@@ -20,7 +20,7 @@
 //! ```
 
 use std::{
-    fs::{File, OpenOptions},
+    fs::File,
     io,
     io::BufReader,
     net::{Ipv4Addr, SocketAddr},
@@ -41,13 +41,13 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::server::TlsStream;
 use tokio_util::{either::Either, sync::CancellationToken};
 use tracing::Level;
-use tracing_subscriber::EnvFilter;
 
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, ExternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     internal_proxy::connect_and_ping,
+    logging::init_extproxy_tracing_registry,
     util::{create_listen_socket, detach_io},
 };
 
@@ -60,29 +60,10 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 }
 
 pub async fn proxy(listen_port: u16, watch: drain::Watch) -> CliResult<()> {
-    let config = LayerConfig::from_env()?;
+    let config = LayerConfig::recalculate_from_env()?;
 
+    init_extproxy_tracing_registry(&config)?;
     tracing::info!(?config, "external_proxy starting");
-
-    if let Some(log_destination) = config.external_proxy.log_destination.as_ref() {
-        let output_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_destination)
-            .map_err(|e| ExternalProxyError::OpenLogFile(log_destination.clone(), e))?;
-
-        let tracing_registry = tracing_subscriber::fmt()
-            .with_writer(output_file)
-            .with_ansi(false);
-
-        if let Some(log_level) = config.external_proxy.log_level.as_ref() {
-            tracing_registry
-                .with_env_filter(EnvFilter::builder().parse_lossy(log_level))
-                .init();
-        } else {
-            tracing_registry.init();
-        }
-    }
 
     let agent_connect_info = std::env::var(AGENT_CONNECT_INFO_ENV_KEY)
         .ok()

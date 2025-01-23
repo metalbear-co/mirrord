@@ -3,7 +3,7 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
-pub mod body_chunks;
+pub mod batched_body;
 pub mod codec;
 pub mod dns;
 pub mod error;
@@ -111,3 +111,7 @@ impl FromStr for MeshVendor {
 pub const AGENT_OPERATOR_CERT_ENV: &str = "MIRRORD_AGENT_OPERATOR_CERT";
 
 pub const AGENT_NETWORK_INTERFACE_ENV: &str = "MIRRORD_AGENT_INTERFACE";
+
+pub const AGENT_METRICS_ENV: &str = "MIRRORD_AGENT_METRICS";
+
+pub const AGENT_IPV6_ENV: &str = "MIRRORD_AGENT_SUPPORT_IPV6";

@@ -18,6 +18,8 @@ use crate::utils::{
     config_dir, kube_client, service, Application, KubeService, ResourceGuard, TestProcess,
 };
 
+mod fs;
+
 /// Guard that deletes a mirrord policy when dropped.
 struct PolicyGuard {
     _inner: ResourceGuard,
@@ -31,28 +33,18 @@ impl PolicyGuard {
     ) -> Self {
         let policy_api: Api<MirrordPolicy> = Api::namespaced(kube_client.clone(), namespace);
         PolicyGuard {
-            _inner: ResourceGuard::create(
-                policy_api,
-                policy.metadata.name.clone().unwrap(),
-                policy,
-                true,
-            )
-            .await
-            .expect("Could not create policy in E2E test."),
+            _inner: ResourceGuard::create(policy_api, policy, true)
+                .await
+                .expect("Could not create policy in E2E test."),
         }
     }
 
     pub async fn clusterwide(kube_client: kube::Client, policy: &MirrordClusterPolicy) -> Self {
         let policy_api: Api<MirrordClusterPolicy> = Api::all(kube_client.clone());
         PolicyGuard {
-            _inner: ResourceGuard::create(
-                policy_api,
-                policy.metadata.name.clone().unwrap(),
-                policy,
-                true,
-            )
-            .await
-            .expect("Could not create policy in E2E test."),
+            _inner: ResourceGuard::create(policy_api, policy, true)
+                .await
+                .expect("Could not create policy in E2E test."),
         }
     }
 }
@@ -128,6 +120,7 @@ fn block_steal_without_qualifiers() -> PolicyTestCase {
                 selector: None,
                 block: vec![BlockedFeature::Steal],
                 env: Default::default(),
+                fs: Default::default(),
             },
         ),
         service_b_can_steal: No,
@@ -147,6 +140,7 @@ fn block_steal_with_path_pattern() -> PolicyTestCase {
                 selector: None,
                 block: vec![BlockedFeature::Steal],
                 env: Default::default(),
+                fs: Default::default(),
             },
         ),
         service_b_can_steal: EvenWithoutFilter,
@@ -166,6 +160,7 @@ fn block_unfiltered_steal_with_path_pattern() -> PolicyTestCase {
                 selector: None,
                 block: vec![BlockedFeature::StealWithoutFilter],
                 env: Default::default(),
+                fs: Default::default(),
             },
         ),
         service_b_can_steal: EvenWithoutFilter,
@@ -185,6 +180,7 @@ fn block_unfiltered_steal_with_deployment_path_pattern() -> PolicyTestCase {
                 selector: None,
                 block: vec![BlockedFeature::StealWithoutFilter],
                 env: Default::default(),
+                fs: Default::default(),
             },
         ),
         service_a_can_steal: OnlyWithFilter,
@@ -210,6 +206,7 @@ fn block_steal_with_label_selector() -> PolicyTestCase {
                 }),
                 block: vec![BlockedFeature::Steal],
                 env: Default::default(),
+                fs: Default::default(),
             },
         ),
         service_b_can_steal: EvenWithoutFilter,
@@ -236,6 +233,7 @@ fn block_steal_with_unmatching_policy() -> PolicyTestCase {
                 }),
                 block: vec![BlockedFeature::Steal],
                 env: Default::default(),
+                fs: Default::default(),
             },
         ),
         service_b_can_steal: EvenWithoutFilter,
@@ -274,7 +272,7 @@ async fn run_mirrord_and_verify_steal_result(
     let target = if target_deployment {
         format!("deploy/{}", kube_service.name)
     } else {
-        kube_service.target.clone()
+        kube_service.pod_container_target()
     };
 
     let test_proc = application
@@ -293,7 +291,7 @@ async fn run_mirrord_and_verify_steal_result(
 
     let test_proc = application
         .run(
-            &kube_service.target,
+            &kube_service.pod_container_target(),
             Some(&kube_service.namespace),
             Some(vec!["--config-file", config_path.to_str().unwrap()]),
             None,
@@ -347,7 +345,7 @@ async fn run_mirrord_and_verify_mirror_result(kube_service: &KubeService, expect
 
     let test_proc = application
         .run(
-            &kube_service.target,
+            &kube_service.pod_container_target(),
             Some(&kube_service.namespace),
             Some(vec!["--fs-mode=local"]),
             None,
@@ -377,6 +375,7 @@ pub async fn create_cluster_policy_and_try_to_mirror(
                 selector: None,
                 block: vec![BlockedFeature::Mirror],
                 env: Default::default(),
+                fs: Default::default(),
             },
         ),
     )
