@@ -95,7 +95,7 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
 /// ```
 ///
 /// The setup above will result in a session targeting the `bear-pod` Kubernetes pod
-/// in the user's default namespace. Target container will be chosen by mirrord.
+/// in the user's default namespace. A target container will be chosen by mirrord.
 ///
 /// Shortened setup with target container:
 ///
@@ -105,7 +105,7 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
 /// }
 /// ```
 ///
-/// Setup above will result in a session targeting the `bear-pod-container` container
+/// The setup above will result in a session targeting the `bear-pod-container` container
 /// in the `bear-pod` Kubernetes pod in the user's default namespace.
 ///
 /// Complete setup:
@@ -122,7 +122,7 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
 /// }
 /// ```
 ///
-/// Setup above will result in a session targeting the `bear-pod-container` container
+/// The setup above will result in a session targeting the `bear-pod-container` container
 /// in the `bear-pod` Kubernetes pod in the `bear-pod-namespace` namespace.
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
 #[serde(deny_unknown_fields)]
@@ -154,7 +154,7 @@ pub struct TargetConfig {
     ///
     /// Namespace where the target lives.
     ///
-    /// Defaults to Kubernetes user's default namespace (defined in Kubernetes context).
+    /// Defaults to the Kubernetes user's default namespace (defined in Kubernetes context).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
 }
@@ -259,7 +259,7 @@ pub enum Target {
     Pod(pod::PodTarget),
 
     /// <!--${internal}-->
-    /// [Rollout](https://argoproj.github.io/argo-rollouts/#how-does-it-work).
+    /// [Argo Rollout](https://argoproj.github.io/argo-rollouts/#how-does-it-work).
     Rollout(rollout::RolloutTarget),
 
     /// <!--${internal}-->
