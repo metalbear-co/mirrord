@@ -114,8 +114,6 @@ pub struct JobVariant<T> {
 
 impl<'c> JobVariant<PodVariant<'c>> {
     pub fn new(agent: &'c AgentConfig, params: &'c ContainerParams) -> Self {
-        // TODO(alex) [high]: Here we also have agent config, which has tolerations.
-        // So why doesn't it propagate?
         JobVariant {
             inner: PodVariant::new(agent, params),
         }
