@@ -12,7 +12,7 @@ use mirrord_macros::protocol_break;
 use semver::VersionReq;
 
 use crate::{
-    dns::{GetAddrInfoRequest, GetAddrInfoResponse},
+    dns::{GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse},
     file::*,
     outgoing::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
@@ -24,10 +24,16 @@ use crate::{
     ResponseError,
 };
 
+/// Minimal mirrord-protocol version that that allows [`LogLevel::Info`].
+pub static INFO_LOG_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.13.4".parse().expect("Bad Identifier"));
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, Copy)]
 pub enum LogLevel {
     Warn,
     Error,
+    /// Supported from [`INFO_LOG_VERSION`].
+    Info,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -85,6 +91,10 @@ pub enum FileRequest {
     ReadDirBatch(ReadDirBatchRequest),
     MakeDir(MakeDirRequest),
     MakeDirAt(MakeDirAtRequest),
+    RemoveDir(RemoveDirRequest),
+    Unlink(UnlinkRequest),
+    UnlinkAt(UnlinkAtRequest),
+    StatFs(StatFsRequest),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -95,9 +105,27 @@ pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ClientMessage {
     Close,
+    /// TCP sniffer message.
+    ///
+    /// These are the messages used by the `mirror` feature, and handled by the
+    /// `TcpSnifferApi` in the agent.
     Tcp(LayerTcp),
+
+    /// TCP stealer message.
+    ///
+    /// These are the messages used by the `steal` feature, and handled by the `TcpStealerApi` in
+    /// the agent.
     TcpSteal(LayerTcpSteal),
+    /// TCP outgoing message.
+    ///
+    /// These are the messages used by the `outgoing` feature (tcp), and handled by the
+    /// `TcpOutgoingApi` in the agent.
     TcpOutgoing(LayerTcpOutgoing),
+
+    /// UDP outgoing message.
+    ///
+    /// These are the messages used by the `outgoing` feature (udp), and handled by the
+    /// `UdpOutgoingApi` in the agent.
     UdpOutgoing(LayerUdpOutgoing),
     FileRequest(FileRequest),
     GetEnvVarsRequest(GetEnvVarsRequest),
@@ -108,6 +136,7 @@ pub enum ClientMessage {
     SwitchProtocolVersion(#[bincode(with_serde)] semver::Version),
     ReadyForLogs,
     Vpn(ClientVpn),
+    GetAddrInfoRequestV2(GetAddrInfoRequestV2),
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
@@ -130,6 +159,8 @@ pub enum FileResponse {
     ReadLink(RemoteResult<ReadLinkFileResponse>),
     ReadDirBatch(RemoteResult<ReadDirBatchResponse>),
     MakeDir(RemoteResult<()>),
+    RemoveDir(RemoteResult<()>),
+    Unlink(RemoteResult<()>),
 }
 
 /// `-agent` --> `-layer` messages.

@@ -2,7 +2,7 @@ use dns::{DnsConfig, DnsFileConfig};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use self::{incoming::*, outgoing::*};
 use crate::{
@@ -10,7 +10,7 @@ use crate::{
     util::MirrordToggleableConfig,
 };
 
-const IPV6_ENV_VAR: &str = "MIRRORD_INCOMING_ENABLE_IPV6";
+const IPV6_ENV_VAR: &str = "MIRRORD_ENABLE_IPV6";
 
 pub mod dns;
 pub mod filter;
@@ -54,7 +54,7 @@ pub mod outgoing;
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize)]
+#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[config(map_to = "NetworkFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct NetworkConfig {

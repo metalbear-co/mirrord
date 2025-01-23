@@ -4,13 +4,13 @@ use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::{LayerConfig, MIRRORD_CONFIG_FILE_ENV};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
-use crate::{config::ExtensionExecArgs, error::CliError, execution::MirrordExecution, CliResult};
+use crate::{config::ExtensionExecArgs, execution::MirrordExecution, CliResult};
 
 /// Actually facilitate execution after all preparations were complete
 async fn mirrord_exec<P>(
     #[cfg(target_os = "macos")] executable: Option<&str>,
     env: HashMap<String, String>,
-    config: LayerConfig,
+    mut config: LayerConfig,
     mut progress: P,
     analytics: &mut AnalyticsReporter,
 ) -> CliResult<()>
@@ -21,9 +21,9 @@ where
     // or run tasks before actually launching.
     #[cfg(target_os = "macos")]
     let mut execution_info =
-        MirrordExecution::start(&config, executable, &mut progress, analytics).await?;
+        MirrordExecution::start(&mut config, executable, &mut progress, analytics).await?;
     #[cfg(not(target_os = "macos"))]
-    let mut execution_info = MirrordExecution::start(&config, &mut progress, analytics).await?;
+    let mut execution_info = MirrordExecution::start(&mut config, &mut progress, analytics).await?;
 
     // We don't execute so set envs aren't passed, so we need to add config file and target to
     // env.
@@ -40,23 +40,15 @@ where
 pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch) -> CliResult<()> {
     let progress = ProgressTracker::try_from_env("mirrord preparing to launch")
         .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
-    let mut env: HashMap<String, String> = HashMap::new();
 
+    // Set environment required for `LayerConfig::from_env_with_warnings`.
     if let Some(config_file) = args.config_file.as_ref() {
-        // Set canoncialized path to config file, in case forks/children are in different
-        // working directories.
-        let full_path = std::fs::canonicalize(config_file)
-            .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.into(), e))?;
-        std::env::set_var(MIRRORD_CONFIG_FILE_ENV, full_path.clone());
-        env.insert(
-            MIRRORD_CONFIG_FILE_ENV.into(),
-            full_path.to_string_lossy().into(),
-        );
+        std::env::set_var(MIRRORD_CONFIG_FILE_ENV, config_file);
     }
     if let Some(target) = args.target.as_ref() {
         std::env::set_var("MIRRORD_IMPERSONATED_TARGET", target.clone());
-        env.insert("MIRRORD_IMPERSONATED_TARGET".into(), target.to_string());
     }
+
     let (config, mut context) = LayerConfig::from_env_with_warnings()?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
@@ -69,14 +61,14 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch)
     #[cfg(target_os = "macos")]
     let execution_result = mirrord_exec(
         args.executable.as_deref(),
-        env,
+        Default::default(),
         config,
         progress,
         &mut analytics,
     )
     .await;
     #[cfg(not(target_os = "macos"))]
-    let execution_result = mirrord_exec(env, config, progress, &mut analytics).await;
+    let execution_result = mirrord_exec(Default::default(), config, progress, &mut analytics).await;
 
     if execution_result.is_err() && !analytics.has_error() {
         analytics.set_error(AnalyticsError::Unknown);

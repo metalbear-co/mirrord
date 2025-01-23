@@ -1,21 +1,17 @@
-#![allow(dead_code, unused)]
 #[cfg(test)]
 mod steal_tests {
-    use std::{
-        io::{BufRead, BufReader, Read, Write},
-        net::{SocketAddr, TcpStream},
-        path::Path,
-        time::Duration,
-    };
+    use std::{net::SocketAddr, path::Path, time::Duration};
 
     use futures_util::{SinkExt, StreamExt};
-    use hyper::{body, client::conn, Request, StatusCode};
-    use hyper_util::rt::TokioIo;
     use k8s_openapi::api::core::v1::Pod;
     use kube::{Api, Client};
     use reqwest::{header::HeaderMap, Url};
     use rstest::*;
-    use tokio::time::sleep;
+    use tokio::{
+        io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+        net::TcpStream,
+        time::sleep,
+    };
     use tokio_tungstenite::{
         connect_async,
         tungstenite::{client::IntoClientRequest, Message},
@@ -94,7 +90,7 @@ mod steal_tests {
                 &service.pod_container_target(),
                 Some(&service.namespace),
                 Some(flags),
-                Some(vec![("MIRRORD_INCOMING_ENABLE_IPV6", "true")]),
+                Some(vec![("MIRRORD_ENABLE_IPV6", "true")]),
             )
             .await;
 
@@ -280,7 +276,7 @@ mod steal_tests {
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
 
-        let mut tcp_stream = TcpStream::connect((addr, port as u16)).unwrap();
+        let mut tcp_stream = TcpStream::connect((addr, port as u16)).await.unwrap();
 
         // Wait for the test app to close the socket and tell us about it.
         process
@@ -289,10 +285,10 @@ mod steal_tests {
 
         const DATA: &[u8; 16] = b"upper me please\n";
 
-        tcp_stream.write_all(DATA).unwrap();
+        tcp_stream.write_all(DATA).await.unwrap();
 
         let mut response = [0u8; DATA.len()];
-        tcp_stream.read_exact(&mut response).unwrap();
+        tcp_stream.read_exact(&mut response).await.unwrap();
 
         process
             .write_to_stdin(b"Hey test app, please stop running and just exit successfuly.\n")
@@ -625,11 +621,11 @@ mod steal_tests {
             .await;
 
         let addr = SocketAddr::new(host.trim().parse().unwrap(), port as u16);
-        let mut stream = TcpStream::connect(addr).unwrap();
-        stream.write_all(tcp_data.as_bytes()).unwrap();
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        stream.write_all(tcp_data.as_bytes()).await.unwrap();
         let mut reader = BufReader::new(stream);
         let mut buf = String::new();
-        reader.read_line(&mut buf).unwrap();
+        reader.read_line(&mut buf).await.unwrap();
         println!("Got response: {buf}");
         // replace "remote: " with empty string, since the response can be split into frames
         // and we just need assert the final response

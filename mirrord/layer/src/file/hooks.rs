@@ -904,8 +904,9 @@ unsafe extern "C" fn fstatat_detour(
     })
 }
 
+/// Hook for `libc::fstatfs`.
 #[hook_guard_fn]
-unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
+pub(crate) unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
     if out_stat.is_null() {
         return HookError::BadPointer.into();
     }
@@ -917,6 +918,25 @@ unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
             0
         })
         .unwrap_or_bypass_with(|_| FN_FSTATFS(fd, out_stat))
+}
+
+/// Hook for `libc::statfs`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn statfs_detour(
+    raw_path: *const c_char,
+    out_stat: *mut statfs,
+) -> c_int {
+    if out_stat.is_null() {
+        return HookError::BadPointer.into();
+    }
+
+    crate::file::ops::statfs(raw_path.checked_into())
+        .map(|res| {
+            let res = res.metadata;
+            fill_statfs(out_stat, &res);
+            0
+        })
+        .unwrap_or_bypass_with(|_| FN_STATFS(raw_path, out_stat))
 }
 
 unsafe fn realpath_logic(
@@ -1088,6 +1108,43 @@ pub(crate) unsafe extern "C" fn mkdirat_detour(
         })
 }
 
+/// Hook for `libc::rmdir`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn rmdir_detour(pathname: *const c_char) -> c_int {
+    rmdir(pathname.checked_into())
+        .map(|()| 0)
+        .unwrap_or_bypass_with(|bypass| {
+            let raw_path = update_ptr_from_bypass(pathname, &bypass);
+            FN_RMDIR(raw_path)
+        })
+}
+
+/// Hook for `libc::unlink`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn unlink_detour(pathname: *const c_char) -> c_int {
+    unlink(pathname.checked_into())
+        .map(|()| 0)
+        .unwrap_or_bypass_with(|bypass| {
+            let raw_path = update_ptr_from_bypass(pathname, &bypass);
+            FN_UNLINK(raw_path)
+        })
+}
+
+/// Hook for `libc::unlinkat`.
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn unlinkat_detour(
+    dirfd: c_int,
+    pathname: *const c_char,
+    flags: u32,
+) -> c_int {
+    unlinkat(dirfd, pathname.checked_into(), flags)
+        .map(|()| 0)
+        .unwrap_or_bypass_with(|bypass| {
+            let raw_path = update_ptr_from_bypass(pathname, &bypass);
+            FN_UNLINKAT(dirfd, raw_path, flags)
+        })
+}
+
 /// Convenience function to setup file hooks (`x_detour`) with `frida_gum`.
 pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     replace!(hook_manager, "open", open_detour, FnOpen, FN_OPEN);
@@ -1163,13 +1220,23 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     );
 
     replace!(hook_manager, "mkdir", mkdir_detour, FnMkdir, FN_MKDIR);
-
     replace!(
         hook_manager,
         "mkdirat",
         mkdirat_detour,
         FnMkdirat,
         FN_MKDIRAT
+    );
+
+    replace!(hook_manager, "rmdir", rmdir_detour, FnRmdir, FN_RMDIR);
+
+    replace!(hook_manager, "unlink", unlink_detour, FnUnlink, FN_UNLINK);
+    replace!(
+        hook_manager,
+        "unlinkat",
+        unlinkat_detour,
+        FnUnlinkat,
+        FN_UNLINKAT
     );
 
     replace!(hook_manager, "lseek", lseek_detour, FnLseek, FN_LSEEK);
@@ -1286,6 +1353,8 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FnFstatfs,
             FN_FSTATFS
         );
+        replace!(hook_manager, "statfs", statfs_detour, FnStatfs, FN_STATFS);
+
         replace!(
             hook_manager,
             "fdopendir",
@@ -1367,6 +1436,13 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             fstatfs_detour,
             FnFstatfs,
             FN_FSTATFS
+        );
+        replace!(
+            hook_manager,
+            "statfs$INODE64",
+            statfs_detour,
+            FnStatfs,
+            FN_STATFS
         );
         replace!(
             hook_manager,

@@ -87,7 +87,29 @@ class FileOpsTest(unittest.TestCase):
             os.mkdir("test_mkdir_error_already_exists", dir_fd=dir)
 
         os.close(dir)
+    
+    def test_statfs_and_fstatvfs_sucess(self):
+        """
+        Test statfs / fstatfs
+        """
+        file_path, _ = self._create_new_tmp_file()
         
+        statvfs_result = os.statvfs(file_path)
+        self.assertIsNotNone(statvfs_result)
+        
+        fd = os.open(file_path, os.O_RDONLY)
+        fstatvfs_result = os.fstatvfs(fd)
+        self.assertIsNotNone(fstatvfs_result)
+    
+    def test_rmdir(self):
+        """
+        Creates a new directory in "/tmp" and removes it using rmdir.
+        """
+        os.mkdir("/tmp/test_rmdir")
+        self.assertTrue(os.path.isdir("/tmp/test_rmdir"))
+        os.rmdir("/tmp/test_rmdir")
+        self.assertFalse(os.path.isdir("/tmp/test_rmdir"))
+            
     def _create_new_tmp_file(self):
         """
         Creates a new file in /tmp and returns the path and name of the file.
@@ -96,7 +118,6 @@ class FileOpsTest(unittest.TestCase):
         with open(file_path, "w") as w_file:
             w_file.write(TEXT)
         return file_path, file_name
-
 
 if __name__ == "__main__":
     unittest.main()

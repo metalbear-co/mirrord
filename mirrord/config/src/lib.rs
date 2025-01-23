@@ -25,13 +25,14 @@ use std::{
     path::Path,
 };
 
+use base64::prelude::*;
 use config::{ConfigContext, ConfigError, MirrordConfig};
 use experimental::ExperimentalConfig;
 use feature::{env::mapper::EnvVarsRemapper, network::outgoing::OutgoingFilterConfig};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use target::Target;
 use tera::Tera;
 use tracing::warn;
@@ -44,6 +45,9 @@ use crate::{
 
 /// Env variable to load config from file (json, yaml and toml supported).
 pub static MIRRORD_CONFIG_FILE_ENV: &str = "MIRRORD_CONFIG_FILE";
+
+/// Env variable to load config from an already resolved base64 encoding.
+pub static MIRRORD_RESOLVED_CONFIG_ENV: &str = "MIRRORD_RESOLVED_CONFIG";
 
 /// mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
@@ -115,7 +119,8 @@ pub static MIRRORD_CONFIG_FILE_ENV: &str = "MIRRORD_CONFIG_FILE";
 ///     "communication_timeout": 30,
 ///     "startup_timeout": 360,
 ///     "network_interface": "eth0",
-///     "flush_connections": true
+///     "flush_connections": true,
+///     "metrics": "0.0.0.0:9000",
 ///   },
 ///   "feature": {
 ///     "env": {
@@ -174,7 +179,7 @@ pub static MIRRORD_CONFIG_FILE_ENV: &str = "MIRRORD_CONFIG_FILE";
 /// ```
 ///
 /// # Options {#root-options}
-#[derive(MirrordConfig, Clone, Debug, Serialize)]
+#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[config(map_to = "LayerFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct LayerConfig {
@@ -327,15 +332,55 @@ pub struct LayerConfig {
 }
 
 impl LayerConfig {
+    /// Given an encoded complete config from the [`MIRRORD_RESOLVED_CONFIG_ENV`]
+    /// env var, attempt to decode it into [`LayerConfig`].
+    /// Intended to avoid re-resolving the config in every process mirrord is loaded into.
+    fn from_env_var(encoded_value: String) -> Result<Self, ConfigError> {
+        let decoded = BASE64_STANDARD
+            .decode(encoded_value)
+            .map_err(|error| ConfigError::EnvVarDecodeError(error.to_string()))?;
+        let serialized = std::str::from_utf8(&decoded)
+            .map_err(|error| ConfigError::EnvVarDecodeError(error.to_string()))?;
+        Ok(serde_json::from_str::<Self>(serialized)?)
+    }
+
+    /// Given a [`LayerConfig`], serialise it and convert to base 64 so it can be
+    /// set into [`MIRRORD_RESOLVED_CONFIG_ENV`].
+    pub fn to_env_var(&self) -> Result<String, ConfigError> {
+        let serialized = serde_json::to_string(self)
+            .map_err(|error| ConfigError::EnvVarEncodeError(error.to_string()))?;
+        Ok(BASE64_STANDARD.encode(serialized))
+    }
+
+    /// Encode this config with [`Self::to_env_var`] and set it into
+    /// [`MIRRORD_RESOLVED_CONFIG_ENV`]. Must be used when updating [`LayerConfig`] after
+    /// creation in order for the config in env to reflect the change.
+    pub fn update_env_var(&self) -> Result<(), ConfigError> {
+        std::env::set_var(MIRRORD_RESOLVED_CONFIG_ENV, self.to_env_var()?);
+        Ok(())
+    }
+
     /// Generate a config from the environment variables and/or a config file.
     /// On success, returns the config and a vec of warnings.
     /// To be used from CLI to verify config and print warnings
     pub fn from_env_with_warnings() -> Result<(Self, ConfigContext), ConfigError> {
         let mut cfg_context = ConfigContext::default();
-        if let Ok(path) = std::env::var(MIRRORD_CONFIG_FILE_ENV) {
-            LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
-        } else {
-            LayerFileConfig::default().generate_config(&mut cfg_context)
+
+        match std::env::var(MIRRORD_RESOLVED_CONFIG_ENV) {
+            Ok(value) if !value.is_empty() => LayerConfig::from_env_var(value),
+            _ => {
+                // the resolved config is not present in env, so resolve it and then set into env
+                // var
+                let config = if let Ok(path) = std::env::var(MIRRORD_CONFIG_FILE_ENV) {
+                    LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
+                } else {
+                    LayerFileConfig::default().generate_config(&mut cfg_context)
+                }?;
+
+                // serialise the config and encode as base64
+                config.update_env_var()?;
+                Ok(config)
+            }
         }
         .map(|config| (config, cfg_context))
     }
@@ -345,6 +390,17 @@ impl LayerConfig {
     /// To be used from parts that load configuration but aren't the first one to do so
     pub fn from_env() -> Result<Self, ConfigError> {
         Self::from_env_with_warnings().map(|(config, _)| config)
+    }
+
+    /// forcefully recalculate the config using [`Self::from_env_with_warnings()`]
+    pub fn recalculate_from_env_with_warnings() -> Result<(Self, ConfigContext), ConfigError> {
+        std::env::remove_var(MIRRORD_RESOLVED_CONFIG_ENV);
+        Self::from_env_with_warnings()
+    }
+
+    /// forcefully recalculate the config using [`Self::from_env_with_warnings()`] without warnings
+    pub fn recalculate_from_env() -> Result<Self, ConfigError> {
+        Self::recalculate_from_env_with_warnings().map(|(config, _)| config)
     }
 
     /// Verify that there are no conflicting settings.
@@ -993,5 +1049,74 @@ mod tests {
             .read_to_string(&mut existing_content);
 
         assert_eq!(existing_content.replace("\r\n", "\n"), compare_content);
+    }
+
+    /// related to issue #2936: https://github.com/metalbear-co/mirrord/issues/2936
+    /// checks that resolved config written to [`MIRRORD_RESOLVED_CONFIG_ENV`] can be
+    /// transformed back into a [`LayerConfig`]
+    #[test]
+    fn encode_and_decode_default_config() {
+        let mut cfg_context = ConfigContext::default();
+        let resolved_config = LayerFileConfig::default()
+            .generate_config(&mut cfg_context)
+            .expect("Default config should be generated from default 'LayerFileConfig'");
+
+        let encoded = resolved_config.to_env_var().unwrap();
+        let decoded = LayerConfig::from_env_var(encoded).unwrap();
+
+        assert_eq!(decoded, resolved_config);
+    }
+
+    #[test]
+    fn encode_and_decode_advanced_config() {
+        let mut cfg_context = ConfigContext::default();
+
+        // this config includes template variables, so it needs to be rendered first
+        let mut template_engine = Tera::default();
+        template_engine
+            .add_raw_template("main", get_advanced_config().as_str())
+            .unwrap();
+        let rendered = template_engine
+            .render("main", &tera::Context::new())
+            .expect("Tera should render JSON config file contents");
+        let resolved_config = ConfigType::Json
+            .parse(rendered.as_str())
+            .generate_config(&mut cfg_context)
+            .expect("Layer config should be generated from JSON config file contents");
+
+        let encoded = resolved_config.to_env_var().unwrap();
+        let decoded = LayerConfig::from_env_var(encoded).unwrap();
+
+        assert_eq!(decoded, resolved_config);
+    }
+
+    fn get_advanced_config() -> String {
+        r#"
+            {
+                "accept_invalid_certificates": false,
+                "target": {
+                    "path": "pod/test-service-abcdefg-abcd",
+                    "namespace": "default"
+                },
+                "feature": {
+                    "env": true,
+                    "fs": "write",
+                    "network": {
+                        "dns": false,
+                        "incoming": {
+                            "mode": "steal",
+                            "http_filter": {
+                                "header_filter": "x-intercept: {{ get_env(name="USER") }}"
+                            }
+                        },
+                        "outgoing": {
+                            "tcp": true,
+                            "udp": false
+                        }
+                    }
+                }
+            }
+        "#
+        .to_string()
     }
 }

@@ -3,7 +3,7 @@
 use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_protocol::{
     tcp::{LayerTcp, LayerTcpSteal, StealType},
-    ClientMessage, ConnectionId, Port,
+    ClientMessage, Port,
 };
 
 /// Retrieves subscribed port from the given [`StealType`].
@@ -26,9 +26,6 @@ pub trait PortSubscriptionExt {
 
     /// Returns an unsubscribe request to be sent to the agent.
     fn wrap_agent_unsubscribe(&self) -> ClientMessage;
-
-    /// Returns an unsubscribe connection request to be sent to the agent.
-    fn wrap_agent_unsubscribe_connection(&self, connection_id: ConnectionId) -> ClientMessage;
 }
 
 impl PortSubscriptionExt for PortSubscription {
@@ -55,16 +52,6 @@ impl PortSubscriptionExt for PortSubscription {
             Self::Mirror(port) => ClientMessage::Tcp(LayerTcp::PortUnsubscribe(*port)),
             Self::Steal(steal_type) => {
                 ClientMessage::TcpSteal(LayerTcpSteal::PortUnsubscribe(get_port(steal_type)))
-            }
-        }
-    }
-
-    /// [`LayerTcp::ConnectionUnsubscribe`] or [`LayerTcpSteal::ConnectionUnsubscribe`].
-    fn wrap_agent_unsubscribe_connection(&self, connection_id: ConnectionId) -> ClientMessage {
-        match self {
-            Self::Mirror(..) => ClientMessage::Tcp(LayerTcp::ConnectionUnsubscribe(connection_id)),
-            Self::Steal(..) => {
-                ClientMessage::TcpSteal(LayerTcpSteal::ConnectionUnsubscribe(connection_id))
             }
         }
     }

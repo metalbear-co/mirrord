@@ -6,7 +6,7 @@ use nix::unistd::getgid;
 use tracing::warn;
 
 use crate::{
-    error::Result,
+    error::AgentResult,
     steal::ip_tables::{chain::IPTableChain, IPTables, Redirect},
 };
 
@@ -20,8 +20,8 @@ where
 {
     const ENTRYPOINT: &'static str = "OUTPUT";
 
-    #[tracing::instrument(skip(ipt), level = tracing::Level::TRACE)]
-    pub fn create(ipt: Arc<IPT>, chain_name: String, pod_ips: Option<&str>) -> Result<Self> {
+    #[tracing::instrument(level = tracing::Level::TRACE, skip(ipt), err)]
+    pub fn create(ipt: Arc<IPT>, chain_name: String, pod_ips: Option<&str>) -> AgentResult<Self> {
         let managed = IPTableChain::create(ipt, chain_name.clone()).inspect_err(
             |e| tracing::error!(%e, "Could not create iptables chain \"{chain_name}\"."),
         )?;
@@ -42,7 +42,7 @@ where
         Ok(OutputRedirect { managed })
     }
 
-    pub fn load(ipt: Arc<IPT>, chain_name: String) -> Result<Self> {
+    pub fn load(ipt: Arc<IPT>, chain_name: String) -> AgentResult<Self> {
         let managed = IPTableChain::load(ipt, chain_name)?;
 
         Ok(OutputRedirect { managed })
@@ -56,7 +56,7 @@ impl<const USE_INSERT: bool, IPT> Redirect for OutputRedirect<USE_INSERT, IPT>
 where
     IPT: IPTables + Send + Sync,
 {
-    async fn mount_entrypoint(&self) -> Result<()> {
+    async fn mount_entrypoint(&self) -> AgentResult<()> {
         if USE_INSERT {
             self.managed.inner().insert_rule(
                 Self::ENTRYPOINT,
@@ -73,7 +73,7 @@ where
         Ok(())
     }
 
-    async fn unmount_entrypoint(&self) -> Result<()> {
+    async fn unmount_entrypoint(&self) -> AgentResult<()> {
         self.managed.inner().remove_rule(
             Self::ENTRYPOINT,
             &format!("-j {}", self.managed.chain_name()),
@@ -82,7 +82,7 @@ where
         Ok(())
     }
 
-    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> AgentResult<()> {
         let redirect_rule = format!(
             "-o lo -m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}"
         );
@@ -92,7 +92,7 @@ where
         Ok(())
     }
 
-    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> AgentResult<()> {
         let redirect_rule = format!(
             "-o lo -m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}"
         );

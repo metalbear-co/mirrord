@@ -3,11 +3,12 @@
 //! The proxy utilizes multiple background tasks to split the code into more self-contained parts.
 //! Structs in this module aim to ease managing their state.
 //!
-//! Each background task implement the [`BackgroundTask`] trait, which specifies its properties and
+//! Each background task implements the [`BackgroundTask`] trait, which specifies its properties and
 //! allows for managing groups of related tasks with one [`BackgroundTasks`] instance.
 
 use std::{collections::HashMap, fmt, future::Future, hash::Hash};
 
+use thiserror::Error;
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
@@ -33,6 +34,67 @@ impl<T: BackgroundTask> MessageBus<T> {
         tokio::select! {
             _ = self.tx.closed() => None,
             msg = self.rx.recv() => msg,
+        }
+    }
+
+    /// Returns a [`Closed`] instance for this [`MessageBus`].
+    pub(crate) fn closed(&self) -> Closed<T> {
+        Closed(self.tx.clone())
+    }
+}
+
+/// A helper struct bound to some [`MessageBus`] instance.
+///
+/// Used in [`BackgroundTask`]s to `.await` on [`Future`]s without lingering after their
+/// [`MessageBus`] is closed.
+///
+/// Its lifetime does not depend on the origin [`MessageBus`] and it does not hold any references
+/// to it, so that you can use it **and** the [`MessageBus`] at the same time.
+///
+/// # Usage example
+///
+/// ```ignore
+/// use std::convert::Infallible;
+///
+/// use mirrord_intproxy::background_tasks::{BackgroundTask, Closed, MessageBus};
+///
+/// struct ExampleTask;
+///
+/// impl ExampleTask {
+///     /// Thanks to the usage of [`Closed`] in [`Self::run`],
+///     /// this function can freely resolve [`Future`]s and use the [`MessageBus`].
+///     /// When the [`MessageBus`] is closed, the whole task will exit.
+///     ///
+///     /// To achieve the same without [`Closed`], you'd need to wrap each
+///     /// [`Future`] resolution with [`tokio::select`].
+///     async fn do_work(&self, message_bus: &mut MessageBus<Self>) {}
+/// }
+///
+/// impl BackgroundTask for ExampleTask {
+///     type MessageIn = Infallible;
+///     type MessageOut = Infallible;
+///     type Error = Infallible;
+///
+///     async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+///         let closed: Closed<Self> = message_bus.closed();
+///         closed.cancel_on_close(self.do_work(message_bus)).await;
+///         Ok(())
+///     }
+/// }
+/// ```
+pub(crate) struct Closed<T: BackgroundTask>(Sender<T::MessageOut>);
+
+impl<T: BackgroundTask> Closed<T> {
+    /// Resolves the given [`Future`], unless the origin [`MessageBus`] closes first.
+    ///
+    /// # Returns
+    ///
+    /// * [`Some`] holding the future output - if the future resolved first
+    /// * [`None`] - if the [`MessageBus`] closed first
+    pub(crate) async fn cancel_on_close<F: Future>(&self, future: F) -> Option<F::Output> {
+        tokio::select! {
+            _ = self.0.closed() => None,
+            output = future => Some(output)
         }
     }
 }
@@ -165,12 +227,14 @@ where
 }
 
 /// An error that can occur when executing a [`BackgroundTask`].
-#[derive(Debug)]
+#[derive(Debug, Error)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum TaskError<Err> {
     /// An internal task error.
+    #[error(transparent)]
     Error(Err),
     /// A panic.
+    #[error("task panicked")]
     Panic,
 }
 

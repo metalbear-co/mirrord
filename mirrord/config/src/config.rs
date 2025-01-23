@@ -86,6 +86,12 @@ pub enum ConfigError {
         value: String,
         fail: Box<fancy_regex::Error>,
     },
+
+    #[error("mirrord-config: decoding resolved config from env var failed with `{0}`")]
+    EnvVarDecodeError(String),
+
+    #[error("mirrord-config: encoding resolved config failed with `{0}`")]
+    EnvVarEncodeError(String),
 }
 
 impl From<tera::Error> for ConfigError {
