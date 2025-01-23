@@ -94,8 +94,20 @@ where
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use super::*;
+
+    impl TaskStatus {
+        pub fn dummy(
+            task_name: &'static str,
+            result_rx: Receiver<Option<Result<(), AgentError>>>,
+        ) -> Self {
+            Self {
+                task_name,
+                result_rx,
+            }
+        }
+    }
 
     #[tokio::test]
     async fn simple_successful() {

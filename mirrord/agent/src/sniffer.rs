@@ -139,7 +139,7 @@ pub(crate) struct TcpConnectionSniffer<T> {
     sessions: TCPSessionMap,
 
     client_txs: HashMap<ClientId, Sender<SniffedConnection>>,
-    clients_closed: FuturesUnordered<ChannelClosedFuture<SniffedConnection>>,
+    clients_closed: FuturesUnordered<ChannelClosedFuture>,
 }
 
 impl<T> Drop for TcpConnectionSniffer<T> {
@@ -432,7 +432,7 @@ mod test {
             atomic::{AtomicUsize, Ordering},
             Arc,
         },
-        time::Duration,
+        time::{Duration, Instant},
     };
 
     use api::TcpSnifferApi;
@@ -440,6 +440,7 @@ mod test {
         tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
         ConnectionId, LogLevel,
     };
+    use rstest::rstest;
     use tcp_capture::test::TcpPacketsChannel;
     use tokio::sync::mpsc;
 
@@ -855,5 +856,46 @@ mod test {
                 local_address: dest_addr.into(),
             }),
         );
+    }
+
+    /// Verifies that [`TcpConnectionSniffer`] reacts to [`TcpSnifferApi`] being dropped
+    /// and clears the packet filter.
+    #[rstest]
+    #[timeout(Duration::from_secs(5))]
+    #[tokio::test]
+    async fn cleanup_on_client_closed() {
+        let mut setup = TestSnifferSetup::new();
+
+        let mut api = setup.get_api().await;
+
+        api.handle_client_message(LayerTcp::PortSubscribe(80))
+            .await
+            .unwrap();
+        assert_eq!(
+            api.recv().await.unwrap(),
+            (DaemonTcp::SubscribeResult(Ok(80)), None),
+        );
+        assert_eq!(setup.times_filter_changed(), 1);
+
+        std::mem::drop(api);
+        let dropped_at = Instant::now();
+
+        loop {
+            match setup.times_filter_changed() {
+                1 => {
+                    println!(
+                        "filter still not changed {}ms after client closed",
+                        dropped_at.elapsed().as_millis()
+                    );
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+
+                2 => {
+                    break;
+                }
+
+                other => panic!("unexpected times filter changed {other}"),
+            }
+        }
     }
 }
