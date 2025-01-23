@@ -21,7 +21,7 @@ impl RuntimeDataFromLabels for ResolvedResource<Deployment> {
         self.container.as_deref()
     }
 
-    async fn get_selector_match_labels(
+    fn get_selector_match_labels(
         resource: &Self::Resource,
     ) -> Result<BTreeMap<String, String>, KubeApiError> {
         resource

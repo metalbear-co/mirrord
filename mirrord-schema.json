@@ -1689,6 +1689,24 @@
       },
       "additionalProperties": false
     },
+    "ServiceTarget": {
+      "type": "object",
+      "required": [
+        "service"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "SplitQueuesConfig": {
       "description": "```json { \"feature\": { \"split_queues\": { \"first-queue\": { \"queue_type\": \"SQS\", \"message_filter\": { \"wows\": \"so wows\", \"coolz\": \"^very\" } }, \"second-queue\": { \"queue_type\": \"SQS\", \"message_filter\": { \"who\": \"you$\" } }, \"third-queue\": { \"queue_type\": \"Kafka\", \"message_filter\": { \"who\": \"you$\" } }, \"fourth-queue\": { \"queue_type\": \"Kafka\", \"message_filter\": { \"wows\": \"so wows\", \"coolz\": \"^very\" } }, } } } ```",
       "type": "object",
@@ -1715,10 +1733,10 @@
       "additionalProperties": false
     },
     "Target": {
-      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `pod/{sample-pod}`; - `deployment/{sample-deployment}`; - `container/{sample-container}`; - `containername/{sample-container}`. - `job/{sample-job}`; - `cronjob/{sample-cronjob}`; - `statefulset/{sample-statefulset}`;",
+      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `targetless` - `pod/{pod-name}[/container/{container-name}]`; - `deployment/{deployment-name}[/container/{container-name}]`; - `rollout/{rollout-name}[/container/{container-name}]`; - `job/{job-name}[/container/{container-name}]`; - `cronjob/{cronjob-name}[/container/{container-name}]`; - `statefulset/{statefulset-name}[/container/{container-name}]`; - `service/{service-name}[/container/{container-name}]`;",
       "anyOf": [
         {
-          "description": "<!--${internal}--> Mirror a deployment.",
+          "description": "<!--${internal}--> [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/).",
           "allOf": [
             {
               "$ref": "#/definitions/DeploymentTarget"
@@ -1726,7 +1744,7 @@
           ]
         },
         {
-          "description": "<!--${internal}--> Mirror a pod.",
+          "description": "<!--${internal}--> [Pod](https://kubernetes.io/docs/concepts/workloads/pods/).",
           "allOf": [
             {
               "$ref": "#/definitions/PodTarget"
@@ -1734,7 +1752,7 @@
           ]
         },
         {
-          "description": "<!--${internal}--> Mirror a rollout.",
+          "description": "<!--${internal}--> [Argo Rollout](https://argoproj.github.io/argo-rollouts/#how-does-it-work).",
           "allOf": [
             {
               "$ref": "#/definitions/RolloutTarget"
@@ -1742,7 +1760,7 @@
           ]
         },
         {
-          "description": "<!--${internal}--> Mirror a Job.\n\nOnly supported when `copy_target` is enabled.",
+          "description": "<!--${internal}--> [Job](https://kubernetes.io/docs/concepts/workloads/controllers/job/).\n\nOnly supported when `copy_target` is enabled.",
           "allOf": [
             {
               "$ref": "#/definitions/JobTarget"
@@ -1750,7 +1768,7 @@
           ]
         },
         {
-          "description": "<!--${internal}--> Targets a [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/).\n\nOnly supported when `copy_target` is enabled.",
+          "description": "<!--${internal}--> [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/).\n\nOnly supported when `copy_target` is enabled.",
           "allOf": [
             {
               "$ref": "#/definitions/CronJobTarget"
@@ -1758,10 +1776,18 @@
           ]
         },
         {
-          "description": "<!--${internal}--> Targets a [StatefulSet](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/).\n\nOnly supported when `copy_target` is enabled.",
+          "description": "<!--${internal}--> [StatefulSet](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/).",
           "allOf": [
             {
               "$ref": "#/definitions/StatefulSetTarget"
+            }
+          ]
+        },
+        {
+          "description": "<!--${internal}--> [Service](https://kubernetes.io/docs/concepts/services-networking/service/).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ServiceTarget"
             }
           ]
         },
