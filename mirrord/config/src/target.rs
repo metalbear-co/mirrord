@@ -94,7 +94,7 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
 /// }
 /// ```
 ///
-/// Setup above will result in a session targeting the `bear-pod` Kubernetes pod
+/// The setup above will result in a session targeting the `bear-pod` Kubernetes pod
 /// in the user's default namespace. Target container will be chosen by mirrord.
 ///
 /// Shortened setup with target container:
