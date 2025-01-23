@@ -1,12 +1,12 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
-use k8s_openapi::api::apps::v1::StatefulSet;
+use k8s_openapi::api::core::v1::Service;
 
 use super::{ResolvedResource, RuntimeDataFromLabels};
 use crate::error::{KubeApiError, Result};
 
-impl RuntimeDataFromLabels for ResolvedResource<StatefulSet> {
-    type Resource = StatefulSet;
+impl RuntimeDataFromLabels for ResolvedResource<Service> {
+    type Resource = Service;
 
     fn name(&self) -> Cow<str> {
         self.resource
@@ -25,7 +25,7 @@ impl RuntimeDataFromLabels for ResolvedResource<StatefulSet> {
         resource
             .spec
             .as_ref()
-            .and_then(|spec| spec.selector.match_labels.clone())
-            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.matchLabels"))
+            .and_then(|spec| spec.selector.clone())
+            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector"))
     }
 }
