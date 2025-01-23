@@ -134,8 +134,6 @@ impl fmt::Debug for OperatorSession {
 
 /// Connection to an operator target.
 pub struct OperatorSessionConnection {
-    /// Unique ID of this connection.
-    pub stream_id: WebSocketStreamId,
     /// Session of this connection.
     pub session: OperatorSession,
     /// Used to send [`ClientMessage`]s to the operator.
@@ -150,7 +148,6 @@ impl fmt::Debug for OperatorSessionConnection {
         let rx_queued_messages = self.rx.len();
 
         f.debug_struct("OperatorSessionConnection")
-            .field("stream_id", &self.stream_id)
             .field("session", &self.session)
             .field("tx_closed", &self.tx.is_closed())
             .field("tx_queued_messages", &tx_queued_messages)
@@ -669,15 +666,10 @@ impl OperatorApi<PreparedClientCert> {
         };
 
         let mut connection_subtask = progress.subtask("connecting to the target");
-        let (tx, rx, stream_id) = Self::connect_target(&self.client, &session, None).await?;
+        let (tx, rx) = Self::connect_target(&self.client, &session).await?;
         connection_subtask.success(Some("connected to the target"));
 
-        Ok(OperatorSessionConnection {
-            stream_id,
-            session,
-            tx,
-            rx,
-        })
+        Ok(OperatorSessionConnection { session, tx, rx })
     }
 
     /// Returns client cert's public key in a base64 encoded string (no padding same like in
@@ -752,7 +744,6 @@ impl OperatorApi<PreparedClientCert> {
     pub async fn connect_in_existing_session<R>(
         layer_config: &LayerConfig,
         session: OperatorSession,
-        websocket_stream_id: Option<WebSocketStreamId>,
         reporter: &mut R,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
@@ -778,15 +769,9 @@ impl OperatorApi<PreparedClientCert> {
             .map_err(KubeApiError::from)
             .map_err(OperatorApiError::CreateKubeClient)?;
 
-        let (tx, rx, stream_id) =
-            Self::connect_target(&client, &session, websocket_stream_id).await?;
+        let (tx, rx) = Self::connect_target(&client, &session).await?;
 
-        Ok(OperatorSessionConnection {
-            stream_id,
-            tx,
-            rx,
-            session,
-        })
+        Ok(OperatorSessionConnection { tx, rx, session })
     }
 
     /// Creates websocket connection to the operator target.
@@ -794,33 +779,23 @@ impl OperatorApi<PreparedClientCert> {
     async fn connect_target(
         client: &Client,
         session: &OperatorSession,
-        websocket_stream_id: Option<WebSocketStreamId>,
-    ) -> OperatorApiResult<(
-        Sender<ClientMessage>,
-        Receiver<DaemonMessage>,
-        WebSocketStreamId,
-    )> {
+    ) -> OperatorApiResult<(Sender<ClientMessage>, Receiver<DaemonMessage>)> {
         let request = Request::builder()
             .uri(&session.connect_url)
             .header(SESSION_ID_HEADER, session.id.to_string())
             .body(vec![])
             .map_err(OperatorApiError::ConnectRequestBuildError)?;
 
-        let connection = upgrade::connect_ws(client, request, websocket_stream_id.as_ref())
+        let connection = upgrade::connect_ws(client, request)
             .await
             .map_err(|error| OperatorApiError::KubeError {
                 error,
                 operation: OperatorOperation::WebsocketConnection,
             })?;
 
-        tracing::debug!(
-            websocket_stream_id = ?connection.stream_id,
-            "upgraded ws"
-        );
-
-        let (tx, rx) =
-            ConnectionWrapper::wrap(connection.stream, session.operator_protocol_version.clone());
-
-        Ok((tx, rx, connection.stream_id))
+        Ok(ConnectionWrapper::wrap(
+            connection,
+            session.operator_protocol_version.clone(),
+        ))
     }
 }

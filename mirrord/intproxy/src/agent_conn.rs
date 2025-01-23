@@ -9,7 +9,6 @@ use std::{
     ops::ControlFlow,
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
 };
 
 use mirrord_analytics::{NullReporter, Reporter};
@@ -18,9 +17,7 @@ use mirrord_kube::{
     api::{kubernetes::AgentKubernetesConnectInfo, wrap_raw_connection},
     error::KubeApiError,
 };
-use mirrord_operator::client::{
-    error::OperatorApiError, OperatorApi, OperatorSession, WebSocketStreamId,
-};
+use mirrord_operator::client::{error::OperatorApiError, OperatorApi, OperatorSession};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -105,11 +102,10 @@ pub enum AgentConnectInfo {
 }
 
 #[derive(Debug, Default)]
-pub enum ReconnectParams {
+pub enum ReconnectFlow {
     ConnectInfo {
         config: LayerConfig,
         connect_info: AgentConnectInfo,
-        websocket_stream_id: WebSocketStreamId,
     },
 
     #[default]
@@ -126,7 +122,7 @@ pub enum ReconnectParams {
 pub struct AgentConnection {
     pub agent_tx: Sender<ClientMessage>,
     pub agent_rx: Receiver<DaemonMessage>,
-    pub reconnect: ReconnectParams,
+    pub reconnect: ReconnectFlow,
 }
 
 impl AgentConnection {
@@ -135,25 +131,19 @@ impl AgentConnection {
     pub async fn new<R: Reporter>(
         config: &LayerConfig,
         connect_info: Option<AgentConnectInfo>,
-        websocket_stream_id: Option<WebSocketStreamId>,
         analytics: &mut R,
     ) -> Result<Self, AgentConnectionError> {
         let (agent_tx, agent_rx, reconnect) = match connect_info {
             Some(AgentConnectInfo::Operator(session)) => {
-                let connection = OperatorApi::connect_in_existing_session(
-                    config,
-                    session.clone(),
-                    websocket_stream_id,
-                    analytics,
-                )
-                .await?;
+                let connection =
+                    OperatorApi::connect_in_existing_session(config, session.clone(), analytics)
+                        .await?;
                 (
                     connection.tx,
                     connection.rx,
-                    ReconnectParams::ConnectInfo {
+                    ReconnectFlow::ConnectInfo {
                         config: config.clone(),
                         connect_info: AgentConnectInfo::Operator(session),
-                        websocket_stream_id: connection.stream_id,
                     },
                 )
             }
@@ -187,12 +177,12 @@ impl AgentConnection {
                     wrap_raw_connection(stream)
                 };
 
-                (tx, rx, ReconnectParams::default())
+                (tx, rx, ReconnectFlow::default())
             }
 
             Some(AgentConnectInfo::DirectKubernetes(connect_info)) => {
                 let (tx, rx) = portforward::create_connection(config, connect_info.clone()).await?;
-                (tx, rx, ReconnectParams::default())
+                (tx, rx, ReconnectFlow::default())
             }
 
             None => {
@@ -202,7 +192,7 @@ impl AgentConnection {
                     .ok_or(AgentConnectionError::NoConnectionMethod)?;
                 let stream = TcpStream::connect(address).await?;
                 let (tx, rx) = wrap_raw_connection(stream);
-                (tx, rx, ReconnectParams::default())
+                (tx, rx, ReconnectFlow::default())
             }
         };
 
@@ -220,7 +210,7 @@ impl AgentConnection {
         Ok(Self {
             agent_tx,
             agent_rx,
-            reconnect: ReconnectParams::Break,
+            reconnect: ReconnectFlow::Break,
         })
     }
 
@@ -242,8 +232,6 @@ impl BackgroundTask for AgentConnection {
     type MessageOut = ProxyMessage;
 
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        let mut sleep = Box::pin(tokio::time::sleep(Duration::from_secs(30)));
-
         loop {
             tokio::select! {
                 msg = message_bus.recv() => match msg {
@@ -266,10 +254,6 @@ impl BackgroundTask for AgentConnection {
                     }
                     Some(msg) => message_bus.send(ProxyMessage::FromAgent(msg)).await,
                 },
-
-                _ = sleep.as_mut() => {
-                    break Err(AgentChannelError);
-                }
             }
         }
     }
@@ -283,11 +267,10 @@ impl RestartableBackgroundTask for AgentConnection {
         message_bus: &mut MessageBus<Self>,
     ) -> ControlFlow<Self::Error> {
         match &self.reconnect {
-            ReconnectParams::Break => ControlFlow::Break(error),
-            ReconnectParams::ConnectInfo {
+            ReconnectFlow::Break => ControlFlow::Break(error),
+            ReconnectFlow::ConnectInfo {
                 config,
                 connect_info,
-                websocket_stream_id,
             } => {
                 let retry_strategy = ExponentialBackoff::from_millis(50).map(jitter).take(10);
 
@@ -295,7 +278,6 @@ impl RestartableBackgroundTask for AgentConnection {
                     AgentConnection::new(
                         config,
                         connect_info.clone().into(),
-                        Some(*websocket_stream_id),
                         &mut NullReporter::default(),
                     )
                     .await
