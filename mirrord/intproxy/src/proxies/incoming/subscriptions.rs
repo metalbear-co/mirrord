@@ -163,7 +163,7 @@ impl Subscription {
 ///    subscription requests
 /// 4. Subscription response from the agent most of the time cannot be tracked down to its
 ///    subscription request
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct SubscriptionsManager {
     remote_ports: RemoteResources<(Port, SocketAddr)>,
     subscriptions: HashMap<Port, Subscription>,

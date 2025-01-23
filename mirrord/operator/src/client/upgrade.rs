@@ -21,8 +21,6 @@ use tokio_tungstenite::{tungstenite::protocol::Role, WebSocketStream};
 
 const WS_PROTOCOL: &str = "v4.channel.k8s.io";
 
-pub type WebSocketStreamId = [u8; 16];
-
 // Verify upgrade response according to RFC6455.
 // Based on `tungstenite` and added subprotocol verification.
 async fn verify_response(res: Response<Body>, key: &HeaderValue) -> Result<Response<Body>> {
@@ -98,7 +96,7 @@ async fn verify_response(res: Response<Body>, key: &HeaderValue) -> Result<Respo
 
 /// Generate a random key for the `Sec-WebSocket-Key` header.
 /// This must be nonce consisting of a randomly selected 16-byte value in base64.
-fn sec_websocket_key_header() -> HeaderValue {
+fn sec_websocket_key() -> HeaderValue {
     let random: [u8; 16] = rand::random();
     base64::engine::general_purpose::STANDARD
         .encode(random)
@@ -122,7 +120,7 @@ pub async fn connect_ws(
         http::header::SEC_WEBSOCKET_VERSION,
         HeaderValue::from_static("13"),
     );
-    let key = sec_websocket_key_header();
+    let key = sec_websocket_key();
     parts
         .headers
         .insert(http::header::SEC_WEBSOCKET_KEY, key.clone());

@@ -44,8 +44,6 @@ mod discovery;
 pub mod error;
 mod upgrade;
 
-pub use upgrade::WebSocketStreamId;
-
 /// State of client's [`Certificate`] the should be attached to some operator requests.
 pub trait ClientCertificateState: fmt::Debug {}
 
