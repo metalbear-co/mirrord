@@ -195,7 +195,7 @@ impl ContainerVariant for PodTargetedVariant<'_> {
         let agent = self.agent_config();
         let params = self.params();
 
-        let tolerations = agent.tolerations.as_ref().unwrap_or(&DEFAULT_TOLERATIONS);
+        let tolerations = agent.tolerations.clone();
 
         let env = self.runtime_data.mesh.map(|mesh_vendor| {
             let mut env = vec![EnvVar {
@@ -216,7 +216,7 @@ impl ContainerVariant for PodTargetedVariant<'_> {
         let update = Pod {
             spec: Some(PodSpec {
                 restart_policy: Some("Never".to_string()),
-                tolerations: Some(tolerations.clone()),
+                tolerations,
                 host_pid: Some(true),
                 node_name: Some(runtime_data.node_name.clone()),
                 volumes: Some(vec![
