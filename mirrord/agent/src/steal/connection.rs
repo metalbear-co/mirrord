@@ -724,7 +724,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::net::SocketAddr;
+    use std::{net::SocketAddr, time::Duration};
 
     use bytes::Bytes;
     use futures::{future::BoxFuture, FutureExt};
@@ -983,6 +983,8 @@ mod test {
 
     /// Verifies that [`TcpConnectionStealer`] removes client's port subscriptions
     /// when client's [`TcpStealerApi`] is dropped.
+    #[rstest]
+    #[timeout(Duration::from_secs(5))]
     #[tokio::test]
     async fn cleanup_on_client_closed() {
         let (command_tx, command_rx) = mpsc::channel(8);
@@ -1022,11 +1024,7 @@ mod test {
 
         std::mem::drop(api);
 
-        let notification =
-            tokio::time::timeout(std::time::Duration::from_secs(5), redirect_rx.recv())
-                .await
-                .unwrap()
-                .unwrap();
+        let notification = redirect_rx.recv().await.unwrap();
         assert_eq!(notification, RedirectNotification::Removed(80));
     }
 }
