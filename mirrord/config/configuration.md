@@ -1561,13 +1561,23 @@ Accepts a single value, or multiple values separated by `;`.
 
 ## target {#root-target}
 
-Specifies the target and namespace to mirror, see [`path`](#target-path) for a list of
-accepted values for the `target` option.
+Specifies the target and namespace to target.
 
 The simplified configuration supports:
 
-- `pod/{sample-pod}/[container]/{sample-container}`;
-- `deployment/{sample-deployment}/[container]/{sample-container}`;
+- `targetless`
+- `pod/{pod-name}[/container/{container-name}]`;
+- `deployment/{deployment-name}[/container/{container-name}]`;
+- `rollout/{rollout-name}[/container/{container-name}]`;
+- `job/{job-name}[/container/{container-name}]`;
+- `cronjob/{cronjob-name}[/container/{container-name}]`;
+- `statefulset/{statefulset-name}[/container/{container-name}]`;
+- `service/{service-name}[/container/{container-name}]`;
+
+Please note that:
+
+- `job`, `cronjob`, `statefulset` and `service` targets require the mirrord Operator
+- `job` and `cronjob` targets require the [`copy_target`](#feature-copy_target) feature
 
 Shortened setup:
 
@@ -1577,38 +1587,63 @@ Shortened setup:
 }
 ```
 
+The setup above will result in a session targeting the `bear-pod` Kubernetes pod
+in the user's default namespace. A target container will be chosen by mirrord.
+
+Shortened setup with target container:
+
+```json
+{
+  "target": "pod/bear-pod/container/bear-pod-container"
+}
+```
+
+The setup above will result in a session targeting the `bear-pod-container` container
+in the `bear-pod` Kubernetes pod in the user's default namespace.
+
 Complete setup:
 
 ```json
 {
  "target": {
    "path": {
-     "pod": "bear-pod"
+     "pod": "bear-pod",
+     "container": "bear-pod-container"
    },
-   "namespace": "default"
+   "namespace": "bear-pod-namespace"
  }
 }
 ```
+
+The setup above will result in a session targeting the `bear-pod-container` container
+in the `bear-pod` Kubernetes pod in the `bear-pod-namespace` namespace.
 
 ### target.namespace {#target-namespace}
 
 Namespace where the target lives.
 
-Defaults to `"default"`.
+Defaults to the Kubernetes user's default namespace (defined in Kubernetes context).
 
 ### target.path {#target-path}
 
-Specifies the running pod (or deployment) to mirror.
+Specifies the Kubernetes resource to target.
 
-Note: Deployment level steal/mirroring is available only in mirrord for Teams
-If you use it without it, it will choose a random pod replica to work with.
+Note: targeting services and whole workloads is available only in mirrord for Teams.
+If you target a workload without the mirrord Operator, it will choose a random pod replica
+to work with.
 
 Supports:
-- `pod/{sample-pod}`;
-- `deployment/{sample-deployment}`;
-- `container/{sample-container}`;
-- `containername/{sample-container}`.
-- `job/{sample-job}` (only when [`copy_target`](#feature-copy_target) is enabled).
+- `targetless`
+- `pod/{pod-name}[/container/{container-name}]`;
+- `deployment/{deployment-name}[/container/{container-name}]`;
+- `rollout/{rollout-name}[/container/{container-name}]`;
+- `job/{job-name}[/container/{container-name}]`; (requires mirrord Operator and the
+  [`copy_target`](#feature-copy_target) feature)
+- `cronjob/{cronjob-name}[/container/{container-name}]`; (requires mirrord Operator and the
+  [`copy_target`](#feature-copy_target) feature)
+- `statefulset/{statefulset-name}[/container/{container-name}]`; (requires mirrord
+  Operator)
+- `service/{service-name}[/container/{container-name}]`; (requires mirrord Operator)
 
 ## telemetry {#root-telemetry}
 Controls whether or not mirrord sends telemetry data to MetalBear cloud.

@@ -615,6 +615,8 @@ impl OperatorApi<PreparedClientCert> {
 
             // `targetless` has no `RuntimeData`!
             if matches!(target, ResolvedTarget::Targetless(_)).not() {
+                // Extracting runtime data asserts that the user can see at least one pod from the
+                // workload/service targets.
                 let runtime_data = target
                     .runtime_data(self.client(), target.namespace())
                     .await?;

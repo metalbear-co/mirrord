@@ -544,6 +544,7 @@ impl OperatorClusterRole {
                     "cronjobs".to_owned(),
                     "statefulsets".to_owned(),
                     "statefulsets/scale".to_owned(),
+                    "services".to_owned(),
                 ]),
                 verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
                 ..Default::default()
