@@ -1752,7 +1752,7 @@
           ]
         },
         {
-          "description": "<!--${internal}--> [Rollout](https://argoproj.github.io/argo-rollouts/#how-does-it-work).",
+          "description": "<!--${internal}--> [Argo Rollout](https://argoproj.github.io/argo-rollouts/#how-does-it-work).",
           "allOf": [
             {
               "$ref": "#/definitions/RolloutTarget"

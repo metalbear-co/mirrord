@@ -1587,8 +1587,8 @@ Shortened setup:
 }
 ```
 
-Setup above will result in a session targeting the `bear-pod` Kubernetes pod
-in the user's default namespace. Target container will be chosen by mirrord.
+The setup above will result in a session targeting the `bear-pod` Kubernetes pod
+in the user's default namespace. A target container will be chosen by mirrord.
 
 Shortened setup with target container:
 
@@ -1598,7 +1598,7 @@ Shortened setup with target container:
 }
 ```
 
-Setup above will result in a session targeting the `bear-pod-container` container
+The setup above will result in a session targeting the `bear-pod-container` container
 in the `bear-pod` Kubernetes pod in the user's default namespace.
 
 Complete setup:
@@ -1615,14 +1615,14 @@ Complete setup:
 }
 ```
 
-Setup above will result in a session targeting the `bear-pod-container` container
+The setup above will result in a session targeting the `bear-pod-container` container
 in the `bear-pod` Kubernetes pod in the `bear-pod-namespace` namespace.
 
 ### target.namespace {#target-namespace}
 
 Namespace where the target lives.
 
-Defaults to Kubernetes user's default namespace (defined in Kubernetes context).
+Defaults to the Kubernetes user's default namespace (defined in Kubernetes context).
 
 ### target.path {#target-path}
 
