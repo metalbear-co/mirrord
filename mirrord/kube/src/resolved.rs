@@ -276,18 +276,20 @@ impl ResolvedTarget<false> {
         Ok(target)
     }
 
-    /// Checks if the target can be used as a via the mirrord Operator.
+    /// Checks if the target can be used via the mirrord Operator.
     ///
     /// This is implemented in the CLI only to improve the UX (skip roundtrip to the operator).
     ///
     /// Performs only basic checks:
     /// 1. [`ResolvedTarget::Deployment`], [`ResolvedTarget::Rollout`],
-    ///    [`ResolvedTarget::StatefulSet`] and [`ResolvedTarget::Service`] - has available replicas
-    ///    and the target container, if specified, is found in the spec
+    ///    [`ResolvedTarget::StatefulSet`] - has available replicas and the target container, if
+    ///    specified, is found in the spec
     /// 2. [`ResolvedTarget::Pod`] - passes target-readiness check, see [`RuntimeData::from_pod`].
     /// 3. [`ResolvedTarget::Job`] and [`ResolvedTarget::CronJob`] - error, as this is `copy_target`
     ///    exclusive
     /// 4. [`ResolvedTarget::Targetless`] - no check (not applicable)
+    /// 5. [`ResolvedTarget::Service`] - has available replicas and the target container, if
+    ///    specified, is found in at least one of them
     #[tracing::instrument(level = Level::DEBUG, skip(client), ret, err)]
     pub async fn assert_valid_mirrord_target(
         self,
