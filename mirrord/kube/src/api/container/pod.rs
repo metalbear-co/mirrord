@@ -20,6 +20,7 @@ use crate::api::{
     runtime::RuntimeData,
 };
 
+/// The `targetless` agent variant is created by this, see its [`PodVariant::as_update`].
 pub struct PodVariant<'c> {
     agent: &'c AgentConfig,
     command_line: Vec<String>,
@@ -66,8 +67,6 @@ impl ContainerVariant for PodVariant<'_> {
             params,
             ..
         } = self;
-
-        let tolerations = agent.tolerations.as_ref().unwrap_or(&DEFAULT_TOLERATIONS);
 
         let resources = agent.resources.clone().unwrap_or_else(|| {
             serde_json::from_value(serde_json::json!({
@@ -124,7 +123,7 @@ impl ContainerVariant for PodVariant<'_> {
             spec: Some(PodSpec {
                 restart_policy: Some("Never".to_string()),
                 image_pull_secrets,
-                tolerations: Some(tolerations.clone()),
+                tolerations: agent.tolerations.clone(),
                 node_selector: Some(node_selector),
                 service_account_name: agent.service_account.clone(),
                 containers: vec![Container {
@@ -148,6 +147,10 @@ impl ContainerVariant for PodVariant<'_> {
     }
 }
 
+/// The `targeted` agent variant is created by this.
+///
+/// It builds on top of [`PodVariant`], merging spec, etc from there. See
+/// [`PodTargetedVariant::as_update`].
 pub struct PodTargetedVariant<'c> {
     inner: PodVariant<'c>,
     runtime_data: &'c RuntimeData,
@@ -195,6 +198,8 @@ impl ContainerVariant for PodTargetedVariant<'_> {
         let agent = self.agent_config();
         let params = self.params();
 
+        let tolerations = agent.tolerations.as_ref().unwrap_or(&DEFAULT_TOLERATIONS);
+
         let env = self.runtime_data.mesh.map(|mesh_vendor| {
             let mut env = vec![EnvVar {
                 name: "MIRRORD_AGENT_IN_SERVICE_MESH".into(),
@@ -214,6 +219,7 @@ impl ContainerVariant for PodTargetedVariant<'_> {
         let update = Pod {
             spec: Some(PodSpec {
                 restart_policy: Some("Never".to_string()),
+                tolerations: Some(tolerations.clone()),
                 host_pid: Some(true),
                 node_name: Some(runtime_data.node_name.clone()),
                 volumes: Some(vec![

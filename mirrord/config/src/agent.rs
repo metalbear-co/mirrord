@@ -240,12 +240,14 @@ pub struct AgentConfig {
 
     /// ### agent.tolerations {#agent-tolerations}
     ///
-    /// Set pod tolerations. (not with ephemeral agents)
-    /// Default is
+    /// Set pod tolerations. (not with ephemeral agents).
+    ///
+    /// Defaults to `operator: Exists`.
+    ///
     /// ```json
     /// [
     ///   {
-    ///     "operator": "Exists"
+    ///     "key": "meow", "operator": "Exists", "effect": "NoSchedule"
     ///   }
     /// ]
     /// ```
