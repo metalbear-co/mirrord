@@ -36,7 +36,7 @@ use local_ip_address::local_ip;
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
 use mirrord_config::LayerConfig;
 use mirrord_intproxy::agent_conn::{AgentConnection, ConnectionTlsError};
-use mirrord_protocol::DaemonCodec;
+use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, LogLevel, LogMessage};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::server::TlsStream;
 use tokio_util::{either::Either, sync::CancellationToken};
@@ -101,6 +101,12 @@ pub async fn proxy(listen_port: u16, watch: drain::Watch) -> CliResult<()> {
         config.external_proxy.start_idle_timeout,
     )));
 
+    let mut own_agent_conn = connect_and_ping(&config, agent_connect_info.clone(), &mut analytics)
+        .await
+        .inspect_err(|_| cancellation_token.cancel())?;
+
+    let mut ping_pong_ticker = tokio::time::interval(Duration::from_secs(30));
+
     loop {
         tokio::select! {
             conn = listener.accept() => {
@@ -145,6 +151,53 @@ pub async fn proxy(listen_port: u16, watch: drain::Watch) -> CliResult<()> {
                 } else {
                     break;
                 }
+            }
+
+            message = own_agent_conn.agent_rx.recv() => {
+                tracing::debug!(?message, "received message on own connection");
+
+                match message {
+                    Some(DaemonMessage::Pong) => continue,
+                    Some(DaemonMessage::LogMessage(LogMessage {
+                        level: LogLevel::Error,
+                        message,
+                    })) => {
+                        tracing::error!("agent log: {message}");
+                    }
+                    Some(DaemonMessage::LogMessage(LogMessage {
+                        level: LogLevel::Warn,
+                        message,
+                    })) => {
+                        tracing::warn!("agent log: {message}");
+                    }
+                    Some(DaemonMessage::Close(reason)) => {
+                        return Err(
+                            ExternalProxyError::PingPongFailed(format!(
+                                "agent closed connection with message: {reason}"
+                            )).into()
+                        );
+                    }
+                    Some(message) => {
+                        return Err(
+                            ExternalProxyError::PingPongFailed(format!(
+                                "agent sent an unexpected message: {message:?}"
+                            )).into()
+                        );
+                    }
+                    None => {
+                        return Err(
+                            ExternalProxyError::PingPongFailed(
+                                "agent unexpectedly closed connection".to_string(),
+                            ).into()
+                        );
+                    }
+                }
+            }
+
+            _ = ping_pong_ticker.tick() => {
+                tracing::debug!("sending ping");
+
+                let _ = own_agent_conn.agent_tx.send(ClientMessage::Ping).await;
             }
 
             _ = initial_connection_timeout.as_mut(), if connections.load(Ordering::Relaxed) == 0 => {
