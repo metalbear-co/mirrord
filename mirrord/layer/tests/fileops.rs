@@ -345,6 +345,9 @@ async fn go_stat(
         ))))
         .await;
 
+    intproxy.expect_statfs("/tmp/test_file.txt").await;
+    intproxy.expect_fstatfs(fd).await;
+
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;
 }

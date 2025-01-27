@@ -44,7 +44,7 @@ pub enum ResponseError {
     #[error("Remote operation expected fd `{0}` to be a file, but it's a directory!")]
     NotFile(u64),
 
-    #[error("IO failed for remote operation with `{0}!")]
+    #[error("IO failed for remote operation: `{0}!")]
     RemoteIO(RemoteIOError),
 
     #[error(transparent)]

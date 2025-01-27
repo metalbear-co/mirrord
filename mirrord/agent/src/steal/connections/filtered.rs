@@ -1,5 +1,6 @@
 use std::{
-    collections::HashMap, future::Future, marker::PhantomData, net::SocketAddr, pin::Pin, sync::Arc,
+    collections::HashMap, future::Future, marker::PhantomData, net::SocketAddr, ops::Not, pin::Pin,
+    sync::Arc,
 };
 
 use bytes::Bytes;
@@ -28,9 +29,13 @@ use tokio::{
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::Level;
 
-use super::{ConnectionMessageIn, ConnectionMessageOut, ConnectionTaskError};
+use super::{
+    ConnectionMessageIn, ConnectionMessageOut, ConnectionTaskError,
+    STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION,
+};
 use crate::{
     http::HttpVersion,
+    metrics::STEAL_FILTERED_CONNECTION_SUBSCRIPTION,
     steal::{connections::unfiltered::UnfilteredStealTask, http::HttpFilter},
     util::ClientId,
 };
@@ -368,6 +373,18 @@ pub struct FilteredStealTask<T> {
 
     /// For safely downcasting the IO stream after an HTTP upgrade. See [`Upgraded::downcast`].
     _io_type: PhantomData<fn() -> T>,
+
+    /// Helps us figuring out if we should update some metrics in the `Drop` implementation.
+    metrics_updated: bool,
+}
+
+impl<T> Drop for FilteredStealTask<T> {
+    fn drop(&mut self) {
+        if self.metrics_updated.not() {
+            STEAL_FILTERED_CONNECTION_SUBSCRIPTION
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
 }
 
 impl<T> FilteredStealTask<T>
@@ -443,6 +460,8 @@ where
             }
         };
 
+        STEAL_FILTERED_CONNECTION_SUBSCRIPTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
         Self {
             connection_id,
             original_destination,
@@ -453,6 +472,7 @@ where
             blocked_requests: Default::default(),
             next_request_id: Default::default(),
             _io_type: Default::default(),
+            metrics_updated: false,
         }
     }
 
@@ -638,6 +658,8 @@ where
                         queued_raw_data.remove(&client_id);
                         self.subscribed.insert(client_id, false);
                         self.blocked_requests.retain(|key, _| key.0 != client_id);
+
+                        STEAL_FILTERED_CONNECTION_SUBSCRIPTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                     },
                 },
 
@@ -646,7 +668,10 @@ where
 
                     // No more requests from the `FilteringService`.
                     // HTTP connection is closed and possibly upgraded.
-                    None => break,
+                    None => {
+                        STEAL_FILTERED_CONNECTION_SUBSCRIPTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                        break
+                    }
                 }
             }
         }
@@ -788,15 +813,18 @@ where
     ) -> Result<(), ConnectionTaskError> {
         let res = self.run_until_http_ends(tx.clone(), rx).await;
 
+        STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        self.metrics_updated = true;
+
         let res = match res {
             Ok(data) => self.run_after_http_ends(data, tx.clone(), rx).await,
             Err(e) => Err(e),
         };
 
-        for (client_id, subscribed) in self.subscribed {
-            if subscribed {
+        for (client_id, subscribed) in self.subscribed.iter() {
+            if *subscribed {
                 tx.send(ConnectionMessageOut::Closed {
-                    client_id,
+                    client_id: *client_id,
                     connection_id: self.connection_id,
                 })
                 .await?;

@@ -34,6 +34,9 @@ pub static RMDIR_VERSION: LazyLock<VersionReq> =
 pub static OPEN_LOCAL_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.13.3".parse().expect("Bad Identifier"));
 
+pub static STATFS_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.16.0".parse().expect("Bad Identifier"));
+
 /// Internal version of Metadata across operating system (macOS, Linux)
 /// Only mutual attributes
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default)]
@@ -411,6 +414,11 @@ pub struct XstatRequest {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct XstatFsRequest {
     pub fd: u64,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct StatFsRequest {
+    pub path: PathBuf,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

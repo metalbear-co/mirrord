@@ -1,8 +1,11 @@
 #![deny(missing_docs)]
 
+use std::net::SocketAddr;
+
 use clap::{Parser, Subcommand};
 use mirrord_protocol::{
-    MeshVendor, AGENT_IPV6_ENV, AGENT_NETWORK_INTERFACE_ENV, AGENT_OPERATOR_CERT_ENV,
+    MeshVendor, AGENT_IPV6_ENV, AGENT_METRICS_ENV, AGENT_NETWORK_INTERFACE_ENV,
+    AGENT_OPERATOR_CERT_ENV,
 };
 
 const DEFAULT_RUNTIME: &str = "containerd";
@@ -27,6 +30,10 @@ pub struct Args {
     /// Interface to use
     #[arg(short = 'i', long, env = AGENT_NETWORK_INTERFACE_ENV)]
     pub network_interface: Option<String>,
+
+    /// Controls whether metrics are enabled, and the address to set up the metrics server.
+    #[arg(long, env = AGENT_METRICS_ENV)]
+    pub metrics: Option<SocketAddr>,
 
     /// Return an error after accepting the first client connection, in order to test agent error
     /// cleanup.

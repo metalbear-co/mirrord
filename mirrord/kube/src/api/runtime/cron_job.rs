@@ -17,9 +17,7 @@ impl RuntimeDataFromLabels for CronJobTarget {
         self.container.as_deref()
     }
 
-    async fn get_selector_match_labels(
-        resource: &Self::Resource,
-    ) -> Result<BTreeMap<String, String>> {
+    fn get_selector_match_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>> {
         resource
             .spec
             .as_ref()

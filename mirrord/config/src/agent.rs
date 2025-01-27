@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, path::Path};
+use std::{collections::HashMap, fmt, net::SocketAddr, path::Path};
 
 use k8s_openapi::api::core::v1::{ResourceRequirements, Toleration};
 use mirrord_analytics::CollectAnalytics;
@@ -240,12 +240,14 @@ pub struct AgentConfig {
 
     /// ### agent.tolerations {#agent-tolerations}
     ///
-    /// Set pod tolerations. (not with ephemeral agents)
-    /// Default is
+    /// Set pod tolerations. (not with ephemeral agents).
+    ///
+    /// Defaults to `operator: Exists`.
+    ///
     /// ```json
     /// [
     ///   {
-    ///     "operator": "Exists"
+    ///     "key": "meow", "operator": "Exists", "effect": "NoSchedule"
     ///   }
     /// ]
     /// ```
@@ -322,7 +324,11 @@ pub struct AgentConfig {
     ///
     /// ```json
     /// {
-    ///   "annotations": { "cats.io/inject": "enabled" }
+    ///   "annotations": {
+    ///     "cats.io/inject": "enabled"
+    ///     "prometheus.io/scrape": "true",
+    ///     "prometheus.io/port": "9000"
+    ///   }
     /// }
     /// ```
     pub annotations: Option<HashMap<String, String>>,
@@ -349,6 +355,20 @@ pub struct AgentConfig {
     /// }
     /// ```
     pub service_account: Option<String>,
+
+    /// ### agent.metrics {#agent-metrics}
+    ///
+    /// Enables prometheus metrics for the agent pod.
+    ///
+    /// You might need to add annotations to the agent pod depending on how prometheus is
+    /// configured to scrape for metrics.
+    ///
+    /// ```json
+    /// {
+    ///   "metrics": "0.0.0.0:9000"
+    /// }
+    /// ```
+    pub metrics: Option<SocketAddr>,
 
     /// <!--${internal}-->
     /// Create an agent that returns an error after accepting the first client. For testing

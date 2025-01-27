@@ -119,7 +119,8 @@ pub static MIRRORD_RESOLVED_CONFIG_ENV: &str = "MIRRORD_RESOLVED_CONFIG";
 ///     "communication_timeout": 30,
 ///     "startup_timeout": 360,
 ///     "network_interface": "eth0",
-///     "flush_connections": true
+///     "flush_connections": true,
+///     "metrics": "0.0.0.0:9000",
 ///   },
 ///   "feature": {
 ///     "env": {
@@ -536,6 +537,14 @@ impl LayerConfig {
                     "The copy target feature is not compatible with a targetless agent, \
                     please either disable this option or specify a target."
                         .into(),
+                ));
+            }
+
+            if matches!(self.target.path, Some(Target::Service(..))) {
+                return Err(ConfigError::Conflict(
+                    "The copy target feature is not yet supported with service targets, \
+                    please either disable this option or specify an exact workload covered by this service."
+                        .into()
                 ));
             }
 

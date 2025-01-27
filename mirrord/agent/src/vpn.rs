@@ -17,7 +17,7 @@ use tokio::{
 };
 
 use crate::{
-    error::{AgentError, Result},
+    error::{AgentError, AgentResult},
     util::run_thread_in_namespace,
     watched_task::{TaskStatus, WatchedTask},
 };
@@ -75,7 +75,7 @@ impl VpnApi {
 
     /// Sends the [`ClientVpn`] message to the background task.
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) async fn layer_message(&mut self, message: ClientVpn) -> Result<()> {
+    pub(crate) async fn layer_message(&mut self, message: ClientVpn) -> AgentResult<()> {
         if self.layer_tx.send(message).await.is_ok() {
             Ok(())
         } else {
@@ -84,7 +84,7 @@ impl VpnApi {
     }
 
     /// Receives a [`ServerVpn`] message from the background task.
-    pub(crate) async fn daemon_message(&mut self) -> Result<ServerVpn> {
+    pub(crate) async fn daemon_message(&mut self) -> AgentResult<ServerVpn> {
         match self.daemon_rx.recv().await {
             Some(msg) => Ok(msg),
             None => Err(self.task_status.unwrap_err().await),
@@ -121,7 +121,7 @@ impl AsyncRawSocket {
     }
 }
 
-async fn create_raw_socket() -> Result<AsyncRawSocket> {
+async fn create_raw_socket() -> AgentResult<AsyncRawSocket> {
     let index = nix::net::if_::if_nametoindex("eth0")
         .map_err(|err| AgentError::VpnError(err.to_string()))?;
 
@@ -139,7 +139,7 @@ async fn create_raw_socket() -> Result<AsyncRawSocket> {
 }
 
 #[tracing::instrument(level = "debug", ret)]
-async fn resolve_interface() -> Result<(IpAddr, IpAddr, IpAddr)> {
+async fn resolve_interface() -> AgentResult<(IpAddr, IpAddr, IpAddr)> {
     // Connect to a remote address so we can later get the default network interface.
     let temporary_socket = UdpSocket::bind("0.0.0.0:0").await?;
     temporary_socket.connect("8.8.8.8:53").await?;
@@ -209,7 +209,7 @@ impl fmt::Debug for VpnTask {
     }
 }
 
-fn interface_index_to_sock_addr(index: i32) -> Result<SockAddr> {
+fn interface_index_to_sock_addr(index: i32) -> AgentResult<SockAddr> {
     let mut addr_storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
     let len = std::mem::size_of::<libc::sockaddr_ll>() as libc::socklen_t;
     let macs = procfs::net::arp().map_err(|err| AgentError::VpnError(err.to_string()))?;
@@ -245,7 +245,7 @@ impl VpnTask {
     }
 
     #[allow(clippy::indexing_slicing)]
-    async fn run(mut self) -> Result<()> {
+    async fn run(mut self) -> AgentResult<()> {
         // so host won't respond with RST to our packets.
         // TODO: need to do it for UDP as well to avoid ICMP unreachable.
         let output = std::process::Command::new("iptables")
@@ -318,7 +318,7 @@ impl VpnTask {
         &mut self,
         message: ClientVpn,
         network_configuration: &NetworkConfiguration,
-    ) -> Result<()> {
+    ) -> AgentResult<()> {
         match message {
             // We make connection to the requested address, split the stream into halves with
             // `io::split`, and put them into respective maps.

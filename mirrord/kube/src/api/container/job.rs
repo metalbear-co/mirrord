@@ -285,7 +285,6 @@ mod test {
                         "restartPolicy": "Never",
                         "imagePullSecrets": agent.image_pull_secrets,
                         "nodeSelector": {},
-                        "tolerations": *DEFAULT_TOLERATIONS,
                         "serviceAccountName": agent.service_account,
                         "containers": [
                             {

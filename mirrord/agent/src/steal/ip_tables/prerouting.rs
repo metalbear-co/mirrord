@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use mirrord_protocol::Port;
 
 use crate::{
-    error::Result,
+    error::AgentResult,
     steal::ip_tables::{chain::IPTableChain, IPTables, Redirect, IPTABLE_PREROUTING},
 };
 
@@ -18,13 +18,13 @@ where
 {
     const ENTRYPOINT: &'static str = "PREROUTING";
 
-    pub fn create(ipt: Arc<IPT>) -> Result<Self> {
+    pub fn create(ipt: Arc<IPT>) -> AgentResult<Self> {
         let managed = IPTableChain::create(ipt, IPTABLE_PREROUTING.to_string())?;
 
         Ok(PreroutingRedirect { managed })
     }
 
-    pub fn load(ipt: Arc<IPT>) -> Result<Self> {
+    pub fn load(ipt: Arc<IPT>) -> AgentResult<Self> {
         let managed = IPTableChain::load(ipt, IPTABLE_PREROUTING.to_string())?;
 
         Ok(PreroutingRedirect { managed })
@@ -36,7 +36,7 @@ impl<IPT> Redirect for PreroutingRedirect<IPT>
 where
     IPT: IPTables + Send + Sync,
 {
-    async fn mount_entrypoint(&self) -> Result<()> {
+    async fn mount_entrypoint(&self) -> AgentResult<()> {
         self.managed.inner().add_rule(
             Self::ENTRYPOINT,
             &format!("-j {}", self.managed.chain_name()),
@@ -45,7 +45,7 @@ where
         Ok(())
     }
 
-    async fn unmount_entrypoint(&self) -> Result<()> {
+    async fn unmount_entrypoint(&self) -> AgentResult<()> {
         self.managed.inner().remove_rule(
             Self::ENTRYPOINT,
             &format!("-j {}", self.managed.chain_name()),
@@ -54,7 +54,7 @@ where
         Ok(())
     }
 
-    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> AgentResult<()> {
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 
@@ -63,7 +63,7 @@ where
         Ok(())
     }
 
-    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> Result<()> {
+    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> AgentResult<()> {
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 

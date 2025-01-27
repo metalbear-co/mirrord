@@ -14,12 +14,17 @@ use tokio_stream::{
     StreamMap, StreamNotifyClose,
 };
 
-use super::messages::{SniffedConnection, SnifferCommand, SnifferCommandInner};
+use super::{
+    messages::{SniffedConnection, SnifferCommand, SnifferCommandInner},
+    AgentResult,
+};
 use crate::{error::AgentError, util::ClientId, watched_task::TaskStatus};
 
 /// Interface used by clients to interact with the
 /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer). Multiple instances of this struct operate
 /// on a single sniffer instance.
+///
+/// Enabled by the `mirror` feature for incoming traffic.
 pub(crate) struct TcpSnifferApi {
     /// Id of the client using this struct.
     client_id: ClientId,
@@ -55,7 +60,7 @@ impl TcpSnifferApi {
         client_id: ClientId,
         sniffer_sender: Sender<SnifferCommand>,
         mut task_status: TaskStatus,
-    ) -> Result<Self, AgentError> {
+    ) -> AgentResult<Self> {
         let (sender, receiver) = mpsc::channel(Self::CONNECTION_CHANNEL_SIZE);
 
         let command = SnifferCommand {
@@ -79,7 +84,7 @@ impl TcpSnifferApi {
 
     /// Send the given command to the connected
     /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
-    async fn send_command(&mut self, command: SnifferCommandInner) -> Result<(), AgentError> {
+    async fn send_command(&mut self, command: SnifferCommandInner) -> AgentResult<()> {
         let command = SnifferCommand {
             client_id: self.client_id,
             command,
@@ -94,7 +99,7 @@ impl TcpSnifferApi {
 
     /// Return the next message from the connected
     /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
-    pub async fn recv(&mut self) -> Result<(DaemonTcp, Option<LogMessage>), AgentError> {
+    pub async fn recv(&mut self) -> AgentResult<(DaemonTcp, Option<LogMessage>)> {
         tokio::select! {
             conn = self.receiver.recv() => match conn {
                 Some(conn) => {
@@ -158,27 +163,26 @@ impl TcpSnifferApi {
         }
     }
 
-    /// Tansform the given message into a [`SnifferCommand`] and pass it to the connected
+    /// Tansforms a [`LayerTcp`] message into a [`SnifferCommand`] and passes it to the connected
     /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
-    pub async fn handle_client_message(&mut self, message: LayerTcp) -> Result<(), AgentError> {
+    pub async fn handle_client_message(&mut self, message: LayerTcp) -> AgentResult<()> {
         match message {
             LayerTcp::PortSubscribe(port) => {
                 let (tx, rx) = oneshot::channel();
                 self.send_command(SnifferCommandInner::Subscribe(port, tx))
                     .await?;
                 self.subscriptions_in_progress.push(rx);
-
                 Ok(())
             }
 
             LayerTcp::PortUnsubscribe(port) => {
                 self.send_command(SnifferCommandInner::UnsubscribePort(port))
-                    .await
+                    .await?;
+                Ok(())
             }
 
             LayerTcp::ConnectionUnsubscribe(connection_id) => {
                 self.connections.remove(&connection_id);
-
                 Ok(())
             }
         }

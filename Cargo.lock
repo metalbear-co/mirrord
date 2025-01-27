@@ -584,9 +584,9 @@ checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 
 [[package]]
 name = "aws-config"
-version = "1.5.14"
+version = "1.5.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f40e82e858e02445402906e454a73e244c7f501fcae198977585946c48e8697"
+checksum = "dc47e70fc35d054c8fcd296d47a61711f043ac80534a10b4f741904f81e73a90"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -676,9 +676,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-sqs"
-version = "1.55.0"
+version = "1.56.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2db64ffe78706b344b7c9b620f96c3c0655745e006b87bad20f424562656a0dd"
+checksum = "ca6b2f438a99c189b89279ca88ed05c2bcdcfcacd7d78a821b8650166040b9b4"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -698,9 +698,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-sso"
-version = "1.55.0"
+version = "1.56.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33993c0b054f4251ff2946941b56c26b582677303eeca34087594eb901ece022"
+checksum = "12e057fdcb8842de9b83592a70f5b4da0ee10bc0ad278247da1425a742a444d7"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -720,9 +720,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-ssooidc"
-version = "1.56.0"
+version = "1.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3bd3ceba74a584337a8f3839c818f14f1a2288bfd24235120ff22d7e17a0dd54"
+checksum = "a120ade4a44691b3c5c2ff2fa61b14ed331fdc218397f61ab48d66593012ae2a"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -742,9 +742,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-sts"
-version = "1.56.0"
+version = "1.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07835598e52dd354368429cb2abf447ce523ea446d0a533a63cb42cd0d2d9280"
+checksum = "115fd4fb663817ed595a5ee4f1649d7aacd861d47462323cb37576ce89271b93"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -937,6 +937,7 @@ checksum = "edca88bc138befd0323b20752846e6587272d3b03b0343c8ea28a6f819e6e71f"
 dependencies = [
  "async-trait",
  "axum-core",
+ "axum-macros",
  "base64 0.22.1",
  "bytes",
  "futures-util",
@@ -985,6 +986,17 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "axum-macros"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57d123550fa8d071b7255cb0cc04dc302baa6c8c4a79f55701552684d8399bce"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.96",
 ]
 
 [[package]]
@@ -1657,9 +1669,9 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cpufeatures"
-version = "0.2.16"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16b80225097f2e5ae4e7179dd2266824648f3e2f49d9134d584b76389d31c4c3"
+checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
 dependencies = [
  "libc",
 ]
@@ -2401,7 +2413,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "libc",
 ]
@@ -3519,7 +3531,7 @@ checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
 
 [[package]]
 name = "issue1317"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "actix-web",
  "env_logger 0.11.6",
@@ -3529,7 +3541,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "errno 0.3.10",
  "libc",
@@ -3538,7 +3550,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776portnot53"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "libc",
  "socket2",
@@ -3546,14 +3558,14 @@ dependencies = [
 
 [[package]]
 name = "issue1899"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "issue2001"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "libc",
 ]
@@ -3874,7 +3886,7 @@ checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
 
 [[package]]
 name = "listen_ports"
-version = "3.130.0"
+version = "3.131.0"
 
 [[package]]
 name = "litemap"
@@ -4115,7 +4127,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "actix-codec",
  "clap",
@@ -4171,10 +4183,11 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "actix-codec",
  "async-trait",
+ "axum",
  "bollard",
  "bytes",
  "clap",
@@ -4199,10 +4212,12 @@ dependencies = [
  "nix 0.29.0",
  "oci-spec",
  "pnet",
- "procfs",
+ "procfs 0.17.0",
+ "prometheus",
  "rand",
  "rawsocket",
  "rcgen",
+ "reqwest 0.12.12",
  "rstest",
  "rustls 0.23.21",
  "semver 1.0.25",
@@ -4226,7 +4241,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "assert-json-diff",
  "base64 0.22.1",
@@ -4240,7 +4255,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "bcder",
  "chrono",
@@ -4261,7 +4276,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "base64 0.22.1",
  "bimap",
@@ -4285,7 +4300,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4295,7 +4310,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "bincode",
  "drain",
@@ -4311,7 +4326,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "bytes",
  "exponential-backoff",
@@ -4339,7 +4354,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy-protocol"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "bincode",
  "mirrord-protocol",
@@ -4349,7 +4364,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "actix-codec",
  "async-stream",
@@ -4373,7 +4388,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "actix-codec",
  "base64 0.22.1",
@@ -4416,7 +4431,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4425,7 +4440,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4435,7 +4450,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -4468,7 +4483,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "enum_dispatch",
  "indicatif",
@@ -4478,7 +4493,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.15.1"
+version = "1.16.1"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -4502,7 +4517,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "apple-codesign",
  "object 0.36.7",
@@ -4515,7 +4530,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-vpn"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "futures",
  "ipnet",
@@ -4842,9 +4857,9 @@ checksum = "1261fe7e33c73b354eab43b1273a57c8f967d0391e80353e51f764ac02cf6775"
 
 [[package]]
 name = "openssl-probe"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
+checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
 
 [[package]]
 name = "option-ext"
@@ -4863,7 +4878,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.130.0"
+version = "3.131.0"
 
 [[package]]
 name = "outref"
@@ -5411,6 +5426,19 @@ dependencies = [
 
 [[package]]
 name = "procfs"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "731e0d9356b0c25f16f33b5be79b1c57b562f141ebfcdb0ad8ac2c13a24293b4"
+dependencies = [
+ "bitflags 2.8.0",
+ "hex",
+ "lazy_static",
+ "procfs-core 0.16.0",
+ "rustix",
+]
+
+[[package]]
+name = "procfs"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc5b72d8145275d844d4b5f6d4e1eef00c8cd889edb6035c21675d1bb1f45c9f"
@@ -5419,8 +5447,18 @@ dependencies = [
  "chrono",
  "flate2",
  "hex",
- "procfs-core",
+ "procfs-core 0.17.0",
  "rustix",
+]
+
+[[package]]
+name = "procfs-core"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d3554923a69f4ce04c4a754260c338f505ce22642d3830e049a399fc2059a29"
+dependencies = [
+ "bitflags 2.8.0",
+ "hex",
 ]
 
 [[package]]
@@ -5432,6 +5470,23 @@ dependencies = [
  "bitflags 2.8.0",
  "chrono",
  "hex",
+]
+
+[[package]]
+name = "prometheus"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d33c28a30771f7f96db69893f78b857f7450d7e0237e9c8fc6427a81bae7ed1"
+dependencies = [
+ "cfg-if",
+ "fnv",
+ "lazy_static",
+ "libc",
+ "memchr",
+ "parking_lot",
+ "procfs 0.16.0",
+ "protobuf",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -5485,6 +5540,12 @@ checksum = "cc2f1e56baa61e93533aebc21af4d2134b70f66275e0fcdf3cbe43d77ff7e8fc"
 dependencies = [
  "prost",
 ]
+
+[[package]]
+name = "protobuf"
+version = "2.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "quick-error"
@@ -5924,14 +5985,14 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "libc",
 ]
@@ -5947,7 +6008,7 @@ dependencies = [
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.130.0"
+version = "3.131.0"
 dependencies = [
  "tokio",
 ]
@@ -6108,9 +6169,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-pki-types"
-version = "1.10.1"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2bf47e6ff922db3825eb750c4e2ff784c6ff8fb9e13046ef6a1d1c5401b0b37"
+checksum = "917ce264624a4b4db1c364dcc35bfca9ded014d0a958cd47ad3e960e988ea51c"
 dependencies = [
  "web-time",
 ]
@@ -7589,9 +7650,9 @@ dependencies = [
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.14"
+version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adb9e6ca4f869e1180728b7950e35922a7fc6397f7b641499e8f3ef06e50dc83"
+checksum = "11cd88e12b17c6494200a9c1b683a04fcac9573ed74cd1b62aeb2727c5592243"
 
 [[package]]
 name = "unicode-linebreak"

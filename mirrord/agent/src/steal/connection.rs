@@ -28,11 +28,12 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::warn;
+use tracing::{warn, Level};
 
-use super::http::HttpResponseFallback;
+use super::{http::HttpResponseFallback, subscriptions::PortRedirector};
 use crate::{
-    error::{AgentError, Result},
+    error::{AgentError, AgentResult},
+    metrics::HTTP_REQUEST_IN_PROGRESS_COUNT,
     steal::{
         connections::{
             ConnectionMessageIn, ConnectionMessageOut, StolenConnection, StolenConnections,
@@ -55,6 +56,22 @@ struct MatchedHttpRequest {
 }
 
 impl MatchedHttpRequest {
+    fn new(
+        connection_id: ConnectionId,
+        port: Port,
+        request_id: RequestId,
+        request: Request<Incoming>,
+    ) -> Self {
+        HTTP_REQUEST_IN_PROGRESS_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        Self {
+            connection_id,
+            port,
+            request_id,
+            request,
+        }
+    }
+
     async fn into_serializable(self) -> Result<HttpRequest<InternalHttpBody>, hyper::Error> {
         let (
             Parts {
@@ -181,7 +198,7 @@ impl Client {
                         let frames = frames
                             .into_iter()
                             .map(InternalHttpBodyFrame::try_from)
-                            .filter_map(Result::ok)
+                            .filter_map(AgentResult::ok)
                             .collect();
                         let message =
                             DaemonTcp::HttpRequestChunked(ChunkedRequest::Start(HttpRequest {
@@ -210,7 +227,7 @@ impl Client {
                             let frames = frames
                                 .into_iter()
                                 .map(InternalHttpBodyFrame::try_from)
-                                .filter_map(Result::ok)
+                                .filter_map(AgentResult::ok)
                                 .collect();
                             let message = DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
                                 ChunkedHttpBody {
@@ -273,9 +290,11 @@ struct TcpStealerConfig {
 /// Meant to be run (see [`TcpConnectionStealer::start`]) in a separate thread while the agent
 /// lives. When handling port subscription requests, this struct manipulates iptables, so it should
 /// run in the same network namespace as the agent's target.
-pub(crate) struct TcpConnectionStealer {
+///
+/// Enabled by the `steal` feature for incoming traffic.
+pub(crate) struct TcpConnectionStealer<Redirector: PortRedirector = IpTablesRedirector> {
     /// For managing active subscriptions and port redirections.
-    port_subscriptions: PortSubscriptions<IpTablesRedirector>,
+    port_subscriptions: PortSubscriptions<Redirector>,
 
     /// For receiving commands.
     /// The other end of this channel belongs to [`TcpStealerApi`](super::api::TcpStealerApi).
@@ -285,7 +304,7 @@ pub(crate) struct TcpConnectionStealer {
     clients: HashMap<ClientId, Client>,
 
     /// [`Future`](std::future::Future)s that resolve when stealer clients close.
-    clients_closed: FuturesUnordered<ChannelClosedFuture<StealerCommand>>,
+    clients_closed: FuturesUnordered<ChannelClosedFuture>,
 
     /// Set of active connections stolen by [`Self::port_subscriptions`].
     connections: StolenConnections,
@@ -294,39 +313,53 @@ pub(crate) struct TcpConnectionStealer {
     support_ipv6: bool,
 }
 
-impl TcpConnectionStealer {
+impl TcpConnectionStealer<IpTablesRedirector> {
     pub const TASK_NAME: &'static str = "Stealer";
 
     /// Initializes a new [`TcpConnectionStealer`], but doesn't start the actual work.
     /// You need to call [`TcpConnectionStealer::start`] to do so.
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = Level::TRACE, err)]
     pub(crate) async fn new(
         command_rx: Receiver<StealerCommand>,
         support_ipv6: bool,
-    ) -> Result<Self, AgentError> {
+    ) -> AgentResult<Self> {
         let config = envy::prefixed("MIRRORD_AGENT_")
             .from_env::<TcpStealerConfig>()
             .unwrap_or_default();
 
-        let port_subscriptions = {
-            let redirector = IpTablesRedirector::new(
-                config.stealer_flush_connections,
-                config.pod_ips,
-                support_ipv6,
-            )
-            .await?;
+        let redirector = IpTablesRedirector::new(
+            config.stealer_flush_connections,
+            config.pod_ips,
+            support_ipv6,
+        )
+        .await?;
 
-            PortSubscriptions::new(redirector, 4)
-        };
+        Ok(Self::with_redirector(command_rx, support_ipv6, redirector))
+    }
+}
 
-        Ok(Self {
-            port_subscriptions,
+impl<Redirector> TcpConnectionStealer<Redirector>
+where
+    Redirector: PortRedirector,
+    Redirector::Error: std::error::Error + Into<AgentError>,
+    AgentError: From<Redirector::Error>,
+{
+    /// Creates a new stealer.
+    ///
+    /// Given [`PortRedirector`] will be used to capture incoming connections.
+    pub(crate) fn with_redirector(
+        command_rx: Receiver<StealerCommand>,
+        support_ipv6: bool,
+        redirector: Redirector,
+    ) -> Self {
+        Self {
+            port_subscriptions: PortSubscriptions::new(redirector, 4),
             command_rx,
             clients: HashMap::with_capacity(8),
             clients_closed: Default::default(),
             connections: StolenConnections::with_capacity(8),
             support_ipv6,
-        })
+        }
     }
 
     /// Runs the tcp traffic stealer loop.
@@ -341,10 +374,7 @@ impl TcpConnectionStealer {
     ///
     /// 4. Handling the cancellation of the whole stealer thread (given `cancellation_token`).
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) async fn start(
-        mut self,
-        cancellation_token: CancellationToken,
-    ) -> Result<(), AgentError> {
+    pub(crate) async fn start(mut self, cancellation_token: CancellationToken) -> AgentResult<()> {
         loop {
             tokio::select! {
                 command = self.command_rx.recv() => {
@@ -362,10 +392,12 @@ impl TcpConnectionStealer {
                 },
 
                 accept = self.port_subscriptions.next_connection() => match accept {
-                    Ok((stream, peer)) => self.incoming_connection(stream, peer).await?,
+                    Ok((stream, peer)) => {
+                        self.incoming_connection(stream, peer).await?;
+                    }
                     Err(error) => {
                         tracing::error!(?error, "Failed to accept a stolen connection");
-                        break Err(error);
+                        break Err(error.into());
                     }
                 },
 
@@ -380,7 +412,11 @@ impl TcpConnectionStealer {
 
     /// Handles a new remote connection that was stolen by [`Self::port_subscriptions`].
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn incoming_connection(&mut self, stream: TcpStream, peer: SocketAddr) -> Result<()> {
+    async fn incoming_connection(
+        &mut self,
+        stream: TcpStream,
+        peer: SocketAddr,
+    ) -> AgentResult<()> {
         let mut real_address = orig_dst::orig_dst_addr(&stream)?;
         let localhost = if self.support_ipv6 && real_address.is_ipv6() {
             IpAddr::V6(Ipv6Addr::LOCALHOST)
@@ -416,10 +452,7 @@ impl TcpConnectionStealer {
 
     /// Handles an update from one of the connections in [`Self::connections`].
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn handle_connection_update(
-        &mut self,
-        update: ConnectionMessageOut,
-    ) -> Result<(), AgentError> {
+    async fn handle_connection_update(&mut self, update: ConnectionMessageOut) -> AgentResult<()> {
         match update {
             ConnectionMessageOut::Closed {
                 connection_id,
@@ -526,12 +559,7 @@ impl TcpConnectionStealer {
                     return Ok(());
                 }
 
-                let matched_request = MatchedHttpRequest {
-                    connection_id,
-                    request,
-                    request_id: id,
-                    port,
-                };
+                let matched_request = MatchedHttpRequest::new(connection_id, port, id, request);
 
                 if !client.send_request_async(matched_request) {
                     self.connections
@@ -550,11 +578,18 @@ impl TcpConnectionStealer {
         Ok(())
     }
 
-    /// Helper function to handle [`Command::PortSubscribe`] messages.
+    /// Helper function to handle [`Command::PortSubscribe`] messages for the `TcpStealer`.
     ///
-    /// Inserts a subscription into [`Self::port_subscriptions`].
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn port_subscribe(&mut self, client_id: ClientId, port_steal: StealType) -> Result<()> {
+    /// Checks if [`StealType`] is a valid [`HttpFilter`], then inserts a subscription into
+    /// [`Self::port_subscriptions`].
+    ///
+    /// - Returns: `true` if this is an HTTP filtered subscription.
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    async fn port_subscribe(
+        &mut self,
+        client_id: ClientId,
+        port_steal: StealType,
+    ) -> AgentResult<bool> {
         let spec = match port_steal {
             StealType::All(port) => Ok((port, None)),
             StealType::FilteredHttp(port, filter) => Regex::new(&format!("(?i){filter}"))
@@ -565,6 +600,11 @@ impl TcpConnectionStealer {
                 .map_err(|err| BadHttpFilterExRegex(filter, err.to_string())),
         };
 
+        let filtered = spec
+            .as_ref()
+            .map(|(_, filter)| filter.is_some())
+            .unwrap_or_default();
+
         let res = match spec {
             Ok((port, filter)) => self.port_subscriptions.add(client_id, port, filter).await?,
             Err(e) => Err(e.into()),
@@ -573,18 +613,18 @@ impl TcpConnectionStealer {
         let client = self.clients.get(&client_id).expect("client not found");
         let _ = client.tx.send(DaemonTcp::SubscribeResult(res)).await;
 
-        Ok(())
+        Ok(filtered)
     }
 
     /// Removes the client with `client_id` from our list of clients (layers), and also removes
     /// their subscriptions from [`Self::port_subscriptions`] and all their open
     /// connections.
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn close_client(&mut self, client_id: ClientId) -> Result<(), AgentError> {
+    async fn close_client(&mut self, client_id: ClientId) -> AgentResult<()> {
         self.port_subscriptions.remove_all(client_id).await?;
 
         let client = self.clients.remove(&client_id).expect("client not found");
-        for connection in client.subscribed_connections.into_iter() {
+        for connection in client.subscribed_connections {
             self.connections
                 .send(connection, ConnectionMessageIn::Unsubscribed { client_id })
                 .await;
@@ -612,12 +652,14 @@ impl TcpConnectionStealer {
     }
 
     /// Handles [`Command`]s that were received by [`TcpConnectionStealer::command_rx`].
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn handle_command(&mut self, command: StealerCommand) -> Result<(), AgentError> {
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    async fn handle_command(&mut self, command: StealerCommand) -> AgentResult<()> {
         let StealerCommand { client_id, command } = command;
 
         match command {
             Command::NewClient(daemon_tx, protocol_version) => {
+                self.clients_closed
+                    .push(ChannelClosedFuture::new(daemon_tx.clone(), client_id));
                 self.clients.insert(
                     client_id,
                     Client {
@@ -644,7 +686,7 @@ impl TcpConnectionStealer {
             }
 
             Command::PortSubscribe(port_steal) => {
-                self.port_subscribe(client_id, port_steal).await?
+                self.port_subscribe(client_id, port_steal).await?;
             }
 
             Command::PortUnsubscribe(port) => {
@@ -682,7 +724,7 @@ impl TcpConnectionStealer {
 
 #[cfg(test)]
 mod test {
-    use std::net::SocketAddr;
+    use std::{net::SocketAddr, time::Duration};
 
     use bytes::Bytes;
     use futures::{future::BoxFuture, FutureExt};
@@ -693,18 +735,75 @@ mod test {
         service::Service,
     };
     use hyper_util::rt::TokioIo;
-    use mirrord_protocol::tcp::{ChunkedRequest, DaemonTcp, InternalHttpBodyFrame};
+    use mirrord_protocol::{
+        tcp::{ChunkedRequest, DaemonTcp, Filter, HttpFilter, InternalHttpBodyFrame, StealType},
+        Port,
+    };
     use rstest::rstest;
     use tokio::{
         net::{TcpListener, TcpStream},
         sync::{
             mpsc::{self, Receiver, Sender},
-            oneshot,
+            oneshot, watch,
         },
     };
     use tokio_stream::wrappers::ReceiverStream;
+    use tokio_util::sync::CancellationToken;
 
-    use crate::steal::connection::{Client, MatchedHttpRequest};
+    use super::AgentError;
+    use crate::{
+        steal::{
+            connection::{Client, MatchedHttpRequest},
+            subscriptions::PortRedirector,
+            TcpConnectionStealer, TcpStealerApi,
+        },
+        watched_task::TaskStatus,
+    };
+
+    /// Notification about a requested redirection operation.
+    ///
+    /// Produced by [`NotifyingRedirector`].
+    #[derive(Debug, PartialEq, Eq)]
+    enum RedirectNotification {
+        Added(Port),
+        Removed(Port),
+        Cleanup,
+    }
+
+    /// Test [`PortRedirector`] that never fails and notifies about requested operations using an
+    /// [`mpsc::channel`].
+    struct NotifyingRedirector(Sender<RedirectNotification>);
+
+    #[async_trait::async_trait]
+    impl PortRedirector for NotifyingRedirector {
+        type Error = AgentError;
+
+        async fn add_redirection(&mut self, port: Port) -> Result<(), Self::Error> {
+            self.0
+                .send(RedirectNotification::Added(port))
+                .await
+                .unwrap();
+            Ok(())
+        }
+
+        async fn remove_redirection(&mut self, port: Port) -> Result<(), Self::Error> {
+            self.0
+                .send(RedirectNotification::Removed(port))
+                .await
+                .unwrap();
+            Ok(())
+        }
+
+        async fn cleanup(&mut self) -> Result<(), Self::Error> {
+            self.0.send(RedirectNotification::Cleanup).await.unwrap();
+            Ok(())
+        }
+
+        async fn next_connection(&mut self) -> Result<(TcpStream, SocketAddr), Self::Error> {
+            std::future::pending().await
+        }
+    }
+
     async fn prepare_dummy_service() -> (
         SocketAddr,
         Receiver<(Request<Incoming>, oneshot::Sender<Response<Empty<Bytes>>>)>,
@@ -880,5 +979,52 @@ mod test {
         assert!(x.is_none());
 
         let _ = response_tx.send(Response::new(Empty::default()));
+    }
+
+    /// Verifies that [`TcpConnectionStealer`] removes client's port subscriptions
+    /// when client's [`TcpStealerApi`] is dropped.
+    #[rstest]
+    #[timeout(Duration::from_secs(5))]
+    #[tokio::test]
+    async fn cleanup_on_client_closed() {
+        let (command_tx, command_rx) = mpsc::channel(8);
+        let (redirect_tx, mut redirect_rx) = mpsc::channel(2);
+        let stealer = TcpConnectionStealer::with_redirector(
+            command_rx,
+            false,
+            NotifyingRedirector(redirect_tx),
+        );
+
+        tokio::spawn(stealer.start(CancellationToken::new()));
+
+        let (_dummy_tx, dummy_rx) = watch::channel(None);
+        let task_status = TaskStatus::dummy(TcpConnectionStealer::TASK_NAME, dummy_rx);
+        let mut api = TcpStealerApi::new(
+            0,
+            command_tx.clone(),
+            task_status,
+            8,
+            mirrord_protocol::VERSION.clone(),
+        )
+        .await
+        .unwrap();
+
+        api.port_subscribe(StealType::FilteredHttpEx(
+            80,
+            HttpFilter::Header(Filter::new("user: test".into()).unwrap()),
+        ))
+        .await
+        .unwrap();
+
+        let response = api.recv().await.unwrap();
+        assert_eq!(response, DaemonTcp::SubscribeResult(Ok(80)));
+
+        let notification = redirect_rx.recv().await.unwrap();
+        assert_eq!(notification, RedirectNotification::Added(80));
+
+        std::mem::drop(api);
+
+        let notification = redirect_rx.recv().await.unwrap();
+        assert_eq!(notification, RedirectNotification::Removed(80));
     }
 }
