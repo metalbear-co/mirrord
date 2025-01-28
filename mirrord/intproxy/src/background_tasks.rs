@@ -20,6 +20,7 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt, StreamMap, StreamNotifyC
 pub struct MessageBus<T: BackgroundTask> {
     tx: Sender<T::MessageOut>,
     rx: Receiver<T::MessageIn>,
+    // Note if adding any new fields do look at `MessageBus::cast`'s unsafe block.
 }
 
 impl<T: BackgroundTask> MessageBus<T> {
@@ -37,10 +38,13 @@ impl<T: BackgroundTask> MessageBus<T> {
         }
     }
 
+    /// Cast `&mut MessageBus<T>` as `&mut MessageBus<R>` only if they share the same message types
     pub fn cast<R>(&mut self) -> &mut MessageBus<R>
     where
         R: BackgroundTask<MessageIn = T::MessageIn, MessageOut = T::MessageOut>,
     {
+        // SAFETY: since MessageBus consits of only the `Sender` and `Receiver` and both should
+        // match.
         unsafe { &mut *(self as *mut MessageBus<T> as *mut MessageBus<R>) }
     }
 
@@ -148,9 +152,9 @@ where
     type MessageIn = T::MessageIn;
     type MessageOut = T::MessageOut;
 
-    async fn run(&mut self, bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         let RestartableBackgroundTaskWrapper { task } = self;
-        let task_bus = bus.cast();
+        let task_bus = message_bus.cast();
 
         match task.run(task_bus).await {
             Err(run_error) => {
