@@ -81,6 +81,10 @@ pub async fn proxy(listen_port: u16, watch: drain::Watch) -> CliResult<()> {
     let mut analytics = AnalyticsReporter::new(config.telemetry, execution_kind, watch);
     (&config).collect_analytics(analytics.get_mut());
 
+    // This connection is just to keep the agent alive as long as the client side is running.
+    let mut own_agent_conn =
+        connect_and_ping(&config, agent_connect_info.clone(), &mut analytics).await?;
+
     let tls_acceptor = create_external_proxy_tls_acceptor(&config).await?;
     let listener = create_listen_socket(SocketAddr::new(
         local_ip().unwrap_or_else(|_| Ipv4Addr::UNSPECIFIED.into()),
@@ -100,11 +104,6 @@ pub async fn proxy(listen_port: u16, watch: drain::Watch) -> CliResult<()> {
     let mut initial_connection_timeout = Box::pin(tokio::time::sleep(Duration::from_secs(
         config.external_proxy.start_idle_timeout,
     )));
-
-    // This connection is just to keep the agent alive as long as the client side is running.
-    let mut own_agent_conn = connect_and_ping(&config, agent_connect_info.clone(), &mut analytics)
-        .await
-        .inspect_err(|_| cancellation_token.cancel())?;
 
     let mut ping_pong_ticker = tokio::time::interval(Duration::from_secs(30));
 
