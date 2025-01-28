@@ -236,7 +236,7 @@ pub struct AgentConfig {
     /// Disables specified Linux capabilities for the agent container.
     /// If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and
     /// `SYS_ADMIN`.
-    /// 
+    ///
     /// Has no effect when using the targetless mode,
     /// as targetless agent containers have no capabilities.
     pub disabled_capabilities: Option<Vec<LinuxCapability>>,
@@ -294,7 +294,7 @@ pub struct AgentConfig {
     /// Defaults to `false`.
     ///
     /// Might be needed in strict environments such as Bottlerocket.
-    /// 
+    ///
     /// Has no effect when using the targetless mode,
     /// as targetless agent containers are never privileged.
     #[config(default = false)]
