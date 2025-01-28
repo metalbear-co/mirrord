@@ -284,7 +284,7 @@
         },
         "disabled_capabilities": {
           "title": "agent.disabled_capabilities {#agent-disabled_capabilities}",
-          "description": "Disables specified Linux capabilities for the agent container. If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and `SYS_ADMIN`.",
+          "description": "Disables specified Linux capabilities for the agent container. If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and `SYS_ADMIN`.\n\nHas no effect when using the targetless mode, as targetless agent containers have no capabilities.",
           "type": [
             "array",
             "null"
@@ -423,7 +423,7 @@
         },
         "privileged": {
           "title": "agent.privileged {#agent-privileged}",
-          "description": "Run the mirror agent as privileged container. Defaults to `false`.\n\nMight be needed in strict environments such as Bottlerocket.",
+          "description": "Run the mirror agent as privileged container. Defaults to `false`.\n\nMight be needed in strict environments such as Bottlerocket.\n\nHas no effect when using the targetless mode, as targetless agent containers are never privileged.",
           "type": [
             "boolean",
             "null"
