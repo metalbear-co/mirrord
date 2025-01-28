@@ -291,9 +291,6 @@ mod test {
                                 "name": "mirrord-agent",
                                 "image": agent.image(),
                                 "imagePullPolicy": agent.image_pull_policy,
-                                "securityContext": {
-                                    "privileged": agent.privileged
-                                },
                                 "command": ["./mirrord-agent", "-l", "3000", "targetless"],
                                 "env": [
                                     { "name": "RUST_LOG", "value": agent.log_level },
