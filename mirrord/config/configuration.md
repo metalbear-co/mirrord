@@ -196,6 +196,9 @@ Disables specified Linux capabilities for the agent container.
 If nothing is disabled here, agent uses `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE` and
 `SYS_ADMIN`.
 
+Has no effect when using the targetless mode,
+as targetless agent containers have no capabilities.
+
 ### agent.dns {#agent-dns}
 
 ### agent.ephemeral {#agent-ephemeral}
@@ -354,6 +357,9 @@ Run the mirror agent as privileged container.
 Defaults to `false`.
 
 Might be needed in strict environments such as Bottlerocket.
+
+Has no effect when using the targetless mode,
+as targetless agent containers are never privileged.
 
 ### agent.resources {#agent-resources}
 
