@@ -413,6 +413,11 @@ impl IntProxy {
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     async fn handle_connection_refresh(&self) -> Result<(), IntProxyError> {
         self.task_txs
+            .simple
+            .send(SimpleProxyMessage::ConnectionRefresh)
+            .await;
+
+        self.task_txs
             .incoming
             .send(IncomingProxyMessage::ConnectionRefresh)
             .await;
