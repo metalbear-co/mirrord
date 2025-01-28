@@ -205,7 +205,8 @@ pub(super) struct ExecParams {
     pub disable_version_check: bool,
 
     /// Load config from config file
-    #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
     pub config_file: Option<PathBuf>,
 
     /// Kube context to use from Kubeconfig
@@ -427,7 +428,8 @@ pub(super) struct PortForwardArgs {
     pub disable_version_check: bool,
 
     /// Load config from config file
-    #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
     pub config_file: Option<PathBuf>,
 
     /// Kube context to use from Kubeconfig
@@ -588,7 +590,7 @@ pub(super) enum OperatorCommand {
     /// Print operator status
     Status {
         /// Specify config file to use
-        #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
+        #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
         config_file: Option<PathBuf>,
     },
     /// Operator session management commands.
@@ -728,7 +730,7 @@ impl ListTargetArgs {
 #[derive(Args, Debug)]
 pub(super) struct ExtensionExecArgs {
     /// Specify config file to use
-    #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./mirrord.json", num_args = 0..=1)]
     pub config_file: Option<PathBuf>,
     /// Specify target
     #[arg(short = 't')]
@@ -767,7 +769,7 @@ pub(super) enum DiagnoseCommand {
     /// Check network connectivity and provide RTT (latency) statistics.
     Latency {
         /// Specify config file to use
-        #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
+        #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
         config_file: Option<PathBuf>,
     },
 }
@@ -897,7 +899,8 @@ pub(super) struct VpnArgs {
     pub namespace: Option<String>,
 
     /// Load config from config file
-    #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
+    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
     pub config_file: Option<PathBuf>,
 
     #[cfg(target_os = "macos")]

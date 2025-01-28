@@ -134,10 +134,6 @@ impl ContainerVariant for PodVariant<'_> {
                     env: Some(env),
                     // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                     resources: Some(resources),
-                    security_context: Some(SecurityContext {
-                        privileged: Some(agent.privileged),
-                        ..Default::default()
-                    }),
                     ..Default::default()
                 }],
                 ..Default::default()
