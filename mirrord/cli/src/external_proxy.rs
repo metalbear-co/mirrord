@@ -101,6 +101,7 @@ pub async fn proxy(listen_port: u16, watch: drain::Watch) -> CliResult<()> {
         config.external_proxy.start_idle_timeout,
     )));
 
+    // This connection is just to keep the agent alive as long as the client side is running.
     let mut own_agent_conn = connect_and_ping(&config, agent_connect_info.clone(), &mut analytics)
         .await
         .inspect_err(|_| cancellation_token.cancel())?;
