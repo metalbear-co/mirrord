@@ -113,6 +113,10 @@ pub(crate) enum ExternalProxyError {
     )]
     #[diagnostic(help("{GENERAL_BUG}"))]
     MissingTlsInfo,
+
+    #[error("External proxy ping pong with the agent failed: {0}")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    PingPongFailed(String),
 }
 
 /// Errors that can occur when executing the `mirrord intproxy` command.

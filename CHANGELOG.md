@@ -8,6 +8,30 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.131.0](https://github.com/metalbear-co/mirrord/tree/3.131.0) - 2025-01-27
+
+
+### Added
+
+- `statfs` support
+  [#statfs](https://github.com/metalbear-co/mirrord/issues/statfs)
+- Support for in-cluster DNS resolution of IPv6 addresses.
+  [#2958](https://github.com/metalbear-co/mirrord/issues/2958)
+- Prometheus metrics to the mirrord-agent.
+  [#2975](https://github.com/metalbear-co/mirrord/issues/2975)
+- Kubernetes Service as a new type of mirrord target (requires mirrord
+  operator).
+
+
+### Fixed
+
+- Misleading doc for `.target.namespace` config.
+  [#3009](https://github.com/metalbear-co/mirrord/issues/3009)
+- Agent now correctly clears incoming port subscriptions of disconnected
+  clients.
+- mirrord no longer uses the default `{"operator": "Exists"}` tolerations when
+  spawning targetless agent pods.
+
 ## [3.130.0](https://github.com/metalbear-co/mirrord/tree/3.130.0) - 2025-01-21
 
 
