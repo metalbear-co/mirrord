@@ -22,7 +22,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 - Added ping pong subtask to mirrord-extproxy to keep agent connection alive while it is
   up. [#3030](https://github.com/metalbear-co/mirrord/issues/3030)
-- `agent.privileged` no longer affects targetless agent's pods.
+- `agent.privileged` no longer affects targetless agents' pods.
 
 ## [3.131.0](https://github.com/metalbear-co/mirrord/tree/3.131.0) - 2025-01-27
 
