@@ -77,14 +77,14 @@ mod linux {
 
                 let arr = sa.sin6_addr.s6_addr;
                 let ip = Ipv6Addr::new(
-                    (arr[0] as u16) << 8 | (arr[1] as u16),
-                    (arr[2] as u16) << 8 | (arr[3] as u16),
-                    (arr[4] as u16) << 8 | (arr[5] as u16),
-                    (arr[6] as u16) << 8 | (arr[7] as u16),
-                    (arr[8] as u16) << 8 | (arr[9] as u16),
-                    (arr[10] as u16) << 8 | (arr[11] as u16),
-                    (arr[12] as u16) << 8 | (arr[13] as u16),
-                    (arr[14] as u16) << 8 | (arr[15] as u16),
+                    ((arr[0] as u16) << 8) | (arr[1] as u16),
+                    ((arr[2] as u16) << 8) | (arr[3] as u16),
+                    ((arr[4] as u16) << 8) | (arr[5] as u16),
+                    ((arr[6] as u16) << 8) | (arr[7] as u16),
+                    ((arr[8] as u16) << 8) | (arr[9] as u16),
+                    ((arr[10] as u16) << 8) | (arr[11] as u16),
+                    ((arr[12] as u16) << 8) | (arr[13] as u16),
+                    ((arr[14] as u16) << 8) | (arr[15] as u16),
                 );
 
                 let port = sa.sin6_port;

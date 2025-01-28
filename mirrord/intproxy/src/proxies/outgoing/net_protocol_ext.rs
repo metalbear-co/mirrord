@@ -205,12 +205,8 @@ impl ConnectedSocket {
 
                 Ok(())
             }
-            InnerConnectedSocket::TcpStream(stream) => {
-                stream.write_all(bytes).await.map_err(Into::into)
-            }
-            InnerConnectedSocket::UnixStream(stream) => {
-                stream.write_all(bytes).await.map_err(Into::into)
-            }
+            InnerConnectedSocket::TcpStream(stream) => stream.write_all(bytes).await,
+            InnerConnectedSocket::UnixStream(stream) => stream.write_all(bytes).await,
         }
     }
 

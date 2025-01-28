@@ -233,7 +233,7 @@ impl DebuggerType {
                                 .split(',')
                                 .find_map(|arg| arg.strip_prefix("address="))
                         })
-                        .and_then(|full_address| full_address.split(':').last())
+                        .and_then(|full_address| full_address.split(':').next_back())
                         .and_then(|port| port.parse::<u16>().ok())
                         .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
                 } else {
