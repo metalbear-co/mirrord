@@ -168,13 +168,13 @@ impl SinglePortForwarder {
                     if let Some(error) = error {
                         tracing::warn!(?connect_info, %error, "error while performing port-forward");
                     } else {
-                        tracing::warn!(?connect_info, "connection exited without error");
+                        tracing::warn!(?connect_info, "port-forward connection closed without any error published in relevant channel");
 
                         break;
                     }
 
                     if retry_strategy.peek().is_none() {
-                        tracing::warn!(?connect_info, "finished retry strategy, closing connection");
+                        tracing::warn!(?connect_info, "port-forward connection retry strategy has reached it's limit on attempts to connect, not attempting again.");
 
                         break;
                     }
