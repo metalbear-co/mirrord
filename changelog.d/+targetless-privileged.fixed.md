@@ -1,1 +1,1 @@
-mirrord no longer requires targetless agents' pods to be privileged.
+`agent.privileged` no longer affects targetless agent's pods.
