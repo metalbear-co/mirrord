@@ -137,6 +137,10 @@ pub trait RestartableBackgroundTask: BackgroundTask {
     ) -> impl Future<Output = ControlFlow<Self::Error>> + Send;
 }
 
+/// Small wrapper for `RestartableBackgroundTask` that wraps in reimplemets `BackgroundTask` with
+/// logic of calling `restart` when an error is returned from `run` future.
+///
+/// This is the created and used in `BackgroundTasks::register_restartable`
 pub struct RestartableBackgroundTaskWrapper<T: RestartableBackgroundTask> {
     task: T,
 }
