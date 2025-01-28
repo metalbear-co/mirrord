@@ -221,6 +221,10 @@ impl From<HookError> for i64 {
             HookError::SocketUnsuportedIpv6 => {
                 info!("{fail}")
             }
+            HookError::ResponseError(ResponseError::NotImplemented) => {
+                // this means we bypass, so we can just return to avoid setting libc.
+                return -1;
+            }
             HookError::ProxyError(ref err) => {
                 graceful_exit!(
                     r"Proxy error, connectivity issue or a bug.
