@@ -19,6 +19,7 @@ use mirrord_config::{
 };
 use mirrord_operator::setup::OperatorNamespace;
 use thiserror::Error;
+use tracing::Level;
 
 use crate::error::CliError;
 
@@ -857,6 +858,7 @@ pub(super) enum ContainerRuntimeCommand {
 }
 
 impl ContainerRuntimeCommand {
+    #[tracing::instrument(level = Level::DEBUG, skip_all, ret)]
     pub fn create<T: Into<String>>(runtime_args: impl IntoIterator<Item = T>) -> Self {
         ContainerRuntimeCommand::Create {
             runtime_args: runtime_args.into_iter().map(T::into).collect(),

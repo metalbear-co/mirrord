@@ -55,8 +55,27 @@ fn format_command(command: &Command) -> String {
         .join(" ")
 }
 
+// TODO(alex) [high]: pf is failing, that's why no container commands works for me?
+// Got these logs from:
+// `cargo run --bin mirrord-console --features binary`
+//
+// Looks like the agent spawns, and terminates...
+//
+/*
+pid 290682: "error while performing port-forward, retrying connect_info=AgentKubernetesConnectInfo { pod_name: \"mirrord-agent-ad8kimnzc5-q99b9\", agent_port: 55024, namespace: None, agent_version: Some(\"3.131.0\") } error=error forwarding port 55024 to pod 72095a38322114fc13d214af3d9a05230591bb6b4ed417a6c9cce425bbabbec9, uid : exit status 1: 2025/01/27 21:07:46 socat[66881] E connect(5, AF=2 127.0.0.1:55024, 16): Connection refused\n"
+
+mirrord-agent-htycplgu6h-wjjsk                   0/1     ContainerCreating   0                 0s
+mirrord-agent-htycplgu6h-wjjsk                   1/1     Running             0                 1s
+mirrord-agent-htycplgu6h-wjjsk                   0/1     Completed           0                 2s
+mirrord-agent-htycplgu6h-wjjsk                   0/1     Completed           0                 4s
+mirrord-agent-htycplgu6h-wjjsk                   0/1     Completed           0                 4s
+mirrord-agent-htycplgu6h-wjjsk                   0/1     Completed           0                 4s
+mirrord-agent-htycplgu6h-wjjsk                   0/1     Terminating         0                 5s
+mirrord-agent-htycplgu6h-wjjsk                   0/1     Terminating         0                 5s
+*/
+
 /// Execute a [`Command`] and read first line from stdout
-#[tracing::instrument(level = Level::TRACE, ret)]
+#[tracing::instrument(level = Level::DEBUG, ret, err)]
 async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>, ContainerError> {
     let mut child = command
         .stdin(Stdio::null())
@@ -311,6 +330,7 @@ async fn create_runtime_command_with_sidecar<P: Progress + Send + Sync>(
 
 /// Main entry point for the `mirrord container` command.
 /// This spawns: "agent" - "external proxy" - "intproxy sidecar" - "execution container"
+#[tracing::instrument(level = Level::DEBUG, ret, err)]
 pub(crate) async fn container_command(
     runtime_args: RuntimeArgs,
     exec_params: ExecParams,

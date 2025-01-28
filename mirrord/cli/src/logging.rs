@@ -34,6 +34,8 @@ pub async fn init_tracing_registry(
     command: &Commands,
     watch: drain::Watch,
 ) -> Result<(), CliError> {
+    std::env::set_var("RUST_LOG", "mirrord=debug,warn");
+
     if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
         mirrord_console::init_async_logger(&console_addr, watch.clone(), 124).await?;
 
