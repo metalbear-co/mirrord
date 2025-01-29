@@ -359,7 +359,7 @@ impl MirrordExecution {
     }
 
     /// Starts the external proxy (`extproxy`) so sidecar intproxy can connect via this to agent
-    #[tracing::instrument(level = Level::TRACE, skip_all)]
+    #[tracing::instrument(level = Level::DEBUG, skip_all, ret, err)]
     pub(crate) async fn start_external<P>(
         config: &LayerConfig,
         progress: &mut P,

@@ -24,7 +24,7 @@ impl Sidecar {
     /// Create a "sidecar" container that is running `mirrord intproxy` that connects to `mirrord
     /// extproxy` running on user machine to be used by execution container (via mounting on same
     /// network)
-    #[tracing::instrument(level = Level::DEBUG, ret, err)]
+    #[tracing::instrument(level = Level::DEBUG, skip(config, base_command), ret, err)]
     pub async fn create_intproxy(
         config: &LayerConfig,
         base_command: &RuntimeCommandBuilder,

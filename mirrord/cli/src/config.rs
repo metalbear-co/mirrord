@@ -857,9 +857,16 @@ pub(super) enum ContainerRuntimeCommand {
         #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
         runtime_args: Vec<String>,
     },
+    Compose {
+        /// Arguments that will be propogated to underlying `<RUNTIME> compose` command.
+        #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
+        runtime_args: Vec<String>,
+    },
 }
 
 impl ContainerRuntimeCommand {
+    // TODO(alex) [high]: I need my own image of mirrord-cli, otherwise it won't have `compose`
+    // command.
     #[tracing::instrument(level = Level::DEBUG, skip_all, ret)]
     pub fn create<T: Into<String>>(runtime_args: impl IntoIterator<Item = T>) -> Self {
         ContainerRuntimeCommand::Create {
@@ -888,6 +895,9 @@ impl ContainerRuntimeCommand {
                 (vec!["create".to_owned()], runtime_args)
             }
             ContainerRuntimeCommand::Run { runtime_args } => (vec!["run".to_owned()], runtime_args),
+            ContainerRuntimeCommand::Compose { runtime_args } => {
+                (vec!["compose".to_owned()], runtime_args)
+            }
         }
     }
 }
