@@ -100,6 +100,9 @@ pub struct MirrordClusterPolicySpec {
     /// the user config.
     #[serde(default)]
     pub fs: FsPolicy,
+
+    #[serde(default)]
+    pub network: NetworkPolicy,
 }
 
 /// Policy for controlling environment variables access from mirrord instances.
@@ -148,6 +151,26 @@ pub struct FsPolicy {
     /// Opening the file is rejected with an IO error.
     #[serde(default)]
     pub not_found: HashSet<String>,
+}
+
+#[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkPolicy {
+    #[serde(default)]
+    pub incoming: IncomingNetworkPolicy,
+}
+
+#[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomingNetworkPolicy {
+    #[serde(default)]
+    pub filter: HttpFilterPolicy,
+}
+
+#[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpFilterPolicy {
+    pub header_filter: Option<String>,
 }
 
 #[test]
