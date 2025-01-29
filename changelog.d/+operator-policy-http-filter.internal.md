@@ -1,1 +1,1 @@
-Add mirrord policy support for specifying requirment for header filter when performing steal-with-filter.
+Add mirrord policy support for specifying pattern requirment for header filter when performing steal-with-filter.
