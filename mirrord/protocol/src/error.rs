@@ -89,12 +89,9 @@ fn policy_name_string(policy_name: Option<&str>) -> String {
 }
 
 fn policy_reason(reason: Option<&str>) -> String {
-    if let Some(reason) = reason {
-        format!("reason: \"{reason}\"")
-    } else {
-        "your organization does not allow you to use this mirrord feature with the chosen target"
-            .to_string()
-    }
+    reason
+        .unwrap_or("your organization does not allow you to use this mirrord feature with the chosen target")
+        .into()
 }
 
 /// Minimal mirrord-protocol version that allows [`BlockedAction::Mirror`].

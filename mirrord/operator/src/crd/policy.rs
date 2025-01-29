@@ -64,6 +64,7 @@ pub struct MirrordPolicySpec {
     #[serde(default)]
     pub fs: FsPolicy,
 
+    /// Fine grained control over network features like specifiying required http filters.
     #[serde(default)]
     pub network: NetworkPolicy,
 }
@@ -156,6 +157,7 @@ pub struct FsPolicy {
     pub not_found: HashSet<String>,
 }
 
+/// Network operations policy that partialy mimics the mirrord network config.
 #[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkPolicy {
@@ -163,6 +165,7 @@ pub struct NetworkPolicy {
     pub incoming: IncomingNetworkPolicy,
 }
 
+/// Incoming network operations policy that partialy mimics the mirrord network.incoming config.
 #[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct IncomingNetworkPolicy {
@@ -170,9 +173,14 @@ pub struct IncomingNetworkPolicy {
     pub http_filter: HttpFilterPolicy,
 }
 
+/// Http filter policy that allows to specify any filter requirments that users must specify in
+/// their config for a successful network steal
 #[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpFilterPolicy {
+    /// Require user's filter to match this regex if filter is provided. (this works in tandom with
+    /// `steal-without-filter` block to require the user to specify a header filter for network
+    /// steal feature)
     pub header_filter: Option<String>,
 }
 
