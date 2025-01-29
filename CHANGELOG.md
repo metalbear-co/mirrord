@@ -20,7 +20,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Internal
 
-- Updated rust toolchain to nightly-2025-01-22.
+- Updated Rust toolchain to nightly-2025-01-22.
 
 ## [3.131.1](https://github.com/metalbear-co/mirrord/tree/3.131.1) - 2025-01-28
 
