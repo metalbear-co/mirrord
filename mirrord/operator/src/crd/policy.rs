@@ -164,7 +164,7 @@ pub struct NetworkPolicy {
 #[serde(rename_all = "camelCase")]
 pub struct IncomingNetworkPolicy {
     #[serde(default)]
-    pub filter: HttpFilterPolicy,
+    pub http_filter: HttpFilterPolicy,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
