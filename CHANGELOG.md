@@ -8,6 +8,36 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.131.2](https://github.com/metalbear-co/mirrord/tree/3.131.2) - 2025-01-29
+
+
+### Fixed
+
+- Removed an error log on a `notimplemented` response from the `mirrord-intproxy`,
+  might fix go crash.
+  [#3044](https://github.com/metalbear-co/mirrord/issues/3044)
+
+
+### Internal
+
+- Updated Rust toolchain to nightly-2025-01-22.
+
+## [3.131.1](https://github.com/metalbear-co/mirrord/tree/3.131.1) - 2025-01-28
+
+
+### Changed
+
+- mirrord commands now accept the `-f`/`--config-file` argument without the value as well.
+  When no value is provided, `./.mirrord/mirrord.json` is assumed.
+  [#1706](https://github.com/metalbear-co/mirrord/issues/1706)
+
+
+### Fixed
+
+- Added ping pong subtask to mirrord-extproxy to keep agent connection alive while it is
+  up. [#3030](https://github.com/metalbear-co/mirrord/issues/3030)
+- `agent.privileged` no longer affects targetless agents' pods.
+
 ## [3.131.0](https://github.com/metalbear-co/mirrord/tree/3.131.0) - 2025-01-27
 
 
