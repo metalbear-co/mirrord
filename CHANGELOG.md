@@ -8,6 +8,20 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.131.2](https://github.com/metalbear-co/mirrord/tree/3.131.2) - 2025-01-29
+
+
+### Fixed
+
+- Removed an error log on a `notimplemented` response from the `mirrord-intproxy`,
+  might fix go crash.
+  [#3044](https://github.com/metalbear-co/mirrord/issues/3044)
+
+
+### Internal
+
+- Updated rust toolchain to nightly-2025-01-22.
+
 ## [3.131.1](https://github.com/metalbear-co/mirrord/tree/3.131.1) - 2025-01-28
 
 
