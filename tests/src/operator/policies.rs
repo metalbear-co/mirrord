@@ -382,6 +382,7 @@ pub async fn create_cluster_policy_and_try_to_mirror(
                 block: vec![BlockedFeature::Mirror],
                 env: Default::default(),
                 fs: Default::default(),
+                network: Default::default(),
             },
         ),
     )
