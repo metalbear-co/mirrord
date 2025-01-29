@@ -63,6 +63,9 @@ pub struct MirrordPolicySpec {
     /// the user config.
     #[serde(default)]
     pub fs: FsPolicy,
+
+    #[serde(default)]
+    pub network: NetworkPolicy,
 }
 
 /// Custom cluster-wide resource for policies that limit what mirrord features users can use.
