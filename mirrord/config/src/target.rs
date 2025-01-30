@@ -148,7 +148,7 @@ pub struct TargetConfig {
     /// - `statefulset/{statefulset-name}[/container/{container-name}]`; (requires mirrord
     ///   Operator)
     /// - `service/{service-name}[/container/{container-name}]`; (requires mirrord Operator)
-    /// - `replicaset/{replicaset-name}[/container/{replicaset-name}]`; (requires mirrord Operator)
+    /// - `replicaset/{replicaset-name}[/container/{container-name}]`; (requires mirrord Operator)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<Target>,
 
