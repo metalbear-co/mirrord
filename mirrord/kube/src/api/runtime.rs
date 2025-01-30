@@ -33,6 +33,7 @@ pub mod cron_job;
 pub mod deployment;
 pub mod job;
 pub mod pod;
+pub mod replica_set;
 pub mod rollout;
 pub mod service;
 pub mod stateful_set;
@@ -374,6 +375,7 @@ impl RuntimeDataProvider for Target {
             Target::CronJob(target) => target.runtime_data(client, namespace).await,
             Target::StatefulSet(target) => target.runtime_data(client, namespace).await,
             Target::Service(target) => target.runtime_data(client, namespace).await,
+            Target::ReplicaSet(target) => target.runtime_data(client, namespace).await,
             Target::Targetless => Err(KubeApiError::MissingRuntimeData),
         }
     }
@@ -389,6 +391,7 @@ impl RuntimeDataProvider for ResolvedTarget<true> {
             Self::CronJob(target) => target.runtime_data(client, namespace).await,
             Self::StatefulSet(target) => target.runtime_data(client, namespace).await,
             Self::Service(target) => target.runtime_data(client, namespace).await,
+            Self::ReplicaSet(target) => target.runtime_data(client, namespace).await,
             Self::Targetless(_) => Err(KubeApiError::MissingRuntimeData),
         }
     }
