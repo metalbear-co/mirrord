@@ -8,8 +8,8 @@ use mirrord_config::{
     feature::FeatureConfig,
     target::{
         cron_job::CronJobTarget, deployment::DeploymentTarget, job::JobTarget, pod::PodTarget,
-        rollout::RolloutTarget, service::ServiceTarget, stateful_set::StatefulSetTarget, Target,
-        TargetConfig,
+        replica_set::ReplicaSetTarget, rollout::RolloutTarget, service::ServiceTarget,
+        stateful_set::StatefulSetTarget, Target, TargetConfig,
     },
 };
 use serde::Serialize;
@@ -47,6 +47,9 @@ enum VerifiedTarget {
 
     #[serde(untagged)]
     Service(ServiceTarget),
+
+    #[serde(untagged)]
+    ReplicaSet(ReplicaSetTarget),
 }
 
 impl From<Target> for VerifiedTarget {
@@ -59,6 +62,7 @@ impl From<Target> for VerifiedTarget {
             Target::CronJob(target) => Self::CronJob(target),
             Target::StatefulSet(target) => Self::StatefulSet(target),
             Target::Service(target) => Self::Service(target),
+            Target::ReplicaSet(target) => Self::ReplicaSet(target),
             Target::Targetless => Self::Targetless,
         }
     }
@@ -75,6 +79,7 @@ impl From<VerifiedTarget> for TargetType {
             VerifiedTarget::CronJob(_) => TargetType::CronJob,
             VerifiedTarget::StatefulSet(_) => TargetType::StatefulSet,
             VerifiedTarget::Service(_) => TargetType::Service,
+            VerifiedTarget::ReplicaSet(_) => TargetType::ReplicaSet,
         }
     }
 }
@@ -106,6 +111,7 @@ enum TargetType {
     CronJob,
     StatefulSet,
     Service,
+    ReplicaSet,
 }
 
 impl core::fmt::Display for TargetType {
@@ -119,6 +125,7 @@ impl core::fmt::Display for TargetType {
             TargetType::CronJob => "cronjob",
             TargetType::StatefulSet => "statefulset",
             TargetType::Service => "service",
+            TargetType::ReplicaSet => "replicaset",
         };
 
         f.write_str(stringifed)
@@ -136,6 +143,7 @@ impl TargetType {
             Self::CronJob,
             Self::StatefulSet,
             Self::Service,
+            Self::ReplicaSet,
         ]
         .into_iter()
     }
@@ -146,7 +154,7 @@ impl TargetType {
             Self::Pod => !(config.copy_target.enabled && config.copy_target.scale_down),
             Self::Job | Self::CronJob => config.copy_target.enabled,
             Self::Service => !config.copy_target.enabled,
-            Self::Deployment | Self::StatefulSet => true,
+            Self::Deployment | Self::StatefulSet | Self::ReplicaSet => true,
         }
     }
 }

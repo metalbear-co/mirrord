@@ -545,6 +545,7 @@ impl OperatorClusterRole {
                     "statefulsets".to_owned(),
                     "statefulsets/scale".to_owned(),
                     "services".to_owned(),
+                    "replicasets".to_owned(),
                 ]),
                 verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
                 ..Default::default()
@@ -591,7 +592,11 @@ impl OperatorClusterRole {
             // Allow for patching replicas and environment variables.
             PolicyRule {
                 api_groups: Some(vec!["apps".to_owned()]),
-                resources: Some(vec!["deployments".to_owned(), "statefulsets".to_owned()]),
+                resources: Some(vec![
+                    "deployments".to_owned(),
+                    "statefulsets".to_owned(),
+                    "replicasets".to_owned(),
+                ]),
                 verbs: vec!["patch".to_owned()],
                 ..Default::default()
             },

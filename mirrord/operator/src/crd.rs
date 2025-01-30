@@ -64,6 +64,7 @@ impl TargetCrd {
             Target::CronJob(target) => ("cronjob", &target.cron_job, &target.container),
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Service(target) => ("service", &target.service, &target.container),
+            Target::ReplicaSet(target) => ("replicaset", &target.replica_set, &target.container),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
         };
 

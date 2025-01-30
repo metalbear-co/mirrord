@@ -3,9 +3,9 @@ use std::fmt;
 use futures::{stream, Stream, StreamExt, TryStreamExt};
 use k8s_openapi::{
     api::{
-        apps::v1::{Deployment, StatefulSet},
+        apps::v1::{Deployment, ReplicaSet, StatefulSet},
         batch::v1::{CronJob, Job},
-        core::v1::Pod,
+        core::v1::{Pod, Service},
     },
     ClusterResourceScope, Metadata, NamespaceResourceScope,
 };
@@ -42,16 +42,25 @@ impl KubeResourceSeeker<'_> {
             .collect())
     }
 
-    /// Returns all resource types ie. [`Pod`], [`Deployment`], [`Rollout`], [`Job`], [`CronJob`],
-    /// and [`StatefulSet`]
+    /// Returns all resource of all types:
+    /// 1. [`Deployment`]s,
+    /// 2. [`Rollout`]s,
+    /// 3. [`StatefulSet`]s
+    /// 4. [`CronJob`]s
+    /// 5. [`Job`]s
+    /// 6. [`Service`]s
+    /// 7. [`ReplicaSet`]s
+    /// 8. [`Pod`]s
     pub async fn all(&self) -> Result<Vec<String>> {
-        let (pods, deployments, rollouts, jobs, cronjobs, statefulsets) = tokio::try_join!(
+        let (pods, deployments, rollouts, jobs, cronjobs, statefulsets, services, replicasets) = tokio::try_join!(
             self.pods(),
             self.simple_list_resource::<Deployment>("deployment"),
             self.simple_list_resource::<Rollout>("rollout"),
             self.simple_list_resource::<Job>("job"),
             self.simple_list_resource::<CronJob>("cronjob"),
             self.simple_list_resource::<StatefulSet>("statefulset"),
+            self.simple_list_resource::<Service>("service"),
+            self.simple_list_resource::<ReplicaSet>("replicaset"),
         )?;
 
         Ok(deployments
@@ -60,6 +69,8 @@ impl KubeResourceSeeker<'_> {
             .chain(statefulsets)
             .chain(cronjobs)
             .chain(jobs)
+            .chain(services)
+            .chain(replicasets)
             .chain(pods)
             .collect())
     }
