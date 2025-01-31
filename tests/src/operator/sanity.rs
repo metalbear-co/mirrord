@@ -16,7 +16,9 @@ pub async fn mirrord_ls(#[future] service_for_mirrord_ls: KubeService) {
     assert!(res.success());
     let stdout = process.get_stdout().await;
     let targets: Vec<String> = serde_json::from_str(&stdout).unwrap();
-    let re = Regex::new(r"^(pod|deployment|statefulset|cronjob|job)/.+(/container/.+)?$").unwrap();
+    let re =
+        Regex::new(r"^(pod|deployment|statefulset|cronjob|job|replicaset)/.+(/container/.+)?$")
+            .unwrap();
     targets.iter().for_each(|output| {
         assert!(
             re.is_match(output),
@@ -24,7 +26,14 @@ pub async fn mirrord_ls(#[future] service_for_mirrord_ls: KubeService) {
         );
     });
 
-    for target_type in ["pod", "deployment", "statefulset", "cronjob", "job"] {
+    for target_type in [
+        "pod",
+        "deployment",
+        "statefulset",
+        "cronjob",
+        "job",
+        "replicaset",
+    ] {
         assert!(
             targets
                 .iter()
