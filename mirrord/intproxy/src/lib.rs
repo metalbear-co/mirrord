@@ -22,7 +22,9 @@ use tokio::{net::TcpListener, time};
 use tracing::Level;
 
 use crate::{
-    agent_conn::AgentConnection, background_tasks::TaskError, error::IntProxyError,
+    agent_conn::AgentConnection,
+    background_tasks::{RestartableBackgroundTaskWrapper, TaskError},
+    error::IntProxyError,
     main_tasks::LayerClosed,
 };
 
@@ -41,7 +43,7 @@ mod request_queue;
 struct TaskTxs {
     layers: HashMap<LayerId, TaskSender<LayerConnection>>,
     _layer_initializer: TaskSender<LayerInitializer>,
-    agent: TaskSender<AgentConnection>,
+    agent: TaskSender<RestartableBackgroundTaskWrapper<AgentConnection>>,
     simple: TaskSender<SimpleProxy>,
     outgoing: TaskSender<OutgoingProxy>,
     incoming: TaskSender<IncomingProxy>,
@@ -77,8 +79,11 @@ impl IntProxy {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
             Default::default();
 
-        let agent =
-            background_tasks.register(agent_conn, MainTaskId::AgentConnection, Self::CHANNEL_SIZE);
+        let agent = background_tasks.register_restartable(
+            agent_conn,
+            MainTaskId::AgentConnection,
+            Self::CHANNEL_SIZE,
+        );
         let layer_initializer = background_tasks.register(
             LayerInitializer::new(listener),
             MainTaskId::LayerInitializer,
@@ -220,6 +225,7 @@ impl IntProxy {
                     .await;
                 }
             }
+            ProxyMessage::ConnectionRefresh => self.handle_connection_refresh().await?,
         }
 
         Ok(())
@@ -270,7 +276,7 @@ impl IntProxy {
 
     /// Routes most messages from the agent to the correct background task.
     /// Some messages are handled here.
-    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     async fn handle_agent_message(&mut self, message: DaemonMessage) -> Result<(), IntProxyError> {
         match message {
             DaemonMessage::Pong => self.task_txs.ping_pong.send(AgentSentPong).await,
@@ -355,7 +361,7 @@ impl IntProxy {
     }
 
     /// Routes a message from the layer to the correct background task.
-    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     async fn handle_layer_message(&self, message: FromLayer) -> Result<(), IntProxyError> {
         let FromLayer {
             message_id,
@@ -400,6 +406,21 @@ impl IntProxy {
             }
             other => return Err(IntProxyError::UnexpectedLayerMessage(other)),
         }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    async fn handle_connection_refresh(&self) -> Result<(), IntProxyError> {
+        self.task_txs
+            .simple
+            .send(SimpleProxyMessage::ConnectionRefresh)
+            .await;
+
+        self.task_txs
+            .incoming
+            .send(IncomingProxyMessage::ConnectionRefresh)
+            .await;
 
         Ok(())
     }

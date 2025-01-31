@@ -6,7 +6,7 @@
 //! Each background task implements the [`BackgroundTask`] trait, which specifies its properties and
 //! allows for managing groups of related tasks with one [`BackgroundTasks`] instance.
 
-use std::{collections::HashMap, fmt, future::Future, hash::Hash};
+use std::{collections::HashMap, fmt, future::Future, hash::Hash, ops::ControlFlow};
 
 use thiserror::Error;
 use tokio::{
@@ -20,6 +20,7 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt, StreamMap, StreamNotifyC
 pub struct MessageBus<T: BackgroundTask> {
     tx: Sender<T::MessageOut>,
     rx: Receiver<T::MessageIn>,
+    // Note if adding any new fields do look at `MessageBus::cast`'s unsafe block.
 }
 
 impl<T: BackgroundTask> MessageBus<T> {
@@ -35,6 +36,16 @@ impl<T: BackgroundTask> MessageBus<T> {
             _ = self.tx.closed() => None,
             msg = self.rx.recv() => msg,
         }
+    }
+
+    /// Cast `&mut MessageBus<T>` as `&mut MessageBus<R>` only if they share the same message types
+    pub fn cast<R>(&mut self) -> &mut MessageBus<R>
+    where
+        R: BackgroundTask<MessageIn = T::MessageIn, MessageOut = T::MessageOut>,
+    {
+        // SAFETY: since MessageBus consits of only the `Sender` and `Receiver` and both should
+        // match.
+        unsafe { &mut *(self as *mut MessageBus<T> as *mut MessageBus<R>) }
     }
 
     /// Returns a [`Closed`] instance for this [`MessageBus`].
@@ -113,9 +124,65 @@ pub trait BackgroundTask: Sized {
     /// When the [`MessageBus`] has no more messages to be consumed, the task should exit without
     /// errors.
     fn run(
-        self,
+        &mut self,
         message_bus: &mut MessageBus<Self>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+pub trait RestartableBackgroundTask: BackgroundTask {
+    fn restart(
+        &mut self,
+        run_error: Self::Error,
+        message_bus: &mut MessageBus<Self>,
+    ) -> impl Future<Output = ControlFlow<Self::Error>> + Send;
+}
+
+/// Small wrapper for `RestartableBackgroundTask` that wraps in reimplemets `BackgroundTask` with
+/// logic of calling `restart` when an error is returned from `run` future.
+///
+/// This is the created and used in `BackgroundTasks::register_restartable`
+pub struct RestartableBackgroundTaskWrapper<T: RestartableBackgroundTask> {
+    task: T,
+}
+
+impl<T> BackgroundTask for RestartableBackgroundTaskWrapper<T>
+where
+    T: RestartableBackgroundTask + Send,
+    T::MessageIn: Send,
+    T::MessageOut: Send,
+    T::Error: Send,
+{
+    type Error = T::Error;
+    type MessageIn = T::MessageIn;
+    type MessageOut = T::MessageOut;
+
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+        let RestartableBackgroundTaskWrapper { task } = self;
+        let task_bus = message_bus.cast();
+
+        match task.run(task_bus).await {
+            Err(run_error) => {
+                let mut run_error = Some(run_error);
+
+                loop {
+                    match task
+                        .restart(run_error.take().expect("should contain an error"), task_bus)
+                        .await
+                    {
+                        ControlFlow::Break(err) => return Err(err),
+                        ControlFlow::Continue(()) => {
+                            if let Err(err) = task.run(task_bus).await {
+                                run_error = Some(err);
+                            } else {
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(()) => Ok(()),
+        }
+    }
 }
 
 /// A struct for managing groups of related [`BackgroundTasks`].
@@ -154,7 +221,7 @@ where
     /// # Panics
     ///
     /// This method panics when attempting to register a task with a duplicate id.
-    pub fn register<T>(&mut self, task: T, id: Id, channel_size: usize) -> TaskSender<T>
+    pub fn register<T>(&mut self, mut task: T, id: Id, channel_size: usize) -> TaskSender<T>
     where
         T: 'static + BackgroundTask<MessageOut = MOut> + Send,
         Err: From<T::Error>,
@@ -185,6 +252,34 @@ where
         TaskSender(in_msg_tx)
     }
 
+    pub fn register_restartable<T>(
+        &mut self,
+        task: T,
+        id: Id,
+        channel_size: usize,
+    ) -> TaskSender<RestartableBackgroundTaskWrapper<T>>
+    where
+        T: 'static + RestartableBackgroundTask<MessageOut = MOut> + Send,
+        Err: From<T::Error>,
+        T::MessageIn: Send,
+        T::Error: Send,
+    {
+        self.register(RestartableBackgroundTaskWrapper { task }, id, channel_size)
+    }
+
+    pub fn tasks_ids(&self) -> impl Iterator<Item = &Id> {
+        self.handles.keys()
+    }
+
+    pub async fn kill_task(&mut self, id: Id) {
+        self.streams.remove(&id);
+        let Some(task) = self.handles.remove(&id) else {
+            return;
+        };
+
+        task.abort();
+    }
+
     /// Returns the next update from one of registered tasks.
     pub async fn next(&mut self) -> Option<(Id, TaskUpdate<MOut, Err>)> {
         let (id, msg) = self.streams.next().await?;
@@ -198,7 +293,10 @@ where
                     .expect("task handles and streams are out of sync")
                     .await;
                 match res {
-                    Err(..) => (id, TaskUpdate::Finished(Err(TaskError::Panic))),
+                    Err(error) => {
+                        tracing::error!(?error, "task panicked");
+                        (id, TaskUpdate::Finished(Err(TaskError::Panic)))
+                    }
                     Ok(res) => (id, TaskUpdate::Finished(res.map_err(TaskError::Error))),
                 }
             }
@@ -216,7 +314,10 @@ where
         let mut results = Vec::with_capacity(self.handles.len());
         for (id, handle) in self.handles {
             let result = match handle.await {
-                Err(..) => Err(TaskError::Panic),
+                Err(error) => {
+                    tracing::error!(?error, "task panicked");
+                    Err(TaskError::Panic)
+                }
                 Ok(res) => res.map_err(TaskError::Error),
             };
             results.push((id, result));

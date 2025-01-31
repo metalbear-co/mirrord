@@ -66,6 +66,7 @@ pub enum IncomingProxyMessage {
     AgentSteal(DaemonTcp),
     /// Agent responded to [`ClientMessage::SwitchProtocolVersion`].
     AgentProtocolVersion(semver::Version),
+    ConnectionRefresh,
 }
 
 /// Handle to a running [`HttpGatewayTask`].
@@ -533,6 +534,22 @@ impl IncomingProxy {
             IncomingProxyMessage::AgentProtocolVersion(version) => {
                 self.response_mode = ResponseMode::from(&version);
             }
+
+            IncomingProxyMessage::ConnectionRefresh => {
+                let running_task_ids = self.tasks.tasks_ids().cloned().collect::<Vec<_>>();
+
+                for task in running_task_ids {
+                    self.tasks.kill_task(task).await;
+                }
+
+                for subscription in self.subscriptions.iter_mut() {
+                    tracing::debug!(?subscription, "resubscribing");
+
+                    for message in subscription.resubscribe() {
+                        message_bus.send(ProxyMessage::ToAgent(message)).await
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -701,7 +718,7 @@ impl BackgroundTask for IncomingProxy {
     type MessageOut = ProxyMessage;
 
     #[tracing::instrument(level = Level::TRACE, name = "incoming_proxy_main_loop", skip_all, err)]
-    async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         loop {
             tokio::select! {
                 msg = message_bus.recv() => match msg {
