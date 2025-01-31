@@ -29,10 +29,7 @@ pub async fn mirrord_ls(#[future] service_for_mirrord_ls: KubeService) {
 
     let re = Regex::new(&format!(
         r"^({})/.+(/container/.+)?$",
-        expected_target_types
-            .into_iter()
-            .collect::<Vec<_>>()
-            .join("|")
+        expected_target_types.join("|")
     ))
     .unwrap();
     targets.iter().for_each(|output| {
