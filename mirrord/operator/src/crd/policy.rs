@@ -63,6 +63,10 @@ pub struct MirrordPolicySpec {
     /// the user config.
     #[serde(default)]
     pub fs: FsPolicy,
+
+    /// Fine grained control over network features like specifiying required http filters.
+    #[serde(default)]
+    pub network: NetworkPolicy,
 }
 
 /// Custom cluster-wide resource for policies that limit what mirrord features users can use.
@@ -100,6 +104,9 @@ pub struct MirrordClusterPolicySpec {
     /// the user config.
     #[serde(default)]
     pub fs: FsPolicy,
+
+    #[serde(default)]
+    pub network: NetworkPolicy,
 }
 
 /// Policy for controlling environment variables access from mirrord instances.
@@ -148,6 +155,33 @@ pub struct FsPolicy {
     /// Opening the file is rejected with an IO error.
     #[serde(default)]
     pub not_found: HashSet<String>,
+}
+
+/// Network operations policy that partialy mimics the mirrord network config.
+#[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkPolicy {
+    #[serde(default)]
+    pub incoming: IncomingNetworkPolicy,
+}
+
+/// Incoming network operations policy that partialy mimics the mirrord `network.incoming` config.
+#[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomingNetworkPolicy {
+    #[serde(default)]
+    pub http_filter: HttpFilterPolicy,
+}
+
+/// Http filter policy that allows to specify requirements for the HTTP filter used in a session.
+#[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpFilterPolicy {
+    /// Require the user's header filter to match this regex if such filter is provided.
+    /// 
+    /// This works in tandem with the `steal-without-filter` block
+    /// to require that the user to specifies a header filter for the network steal feature.
+    pub header_filter: Option<String>,
 }
 
 #[test]
