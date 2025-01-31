@@ -570,3 +570,13 @@ cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-
 If it doesn't work, try updating `cargo-zigbuild`
 (`cargo install cargo-zigbuild` or maybe `cargo install cargo-zigbuild --force`)
 or via `homebrew` if it was installed via homebrew.
+
+# Adding new target types
+
+Adding a new target type for mirrord requires changes in:
+
+1. `mirrord-config` crate - parsing the target from the user config;
+2. `mirrord-cli` crate - verifying the user config;
+3. `mirrord-kube` crate - resolving the target to the Kubernetes resource;
+4. `mirrord-operator` crate - defining operator's `ClusterRole`;
+5. `test` crate - testing `mirrord ls` command
