@@ -889,6 +889,9 @@ impl ContainerRuntimeCommand {
         })
     }
 
+    /// Returns the string version of the docker command, and the thing you want the command
+    /// to do, e.g. `["docker", "run"]`, or `["compose", "up"]`.
+    #[tracing::instrument(level = Level::DEBUG, ret)]
     pub fn into_parts(self) -> (Vec<String>, Vec<String>) {
         match self {
             ContainerRuntimeCommand::Create { runtime_args } => {

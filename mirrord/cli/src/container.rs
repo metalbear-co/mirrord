@@ -6,6 +6,8 @@
 //! terminal split
 //! `MIRRORD_PROGRESS_MODE=off RUST_LOG=mirrord=debug,warn MIRRORD_CONSOLE_ADDR=127.0.0.1:11233
 //! mirrord container -- docker compose up`
+// TODO(alex) [mid]: Improve this:
+// - Say which ip to use with mirrord console for good logs;
 use std::{
     collections::HashMap,
     io::Write,
@@ -122,16 +124,16 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
 /// Create a temp file with a json serialized [`LayerConfig`] to be loaded by container and external
 /// proxy
 #[tracing::instrument(level = Level::DEBUG, skip(config), ret, err)]
-fn create_composed_config(config: &LayerConfig) -> Result<NamedTempFile, ContainerError> {
-    let mut composed_config_file = tempfile::Builder::new()
+fn create_temp_layer_config(config: &LayerConfig) -> Result<NamedTempFile, ContainerError> {
+    let mut layer_config_file = tempfile::Builder::new()
         .suffix(".json")
         .tempfile()
         .map_err(ContainerError::ConfigWrite)?;
-    composed_config_file
+    layer_config_file
         .write_all(&serde_json::to_vec(config).map_err(ContainerError::ConfigSerialization)?)
         .map_err(ContainerError::ConfigWrite)?;
 
-    Ok(composed_config_file)
+    Ok(layer_config_file)
 }
 
 /// Create a tempfile and write to it a self-signed certificate with the provided subject alt names
@@ -269,6 +271,7 @@ async fn create_runtime_command_with_sidecar<P: Progress + Send + Sync>(
         {
             runtime_command.add_env(MIRRORD_CONSOLE_ADDR_ENV, console_addr);
         } else {
+            // TODO(alex) [mid]: Use eth0 ip.
             tracing::warn!(
                 ?console_addr,
                 "{MIRRORD_CONSOLE_ADDR_ENV} needs to be a non loopback address when used with containers"
@@ -349,14 +352,14 @@ pub(crate) async fn container_command(
     let (_internal_proxy_tls_guards, _external_proxy_tls_guards) =
         prepare_tls_certs_for_container(&mut config)?;
 
-    let composed_config_file = create_composed_config(&config)?;
-    std::env::set_var(MIRRORD_CONFIG_FILE_ENV, composed_config_file.path());
+    let layer_config_file = create_temp_layer_config(&config)?;
+    std::env::set_var(MIRRORD_CONFIG_FILE_ENV, layer_config_file.path());
 
     let (mut runtime_command, sidecar, _execution_info) = create_runtime_command_with_sidecar(
         &mut analytics,
         &mut progress,
         &config,
-        composed_config_file.path(),
+        layer_config_file.path(),
         runtime_args.runtime,
     )
     .await?;
@@ -397,7 +400,7 @@ pub(crate) async fn container_command(
         }
     }
 
-    if let Err(err) = composed_config_file.keep() {
+    if let Err(err) = layer_config_file.keep() {
         tracing::warn!(?err, "failed to keep composed config file");
     }
 
@@ -445,7 +448,7 @@ pub(crate) async fn container_ext_command(
     let (_internal_proxy_tls_guards, _external_proxy_tls_guards) =
         prepare_tls_certs_for_container(&mut config)?;
 
-    let composed_config_file = create_composed_config(&config)?;
+    let composed_config_file = create_temp_layer_config(&config)?;
     std::env::set_var(MIRRORD_CONFIG_FILE_ENV, composed_config_file.path());
 
     let container_runtime = std::env::var("MIRRORD_CONTAINER_USE_RUNTIME")
