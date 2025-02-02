@@ -39,7 +39,7 @@ impl<T: BackgroundTask> MessageBus<T> {
     }
 
     /// Cast `&mut MessageBus<T>` as `&mut MessageBus<R>` only if they share the same message types
-    pub fn cast<R>(&mut self) -> &mut MessageBus<R>
+    pub(crate) fn cast<R>(&mut self) -> &mut MessageBus<R>
     where
         R: BackgroundTask<MessageIn = T::MessageIn, MessageOut = T::MessageOut>,
     {
@@ -267,17 +267,10 @@ where
         self.register(RestartableBackgroundTaskWrapper { task }, id, channel_size)
     }
 
-    pub fn tasks_ids(&self) -> impl Iterator<Item = &Id> {
-        self.handles.keys()
-    }
-
-    pub async fn kill_task(&mut self, id: Id) {
-        self.streams.remove(&id);
-        let Some(task) = self.handles.remove(&id) else {
-            return;
-        };
-
-        task.abort();
+    pub fn clear(&mut self) {
+        for (id, _) in self.handles.drain() {
+            self.streams.remove(&id);
+        }
     }
 
     /// Returns the next update from one of registered tasks.

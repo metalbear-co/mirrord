@@ -536,11 +536,9 @@ impl IncomingProxy {
             }
 
             IncomingProxyMessage::ConnectionRefresh => {
-                let running_task_ids = self.tasks.tasks_ids().cloned().collect::<Vec<_>>();
-
-                for task in running_task_ids {
-                    self.tasks.kill_task(task).await;
-                }
+                self.mirror_tcp_proxies.clear();
+                self.steal_tcp_proxies.clear();
+                self.tasks.clear();
 
                 for subscription in self.subscriptions.iter_mut() {
                     tracing::debug!(?subscription, "resubscribing");

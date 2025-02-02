@@ -27,8 +27,6 @@ pub enum SimpleProxyMessage {
     GetEnvRes(RemoteResult<HashMap<String, String>>),
     /// Protocol version was negotiated with the agent.
     ProtocolVersion(Version),
-    /// Agent connection was refreshed need to negotiate version
-    ConnectionRefresh,
 }
 
 #[derive(Error, Debug)]
@@ -125,13 +123,6 @@ impl BackgroundTask for SimpleProxy {
                         .await
                 }
                 SimpleProxyMessage::ProtocolVersion(version) => self.set_protocol_version(version),
-                SimpleProxyMessage::ConnectionRefresh => {
-                    if let Some(version) = &self.protocol_version {
-                        message_bus
-                            .send(ClientMessage::SwitchProtocolVersion(version.clone()))
-                            .await
-                    }
-                }
             }
         }
 

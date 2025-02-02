@@ -36,6 +36,8 @@ pub enum FilesProxyMessage {
     LayerForked(LayerForked),
     /// Layer instance closed.
     LayerClosed(LayerClosed),
+    /// Agent connection was refreshed
+    ConnectionRefresh,
 }
 
 /// Error that can occur in [`FilesProxy`].
@@ -761,6 +763,20 @@ impl FilesProxy {
 
         Ok(())
     }
+
+    async fn handle_reconnect(&mut self, _message_bus: &mut MessageBus<Self>) {
+        for (_, fds) in self.remote_files.drain() {
+            for fd in fds {
+                self.buffered_files.remove(&fd);
+            }
+        }
+
+        for (_, fds) in self.remote_dirs.drain() {
+            for fd in fds {
+                self.buffered_dirs.remove(&fd);
+            }
+        }
+    }
 }
 
 impl BackgroundTask for FilesProxy {
@@ -785,6 +801,7 @@ impl BackgroundTask for FilesProxy {
                 }
                 FilesProxyMessage::LayerForked(forked) => self.layer_forked(forked),
                 FilesProxyMessage::ProtocolVersion(version) => self.protocol_version(version),
+                FilesProxyMessage::ConnectionRefresh => self.handle_reconnect(message_bus).await,
             }
         }
 

@@ -18,6 +18,7 @@ use proxies::{
     outgoing::{OutgoingProxy, OutgoingProxyMessage},
     simple::{SimpleProxy, SimpleProxyMessage},
 };
+use semver::Version;
 use tokio::{net::TcpListener, time};
 use tracing::Level;
 
@@ -60,6 +61,10 @@ pub struct IntProxy {
     any_connection_accepted: bool,
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
     task_txs: TaskTxs,
+    /// [`mirrord_protocol`] version negotiated with the agent.
+    /// Determines whether we can use some messages, like [`FileRequest::ReadDirBatch`] or
+    /// [`FileRequest::ReadLink`].
+    protocol_version: Option<Version>,
 }
 
 impl IntProxy {
@@ -128,6 +133,7 @@ impl IntProxy {
                 ping_pong,
                 files,
             },
+            protocol_version: None,
         }
     }
 
@@ -318,6 +324,8 @@ impl IntProxy {
                     .await
             }
             DaemonMessage::SwitchProtocolVersionResponse(protocol_version) => {
+                let _ = self.protocol_version.insert(protocol_version.clone());
+
                 if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
                     self.task_txs.agent.send(ClientMessage::ReadyForLogs).await;
                 }
@@ -413,8 +421,18 @@ impl IntProxy {
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     async fn handle_connection_refresh(&self) -> Result<(), IntProxyError> {
         self.task_txs
-            .simple
-            .send(SimpleProxyMessage::ConnectionRefresh)
+            .agent
+            .send(ClientMessage::SwitchProtocolVersion(
+                self.protocol_version
+                    .as_ref()
+                    .unwrap_or(&mirrord_protocol::VERSION)
+                    .clone(),
+            ))
+            .await;
+
+        self.task_txs
+            .files
+            .send(FilesProxyMessage::ConnectionRefresh)
             .await;
 
         self.task_txs
