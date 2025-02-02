@@ -543,9 +543,9 @@ impl IncomingProxy {
                 for subscription in self.subscriptions.iter_mut() {
                     tracing::debug!(?subscription, "resubscribing");
 
-                    for message in subscription.resubscribe() {
-                        message_bus.send(ProxyMessage::ToAgent(message)).await
-                    }
+                    message_bus
+                        .send(ProxyMessage::ToAgent(subscription.resubscribe_message()))
+                        .await
                 }
             }
         }

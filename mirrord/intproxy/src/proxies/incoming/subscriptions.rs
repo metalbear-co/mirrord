@@ -145,13 +145,10 @@ impl Subscription {
         }
     }
 
-    pub fn resubscribe(&mut self) -> Vec<ClientMessage> {
+    pub fn resubscribe_message(&mut self) -> ClientMessage {
         self.confirmed = false;
 
-        std::iter::once(&self.active_source)
-            .chain(self.queued_sources.iter())
-            .map(|source| source.request.subscription.agent_subscribe())
-            .collect()
+        self.active_source.request.subscription.agent_subscribe()
     }
 }
 
