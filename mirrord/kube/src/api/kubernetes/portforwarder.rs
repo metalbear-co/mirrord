@@ -215,7 +215,7 @@ pub async fn retry_portforward(
     client: &Client,
     connect_info: AgentKubernetesConnectInfo,
 ) -> Result<(Box<dyn UnpinStream>, SinglePortForwarder)> {
-    // use 1024 * 1024 to be identical to `kube` implementation (https://github.com/kube-rs/kube/blob/ecbdafc214538aadc78ec8447f2fa12d0057492b/kube-client/src/api/portforward.rs#L101)
+    // use 1024 * 1024 to be identical to [`kube` implementation](https://github.com/kube-rs/kube/blob/ecbdafc214538aadc78ec8447f2fa12d0057492b/kube-client/src/api/portforward.rs#L101).
     let (lhs, rhs) = tokio::io::duplex(1024 * 1024);
 
     let port_forwarder = SinglePortForwarder::connect(client, connect_info, Box::new(rhs)).await?;
