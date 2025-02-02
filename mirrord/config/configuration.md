@@ -1652,6 +1652,7 @@ Supports:
 - `statefulset/{statefulset-name}[/container/{container-name}]`; (requires mirrord
   Operator)
 - `service/{service-name}[/container/{container-name}]`; (requires mirrord Operator)
+- `replicaset/{replicaset-name}[/container/{replicaset-name}]`; (requires mirrord Operator)
 
 ## telemetry {#root-telemetry}
 Controls whether or not mirrord sends telemetry data to MetalBear cloud.

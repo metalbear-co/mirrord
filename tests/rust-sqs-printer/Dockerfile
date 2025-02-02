@@ -1,5 +1,5 @@
 # Using the agent's build image, that has rustup targets, zigbuild etc.
-FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9 AS build-env
+FROM --platform=$BUILDPLATFORM ghcr.io/metalbear-co/ci-agent-build:602d397f8e2088ca6ef229e7da0f86490153d8b7 AS build-env
 ARG TARGETARCH
 
 WORKDIR /build

@@ -42,8 +42,7 @@ impl VpnAgent {
                     _ => None,
                 },
             )
-            .await
-            .map_err(VpnError::from)?
+            .await?
         else {
             return Err(VpnError::AgentUnexpectedResponse);
         };
@@ -79,8 +78,7 @@ impl VpnAgent {
                     _ => None,
                 },
             )
-            .await
-            .map_err(VpnError::from)?;
+            .await?;
 
         match response {
             Some(ServerVpn::NetworkConfiguration(network)) => Ok(network),

@@ -27,7 +27,7 @@ where
     }
 }
 
-impl<'c, T> ContainerApi<JobVariant<T>> for Targetless<'c, JobVariant<T>>
+impl<T> ContainerApi<JobVariant<T>> for Targetless<'_, JobVariant<T>>
 where
     T: ContainerVariant<Update = Pod>,
 {
