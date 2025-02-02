@@ -61,9 +61,8 @@ pub struct IntProxy {
     any_connection_accepted: bool,
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
     task_txs: TaskTxs,
+
     /// [`mirrord_protocol`] version negotiated with the agent.
-    /// Determines whether we can use some messages, like [`FileRequest::ReadDirBatch`] or
-    /// [`FileRequest::ReadLink`].
     protocol_version: Option<Version>,
 }
 
