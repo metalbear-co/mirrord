@@ -2,7 +2,10 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    time::Duration,
+};
 
 use background_tasks::{BackgroundTasks, TaskSender, TaskUpdate};
 use error::UnexpectedAgentMessage;
@@ -26,7 +29,7 @@ use crate::{
     agent_conn::AgentConnection,
     background_tasks::{RestartableBackgroundTaskWrapper, TaskError},
     error::IntProxyError,
-    main_tasks::LayerClosed,
+    main_tasks::{ConnectionRefresh, LayerClosed},
 };
 
 pub mod agent_conn;
@@ -64,6 +67,10 @@ pub struct IntProxy {
 
     /// [`mirrord_protocol`] version negotiated with the agent.
     protocol_version: Option<Version>,
+
+    /// Temporary message queue for any [`ProxyMessage`] from layer or to agent that are sent
+    /// during reconnection state.
+    reconnect_task_queue: Option<VecDeque<ProxyMessage>>,
 }
 
 impl IntProxy {
@@ -133,6 +140,7 @@ impl IntProxy {
                 files,
             },
             protocol_version: None,
+            reconnect_task_queue: Default::default(),
         }
     }
 
@@ -186,6 +194,15 @@ impl IntProxy {
     /// [`ProxyMessage::NewLayer`] is handled here, as an exception.
     async fn handle(&mut self, msg: ProxyMessage) -> Result<(), IntProxyError> {
         match msg {
+            ProxyMessage::NewLayer(_) | ProxyMessage::FromLayer(_) | ProxyMessage::ToAgent(_)
+                if self.reconnect_task_queue.is_some() =>
+            {
+                // We are in reconnect state so should queue this message.
+                self.reconnect_task_queue
+                    .as_mut()
+                    .expect("reconnect_task_queue should contain value when in reconnect state")
+                    .push_back(msg);
+            }
             ProxyMessage::NewLayer(new_layer) => {
                 self.any_connection_accepted = true;
 
@@ -230,7 +247,7 @@ impl IntProxy {
                     .await;
                 }
             }
-            ProxyMessage::ConnectionRefresh => self.handle_connection_refresh().await?,
+            ProxyMessage::ConnectionRefresh(kind) => self.handle_connection_refresh(kind).await?,
         }
 
         Ok(())
@@ -418,26 +435,55 @@ impl IntProxy {
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
-    async fn handle_connection_refresh(&self) -> Result<(), IntProxyError> {
-        self.task_txs
-            .agent
-            .send(ClientMessage::SwitchProtocolVersion(
-                self.protocol_version
-                    .as_ref()
-                    .unwrap_or(&mirrord_protocol::VERSION)
-                    .clone(),
-            ))
-            .await;
+    async fn handle_connection_refresh(
+        &mut self,
+        kind: ConnectionRefresh,
+    ) -> Result<(), IntProxyError> {
+        match kind {
+            ConnectionRefresh::Start => {
+                // Initialise default reconnect message queue
+                self.reconnect_task_queue.get_or_insert_default();
+            }
+            ConnectionRefresh::End => {
+                let Some(task_queue) = self.reconnect_task_queue.take() else {
+                    return Err(IntProxyError::AgentFailed(
+                        "unexpected state: agent reconnected finished without correctly initialzing a reconnect"
+                            .into(),
+                    ));
+                };
 
-        self.task_txs
-            .files
-            .send(FilesProxyMessage::ConnectionRefresh)
-            .await;
+                self.task_txs
+                    .agent
+                    .send(ClientMessage::SwitchProtocolVersion(
+                        self.protocol_version
+                            .as_ref()
+                            .unwrap_or(&mirrord_protocol::VERSION)
+                            .clone(),
+                    ))
+                    .await;
 
-        self.task_txs
-            .incoming
-            .send(IncomingProxyMessage::ConnectionRefresh)
-            .await;
+                self.task_txs
+                    .files
+                    .send(FilesProxyMessage::ConnectionRefresh)
+                    .await;
+
+                self.task_txs
+                    .incoming
+                    .send(IncomingProxyMessage::ConnectionRefresh)
+                    .await;
+
+                Box::pin(async {
+                    for msg in task_queue {
+                        tracing::debug!(?msg, "dequeueing message for reconnect");
+
+                        self.handle(msg).await?
+                    }
+
+                    Ok::<(), IntProxyError>(())
+                })
+                .await?
+            }
+        }
 
         Ok(())
     }

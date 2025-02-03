@@ -38,7 +38,7 @@ use tracing::Level;
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus, RestartableBackgroundTask},
-    ProxyMessage,
+    main_tasks::{ConnectionRefresh, ProxyMessage},
 };
 
 mod portforward;
@@ -283,6 +283,10 @@ impl RestartableBackgroundTask for AgentConnection {
                 config,
                 connect_info,
             } => {
+                message_bus
+                    .send(ProxyMessage::ConnectionRefresh(ConnectionRefresh::Start))
+                    .await;
+
                 let retry_strategy = ExponentialBackoff::from_millis(50).map(jitter).take(10);
 
                 let connection = Retry::spawn(retry_strategy, || async move {
@@ -301,7 +305,9 @@ impl RestartableBackgroundTask for AgentConnection {
                 match connection {
                     Ok(connection) => {
                         *self = connection;
-                        message_bus.send(ProxyMessage::ConnectionRefresh).await;
+                        message_bus
+                            .send(ProxyMessage::ConnectionRefresh(ConnectionRefresh::End))
+                            .await;
 
                         ControlFlow::Continue(())
                     }
