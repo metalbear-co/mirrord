@@ -113,6 +113,9 @@ pub struct OperatorSession {
     /// Version of [`mirrord_protocol`] used by the operator.
     /// Used to create [`ConnectionWrapper`].
     pub operator_protocol_version: Option<Version>,
+
+    /// Version of the operator.
+    pub operator_version: Version,
 }
 
 impl fmt::Debug for OperatorSession {
@@ -126,6 +129,7 @@ impl fmt::Debug for OperatorSession {
                 &self.operator_license_fingerprint,
             )
             .field("operator_protocol_version", &self.operator_protocol_version)
+            .field("operator_version", &self.operator_version)
             .finish()
     }
 }
@@ -662,6 +666,7 @@ impl OperatorApi<PreparedClientCert> {
                 .protocol_version
                 .as_ref()
                 .and_then(|version| version.parse().ok()),
+            operator_version: self.operator.spec.operator_version.clone(),
         };
 
         let mut connection_subtask = progress.subtask("connecting to the target");

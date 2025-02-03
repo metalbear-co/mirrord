@@ -8,7 +8,7 @@ use std::{
     net::{IpAddr, SocketAddr},
     ops::ControlFlow,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 
 use mirrord_analytics::{NullReporter, Reporter};
@@ -19,6 +19,7 @@ use mirrord_kube::{
 };
 use mirrord_operator::client::{error::OperatorApiError, OperatorApi, OperatorSession};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
+use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
@@ -41,6 +42,12 @@ use crate::{
 };
 
 mod portforward;
+
+static OPERATOR_RETRY_VERSION: LazyLock<VersionReq> = LazyLock::new(|| {
+    ">3.104.2"
+        .parse()
+        .expect("OPERATOR_RETRY_VERSION should be a valid VersionReq value")
+});
 
 /// Errors that can occur when the internal proxy tries to establish a connection with the agent.
 #[derive(Error, Debug)]
@@ -141,9 +148,13 @@ impl AgentConnection {
                 (
                     connection.tx,
                     connection.rx,
-                    ReconnectFlow::ConnectInfo {
-                        config: config.clone(),
-                        connect_info: AgentConnectInfo::Operator(session),
+                    if OPERATOR_RETRY_VERSION.matches(&session.operator_version) {
+                        ReconnectFlow::ConnectInfo {
+                            config: config.clone(),
+                            connect_info: AgentConnectInfo::Operator(session),
+                        }
+                    } else {
+                        ReconnectFlow::default()
                     },
                 )
             }
