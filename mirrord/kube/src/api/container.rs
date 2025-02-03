@@ -53,8 +53,9 @@ impl ContainerParams {
         tls_cert: Option<String>,
         pod_ips: Option<String>,
         support_ipv6: bool,
+        port: Option<u16>,
     ) -> ContainerParams {
-        let port: u16 = rand::thread_rng().gen_range(30000..=65535);
+        let port = port.unwrap_or_else(|| rand::thread_rng().gen_range(30000..=65535));
         let gid: u16 = rand::thread_rng().gen_range(3000..u16::MAX);
 
         let name = format!(
