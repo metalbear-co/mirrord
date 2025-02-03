@@ -173,7 +173,7 @@ where
 
     let agent_connect_info = tokio::time::timeout(
         Duration::from_secs(config.agent.startup_timeout),
-        k8s_api.create_agent(progress, &config.target, Some(config), Default::default()),
+        k8s_api.create_agent(progress, &config.target, Some(config), None, None),
     )
     .await
     .unwrap_or(Err(KubeApiError::AgentReadyTimeout))
