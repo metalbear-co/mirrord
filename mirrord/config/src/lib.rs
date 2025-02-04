@@ -500,14 +500,13 @@ impl LayerConfig {
             Err(ConfigError::TargetJobWithoutCopyTarget)?
         }
 
-        if self.target.path.is_none() && !context.ide {
-            // In the IDE, a target may be selected after `mirrord verify-config` is run, so we
-            // for this case we treat these as warnings. They'll become errors once mirrord proper
-            // tries to start (if the user somehow managed to not select a target by then).
-            if self.target.namespace.is_some() {
-                Err(ConfigError::TargetNamespaceWithoutTarget)?
-            }
+        let is_targetless = match self.target.path.as_ref() {
+            Some(Target::Targetless) => true,
+            None => !context.ide,
+            _ => false,
+        };
 
+        if is_targetless {
             if self.feature.network.incoming.is_steal() {
                 Err(ConfigError::Conflict("Steal mode is not compatible with a targetless agent, please either disable this option or specify a target.".into()))?
             }
@@ -519,6 +518,10 @@ impl LayerConfig {
                         specify a target."
                         .into(),
                 ))?
+            }
+
+            if self.agent.namespace.is_some() {
+                context.add_warning("Agent namespace is ignored in targetless runs".into());
             }
         }
 
@@ -532,7 +535,7 @@ impl LayerConfig {
             }
 
             // Target may also be set later in the UI.
-            if self.target.path.is_none() && !context.ide {
+            if is_targetless {
                 return Err(ConfigError::Conflict(
                     "The copy target feature is not compatible with a targetless agent, \
                     please either disable this option or specify a target."

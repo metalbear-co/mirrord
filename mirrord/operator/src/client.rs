@@ -15,7 +15,11 @@ use mirrord_auth::{
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::LicenseValidity,
 };
-use mirrord_config::{feature::split_queues::SplitQueuesConfig, target::Target, LayerConfig};
+use mirrord_config::{
+    feature::{network::incoming::ConcurrentSteal, split_queues::SplitQueuesConfig},
+    target::Target,
+    LayerConfig,
+};
 use mirrord_kube::{
     api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
     error::KubeApiError,
@@ -507,20 +511,6 @@ where
         HeaderValue::try_from(as_base64)
             .map_err(|error| OperatorApiError::ClientCertError(error.to_string()))
     }
-
-    /// Returns a namespace of the target based on the given [`LayerConfig`] and default namespace
-    /// of [`Client`] used by this instance.
-    fn target_namespace<'a>(&'a self, layer_config: &'a LayerConfig) -> &'a str {
-        let namespace_opt = if layer_config.target.path.is_some() {
-            // Not a targetless run, we use target's namespace.
-            layer_config.target.namespace.as_deref()
-        } else {
-            // A targetless run, we use the namespace where the agent should live.
-            layer_config.agent.namespace.as_deref()
-        };
-
-        namespace_opt.unwrap_or(self.client.default_namespace())
-    }
 }
 
 impl OperatorApi<PreparedClientCert> {
@@ -587,7 +577,11 @@ impl OperatorApi<PreparedClientCert> {
                 .clone()
                 .unwrap_or(Target::Targetless);
             let scale_down = layer_config.feature.copy_target.scale_down;
-            let namespace = self.target_namespace(layer_config);
+            let namespace = layer_config
+                .target
+                .namespace
+                .as_deref()
+                .unwrap_or(self.client.default_namespace());
             let copied = self
                 .copy_target(
                     target,
@@ -633,12 +627,9 @@ impl OperatorApi<PreparedClientCert> {
             }
 
             (
-                target.connect_url(
-                    use_proxy_api,
+                self.target_connect_url(
+                    &target,
                     layer_config.feature.network.incoming.on_concurrent_steal,
-                    &TargetCrd::api_version(&()),
-                    &TargetCrd::plural(&()),
-                    &TargetCrd::url_path(&(), target.namespace()),
                 ),
                 None,
             )
@@ -669,6 +660,43 @@ impl OperatorApi<PreparedClientCert> {
         connection_subtask.success(Some("connected to the target"));
 
         Ok(OperatorSessionConnection { session, tx, rx })
+    }
+
+    /// Produces the URL for making a connection request to the operator.
+    fn target_connect_url(
+        &self,
+        target: &ResolvedTarget<true>,
+        concurrent_steal: ConcurrentSteal,
+    ) -> String {
+        let use_proxy = self
+            .operator
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::ProxyApi);
+
+        let name = {
+            let mut urlfied_name = target.type_().to_string();
+            if let Some(target_name) = target.name() {
+                urlfied_name.push('.');
+                urlfied_name.push_str(target_name);
+            }
+            if let Some(target_container) = target.container() {
+                urlfied_name.push('.');
+                urlfied_name.push_str(target_container);
+            }
+            urlfied_name
+        };
+
+        let namespace = target.namespace().unwrap_or("default");
+
+        if use_proxy {
+            let api_version = TargetCrd::api_version(&());
+            let plural = TargetCrd::plural(&());
+            format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?on_concurrent_steal={concurrent_steal}&connect=true")
+        } else {
+            let url_path = TargetCrd::url_path(&(), Some(namespace));
+            format!("{url_path}/{name}?on_concurrent_steal={concurrent_steal}&connect=true")
+        }
     }
 
     /// Returns client cert's public key in a base64 encoded string (no padding same like in
