@@ -1669,6 +1669,24 @@
         }
       ]
     },
+    "ReplicaSetTarget": {
+      "type": "object",
+      "required": [
+        "replica_set"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replica_set": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "RolloutTarget": {
       "description": "<!--${internal}--> Mirror the rollout specified by [`RolloutTarget::rollout`].",
       "type": "object",
@@ -1733,7 +1751,7 @@
       "additionalProperties": false
     },
     "Target": {
-      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `targetless` - `pod/{pod-name}[/container/{container-name}]`; - `deployment/{deployment-name}[/container/{container-name}]`; - `rollout/{rollout-name}[/container/{container-name}]`; - `job/{job-name}[/container/{container-name}]`; - `cronjob/{cronjob-name}[/container/{container-name}]`; - `statefulset/{statefulset-name}[/container/{container-name}]`; - `service/{service-name}[/container/{container-name}]`;",
+      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `targetless` - `pod/{pod-name}[/container/{container-name}]`; - `deployment/{deployment-name}[/container/{container-name}]`; - `rollout/{rollout-name}[/container/{container-name}]`; - `job/{job-name}[/container/{container-name}]`; - `cronjob/{cronjob-name}[/container/{container-name}]`; - `statefulset/{statefulset-name}[/container/{container-name}]`; - `service/{service-name}[/container/{container-name}]`; - `replicaset/{replicaset-name}[/container/{container-name}]`;",
       "anyOf": [
         {
           "description": "<!--${internal}--> [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/).",
@@ -1788,6 +1806,14 @@
           "allOf": [
             {
               "$ref": "#/definitions/ServiceTarget"
+            }
+          ]
+        },
+        {
+          "description": "<!--${internal}--> [ReplicaSet](https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReplicaSetTarget"
             }
           ]
         },

@@ -906,7 +906,7 @@ unsafe extern "C" fn fstatat_detour(
 
 /// Hook for `libc::fstatfs`.
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
+unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
     if out_stat.is_null() {
         return HookError::BadPointer.into();
     }
@@ -922,10 +922,7 @@ pub(crate) unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs)
 
 /// Hook for `libc::statfs`.
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn statfs_detour(
-    raw_path: *const c_char,
-    out_stat: *mut statfs,
-) -> c_int {
+unsafe extern "C" fn statfs_detour(raw_path: *const c_char, out_stat: *mut statfs) -> c_int {
     if out_stat.is_null() {
         return HookError::BadPointer.into();
     }

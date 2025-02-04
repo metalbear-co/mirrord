@@ -161,12 +161,15 @@ impl KubernetesAPI {
     /// * `tls_cert` - value for
     ///   [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV), for creating an
     ///   agent from the operator. In usage from this repo this is always `None`.
+    /// * `agent_port` - port number on which the agent will listen for client connections. If
+    ///   [`None`] is given, a random high port will be user.
     #[tracing::instrument(level = "trace", skip(self), ret, err)]
     pub async fn create_agent_params(
         &self,
         target: &TargetConfig,
         tls_cert: Option<String>,
         support_ipv6: bool,
+        agent_port: Option<u16>,
     ) -> Result<(ContainerParams, Option<RuntimeData>), KubeApiError> {
         let runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
             Target::Targetless => None,
@@ -188,7 +191,7 @@ impl KubernetesAPI {
                     .join(",")
             });
 
-        let params = ContainerParams::new(tls_cert, pod_ips, support_ipv6);
+        let params = ContainerParams::new(tls_cert, pod_ips, support_ipv6, agent_port);
 
         Ok((params, runtime_data))
     }
@@ -199,6 +202,8 @@ impl KubernetesAPI {
     /// * `tls_cert` - value for
     ///   [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV), for creating an
     ///   agent from the operator. In usage from this repo this is always `None`.
+    /// * `agent_port` - port number on which the agent will listen for client connections. If
+    ///   [`None`] is given, a random high port will be used.
     #[tracing::instrument(level = "trace", skip(self, progress))]
     pub async fn create_agent<P>(
         &self,
@@ -206,6 +211,7 @@ impl KubernetesAPI {
         target: &TargetConfig,
         config: Option<&LayerConfig>,
         tls_cert: Option<String>,
+        agent_port: Option<u16>,
     ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
     where
         P: Progress + Send + Sync,
@@ -214,7 +220,7 @@ impl KubernetesAPI {
             .map(|layer_conf| layer_conf.feature.network.ipv6)
             .unwrap_or_default();
         let (params, runtime_data) = self
-            .create_agent_params(target, tls_cert, support_ipv6)
+            .create_agent_params(target, tls_cert, support_ipv6, agent_port)
             .await?;
         if let Some(RuntimeData {
             guessed_container: true,

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use k8s_openapi::api::{
-    apps::v1::{Deployment, StatefulSet},
+    apps::v1::{Deployment, ReplicaSet, StatefulSet},
     batch::v1::{CronJob, Job},
     core::v1::{Pod, Service},
 };
@@ -19,6 +19,7 @@ pub mod cron_job;
 pub mod deployment;
 pub mod job;
 pub mod pod;
+pub mod replica_set;
 pub mod rollout;
 pub mod service;
 pub mod stateful_set;
@@ -41,6 +42,7 @@ pub enum ResolvedTarget<const CHECKED: bool> {
     CronJob(ResolvedResource<CronJob>),
     StatefulSet(ResolvedResource<StatefulSet>),
     Service(ResolvedResource<Service>),
+    ReplicaSet(ResolvedResource<ReplicaSet>),
 
     /// [`Pod`] is a special case, in that it does not implement [`RuntimeDataFromLabels`],
     /// and instead we implement a `runtime_data` method directly in its
@@ -92,6 +94,9 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::Service(ResolvedResource { resource, .. }) => {
                 resource.metadata.name.as_deref()
             }
+            ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => {
+                resource.metadata.name.as_deref()
+            }
             ResolvedTarget::Targetless(_) => None,
         }
     }
@@ -105,6 +110,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::CronJob(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::StatefulSet(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::Service(ResolvedResource { resource, .. }) => resource.name_any(),
+            ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => resource.name_any(),
             ResolvedTarget::Targetless(..) => "targetless".to_string(),
         }
     }
@@ -132,6 +138,9 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::Service(ResolvedResource { resource, .. }) => {
                 resource.metadata.namespace.as_deref()
             }
+            ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => {
+                resource.metadata.namespace.as_deref()
+            }
             ResolvedTarget::Targetless(namespace) => Some(namespace),
         }
     }
@@ -150,6 +159,9 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
                 resource.metadata.labels
             }
             ResolvedTarget::Service(ResolvedResource { resource, .. }) => resource.metadata.labels,
+            ResolvedTarget::ReplicaSet(ResolvedResource { resource, .. }) => {
+                resource.metadata.labels
+            }
             ResolvedTarget::Targetless(_) => None,
         }
     }
@@ -163,6 +175,7 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             ResolvedTarget::CronJob(_) => "cronjob",
             ResolvedTarget::StatefulSet(_) => "statefulset",
             ResolvedTarget::Service(_) => "service",
+            ResolvedTarget::ReplicaSet(_) => "replicaset",
             ResolvedTarget::Targetless(_) => "targetless",
         }
     }
@@ -176,7 +189,10 @@ impl<const CHECKED: bool> ResolvedTarget<CHECKED> {
             | ResolvedTarget::CronJob(ResolvedResource { container, .. })
             | ResolvedTarget::StatefulSet(ResolvedResource { container, .. })
             | ResolvedTarget::Service(ResolvedResource { container, .. })
-            | ResolvedTarget::Pod(ResolvedResource { container, .. }) => container.as_deref(),
+            | ResolvedTarget::Pod(ResolvedResource { container, .. })
+            | ResolvedTarget::ReplicaSet(ResolvedResource { container, .. }) => {
+                container.as_deref()
+            }
             ResolvedTarget::Targetless(..) => None,
         }
     }
@@ -264,6 +280,15 @@ impl ResolvedTarget<false> {
                 .await
                 .map(|resource| {
                     ResolvedTarget::Service(ResolvedResource {
+                        resource,
+                        container: target.container.clone(),
+                    })
+                }),
+            Target::ReplicaSet(target) => get_k8s_resource_api::<ReplicaSet>(client, namespace)
+                .get(&target.replica_set)
+                .await
+                .map(|resource| {
+                    ResolvedTarget::ReplicaSet(ResolvedResource {
                         resource,
                         container: target.container.clone(),
                     })
@@ -458,6 +483,43 @@ impl ResolvedTarget<false> {
                 }
 
                 Ok(ResolvedTarget::Service(ResolvedResource {
+                    resource,
+                    container,
+                }))
+            }
+
+            ResolvedTarget::ReplicaSet(ResolvedResource {
+                resource,
+                container,
+            }) => {
+                let available = resource
+                    .status
+                    .as_ref()
+                    .ok_or_else(|| KubeApiError::missing_field(&resource, ".status"))?
+                    .available_replicas
+                    .unwrap_or_default(); // Field can be missing when there are no replicas
+
+                if available <= 0 {
+                    return Err(KubeApiError::invalid_state(
+                        &resource,
+                        "no available replicas",
+                    ));
+                }
+
+                if let Some(container) = &container {
+                    // verify that the container exists
+                    resource
+                        .spec
+                        .as_ref()
+                        .and_then(|spec| spec.template.as_ref()?.spec.as_ref())
+                        .ok_or_else(|| KubeApiError::missing_field(&resource, ".spec.template.spec"))?
+                        .containers
+                        .iter()
+                        .find(|c| c.name == *container)
+                        .ok_or_else(|| KubeApiError::invalid_state(&resource, format_args!("specified pod template does not contain target container `{container}`")))?;
+                }
+
+                Ok(ResolvedTarget::ReplicaSet(ResolvedResource {
                     resource,
                     container,
                 }))
