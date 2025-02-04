@@ -140,6 +140,9 @@ If not provided, mirrord will use value from the kubeconfig.
 
 Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.
 
+**Note:** this configuration is ignored when using the mirrord Operator.
+Agent configuration is done by the cluster admin.
+
 We provide sane defaults for this option, so you don't have to set up anything here.
 
 ```json
@@ -204,7 +207,9 @@ as targetless agent containers have no capabilities.
 ### agent.ephemeral {#agent-ephemeral}
 
 Runs the agent as an
-[ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)
+[ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/).
+
+Not compatible with targetless runs.
 
 Defaults to `false`.
 
@@ -323,7 +328,9 @@ configured to scrape for metrics.
 ### agent.namespace {#agent-namespace}
 
 Namespace where the agent shall live.
-Note: Doesn't work with ephemeral containers.
+
+**Note:** ignored in targetless runs or when the agent is run as an ephemeral container.
+
 Defaults to the current kubernetes namespace.
 
 ### agent.network_interface {#agent-network_interface}
@@ -1587,7 +1594,7 @@ Please note that:
 - `job`, `cronjob`, `statefulset` and `service` targets require the mirrord Operator
 - `job` and `cronjob` targets require the [`copy_target`](#feature-copy_target) feature
 
-Shortened setup:
+Shortened setup with a target:
 
 ```json
 {
@@ -1598,7 +1605,7 @@ Shortened setup:
 The setup above will result in a session targeting the `bear-pod` Kubernetes pod
 in the user's default namespace. A target container will be chosen by mirrord.
 
-Shortened setup with target container:
+Shortened setup with a target container:
 
 ```json
 {
@@ -1609,7 +1616,7 @@ Shortened setup with target container:
 The setup above will result in a session targeting the `bear-pod-container` container
 in the `bear-pod` Kubernetes pod in the user's default namespace.
 
-Complete setup:
+Complete setup with a target container:
 
 ```json
 {
@@ -1626,15 +1633,33 @@ Complete setup:
 The setup above will result in a session targeting the `bear-pod-container` container
 in the `bear-pod` Kubernetes pod in the `bear-pod-namespace` namespace.
 
+Setup with a namespace for a targetless run:
+
+```json
+{
+  "target": {
+    "path": "targetless",
+    "namespace": "bear-namespace"
+  }
+}
+```
+
+The setup above will result in a session without any target.
+Remote outgoing traffic and DNS will be done from the `bear-namespace` namespace.
+
 ### target.namespace {#target-namespace}
 
 Namespace where the target lives.
+
+For targetless runs, this the namespace in which remote networking is done.
 
 Defaults to the Kubernetes user's default namespace (defined in Kubernetes context).
 
 ### target.path {#target-path}
 
 Specifies the Kubernetes resource to target.
+
+If not given, defaults to `targetless`.
 
 Note: targeting services and whole workloads is available only in mirrord for Teams.
 If you target a workload without the mirrord Operator, it will choose a random pod replica
@@ -1652,7 +1677,7 @@ Supports:
 - `statefulset/{statefulset-name}[/container/{container-name}]`; (requires mirrord
   Operator)
 - `service/{service-name}[/container/{container-name}]`; (requires mirrord Operator)
-- `replicaset/{replicaset-name}[/container/{replicaset-name}]`; (requires mirrord Operator)
+- `replicaset/{replicaset-name}[/container/{container-name}]`; (requires mirrord Operator)
 
 ## telemetry {#root-telemetry}
 Controls whether or not mirrord sends telemetry data to MetalBear cloud.
