@@ -465,6 +465,14 @@ To debug it with a debugger:
 
 ## Retrieving Agent Logs
 
+You can change the minimum severity of logs emitted by the agent by setting `agent.log_level` in the mirrord config
+file, for example:
+```json
+"agent": {
+	"log_level": "mirrord=trace"
+}
+```
+
 By default, the agent's pod will complete and disappear shortly after the agent exits. In order to be able to retrieve 
 the agent's logs after it crashes, set the agent's pod's TTL to a comfortable number of seconds. This configuration can
 be specified either as a command line argument (`--agent-ttl`), environment variable (`MIRRORD_AGENT_TTL`), or in a
