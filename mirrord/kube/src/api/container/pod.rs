@@ -99,25 +99,35 @@ impl ContainerVariant for PodVariant<'_> {
             .map(BTreeMap::from_iter)
             .unwrap_or_default();
 
+        let labels = agent
+            .labels
+            .iter()
+            .flatten()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .chain([
+                (
+                    "kuma.io/sidecar-injection".to_owned(),
+                    "disabled".to_owned(),
+                ),
+                ("app".to_owned(), "mirrord".to_owned()),
+            ])
+            .collect();
+
+        let annotations = agent
+            .annotations
+            .iter()
+            .flatten()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .chain([
+                ("sidecar.istio.io/inject".to_string(), "false".to_string()),
+                ("linkerd.io/inject".to_string(), "disabled".to_string()),
+            ])
+            .collect();
+
         Pod {
             metadata: ObjectMeta {
-                annotations: Some(
-                    [
-                        ("sidecar.istio.io/inject".to_string(), "false".to_string()),
-                        ("linkerd.io/inject".to_string(), "disabled".to_string()),
-                    ]
-                    .into(),
-                ),
-                labels: Some(
-                    [
-                        (
-                            "kuma.io/sidecar-injection".to_string(),
-                            "disabled".to_string(),
-                        ),
-                        ("app".to_string(), "mirrord".to_string()),
-                    ]
-                    .into(),
-                ),
+                annotations: Some(annotations),
+                labels: Some(labels),
                 ..Default::default()
             },
             spec: Some(PodSpec {
