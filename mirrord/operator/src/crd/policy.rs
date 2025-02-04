@@ -178,7 +178,7 @@ pub struct IncomingNetworkPolicy {
 #[serde(rename_all = "camelCase")]
 pub struct HttpFilterPolicy {
     /// Require the user's header filter to match this regex if such filter is provided.
-    /// 
+    ///
     /// This works in tandem with the `steal-without-filter` block
     /// to require that the user to specifies a header filter for the network steal feature.
     pub header_filter: Option<String>,
