@@ -26,6 +26,7 @@ impl RuntimeDataFromLabels for RolloutTarget {
             .clone()
             .ok_or_else(|| KubeApiError::missing_field(resource, ".spec"))?
             .selector
+            .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector"))?
             .match_labels
             .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.matchLabels"))
     }

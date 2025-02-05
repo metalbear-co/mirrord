@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use k8s_openapi::{
     api::{
@@ -120,6 +120,67 @@ impl Rollout {
                 .map(Cow::Owned),
         }
     }
+
+    pub async fn get_match_labels<'a>(
+        &'a self,
+        client: &Client,
+    ) -> Result<Cow<'a, BTreeMap<String, String>>, KubeApiError> {
+        let spec = self
+            .spec
+            .as_ref()
+            .ok_or_else(|| KubeApiError::missing_field(self, ".spec"))?;
+
+        match spec {
+            RolloutSpec {
+                selector: Some(..),
+                workload_ref: Some(..),
+                ..
+            } => Err(KubeApiError::invalid_state(
+                self,
+                "both `.spec.selector` and `.spec.workladRef` fields are filled",
+            )),
+
+            RolloutSpec {
+                selector: None,
+                workload_ref: None,
+                ..
+            } => Err(KubeApiError::invalid_state(
+                self,
+                "both `.spec.selector` and `.spec.workloadRef` fields are empty",
+            )),
+
+            RolloutSpec {
+                selector: Some(selector),
+                ..
+            } => selector
+                .match_labels
+                .as_ref()
+                .ok_or_else(|| {
+                    KubeApiError::invalid_state(
+                        self,
+                        format_args!("field `.spec.selector` is missing",),
+                    )
+                })
+                .map(Cow::Borrowed),
+
+            RolloutSpec {
+                workload_ref: Some(workload_ref),
+                ..
+            } => workload_ref
+                .get_match_labels(client, self.metadata.namespace.as_deref())
+                .await?
+                .ok_or_else(|| {
+                    KubeApiError::invalid_state(
+                        self,
+                        format_args!(
+                            "field `.spec.workloadRef` refers to an unknown resource `{}/{}`",
+                            workload_ref.api_version, workload_ref.kind
+                        ),
+                    )
+                })
+                .map(Cow::Owned),
+        }
+    }
 }
 
 impl WorkloadRef {
@@ -180,6 +241,68 @@ impl WorkloadRef {
                     .take()
                     .ok_or_else(|| KubeApiError::missing_field(&stateful_set, ".spec"))
                     .map(|spec| Some(spec.template))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    pub async fn get_match_labels<'a>(
+        &'a self,
+        client: &Client,
+        namespace: Option<&str>,
+    ) -> Result<Option<BTreeMap<String, String>>, KubeApiError> {
+        match (self.api_version.as_str(), self.kind.as_str()) {
+            (Deployment::API_VERSION, Deployment::KIND) => {
+                let mut deployment = get_k8s_resource_api::<Deployment>(client, namespace)
+                    .get(&self.name)
+                    .await?;
+
+                deployment
+                    .spec
+                    .take()
+                    .ok_or_else(|| KubeApiError::missing_field(&deployment, ".spec"))
+                    .map(|spec| spec.selector.match_labels)
+            }
+            (ReplicaSet::API_VERSION, ReplicaSet::KIND) => {
+                let mut replica_set = get_k8s_resource_api::<ReplicaSet>(client, namespace)
+                    .get(&self.name)
+                    .await?;
+
+                todo!()
+
+                // replica_set
+                //     .spec
+                //     .take()
+                //     .ok_or_else(|| KubeApiError::missing_field(&replica_set, ".spec"))?
+                //     .template
+                //     .ok_or_else(|| KubeApiError::missing_field(&replica_set, ".spec.template"))
+                //     .map(Some)
+            }
+            (PodTemplate::API_VERSION, PodTemplate::KIND) => {
+                let mut pod_template = get_k8s_resource_api::<PodTemplate>(client, namespace)
+                    .get(&self.name)
+                    .await?;
+
+                todo!()
+
+                // pod_template
+                //     .template
+                //     .take()
+                //     .ok_or_else(|| KubeApiError::missing_field(&pod_template, ".template"))
+                //     .map(Some)
+            }
+            (StatefulSet::API_VERSION, StatefulSet::KIND) => {
+                let mut stateful_set = get_k8s_resource_api::<StatefulSet>(client, namespace)
+                    .get(&self.name)
+                    .await?;
+
+                todo!()
+
+                // stateful_set
+                //     .spec
+                //     .take()
+                //     .ok_or_else(|| KubeApiError::missing_field(&stateful_set, ".spec"))
+                //     .map(|spec| Some(spec.template))
             }
             _ => Ok(None),
         }
