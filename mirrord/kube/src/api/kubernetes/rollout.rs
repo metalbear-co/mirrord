@@ -236,8 +236,8 @@ impl WorkloadRef {
         }
     }
 
-    pub async fn get_match_labels<'a>(
-        &'a self,
+    pub async fn get_match_labels(
+        &self,
         client: &Client,
         namespace: Option<&str>,
     ) -> Result<Option<LabelSelector>, KubeApiError> {
