@@ -179,8 +179,8 @@ pub struct IncomingNetworkPolicy {
 pub struct HttpFilterPolicy {
     /// Require the user's header filter to match this regex, if such filter is provided.
     ///
-    /// This works in tandem with the `steal-without-filter` block
-    /// to require that the user specifies a header filter for the network steal feature.
+    /// This auto enables `steal-without-filter` policy block to require that the user specifies a
+    /// header filter for the network steal feature.
     ///
     /// # Composed filters
     ///
