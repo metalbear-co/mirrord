@@ -102,8 +102,7 @@ streammap-ext = "0.1"
 regex = { version = "1", features = ["unicode-case"] }
 fancy-regex = { version = "0.14" }
 enum_dispatch = "0.3"
-envfile = "0.2"
-
+dotenv = "0.15"
 
 # If you update `hyper`, check that `h2` version is compatible in `intproxy/Cargo.toml`.
 # There is a test for this: `cargo test -p mirrord-intproxy hyper_and_h2_versions_in_sync`
