@@ -63,6 +63,10 @@ pub struct MirrordPolicySpec {
     /// the user config.
     #[serde(default)]
     pub fs: FsPolicy,
+
+    /// Fine grained control over network features like specifying required HTTP filters.
+    #[serde(default)]
+    pub network: NetworkPolicy,
 }
 
 /// Custom cluster-wide resource for policies that limit what mirrord features users can use.
@@ -100,6 +104,9 @@ pub struct MirrordClusterPolicySpec {
     /// the user config.
     #[serde(default)]
     pub fs: FsPolicy,
+
+    #[serde(default)]
+    pub network: NetworkPolicy,
 }
 
 /// Policy for controlling environment variables access from mirrord instances.
@@ -148,6 +155,41 @@ pub struct FsPolicy {
     /// Opening the file is rejected with an IO error.
     #[serde(default)]
     pub not_found: HashSet<String>,
+}
+
+/// Network operations policy that partialy mimics the mirrord network config.
+#[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkPolicy {
+    #[serde(default)]
+    pub incoming: IncomingNetworkPolicy,
+}
+
+/// Incoming network operations policy that partialy mimics the mirrord `network.incoming` config.
+#[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomingNetworkPolicy {
+    #[serde(default)]
+    pub http_filter: HttpFilterPolicy,
+}
+
+/// Http filter policy that allows to specify requirements for the HTTP filter used in a session.
+#[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpFilterPolicy {
+    /// Require the user's header filter to match this regex, if such filter is provided.
+    ///
+    /// This works in tandem with the `steal-without-filter` block
+    /// to require that the user specifies a header filter for the network steal feature.
+    ///
+    /// # Composed filters
+    ///
+    /// When the user requests an `all_of` HTTP filter, at least one of the nested filters
+    /// must be a header filter that matches this regex. At least one nested filter is required.
+    ///
+    /// When the user requests an `any_of` HTTP filter, all nested header filters must match this
+    /// regex. At least one nested header filter is required.
+    pub header_filter: Option<String>,
 }
 
 #[test]

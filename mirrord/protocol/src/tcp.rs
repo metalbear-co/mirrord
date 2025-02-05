@@ -155,6 +155,14 @@ impl Display for Filter {
     }
 }
 
+impl std::ops::Deref for Filter {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Describes different types of HTTP filtering available
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum HttpFilter {

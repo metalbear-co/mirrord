@@ -258,9 +258,12 @@ impl SubscriptionsManager {
             }
 
             Err(
-                ref response_error @ ResponseError::Forbidden {
+                ref response_error @ (ResponseError::Forbidden {
                     ref blocked_action, ..
-                },
+                }
+                | ResponseError::ForbiddenWithReason {
+                    ref blocked_action, ..
+                }),
             ) => {
                 tracing::warn!(%response_error, "Port subscribe blocked by policy");
 
