@@ -87,7 +87,7 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
 /// - `job`, `cronjob`, `statefulset` and `service` targets require the mirrord Operator
 /// - `job` and `cronjob` targets require the [`copy_target`](#feature-copy_target) feature
 ///
-/// Shortened setup:
+/// Shortened setup with a target:
 ///
 ///```json
 /// {
@@ -98,7 +98,7 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
 /// The setup above will result in a session targeting the `bear-pod` Kubernetes pod
 /// in the user's default namespace. A target container will be chosen by mirrord.
 ///
-/// Shortened setup with target container:
+/// Shortened setup with a target container:
 ///
 /// ```json
 /// {
@@ -109,7 +109,7 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
 /// The setup above will result in a session targeting the `bear-pod-container` container
 /// in the `bear-pod` Kubernetes pod in the user's default namespace.
 ///
-/// Complete setup:
+/// Complete setup with a target container:
 ///
 /// ```json
 /// {
@@ -125,12 +125,28 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
 ///
 /// The setup above will result in a session targeting the `bear-pod-container` container
 /// in the `bear-pod` Kubernetes pod in the `bear-pod-namespace` namespace.
+///
+/// Setup with a namespace for a targetless run:
+///
+/// ```json
+/// {
+///   "target": {
+///     "path": "targetless",
+///     "namespace": "bear-namespace"
+///   }
+/// }
+/// ```
+///
+/// The setup above will result in a session without any target.
+/// Remote outgoing traffic and DNS will be done from the `bear-namespace` namespace.
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct TargetConfig {
     /// ### target.path {#target-path}
     ///
     /// Specifies the Kubernetes resource to target.
+    ///
+    /// If not given, defaults to `targetless`.
     ///
     /// Note: targeting services and whole workloads is available only in mirrord for Teams.
     /// If you target a workload without the mirrord Operator, it will choose a random pod replica
@@ -155,6 +171,8 @@ pub struct TargetConfig {
     /// ### target.namespace {#target-namespace}
     ///
     /// Namespace where the target lives.
+    ///
+    /// For targetless runs, this the namespace in which remote networking is done.
     ///
     /// Defaults to the Kubernetes user's default namespace (defined in Kubernetes context).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -322,23 +340,6 @@ impl FromStr for Target {
 }
 
 impl Target {
-    /// Get the target name - pod name, deployment name, rollout name..
-    pub fn get_target_name(&self) -> String {
-        match self {
-            Target::Deployment(target) => target.deployment.clone(),
-            Target::Pod(target) => target.pod.clone(),
-            Target::Rollout(target) => target.rollout.clone(),
-            Target::Job(target) => target.job.clone(),
-            Target::CronJob(target) => target.cron_job.clone(),
-            Target::StatefulSet(target) => target.stateful_set.clone(),
-            Target::Service(target) => target.service.clone(),
-            Target::ReplicaSet(target) => target.replica_set.clone(),
-            Target::Targetless => {
-                unreachable!("this shouldn't happen - called from operator on a flow where it's not targetless.")
-            }
-        }
-    }
-
     /// `true` if this [`Target`] is only supported when the copy target feature is enabled.
     pub(super) fn requires_copy(&self) -> bool {
         matches!(self, Target::Job(_) | Target::CronJob(_))

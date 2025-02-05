@@ -6,7 +6,7 @@ use k8s_openapi::api::{
     core::v1::{Pod, Service},
 };
 use kube::{Client, Resource, ResourceExt};
-use mirrord_config::{feature::network::incoming::ConcurrentSteal, target::Target};
+use mirrord_config::target::Target;
 use tracing::Level;
 
 use super::{
@@ -530,39 +530,5 @@ impl ResolvedTarget<false> {
                 Ok(ResolvedTarget::Targetless(namespace))
             }
         }
-    }
-}
-
-impl ResolvedTarget<true> {
-    pub fn connect_url(
-        &self,
-        use_proxy: bool,
-        concurrent_steal: ConcurrentSteal,
-        api_version: &str,
-        plural: &str,
-        url_path: &str,
-    ) -> String {
-        let name = self.urlfied_name();
-        let namespace = self.namespace().unwrap_or("default");
-
-        if use_proxy {
-            format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?on_concurrent_steal={concurrent_steal}&connect=true")
-        } else {
-            format!("{url_path}/{name}?on_concurrent_steal={concurrent_steal}&connect=true")
-        }
-    }
-
-    pub fn urlfied_name(&self) -> String {
-        let mut url = self.type_().to_string();
-
-        if let Some(target_name) = self.name() {
-            url.push_str(&format!(".{target_name}"));
-        }
-
-        if let Some(container) = self.container() {
-            url.push_str(&format!(".container.{container}"));
-        }
-
-        url
     }
 }
