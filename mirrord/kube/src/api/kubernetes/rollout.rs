@@ -39,9 +39,8 @@ pub struct RolloutStatus {
 #[serde(rename_all = "camelCase")]
 pub struct RolloutSpec {
     pub replicas: Option<i32>,
-    pub selector: LabelSelector,
-    #[serde(deserialize_with = "rollout_pod_spec")]
-    pub template: Option<PodTemplateSpec>,
+    pub selector: Option<LabelSelector>,
+    pub template: Option<RolloutSpecTemplate>,
     pub workload_ref: Option<WorkloadRef>,
 }
 
@@ -63,44 +62,6 @@ pub struct WorkloadRef {
     pub api_version: String,
     pub kind: String,
     pub name: String,
-}
-
-/// Custom deserializer for a rollout template field due to
-/// [#548](https://github.com/metalbear-co/operator/issues/548)
-/// First deserializes it as value, fixes possible issues and then deserializes it as
-/// PodTemplateSpec.
-fn rollout_pod_spec<'de, D>(deserializer: D) -> Result<Option<PodTemplateSpec>, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let mut value = serde_json::Value::deserialize(deserializer)?;
-
-    value
-        .get_mut("spec")
-        .and_then(|spec| spec.get_mut("containers")?.as_array_mut())
-        .into_iter()
-        .flatten()
-        .filter_map(|container| container.get_mut("resources"))
-        .for_each(|resources| {
-            for field in ["limits", "requests"] {
-                let Some(object) = resources.get_mut(field) else {
-                    continue;
-                };
-
-                for field in ["cpu", "memory"] {
-                    let Some(raw) = object.get_mut(field) else {
-                        continue;
-                    };
-
-                    if let Some(number) = raw.as_number() {
-                        *raw = number.to_string().into();
-                    }
-                }
-            }
-        });
-
-    let pod_template: PodTemplateSpec = serde_json::from_value(value).map_err(de::Error::custom)?;
-    Ok(Some(pod_template))
 }
 
 impl Rollout {
@@ -139,7 +100,7 @@ impl Rollout {
             RolloutSpec {
                 template: Some(template),
                 ..
-            } => Ok(Cow::Borrowed(template)),
+            } => Ok(Cow::Borrowed(template.as_ref())),
 
             RolloutSpec {
                 workload_ref: Some(workload_ref),
@@ -248,6 +209,53 @@ impl Metadata for Rollout {
     fn metadata_mut(&mut self) -> &mut Self::Ty {
         &mut self.metadata
     }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+pub struct RolloutSpecTemplate(#[serde(deserialize_with = "rollout_pod_spec")] PodTemplateSpec);
+
+impl AsRef<PodTemplateSpec> for RolloutSpecTemplate {
+    fn as_ref(&self) -> &PodTemplateSpec {
+        &self.0
+    }
+}
+
+/// Custom deserializer for a rollout template field due to
+/// [#548](https://github.com/metalbear-co/operator/issues/548)
+/// First deserializes it as value, fixes possible issues and then deserializes it as
+/// PodTemplateSpec.
+#[tracing::instrument(level = "debug", skip(deserializer), ret, err)]
+fn rollout_pod_spec<'de, D>(deserializer: D) -> Result<PodTemplateSpec, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let mut value = serde_json::Value::deserialize(deserializer)?;
+
+    value
+        .get_mut("spec")
+        .and_then(|spec| spec.get_mut("containers")?.as_array_mut())
+        .into_iter()
+        .flatten()
+        .filter_map(|container| container.get_mut("resources"))
+        .for_each(|resources| {
+            for field in ["limits", "requests"] {
+                let Some(object) = resources.get_mut(field) else {
+                    continue;
+                };
+
+                for field in ["cpu", "memory"] {
+                    let Some(raw) = object.get_mut(field) else {
+                        continue;
+                    };
+
+                    if let Some(number) = raw.as_number() {
+                        *raw = number.to_string().into();
+                    }
+                }
+            }
+        });
+
+    serde_json::from_value(value).map_err(de::Error::custom)
 }
 
 #[cfg(test)]
