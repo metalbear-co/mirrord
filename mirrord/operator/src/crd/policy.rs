@@ -64,7 +64,7 @@ pub struct MirrordPolicySpec {
     #[serde(default)]
     pub fs: FsPolicy,
 
-    /// Fine grained control over network features like specifiying required http filters.
+    /// Fine grained control over network features like specifying required HTTP filters.
     #[serde(default)]
     pub network: NetworkPolicy,
 }
@@ -177,10 +177,18 @@ pub struct IncomingNetworkPolicy {
 #[derive(Clone, Default, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpFilterPolicy {
-    /// Require the user's header filter to match this regex if such filter is provided.
+    /// Require the user's header filter to match this regex, if such filter is provided.
     ///
     /// This works in tandem with the `steal-without-filter` block
-    /// to require that the user to specifies a header filter for the network steal feature.
+    /// to require that the user specifies a header filter for the network steal feature.
+    ///
+    /// # Composed filters
+    ///
+    /// When the user requests an `all_of` HTTP filter, at least one of the nested filters
+    /// must be a header filter that matches this regex. At least one nested filter is required.
+    /// 
+    /// When the user requests an `any_of` HTTP filter, all nested filters
+    /// must be header filters and match this regex. At least one nested filter is required.
     pub header_filter: Option<String>,
 }
 
