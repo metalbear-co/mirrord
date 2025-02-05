@@ -41,6 +41,10 @@ pub struct KubernetesAPI {
 }
 
 impl KubernetesAPI {
+    /// Creates a new instance from the given [`LayerConfig`].
+    ///
+    /// If [`LayerConfig::target`] specifies a targetless run,
+    /// replaces [`AgentConfig::namespace`] with the target namespace.
     pub async fn create(config: &LayerConfig) -> Result<Self> {
         let client = create_kube_config(
             config.accept_invalid_certificates,
@@ -50,7 +54,17 @@ impl KubernetesAPI {
         .await?
         .try_into()?;
 
-        Ok(KubernetesAPI::new(client, config.agent.clone()))
+        let mut agent = config.agent.clone();
+        if config
+            .target
+            .path
+            .as_ref()
+            .is_none_or(|path| matches!(path, Target::Targetless))
+        {
+            agent.namespace = config.target.namespace.clone();
+        }
+
+        Ok(KubernetesAPI::new(client, agent))
     }
 
     pub fn new(client: Client, agent: AgentConfig) -> Self {
