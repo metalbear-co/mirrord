@@ -186,9 +186,9 @@ pub struct HttpFilterPolicy {
     ///
     /// When the user requests an `all_of` HTTP filter, at least one of the nested filters
     /// must be a header filter that matches this regex. At least one nested filter is required.
-    /// 
-    /// When the user requests an `any_of` HTTP filter, all nested filters
-    /// must be header filters and match this regex. At least one nested filter is required.
+    ///
+    /// When the user requests an `any_of` HTTP filter, all nested header filters must match this
+    /// regex.
     pub header_filter: Option<String>,
 }
 
