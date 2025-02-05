@@ -44,6 +44,11 @@ impl RuntimeDataFromLabels for ResolvedResource<Rollout> {
         let formatted_labels = resource
             .get_match_labels(client)
             .await?
+            .match_labels
+            .as_ref()
+            .ok_or_else(|| {
+                KubeApiError::missing_field(resource, ".selector or .selector.match_labels")
+            })?
             .iter()
             .map(|(key, value)| format!("{key}={value}"))
             .collect::<Vec<String>>()
