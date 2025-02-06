@@ -19,7 +19,7 @@ pub trait EnvValue: Sized {
     type FromReprError;
 
     /// Produces a representation for the given value.
-    fn into_repr(&self) -> Result<String, Self::IntoReprError>;
+    fn as_repr(&self) -> Result<String, Self::IntoReprError>;
 
     /// Reads a value from the given representation.
     fn from_repr(repr: &[u8]) -> Result<Self, Self::FromReprError>;
@@ -34,7 +34,7 @@ impl<T: StoredAsString> EnvValue for T {
     type IntoReprError = Infallible;
     type FromReprError = ParseEnvError<T::Err>;
 
-    fn into_repr(&self) -> Result<String, Self::IntoReprError> {
+    fn as_repr(&self) -> Result<String, Self::IntoReprError> {
         Ok(self.to_string())
     }
 
@@ -44,8 +44,7 @@ impl<T: StoredAsString> EnvValue for T {
     }
 }
 
-/// Errors that can occur when reading an environment variable value from the representation using
-/// [`StringRepr`] or [`CommaSeparatedRepr`].
+/// Errors that can occur when reading a [`StoredAsString`] environment variable value.
 #[derive(Error, Debug)]
 pub enum ParseEnvError<E> {
     Utf8Error(#[source] Utf8Error),
@@ -74,7 +73,7 @@ impl<V: EnvValue> CheckedEnv<V> {
     /// Produces an [`EnvVar`] spec, using the given value.
     #[cfg(feature = "k8s-openapi")]
     pub fn try_as_k8s_spec(self, value: &V) -> Result<EnvVar, V::IntoReprError> {
-        let repr = V::into_repr(value)?;
+        let repr = value.as_repr()?;
 
         Ok(EnvVar {
             name: self.name.into(),
@@ -141,7 +140,7 @@ impl EnvValue for Vec<IpAddr> {
     type IntoReprError = Infallible;
     type FromReprError = ParseEnvError<AddrParseError>;
 
-    fn into_repr(&self) -> Result<String, Self::IntoReprError> {
+    fn as_repr(&self) -> Result<String, Self::IntoReprError> {
         Ok(self
             .iter()
             .map(ToString::to_string)
