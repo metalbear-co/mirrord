@@ -25,7 +25,10 @@ pub trait EnvValue: Sized {
     fn from_repr(repr: &[u8]) -> Result<Self, Self::FromReprError>;
 }
 
-pub trait StoredAsString: fmt::Display + FromStr {}
+/// Convenience trait to mark value types that can be converted with [`ToString`] and [`FromStr`].
+///
+/// Implementors are provided with a blanket implementation of [`EnvValue`].
+pub trait StoredAsString: ToString + FromStr {}
 
 impl<T: StoredAsString> EnvValue for T {
     type IntoReprError = Infallible;
@@ -132,18 +135,7 @@ impl StoredAsString for u32 {}
 
 impl StoredAsString for SocketAddr {}
 
-impl EnvValue for String {
-    type IntoReprError = Infallible;
-    type FromReprError = Utf8Error;
-
-    fn into_repr(&self) -> Result<String, Self::IntoReprError> {
-        Ok(self.clone())
-    }
-
-    fn from_repr(repr: &[u8]) -> Result<Self, Self::FromReprError> {
-        std::str::from_utf8(repr).map(From::from)
-    }
-}
+impl StoredAsString for String {}
 
 impl EnvValue for Vec<IpAddr> {
     type IntoReprError = Infallible;
