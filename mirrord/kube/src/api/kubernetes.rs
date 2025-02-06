@@ -172,9 +172,8 @@ impl KubernetesAPI {
     /// # Params
     ///
     /// * `config` - if passed, will be checked against cluster setup
-    /// * `tls_cert` - value for
-    ///   [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV), for creating an
-    ///   agent from the operator. In usage from this repo this is always `None`.
+    /// * `tls_cert` - value for [`OPERATOR_CERT`](mirrord_agent_env::envs::OPERATOR_CERT), for
+    ///   creating an agent from the operator. In usage from this repo this is always `None`.
     /// * `agent_port` - port number on which the agent will listen for client connections. If
     ///   [`None`] is given, a random high port will be user.
     #[tracing::instrument(level = "trace", skip(self), ret, err)]
@@ -206,9 +205,8 @@ impl KubernetesAPI {
     /// # Params
     ///
     /// * `config` - if passed, will be checked against cluster setup
-    /// * `tls_cert` - value for
-    ///   [`AGENT_OPERATOR_CERT_ENV`](mirrord_agent_env::AGENT_OPERATOR_CERT_ENV), for creating an
-    ///   agent from the operator. In usage from this repo this is always `None`.
+    /// * `tls_cert` - value for [`OPERATOR_CERT`](mirrord_agent_env::envs::OPERATOR_CERT), for
+    ///   creating an agent from the operator. In usage from this repo this is always `None`.
     /// * `agent_port` - port number on which the agent will listen for client connections. If
     ///   [`None`] is given, a random high port will be used.
     #[tracing::instrument(level = "trace", skip(self, progress))]
