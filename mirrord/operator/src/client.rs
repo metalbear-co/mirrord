@@ -839,7 +839,7 @@ mod test {
     use super::OperatorApi;
 
     /// Verifies that [`OperatorApi::target_connect_url`] produces expected URLs.
-    /// 
+    ///
     /// These URLs should not change for backward compatibility.
     #[rstest]
     #[case::deployment_no_container_no_proxy(
