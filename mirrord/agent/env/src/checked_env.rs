@@ -11,7 +11,7 @@ use std::{
 use k8s_openapi::api::core::v1::EnvVar;
 use thiserror::Error;
 
-/// A representation of an environment variable value.
+/// Type of an environment variable value.
 pub trait EnvValue: Sized {
     /// Error that can occur when producing the value representation.
     type IntoReprError;
