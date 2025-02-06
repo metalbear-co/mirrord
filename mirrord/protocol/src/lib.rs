@@ -9,6 +9,7 @@ pub mod dns;
 pub mod error;
 pub mod file;
 pub mod outgoing;
+#[deprecated = "pause feature was removed"]
 pub mod pause;
 pub mod tcp;
 pub mod vpn;
