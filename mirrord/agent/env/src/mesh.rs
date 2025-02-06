@@ -4,6 +4,8 @@ use std::fmt;
 ///
 /// Used to be detected in the CLI and passed to the agent in a command line argument.
 /// Now the agent independently infers it from the iptables.
+///
+/// Because of this change, this enum does **not** have to backwards compatible.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MeshVendor {
     Linkerd,
