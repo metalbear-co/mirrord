@@ -3,7 +3,7 @@
 use std::net::SocketAddr;
 
 use clap::{Parser, Subcommand};
-use mirrord_agent_env::{envs, mesh::MeshVendor};
+use mirrord_agent_env::envs;
 
 const DEFAULT_RUNTIME: &str = "containerd";
 
@@ -48,7 +48,7 @@ pub struct Args {
     #[arg(long, env = envs::OPERATOR_CERT.name)]
     pub operator_tls_cert_pem: Option<String>,
 
-    /// Which kind of mesh the remote pod is in, see [`MeshVendor`].
+    /// Whether there is a mesh present in the target pod.
     #[arg(
         long,
         default_value_t = false,
@@ -86,21 +86,15 @@ pub enum Mode {
         #[arg(short = 'r', long, default_value = DEFAULT_RUNTIME)]
         container_runtime: String,
 
-        // TODO(alex): We should remove this arg from here and put into the general `Args`, but
-        // this would be a breaking change, as the agent would be started as:
-        // `agent --mesh targeted` becomes incompatible when a new layer version tries to
-        // initialize an old agent version.
-        /// Which kind of mesh the remote pod is in, see [`MeshVendor`].
+        // This argument is being kept here only for compatibility with very old CLIs.
         #[arg(long)]
-        mesh: Option<MeshVendor>,
+        mesh: Option<String>,
     },
     /// Inform the agent to use `proc/1/root` as the root directory.
     Ephemeral {
-        // TODO(alex): Same issue here, we want to remove this at some point, and move it to
-        // `Args`.
-        /// Which kind of mesh the remote pod is in, see [`MeshVendor`].
+        // This argument is being kept here only for compatibility with very old CLIs.
         #[arg(long)]
-        mesh: Option<MeshVendor>,
+        mesh: Option<String>,
     },
     #[default]
     Targetless,

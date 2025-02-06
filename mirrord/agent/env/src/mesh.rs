@@ -1,17 +1,9 @@
-use std::{fmt, str::FromStr};
+use std::fmt;
 
-use thiserror::Error;
-
-/// Used to identify if the target pod is in a mesh context.
+/// Type of a mesh context in which the target pod runs.
 ///
-/// - Passed to the agent so we can handle the special case for selecting a network interface `lo`
-///   when we're mirroring with `istio`;
-/// - Used in the stealer iptables handling to add/detect special rules for meshes;
-///
-/// ## Internal
-///
-/// Can be converted to, and from `String`, if you add a new value here, don't forget to add it to
-/// the `FromStr` implementation!
+/// Used to be detected in the CLI and passed to the agent in a command line argument.
+/// Now the agent independently infers it from the iptables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MeshVendor {
     Linkerd,
@@ -32,22 +24,3 @@ impl fmt::Display for MeshVendor {
         }
     }
 }
-
-impl FromStr for MeshVendor {
-    type Err = MeshVendorParseError;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "linkerd" => Ok(Self::Linkerd),
-            "istio" => Ok(Self::Istio),
-            "kuma" => Ok(Self::Kuma),
-            "istio-ambient" => Ok(Self::IstioAmbient),
-            invalid => Err(MeshVendorParseError(invalid.into())),
-        }
-    }
-}
-
-/// Error when parsing a [`MeshVendor`] from the agent arguments.
-#[derive(Debug, PartialEq, Clone, Eq, Error)]
-#[error("unknown variant `{0}`")]
-pub struct MeshVendorParseError(pub String);
