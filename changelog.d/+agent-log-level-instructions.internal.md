@@ -1,1 +1,0 @@
-Add instructions to CONTRIBUTING.md for changing the agent log level in mirrord config.
