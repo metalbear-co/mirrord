@@ -626,8 +626,15 @@ impl OperatorApi<PreparedClientCert> {
                 }
             }
 
+            let use_proxy = self
+                .operator
+                .spec
+                .supported_features()
+                .contains(&NewOperatorFeature::ProxyApi);
+
             (
-                self.target_connect_url(
+                Self::target_connect_url(
+                    use_proxy,
                     &target,
                     layer_config.feature.network.incoming.on_concurrent_steal,
                 ),
@@ -664,16 +671,10 @@ impl OperatorApi<PreparedClientCert> {
 
     /// Produces the URL for making a connection request to the operator.
     fn target_connect_url(
-        &self,
+        use_proxy: bool,
         target: &ResolvedTarget<true>,
         concurrent_steal: ConcurrentSteal,
     ) -> String {
-        let use_proxy = self
-            .operator
-            .spec
-            .supported_features()
-            .contains(&NewOperatorFeature::ProxyApi);
-
         let name = {
             let mut urlfied_name = target.type_().to_string();
             if let Some(target_name) = target.name() {
@@ -681,7 +682,7 @@ impl OperatorApi<PreparedClientCert> {
                 urlfied_name.push_str(target_name);
             }
             if let Some(target_container) = target.container() {
-                urlfied_name.push('.');
+                urlfied_name.push_str(".container.");
                 urlfied_name.push_str(target_container);
             }
             urlfied_name
@@ -824,5 +825,99 @@ impl OperatorApi<PreparedClientCert> {
             connection,
             session.operator_protocol_version.clone(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use k8s_openapi::api::apps::v1::Deployment;
+    use kube::api::ObjectMeta;
+    use mirrord_config::feature::network::incoming::ConcurrentSteal;
+    use mirrord_kube::resolved::{ResolvedResource, ResolvedTarget};
+    use rstest::rstest;
+
+    use super::OperatorApi;
+
+    /// Verifies that [`OperatorApi::target_connect_url`] produces expected URLs.
+    /// 
+    /// These URLs should not change for backward compatibility.
+    #[rstest]
+    #[case::deployment_no_container_no_proxy(
+        false,
+        ResolvedTarget::Deployment(ResolvedResource {
+            resource: Deployment {
+                metadata: ObjectMeta {
+                    name: Some("py-serv-deployment".into()),
+                    namespace: Some("default".into()),
+                    ..Default::default()
+                },
+                spec: None,
+                status: None,
+            },
+            container: None,
+        }),
+        ConcurrentSteal::Abort,
+        "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?on_concurrent_steal=abort&connect=true"
+    )]
+    #[case::deployment_no_container_proxy(
+        true,
+        ResolvedTarget::Deployment(ResolvedResource {
+            resource: Deployment {
+                metadata: ObjectMeta {
+                    name: Some("py-serv-deployment".into()),
+                    namespace: Some("default".into()),
+                    ..Default::default()
+                },
+                spec: None,
+                status: None,
+            },
+            container: None,
+        }),
+        ConcurrentSteal::Abort,
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment?on_concurrent_steal=abort&connect=true"
+    )]
+    #[case::deployment_container_no_proxy(
+        false,
+        ResolvedTarget::Deployment(ResolvedResource {
+            resource: Deployment {
+                metadata: ObjectMeta {
+                    name: Some("py-serv-deployment".into()),
+                    namespace: Some("default".into()),
+                    ..Default::default()
+                },
+                spec: None,
+                status: None,
+            },
+            container: Some("py-serv".into()),
+        }),
+        ConcurrentSteal::Abort,
+        "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?on_concurrent_steal=abort&connect=true"
+    )]
+    #[case::deployment_container_proxy(
+        true,
+        ResolvedTarget::Deployment(ResolvedResource {
+            resource: Deployment {
+                metadata: ObjectMeta {
+                    name: Some("py-serv-deployment".into()),
+                    namespace: Some("default".into()),
+                    ..Default::default()
+                },
+                spec: None,
+                status: None,
+            },
+            container: Some("py-serv".into()),
+        }),
+        ConcurrentSteal::Abort,
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?on_concurrent_steal=abort&connect=true"
+    )]
+    #[test]
+    fn target_connect_url(
+        #[case] use_proxy: bool,
+        #[case] target: ResolvedTarget<true>,
+        #[case] concurrent_steal: ConcurrentSteal,
+        #[case] expected: &str,
+    ) {
+        let produced = OperatorApi::target_connect_url(use_proxy, &target, concurrent_steal);
+        assert_eq!(produced, expected,)
     }
 }
