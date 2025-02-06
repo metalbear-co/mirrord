@@ -4,54 +4,50 @@
 
 use std::net::{IpAddr, SocketAddr};
 
-use crate::checked_env::{CheckedEnv, CommaSeparatedRepr, StringRepr};
+use crate::checked_env::CheckedEnv;
 
 /// Used to pass operator's x509 certificate to the agent.
 ///
 /// This way the agent can be sure that it only accepts TLS connections coming from the exact
 /// operator that spawned it.
-pub const OPERATOR_CERT: CheckedEnv<StringRepr<String>> =
-    CheckedEnv::new("AGENT_OPERATOR_CERT_ENV");
+pub const OPERATOR_CERT: CheckedEnv<String> = CheckedEnv::new("AGENT_OPERATOR_CERT_ENV");
 
 /// Determines a network interface for mirroring.
-pub const NETWORK_INTERFACE: CheckedEnv<StringRepr<String>> =
-    CheckedEnv::new("AGENT_NETWORK_INTERFACE_ENV");
+pub const NETWORK_INTERFACE: CheckedEnv<String> = CheckedEnv::new("AGENT_NETWORK_INTERFACE_ENV");
 
 /// Enables Prometheus metrics export point and sets its address.
-pub const METRICS: CheckedEnv<StringRepr<SocketAddr>> = CheckedEnv::new("MIRRORD_AGENT_METRICS");
+pub const METRICS: CheckedEnv<SocketAddr> = CheckedEnv::new("MIRRORD_AGENT_METRICS");
 
 /// Used to inform the agent that mesh is present in the target pod.
-pub const IN_SERVICE_MESH: CheckedEnv<StringRepr<bool>> =
-    CheckedEnv::new("MIRRORD_AGENT_IN_SERVICE_MESH");
+pub const IN_SERVICE_MESH: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_IN_SERVICE_MESH");
 
 /// Used to inform the agent that istio cni mesh is present in the target pod.
-pub const ISTIO_CNI: CheckedEnv<StringRepr<bool>> = CheckedEnv::new("MIRRORD_AGENT_ISTIO_CNI");
+pub const ISTIO_CNI: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_ISTIO_CNI");
 
 /// Instructs the agent to flush connections when adding new iptables rules.
-pub const STEALER_FLUSH_CONNECTIONS: CheckedEnv<StringRepr<bool>> =
+pub const STEALER_FLUSH_CONNECTIONS: CheckedEnv<bool> =
     CheckedEnv::new("MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS");
 
 /// Instructs the agent to use `iptables-nft` instead of `iptables-legacy` for manipulating
 /// iptables.
-pub const NFTABLES: CheckedEnv<StringRepr<bool>> = CheckedEnv::new("MIRRORD_AGENT_NFTABLES");
+pub const NFTABLES: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_NFTABLES");
 
 /// Instructs the agent to produces logs in JSON format.
-pub const JSON_LOG: CheckedEnv<StringRepr<bool>> = CheckedEnv::new("MIRRORD_AGENT_JSON_LOG");
+pub const JSON_LOG: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_JSON_LOG");
 
 /// Enables IPv6 support in the agent.
-pub const IPV6: CheckedEnv<StringRepr<bool>> = CheckedEnv::new("AGENT_IPV6_ENV");
+pub const IPV6: CheckedEnv<bool> = CheckedEnv::new("AGENT_IPV6_ENV");
 
 /// Sets a hard timeout on DNS queries.
-pub const DNS_TIMEOUT: CheckedEnv<StringRepr<u32>> = CheckedEnv::new("MIRRORD_AGENT_DNS_TIMEOUT");
+pub const DNS_TIMEOUT: CheckedEnv<u32> = CheckedEnv::new("MIRRORD_AGENT_DNS_TIMEOUT");
 
 /// Sets a hard limit on DNS query attempts.
-pub const DNS_ATTEMPTS: CheckedEnv<StringRepr<u32>> = CheckedEnv::new("MIRRORD_AGENT_DNS_ATTEMPTS");
+pub const DNS_ATTEMPTS: CheckedEnv<u32> = CheckedEnv::new("MIRRORD_AGENT_DNS_ATTEMPTS");
 
 /// This is currently not used in the agent.
-pub const POD_IPS: CheckedEnv<CommaSeparatedRepr<IpAddr>> =
-    CheckedEnv::new("MIRRORD_AGENT_POD_IPS");
+pub const POD_IPS: CheckedEnv<Vec<IpAddr>> = CheckedEnv::new("MIRRORD_AGENT_POD_IPS");
 
 /// Sets agent log level.
 ///
 /// Should follow `tracing`` format, e.g `mirrord=trace`.
-pub const LOG_LEVEL: CheckedEnv<StringRepr<String>> = CheckedEnv::new("RUST_LOG");
+pub const LOG_LEVEL: CheckedEnv<String> = CheckedEnv::new("RUST_LOG");
