@@ -2,6 +2,7 @@ use std::{future, path::PathBuf, time::Duration};
 
 use futures::{stream::FuturesOrdered, StreamExt};
 use hickory_resolver::{system_conf::parse_resolv_conf, Hosts, Resolver};
+use mirrord_agent_env::envs;
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse},
     DnsLookupError, RemoteResult, ResolveErrorKindInternal, ResponseError,
@@ -71,18 +72,18 @@ impl DnsWorker {
             })
             .unwrap_or_else(|| PathBuf::from("/etc"));
 
+        let timeout = envs::DNS_TIMEOUT.try_from_env().ok().flatten().unwrap_or(1);
+        let attempts = envs::DNS_ATTEMPTS
+            .try_from_env()
+            .ok()
+            .flatten()
+            .unwrap_or(1);
+
         Self {
             etc_path,
             request_rx,
-            timeout: std::env::var("MIRRORD_AGENT_DNS_TIMEOUT")
-                .ok()
-                .and_then(|timeout| timeout.parse().ok())
-                .map(Duration::from_secs)
-                .unwrap_or_else(|| Duration::from_secs(1)),
-            attempts: std::env::var("MIRRORD_AGENT_DNS_ATTEMPTS")
-                .ok()
-                .and_then(|attempts| attempts.parse().ok())
-                .unwrap_or(1),
+            timeout: Duration::from_secs(timeout.into()),
+            attempts: usize::try_from(attempts).unwrap_or(usize::MAX),
             support_ipv6,
         }
     }

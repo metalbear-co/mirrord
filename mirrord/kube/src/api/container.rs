@@ -1,9 +1,9 @@
-use std::{collections::HashSet, sync::LazyLock};
+use std::{collections::HashSet, net::IpAddr, sync::LazyLock};
 
 use k8s_openapi::api::core::v1::{ContainerStatus, Pod};
+use mirrord_agent_env::mesh::MeshVendor;
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
-use mirrord_protocol::MeshVendor;
 use rand::{
     distributions::{Alphanumeric, DistString},
     Rng,
@@ -43,7 +43,7 @@ pub struct ContainerParams {
     /// Value for [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV) set in
     /// the agent container.
     pub tls_cert: Option<String>,
-    pub pod_ips: Option<String>,
+    pub pod_ips: Option<Vec<IpAddr>>,
     /// Support IPv6-only clusters
     pub support_ipv6: bool,
 }
@@ -51,7 +51,7 @@ pub struct ContainerParams {
 impl ContainerParams {
     pub fn new(
         tls_cert: Option<String>,
-        pod_ips: Option<String>,
+        pod_ips: Option<Vec<IpAddr>>,
         support_ipv6: bool,
         port: Option<u16>,
     ) -> ContainerParams {

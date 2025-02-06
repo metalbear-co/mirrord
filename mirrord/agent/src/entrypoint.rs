@@ -13,6 +13,7 @@ use client_connection::AgentTlsConnector;
 use dns::{ClientGetAddrInfoRequest, DnsCommand, DnsWorker};
 use futures::TryFutureExt;
 use metrics::{start_metrics, CLIENT_COUNT};
+use mirrord_agent_env::envs;
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use sniffer::tcp_capture::RawSocketTcpCapture;
 use tokio::{
@@ -863,10 +864,7 @@ pub async fn main() -> AgentResult<()> {
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
 
-    if let Ok(json_log) =
-        std::env::var("MIRRORD_AGENT_JSON_LOG").map(|json_log| json_log.parse().unwrap_or_default())
-        && json_log
-    {
+    if envs::JSON_LOG.is_set() {
         tracing_subscriber::registry()
             .with(
                 tracing_subscriber::fmt::layer()

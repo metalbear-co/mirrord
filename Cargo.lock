@@ -4204,6 +4204,7 @@ dependencies = [
  "iptables",
  "k8s-cri",
  "libc",
+ "mirrord-agent-env",
  "mirrord-protocol",
  "mockall",
  "nix 0.29.0",
@@ -4234,6 +4235,14 @@ dependencies = [
  "tracing-subscriber",
  "wildmatch",
  "x509-parser",
+]
+
+[[package]]
+name = "mirrord-agent-env"
+version = "3.131.2"
+dependencies = [
+ "k8s-openapi",
+ "thiserror 2.0.11",
 ]
 
 [[package]]
@@ -4368,6 +4377,7 @@ dependencies = [
  "futures",
  "k8s-openapi",
  "kube",
+ "mirrord-agent-env",
  "mirrord-config",
  "mirrord-progress",
  "mirrord-protocol",

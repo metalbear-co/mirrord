@@ -3,10 +3,7 @@
 use std::net::SocketAddr;
 
 use clap::{Parser, Subcommand};
-use mirrord_protocol::{
-    MeshVendor, AGENT_IPV6_ENV, AGENT_METRICS_ENV, AGENT_NETWORK_INTERFACE_ENV,
-    AGENT_OPERATOR_CERT_ENV,
-};
+use mirrord_agent_env::{envs, mesh::MeshVendor};
 
 const DEFAULT_RUNTIME: &str = "containerd";
 
@@ -28,11 +25,11 @@ pub struct Args {
     pub communication_timeout: u16,
 
     /// Interface to use
-    #[arg(short = 'i', long, env = AGENT_NETWORK_INTERFACE_ENV)]
+    #[arg(short = 'i', long, env = envs::NETWORK_INTERFACE.name)]
     pub network_interface: Option<String>,
 
     /// Controls whether metrics are enabled, and the address to set up the metrics server.
-    #[arg(long, env = AGENT_METRICS_ENV)]
+    #[arg(long, env = envs::METRICS.name)]
     pub metrics: Option<SocketAddr>,
 
     /// Return an error after accepting the first client connection, in order to test agent error
@@ -48,7 +45,7 @@ pub struct Args {
     /// from the clients (proxied by the operator).
     ///
     /// If not given, the agent will not use TLS.
-    #[arg(long, env = AGENT_OPERATOR_CERT_ENV)]
+    #[arg(long, env = envs::OPERATOR_CERT.name)]
     pub operator_tls_cert_pem: Option<String>,
 
     /// Which kind of mesh the remote pod is in, see [`MeshVendor`].
@@ -56,7 +53,7 @@ pub struct Args {
         long,
         default_value_t = false,
         hide = true,
-        env = "MIRRORD_AGENT_IN_SERVICE_MESH"
+        env = envs::IN_SERVICE_MESH.name,
     )]
     pub is_mesh: bool,
 
@@ -64,7 +61,7 @@ pub struct Args {
     ///
     /// Only when this option is set will take the needed steps to run on an IPv6 single stack
     /// cluster.
-    #[arg(long, default_value_t = false, env = AGENT_IPV6_ENV)]
+    #[arg(long, default_value_t = false, env = envs::IPV6.name)]
     pub ipv6: bool,
 }
 

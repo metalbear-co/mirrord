@@ -2,6 +2,7 @@
 
 members = [
     "mirrord/*",
+    "mirrord/agent/env",
     "mirrord/layer/tests/apps/fileops",
     "mirrord/layer/tests/apps/outgoing",
     "mirrord/layer/tests/apps/listen_ports",
