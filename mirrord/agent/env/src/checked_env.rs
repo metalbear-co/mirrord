@@ -150,10 +150,7 @@ impl<V: EnvValue> fmt::Display for CheckedEnv<V> {
 
 impl<V: EnvValue> Clone for CheckedEnv<V> {
     fn clone(&self) -> Self {
-        Self {
-            name: self.name,
-            value_type: PhantomData,
-        }
+        *self
     }
 }
 
@@ -162,10 +159,6 @@ impl<V: EnvValue> Copy for CheckedEnv<V> {}
 impl<V: EnvValue> PartialEq for CheckedEnv<V> {
     fn eq(&self, other: &Self) -> bool {
         self.name.eq(other.name)
-    }
-
-    fn ne(&self, other: &Self) -> bool {
-        self.name.ne(other.name)
     }
 }
 
