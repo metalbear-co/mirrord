@@ -44,9 +44,7 @@ pub const DNS_TIMEOUT: CheckedEnv<u32> = CheckedEnv::new("MIRRORD_AGENT_DNS_TIME
 /// Sets a hard limit on DNS query attempts.
 pub const DNS_ATTEMPTS: CheckedEnv<u32> = CheckedEnv::new("MIRRORD_AGENT_DNS_ATTEMPTS");
 
-/// This is currently not used in the agent.
-///
-/// Left for backwards compatibility.
+/// Used in incoming traffic redirection to produce correct iptables rules.
 pub const POD_IPS: CheckedEnv<Vec<IpAddr>> = CheckedEnv::new("MIRRORD_AGENT_POD_IPS");
 
 /// Sets agent log level.
