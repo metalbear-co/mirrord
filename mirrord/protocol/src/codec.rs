@@ -18,7 +18,6 @@ use crate::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
-    pause::DaemonPauseTarget,
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     vpn::{ClientVpn, ServerVpn},
     ResponseError,
@@ -166,6 +165,7 @@ pub enum FileResponse {
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 #[protocol_break(2)]
+#[allow(deprecated)] // We can't remove deprecated variants without breaking the protocol
 pub enum DaemonMessage {
     /// Kills the intproxy, no guarantee that messages that were sent before a `Close` will be
     /// handled by the intproxy and forwarded to the layer before the intproxy exits.
@@ -181,7 +181,7 @@ pub enum DaemonMessage {
     GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
     GetAddrInfoResponse(GetAddrInfoResponse),
     /// Pause is deprecated but we don't want to break protocol
-    PauseTarget(DaemonPauseTarget),
+    PauseTarget(crate::pause::DaemonPauseTarget),
     SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
     Vpn(ServerVpn),
 }

@@ -3,10 +3,8 @@ use std::sync::LazyLock;
 use futures::{AsyncBufReadExt, TryStreamExt};
 use k8s_openapi::api::core::v1::{EnvVar, Pod, Toleration};
 use kube::{api::LogParams, Api};
+use mirrord_agent_env::envs;
 use mirrord_config::agent::{AgentConfig, LinuxCapability};
-use mirrord_protocol::{
-    AGENT_IPV6_ENV, AGENT_METRICS_ENV, AGENT_NETWORK_INTERFACE_ENV, AGENT_OPERATOR_CERT_ENV,
-};
 use regex::Regex;
 use tracing::warn;
 
@@ -37,58 +35,38 @@ pub(super) fn get_capabilities(agent: &AgentConfig) -> Vec<LinuxCapability> {
 /// Builds mirrord agent environment variables.
 pub(super) fn agent_env(agent: &AgentConfig, params: &&ContainerParams) -> Vec<EnvVar> {
     let mut env = vec![
-        ("RUST_LOG".to_string(), agent.log_level.clone()),
-        (
-            "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS".to_string(),
-            agent.flush_connections.to_string(),
-        ),
-        (
-            "MIRRORD_AGENT_NFTABLES".to_string(),
-            agent.nftables.to_string(),
-        ),
-        (
-            "MIRRORD_AGENT_JSON_LOG".to_string(),
-            agent.json_log.to_string(),
-        ),
+        envs::LOG_LEVEL.as_k8s_spec(&agent.log_level),
+        envs::STEALER_FLUSH_CONNECTIONS.as_k8s_spec(&agent.flush_connections),
+        envs::NFTABLES.as_k8s_spec(&agent.nftables),
+        envs::JSON_LOG.as_k8s_spec(&agent.json_log),
+        envs::IPV6_SUPPORT.as_k8s_spec(&params.support_ipv6),
     ];
+
     if let Some(attempts) = agent.dns.attempts {
-        env.push((
-            "MIRRORD_AGENT_DNS_ATTEMPTS".to_string(),
-            attempts.to_string(),
-        ));
+        env.push(envs::DNS_ATTEMPTS.as_k8s_spec(&attempts));
     }
 
     if let Some(interface) = agent.network_interface.as_ref() {
-        env.push((AGENT_NETWORK_INTERFACE_ENV.to_string(), interface.into()));
+        env.push(envs::NETWORK_INTERFACE.as_k8s_spec(interface));
     }
 
-    env.push((AGENT_IPV6_ENV.to_string(), params.support_ipv6.to_string()));
-
     if let Some(timeout) = agent.dns.timeout {
-        env.push(("MIRRORD_AGENT_DNS_TIMEOUT".to_string(), timeout.to_string()));
+        env.push(envs::DNS_TIMEOUT.as_k8s_spec(&timeout));
     };
 
-    if let Some(pod_ips) = params.pod_ips.clone() {
-        env.push(("MIRRORD_AGENT_POD_IPS".to_string(), pod_ips));
+    if let Some(pod_ips) = &params.pod_ips {
+        env.push(envs::POD_IPS.as_k8s_spec(pod_ips));
     }
 
     if let Some(metrics_address) = agent.metrics.as_ref() {
-        env.push((AGENT_METRICS_ENV.to_string(), metrics_address.to_string()));
+        env.push(envs::METRICS.as_k8s_spec(metrics_address));
     }
 
-    env.into_iter()
-        .chain(
-            params
-                .tls_cert
-                .clone()
-                .map(|cert| (AGENT_OPERATOR_CERT_ENV.to_string(), cert)),
-        )
-        .map(|(name, value)| EnvVar {
-            name,
-            value: Some(value),
-            ..Default::default()
-        })
-        .collect::<Vec<_>>()
+    if let Some(cert) = &params.tls_cert {
+        env.push(envs::OPERATOR_CERT.as_k8s_spec(cert));
+    }
+
+    env
 }
 
 pub(super) fn base_command_line(agent: &AgentConfig, params: &ContainerParams) -> Vec<String> {

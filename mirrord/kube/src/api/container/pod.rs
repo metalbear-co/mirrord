@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 
 use k8s_openapi::{
     api::core::v1::{
-        Capabilities, Container, EnvVar, HostPathVolumeSource, LocalObjectReference, Pod, PodSpec,
+        Capabilities, Container, HostPathVolumeSource, LocalObjectReference, Pod, PodSpec,
         SecurityContext, Volume, VolumeMount,
     },
     DeepMerge,
 };
 use kube::api::ObjectMeta;
+use mirrord_agent_env::{envs, mesh::MeshVendor};
 use mirrord_config::agent::AgentConfig;
-use mirrord_protocol::MeshVendor;
 
 use super::util::agent_env;
 use crate::api::{
@@ -197,17 +197,9 @@ impl ContainerVariant for PodTargetedVariant<'_> {
         let tolerations = agent.tolerations.as_ref().unwrap_or(&DEFAULT_TOLERATIONS);
 
         let env = self.runtime_data.mesh.map(|mesh_vendor| {
-            let mut env = vec![EnvVar {
-                name: "MIRRORD_AGENT_IN_SERVICE_MESH".into(),
-                value: Some("true".into()),
-                ..Default::default()
-            }];
+            let mut env = vec![envs::IN_SERVICE_MESH.as_k8s_spec(&true)];
             if matches!(mesh_vendor, MeshVendor::IstioCni) {
-                env.push(EnvVar {
-                    name: "MIRRORD_AGENT_ISTIO_CNI".into(),
-                    value: Some("true".into()),
-                    ..Default::default()
-                });
+                env.push(envs::ISTIO_CNI.as_k8s_spec(&true));
             }
             env
         });

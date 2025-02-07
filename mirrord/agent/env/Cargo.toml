@@ -1,0 +1,23 @@
+[package]
+name = "mirrord-agent-env"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[features]
+default = ["k8s-openapi"]
+k8s-openapi = ["dep:k8s-openapi"]
+
+[dependencies]
+k8s-openapi = { workspace = true, optional = true }
+thiserror.workspace = true
+tracing.workspace = true

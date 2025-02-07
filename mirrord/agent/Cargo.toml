@@ -19,6 +19,9 @@ workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [target.'cfg(target_os = "linux")'.dependencies]
+mirrord-protocol = { path = "../protocol" }
+mirrord-agent-env = { path = "./env", default-features = false }
+
 containerd-client = "0.6"
 tokio = { workspace = true, features = [
     "rt",
@@ -34,7 +37,6 @@ serde_json.workspace = true
 pnet = "0.35"
 nix = { workspace = true, features = ["mount", "sched", "user"] }
 clap = { workspace = true, features = ["env"] }
-mirrord-protocol = { path = "../protocol" }
 actix-codec.workspace = true
 futures.workspace = true
 tracing.workspace = true
@@ -67,7 +69,6 @@ semver.workspace = true
 tokio-rustls.workspace = true
 x509-parser = "0.16"
 rustls.workspace = true
-envy = "0.4"
 socket2.workspace = true
 prometheus = { version = "0.13", features = ["process"] }
 axum = { version = "0.7", features = ["macros"] }

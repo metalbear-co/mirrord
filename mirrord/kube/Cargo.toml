@@ -26,6 +26,7 @@ portforward = [
 ]
 
 [dependencies]
+mirrord-agent-env = { path = "../agent/env" }
 mirrord-config = { path = "../config"}
 mirrord-progress = { path = "../progress" }
 mirrord-protocol = { path = "../protocol" }

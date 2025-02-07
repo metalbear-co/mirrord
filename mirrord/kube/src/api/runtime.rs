@@ -14,8 +14,8 @@ use k8s_openapi::{
     NamespaceResourceScope,
 };
 use kube::{api::ListParams, Api, Client, Resource};
+use mirrord_agent_env::mesh::MeshVendor;
 use mirrord_config::target::Target;
-use mirrord_protocol::MeshVendor;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 use tracing::Level;

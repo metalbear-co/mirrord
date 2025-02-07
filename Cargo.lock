@@ -2265,15 +2265,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "envy"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f47e0157f2cb54f5ae1bd371b30a2ae4311e1c028f575cd4e81de7353215965"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4191,7 +4182,6 @@ dependencies = [
  "containerd-client",
  "dashmap",
  "enum_dispatch",
- "envy",
  "faccess",
  "fancy-regex",
  "futures",
@@ -4204,6 +4194,7 @@ dependencies = [
  "iptables",
  "k8s-cri",
  "libc",
+ "mirrord-agent-env",
  "mirrord-protocol",
  "mockall",
  "nix 0.29.0",
@@ -4234,6 +4225,15 @@ dependencies = [
  "tracing-subscriber",
  "wildmatch",
  "x509-parser",
+]
+
+[[package]]
+name = "mirrord-agent-env"
+version = "3.132.1"
+dependencies = [
+ "k8s-openapi",
+ "thiserror 2.0.11",
+ "tracing",
 ]
 
 [[package]]
@@ -4368,6 +4368,7 @@ dependencies = [
  "futures",
  "k8s-openapi",
  "kube",
+ "mirrord-agent-env",
  "mirrord-config",
  "mirrord-progress",
  "mirrord-protocol",
@@ -4490,7 +4491,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.17.0"
+version = "1.17.1"
 dependencies = [
  "actix-codec",
  "bincode",
