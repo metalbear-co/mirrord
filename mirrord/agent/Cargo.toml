@@ -69,7 +69,6 @@ semver.workspace = true
 tokio-rustls.workspace = true
 x509-parser = "0.16"
 rustls.workspace = true
-envy = "0.4"
 socket2.workspace = true
 prometheus = { version = "0.13", features = ["process"] }
 axum = { version = "0.7", features = ["macros"] }
