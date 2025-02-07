@@ -1,4 +1,5 @@
 use std::{
+    any,
     convert::Infallible,
     fmt,
     marker::PhantomData,
@@ -39,7 +40,7 @@ impl<T: StoredAsString> EnvValue for T {
     }
 
     fn from_repr(repr: &[u8]) -> Result<Self, Self::FromReprError> {
-        let as_str = std::str::from_utf8(repr).map_err(ParseEnvError::Utf8Error)?;
+        let as_str = std::str::from_utf8(repr)?;
         as_str.parse().map_err(ParseEnvError::ParseError)
     }
 }
@@ -47,7 +48,7 @@ impl<T: StoredAsString> EnvValue for T {
 /// Errors that can occur when reading a [`StoredAsString`] environment variable value.
 #[derive(Error, Debug)]
 pub enum ParseEnvError<E> {
-    Utf8Error(#[source] Utf8Error),
+    Utf8Error(#[from] Utf8Error),
     ParseError(#[source] E),
 }
 
@@ -118,7 +119,10 @@ impl CheckedEnv<bool> {
 
 impl<V: EnvValue> fmt::Debug for CheckedEnv<V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.name)
+        f.debug_struct("CheckedEnv")
+            .field("name", &self.name)
+            .field("value_type", &any::type_name::<V>())
+            .finish()
     }
 }
 
@@ -149,7 +153,7 @@ impl EnvValue for Vec<IpAddr> {
     }
 
     fn from_repr(repr: &[u8]) -> Result<Self, Self::FromReprError> {
-        let as_str = std::str::from_utf8(repr).map_err(ParseEnvError::Utf8Error)?;
+        let as_str = std::str::from_utf8(repr)?;
 
         as_str
             .split(',')

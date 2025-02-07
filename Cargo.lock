@@ -4239,7 +4239,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent-env"
-version = "3.131.2"
+version = "3.132.1"
 dependencies = [
  "k8s-openapi",
  "thiserror 2.0.11",
