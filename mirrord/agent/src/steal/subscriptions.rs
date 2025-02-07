@@ -155,8 +155,8 @@ impl IpTablesRedirector {
         support_ipv6: bool,
     ) -> AgentResult<Self> {
         let (pod_ips4, pod_ips6) = pod_ips
-            .iter()
-            .partition::<Vec<IpAddr>, _>(|ip| ip.is_ipv4());
+            .into_iter()
+            .partition::<Vec<IpAddr>, _>(IpAddr::is_ipv4);
         tracing::debug!(?pod_ips4, ?pod_ips6, "Resolved pod IP addresses from env",);
 
         tracing::debug!("Creating IPv4 iptables redirection listener");
