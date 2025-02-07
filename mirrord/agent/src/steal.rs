@@ -13,6 +13,7 @@ mod http;
 pub mod ip_tables;
 mod orig_dst;
 mod subscriptions;
+mod tls;
 
 pub(crate) use api::TcpStealerApi;
 pub(crate) use connection::TcpConnectionStealer;
