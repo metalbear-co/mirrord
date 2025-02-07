@@ -61,7 +61,7 @@ pub struct Args {
     ///
     /// Only when this option is set will take the needed steps to run on an IPv6 single stack
     /// cluster.
-    #[arg(long, default_value_t = false, env = envs::IPV6.name)]
+    #[arg(long, default_value_t = false, env = envs::IPV6_SUPPORT.name)]
     pub ipv6: bool,
 }
 
