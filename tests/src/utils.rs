@@ -528,7 +528,7 @@ impl FileOps {
             FileOps::GoDir21 => vec!["go-e2e-dir/21.go_test_app"],
             FileOps::GoDir22 => vec!["go-e2e-dir/22.go_test_app"],
             FileOps::GoDir23 => vec!["go-e2e-dir/23.go_test_app"],
-            FileOps::GoStatfs => vec!["go-e2e-dir/statfs.go_test_app"],
+            FileOps::GoStatfs => vec!["go-e2e-statfs/statfs.go_test_app"],
         }
     }
 
@@ -1633,7 +1633,7 @@ pub async fn go_statfs_service(#[future] kube_client: Client) -> KubeService {
         "default",
         "ClusterIP",
         // "ghcr.io/metalbear-co/mirrord-node-udp-logger:latest",
-        "docker.io/t4lz/go-statfs:2025_02_04",
+        "docker.io/t4lz/go-statfs:2025_02_06",
         "go-statfs",
         true,
         kube_client,

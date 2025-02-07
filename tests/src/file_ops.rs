@@ -217,30 +217,30 @@ mod file_ops_tests {
     }
 
     #[derive(Deserialize, Debug)]
-    struct Statfs {
+    struct GoStatfs {
         bavail: u64,
         bfree: u64,
         blocks: u64,
-        bsize: u64,
+        bsize: i64,
         ffree: u64,
         files: u64,
-        flags: u64,
-        frsize: u64,
-        fsid: [u64; 2],
-        namelen: u64,
-        spare: [u64; 4],
-        r#type: u64,
+        flags: i64,
+        frsize: i64,
+        fsid: [i32; 2],
+        namelen: i64,
+        spare: [i64; 4],
+        r#type: i64,
     }
 
-    impl PartialEq for Statfs {
+    impl PartialEq for GoStatfs {
         fn eq(&self, other: &Self) -> bool {
             // bavail and bfree changes constantly, so they will usually not be the same in the two
             // calls, so we just check they're kind of close.
             self.bavail / 1024 == other.bavail / 1024
                 && self.bfree / 1024 == other.bfree / 1024
+                && self.ffree / 1024 == other.ffree / 1024
                 && self.blocks == other.blocks
                 && self.bsize == other.bsize
-                && self.ffree == other.ffree
                 && self.files == other.files
                 && self.flags == other.flags
                 && self.frsize == other.frsize
@@ -286,17 +286,22 @@ mod file_ops_tests {
         let res = process.wait().await;
         assert!(res.success());
         let mirrord_statfs_output = process.get_stdout().await;
-        let statfs_from_mirrord: Statfs = serde_json::from_str(&mirrord_statfs_output).unwrap();
+        println!("statfs via mirrord:\n{}", mirrord_statfs_output);
+        let statfs_from_mirrord: GoStatfs = serde_json::from_str(&mirrord_statfs_output).unwrap();
 
         let pod_api = Api::<Pod>::namespaced(client, &service.namespace);
-        let statfs_from_pod: Statfs = loop {
+        let statfs_from_pod: GoStatfs = loop {
             let logs = pod_api
                 .logs(&service.pod_name, &LogParams::default())
                 .await
                 .unwrap();
             println!("{}", logs);
-            if let Ok(statfs) = serde_json::from_str(&logs) {
-                break statfs;
+            match serde_json::from_str(&logs) {
+                Ok(statfs) => break statfs,
+                Err(err) => println!(
+                    "Could not deserialize statfs from logs. Got error: {:#?}",
+                    err
+                ),
             }
             // It's possible we didn't get all the logs yet, so the json is not valid.
             // Wait a bit and fetch the logs again.

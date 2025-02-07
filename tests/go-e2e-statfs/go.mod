@@ -1,3 +1,3 @@
-module dir_go
+module go_statfs
 
-go 1.19
+        go 1.19
