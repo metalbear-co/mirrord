@@ -4232,8 +4232,10 @@ dependencies = [
 name = "mirrord-agent-env"
 version = "3.132.1"
 dependencies = [
+ "base64 0.22.1",
  "k8s-openapi",
  "serde",
+ "serde_json",
  "thiserror 2.0.11",
  "tracing",
 ]

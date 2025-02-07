@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 pub type StealTlsConfig = HashMap<u16, StealPortTlsConfig>;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct StealPortTlsConfig {
     pub server_cert_pem: PathBuf,
     pub server_key_pem: PathBuf,

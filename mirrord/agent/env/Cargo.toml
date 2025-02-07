@@ -18,7 +18,9 @@ default = ["k8s-openapi"]
 k8s-openapi = ["dep:k8s-openapi"]
 
 [dependencies]
+base64.workspace = true
 k8s-openapi = { workspace = true, optional = true }
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
