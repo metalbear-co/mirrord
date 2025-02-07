@@ -18,10 +18,10 @@ pub const NETWORK_INTERFACE: CheckedEnv<String> = CheckedEnv::new("AGENT_NETWORK
 /// Enables Prometheus metrics export point and sets its address.
 pub const METRICS: CheckedEnv<SocketAddr> = CheckedEnv::new("MIRRORD_AGENT_METRICS");
 
-/// Used to inform the agent that mesh is present in the target pod.
+/// Used to inform the agent that the target pod is in a mesh.
 pub const IN_SERVICE_MESH: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_IN_SERVICE_MESH");
 
-/// Used to inform the agent that istio cni mesh is present in the target pod.
+/// Used to inform the agent that the target pod is in an Istio CNI mesh.
 pub const ISTIO_CNI: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_ISTIO_CNI");
 
 /// Instructs the agent to flush connections when adding new iptables rules.
@@ -32,7 +32,7 @@ pub const STEALER_FLUSH_CONNECTIONS: CheckedEnv<bool> =
 /// iptables.
 pub const NFTABLES: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_NFTABLES");
 
-/// Instructs the agent to produces logs in JSON format.
+/// Instructs the agent to produce logs in JSON format.
 pub const JSON_LOG: CheckedEnv<bool> = CheckedEnv::new("MIRRORD_AGENT_JSON_LOG");
 
 /// Enables IPv6 support in the agent.
@@ -49,5 +49,5 @@ pub const POD_IPS: CheckedEnv<Vec<IpAddr>> = CheckedEnv::new("MIRRORD_AGENT_POD_
 
 /// Sets agent log level.
 ///
-/// Should follow `tracing`` format, e.g `mirrord=trace`.
+/// Should follow `tracing` format, e.g `mirrord=trace`.
 pub const LOG_LEVEL: CheckedEnv<String> = CheckedEnv::new("RUST_LOG");
