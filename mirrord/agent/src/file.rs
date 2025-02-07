@@ -4,12 +4,12 @@ use std::{
     fs::{read_link, File, OpenOptions, ReadDir},
     io::{self, prelude::*, BufReader, SeekFrom},
     iter::{Enumerate, Peekable},
-    ops::RangeInclusive,
+    ops::{Deref, RangeInclusive},
     os::{
         fd::RawFd,
         unix::{fs::MetadataExt, prelude::FileExt},
     },
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use faccess::{AccessMode, PathExt};
@@ -19,6 +19,82 @@ use nix::unistd::UnlinkatFlags;
 use tracing::{error, trace, Level};
 
 use crate::{error::AgentResult, metrics::OPEN_FD_COUNT};
+
+#[derive(Debug)]
+pub(crate) struct RootPath(PathBuf);
+
+impl RootPath {
+    pub(crate) fn new(pid: u64) -> Self {
+        Self(PathBuf::from(format!("/proc/{pid}/root")))
+    }
+
+    /// Resolve a path that might contain symlinks from a specific container
+    /// to a path accessible from the root host.
+    #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::DEBUG))]
+    pub(crate) fn resolve_path(&self, path: &Path) -> io::Result<PathBuf> {
+        let mut temp_path = PathBuf::new();
+
+        for component in path.components() {
+            match component {
+                Component::RootDir => {}
+
+                Component::Prefix(prefix) => Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("prefix not supported {prefix:?}"),
+                ))?,
+
+                Component::CurDir => {}
+
+                Component::ParentDir => {
+                    if !temp_path.pop() {
+                        Err(io::Error::new(io::ErrorKind::InvalidInput, "LFI attempt?"))?
+                    }
+                }
+
+                Component::Normal(component) => {
+                    let real_path = self.join(&temp_path).join(component);
+                    if real_path.is_symlink() {
+                        trace!("{:?} is symlink", real_path);
+                        let sym_dest = real_path.read_link()?;
+                        temp_path = temp_path.join(sym_dest);
+                    } else {
+                        temp_path = temp_path.join(component);
+                    }
+                    if temp_path.has_root() {
+                        temp_path = temp_path
+                            .strip_prefix("/")
+                            .map_err(|_| {
+                                std::io::Error::new(
+                                    std::io::ErrorKind::InvalidInput,
+                                    "couldn't strip prefix",
+                                )
+                            })?
+                            .into();
+                    }
+                }
+            }
+        }
+
+        // full path, from host perspective
+        let final_path = self.join(temp_path);
+
+        Ok(final_path)
+    }
+}
+
+impl Default for RootPath {
+    fn default() -> Self {
+        Self(PathBuf::from("/"))
+    }
+}
+
+impl Deref for RootPath {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 #[derive(Debug)]
 pub enum RemoteFile {
@@ -69,7 +145,7 @@ impl Iterator for GetDEnts64Stream {
 
 #[derive(Debug)]
 pub(crate) struct FileManager {
-    root_path: PathBuf,
+    root_path: RootPath,
     open_files: HashMap<u64, RemoteFile>,
     dir_streams: HashMap<u64, Enumerate<ReadDir>>,
     getdents_streams: HashMap<u64, Peekable<GetDEnts64Stream>>,
@@ -82,67 +158,6 @@ impl Drop for FileManager {
             self.open_files.len() + self.dir_streams.len() + self.getdents_streams.len();
         OPEN_FD_COUNT.fetch_sub(descriptors as i64, std::sync::atomic::Ordering::Relaxed);
     }
-}
-
-pub fn get_root_path_from_optional_pid(pid: Option<u64>) -> PathBuf {
-    match pid {
-        Some(pid) => PathBuf::from("/proc").join(pid.to_string()).join("root"),
-        None => PathBuf::from("/"),
-    }
-}
-
-/// Resolve a path that might contain symlinks from a specific container to a path accessible from
-/// the root host
-#[tracing::instrument(level = "trace")]
-pub fn resolve_path<P: AsRef<Path> + std::fmt::Debug, R: AsRef<Path> + std::fmt::Debug>(
-    path: P,
-    root_path: R,
-) -> std::io::Result<PathBuf> {
-    use std::path::Component::*;
-
-    let mut temp_path = PathBuf::new();
-    for component in path.as_ref().components() {
-        match component {
-            RootDir => {}
-            Prefix(prefix) => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("Prefix not supported {prefix:?}"),
-            ))?,
-            CurDir => {}
-            ParentDir => {
-                if !temp_path.pop() {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        "LFI attempt?",
-                    ))?
-                }
-            }
-            Normal(component) => {
-                let real_path = root_path.as_ref().join(&temp_path).join(component);
-                if real_path.is_symlink() {
-                    trace!("{:?} is symlink", real_path);
-                    let sym_dest = real_path.read_link()?;
-                    temp_path = temp_path.join(sym_dest);
-                } else {
-                    temp_path = temp_path.join(component);
-                }
-                if temp_path.has_root() {
-                    temp_path = temp_path
-                        .strip_prefix("/")
-                        .map_err(|_| {
-                            std::io::Error::new(
-                                std::io::ErrorKind::InvalidInput,
-                                "couldn't strip prefix",
-                            )
-                        })?
-                        .into();
-                }
-            }
-        }
-    }
-    // full path, from host perspective
-    let final_path = root_path.as_ref().join(temp_path);
-    Ok(final_path)
 }
 
 impl FileManager {
@@ -275,8 +290,7 @@ impl FileManager {
 
     #[tracing::instrument(level = Level::TRACE, ret)]
     pub fn new(pid: Option<u64>) -> Self {
-        let root_path = get_root_path_from_optional_pid(pid);
-        trace!("Agent root path >> {root_path:?}");
+        let root_path = pid.map(RootPath::new).unwrap_or_default();
 
         Self {
             root_path,
@@ -293,7 +307,7 @@ impl FileManager {
         path: PathBuf,
         open_options: OpenOptionsInternal,
     ) -> RemoteResult<OpenFileResponse> {
-        let path = resolve_path(path, &self.root_path)?;
+        let path = self.root_path.resolve_path(&path)?;
         let file = OpenOptions::from(open_options).open(&path)?;
 
         let fd = self
@@ -502,7 +516,7 @@ impl FileManager {
     pub(crate) fn mkdir(&mut self, path: &Path, mode: u32) -> RemoteResult<()> {
         trace!("FileManager::mkdir -> path {:#?} | mode {:#?}", path, mode);
 
-        let path = resolve_path(path, &self.root_path)?;
+        let path = self.root_path.resolve_path(path)?;
 
         match nix::unistd::mkdir(&path, nix::sys::stat::Mode::from_bits_truncate(mode)) {
             Ok(_) => Ok(()),
@@ -541,14 +555,14 @@ impl FileManager {
 
     #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(crate) fn rmdir(&mut self, path: &Path) -> RemoteResult<()> {
-        let path = resolve_path(path, &self.root_path)?;
+        let path = self.root_path.resolve_path(path)?;
 
         std::fs::remove_dir(path.as_path()).map_err(ResponseError::from)
     }
 
     #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(crate) fn unlink(&mut self, path: &Path) -> RemoteResult<()> {
-        let path = resolve_path(path, &self.root_path)?;
+        let path = self.root_path.resolve_path(path)?;
 
         nix::unistd::unlink(path.as_path())
             .map_err(|error| ResponseError::from(std::io::Error::from_raw_os_error(error as i32)))
@@ -574,7 +588,7 @@ impl FileManager {
                     return Err(ResponseError::NotDirectory(dirfd));
                 }
             }
-            None => resolve_path(path, &self.root_path)?,
+            None => self.root_path.resolve_path(path)?,
         };
 
         let flags = match flags {
@@ -677,7 +691,7 @@ impl FileManager {
         pathname: PathBuf,
         mode: u8,
     ) -> RemoteResult<AccessFileResponse> {
-        let pathname = resolve_path(pathname, &self.root_path)?;
+        let pathname = self.root_path.resolve_path(&pathname)?;
         trace!(
             "FileManager::access -> pathname {:#?} | mode {:#?}",
             pathname,
@@ -743,7 +757,7 @@ impl FileManager {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "couldn't strip prefix")
         })?;
         let res = if follow_symlink {
-            resolve_path(path, &self.root_path)?.metadata()
+            self.root_path.resolve_path(path)?.metadata()
         } else {
             self.root_path.join(path).symlink_metadata()
         };
@@ -775,7 +789,7 @@ impl FileManager {
 
     #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) fn statfs(&mut self, path: PathBuf) -> RemoteResult<XstatFsResponse> {
-        let path = resolve_path(path, &self.root_path)?;
+        let path = self.root_path.resolve_path(&path)?;
 
         let statfs = nix::sys::statfs::statfs(&path)
             .map_err(|err| std::io::Error::from_raw_os_error(err as i32))?;

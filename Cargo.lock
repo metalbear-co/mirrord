@@ -4208,6 +4208,7 @@ dependencies = [
  "reqwest 0.12.12",
  "rstest",
  "rustls 0.23.21",
+ "rustls-pemfile 2.2.0",
  "semver 1.0.25",
  "serde",
  "serde_json",
@@ -4232,6 +4233,7 @@ name = "mirrord-agent-env"
 version = "3.132.1"
 dependencies = [
  "k8s-openapi",
+ "serde",
  "thiserror 2.0.11",
  "tracing",
 ]

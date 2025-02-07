@@ -19,5 +19,6 @@ k8s-openapi = ["dep:k8s-openapi"]
 
 [dependencies]
 k8s-openapi = { workspace = true, optional = true }
+serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
