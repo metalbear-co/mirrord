@@ -137,7 +137,7 @@ pub(super) trait MeshVendorExt: Sized {
 
 impl MeshVendorExt for MeshVendor {
     fn detect<IPT: IPTables>(ipt: &IPT) -> AgentResult<Option<Self>> {
-        if envs::ISTIO_CNI.is_set() {
+        if envs::ISTIO_CNI.from_env_or_default() {
             return Ok(Some(MeshVendor::IstioCni));
         }
 

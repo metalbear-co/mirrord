@@ -4243,6 +4243,7 @@ version = "3.132.1"
 dependencies = [
  "k8s-openapi",
  "thiserror 2.0.11",
+ "tracing",
 ]
 
 [[package]]

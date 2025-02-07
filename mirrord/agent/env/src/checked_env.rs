@@ -53,7 +53,6 @@ pub enum ParseEnvError<E> {
 }
 
 /// An environment variable with strict value type checking.
-#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct CheckedEnv<V: EnvValue> {
     /// Name of the variable.
     pub name: &'static str,
@@ -105,15 +104,32 @@ impl<V: EnvValue<IntoReprError = Infallible>> CheckedEnv<V> {
     }
 }
 
-impl CheckedEnv<bool> {
-    /// Convenience method for checking whether this variable is set.
+impl<V> CheckedEnv<V>
+where
+    V: EnvValue + Default + fmt::Debug,
+    V::FromReprError: fmt::Debug,
+{
+    /// Convenience method for getting this variable's value.
     ///
-    /// For variables with [`bool`] values.
-    ///
-    /// Returns `true` if the variable is present and set to true.
-    /// Returns `false` if the variable is missing or set to some other value.
-    pub fn is_set(self) -> bool {
-        self.try_from_env().ok().flatten().unwrap_or_default()
+    /// Reads this variable's value from the process environment.
+    /// If this variable is missing or its value is malformed, returns a [`Default`].
+    pub fn from_env_or_default(self) -> V {
+        match self.try_from_env() {
+            Ok(None) => Default::default(),
+            Ok(Some(value)) => value,
+            Err(error) => {
+                let default_value = V::default();
+
+                tracing::error!(
+                    ?error,
+                    ?default_value,
+                    ?self,
+                    "Failed to read an environment variable, value is malformed. Using a default value.",
+                );
+
+                default_value
+            }
+        }
     }
 }
 
@@ -131,6 +147,29 @@ impl<V: EnvValue> fmt::Display for CheckedEnv<V> {
         f.write_str(self.name)
     }
 }
+
+impl<V: EnvValue> Clone for CheckedEnv<V> {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name,
+            value_type: PhantomData,
+        }
+    }
+}
+
+impl<V: EnvValue> Copy for CheckedEnv<V> {}
+
+impl<V: EnvValue> PartialEq for CheckedEnv<V> {
+    fn eq(&self, other: &Self) -> bool {
+        self.name.eq(other.name)
+    }
+
+    fn ne(&self, other: &Self) -> bool {
+        self.name.ne(other.name)
+    }
+}
+
+impl<V: EnvValue> Eq for CheckedEnv<V> {}
 
 impl StoredAsString for bool {}
 

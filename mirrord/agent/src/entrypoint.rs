@@ -864,7 +864,7 @@ pub async fn main() -> AgentResult<()> {
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
 
-    if envs::JSON_LOG.is_set() {
+    if envs::JSON_LOG.from_env_or_default() {
         tracing_subscriber::registry()
             .with(
                 tracing_subscriber::fmt::layer()
