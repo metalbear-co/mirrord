@@ -37,6 +37,10 @@ pub static OPEN_LOCAL_VERSION: LazyLock<VersionReq> =
 pub static STATFS_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.16.0".parse().expect("Bad Identifier"));
 
+/// Allows for V2 statfs requests/responses. The V2 responses contain more fields with statfs data.
+pub static STATFS_V2_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.18.0".parse().expect("Bad Identifier"));
+
 /// Internal version of Metadata across operating system (macOS, Linux)
 /// Only mutual attributes
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default)]
@@ -119,6 +123,108 @@ impl From<Statfs> for FsMetadataInternal {
             blocks_available: stat.blocks_available(),
             files: stat.files(),
             files_free: stat.files_free(),
+        }
+    }
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default)]
+pub struct FsMetadataInternalV2 {
+    /// f_type
+    pub filesystem_type: i64,
+    /// f_bsize
+    pub block_size: i64,
+    /// f_blocks
+    pub blocks: u64,
+    /// f_bfree
+    pub blocks_free: u64,
+    /// f_bavail
+    pub blocks_available: u64,
+    /// f_files
+    pub files: u64,
+    /// f_ffree
+    pub files_free: u64,
+    /// f_fsid
+    pub filesystem_id: [i32; 2],
+    /// f_namelen
+    pub name_len: i64,
+    /// f_frsize
+    pub fragment_size: i64,
+    /// f_flags
+    pub flags: i64,
+}
+
+impl From<FsMetadataInternal> for FsMetadataInternalV2 {
+    fn from(
+        FsMetadataInternal {
+            filesystem_type,
+            block_size,
+            blocks,
+            blocks_free,
+            blocks_available,
+            files,
+            files_free,
+        }: FsMetadataInternal,
+    ) -> Self {
+        Self {
+            filesystem_type,
+            block_size,
+            blocks,
+            blocks_free,
+            blocks_available,
+            files,
+            files_free,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<FsMetadataInternalV2> for FsMetadataInternal {
+    fn from(
+        FsMetadataInternalV2 {
+            filesystem_type,
+            block_size,
+            blocks,
+            blocks_free,
+            blocks_available,
+            files,
+            files_free,
+            ..
+        }: FsMetadataInternalV2,
+    ) -> Self {
+        FsMetadataInternal {
+            filesystem_type,
+            block_size,
+            blocks,
+            blocks_free,
+            blocks_available,
+            files,
+            files_free,
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl From<Statfs> for FsMetadataInternalV2 {
+    fn from(stat: Statfs) -> Self {
+        // The reason we need the inner `statfs64` struct is that nix's `Statfs` just does not give
+        // any access to some fields, like `f_frsize` and the value of `f_fsid`.
+        // SAFETY: Statfs is just a `#[repr(transparent)]` wrapper around `libc::statfs64` on Linux.
+        let inner: libc::statfs64 = unsafe { std::mem::transmute(stat) };
+        Self {
+            filesystem_type: inner.f_type,
+            block_size: inner.f_bsize,
+            blocks: inner.f_blocks,
+            blocks_free: inner.f_bfree,
+            blocks_available: inner.f_bavail,
+            files: inner.f_files,
+            files_free: inner.f_ffree,
+            // SAFETY: `statfs64.f_fsid` is `libc::fsid_t`, which has `#[repr(C)]` (even though
+            // you can't see that at first glance because it's added via the `s!` macro), and only
+            // contains 1 field which has the same type as `Self.filesystem_id`.
+            filesystem_id: unsafe { std::mem::transmute(inner.f_fsid) },
+            name_len: inner.f_namelen,
+            fragment_size: inner.f_frsize,
+            flags: inner.f_flags,
         }
     }
 }
@@ -416,9 +522,33 @@ pub struct XstatFsRequest {
     pub fd: u64,
 }
 
+/// Same as `XstatFsRequest`, but results in the V2 version of the response.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct XstatFsRequestV2 {
+    pub fd: u64,
+}
+
+impl From<XstatFsRequestV2> for XstatFsRequest {
+    fn from(XstatFsRequestV2 { fd }: XstatFsRequestV2) -> Self {
+        Self { fd }
+    }
+}
+
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct StatFsRequest {
     pub path: PathBuf,
+}
+
+/// Same as `StatFsRequest`, but results in the V2 version of the response.
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct StatFsRequestV2 {
+    pub path: PathBuf,
+}
+
+impl From<StatFsRequestV2> for StatFsRequest {
+    fn from(StatFsRequestV2 { path }: StatFsRequestV2) -> Self {
+        Self { path }
+    }
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -429,6 +559,29 @@ pub struct XstatResponse {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct XstatFsResponse {
     pub metadata: FsMetadataInternal,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct XstatFsResponseV2 {
+    // I'm not sure why not directly have the fields in this struct, but this is how it is in
+    // `XstatFsResponse` and `XstatResponse`, so I'm staying with that pattern it for consistency.
+    pub metadata: FsMetadataInternalV2,
+}
+
+impl From<XstatFsResponse> for XstatFsResponseV2 {
+    fn from(value: XstatFsResponse) -> Self {
+        XstatFsResponseV2 {
+            metadata: value.metadata.into(),
+        }
+    }
+}
+
+impl From<XstatFsResponseV2> for XstatFsResponse {
+    fn from(value: XstatFsResponseV2) -> Self {
+        XstatFsResponse {
+            metadata: value.metadata.into(),
+        }
+    }
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

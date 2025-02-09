@@ -94,6 +94,12 @@ pub enum FileRequest {
     Unlink(UnlinkRequest),
     UnlinkAt(UnlinkAtRequest),
     StatFs(StatFsRequest),
+
+    /// Same as XstatFs, but results in the V2 response.
+    XstatFsV2(XstatFsRequestV2),
+
+    /// Same as StatFs, but results in the V2 response.
+    StatFsV2(StatFsRequestV2),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -160,6 +166,7 @@ pub enum FileResponse {
     MakeDir(RemoteResult<()>),
     RemoveDir(RemoteResult<()>),
     Unlink(RemoteResult<()>),
+    XstatFsV2(RemoteResult<XstatFsResponseV2>),
 }
 
 /// `-agent` --> `-layer` messages.

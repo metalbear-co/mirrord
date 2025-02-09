@@ -6,7 +6,7 @@ use mirrord_protocol::{
     file::{
         CloseDirRequest, CloseFileRequest, DirEntryInternal, ReadDirBatchRequest, ReadDirResponse,
         ReadFileResponse, ReadLimitedFileRequest, SeekFromInternal, MKDIR_VERSION,
-        READDIR_BATCH_VERSION, READLINK_VERSION, RMDIR_VERSION, STATFS_VERSION,
+        READDIR_BATCH_VERSION, READLINK_VERSION, RMDIR_VERSION, STATFS_V2_VERSION, STATFS_VERSION,
     },
     ClientMessage, DaemonMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError,
     ResponseError,
@@ -274,7 +274,7 @@ impl FilesProxy {
             {
                 Err(FileResponse::RemoveDir(Err(ResponseError::NotImplemented)))
             }
-            FileRequest::StatFs(..)
+            FileRequest::StatFs(..) | FileRequest::StatFsV2(..)
                 if protocol_version
                     .is_none_or(|version: &Version| !STATFS_VERSION.matches(version)) =>
             {
@@ -539,6 +539,32 @@ impl FilesProxy {
                     .send(ClientMessage::FileRequest(FileRequest::Seek(seek)))
                     .await;
             }
+            FileRequest::StatFsV2(statfs_v2)
+                if self
+                    .protocol_version
+                    .as_ref()
+                    .is_none_or(|version| !STATFS_V2_VERSION.matches(version)) =>
+            {
+                self.request_queue.push_back(message_id, layer_id);
+                message_bus
+                    .send(ClientMessage::FileRequest(FileRequest::StatFs(
+                        statfs_v2.into(),
+                    )))
+                    .await;
+            }
+            FileRequest::XstatFsV2(xstatfs_v2)
+                if self
+                    .protocol_version
+                    .as_ref()
+                    .is_none_or(|version| !STATFS_V2_VERSION.matches(version)) =>
+            {
+                self.request_queue.push_back(message_id, layer_id);
+                message_bus
+                    .send(ClientMessage::FileRequest(FileRequest::XstatFs(
+                        xstatfs_v2.into(),
+                    )))
+                    .await;
+            }
 
             // Doesn't require any special logic.
             other => {
@@ -739,6 +765,21 @@ impl FilesProxy {
                         message: ProxyToLayerMessage::File(FileResponse::ReadDir(Ok(
                             ReadDirResponse { direntry },
                         ))),
+                    })
+                    .await;
+            }
+            // Convert to XstatFsV2 so that the layer doesn't ever need to deal with the old type.
+            FileResponse::XstatFs(res) => {
+                let (message_id, layer_id) = self.request_queue.pop_front().ok_or_else(|| {
+                    UnexpectedAgentMessage(DaemonMessage::File(FileResponse::XstatFs(res.clone())))
+                })?;
+                message_bus
+                    .send(ToLayer {
+                        message_id,
+                        layer_id,
+                        message: ProxyToLayerMessage::File(FileResponse::XstatFsV2(
+                            res.map(Into::into),
+                        )),
                     })
                     .await;
             }
