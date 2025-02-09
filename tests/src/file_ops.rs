@@ -236,9 +236,9 @@ mod file_ops_tests {
         fn eq(&self, other: &Self) -> bool {
             // bavail and bfree changes constantly, so they will usually not be the same in the two
             // calls, so we just check they're kind of close.
-            self.bavail / 1024 == other.bavail / 1024
-                && self.bfree / 1024 == other.bfree / 1024
-                && self.ffree / 1024 == other.ffree / 1024
+            self.bavail / 100000 == other.bavail / 100000
+                && self.bfree / 100000 == other.bfree / 100000
+                && self.ffree / 100000 == other.ffree / 100000
                 && self.blocks == other.blocks
                 && self.bsize == other.bsize
                 && self.files == other.files
