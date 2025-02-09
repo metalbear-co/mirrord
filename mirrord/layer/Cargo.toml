@@ -31,7 +31,7 @@ base64.workspace = true
 bincode.workspace = true
 bytemuck = "1"
 ctor = "0.2"
-envfile.workspace = true
+dotenv.workspace = true
 errno = "0.3"
 frida-gum = { version = "0.15", features = ["auto-download"] }
 hashbrown = "0.15"

@@ -2,7 +2,8 @@ use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
 use fancy_regex::Regex;
-use mirrord_protocol::{MeshVendor, Port};
+use mirrord_agent_env::{envs, mesh::MeshVendor};
+use mirrord_protocol::Port;
 
 use crate::{
     error::AgentResult,
@@ -136,11 +137,10 @@ pub(super) trait MeshVendorExt: Sized {
 
 impl MeshVendorExt for MeshVendor {
     fn detect<IPT: IPTables>(ipt: &IPT) -> AgentResult<Option<Self>> {
-        if let Ok(val) = std::env::var("MIRRORD_AGENT_ISTIO_CNI")
-            && val.to_lowercase() == "true"
-        {
+        if envs::ISTIO_CNI.from_env_or_default() {
             return Ok(Some(MeshVendor::IstioCni));
         }
+
         let output = ipt.list_rules("OUTPUT")?;
 
         let nat_result = output.iter().find_map(|rule| {

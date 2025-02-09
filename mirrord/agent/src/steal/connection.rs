@@ -11,6 +11,7 @@ use hyper::{
     body::Incoming,
     http::{header::UPGRADE, request::Parts},
 };
+use mirrord_agent_env::envs;
 use mirrord_protocol::{
     batched_body::{BatchedBody, Frames},
     tcp::{
@@ -22,7 +23,6 @@ use mirrord_protocol::{
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
     RequestId,
 };
-use serde::Deserialize;
 use tokio::{
     net::TcpStream,
     sync::mpsc::{Receiver, Sender},
@@ -279,10 +279,18 @@ impl Client {
     }
 }
 
-#[derive(Deserialize, Debug, Default)]
 struct TcpStealerConfig {
     stealer_flush_connections: bool,
-    pod_ips: Option<String>,
+    pod_ips: Vec<IpAddr>,
+}
+
+impl TcpStealerConfig {
+    fn from_env() -> Self {
+        Self {
+            stealer_flush_connections: envs::STEALER_FLUSH_CONNECTIONS.from_env_or_default(),
+            pod_ips: envs::POD_IPS.from_env_or_default(),
+        }
+    }
 }
 
 /// Created once per agent during initialization.
@@ -323,10 +331,7 @@ impl TcpConnectionStealer<IpTablesRedirector> {
         command_rx: Receiver<StealerCommand>,
         support_ipv6: bool,
     ) -> AgentResult<Self> {
-        let config = envy::prefixed("MIRRORD_AGENT_")
-            .from_env::<TcpStealerConfig>()
-            .unwrap_or_default();
-
+        let config = TcpStealerConfig::from_env();
         let redirector = IpTablesRedirector::new(
             config.stealer_flush_connections,
             config.pod_ips,

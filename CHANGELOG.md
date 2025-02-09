@@ -8,6 +8,50 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.132.1](https://github.com/metalbear-co/mirrord/tree/3.132.1) - 2025-02-06
+
+
+### Fixed
+
+- Fixed operator connect URL produced by the CLI when a target container is
+  specified.
+
+## [3.132.0](https://github.com/metalbear-co/mirrord/tree/3.132.0) - 2025-02-06
+
+
+### Removed
+
+- Removed faulty `statfs` hook for Go applications.
+
+
+### Added
+
+- Added Kubernetes ReplicaSet as a new target type (requires mirrord Operator).
+
+
+### Changed
+
+- Namespace for `targetless` runs is now specified with the
+  `target.namespace` config field (or the `MIRRORD_TARGET_NAMESPACE`
+  environment variable).
+  `agent.namespace` field is ignored in targetless runs.
+
+
+### Internal
+
+- Some code snippets in the configuration documentation were missing the
+  closing backticks, which resulted in bad formatting when converted to
+  markdown and displayed on the website.
+- Added instructions to CONTRIBUTING.md for changing the agent log level in
+  mirrord config.
+- Added mirrord policy support for specifying pattern requirment for header
+  filter when performing steal-with-filter.
+- Removed `envfile` dependency.
+- Update policy doc for http_filter header.
+- Updated `tests::operator::sanity::mirrord_ls` test after adding ReplicaSet
+  support.
+- `mirrord-kube` now allows for setting agent listen port.
+
 ## [3.131.2](https://github.com/metalbear-co/mirrord/tree/3.131.2) - 2025-01-29
 
 

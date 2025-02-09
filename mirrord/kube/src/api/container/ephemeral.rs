@@ -1,15 +1,15 @@
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::{
-    Capabilities, EnvVar, EphemeralContainer as KubeEphemeralContainer, Pod, SecurityContext,
+    Capabilities, EphemeralContainer as KubeEphemeralContainer, Pod, SecurityContext,
 };
 use kube::{
     api::PostParams,
     runtime::{watcher, WatchStreamExt},
     Client,
 };
+use mirrord_agent_env::{envs, mesh::MeshVendor};
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
-use mirrord_protocol::MeshVendor;
 use tokio::pin;
 use tracing::debug;
 
@@ -204,17 +204,9 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
         let mut env = agent_env(agent, params);
 
         if let Some(mesh_vendor) = self.runtime_data.mesh.as_ref() {
-            env.push(EnvVar {
-                name: "MIRRORD_AGENT_IN_SERVICE_MESH".into(),
-                value: Some("true".into()),
-                ..Default::default()
-            });
+            env.push(envs::IN_SERVICE_MESH.as_k8s_spec(&true));
             if matches!(mesh_vendor, MeshVendor::IstioCni) {
-                env.push(EnvVar {
-                    name: "MIRRORD_AGENT_ISTIO_CNI".into(),
-                    value: Some("true".into()),
-                    ..Default::default()
-                });
+                env.push(envs::ISTIO_CNI.as_k8s_spec(&true));
             }
         };
 

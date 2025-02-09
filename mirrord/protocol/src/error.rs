@@ -25,11 +25,6 @@ pub enum SerializationError {
     SocketAddress,
 }
 
-/// Error when parsing a `MeshVendor` from the `agent/cli` arguments.
-#[derive(Debug, PartialEq, Clone, Eq, Error)]
-#[error("Failed parsing `MeshVendor` from `{0}`!")]
-pub struct MeshVendorParseError(pub String);
-
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 pub enum ResponseError {
     #[error("File/connection ids exhausted, operation `{0}` failed!")]
@@ -59,7 +54,7 @@ pub enum ResponseError {
     #[error("Operation is not yet supported by mirrord.")]
     NotImplemented,
 
-    #[error("{blocked_action} is forbidden by {} for this target (your organization does not allow you to use this mirrord feature with the chosen target).", policy_name_string(.policy_name.clone()))]
+    #[error("{blocked_action} is forbidden by {} for this target (your organization does not allow you to use this mirrord feature with the chosen target).", policy_name_string(.policy_name.as_deref()))]
     Forbidden {
         blocked_action: BlockedAction,
         policy_name: Option<String>,
@@ -70,6 +65,13 @@ pub enum ResponseError {
 
     #[error("File has to be opened locally!")]
     OpenLocal,
+
+    #[error("{blocked_action} is forbidden by {} for this target ({reason}).", policy_name_string(.policy_name.as_deref()))]
+    ForbiddenWithReason {
+        blocked_action: BlockedAction,
+        policy_name: Option<String>,
+        reason: String,
+    },
 }
 
 impl From<StripPrefixError> for ResponseError {
@@ -79,7 +81,7 @@ impl From<StripPrefixError> for ResponseError {
 }
 
 /// If some then the name with a trailing space, else empty string.
-fn policy_name_string(policy_name: Option<String>) -> String {
+fn policy_name_string(policy_name: Option<&str>) -> String {
     if let Some(name) = policy_name {
         format!("the mirrord policy \"{name}\"")
     } else {
@@ -91,8 +93,13 @@ fn policy_name_string(policy_name: Option<String>) -> String {
 pub static MIRROR_BLOCK_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.12.0".parse().expect("Bad Identifier"));
 
+/// Minimal mirrord-protocol version that allows [`ResponseError::Forbidden`] to have `reason`
+/// member.
+pub static MIRROR_POLICY_REASON_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.17.0".parse().expect("Bad Identifier"));
+
 /// All the actions that can be blocked by the operator, to identify the blocked feature in a
-/// [`ResponseError::Forbidden`] message.
+/// [`ResponseError::Forbidden`] or [`ResponseError::ForbiddenWithReason`] message.
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq, Error)]
 pub enum BlockedAction {
     Steal(StealType),
