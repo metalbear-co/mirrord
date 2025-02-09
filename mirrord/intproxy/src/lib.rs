@@ -448,6 +448,11 @@ impl IntProxy {
                     .simple
                     .send(SimpleProxyMessage::ConnectionRefresh)
                     .await;
+
+                self.task_txs
+                    .outgoing
+                    .send(OutgoingProxyMessage::ConnectionRefresh)
+                    .await;
             }
             ConnectionRefresh::End => {
                 let Some(task_queue) = self.reconnect_task_queue.take() else {

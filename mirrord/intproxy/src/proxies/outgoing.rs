@@ -220,6 +220,12 @@ impl OutgoingProxy {
         let msg = request.protocol.wrap_agent_connect(request.remote_address);
         message_bus.send(ProxyMessage::ToAgent(msg)).await;
     }
+
+    async fn handle_connection_refresh(&mut self) {
+        self.datagrams_reqs.clear();
+        self.stream_reqs.clear();
+        self.txs.clear();
+    }
 }
 
 /// Messages consumed by the [`OutgoingProxy`] running as a [`BackgroundTask`].
@@ -227,6 +233,7 @@ pub enum OutgoingProxyMessage {
     AgentStream(DaemonTcpOutgoing),
     AgentDatagrams(DaemonUdpOutgoing),
     LayerConnect(OutgoingConnectRequest, MessageId, LayerId),
+    ConnectionRefresh,
 }
 
 impl BackgroundTask for OutgoingProxy {
@@ -264,6 +271,7 @@ impl BackgroundTask for OutgoingProxy {
                         req,
                         message_bus
                     ).await,
+                    Some(OutgoingProxyMessage::ConnectionRefresh) => self.handle_connection_refresh().await,
                 },
 
                 Some(task_update) = self.background_tasks.next() => match task_update {
