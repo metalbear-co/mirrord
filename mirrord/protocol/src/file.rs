@@ -221,7 +221,7 @@ impl From<Statfs> for FsMetadataInternalV2 {
             // SAFETY: `statfs64.f_fsid` is `libc::fsid_t`, which has `#[repr(C)]` (even though
             // you can't see that at first glance because it's added via the `s!` macro), and only
             // contains 1 field which has the same type as `Self.filesystem_id`.
-            filesystem_id: unsafe { std::mem::transmute(inner.f_fsid) },
+            filesystem_id: unsafe { std::mem::transmute::<libc::fsid_t, [i32; 2]>(inner.f_fsid) },
             name_len: inner.f_namelen,
             fragment_size: inner.f_frsize,
             flags: inner.f_flags,
