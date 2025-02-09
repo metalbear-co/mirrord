@@ -17,8 +17,7 @@ use mirrord_intproxy::{agent_conn::AgentConnection, IntProxy};
 use mirrord_protocol::{
     file::{
         AccessFileRequest, AccessFileResponse, OpenFileRequest, OpenOptionsInternal,
-        ReadFileRequest, SeekFromInternal, XstatFsResponse, XstatFsResponseV2, XstatRequest,
-        XstatResponse,
+        ReadFileRequest, SeekFromInternal, XstatFsResponseV2, XstatRequest, XstatResponse,
     },
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
