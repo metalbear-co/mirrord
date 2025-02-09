@@ -6,13 +6,13 @@ use kube::{
     config::{KubeConfigOptions, Kubeconfig},
     Api, Client, Config, Discovery,
 };
+use mirrord_agent_env::mesh::MeshVendor;
 use mirrord_config::{
     agent::AgentConfig,
     target::{Target, TargetConfig},
     LayerConfig,
 };
 use mirrord_progress::Progress;
-use mirrord_protocol::MeshVendor;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
@@ -172,9 +172,8 @@ impl KubernetesAPI {
     /// # Params
     ///
     /// * `config` - if passed, will be checked against cluster setup
-    /// * `tls_cert` - value for
-    ///   [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV), for creating an
-    ///   agent from the operator. In usage from this repo this is always `None`.
+    /// * `tls_cert` - value for [`OPERATOR_CERT`](mirrord_agent_env::envs::OPERATOR_CERT), for
+    ///   creating an agent from the operator. In usage from this repo this is always `None`.
     /// * `agent_port` - port number on which the agent will listen for client connections. If
     ///   [`None`] is given, a random high port will be user.
     #[tracing::instrument(level = "trace", skip(self), ret, err)]
@@ -195,15 +194,8 @@ impl KubernetesAPI {
 
         let pod_ips = runtime_data
             .as_ref()
-            .filter(|runtime_data| !runtime_data.pod_ips.is_empty())
-            .map(|runtime_data| {
-                runtime_data
-                    .pod_ips
-                    .iter()
-                    .map(|ip| ip.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            });
+            .map(|runtime_data| runtime_data.pod_ips.clone())
+            .filter(|pod_ips| !pod_ips.is_empty());
 
         let params = ContainerParams::new(tls_cert, pod_ips, support_ipv6, agent_port);
 
@@ -213,9 +205,8 @@ impl KubernetesAPI {
     /// # Params
     ///
     /// * `config` - if passed, will be checked against cluster setup
-    /// * `tls_cert` - value for
-    ///   [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV), for creating an
-    ///   agent from the operator. In usage from this repo this is always `None`.
+    /// * `tls_cert` - value for [`OPERATOR_CERT`](mirrord_agent_env::envs::OPERATOR_CERT), for
+    ///   creating an agent from the operator. In usage from this repo this is always `None`.
     /// * `agent_port` - port number on which the agent will listen for client connections. If
     ///   [`None`] is given, a random high port will be used.
     #[tracing::instrument(level = "trace", skip(self, progress))]

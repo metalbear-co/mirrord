@@ -1153,6 +1153,7 @@ header `x-debug-session` with value `121212`.
     { "path": "^/api/my-endpoint$" }
   ]
 }
+```
 
 If you want to steal HTTP requests that match **any** of the patterns specified, use `any_of`.
 For example, this filter steals HTTP requests to endpoint `/api/my-endpoint`
@@ -1164,6 +1165,7 @@ For example, this filter steals HTTP requests to endpoint `/api/my-endpoint`
    { "header": "^x-debug-session: 121212$" }
  ]
 }
+```
 
 ##### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
 

@@ -281,7 +281,8 @@ impl From<HookError> for i64 {
                 ResponseError::PortAlreadyStolen(_port) => libc::EINVAL,
                 ResponseError::NotImplemented => libc::EINVAL,
                 ResponseError::StripPrefix(_) => libc::EINVAL,
-                err @ ResponseError::Forbidden { .. } => {
+                err @ (ResponseError::Forbidden { .. }
+                | ResponseError::ForbiddenWithReason { .. }) => {
                     graceful_exit!(
                         "Stopping mirrord run. Please adjust your mirrord configuration.\n{err}"
                     );

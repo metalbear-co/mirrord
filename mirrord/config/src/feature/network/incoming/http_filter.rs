@@ -68,17 +68,19 @@ use crate::{
 ///     { "path": "^/api/my-endpoint$" }
 ///   ]
 /// }
+/// ```
 ///
 /// If you want to steal HTTP requests that match **any** of the patterns specified, use `any_of`.
 /// For example, this filter steals HTTP requests to endpoint `/api/my-endpoint`
 /// **and** HTTP requests that contain header `x-debug-session` with value `121212`.
 /// ```json
-///{
+/// {
 ///  "any_of": [
 ///    { "path": "^/api/my-endpoint$"},
 ///    { "header": "^x-debug-session: 121212$" }
 ///  ]
-///}
+/// }
+/// ```
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[config(map_to = "HttpFilterFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
