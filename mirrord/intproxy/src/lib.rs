@@ -443,6 +443,11 @@ impl IntProxy {
             ConnectionRefresh::Start => {
                 // Initialise default reconnect message queue
                 self.reconnect_task_queue.get_or_insert_default();
+
+                self.task_txs
+                    .simple
+                    .send(SimpleProxyMessage::ConnectionRefresh)
+                    .await;
             }
             ConnectionRefresh::End => {
                 let Some(task_queue) = self.reconnect_task_queue.take() else {
