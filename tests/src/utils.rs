@@ -528,7 +528,7 @@ impl FileOps {
             FileOps::GoDir21 => vec!["go-e2e-dir/21.go_test_app"],
             FileOps::GoDir22 => vec!["go-e2e-dir/22.go_test_app"],
             FileOps::GoDir23 => vec!["go-e2e-dir/23.go_test_app"],
-            FileOps::GoStatfs => vec!["go-e2e-statfs/statfs.go_test_app"],
+            FileOps::GoStatfs => vec!["go-e2e-statfs/23.go_test_app"],
         }
     }
 
