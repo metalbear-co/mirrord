@@ -1,6 +1,5 @@
 #[cfg(target_os = "linux")]
 use core::ffi::{c_size_t, c_ssize_t};
-use std::mem::transmute;
 /// FFI functions that override the `libc` calls (see `file` module documentation on how to
 /// enable/disable these).
 ///
@@ -15,8 +14,8 @@ use std::{
 
 use errno::{set_errno, Errno};
 use libc::{
-    self, c_char, c_int, c_void, dirent, iovec, off_t, size_t, ssize_t, stat, statfs, statfs64,
-    AT_EACCESS, AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY,
+    self, c_char, c_int, c_void, dirent, iovec, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
+    AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY,
 };
 #[cfg(target_os = "linux")]
 use libc::{dirent64, stat64, statx, EBADF, ENOENT, ENOTDIR};
@@ -753,14 +752,15 @@ unsafe extern "C" fn fill_statfs(out_stat: *mut statfs, metadata: &FsMetadataInt
     #[cfg(target_os = "linux")]
     {
         // SAFETY: fsid_t has C repr and holds just an array with two i32s.
-        out.f_fsid = transmute::<[i32; 2], libc::fsid_t>(metadata.filesystem_id);
+        out.f_fsid = std::mem::transmute::<[i32; 2], libc::fsid_t>(metadata.filesystem_id);
         out.f_namelen = metadata.name_len;
         out.f_frsize = metadata.fragment_size;
     }
 }
 
 /// Fills the `statfs` struct with the metadata
-unsafe extern "C" fn fill_statfs64(out_stat: *mut statfs64, metadata: &FsMetadataInternalV2) {
+#[cfg(target_os = "linux")]
+unsafe extern "C" fn fill_statfs64(out_stat: *mut libc::statfs64, metadata: &FsMetadataInternalV2) {
     // Acording to linux documentation "Fields that are undefined for a particular file system are
     // set to 0."
     out_stat.write_bytes(0, 1);
@@ -775,7 +775,7 @@ unsafe extern "C" fn fill_statfs64(out_stat: *mut statfs64, metadata: &FsMetadat
     #[cfg(target_os = "linux")]
     {
         // SAFETY: fsid_t has C repr and holds just an array with two i32s.
-        out.f_fsid = transmute::<[i32; 2], libc::fsid_t>(metadata.filesystem_id);
+        out.f_fsid = std::mem::transmute::<[i32; 2], libc::fsid_t>(metadata.filesystem_id);
         out.f_namelen = metadata.name_len;
         out.f_frsize = metadata.fragment_size;
         out.f_flags = metadata.flags;
@@ -952,8 +952,12 @@ unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
 }
 
 /// Hook for `libc::fstatfs64`.
+#[cfg(target_os = "linux")]
 #[hook_guard_fn]
-pub(crate) unsafe extern "C" fn fstatfs64_detour(fd: c_int, out_stat: *mut statfs64) -> c_int {
+pub(crate) unsafe extern "C" fn fstatfs64_detour(
+    fd: c_int,
+    out_stat: *mut libc::statfs64,
+) -> c_int {
     if out_stat.is_null() {
         return HookError::BadPointer.into();
     }
@@ -984,10 +988,11 @@ unsafe extern "C" fn statfs_detour(raw_path: *const c_char, out_stat: *mut statf
 }
 
 /// Hook for `libc::statfs`.
+#[cfg(target_os = "linux")]
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn statfs64_detour(
     raw_path: *const c_char,
-    out_stat: *mut statfs64,
+    out_stat: *mut libc::statfs64,
 ) -> c_int {
     if out_stat.is_null() {
         return HookError::BadPointer.into();
@@ -1359,6 +1364,20 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     #[cfg(target_os = "linux")]
     {
         replace!(hook_manager, "statx", statx_detour, FnStatx, FN_STATX);
+        replace!(
+            hook_manager,
+            "fstatfs64",
+            fstatfs64_detour,
+            FnFstatfs64,
+            FN_FSTATFS64
+        );
+        replace!(
+            hook_manager,
+            "statfs64",
+            statfs64_detour,
+            FnStatfs64,
+            FN_STATFS64
+        );
     }
 
     #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
@@ -1415,22 +1434,7 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FnFstatfs,
             FN_FSTATFS
         );
-        replace!(
-            hook_manager,
-            "fstatfs64",
-            fstatfs64_detour,
-            FnFstatfs64,
-            FN_FSTATFS64
-        );
         replace!(hook_manager, "statfs", statfs_detour, FnStatfs, FN_STATFS);
-        replace!(
-            hook_manager,
-            "statfs64",
-            statfs64_detour,
-            FnStatfs64,
-            FN_STATFS64
-        );
-
         replace!(
             hook_manager,
             "fdopendir",
