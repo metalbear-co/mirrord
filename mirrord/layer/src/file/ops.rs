@@ -736,7 +736,7 @@ pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponseV2> {
     // old version responses to V2 responses.
     let xstatfs = XstatFsRequestV2 { fd };
 
-    let response = common::make_proxy_request_with_response(xstatfs)??.into();
+    let response = common::make_proxy_request_with_response(xstatfs)??;
 
     Detour::Success(response)
 }
@@ -750,7 +750,7 @@ pub(crate) fn statfs(path: Detour<PathBuf>) -> Detour<XstatFsResponseV2> {
     // old version responses to V2 responses.
     let statfs = StatFsRequestV2 { path };
 
-    let response = common::make_proxy_request_with_response(statfs)??.into();
+    let response = common::make_proxy_request_with_response(statfs)??;
 
     Detour::Success(response)
 }
