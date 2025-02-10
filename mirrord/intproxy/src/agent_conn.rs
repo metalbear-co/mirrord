@@ -44,7 +44,7 @@ use crate::{
 mod portforward;
 
 static OPERATOR_RETRY_VERSION: LazyLock<VersionReq> = LazyLock::new(|| {
-    ">3.104.2"
+    ">3.105.0"
         .parse()
         .expect("OPERATOR_RETRY_VERSION should be a valid VersionReq value")
 });
