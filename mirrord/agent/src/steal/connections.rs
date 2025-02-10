@@ -1,8 +1,9 @@
 //! Home for [`StolenConnections`] - manager for connections that were stolen based on active port
 //! subscriptions.
 
-use std::{collections::HashMap, fmt, io, net::SocketAddr, time::Duration};
+use std::{collections::HashMap, fmt, io, net::SocketAddr, sync::Arc, time::Duration};
 
+use dashmap::DashMap;
 use hyper::{body::Incoming, Request, Response};
 use mirrord_protocol::{tcp::NewTcpConnection, ConnectionId, Port, RequestId};
 use thiserror::Error;
@@ -11,10 +12,11 @@ use tokio::{
     sync::mpsc::{self, error::SendError, Receiver, Sender},
     task::JoinSet,
 };
+use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tracing::Level;
 
 use self::{filtered::DynamicBody, unfiltered::UnfilteredStealTask};
-use super::{http::DefaultReversibleStream, subscriptions::PortSubscription};
+use super::{http::{DefaultReversibleStream, HttpFilter}, subscriptions::PortSubscription, StealTlsAcceptors};
 use crate::{
     http::HttpVersion, metrics::STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION,
     steal::connections::filtered::FilteredStealTask, util::ClientId,
@@ -264,6 +266,9 @@ pub struct StolenConnections {
     ///
     /// Allows for polling updates from all spawned tasks in [`Self::wait`].
     main_rx: Receiver<ConnectionMessageOut>,
+
+    /// For filtered HTTPS stealing.
+    tls_acceptors: StealTlsAcceptors,
 }
 
 impl StolenConnections {
@@ -275,7 +280,7 @@ impl StolenConnections {
     const TASK_IN_CHANNEL_CAPACITY: usize = 16;
 
     /// Creates a new empty set of [`StolenConnection`]s.
-    pub fn with_capacity(capacity: usize) -> Self {
+    pub fn new(capacity: usize, tls_acceptors: StealTlsAcceptors) -> Self {
         let (main_tx, main_rx) = mpsc::channel(Self::MAIN_CHANNEL_CAPACITY);
 
         Self {
@@ -286,6 +291,8 @@ impl StolenConnections {
 
             main_tx,
             main_rx,
+
+            tls_acceptors,
         }
     }
 
@@ -298,14 +305,34 @@ impl StolenConnections {
 
         let (task_tx, task_rx) = mpsc::channel(Self::TASK_IN_CHANNEL_CAPACITY);
         let main_tx = self.main_tx.clone();
+        let acceptors = self.tls_acceptors.clone();
 
         tracing::trace!(connection_id, "Spawning connection task");
         self.tasks.spawn(async move {
+            let acceptor = match &connection.port_subscription {
+                PortSubscription::Filtered(filters) => acceptors
+                    .get_acceptor(connection.destination.port())
+                    .await
+                    .inspect_err(|error| {
+                        tracing::error!(
+                            port = connection.destination.port(),
+                            http_filters = ?filters,
+                            peer_addr = %connection.source,
+                            %error,
+                            "Failed to build a steal TLS acceptor",
+                        );
+                    })
+                    .ok()
+                    .flatten(),
+                PortSubscription::Unfiltered(..) => None,
+            };
+
             let task = ConnectionTask {
                 connection_id,
                 connection,
                 tx: main_tx,
                 rx: task_rx,
+                acceptor,
             };
 
             match task.run().await {
@@ -432,6 +459,8 @@ struct ConnectionTask {
     /// Sending end of the channel shared between all [`ConnectionTask`]s and [`StolenConnections`]
     /// set.
     tx: Sender<ConnectionMessageOut>,
+    /// For filtered HTTPS stealing.
+    acceptor: Option<TlsAcceptor>,
 }
 
 impl ConnectionTask {
@@ -447,8 +476,8 @@ impl ConnectionTask {
     /// This task is responsible for **always** sending [`ConnectionMessageOut::Closed`] to
     /// interested stealer clients, even when an error has occurred.
     async fn run(mut self) -> Result<(), ConnectionTaskError> {
-        match self.connection.port_subscription {
-            PortSubscription::Unfiltered(client_id) => {
+        match (self.connection.port_subscription, self.acceptor) {
+            (PortSubscription::Unfiltered(client_id), _) => {
                 self.tx
                     .send(ConnectionMessageOut::SubscribedTcp {
                         client_id,
@@ -467,7 +496,38 @@ impl ConnectionTask {
                     .await
             }
 
-            PortSubscription::Filtered(filters) => {
+            (PortSubscription::Filtered(filters), Some(acceptor)) => {
+                let stream = acceptor.accept(self.connection.stream).await?;
+                let mut stream = DefaultReversibleStream::read_header(
+                    stream,
+                    Self::HTTP_DETECTION_TIMEOUT,
+                )
+                .await?;
+
+                let Some(http_version) = HttpVersion::new(stream.get_header()) else {
+                    tracing::trace!(
+                        "No HTTP version detected proxying the connection"
+                    );
+
+                    let mut outgoing_io = TcpStream::connect(self.connection.destination).await?;
+
+                    todo!()
+                };
+
+                tracing::trace!(?http_version, "Detected HTTP version");
+
+                let task = FilteredStealTask::new(
+                    self.connection_id,
+                    filters,
+                    self.connection.destination,
+                    http_version,
+                    stream,
+                );
+
+                task.run(self.tx.clone(), &mut self.rx).await
+            }
+
+            (PortSubscription::Filtered(filters), None) => {
                 let mut stream = DefaultReversibleStream::read_header(
                     self.connection.stream,
                     Self::HTTP_DETECTION_TIMEOUT,

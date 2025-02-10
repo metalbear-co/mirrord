@@ -6,22 +6,20 @@ use std::{
 
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite},
-    net::TcpStream,
     time,
     time::{Duration, Instant},
 };
 
-/// Wraps a [`TcpStream`] to allow a sort of _peek_ functionality, by reading the first bytes, but
+/// Wraps an async IO stream to allow a sort of _peek_ functionality, by reading the first bytes, but
 /// then keeping them for later reads.
 ///
 /// Very useful to the HTTP filter component on `stealer`, where we have to look at the first
-/// message on a [`TcpStream`] to try and identify if this connection is _talking_ HTTP.
+/// message on a [`TcpStream`](tokio::net::TcpStream) to try and identify if this connection is _talking_ HTTP.
 ///
 /// Thanks [finomnis](https://stackoverflow.com/users/2902833/finomnis) for the help!
-// impl deref with pin
 #[derive(Debug)]
-pub(crate) struct ReversibleStream<const HEADER_SIZE: usize> {
-    stream: TcpStream,
+pub(crate) struct ReversibleStream<const HEADER_SIZE: usize, T> {
+    stream: T,
 
     header: [u8; HEADER_SIZE],
 
@@ -40,10 +38,13 @@ pub(crate) struct ReversibleStream<const HEADER_SIZE: usize> {
     num_forwarded: usize,
 }
 
-impl<const HEADER_SIZE: usize> ReversibleStream<HEADER_SIZE> {
-    /// Build a [`ReversibleStream`] from a [`TcpStream`], move on if not done within given timeout.
-    /// Return an Error if there was an error while reading from the [`TcpStream`].
-    pub(crate) async fn read_header(stream: TcpStream, timeout: Duration) -> io::Result<Self> {
+impl<const HEADER_SIZE: usize, T> ReversibleStream<HEADER_SIZE, T>
+where
+    T: AsyncRead + Unpin,
+{
+    /// Build a [`ReversibleStream`] from an async IO stream, move on if not done within given timeout.
+    /// Return an error if there was an error while reading from the stream.
+    pub(crate) async fn read_header(stream: T, timeout: Duration) -> io::Result<Self> {
         let mut this = Self {
             stream,
             header: [0; HEADER_SIZE],
@@ -100,7 +101,10 @@ impl<const HEADER_SIZE: usize> ReversibleStream<HEADER_SIZE> {
     }
 }
 
-impl<const HEADER_SIZE: usize> AsyncRead for ReversibleStream<HEADER_SIZE> {
+impl<const HEADER_SIZE: usize, T> AsyncRead for ReversibleStream<HEADER_SIZE, T>
+where
+    T: AsyncRead + Unpin,
+{
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -121,7 +125,10 @@ impl<const HEADER_SIZE: usize> AsyncRead for ReversibleStream<HEADER_SIZE> {
     }
 }
 
-impl<const HEADER_SIZE: usize> AsyncWrite for ReversibleStream<HEADER_SIZE> {
+impl<const HEADER_SIZE: usize, T> AsyncWrite for ReversibleStream<HEADER_SIZE, T>
+where
+    T: AsyncWrite + Unpin,
+{
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,

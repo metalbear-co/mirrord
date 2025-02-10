@@ -2,9 +2,9 @@
 
 use std::{
     collections::HashMap,
-    io,
+    fmt, io,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -49,43 +49,54 @@ pub enum StealTlsError {
     BuildConfigError(#[from] rustls::Error),
 }
 
-pub(crate) struct StealTlsAcceptors {
+#[derive(Default)]
+struct State {
     config: StealTlsConfig,
-    resolved: HashMap<u16, (TlsAcceptor, Instant)>,
+    resolved: Mutex<HashMap<u16, (TlsAcceptor, Instant)>>,
     root_path: RootPath,
 }
+
+#[derive(Clone, Default)]
+pub(crate) struct StealTlsAcceptors(Arc<State>);
 
 impl StealTlsAcceptors {
     const ACCEPTOR_VALIDITY: Duration = Duration::from_secs(30);
 
     pub(crate) fn new(config: StealTlsConfig, target_pid: u64) -> Self {
-        Self {
+        Self(Arc::new(State {
             config,
             resolved: Default::default(),
             root_path: RootPath::new(target_pid),
-        }
+        }))
     }
 
     pub(crate) async fn get_acceptor(
-        &mut self,
+        &self,
         port: u16,
     ) -> Result<Option<TlsAcceptor>, StealTlsError> {
         let ready = self
+            .0
             .resolved
-            .get(&port)
+            .lock()
+            .inspect_err(|_| tracing::error!("TLS acceptors mutex is poisoned"))
+            .ok()
+            .and_then(|resolved| resolved.get(&port).cloned())
             .filter(|entry| entry.1.elapsed() < Self::ACCEPTOR_VALIDITY);
         if let Some(ready) = ready {
             return Ok(Some(ready.0.clone()));
         }
 
-        let Some(config) = self.config.get(&port) else {
+        let Some(config) = self.0.config.get(&port) else {
             return Ok(None);
         };
 
         let acceptor = self.build_acceptor(config).await?;
 
-        self.resolved
-            .insert(port, (acceptor.clone(), Instant::now()));
+        if let Ok(mut resolved) = self.0.resolved.lock() {
+            resolved.insert(port, (acceptor.clone(), Instant::now()));
+        } else {
+            tracing::error!("TLS acceptors mutex is poisoned");
+        }
 
         Ok(Some(acceptor))
     }
@@ -117,7 +128,7 @@ impl StealTlsAcceptors {
         path: &Path,
     ) -> Result<Vec<CertificateDer<'static>>, StealTlsError> {
         let pem: io::Result<Vec<u8>> = try {
-            let path = self.root_path.resolve_path(path)?;
+            let path = self.0.root_path.resolve_path(path)?;
             fs::read(path).await?
         };
 
@@ -142,7 +153,7 @@ impl StealTlsAcceptors {
 
     async fn get_key(&self, path: &Path) -> Result<PrivateKeyDer<'static>, StealTlsError> {
         let pem: io::Result<Vec<u8>> = try {
-            let path = self.root_path.resolve_path(path)?;
+            let path = self.0.root_path.resolve_path(path)?;
             fs::read(path).await?
         };
 
@@ -173,5 +184,18 @@ impl StealTlsAcceptors {
         }
 
         found_key.ok_or(StealTlsError::KeyNotFound(path.to_path_buf()))
+    }
+}
+
+impl fmt::Debug for StealTlsAcceptors {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StealTlsAcceptors")
+            .field("config", &self.0.config)
+            .field("root_path", &self.0.root_path)
+            .field(
+                "resolved",
+                &self.0.resolved.lock().as_ref().map(|r| r.keys()),
+            )
+            .finish()
     }
 }

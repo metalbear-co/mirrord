@@ -12,11 +12,13 @@ mod connections;
 mod http;
 pub mod ip_tables;
 mod orig_dst;
+// mod stream_replay;
 mod subscriptions;
 mod tls;
 
 pub(crate) use api::TcpStealerApi;
 pub(crate) use connection::TcpConnectionStealer;
+pub(crate) use tls::StealTlsAcceptors;
 
 use self::http::HttpResponseFallback;
 
