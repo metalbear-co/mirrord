@@ -523,7 +523,8 @@ impl LayerConfig {
             if self.agent.namespace.is_some() {
                 context.add_warning(
                     "Agent namespace is ignored in targetless runs. \
-                    To specify a namespace for a targetless run, use target namespace.".into()
+                    To specify a namespace for a targetless run, use target namespace."
+                        .into(),
                 );
             }
         }
