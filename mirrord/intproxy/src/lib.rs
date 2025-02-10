@@ -14,7 +14,7 @@ use layer_initializer::LayerInitializer;
 use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
 use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, LocalMessage};
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS};
-use ping_pong::{AgentSentPong, PingPong};
+use ping_pong::{PingPong, PingPongMessage};
 use proxies::{
     files::{FilesProxy, FilesProxyMessage},
     incoming::{IncomingProxy, IncomingProxyMessage},
@@ -301,7 +301,12 @@ impl IntProxy {
     #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     async fn handle_agent_message(&mut self, message: DaemonMessage) -> Result<(), IntProxyError> {
         match message {
-            DaemonMessage::Pong => self.task_txs.ping_pong.send(AgentSentPong).await,
+            DaemonMessage::Pong => {
+                self.task_txs
+                    .ping_pong
+                    .send(PingPongMessage::AgentSentPong)
+                    .await
+            }
             DaemonMessage::Close(reason) => return Err(IntProxyError::AgentFailed(reason)),
             DaemonMessage::TcpOutgoing(msg) => {
                 self.task_txs
@@ -439,6 +444,11 @@ impl IntProxy {
         &mut self,
         kind: ConnectionRefresh,
     ) -> Result<(), IntProxyError> {
+        self.task_txs
+            .ping_pong
+            .send(PingPongMessage::ConnectionRefresh(kind))
+            .await;
+
         match kind {
             ConnectionRefresh::Start => {
                 // Initialise default reconnect message queue

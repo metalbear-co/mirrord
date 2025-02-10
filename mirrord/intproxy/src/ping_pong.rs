@@ -13,6 +13,7 @@ use tokio::time::{self, Interval, MissedTickBehavior};
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
+    main_tasks::ConnectionRefresh,
     ProxyMessage,
 };
 
@@ -29,7 +30,10 @@ pub enum PingPongError {
 
 /// Notification about a [`DeamonMessage::Pong`](mirrord_protocol::DaemonMessage::Pong) received
 /// from the agent.
-pub struct AgentSentPong;
+pub enum PingPongMessage {
+    AgentSentPong,
+    ConnectionRefresh(ConnectionRefresh),
+}
 
 /// Encapsulates logic of the ping pong mechanism on the proxy side.
 /// Run as a [`BackgroundTask`].
@@ -38,6 +42,8 @@ pub struct PingPong {
     ticker: Interval,
     /// Whether this struct awaits for a pong from the agent.
     awaiting_pong: bool,
+
+    reconnecting: bool,
 }
 
 impl PingPong {
@@ -53,13 +59,14 @@ impl PingPong {
         Self {
             ticker,
             awaiting_pong: false,
+            reconnecting: false,
         }
     }
 }
 
 impl BackgroundTask for PingPong {
     type Error = PingPongError;
-    type MessageIn = AgentSentPong;
+    type MessageIn = PingPongMessage;
     type MessageOut = ProxyMessage;
 
     /// Pings the agent with a frequency configured in [`PingPong::new`].
@@ -69,7 +76,7 @@ impl BackgroundTask for PingPong {
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         loop {
             tokio::select! {
-                _ = self.ticker.tick() => {
+                _ = self.ticker.tick(), if !self.reconnecting => {
                     if self.awaiting_pong {
                         tracing::error!("pong timeout");
                         break Err(PingPongError::PongTimeout);
@@ -85,14 +92,27 @@ impl BackgroundTask for PingPong {
                         tracing::trace!("message bus closed, exiting");
                         break Ok(())
                     },
-                    (Some(AgentSentPong), true) => {
+                    (Some(PingPongMessage::AgentSentPong), true) => {
                         tracing::trace!("agent responded to ping");
                         self.awaiting_pong = false;
                     },
-                    (Some(AgentSentPong), false) => {
+                    (Some(PingPongMessage::AgentSentPong), false) => {
                         tracing::error!("agent sent an unexpected pong");
                         break Err(PingPongError::UnmatchedPong)
                     },
+                    (Some(PingPongMessage::ConnectionRefresh(refresh)), _) => {
+                        match refresh {
+                            ConnectionRefresh::Start => {
+                                self.reconnecting = true;
+                            }
+                            ConnectionRefresh::End => {
+                                self.awaiting_pong = false;
+                                self.reconnecting = false;
+                                self.ticker.reset();
+                            }
+                        }
+                    }
+
                 },
             }
         }
