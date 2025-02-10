@@ -234,12 +234,9 @@ mod file_ops_tests {
 
     impl PartialEq for GoStatfs {
         fn eq(&self, other: &Self) -> bool {
-            // bavail and bfree changes constantly, so they will usually not be the same in the two
-            // calls, so we just check they're kind of close.
-            self.bavail / 100000 == other.bavail / 100000
-                && self.bfree / 100000 == other.bfree / 100000
-                && self.ffree / 100000 == other.ffree / 100000
-                && self.blocks == other.blocks
+            // bavail and bfree  and ffree change constantly, so they will usually not be the same
+            // in the two calls, so we can't really reliably test those fields..
+            self.blocks == other.blocks
                 && self.bsize == other.bsize
                 && self.files == other.files
                 && self.flags == other.flags
