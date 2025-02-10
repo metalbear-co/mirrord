@@ -106,7 +106,6 @@ impl BackgroundTask for PingPong {
                                 self.reconnecting = true;
                             }
                             ConnectionRefresh::End => {
-                                self.awaiting_pong = false;
                                 self.reconnecting = false;
                                 self.ticker.reset();
                             }
