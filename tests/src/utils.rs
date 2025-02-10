@@ -1632,8 +1632,7 @@ pub async fn go_statfs_service(#[future] kube_client: Client) -> KubeService {
     service(
         "default",
         "ClusterIP",
-        // "ghcr.io/metalbear-co/mirrord-node-udp-logger:latest",
-        "docker.io/t4lz/go-statfs:2025_02_06",
+        "ghcr.io/metalbear-co/mirrord-go-statfs:latest",
         "go-statfs",
         true,
         kube_client,
