@@ -16,7 +16,11 @@ use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tracing::Level;
 
 use self::{filtered::DynamicBody, unfiltered::UnfilteredStealTask};
-use super::{http::{DefaultReversibleStream, HttpFilter}, subscriptions::PortSubscription, StealTlsAcceptors};
+use super::{
+    http::{DefaultReversibleStream, HttpFilter},
+    subscriptions::PortSubscription,
+    StealTlsAcceptors,
+};
 use crate::{
     http::HttpVersion, metrics::STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION,
     steal::connections::filtered::FilteredStealTask, util::ClientId,
@@ -496,37 +500,6 @@ impl ConnectionTask {
                     .await
             }
 
-            (PortSubscription::Filtered(filters), Some(acceptor)) => {
-                let stream = acceptor.accept(self.connection.stream).await?;
-                let mut stream = DefaultReversibleStream::read_header(
-                    stream,
-                    Self::HTTP_DETECTION_TIMEOUT,
-                )
-                .await?;
-
-                let Some(http_version) = HttpVersion::new(stream.get_header()) else {
-                    tracing::trace!(
-                        "No HTTP version detected proxying the connection"
-                    );
-
-                    let mut outgoing_io = TcpStream::connect(self.connection.destination).await?;
-
-                    todo!()
-                };
-
-                tracing::trace!(?http_version, "Detected HTTP version");
-
-                let task = FilteredStealTask::new(
-                    self.connection_id,
-                    filters,
-                    self.connection.destination,
-                    http_version,
-                    stream,
-                );
-
-                task.run(self.tx.clone(), &mut self.rx).await
-            }
-
             (PortSubscription::Filtered(filters), None) => {
                 let mut stream = DefaultReversibleStream::read_header(
                     self.connection.stream,
@@ -543,6 +516,33 @@ impl ConnectionTask {
                     tokio::io::copy_bidirectional(&mut stream, &mut outgoing_io).await?;
 
                     return Ok(());
+                };
+
+                tracing::trace!(?http_version, "Detected HTTP version");
+
+                let task = FilteredStealTask::new(
+                    self.connection_id,
+                    filters,
+                    self.connection.destination,
+                    http_version,
+                    stream,
+                );
+
+                task.run(self.tx.clone(), &mut self.rx).await
+            }
+
+            (PortSubscription::Filtered(filters), Some(acceptor)) => {
+                let stream = acceptor.accept(self.connection.stream).await?;
+                let mut stream =
+                    DefaultReversibleStream::read_header(stream, Self::HTTP_DETECTION_TIMEOUT)
+                        .await?;
+
+                let Some(http_version) = HttpVersion::new(stream.get_header()) else {
+                    tracing::trace!("No HTTP version detected proxying the connection");
+
+                    let mut outgoing_io = TcpStream::connect(self.connection.destination).await?;
+
+                    todo!()
                 };
 
                 tracing::trace!(?http_version, "Detected HTTP version");

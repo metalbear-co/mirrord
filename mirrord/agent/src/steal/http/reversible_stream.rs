@@ -10,11 +10,12 @@ use tokio::{
     time::{Duration, Instant},
 };
 
-/// Wraps an async IO stream to allow a sort of _peek_ functionality, by reading the first bytes, but
-/// then keeping them for later reads.
+/// Wraps an async IO stream to allow a sort of _peek_ functionality, by reading the first bytes,
+/// but then keeping them for later reads.
 ///
 /// Very useful to the HTTP filter component on `stealer`, where we have to look at the first
-/// message on a [`TcpStream`](tokio::net::TcpStream) to try and identify if this connection is _talking_ HTTP.
+/// message on a [`TcpStream`](tokio::net::TcpStream) to try and identify if this connection is
+/// _talking_ HTTP.
 ///
 /// Thanks [finomnis](https://stackoverflow.com/users/2902833/finomnis) for the help!
 #[derive(Debug)]
@@ -42,8 +43,8 @@ impl<const HEADER_SIZE: usize, T> ReversibleStream<HEADER_SIZE, T>
 where
     T: AsyncRead + Unpin,
 {
-    /// Build a [`ReversibleStream`] from an async IO stream, move on if not done within given timeout.
-    /// Return an error if there was an error while reading from the stream.
+    /// Build a [`ReversibleStream`] from an async IO stream, move on if not done within given
+    /// timeout. Return an error if there was an error while reading from the stream.
     pub(crate) async fn read_header(stream: T, timeout: Duration) -> io::Result<Self> {
         let mut this = Self {
             stream,

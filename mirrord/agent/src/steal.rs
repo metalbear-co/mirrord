@@ -12,7 +12,7 @@ mod connections;
 mod http;
 pub mod ip_tables;
 mod orig_dst;
-// mod stream_replay;
+mod stream_rollback;
 mod subscriptions;
 mod tls;
 
