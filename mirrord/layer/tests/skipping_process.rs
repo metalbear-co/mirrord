@@ -3,7 +3,6 @@
 
 use std::{env::temp_dir, os::unix::fs, path::Path, time::Duration};
 
-use rand::prelude::*;
 use rstest::rstest;
 
 mod common;
