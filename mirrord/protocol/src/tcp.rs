@@ -3,7 +3,7 @@ use std::{
     collections::VecDeque,
     convert::Infallible,
     fmt,
-    net::IpAddr,
+    net::{IpAddr, SocketAddr},
     pin::Pin,
     sync::LazyLock,
     task::{Context, Poll},
@@ -88,6 +88,7 @@ pub enum DaemonTcp {
     HttpRequest(HttpRequest<Vec<u8>>),
     HttpRequestFramed(HttpRequest<InternalHttpBody>),
     HttpRequestChunked(ChunkedRequest),
+    HttpRequestV2(HttpRequestV2),
 }
 
 /// Contents of a chunked message from server.
@@ -96,6 +97,40 @@ pub enum ChunkedRequest {
     Start(HttpRequest<Vec<InternalHttpBodyFrame>>),
     Body(ChunkedHttpBody),
     Error(ChunkedHttpError),
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct HttpRequestV2 {
+    pub connection_id: ConnectionId,
+    pub request_id: RequestId,
+    pub inner: HttpRequestV2Inner,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum HttpRequestV2Inner {
+    Head(HttpRequestV2Head),
+    Body(#[bincode(with_serde)] InternalHttpBodyV2),
+    Error(HttpRequestV2Error),
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct HttpRequestV2Head {
+    #[bincode(with_serde)]
+    pub request: InternalHttpRequest<InternalHttpBodyV2>,
+    pub original_destination: SocketAddr,
+    pub original_source: SocketAddr,
+    pub is_https: bool,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+pub struct InternalHttpBodyV2 {
+    pub frames: Vec<InternalHttpBodyFrame>,
+    pub body_finished: bool,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct HttpRequestV2Error {
+    pub error_message: String,
 }
 
 /// Contents of a chunked message body frame from server.

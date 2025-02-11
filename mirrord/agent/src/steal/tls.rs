@@ -77,6 +77,7 @@ impl From<JoinError> for StealTlsError {
 pub(crate) struct StealTlsHandler {
     built_at: Instant,
     acceptor: TlsAcceptor,
+    #[allow(unused)]
     connector: TlsConnector,
 }
 
@@ -88,6 +89,7 @@ impl StealTlsHandler {
         self.acceptor.accept(stream).await
     }
 
+    #[allow(unused)]
     pub(crate) async fn connect<IO>(
         &self,
         uri: &Uri,

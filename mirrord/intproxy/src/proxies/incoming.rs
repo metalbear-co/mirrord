@@ -466,6 +466,8 @@ impl IncomingProxy {
                     message_bus.send(msg).await;
                 }
             }
+
+            DaemonTcp::HttpRequestV2(..) => todo!(),
         }
 
         Ok(())
