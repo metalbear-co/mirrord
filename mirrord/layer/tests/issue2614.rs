@@ -4,7 +4,6 @@
 
 use std::{os::unix::fs::PermissionsExt, path::Path, time::Duration};
 
-use rand::Rng;
 use rstest::rstest;
 
 mod common;
