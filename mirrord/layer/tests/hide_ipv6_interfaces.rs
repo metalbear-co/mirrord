@@ -4,7 +4,6 @@
 
 use std::{path::Path, time::Duration};
 
-use rand::Rng;
 use rstest::rstest;
 
 mod common;
