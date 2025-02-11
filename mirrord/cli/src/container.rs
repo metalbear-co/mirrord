@@ -8,6 +8,8 @@
 //! mirrord container -- docker compose up`
 // TODO(alex) [mid]: Improve this:
 // - Say which ip to use with mirrord console for good logs;
+// - If you use the `eth0` (or whatever) ip, then the command always fails with the `--attach`
+//   error, console address might not be propagating to the `run/start` command?;
 use std::{
     collections::HashMap,
     io::Write,
@@ -141,19 +143,19 @@ fn create_temp_layer_config(config: &LayerConfig) -> Result<NamedTempFile, Conta
 fn create_self_signed_certificate(
     subject_alt_names: Vec<String>,
 ) -> Result<(NamedTempFile, NamedTempFile), ContainerError> {
-    let geerated = rcgen::generate_simple_self_signed(subject_alt_names)
+    let generated = rcgen::generate_simple_self_signed(subject_alt_names)
         .map_err(ContainerError::SelfSignedCertificate)?;
 
     let mut certificate =
         tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
     certificate
-        .write_all(geerated.cert.pem().as_bytes())
+        .write_all(generated.cert.pem().as_bytes())
         .map_err(ContainerError::WriteSelfSignedCertificate)?;
 
     let mut private_key =
         tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
     private_key
-        .write_all(geerated.key_pair.serialize_pem().as_bytes())
+        .write_all(generated.key_pair.serialize_pem().as_bytes())
         .map_err(ContainerError::WriteSelfSignedCertificate)?;
 
     Ok((certificate, private_key))
@@ -235,7 +237,7 @@ fn create_config_and_analytics<P: Progress>(
 
 /// Create [`RuntimeCommandBuilder`] with the corresponding [`Sidecar`] connected to
 /// [`MirrordExecution`] as extproxy.
-#[tracing::instrument(level = Level::DEBUG, skip(analytics, progress, config), err)]
+#[tracing::instrument(level = Level::DEBUG, skip(analytics, progress, config), ret, err)]
 async fn create_runtime_command_with_sidecar<P: Progress + Send + Sync>(
     analytics: &mut AnalyticsReporter,
     progress: &mut P,
@@ -323,7 +325,7 @@ async fn create_runtime_command_with_sidecar<P: Progress + Send + Sync>(
 
 /// Main entry point for the `mirrord container` command.
 /// This spawns: "agent" - "external proxy" - "intproxy sidecar" - "execution container"
-#[tracing::instrument(level = Level::DEBUG, skip(watch), ret, err)]
+#[tracing::instrument(level = Level::INFO, skip(watch), ret, err)]
 pub(crate) async fn container_command(
     runtime_args: RuntimeArgs,
     exec_params: ExecParams,
@@ -352,9 +354,13 @@ pub(crate) async fn container_command(
     let (_internal_proxy_tls_guards, _external_proxy_tls_guards) =
         prepare_tls_certs_for_container(&mut config)?;
 
+    // TODO(alex) [high]: I have to create/copy/pass the `compose.yaml` file around here, before
+    // the proxy container is created? I don't think so. The way I see it, we just need
+    // to run the `docker compose up` command down below, refer to #1.
     let layer_config_file = create_temp_layer_config(&config)?;
     std::env::set_var(MIRRORD_CONFIG_FILE_ENV, layer_config_file.path());
 
+    // TODO(alex) [low]: This is the `docker create mirrord-intproxy` part.
     let (mut runtime_command, sidecar, _execution_info) = create_runtime_command_with_sidecar(
         &mut analytics,
         &mut progress,
@@ -375,9 +381,20 @@ pub(crate) async fn container_command(
 
     progress.success(None);
 
+    // TODO(alex) [low]: And this should be the `docker run -it ubuntu` part.
+    //
+    // TODO(alex) [high] [#1]: `docker compose up` is being run here, right? So it should have
+    // access to the user files and stuff, we just need to modify the env vars in their compose
+    // containers.
+    //
+    // We should load an `--env-file` from the user, and append the mirrord stuff to it,
+    // this should be a tempfile, since we don't want to modify the actual user file.
+    // Then it would work for all containers in compose, I assume?
     let (binary, binary_args) = runtime_command
         .with_command(runtime_args.command)
         .into_command_args();
+
+    tracing::debug!(binary, "What are we getting back ?");
 
     let runtime_command_result = Command::new(binary)
         .args(binary_args)
@@ -414,6 +431,7 @@ pub(crate) async fn container_command(
     }
 }
 
+// TODO(alex) [mid]: What's this? Do I need to worry about it while testing compose from the cli?
 /// Create sidecar and extproxy but return arguments for extension instead of executing run command
 #[tracing::instrument(level = Level::DEBUG, skip(watch), ret, err)]
 pub(crate) async fn container_ext_command(

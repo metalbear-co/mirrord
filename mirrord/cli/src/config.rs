@@ -830,14 +830,15 @@ pub struct ExtensionContainerArgs {
     pub target: Option<String>,
 }
 
+/// Args related to the `{runtime}` command, i.e. `docker run -e CATS=MEOW`.
 #[derive(Parser, Debug)]
 pub struct RuntimeArgs {
-    /// Which kind of container runtime to use.
+    /// Which kind of container runtime to use, this is the `docker` part of the command.
     #[arg(value_enum)]
     pub runtime: ContainerRuntime,
 
+    /// Command to use with `mirrord container`, i.e. `run -e CATS=MEOW`.
     #[command(subcommand)]
-    /// Command to use with `mirrord container`.
     pub command: ContainerRuntimeCommand,
 }
 
@@ -867,7 +868,14 @@ pub(super) enum ContainerRuntimeCommand {
 impl ContainerRuntimeCommand {
     // TODO(alex) [high]: I need my own image of mirrord-cli, otherwise it won't have `compose`
     // command.
-    #[tracing::instrument(level = Level::DEBUG, skip_all, ret)]
+    //
+    // [update]: Add somewhere that this is needed, with the docker command, so nobody trips
+    // on this.
+    /// Creates the sidecar container that'll run `runtime_args`.
+    ///
+    /// `runtime_args` here should be something like:
+    /// `["--rm", "ghcr.io/metalbear-co/mirrord-cli:latest", "mirrord", "intproxy"]`
+    #[tracing::instrument(level = Level::INFO, skip_all, ret)]
     pub fn create<T: Into<String>>(runtime_args: impl IntoIterator<Item = T>) -> Self {
         ContainerRuntimeCommand::Create {
             runtime_args: runtime_args.into_iter().map(T::into).collect(),
@@ -891,7 +899,7 @@ impl ContainerRuntimeCommand {
 
     /// Returns the string version of the docker command, and the thing you want the command
     /// to do, e.g. `["docker", "run"]`, or `["compose", "up"]`.
-    #[tracing::instrument(level = Level::DEBUG, ret)]
+    #[tracing::instrument(level = Level::INFO, ret)]
     pub fn into_parts(self) -> (Vec<String>, Vec<String>) {
         match self {
             ContainerRuntimeCommand::Create { runtime_args } => {

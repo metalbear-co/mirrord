@@ -74,7 +74,7 @@ impl Sidecar {
         format!("container:{container_id}")
     }
 
-    #[tracing::instrument(level = Level::TRACE)]
+    #[tracing::instrument(level = Level::DEBUG, err)]
     pub async fn start(&self) -> Result<(SocketAddr, SidecarLogs), ContainerError> {
         let mut command = Command::new(&self.runtime_binary);
         command.args(["start", "--attach", &self.container_id]);
