@@ -12,7 +12,6 @@ use mirrord_protocol::{
     tcp::{DaemonTcp, LayerTcp},
     ClientMessage, DaemonMessage, FileRequest, FileResponse,
 };
-use rand::Rng;
 use rstest::rstest;
 
 mod common;
@@ -29,7 +28,7 @@ async fn test_issue2807_with_ipv6_ignore(
     dylib_path: &Path,
 ) {
     let dir = tempfile::tempdir().unwrap();
-    let file_id = rand::thread_rng().gen::<u64>();
+    let file_id = rand::random::<u64>();
     let config_path = dir.path().join(format!("{file_id:X}.json"));
 
     let config = serde_json::json!({

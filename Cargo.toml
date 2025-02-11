@@ -89,15 +89,15 @@ kube = { git = "https://github.com/kube-rs/kube.git", rev = "ecbdafc214538aadc78
     "socks5",
     "http-proxy",
 ] }
-hickory-resolver = { version = "0.25.0-alpha.4", features = [
+hickory-resolver = { version = "0.25.0-alpha.5", features = [
     "serde",
     "tokio-runtime",
 ] }
-hickory-proto = "0.25.0-alpha.4"
+hickory-proto = "0.25.0-alpha.5"
 tokio-util = { version = "0.7", features = ["net", "codec"] }
 
 # Used by `layer`, `intproxy`, `tests`, `medschool`, `cli`, `agent`, `operator`.
-rand = "0.8"
+rand = "0.9"
 streammap-ext = "0.1"
 regex = { version = "1", features = ["unicode-case"] }
 fancy-regex = { version = "0.14" }

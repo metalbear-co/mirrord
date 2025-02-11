@@ -7,7 +7,7 @@ use std::{
 
 use futures::StreamExt;
 use mirrord_config::LayerConfig;
-use rand::{distributions::Alphanumeric, Rng};
+use rand::distr::{Alphanumeric, SampleString};
 use tokio::io::AsyncWriteExt;
 use tokio_stream::Stream;
 use tracing_subscriber::{prelude::*, EnvFilter};
@@ -65,12 +65,11 @@ pub async fn init_tracing_registry(
 }
 
 fn default_logfile_path(prefix: &str) -> PathBuf {
-    let random_name: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(7)
-        .map(char::from)
-        .collect();
-    let timestamp = SystemTime::UNIX_EPOCH.elapsed().unwrap().as_secs();
+    let random_name: String = Alphanumeric.sample_string(&mut rand::rng(), 7);
+    let timestamp = SystemTime::UNIX_EPOCH
+        .elapsed()
+        .expect("now must have some delta from UNIX_EPOCH, it isn't 1970 anymore")
+        .as_secs();
 
     PathBuf::from(format!("/tmp/{prefix}-{timestamp}-{random_name}.log"))
 }
