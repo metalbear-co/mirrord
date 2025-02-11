@@ -120,6 +120,7 @@ pub enum FileOps {
     GoDir21,
     GoDir22,
     GoDir23,
+    GoStatfs,
 }
 
 #[derive(Debug)]
@@ -527,6 +528,7 @@ impl FileOps {
             FileOps::GoDir21 => vec!["go-e2e-dir/21.go_test_app"],
             FileOps::GoDir22 => vec!["go-e2e-dir/22.go_test_app"],
             FileOps::GoDir23 => vec!["go-e2e-dir/23.go_test_app"],
+            FileOps::GoStatfs => vec!["go-e2e-statfs/23.go_test_app"],
         }
     }
 
@@ -1619,6 +1621,19 @@ pub async fn random_namespace_self_deleting_service(#[future] kube_client: Clien
         "NodePort",
         "ghcr.io/metalbear-co/mirrord-pytest:latest",
         "pytest-echo",
+        true,
+        kube_client,
+    )
+    .await
+}
+
+#[fixture]
+pub async fn go_statfs_service(#[future] kube_client: Client) -> KubeService {
+    service(
+        "default",
+        "ClusterIP",
+        "ghcr.io/metalbear-co/mirrord-go-statfs:latest",
+        "go-statfs",
         true,
         kube_client,
     )

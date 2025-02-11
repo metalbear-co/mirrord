@@ -345,9 +345,8 @@ async fn go_stat(
         ))))
         .await;
 
-    // statfs/fstatfs hooks are currently disabled in Go apps due to a [bug](https://github.com/metalbear-co/mirrord/issues/3044).
-    // intproxy.expect_statfs("/tmp/test_file.txt").await;
-    // intproxy.expect_fstatfs(fd).await;
+    intproxy.expect_statfs("/tmp/test_file.txt").await;
+    intproxy.expect_fstatfs(fd).await;
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stderr().await;

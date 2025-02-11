@@ -17,7 +17,7 @@ use mirrord_intproxy::{agent_conn::AgentConnection, IntProxy};
 use mirrord_protocol::{
     file::{
         AccessFileRequest, AccessFileResponse, OpenFileRequest, OpenOptionsInternal,
-        ReadFileRequest, SeekFromInternal, XstatFsResponse, XstatRequest, XstatResponse,
+        ReadFileRequest, SeekFromInternal, XstatFsResponseV2, XstatRequest, XstatResponse,
     },
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
@@ -494,15 +494,15 @@ impl TestIntProxy {
         // Expecting `statfs` call with path.
         assert_matches!(
             self.recv().await,
-            ClientMessage::FileRequest(FileRequest::StatFs(
-                mirrord_protocol::file::StatFsRequest { path }
+            ClientMessage::FileRequest(FileRequest::StatFsV2(
+                mirrord_protocol::file::StatFsRequestV2 { path }
             )) if path.to_str().unwrap() == expected_path
         );
 
         // Answer `statfs`.
         self.codec
-            .send(DaemonMessage::File(FileResponse::XstatFs(Ok(
-                XstatFsResponse {
+            .send(DaemonMessage::File(FileResponse::XstatFsV2(Ok(
+                XstatFsResponseV2 {
                     metadata: Default::default(),
                 },
             ))))
@@ -515,15 +515,15 @@ impl TestIntProxy {
         // Expecting `fstatfs` call with path.
         assert_matches!(
             self.recv().await,
-            ClientMessage::FileRequest(FileRequest::XstatFs(
-                mirrord_protocol::file::XstatFsRequest { fd }
+            ClientMessage::FileRequest(FileRequest::XstatFsV2(
+                mirrord_protocol::file::XstatFsRequestV2 { fd }
             )) if expected_fd == fd
         );
 
         // Answer `fstatfs`.
         self.codec
-            .send(DaemonMessage::File(FileResponse::XstatFs(Ok(
-                XstatFsResponse {
+            .send(DaemonMessage::File(FileResponse::XstatFsV2(Ok(
+                XstatFsResponseV2 {
                     metadata: Default::default(),
                 },
             ))))

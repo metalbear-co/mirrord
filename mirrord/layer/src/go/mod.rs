@@ -101,10 +101,8 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                         .into()
                 }
                 libc::SYS_fstat => fstat_detour(param1 as _, param2 as _) as i64,
-                // Currently disabled due to a [bug](https://github.com/metalbear-co/mirrord/issues/3044).
-                // libc::SYS_statfs => statfs_detour(param1 as _, param2 as _) as i64,
-                // Currently disabled due to a [bug](https://github.com/metalbear-co/mirrord/issues/3044).
-                // libc::SYS_fstatfs => fstatfs_detour(param1 as _, param2 as _) as i64,
+                libc::SYS_statfs => statfs64_detour(param1 as _, param2 as _) as i64,
+                libc::SYS_fstatfs => fstatfs64_detour(param1 as _, param2 as _) as i64,
                 libc::SYS_fsync => fsync_detour(param1 as _) as i64,
                 libc::SYS_fdatasync => fsync_detour(param1 as _) as i64,
                 libc::SYS_openat => {
