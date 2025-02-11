@@ -1484,7 +1484,7 @@
         },
         "ipv6": {
           "title": "feature.network.ipv6 {#feature-network-ipv6}",
-          "description": "Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6.",
+          "description": "Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6, or connects to other services over IPv6.",
           "type": [
             "boolean",
             "null"

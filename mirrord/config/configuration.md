@@ -1305,7 +1305,8 @@ Mutually exclusive with
 
 ### feature.network.ipv6 {#feature-network-ipv6}
 
-Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6.
+Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6,
+or connects to other services over IPv6.
 
 ### feature.network.outgoing {#feature-network-outgoing}
 
