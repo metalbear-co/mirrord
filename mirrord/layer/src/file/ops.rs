@@ -9,8 +9,8 @@ use mirrord_protocol::{
     file::{
         MakeDirAtRequest, MakeDirRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
         ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse, RemoveDirRequest,
-        SeekFileResponse, StatFsRequest, UnlinkAtRequest, WriteFileResponse, XstatFsResponse,
-        XstatResponse,
+        SeekFileResponse, StatFsRequestV2, UnlinkAtRequest, WriteFileResponse, XstatFsRequestV2,
+        XstatFsResponseV2, XstatResponse,
     },
     ResponseError,
 };
@@ -729,22 +729,28 @@ pub(crate) fn statx_logic(
 }
 
 #[mirrord_layer_macro::instrument(level = "trace")]
-pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponse> {
+pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponseV2> {
     let fd = get_remote_fd(fd)?;
 
-    let lstatfs = XstatFsRequest { fd };
+    // intproxy downgrades to old version if new one is not supported by agent, and converts
+    // old version responses to V2 responses.
+    let xstatfs = XstatFsRequestV2 { fd };
 
-    let response = common::make_proxy_request_with_response(lstatfs)??;
+    let response = common::make_proxy_request_with_response(xstatfs)??;
 
     Detour::Success(response)
 }
 
+/// Gets all the data for statfs64, but can be used also for statfs.
 #[mirrord_layer_macro::instrument(level = "trace")]
-pub(crate) fn statfs(path: Detour<PathBuf>) -> Detour<XstatFsResponse> {
+pub(crate) fn statfs(path: Detour<PathBuf>) -> Detour<XstatFsResponseV2> {
     let path = path?;
-    let lstatfs = StatFsRequest { path };
 
-    let response = common::make_proxy_request_with_response(lstatfs)??;
+    // intproxy downgrades to old version if new one is not supported by agent, and converts
+    // old version responses to V2 responses.
+    let statfs = StatFsRequestV2 { path };
+
+    let response = common::make_proxy_request_with_response(statfs)??;
 
     Detour::Success(response)
 }

@@ -8,7 +8,7 @@ use libc::{c_int, O_ACCMODE, O_APPEND, O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRO
 use mirrord_protocol::file::{
     AccessFileRequest, CloseFileRequest, FdOpenDirRequest, OpenDirResponse, OpenOptionsInternal,
     OpenRelativeFileRequest, ReadFileRequest, ReadLimitedFileRequest, SeekFileRequest,
-    WriteFileRequest, WriteLimitedFileRequest, XstatFsRequest, XstatRequest,
+    WriteFileRequest, WriteLimitedFileRequest, XstatRequest,
 };
 /// File operations on remote pod.
 ///
