@@ -70,7 +70,7 @@ pub struct NetworkConfig {
     #[config(toggleable, nested)]
     pub dns: DnsConfig,
 
-    /// ### feature.network.ipv6 {#feature-network-dns}
+    /// ### feature.network.ipv6 {#feature-network-ipv6}
     ///
     /// Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6.
     #[config(env = IPV6_ENV_VAR, default = false)]

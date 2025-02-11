@@ -1303,7 +1303,7 @@ List of ports to mirror/steal traffic from. Other ports will remain local.
 Mutually exclusive with
 [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
 
-### feature.network.ipv6 {#feature-network-dns}
+### feature.network.ipv6 {#feature-network-ipv6}
 
 Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6.
 
