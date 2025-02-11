@@ -123,4 +123,16 @@ where
             *self.counts.entry(resource).or_default() += 1;
         }
     }
+
+    /// Removes all resources held all layers instances.
+    /// Returns an [`Iterator`] of layers and remote files/folders that were removed.
+    ///
+    /// Should be used for when the remote is lost and there is a need to restart.
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    pub(crate) fn drain(&mut self) -> impl '_ + Iterator<Item = (LayerId, Vec<T>)> {
+        let ids: Vec<_> = self.by_layer.keys().cloned().collect();
+
+        ids.into_iter()
+            .map(|id| (id, self.remove_all(id).collect()))
+    }
 }

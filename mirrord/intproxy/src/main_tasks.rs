@@ -19,6 +19,8 @@ pub enum ProxyMessage {
     FromLayer(FromLayer),
     /// New layer instance to serve.
     NewLayer(NewLayer),
+    /// Connection to agent was dropped and needs reload.
+    ConnectionRefresh(ConnectionRefresh),
 }
 
 #[cfg(test)]
@@ -135,4 +137,12 @@ pub struct LayerForked {
 #[derive(Debug, Clone, Copy)]
 pub struct LayerClosed {
     pub id: LayerId,
+}
+
+/// Notification about start and end of reconnection to agent.
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub enum ConnectionRefresh {
+    Start,
+    End,
 }

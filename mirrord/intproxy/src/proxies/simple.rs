@@ -27,6 +27,7 @@ pub enum SimpleProxyMessage {
     GetEnvRes(RemoteResult<HashMap<String, String>>),
     /// Protocol version was negotiated with the agent.
     ProtocolVersion(Version),
+    ConnectionRefresh,
 }
 
 #[derive(Error, Debug)]
@@ -58,6 +59,11 @@ impl SimpleProxy {
             .as_ref()
             .is_some_and(|version| ADDRINFO_V2_VERSION.matches(version))
     }
+
+    fn handle_connection_refresh(&mut self) {
+        self.addr_info_reqs.clear();
+        self.get_env_reqs.clear();
+    }
 }
 
 impl BackgroundTask for SimpleProxy {
@@ -65,7 +71,7 @@ impl BackgroundTask for SimpleProxy {
     type MessageIn = SimpleProxyMessage;
     type MessageOut = ProxyMessage;
 
-    async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         while let Some(msg) = message_bus.recv().await {
             tracing::trace!(?msg, "new message in message_bus");
 
@@ -123,6 +129,7 @@ impl BackgroundTask for SimpleProxy {
                         .await
                 }
                 SimpleProxyMessage::ProtocolVersion(version) => self.set_protocol_version(version),
+                SimpleProxyMessage::ConnectionRefresh => self.handle_connection_refresh(),
             }
         }
 

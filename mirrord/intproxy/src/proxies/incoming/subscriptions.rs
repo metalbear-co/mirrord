@@ -25,7 +25,7 @@ struct Source {
 
 /// Represents a port subscription in the agent.
 #[derive(Debug)]
-struct Subscription {
+pub struct Subscription {
     /// Previous sources of this subscription. Each of these was at some point active, but was
     /// later overwritten.
     queued_sources: Vec<Source>,
@@ -143,6 +143,12 @@ impl Subscription {
                     .wrap_agent_unsubscribe(),
             )),
         }
+    }
+
+    pub fn resubscribe_message(&mut self) -> ClientMessage {
+        self.confirmed = false;
+
+        self.active_source.request.subscription.agent_subscribe()
     }
 }
 
@@ -308,6 +314,10 @@ impl SubscriptionsManager {
     /// Notifies this struct about layer forking.
     pub fn layer_forked(&mut self, parent: LayerId, child: LayerId) {
         self.remote_ports.clone_all(parent, child);
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Subscription> + '_ {
+        self.subscriptions.values_mut()
     }
 }
 
