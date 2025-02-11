@@ -8,10 +8,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+use http::Uri;
 use mirrord_agent_env::steal_tls::{AlpnProtocol, StealPortTlsConfig, StealTlsConfig};
 use rustls::{
     client::VerifierBuilderError,
-    pki_types::{CertificateDer, PrivateKeyDer, ServerName},
+    pki_types::{CertificateDer, InvalidDnsNameError, PrivateKeyDer, ServerName},
     server::{danger::ClientCertVerifier, NoClientAuth, WebPkiClientVerifier},
     ClientConfig, RootCertStore, ServerConfig,
 };
@@ -58,6 +59,14 @@ pub enum StealTlsError {
     BackgroundTaskPanicked,
 }
 
+#[derive(Error, Debug)]
+pub enum ConnectTlsError {
+    #[error("IO failed: {0}")]
+    IoError(#[from] io::Error),
+    #[error("request URI did not contain a valid DNS name: {0}")]
+    InvalidDnsNameError(#[from] InvalidDnsNameError),
+}
+
 impl From<JoinError> for StealTlsError {
     fn from(_: JoinError) -> Self {
         Self::BackgroundTaskPanicked
@@ -81,13 +90,25 @@ impl StealTlsHandler {
 
     pub(crate) async fn connect<IO>(
         &self,
-        domain: ServerName<'static>,
+        uri: &Uri,
         stream: IO,
-    ) -> io::Result<client::TlsStream<IO>>
+    ) -> Result<client::TlsStream<IO>, ConnectTlsError>
     where
         IO: AsyncRead + AsyncWrite + Unpin,
     {
-        self.connector.connect(domain, stream).await
+        let mut hostname = uri.host().unwrap_or_default();
+
+        // Remove square brackets around IPv6 address.
+        if let Some(trimmed) = hostname.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
+            hostname = trimmed;
+        }
+
+        let domain = ServerName::try_from(hostname)?.to_owned();
+
+        self.connector
+            .connect(domain, stream)
+            .await
+            .map_err(From::from)
     }
 }
 
