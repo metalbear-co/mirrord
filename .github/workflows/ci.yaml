@@ -301,7 +301,8 @@ jobs:
       - run: |
           go version
       - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 21
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 21
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
@@ -309,7 +310,8 @@ jobs:
       - run: |
           go version
       - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 22
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 22
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
@@ -317,7 +319,8 @@ jobs:
       - run: |
           go version
       - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 23
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 23
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
@@ -429,7 +432,8 @@ jobs:
           go version
       # don't use "cache" for other Gos since it will try to overwrite and have bad results.
       - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 21
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 21
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
@@ -437,7 +441,8 @@ jobs:
       - run: |
           go version
       - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 22
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 22
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
@@ -445,7 +450,8 @@ jobs:
       - run: |
           go version
       - run: | # Build Go test apps.
-          ./scripts/build_go_apps.sh 23
+          cd mirrord/layer/tests
+          ../../../scripts/build_go_apps.sh 23
       - run: |
           cd mirrord/layer/tests/apps/fileops
           cargo build
