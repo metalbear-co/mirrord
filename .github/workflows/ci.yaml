@@ -534,13 +534,7 @@ jobs:
       - name: Run targetless E2E test
         run: |
           cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features targetless -- --test-threads=6 targetless
-      - name: Run all E2E tests - docker
-        if: ${{ matrix.container-runtime == 'docker' }}
-        run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features docker,job -- --test-threads=6
-          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features docker,ephemeral -- --test-threads=6
-      - name: Run all E2E tests - containerd
-        if: ${{ matrix.container-runtime == 'containerd' }}
+      - name: Run all E2E tests
         run: |
           cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features job -- --test-threads=6
           cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features ephemeral -- --test-threads=6
