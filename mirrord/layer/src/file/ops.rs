@@ -14,7 +14,7 @@ use mirrord_protocol::{
     },
     ResponseError,
 };
-use rand::distributions::{Alphanumeric, DistString};
+use rand::distr::{Alphanumeric, SampleString};
 #[cfg(debug_assertions)]
 use tracing::Level;
 use tracing::{error, trace};
@@ -150,7 +150,7 @@ fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
     if crate::setup().experimental().use_dev_null {
         return create_local_devnull_file(remote_fd);
     }
-    let random_string = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
+    let random_string = Alphanumeric.sample_string(&mut rand::rng(), 16);
     let file_name = format!("{remote_fd}-{random_string}");
     let file_path = env::temp_dir().join(file_name);
     let file_c_string = CString::new(file_path.to_string_lossy().to_string())?;

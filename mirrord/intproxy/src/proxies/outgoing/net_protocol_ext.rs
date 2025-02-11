@@ -16,7 +16,7 @@ use mirrord_protocol::{
     },
     ClientMessage, ConnectionId,
 };
-use rand::{distributions::Alphanumeric, Rng};
+use rand::distr::{Alphanumeric, SampleString};
 use tokio::{
     fs,
     io::{AsyncReadExt, AsyncWriteExt},
@@ -128,12 +128,7 @@ impl PreparedSocket {
             fs::create_dir_all(&tmp_dir).await?;
         }
 
-        let random_string: String = rand::thread_rng()
-            .sample_iter(Alphanumeric)
-            .take(16)
-            .map(char::from)
-            .collect();
-
+        let random_string: String = Alphanumeric.sample_string(&mut rand::rng(), 16);
         Ok(tmp_dir.join(random_string))
     }
 
