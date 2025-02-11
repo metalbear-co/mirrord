@@ -100,7 +100,7 @@ async fn test_issue2817(
     config_variant: TestedStealVariant,
 ) {
     let dir = tempfile::tempdir().unwrap();
-    let file_id = rand::thread_rng().gen::<u64>();
+    let file_id = rand::generate::<u64>();
     let config_path = dir.path().join(format!("{file_id:X}.json"));
 
     let config = serde_json::json!({

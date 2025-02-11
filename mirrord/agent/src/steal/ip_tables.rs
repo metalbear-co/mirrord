@@ -6,7 +6,7 @@ use std::{
 use enum_dispatch::enum_dispatch;
 use mirrord_agent_env::{envs, mesh::MeshVendor};
 use mirrord_protocol::Port;
-use rand::distributions::{Alphanumeric, DistString};
+use rand::distr::{Alphanumeric, SampleString};
 use tracing::warn;
 
 use crate::{
@@ -33,7 +33,7 @@ pub static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_PREROUTING_ENV).unwrap_or_else(|_| {
         format!(
             "MIRRORD_INPUT_{}",
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+            Alphanumeric.sample_string(&mut rand::rng(), 5)
         )
     })
 });
@@ -43,7 +43,7 @@ pub(crate) static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_MESH_ENV).unwrap_or_else(|_| {
         format!(
             "MIRRORD_OUTPUT_{}",
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+            Alphanumeric.sample_string(&mut rand::rng(), 5)
         )
     })
 });
@@ -53,7 +53,7 @@ pub(crate) static IPTABLE_STANDARD: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_STANDARD_ENV).unwrap_or_else(|_| {
         format!(
             "MIRRORD_STANDARD_{}",
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+            Alphanumeric.sample_string(&mut rand::rng(), 5)
         )
     })
 });
@@ -63,7 +63,7 @@ pub static IPTABLE_INPUT: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_INPUT_ENV).unwrap_or_else(|_| {
         format!(
             "MIRRORD_INPUT_{}",
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+            Alphanumeric.sample_string(&mut rand::rng(), 5)
         )
     })
 });

@@ -12,10 +12,7 @@ pub use common::*;
 /// Creates a new [`Application`], which is a symlink to the existing executable.
 /// The link is created in the temporary directory and its name is randomized.
 async fn symlink_app(app: &Application) -> Application {
-    let path = temp_dir().join(format!(
-        "test-dynamic-app-{}",
-        rand::thread_rng().gen::<u128>()
-    ));
+    let path = temp_dir().join(format!("test-dynamic-app-{}", rand::random::<u128>()));
     println!("{}", app.get_executable().await);
 
     fs::symlink(app.get_executable().await, &path).expect("failed to create executable symlink");

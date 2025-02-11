@@ -23,7 +23,7 @@ async fn check_ipv6s_hidden_with_config(
     dylib_path: &Path,
 ) {
     let dir = tempfile::tempdir().unwrap();
-    let file_id = rand::thread_rng().gen::<u64>();
+    let file_id = rand::random::<u64>();
     let config_path = dir.path().join(format!("{file_id:X}.json"));
 
     let config = serde_json::json!({
