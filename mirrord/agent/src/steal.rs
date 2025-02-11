@@ -18,7 +18,7 @@ mod tls;
 
 pub(crate) use api::TcpStealerApi;
 pub(crate) use connection::TcpConnectionStealer;
-pub(crate) use tls::StealTlsAcceptors;
+pub(crate) use tls::StealTlsHandlers;
 
 use self::http::HttpResponseFallback;
 

@@ -14,8 +14,6 @@ pub struct StreamWithRollback<const CAN_ROLLBACK: bool, T> {
 }
 
 impl<T> StreamWithRollback<true, T> {
-    pub const DEFAULT_CAPACITY: usize = 1024 * 4;
-
     pub fn new(inner: T, capacity: usize) -> Self {
         Self {
             inner,

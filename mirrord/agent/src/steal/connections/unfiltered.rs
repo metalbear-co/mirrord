@@ -59,8 +59,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
                 read = self.stream.read_buf(&mut buf), if !reading_closed => match read {
                     Ok(..) => {
                         if buf.is_empty() {
-                            STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-
                             tracing::trace!(
                                 client_id = self.client_id,
                                 connection_id = self.connection_id,
@@ -84,8 +82,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
                     Err(e) if e.kind() == ErrorKind::WouldBlock => {}
 
                     Err(e) => {
-                        STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-
                         tx.send(ConnectionMessageOut::Closed {
                             client_id: self.client_id,
                             connection_id: self.connection_id
@@ -142,9 +138,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
                     },
 
                     ConnectionMessageIn::Unsubscribed { .. } => {
-                        STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-
-                        return Ok(());
+                        break Ok(());
                     }
                 }
             }

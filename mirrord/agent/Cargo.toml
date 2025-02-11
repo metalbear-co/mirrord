@@ -76,10 +76,10 @@ iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e
 rawsocket = { git = "https://github.com/metalbear-co/rawsocket.git" }
 procfs = "0.17.0"
 rustls-pemfile = "2.2"
+rcgen.workspace = true
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rstest.workspace = true
 mockall = "0.13"
 test_bin = "0.4"
-rcgen.workspace = true
 reqwest.workspace = true

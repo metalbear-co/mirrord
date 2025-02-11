@@ -1,29 +1,32 @@
 //! Home for [`StolenConnections`] - manager for connections that were stolen based on active port
 //! subscriptions.
 
-use std::{collections::HashMap, fmt, io, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    fmt, io,
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
 
-use dashmap::DashMap;
+use bytes::BufMut;
 use hyper::{body::Incoming, Request, Response};
 use mirrord_protocol::{tcp::NewTcpConnection, ConnectionId, Port, RequestId};
 use thiserror::Error;
 use tokio::{
+    io::{AsyncRead, AsyncReadExt},
     net::TcpStream,
     sync::mpsc::{self, error::SendError, Receiver, Sender},
     task::JoinSet,
 };
-use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tracing::Level;
 
 use self::{filtered::DynamicBody, unfiltered::UnfilteredStealTask};
-use super::{
-    http::{DefaultReversibleStream, HttpFilter},
-    subscriptions::PortSubscription,
-    StealTlsAcceptors,
-};
+use super::{subscriptions::PortSubscription, tls::StealTlsHandler, StealTlsHandlers};
 use crate::{
-    http::HttpVersion, metrics::STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION,
-    steal::connections::filtered::FilteredStealTask, util::ClientId,
+    http::HttpVersion,
+    metrics::STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION,
+    steal::{connections::filtered::FilteredStealTask, stream_rollback::StreamWithRollback},
+    util::ClientId,
 };
 
 mod filtered;
@@ -272,7 +275,7 @@ pub struct StolenConnections {
     main_rx: Receiver<ConnectionMessageOut>,
 
     /// For filtered HTTPS stealing.
-    tls_acceptors: StealTlsAcceptors,
+    tls_handlers: StealTlsHandlers,
 }
 
 impl StolenConnections {
@@ -284,7 +287,7 @@ impl StolenConnections {
     const TASK_IN_CHANNEL_CAPACITY: usize = 16;
 
     /// Creates a new empty set of [`StolenConnection`]s.
-    pub fn new(capacity: usize, tls_acceptors: StealTlsAcceptors) -> Self {
+    pub fn new(capacity: usize, tls_handlers: StealTlsHandlers) -> Self {
         let (main_tx, main_rx) = mpsc::channel(Self::MAIN_CHANNEL_CAPACITY);
 
         Self {
@@ -296,7 +299,7 @@ impl StolenConnections {
             main_tx,
             main_rx,
 
-            tls_acceptors,
+            tls_handlers,
         }
     }
 
@@ -309,13 +312,13 @@ impl StolenConnections {
 
         let (task_tx, task_rx) = mpsc::channel(Self::TASK_IN_CHANNEL_CAPACITY);
         let main_tx = self.main_tx.clone();
-        let acceptors = self.tls_acceptors.clone();
+        let tls_handlers = self.tls_handlers.clone();
 
         tracing::trace!(connection_id, "Spawning connection task");
         self.tasks.spawn(async move {
-            let acceptor = match &connection.port_subscription {
-                PortSubscription::Filtered(filters) => acceptors
-                    .get_acceptor(connection.destination.port())
+            let tls_handler = match &connection.port_subscription {
+                PortSubscription::Filtered(filters) => tls_handlers
+                    .get_handler(connection.destination.port())
                     .await
                     .inspect_err(|error| {
                         tracing::error!(
@@ -336,7 +339,7 @@ impl StolenConnections {
                 connection,
                 tx: main_tx,
                 rx: task_rx,
-                acceptor,
+                tls_handler,
             };
 
             match task.run().await {
@@ -464,7 +467,7 @@ struct ConnectionTask {
     /// set.
     tx: Sender<ConnectionMessageOut>,
     /// For filtered HTTPS stealing.
-    acceptor: Option<TlsAcceptor>,
+    tls_handler: Option<StealTlsHandler>,
 }
 
 impl ConnectionTask {
@@ -473,6 +476,33 @@ impl ConnectionTask {
     /// [`PortSubscription::Filtered`] is in use.
     const HTTP_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
+    async fn get_http_version<T>(
+        stream: &mut StreamWithRollback<true, T>,
+    ) -> Result<Option<HttpVersion>, ConnectionTaskError>
+    where
+        T: AsyncRead + Unpin,
+    {
+        let mut bytes_read = [0_u8; HttpVersion::MINIMAL_HEADER_SIZE];
+        let mut buf = bytes_read.as_mut_slice();
+
+        let timeout_at = Instant::now() + Self::HTTP_DETECTION_TIMEOUT;
+        while buf.remaining_mut() > 0 {
+            tokio::select! {
+                _ = tokio::time::sleep_until(timeout_at.into()) => {
+                    break;
+                }
+
+                result = stream.read_buf(&mut buf) => {
+                    if result? == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(HttpVersion::new(buf))
+    }
+
     /// Runs this task until the connection is closed.
     ///
     /// # Note
@@ -480,7 +510,7 @@ impl ConnectionTask {
     /// This task is responsible for **always** sending [`ConnectionMessageOut::Closed`] to
     /// interested stealer clients, even when an error has occurred.
     async fn run(mut self) -> Result<(), ConnectionTaskError> {
-        match (self.connection.port_subscription, self.acceptor) {
+        match (self.connection.port_subscription, self.tls_handler) {
             (PortSubscription::Unfiltered(client_id), _) => {
                 self.tx
                     .send(ConnectionMessageOut::SubscribedTcp {
@@ -501,13 +531,12 @@ impl ConnectionTask {
             }
 
             (PortSubscription::Filtered(filters), None) => {
-                let mut stream = DefaultReversibleStream::read_header(
-                    self.connection.stream,
-                    Self::HTTP_DETECTION_TIMEOUT,
-                )
-                .await?;
+                let mut stream = StreamWithRollback::new(self.connection.stream, 16);
+                let http_version = Self::get_http_version(&mut stream).await?;
+                stream.rollback();
+                let mut stream = stream.disable_rollback();
 
-                let Some(http_version) = HttpVersion::new(stream.get_header()) else {
+                let Some(http_version) = http_version else {
                     tracing::trace!(
                         "No HTTP version detected, proxying the connection transparently"
                     );
@@ -531,18 +560,22 @@ impl ConnectionTask {
                 task.run(self.tx.clone(), &mut self.rx).await
             }
 
-            (PortSubscription::Filtered(filters), Some(acceptor)) => {
-                let stream = acceptor.accept(self.connection.stream).await?;
-                let mut stream =
-                    DefaultReversibleStream::read_header(stream, Self::HTTP_DETECTION_TIMEOUT)
-                        .await?;
+            (PortSubscription::Filtered(filters), Some(tls_handler)) => {
+                let stream = tls_handler.accept(self.connection.stream).await?;
+                let mut stream = StreamWithRollback::new(stream, 16);
+                let http_version = Self::get_http_version(&mut stream).await?;
+                stream.rollback();
+                let mut stream = stream.disable_rollback();
 
-                let Some(http_version) = HttpVersion::new(stream.get_header()) else {
-                    tracing::trace!("No HTTP version detected proxying the connection");
+                let Some(http_version) = http_version else {
+                    tracing::trace!(
+                        "No HTTP version detected, proxying the connection transparently"
+                    );
 
                     let mut outgoing_io = TcpStream::connect(self.connection.destination).await?;
+                    tokio::io::copy_bidirectional(&mut stream, &mut outgoing_io).await?;
 
-                    todo!()
+                    return Ok(());
                 };
 
                 tracing::trace!(?http_version, "Detected HTTP version");
