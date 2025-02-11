@@ -27,7 +27,7 @@ use kube::{
     runtime::wait::{await_condition, conditions::is_pod_running},
     Api, Client, Config, Error, Resource,
 };
-use rand::{distributions::Alphanumeric, Rng};
+use rand::distr::{Alphanumeric, SampleString};
 use reqwest::{RequestBuilder, StatusCode};
 use rstest::*;
 use serde::{de::DeserializeOwned, Serialize};
@@ -73,11 +73,8 @@ pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(api: &Ap
 
 /// Creates a random string of 7 alphanumeric lowercase characters.
 pub(crate) fn random_string() -> String {
-    rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(7)
-        .map(char::from)
-        .collect::<String>()
+    Alphanumeric
+        .sample_string(&mut rand::rng(), 7)
         .to_ascii_lowercase()
 }
 
