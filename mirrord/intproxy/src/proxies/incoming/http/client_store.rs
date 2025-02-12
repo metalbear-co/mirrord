@@ -43,15 +43,7 @@ pub struct ClientStore {
     notify: Arc<Notify>,
 }
 
-impl Default for ClientStore {
-    fn default() -> Self {
-        Self::new_with_timeout(Self::IDLE_CLIENT_DEFAULT_TIMEOUT)
-    }
-}
-
 impl ClientStore {
-    pub const IDLE_CLIENT_DEFAULT_TIMEOUT: Duration = Duration::from_secs(3);
-
     /// Creates a new store.
     ///
     /// The store will keep unused clients alive for at least the given time.

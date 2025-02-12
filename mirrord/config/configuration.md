@@ -510,6 +510,8 @@ This timeout determines for how long such connections are cached.
 Set to 0 to disable caching local HTTP connections (connections will be dropped as soon as
 the request is delivered).
 
+Defaults to 3000ms.
+
 ### _experimental_ readlink {#experimental-readlink}
 
 DEPRECATED, WILL BE REMOVED
