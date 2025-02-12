@@ -84,7 +84,7 @@ pub struct ExperimentalConfig {
     ///
     /// Set to 0 to disable caching local HTTP connections (connections will be dropped as soon as
     /// the request is delivered).
-    /// 
+    ///
     /// Defaults to 3000ms.
     #[config(default = 3000)]
     pub idle_local_http_connection_timeout: u64,
