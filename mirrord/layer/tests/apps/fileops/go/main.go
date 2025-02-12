@@ -20,6 +20,19 @@ func main() {
 		panic(err)
 	}
 
+    // Call statfs on a relative path so that the test can verify it's bypassed.
+	err = syscall.Statfs(".", &statfs)
+	if err != nil {
+		panic(err)
+	}
+
+    // Call statfs on the root path so that the test can verify it's bypassed (the root path is one of the paths)
+    // that are read locally by default.
+	err = syscall.Statfs("/", &statfs)
+	if err != nil {
+		panic(err)
+	}
+
 	err = syscall.Fstatfs(fd, &statfs)
 	if err != nil {
 		panic(err)
