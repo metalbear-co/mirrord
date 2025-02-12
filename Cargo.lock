@@ -7141,6 +7141,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
+name = "tls-util"
+version = "3.132.1"
+dependencies = [
+ "rcgen",
+ "rustls 0.23.21",
+ "rustls-pemfile 2.2.0",
+ "thiserror 2.0.11",
+ "tokio-rustls 0.26.1",
+ "x509-parser",
+]
+
+[[package]]
 name = "tokio"
 version = "1.43.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
