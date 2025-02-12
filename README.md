@@ -101,6 +101,16 @@ or
 curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash
 ```
 
+or using Nix:
+
+```sh
+# Using nix-env (legacy)
+nix-env -iA nixpkgs.mirrord
+
+# Using nix profile (recommended)
+nix profile install nixpkgs#mirrord
+```
+
 - Windows isn't currently supported (you can use WSL)
 
 ### How To Use
