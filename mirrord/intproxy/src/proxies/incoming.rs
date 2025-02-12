@@ -12,6 +12,7 @@ use bound_socket::BoundTcpSocket;
 use http::{ClientStore, ResponseMode, StreamingBody};
 use http_gateway::HttpGatewayTask;
 use metadata_store::MetadataStore;
+use mirrord_config::feature::network::incoming::http_filter::LocalHttpDeliveryType;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
     MessageId, PortSubscription, ProxyToLayerMessage,
@@ -126,7 +127,6 @@ struct HttpGatewayHandle {
 /// An HTTP request stolen with a filter can result in an HTTP upgrade.
 /// When this happens, the TCP connection is recovered and passed to a new [`TcpProxyTask`].
 /// The TCP connection is then treated as stolen without a filter.
-#[derive(Default)]
 pub struct IncomingProxy {
     /// Active port subscriptions for all layers.
     subscriptions: SubscriptionsManager,
@@ -134,6 +134,8 @@ pub struct IncomingProxy {
     metadata_store: MetadataStore,
     /// What HTTP response flavor we produce.
     response_mode: ResponseMode,
+    /// How we deliver HTTPS requests to the user application.
+    https_delivery: LocalHttpDeliveryType,
     /// Cache for [`LocalHttpClient`](http::LocalHttpClient)s.
     client_store: ClientStore,
     /// Each mirrored remote connection is mapped to a [`TcpProxyTask`] in mirror mode.
@@ -157,6 +159,20 @@ impl IncomingProxy {
     /// Used when registering new tasks in the internal [`BackgroundTasks`] instance.
     const CHANNEL_SIZE: usize = 512;
 
+    pub fn new(https_delivery: LocalHttpDeliveryType) -> Self {
+        Self {
+            subscriptions: Default::default(),
+            metadata_store: Default::default(),
+            response_mode: Default::default(),
+            https_delivery,
+            client_store: Default::default(),
+            mirror_tcp_proxies: Default::default(),
+            steal_tcp_proxies: Default::default(),
+            http_gateways: Default::default(),
+            tasks: Default::default(),
+        }
+    }
+
     /// Starts a new [`HttpGatewayTask`] to handle the given request.
     ///
     /// If we don't have a [`PortSubscription`] for the port, the task is not started.
@@ -165,6 +181,7 @@ impl IncomingProxy {
     async fn start_http_gateway(
         &mut self,
         request: HttpRequest<StreamingBody>,
+        is_https: bool,
         body_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
         message_bus: &MessageBus<Self>,
     ) {
@@ -223,6 +240,9 @@ impl IncomingProxy {
         let tx = self.tasks.register(
             HttpGatewayTask::new(
                 request,
+                is_https
+                    .then(|| self.https_delivery.clone())
+                    .unwrap_or(LocalHttpDeliveryType::Http),
                 self.client_store.clone(),
                 self.response_mode,
                 subscription.listening_on,
@@ -333,7 +353,7 @@ impl IncomingProxy {
             ChunkedRequest::Start(request) => {
                 let (body_tx, body_rx) = mpsc::channel(128);
                 let request = request.map_body(|frames| StreamingBody::new(body_rx, frames));
-                self.start_http_gateway(request, Some(body_tx), message_bus)
+                self.start_http_gateway(request, false, Some(body_tx), message_bus)
                     .await;
             }
 
@@ -441,12 +461,12 @@ impl IncomingProxy {
             }
 
             DaemonTcp::HttpRequest(request) => {
-                self.start_http_gateway(request.map_body(From::from), None, message_bus)
+                self.start_http_gateway(request.map_body(From::from), false, None, message_bus)
                     .await;
             }
 
             DaemonTcp::HttpRequestFramed(request) => {
-                self.start_http_gateway(request.map_body(From::from), None, message_bus)
+                self.start_http_gateway(request.map_body(From::from), false, None, message_bus)
                     .await;
             }
 

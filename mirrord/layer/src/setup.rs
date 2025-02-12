@@ -235,6 +235,7 @@ impl IncomingMode {
                 all_of: None,
                 any_of: None,
                 ports: _ports,
+                https_delivery: _https_delivery,
             } => StealHttpFilter::Filter(HttpFilter::Path(
                 Filter::new(path.into()).expect("invalid filter expression"),
             )),
@@ -245,6 +246,7 @@ impl IncomingMode {
                 all_of: None,
                 any_of: None,
                 ports: _ports,
+                https_delivery: _https_delivery,
             } => StealHttpFilter::Filter(HttpFilter::Header(
                 Filter::new(header.into()).expect("invalid filter expression"),
             )),
@@ -255,6 +257,7 @@ impl IncomingMode {
                 all_of: Some(filters),
                 any_of: None,
                 ports: _ports,
+                https_delivery: _https_delivery,
             } => StealHttpFilter::Filter(Self::make_composite_filter(true, filters)),
 
             HttpFilterConfig {
@@ -263,6 +266,7 @@ impl IncomingMode {
                 all_of: None,
                 any_of: Some(filters),
                 ports: _ports,
+                https_delivery: _https_delivery,
             } => StealHttpFilter::Filter(Self::make_composite_filter(false, filters)),
 
             HttpFilterConfig {
@@ -271,6 +275,7 @@ impl IncomingMode {
                 all_of: None,
                 any_of: None,
                 ports: _ports,
+                https_delivery: _https_delivery,
             } => StealHttpFilter::None,
 
             _ => panic!("multiple HTTP filters specified, this is a bug"),

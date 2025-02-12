@@ -1,4 +1,4 @@
-use std::{collections::HashSet, ops::Deref, str::FromStr};
+use std::{collections::HashSet, ops::Deref, path::PathBuf, str::FromStr};
 
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
@@ -81,7 +81,7 @@ use crate::{
 ///  ]
 /// }
 /// ```
-#[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(MirrordConfig, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[config(map_to = "HttpFilterFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct HttpFilterConfig {
@@ -157,6 +157,8 @@ pub struct HttpFilterConfig {
     /// Set to [80, 8080] by default.
     #[config(env = "MIRRORD_HTTP_FILTER_PORTS", default)]
     pub ports: PortList,
+
+    pub https_delivery: LocalHttpDeliveryType,
 }
 
 impl HttpFilterConfig {
@@ -173,6 +175,19 @@ impl HttpFilterConfig {
 
     pub fn get_filtered_ports(&self) -> Option<&[u16]> {
         self.is_filter_set().then(|| &*self.ports.0)
+    }
+}
+
+impl Default for HttpFilterConfig {
+    fn default() -> Self {
+        Self {
+            header_filter: Default::default(),
+            path_filter: Default::default(),
+            all_of: Default::default(),
+            any_of: Default::default(),
+            ports: Default::default(),
+            https_delivery: LocalHttpDeliveryType::HttpsAnonymous,
+        }
     }
 }
 
@@ -221,9 +236,6 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
             .source_value(context)
             .transpose()?;
 
-        let all_of = None;
-        let any_of = None;
-
         let ports = FromEnv::new("MIRRORD_HTTP_FILTER_PORTS")
             .source_value(context)
             .transpose()?
@@ -232,9 +244,10 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
         Ok(Self::Generated {
             header_filter,
             path_filter,
-            all_of,
-            any_of,
+            all_of: None,
+            any_of: None,
             ports,
+            https_delivery: LocalHttpDeliveryType::HttpsAnonymous,
         })
     }
 }
@@ -271,6 +284,14 @@ impl From<PortList> for HashSet<u16> {
     fn from(value: PortList) -> Self {
         value.0.into()
     }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LocalHttpDeliveryType {
+    Http,
+    HttpsAnonymous,
+    HttpsWithLocalCert { cert_pem: PathBuf, key_pem: PathBuf },
 }
 
 impl CollectAnalytics for &HttpFilterConfig {

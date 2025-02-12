@@ -106,6 +106,7 @@ pub(crate) async fn proxy(
         agent_conn,
         listener,
         config.experimental.readonly_file_buffer,
+        config.feature.network.incoming.http_filter.https_delivery,
     )
     .run(first_connection_timeout, consecutive_connection_timeout)
     .await

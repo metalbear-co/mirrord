@@ -11,6 +11,7 @@ use std::{
 use exponential_backoff::Backoff;
 use http_body_util::BodyExt;
 use hyper::{body::Incoming, http::response::Parts, StatusCode};
+use mirrord_config::feature::network::incoming::http_filter::LocalHttpDeliveryType;
 use mirrord_protocol::{
     batched_body::BatchedBody,
     tcp::{
@@ -35,6 +36,8 @@ use crate::background_tasks::{BackgroundTask, MessageBus};
 pub struct HttpGatewayTask {
     /// Request to deliver.
     request: HttpRequest<StreamingBody>,
+    /// Determines how we deliver the request.
+    delivery: LocalHttpDeliveryType,
     /// Shared cache of [`LocalHttpClient`](super::http::LocalHttpClient)s.
     client_store: ClientStore,
     /// Determines response variant.
@@ -47,6 +50,7 @@ impl fmt::Debug for HttpGatewayTask {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HttpGatewayTask")
             .field("request", &self.request)
+            .field("delivery", &self.delivery)
             .field("response_mode", &self.response_mode)
             .field("server_addr", &self.server_addr)
             .finish()
@@ -57,12 +61,14 @@ impl HttpGatewayTask {
     /// Creates a new gateway task.
     pub fn new(
         request: HttpRequest<StreamingBody>,
+        delivery: LocalHttpDeliveryType,
         client_store: ClientStore,
         response_mode: ResponseMode,
         server_addr: SocketAddr,
     ) -> Self {
         Self {
             request,
+            delivery,
             client_store,
             response_mode,
             server_addr,
@@ -534,6 +540,7 @@ mod test {
             };
             let gateway = HttpGatewayTask::new(
                 request,
+                LocalHttpDeliveryType::Http,
                 Default::default(),
                 ResponseMode::Basic,
                 local_destination,
@@ -687,7 +694,13 @@ mod test {
 
         let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> = Default::default();
         let _gateway = tasks.register(
-            HttpGatewayTask::new(request, ClientStore::default(), response_mode, addr),
+            HttpGatewayTask::new(
+                request,
+                LocalHttpDeliveryType::Http,
+                Default::default(),
+                response_mode,
+                addr,
+            ),
             (),
             8,
         );
@@ -831,7 +844,13 @@ mod test {
         let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> = Default::default();
         let client_store = ClientStore::default();
         let _gateway = tasks.register(
-            HttpGatewayTask::new(request, client_store.clone(), ResponseMode::Basic, addr),
+            HttpGatewayTask::new(
+                request,
+                LocalHttpDeliveryType::Http,
+                client_store.clone(),
+                ResponseMode::Basic,
+                addr,
+            ),
             (),
             8,
         );
@@ -901,6 +920,7 @@ mod test {
         let _gateway_1 = tasks.register(
             HttpGatewayTask::new(
                 request.clone(),
+                LocalHttpDeliveryType::Http,
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
@@ -911,6 +931,7 @@ mod test {
         let _gateway_2 = tasks.register(
             HttpGatewayTask::new(
                 request.clone(),
+                LocalHttpDeliveryType::Http,
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,

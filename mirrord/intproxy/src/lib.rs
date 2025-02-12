@@ -9,6 +9,7 @@ use error::UnexpectedAgentMessage;
 use layer_conn::LayerConnection;
 use layer_initializer::LayerInitializer;
 use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
+use mirrord_config::feature::network::incoming::http_filter::LocalHttpDeliveryType;
 use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, LocalMessage};
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS};
 use ping_pong::{AgentSentPong, PingPong};
@@ -73,6 +74,7 @@ impl IntProxy {
         agent_conn: AgentConnection,
         listener: TcpListener,
         file_buffer_size: u64,
+        https_delivery: LocalHttpDeliveryType,
     ) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
             Default::default();
@@ -100,7 +102,7 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
         let incoming = background_tasks.register(
-            IncomingProxy::default(),
+            IncomingProxy::new(https_delivery),
             MainTaskId::IncomingProxy,
             Self::CHANNEL_SIZE,
         );
