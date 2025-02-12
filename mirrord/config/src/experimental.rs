@@ -70,6 +70,22 @@ pub struct ExperimentalConfig {
     /// <https://github.com/metalbear-co/mirrord/issues/2069>
     #[config(default = 128000)]
     pub readonly_file_buffer: u64,
+
+    /// ### _experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}
+    ///
+    /// Sets a timeout for idle local HTTP connections (in milliseconds).
+    ///
+    /// HTTP requests stolen with a filter are delivered to the local application
+    /// from a HTTP connection made from the local machine. Once a request is delivered,
+    /// the connection is cached for some time, so that it can be reused to deliver
+    /// the next request.
+    ///
+    /// This timeout determines for how long such connections are cached.
+    ///
+    /// Set to 0 to disable caching local HTTP connections (connections will be dropped as soon as
+    /// the request is delivered).
+    #[config(default = 3000)]
+    pub idle_local_http_connection_timeout: u64,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -81,5 +97,9 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("hide_ipv6_interfaces", self.hide_ipv6_interfaces);
         analytics.add("disable_reuseaddr", self.disable_reuseaddr);
         analytics.add("readonly_file_buffer", self.readonly_file_buffer);
+        analytics.add(
+            "idle_local_http_connection_timeout",
+            self.idle_local_http_connection_timeout,
+        );
     }
 }

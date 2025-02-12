@@ -73,6 +73,7 @@ impl IntProxy {
         agent_conn: AgentConnection,
         listener: TcpListener,
         file_buffer_size: u64,
+        idle_local_http_connection_timeout: Duration,
     ) -> Self {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
             Default::default();
@@ -100,7 +101,7 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
         let incoming = background_tasks.register(
-            IncomingProxy::default(),
+            IncomingProxy::new(idle_local_http_connection_timeout),
             MainTaskId::IncomingProxy,
             Self::CHANNEL_SIZE,
         );
