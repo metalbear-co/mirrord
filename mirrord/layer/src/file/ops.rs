@@ -746,6 +746,12 @@ pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponseV2> {
 pub(crate) fn statfs(path: Detour<PathBuf>) -> Detour<XstatFsResponseV2> {
     let path = path?;
 
+    check_relative_paths!(path);
+
+    let path = remap_path!(path);
+
+    ensure_not_ignored!(path, false);
+
     // intproxy downgrades to old version if new one is not supported by agent, and converts
     // old version responses to V2 responses.
     let statfs = StatFsRequestV2 { path };
