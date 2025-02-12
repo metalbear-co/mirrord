@@ -18,6 +18,28 @@ impl CertWithKey {
         Ok(Self { cert_chain, key })
     }
 
+    pub fn new_random_self_signed<I: Into<Vec<String>>>(
+        subject_alternate_names: I,
+    ) -> Result<Self, CertWithKeyError> {
+        let generated = rcgen::generate_simple_self_signed(subject_alternate_names)?;
+        let cert_chain = vec![generated.cert.into()];
+        let key = generated
+            .key_pair
+            .serialize_der()
+            .try_into()
+            .map_err(|_| CertWithKeyError::GeneratedInvalidKey)?;
+
+        Ok(Self { cert_chain, key })
+    }
+
+    pub fn cert_chain(&self) -> &[CertificateDer<'static>] {
+        &self.cert_chain
+    }
+
+    pub fn key(&self) -> &PrivateKeyDer<'static> {
+        &self.key
+    }
+
     fn get_cert_chain(path: &Path) -> Result<Vec<CertificateDer<'static>>, CertWithKeyError> {
         let pem = File::open(path).map_err(CertWithKeyError::CertFromPemError)?;
 

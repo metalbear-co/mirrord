@@ -19,6 +19,10 @@ pub enum CertWithKeyError {
     NoKeyFound,
     #[error("the PEM file contains multiple private keys")]
     MultipleKeysFound,
+    #[error("failed to generate the certificate: {0}")]
+    GenerateError(#[from] rcgen::Error),
+    #[error("generated an invalid private key")]
+    GeneratedInvalidKey,
 }
 
 #[derive(Error, Debug)]

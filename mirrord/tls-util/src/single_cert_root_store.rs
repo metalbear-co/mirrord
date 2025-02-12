@@ -17,6 +17,12 @@ pub struct SingleCertRootStore {
 }
 
 impl SingleCertRootStore {
+    /// For this method to accept the given `certificate_pem`:
+    /// 1. The X509 certificate must be located in the *first* PEM block. Only the *first* PEM block
+    ///    is inspected.
+    /// 2. The X509 certificate must contain exactly one SAN extension.
+    /// 3. The SAN extension must contain at least one SAN that is a DNS name or an IP address. This
+    ///    requirement comes from [`TlsConnector::connect`] interface.
     pub fn read(pem: &[u8]) -> Result<Self, SingleCertRootStoreError> {
         let (_, pem) = pem::parse_x509_pem(pem)?;
         let cert = pem.parse_x509()?;

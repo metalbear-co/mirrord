@@ -1,4 +1,4 @@
-use std::{ffi::NulError, net::SocketAddr, num::ParseIntError, path::PathBuf, str::FromStr};
+use std::{ffi::NulError, io, net::SocketAddr, num::ParseIntError, path::PathBuf, str::FromStr};
 
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
@@ -7,7 +7,7 @@ use mirrord_console::error::ConsoleError;
 use mirrord_intproxy::{agent_conn::ExtproxyConnectionTlsError, error::IntProxyError};
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
-use mirrord_tls_util::TlsUtilError;
+use mirrord_tls_util::{CertWithKeyError, TlsUtilError};
 use mirrord_vpn::error::VpnError;
 use reqwest::StatusCode;
 use thiserror::Error;
@@ -49,13 +49,9 @@ pub(crate) enum ContainerError {
     #[diagnostic(help("{GENERAL_BUG}"))]
     ConfigWrite(std::io::Error),
 
-    #[error("Could not create a self sigend certificate for proxy: {0}")]
+    #[error(transparent)]
     #[diagnostic(help("{GENERAL_BUG}"))]
-    SelfSignedCertificate(rcgen::Error),
-
-    #[error("Could not write self sigend certificate for proxy: {0}")]
-    #[diagnostic(help("{GENERAL_BUG}"))]
-    WriteSelfSignedCertificate(std::io::Error),
+    SelfSignedCertificate(#[from] SelfSignedCertificateError),
 
     #[error("Failed to execute command: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
@@ -80,6 +76,14 @@ pub(crate) enum ContainerError {
     #[error("Failed get running proxy socket addr: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     UnableParseProxySocketAddr(<SocketAddr as FromStr>::Err),
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum SelfSignedCertificateError {
+    #[error("failed to generate a self-signed certificate for proxy: {0}")]
+    GenerateError(#[from] CertWithKeyError),
+    #[error("failed to write a self-signed certificate for proxy to a file: {0}")]
+    WriteToFileError(#[from] io::Error),
 }
 
 /// Errors that can occur when executing the `mirrord extproxy` command.
@@ -529,12 +533,8 @@ mod tests {
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::ListParams, Api};
     use mirrord_tls_util::{
-        rustls::{
-            crypto::aws_lc_rs::default_provider,
-            pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
-            ServerConfig,
-        },
-        tokio_rustls::TlsAcceptor,
+        rustls::crypto::aws_lc_rs::default_provider, tokio_rustls::TlsAcceptor, AcceptorClientAuth,
+        CertWithKey, TlsAcceptorConfig, TlsAcceptorExt,
     };
     use tokio::{net::TcpListener, sync::Notify};
 
@@ -596,29 +596,20 @@ mod tests {
     ///
     /// The certificate is generated here with [`rcgen::generate_simple_self_signed`].
     async fn run_hyper_tls_server(notify: Arc<Notify>) {
-        use rcgen::generate_simple_self_signed;
-
         let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 9669);
 
         let incoming = TcpListener::bind(&addr).await.unwrap();
 
         // Generate a certificate that should not work with kube.
-        let cert_key = generate_simple_self_signed(vec!["mieszko.i".to_string()]).unwrap();
-        let cert_pem = cert_key.cert.pem().into_bytes();
-        let cert = CertificateDer::from_pem_slice(&cert_pem).unwrap();
+        let cert = CertWithKey::new_random_self_signed(["mieszko.i".to_string()]).unwrap();
 
-        let key_pem = cert_key.key_pair.serialize_pem().into_bytes();
-        let key = PrivateKeyDer::from_pem_slice(&key_pem).unwrap();
+        let config = TlsAcceptorConfig {
+            server_auth: cert,
+            client_auth: AcceptorClientAuth::Disabled,
+            alpn_protocols: vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()],
+        };
 
-        // Build TLS configuration.
-        let mut server_config = ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(vec![cert], key)
-            .unwrap();
-
-        server_config.alpn_protocols =
-            vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
-        let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
+        let tls_acceptor = TlsAcceptor::build_from_config(config).unwrap();
 
         /// Catch-all handler, we don't care about the response, any request is supposed
         /// to fail due to `InvalidCertificate`.

@@ -15,6 +15,7 @@ edition.workspace = true
 
 [dependencies]
 http.workspace = true
+pem = "3.0"
 rcgen.workspace = true
 rustls.workspace = true
 rustls-pemfile = "2.2"

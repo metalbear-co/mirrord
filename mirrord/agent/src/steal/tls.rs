@@ -1,70 +1,39 @@
 use std::{
     collections::HashMap,
-    fmt,
-    fs::File,
-    io::{self, BufReader},
+    fmt, io,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
-use http::Uri;
-use mirrord_agent_env::steal_tls::{AlpnProtocol, StealPortTlsConfig, StealTlsConfig};
-use rustls::{
-    client::VerifierBuilderError,
-    pki_types::{CertificateDer, InvalidDnsNameError, PrivateKeyDer, ServerName},
-    server::{danger::ClientCertVerifier, NoClientAuth, WebPkiClientVerifier},
-    ClientConfig, RootCertStore, ServerConfig,
+use mirrord_agent_env::steal_tls::{
+    AgentClientAuth, AlpnProtocol, RemoteClientAuth, StealPortTlsConfig, StealTlsConfig,
 };
-use rustls_pemfile::Item;
+use mirrord_tls_util::{
+    rustls::pki_types::ServerName,
+    tokio_rustls::{client, server, TlsAcceptor, TlsConnector},
+    AcceptorClientAuth, BestEffortRootStore, CertWithKey, ConnectorClientAuth, ConnectorServerAuth,
+    TlsAcceptorConfig, TlsAcceptorExt, TlsConnectorConfig, TlsConnectorExt, TlsUtilError,
+};
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     task::JoinError,
 };
-use tokio_rustls::{client, server, TlsAcceptor, TlsConnector};
 use tracing::Level;
 
 use crate::file::RootPath;
 
 #[derive(Error, Debug)]
-pub enum FromPemError {
-    #[error("failed to read the PEM file: {0}")]
-    ReadError(#[source] io::Error),
-    #[error("failed to parse the PEM file: {0}")]
-    ParseError(#[source] io::Error),
-    #[error("no certificate was found in the PEM file")]
-    CertChainEmpty,
-    #[error("no private key was found in the PEM file")]
-    KeyNotFound,
-    #[error("multiple private keys were found in the PEM file")]
-    MultipleKeysFound,
-}
-
-#[derive(Error, Debug)]
 pub enum StealTlsError {
-    #[error("failed to process `{path}`: {error}")]
-    FromPemError {
-        #[source]
-        error: FromPemError,
-        path: PathBuf,
-    },
-    #[error("failed to build mirrord-agent's TLS server config: {0}")]
-    BuildServerConfigError(#[source] rustls::Error),
-    #[error("failed to build client cert verifier for the mirrord-agent's TLS server: {0}")]
-    BuildClientVerifierError(#[from] VerifierBuilderError),
-    #[error("failed to build mirrord-agent's TLS client config: {0}")]
-    BuildClientConfigError(#[source] rustls::Error),
+    #[error("failed to resolve path `{path}` in the target container filesystem: {error}")]
+    PathResolutionError { path: PathBuf, error: io::Error },
+    #[error(transparent)]
+    TlsUtilError(#[from] TlsUtilError),
+    #[error("produced an empty root certificates store")]
+    EmptyRootCertStore,
     #[error("background task responsible for builing TLS configuration panicked")]
     BackgroundTaskPanicked,
-}
-
-#[derive(Error, Debug)]
-pub enum ConnectTlsError {
-    #[error("IO failed: {0}")]
-    IoError(#[from] io::Error),
-    #[error("request URI did not contain a valid DNS name: {0}")]
-    InvalidDnsNameError(#[from] InvalidDnsNameError),
 }
 
 impl From<JoinError> for StealTlsError {
@@ -92,23 +61,14 @@ impl StealTlsHandler {
     #[allow(unused)]
     pub(crate) async fn connect<IO>(
         &self,
-        uri: &Uri,
+        server_name: ServerName<'static>,
         stream: IO,
-    ) -> Result<client::TlsStream<IO>, ConnectTlsError>
+    ) -> io::Result<client::TlsStream<IO>>
     where
         IO: AsyncRead + AsyncWrite + Unpin,
     {
-        let mut hostname = uri.host().unwrap_or_default();
-
-        // Remove square brackets around IPv6 address.
-        if let Some(trimmed) = hostname.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
-            hostname = trimmed;
-        }
-
-        let domain = ServerName::try_from(hostname)?.to_owned();
-
         self.connector
-            .connect(domain, stream)
+            .connect(server_name, stream)
             .await
             .map_err(From::from)
     }
@@ -177,6 +137,17 @@ impl StealTlsHandlers {
         Ok(Some(handler))
     }
 
+    #[tracing::instrument(level = Level::TRACE, err(level = Level::TRACE))]
+    fn resolve_in_target_filesystem(&self, path: &Path) -> Result<PathBuf, StealTlsError> {
+        self.0
+            .root_path
+            .resolve_path(path)
+            .map_err(|error| StealTlsError::PathResolutionError {
+                path: path.to_path_buf(),
+                error,
+            })
+    }
+
     #[tracing::instrument(level = Level::DEBUG, err(level = Level::DEBUG))]
     fn build_handler(&self, config: &StealPortTlsConfig) -> Result<StealTlsHandler, StealTlsError> {
         let acceptor = self.build_acceptor(&config)?;
@@ -191,225 +162,78 @@ impl StealTlsHandlers {
 
     #[tracing::instrument(level = Level::DEBUG, err(level = Level::DEBUG))]
     fn build_acceptor(&self, config: &StealPortTlsConfig) -> Result<TlsAcceptor, StealTlsError> {
-        let cert_chain = self
-            .get_cert_chain(&config.remote_server_auth.cert_pem)
-            .map_err(|error| StealTlsError::FromPemError {
-                error,
-                path: config.remote_server_auth.cert_pem.to_path_buf(),
-            })?;
-        let key = self
-            .get_key(&config.remote_server_auth.key_pem)
-            .map_err(|error| StealTlsError::FromPemError {
-                error,
-                path: config.remote_server_auth.key_pem.to_path_buf(),
-            })?;
+        let cert_pem = self.resolve_in_target_filesystem(&config.remote_server_auth.cert_pem)?;
+        let cert_key = self.resolve_in_target_filesystem(&config.remote_server_auth.key_pem)?;
+        let server_auth = CertWithKey::read(&cert_pem, &cert_key).map_err(TlsUtilError::from)?;
 
-        let client_cert_verifier: Arc<dyn ClientCertVerifier> = if let Some(client_auth) =
-            &config.remote_client_auth
-        {
-            let mut root_store = RootCertStore::empty();
+        let client_auth = match &config.remote_client_auth {
+            Some(RemoteClientAuth {
+                allow_unauthenticated,
+                root_cert_pems,
+            }) => {
+                let mut store = BestEffortRootStore::default();
 
-            for path in &client_auth.root_cert_pems {
-                self.add_all_to_root_store(&mut root_store, path);
+                for path in root_cert_pems {
+                    let Ok(path) = self.resolve_in_target_filesystem(path) else {
+                        continue;
+                    };
+
+                    store.try_add_all_from_pem(&path);
+                }
+
+                if !*allow_unauthenticated && store.certs() == 0 {
+                    return Err(StealTlsError::EmptyRootCertStore);
+                }
+
+                AcceptorClientAuth::WithRootStore {
+                    store,
+                    allow_unauthenticated: *allow_unauthenticated,
+                }
             }
-
-            if client_auth.allow_unauthenticated && root_store.is_empty() {
-                tracing::debug!(
-                        "Root store is empty, but rustls verifier needs at least one trust anchor, even if anonymous clients are allowed. \
-                        Generating a dummy root certificate",
-                    );
-                Self::add_dummy_cert(&mut root_store);
-            }
-
-            let mut verifier = WebPkiClientVerifier::builder(Arc::new(root_store));
-            if client_auth.allow_unauthenticated {
-                verifier = verifier.allow_unauthenticated();
-            }
-            verifier.build()?
-        } else {
-            Arc::new(NoClientAuth)
+            None => AcceptorClientAuth::Disabled,
         };
 
-        let mut server_config = ServerConfig::builder()
-            .with_client_cert_verifier(client_cert_verifier)
-            .with_single_cert(cert_chain, key)
-            .map_err(StealTlsError::BuildServerConfigError)?;
+        let server_config = TlsAcceptorConfig {
+            server_auth,
+            client_auth,
+            alpn_protocols: config
+                .remote_server_auth
+                .alpn_protocols
+                .iter()
+                .filter_map(AlpnProtocol::as_bytes)
+                .map(Vec::from)
+                .collect(),
+        };
 
-        server_config.alpn_protocols = config
-            .remote_server_auth
-            .alpn_protocols
-            .iter()
-            .filter_map(AlpnProtocol::as_bytes)
-            .map(Vec::from)
-            .collect();
-
-        Ok(TlsAcceptor::from(Arc::new(server_config)))
+        TlsAcceptor::build_from_config(server_config).map_err(From::from)
     }
 
     #[tracing::instrument(level = Level::DEBUG, err(level = Level::DEBUG))]
     fn build_connector(&self, config: &StealPortTlsConfig) -> Result<TlsConnector, StealTlsError> {
-        let mut root_store = RootCertStore::empty();
-        self.add_all_to_root_store(&mut root_store, &config.remote_server_auth.cert_pem);
+        let path = self.resolve_in_target_filesystem(&config.remote_server_auth.cert_pem)?;
+        let mut server_auth = BestEffortRootStore::default();
+        server_auth.try_add_all_from_pem(&path);
+        if server_auth.certs() == 0 {
+            return Err(StealTlsError::EmptyRootCertStore);
+        }
 
-        let client_config = match &config.agent_client_auth {
-            Some(agent_auth) => {
-                let cert_chain = self.get_cert_chain(&agent_auth.cert_pem).map_err(|error| {
-                    StealTlsError::FromPemError {
-                        error,
-                        path: agent_auth.cert_pem.clone(),
-                    }
-                })?;
-                let key = self.get_key(&agent_auth.key_pem).map_err(|error| {
-                    StealTlsError::FromPemError {
-                        error,
-                        path: agent_auth.key_pem.clone(),
-                    }
-                })?;
-
-                ClientConfig::builder()
-                    .with_root_certificates(root_store)
-                    .with_client_auth_cert(cert_chain, key)
-                    .map_err(StealTlsError::BuildClientConfigError)?
+        let client_auth = match &config.agent_client_auth {
+            Some(AgentClientAuth { cert_pem, key_pem }) => {
+                let cert_pem = self.resolve_in_target_filesystem(cert_pem)?;
+                let key_pem = self.resolve_in_target_filesystem(key_pem)?;
+                let cert = CertWithKey::read(&cert_pem, &key_pem).map_err(TlsUtilError::from)?;
+                ConnectorClientAuth::CertWithKey(cert)
             }
 
-            None => ClientConfig::builder()
-                .with_root_certificates(root_store)
-                .with_no_client_auth(),
+            None => ConnectorClientAuth::Anonymous,
         };
 
-        Ok(TlsConnector::from(Arc::new(client_config)))
-    }
-
-    #[tracing::instrument(level = Level::DEBUG)]
-    fn add_all_to_root_store(&self, root_store: &mut RootCertStore, path: &Path) {
-        let resolved = match self.0.root_path.resolve_path(path) {
-            Ok(resolved) => resolved,
-            Err(error) => {
-                tracing::warn!(
-                    ?path,
-                    %error,
-                    "Failed to resolve a root certificate path in the target container filesystem",
-                );
-                return;
-            }
+        let client_config = TlsConnectorConfig {
+            server_auth: ConnectorServerAuth::BestEffortRootStore(server_auth),
+            client_auth,
         };
 
-        let mut file = match File::open(resolved) {
-            Ok(file) => BufReader::new(file),
-            Err(error) => {
-                tracing::warn!(
-                    ?path,
-                    %error,
-                    "Failed to open a root certificate file in the target container filesystem",
-                );
-                return;
-            }
-        };
-
-        for cert in rustls_pemfile::certs(&mut file) {
-            match cert {
-                Ok(cert) => match root_store.add(cert) {
-                    Ok(()) => {
-                        tracing::debug!(?path, "Ceritificate added");
-                    }
-                    Err(error) => {
-                        tracing::warn!(
-                            %error,
-                            ?path,
-                            "Failed to add a certificate to the root certificate store",
-                        );
-                    }
-                },
-
-                Err(error) => {
-                    tracing::warn!(
-                        ?path,
-                        %error,
-                        "Failed to parse a PEM file when building a root certificate store",
-                    );
-
-                    // Inspected `rustls_pemfile::certs` code
-                    // and it looks like we can hit an endless loop if we don't break.
-                    continue;
-                }
-            }
-        }
-    }
-
-    /// Generates a dummy self-signed certificate and adds it to the given [`RootCertStore`].
-    ///
-    /// We do this, because [`WebPkiClientVerifier`] always requires a non-empty root cert store,
-    /// even if anonymous clients are allowed.
-    ///
-    /// This function is best-effort. If something fails here, no certificate will be added.
-    #[tracing::instrument(level = Level::DEBUG)]
-    fn add_dummy_cert(root_store: &mut RootCertStore) {
-        match rcgen::generate_simple_self_signed(["dummy".to_string()]) {
-            Ok(cert) => {
-                if let Err(error) = root_store.add(cert.cert.into()) {
-                    tracing::debug!(
-                        %error,
-                        "Failed to add the certificate",
-                    );
-                }
-            }
-            Err(error) => {
-                tracing::debug!(
-                    %error,
-                    "Failed to generate the certificate",
-                );
-            }
-        }
-    }
-
-    #[tracing::instrument(level = Level::DEBUG, err(level = Level::DEBUG))]
-    fn get_cert_chain(&self, path: &Path) -> Result<Vec<CertificateDer<'static>>, FromPemError> {
-        let mut pem = self
-            .0
-            .root_path
-            .resolve_path(path)
-            .and_then(|path| File::open(path))
-            .map(BufReader::new)
-            .map_err(FromPemError::ReadError)?;
-
-        let cert_chain = rustls_pemfile::certs(&mut pem)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(FromPemError::ParseError)?;
-
-        if cert_chain.is_empty() {
-            return Err(FromPemError::CertChainEmpty);
-        }
-
-        Ok(cert_chain)
-    }
-
-    #[tracing::instrument(level = Level::DEBUG, err(level = Level::DEBUG))]
-    fn get_key(&self, path: &Path) -> Result<PrivateKeyDer<'static>, FromPemError> {
-        let mut pem = self
-            .0
-            .root_path
-            .resolve_path(path)
-            .and_then(|path| File::open(path))
-            .map(BufReader::new)
-            .map_err(FromPemError::ReadError)?;
-
-        let mut found_key = None;
-
-        for entry in rustls_pemfile::read_all(&mut pem) {
-            let entry = entry.map_err(FromPemError::ParseError)?;
-            let key = match entry {
-                Item::Pkcs1Key(key) => PrivateKeyDer::Pkcs1(key),
-                Item::Pkcs8Key(key) => PrivateKeyDer::Pkcs8(key),
-                Item::Sec1Key(key) => PrivateKeyDer::Sec1(key),
-                _ => continue,
-            };
-
-            if found_key.replace(key).is_some() {
-                return Err(FromPemError::MultipleKeysFound);
-            }
-        }
-
-        found_key.ok_or(FromPemError::KeyNotFound)
+        TlsConnector::build_from_config(client_config).map_err(From::from)
     }
 }
 

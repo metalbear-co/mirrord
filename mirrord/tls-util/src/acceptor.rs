@@ -16,6 +16,7 @@ pub enum AcceptorClientAuth {
 pub struct TlsAcceptorConfig {
     pub server_auth: CertWithKey,
     pub client_auth: AcceptorClientAuth,
+    pub alpn_protocols: Vec<Vec<u8>>,
 }
 
 pub trait TlsAcceptorExt: Sized {
@@ -40,10 +41,12 @@ impl TlsAcceptorExt for TlsAcceptor {
             }
         };
 
-        let config = builder
+        let mut server_config = builder
             .with_single_cert(config.server_auth.cert_chain, config.server_auth.key)
             .map_err(TlsUtilError::ServerConfigError)?;
 
-        Ok(TlsAcceptor::from(Arc::new(config)))
+        server_config.alpn_protocols = config.alpn_protocols;
+
+        Ok(TlsAcceptor::from(Arc::new(server_config)))
     }
 }

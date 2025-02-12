@@ -247,6 +247,7 @@ async fn create_external_proxy_tls_acceptor(
             store: client_root_store,
             allow_unauthenticated: false,
         },
+        alpn_protocols: Default::default(),
     };
 
     let acceptor = TlsAcceptor::build_from_config(config)?;

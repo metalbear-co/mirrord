@@ -15,6 +15,7 @@ use futures::TryFutureExt;
 use metrics::{start_metrics, CLIENT_COUNT};
 use mirrord_agent_env::envs;
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
+use mirrord_tls_util::rustls;
 use sniffer::tcp_capture::RawSocketTcpCapture;
 use tokio::{
     net::{TcpListener, TcpStream},

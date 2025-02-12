@@ -18,6 +18,7 @@ use mirrord_config::{
     LayerConfig, MIRRORD_CONFIG_FILE_ENV,
 };
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker, MIRRORD_PROGRESS_ENV};
+use mirrord_tls_util::{AsPem, CertWithKey};
 use tempfile::NamedTempFile;
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
@@ -29,7 +30,7 @@ use crate::{
     config::{ContainerRuntime, ExecParams, RuntimeArgs},
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     container::{command_builder::RuntimeCommandBuilder, sidecar::Sidecar},
-    error::{CliError, CliResult, ContainerError},
+    error::{CliError, CliResult, ContainerError, SelfSignedCertificateError},
     execution::{
         MirrordExecution, LINUX_INJECTION_ENV_VAR, MIRRORD_CONNECT_TCP_ENV,
         MIRRORD_EXECUTION_KIND_ENV,
@@ -130,21 +131,14 @@ fn create_composed_config(config: &LayerConfig) -> Result<NamedTempFile, Contain
 #[tracing::instrument(level = Level::TRACE, ret)]
 fn create_self_signed_certificate(
     subject_alt_names: Vec<String>,
-) -> Result<(NamedTempFile, NamedTempFile), ContainerError> {
-    let geerated = rcgen::generate_simple_self_signed(subject_alt_names)
-        .map_err(ContainerError::SelfSignedCertificate)?;
+) -> Result<(NamedTempFile, NamedTempFile), SelfSignedCertificateError> {
+    let cert = CertWithKey::new_random_self_signed(subject_alt_names)?;
 
-    let mut certificate =
-        tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
-    certificate
-        .write_all(geerated.cert.pem().as_bytes())
-        .map_err(ContainerError::WriteSelfSignedCertificate)?;
+    let mut certificate = tempfile::NamedTempFile::new()?;
+    certificate.write_all(cert.cert_chain().first().unwrap().as_pem().as_bytes())?;
 
-    let mut private_key =
-        tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
-    private_key
-        .write_all(geerated.key_pair.serialize_pem().as_bytes())
-        .map_err(ContainerError::WriteSelfSignedCertificate)?;
+    let mut private_key = tempfile::NamedTempFile::new()?;
+    private_key.write_all(cert.key().as_pem().as_bytes())?;
 
     Ok((certificate, private_key))
 }
@@ -159,7 +153,8 @@ fn prepare_tls_certs_for_container(
             || config.internal_proxy.client_tls_key.is_none())
     {
         let (internal_proxy_cert, internal_proxy_key) =
-            create_self_signed_certificate(vec!["intproxy".to_owned()])?;
+            create_self_signed_certificate(vec!["intproxy".to_owned()])
+                .map_err(ContainerError::from)?;
 
         config
             .internal_proxy
@@ -185,7 +180,8 @@ fn prepare_tls_certs_for_container(
             .collect();
 
         let (external_proxy_cert, external_proxy_key) =
-            create_self_signed_certificate(external_proxy_subject_alt_names)?;
+            create_self_signed_certificate(external_proxy_subject_alt_names)
+                .map_err(ContainerError::from)?;
 
         config
             .external_proxy
