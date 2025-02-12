@@ -11,7 +11,6 @@ use std::{
 use exponential_backoff::Backoff;
 use http_body_util::BodyExt;
 use hyper::{body::Incoming, http::response::Parts, StatusCode};
-use mirrord_config::feature::network::incoming::http_filter::LocalHttpDeliveryType;
 use mirrord_protocol::{
     batched_body::BatchedBody,
     tcp::{
@@ -19,6 +18,7 @@ use mirrord_protocol::{
         InternalHttpBody, InternalHttpBodyFrame, InternalHttpResponse,
     },
 };
+use rustls::pki_types::ServerName;
 use tokio::time;
 use tracing::Level;
 
@@ -37,7 +37,7 @@ pub struct HttpGatewayTask {
     /// Request to deliver.
     request: HttpRequest<StreamingBody>,
     /// Determines how we deliver the request.
-    delivery: LocalHttpDeliveryType,
+    is_https: bool,
     /// Shared cache of [`LocalHttpClient`](super::http::LocalHttpClient)s.
     client_store: ClientStore,
     /// Determines response variant.
@@ -50,7 +50,7 @@ impl fmt::Debug for HttpGatewayTask {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HttpGatewayTask")
             .field("request", &self.request)
-            .field("delivery", &self.delivery)
+            .field("is_https", &self.is_https)
             .field("response_mode", &self.response_mode)
             .field("server_addr", &self.server_addr)
             .finish()
@@ -61,18 +61,37 @@ impl HttpGatewayTask {
     /// Creates a new gateway task.
     pub fn new(
         request: HttpRequest<StreamingBody>,
-        delivery: LocalHttpDeliveryType,
+        is_https: bool,
         client_store: ClientStore,
         response_mode: ResponseMode,
         server_addr: SocketAddr,
     ) -> Self {
         Self {
             request,
-            delivery,
+            is_https,
             client_store,
             response_mode,
             server_addr,
         }
+    }
+
+    fn tls_server_name(&self) -> Result<Option<ServerName<'static>>, LocalHttpError> {
+        if !self.is_https {
+            return Ok(None);
+        }
+
+        let mut host = self.request.internal_request.uri.host().unwrap_or_default();
+
+        if let Some(trimmed) = host
+            .strip_prefix('[')
+            .and_then(|host| host.strip_suffix(']'))
+        {
+            host = trimmed;
+        }
+
+        let name = ServerName::try_from(host)?.to_owned();
+
+        Ok(Some(name))
     }
 
     /// Handles the response if we operate in [`ResponseMode::Chunked`].
@@ -215,7 +234,11 @@ impl HttpGatewayTask {
     async fn send_attempt(&self, message_bus: &mut MessageBus<Self>) -> Result<(), LocalHttpError> {
         let mut client = self
             .client_store
-            .get(self.server_addr, self.request.version())
+            .get(
+                self.server_addr,
+                self.request.version(),
+                self.tls_server_name()?,
+            )
             .await?;
         let mut response = client.send_request(self.request.clone()).await?;
         let on_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS).then(|| {
@@ -398,6 +421,7 @@ mod test {
         Method, Request, Response, StatusCode, Version,
     };
     use hyper_util::rt::TokioIo;
+    use mirrord_config::feature::network::incoming::http_filter::LocalHttpDeliveryType;
     use mirrord_protocol::tcp::{HttpRequest, InternalHttpRequest};
     use rstest::rstest;
     use tokio::{
@@ -540,8 +564,8 @@ mod test {
             };
             let gateway = HttpGatewayTask::new(
                 request,
-                LocalHttpDeliveryType::Http,
-                Default::default(),
+                false,
+                ClientStore::new(LocalHttpDeliveryType::Http, Duration::from_secs(3)),
                 ResponseMode::Basic,
                 local_destination,
             );
@@ -688,7 +712,7 @@ mod test {
                 uri: "/".parse().unwrap(),
                 headers: Default::default(),
                 version: Version::HTTP_11,
-                body: StreamingBody::from(vec![]),
+                body: StreamingBody::default(),
             },
         };
 
@@ -696,8 +720,8 @@ mod test {
         let _gateway = tasks.register(
             HttpGatewayTask::new(
                 request,
-                LocalHttpDeliveryType::Http,
-                Default::default(),
+                false,
+                ClientStore::new(LocalHttpDeliveryType::Http, Duration::from_secs(3)),
                 response_mode,
                 addr,
             ),
@@ -842,11 +866,11 @@ mod test {
             .insert(header::CONTENT_LENGTH, HeaderValue::from_static("12"));
 
         let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> = Default::default();
-        let client_store = ClientStore::default();
+        let client_store = ClientStore::new(LocalHttpDeliveryType::Http, Duration::from_secs(3));
         let _gateway = tasks.register(
             HttpGatewayTask::new(
                 request,
-                LocalHttpDeliveryType::Http,
+                false,
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
@@ -916,11 +940,14 @@ mod test {
             .insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
 
         let mut tasks: BackgroundTasks<u32, InProxyTaskMessage, Infallible> = Default::default();
-        let client_store = ClientStore::new_with_timeout(Duration::from_secs(1337 * 21 * 37));
+        let client_store = ClientStore::new(
+            LocalHttpDeliveryType::Http,
+            Duration::from_secs(1337 * 21 * 37),
+        );
         let _gateway_1 = tasks.register(
             HttpGatewayTask::new(
                 request.clone(),
-                LocalHttpDeliveryType::Http,
+                false,
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
@@ -931,7 +958,7 @@ mod test {
         let _gateway_2 = tasks.register(
             HttpGatewayTask::new(
                 request.clone(),
-                LocalHttpDeliveryType::Http,
+                false,
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,

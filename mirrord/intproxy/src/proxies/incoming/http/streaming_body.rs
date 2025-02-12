@@ -114,6 +114,13 @@ impl From<InternalHttpBody> for StreamingBody {
     }
 }
 
+impl From<Vec<InternalHttpBodyFrame>> for StreamingBody {
+    fn from(value: Vec<InternalHttpBodyFrame>) -> Self {
+        let (_, dummy_rx) = mpsc::channel(1); // `mpsc::channel` panics on capacity 0
+        Self::new(dummy_rx, value)
+    }
+}
+
 impl From<Receiver<InternalHttpBodyFrame>> for StreamingBody {
     fn from(value: Receiver<InternalHttpBodyFrame>) -> Self {
         Self::new(value, Default::default())

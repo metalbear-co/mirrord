@@ -6,13 +6,15 @@ use std::{
 };
 
 use hyper::Version;
+use mirrord_config::feature::network::incoming::http_filter::LocalHttpDeliveryType;
+use rustls::pki_types::ServerName;
 use tokio::{
     sync::Notify,
     time::{self, Instant},
 };
 use tracing::Level;
 
-use super::{LocalHttpClient, LocalHttpError};
+use super::{tls_connector::LazyConnector, LocalHttpClient, LocalHttpError};
 
 /// Idle [`LocalHttpClient`] caches in [`ClientStore`].
 struct IdleLocalClient {
@@ -35,18 +37,19 @@ impl fmt::Debug for IdleLocalClient {
 /// dedicated [`tokio::task`]. This timeout defaults to [`Self::IDLE_CLIENT_DEFAULT_TIMEOUT`].
 #[derive(Clone)]
 pub struct ClientStore {
+    /// Idle [`LocalHttpClient`]s.
     clients: Arc<Mutex<Vec<IdleLocalClient>>>,
+
+    /// Used when making TLS connections to the user application.
+    ///
+    /// If [`None`], we're always delivering plain HTTP requests.
+    tls_connector: Option<Arc<LazyConnector>>,
+
     /// Used to notify other tasks when there is a new client in the store.
     ///
     /// Make sure to only call [`Notify::notify_waiters`] and [`Notify::notified`] when holding a
     /// lock on [`Self::clients`]. Otherwise you'll have a race condition.
     notify: Arc<Notify>,
-}
-
-impl Default for ClientStore {
-    fn default() -> Self {
-        Self::new_with_timeout(Self::IDLE_CLIENT_DEFAULT_TIMEOUT)
-    }
 }
 
 impl ClientStore {
@@ -55,9 +58,16 @@ impl ClientStore {
     /// Creates a new store.
     ///
     /// The store will keep unused clients alive for at least the given time.
-    pub fn new_with_timeout(timeout: Duration) -> Self {
+    pub fn new(https_delivery: LocalHttpDeliveryType, timeout: Duration) -> Self {
         let store = Self {
             clients: Default::default(),
+            tls_connector: match https_delivery {
+                LocalHttpDeliveryType::Http => None,
+                LocalHttpDeliveryType::HttpsAnonymous => Some(Arc::new(LazyConnector::anonymous())),
+                LocalHttpDeliveryType::HttpsWithLocalCert { cert_pem, key_pem } => {
+                    Some(Arc::new(LazyConnector::authenticated(cert_pem, key_pem)))
+                }
+            },
             notify: Default::default(),
         };
 
@@ -72,6 +82,7 @@ impl ClientStore {
         &self,
         server_addr: SocketAddr,
         version: Version,
+        tls_server_name: Option<ServerName<'static>>,
     ) -> Result<LocalHttpClient, LocalHttpError> {
         let ready = {
             let mut guard = self
@@ -90,15 +101,29 @@ impl ClientStore {
             return Ok(ready.client);
         }
 
-        let connect_task = tokio::spawn(LocalHttpClient::new(server_addr, version));
-
         tokio::select! {
-            result = connect_task => result.expect("this task should not panic"),
-            ready = self.wait_for_ready(server_addr, version) => {
+            result = self.create_client(server_addr, version, tls_server_name.clone()) => result,
+            ready = self.wait_for_ready(server_addr, version, tls_server_name.as_ref()) => {
                 tracing::trace!(?ready, "Reused an idle client");
                 Ok(ready)
             },
         }
+    }
+
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::WARN))]
+    async fn create_client(
+        &self,
+        server_addr: SocketAddr,
+        version: Version,
+        tls_server_name: Option<ServerName<'static>>,
+    ) -> Result<LocalHttpClient, LocalHttpError> {
+        let (Some(name), Some(lazy_connector)) = (tls_server_name, &self.tls_connector) else {
+            return LocalHttpClient::new_plain(server_addr, version).await;
+        };
+
+        let connector = lazy_connector.get().await?;
+
+        LocalHttpClient::new_tls(server_addr, version, name, &connector).await
     }
 
     /// Stores an unused [`LocalHttpClient`], so that it can be reused later.
@@ -116,7 +141,12 @@ impl ClientStore {
     }
 
     /// Waits until there is a ready unused client.
-    async fn wait_for_ready(&self, server_addr: SocketAddr, version: Version) -> LocalHttpClient {
+    async fn wait_for_ready(
+        &self,
+        server_addr: SocketAddr,
+        version: Version,
+        tls_server_name: Option<&ServerName<'static>>,
+    ) -> LocalHttpClient {
         loop {
             let notified = {
                 let mut guard = self
@@ -126,6 +156,7 @@ impl ClientStore {
                 let position = guard.iter().position(|idle| {
                     idle.client.handles_version(version)
                         && idle.client.local_server_address() == server_addr
+                        && idle.client.tls_server_name() == tls_server_name
                 });
 
                 match position {
@@ -198,6 +229,7 @@ mod test {
         body::Incoming, server::conn::http1, service::service_fn, Request, Response, Version,
     };
     use hyper_util::rt::TokioIo;
+    use mirrord_config::feature::network::incoming::http_filter::LocalHttpDeliveryType;
     use tokio::{net::TcpListener, time};
 
     use super::ClientStore;
@@ -221,8 +253,11 @@ mod test {
                 .unwrap()
         });
 
-        let client_store = ClientStore::new_with_timeout(Duration::from_millis(10));
-        let client = client_store.get(addr, Version::HTTP_11).await.unwrap();
+        let client_store = ClientStore::new(LocalHttpDeliveryType::Http, Duration::from_millis(10));
+        let client = client_store
+            .get(addr, Version::HTTP_11, None)
+            .await
+            .unwrap();
         client_store.push_idle(client);
 
         time::sleep(Duration::from_millis(100)).await;

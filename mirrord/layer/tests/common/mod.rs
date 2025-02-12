@@ -13,6 +13,7 @@ use std::{
 
 use actix_codec::Framed;
 use futures::{SinkExt, StreamExt};
+use mirrord_config::feature::network::incoming::http_filter::LocalHttpDeliveryType;
 use mirrord_intproxy::{agent_conn::AgentConnection, IntProxy};
 use mirrord_protocol::{
     file::{
@@ -111,7 +112,8 @@ impl TestIntProxy {
             let agent_conn = AgentConnection::new_for_raw_address(fake_agent_address)
                 .await
                 .unwrap();
-            let intproxy = IntProxy::new_with_connection(agent_conn, listener, 0);
+            let intproxy =
+                IntProxy::new_with_connection(agent_conn, listener, 0, LocalHttpDeliveryType::Http);
             intproxy
                 .run(Duration::from_secs(5), Duration::from_secs(5))
                 .await

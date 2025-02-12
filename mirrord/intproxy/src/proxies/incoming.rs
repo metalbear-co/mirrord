@@ -19,8 +19,9 @@ use mirrord_intproxy_protocol::{
 };
 use mirrord_protocol::{
     tcp::{
-        ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, DaemonTcp, HttpRequest,
-        InternalHttpBodyFrame, LayerTcp, LayerTcpSteal, NewTcpConnection, StealType, TcpData,
+        ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, DaemonTcp, HttpRequest, HttpRequestV2,
+        HttpRequestV2Inner, InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, LayerTcpSteal,
+        NewTcpConnection, StealType, TcpData,
     },
     ClientMessage, ConnectionId, RequestId, ResponseError,
 };
@@ -134,8 +135,6 @@ pub struct IncomingProxy {
     metadata_store: MetadataStore,
     /// What HTTP response flavor we produce.
     response_mode: ResponseMode,
-    /// How we deliver HTTPS requests to the user application.
-    https_delivery: LocalHttpDeliveryType,
     /// Cache for [`LocalHttpClient`](http::LocalHttpClient)s.
     client_store: ClientStore,
     /// Each mirrored remote connection is mapped to a [`TcpProxyTask`] in mirror mode.
@@ -164,8 +163,10 @@ impl IncomingProxy {
             subscriptions: Default::default(),
             metadata_store: Default::default(),
             response_mode: Default::default(),
-            https_delivery,
-            client_store: Default::default(),
+            client_store: ClientStore::new(
+                https_delivery,
+                ClientStore::IDLE_CLIENT_DEFAULT_TIMEOUT,
+            ),
             mirror_tcp_proxies: Default::default(),
             steal_tcp_proxies: Default::default(),
             http_gateways: Default::default(),
@@ -240,9 +241,7 @@ impl IncomingProxy {
         let tx = self.tasks.register(
             HttpGatewayTask::new(
                 request,
-                is_https
-                    .then(|| self.https_delivery.clone())
-                    .unwrap_or(LocalHttpDeliveryType::Http),
+                is_https,
                 self.client_store.clone(),
                 self.response_mode,
                 subscription.listening_on,
@@ -425,6 +424,100 @@ impl IncomingProxy {
         }
     }
 
+    async fn handle_http_request_v2(
+        &mut self,
+        request: HttpRequestV2,
+        message_bus: &mut MessageBus<Self>,
+    ) {
+        match request.inner {
+            HttpRequestV2Inner::Head(head) => {
+                let (body, body_tx) = if head.request.body.body_finished {
+                    (StreamingBody::from(head.request.body.frames), None)
+                } else {
+                    let (body_tx, body_rx) = mpsc::channel(128);
+                    let body = StreamingBody::new(body_rx, head.request.body.frames);
+                    (body, Some(body_tx))
+                };
+
+                let is_https = head.is_https;
+                let request = HttpRequest {
+                    internal_request: InternalHttpRequest {
+                        method: head.request.method,
+                        uri: head.request.uri,
+                        headers: head.request.headers,
+                        version: head.request.version,
+                        body,
+                    },
+                    connection_id: request.connection_id,
+                    request_id: request.request_id,
+                    port: head.original_destination.port(),
+                };
+
+                self.start_http_gateway(request, is_https, body_tx, message_bus)
+                    .await;
+            }
+
+            HttpRequestV2Inner::Body(body) => {
+                let gateway = self
+                    .http_gateways
+                    .get_mut(&request.connection_id)
+                    .and_then(|gateways| gateways.get_mut(&request.request_id));
+                let Some(gateway) = gateway else {
+                    tracing::debug!(
+                        connection_id = request.connection_id,
+                        request_id = request.request_id,
+                        frames = ?body.frames,
+                        last_body_chunk = body.body_finished,
+                        "Received a body chunk for a request that is no longer alive locally"
+                    );
+
+                    return;
+                };
+
+                let Some(tx) = gateway.body_tx.as_ref() else {
+                    tracing::debug!(
+                        connection_id = request.connection_id,
+                        request_id = request.request_id,
+                        frames = ?body.frames,
+                        last_body_chunk = body.body_finished,
+                        "Received a body chunk for a request with a closed body"
+                    );
+
+                    return;
+                };
+
+                for frame in body.frames {
+                    if let Err(err) = tx.send(frame).await {
+                        tracing::debug!(
+                            frame = ?err.0,
+                            connection_id = request.connection_id,
+                            request_id = request.connection_id,
+                            "Failed to send an HTTP request body frame to the HttpGatewayTask, channel is closed"
+                        );
+                        break;
+                    }
+                }
+
+                if body.body_finished {
+                    gateway.body_tx = None;
+                }
+            }
+
+            HttpRequestV2Inner::Error(error) => {
+                tracing::debug!(
+                    connection_id = request.connection_id,
+                    request_id = request.request_id,
+                    error = error.error_message,
+                    "Received an error in an HTTP request body",
+                );
+
+                if let Some(gateways) = self.http_gateways.get_mut(&request.connection_id) {
+                    gateways.remove(&request.request_id);
+                };
+            }
+        }
+    }
+
     /// Handles all agent messages.
     async fn handle_agent_message(
         &mut self,
@@ -487,7 +580,9 @@ impl IncomingProxy {
                 }
             }
 
-            DaemonTcp::HttpRequestV2(..) => todo!(),
+            DaemonTcp::HttpRequestV2(request) => {
+                self.handle_http_request_v2(request, message_bus).await
+            }
         }
 
         Ok(())
