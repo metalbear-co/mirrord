@@ -32,6 +32,7 @@ use mirrord_config::{
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_progress::{messages::EXEC_CONTAINER_BINARY, Progress, ProgressTracker};
+use mirrord_tls_util::rustls::crypto::{self, CryptoProvider};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
 use operator::operator_command;
@@ -502,7 +503,7 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
                 kube_api_error,
                 CliError::PortForwardingSetupError,
             ),
-            AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
+            AgentConnectionError::ExtproxyTls(connection_tls_error) => connection_tls_error.into(),
             AgentConnectionError::NoConnectionMethod => CliError::PortForwardingNoConnectionMethod,
         })?;
     let connection_2 = connection::AgentConnection {
@@ -540,7 +541,7 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> miette::Result<()> {
-    rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
+    CryptoProvider::install_default(crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
 
     let cli = Cli::parse();

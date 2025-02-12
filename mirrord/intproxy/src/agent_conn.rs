@@ -42,31 +42,29 @@ use crate::{
 #[derive(Error, Debug)]
 pub enum AgentConnectionError {
     /// IO failed.
-    #[error("{0}")]
+    #[error(transparent)]
     Io(#[from] io::Error),
     /// mirrord operator API failed.
-    #[error("{0}")]
+    #[error(transparent)]
     Operator(#[from] OperatorApiError),
     /// mirrord kube API failed.
-    #[error("{0}")]
+    #[error(transparent)]
     Kube(#[from] KubeApiError),
-
-    #[error("{0}")]
-    Tls(#[from] ConnectionTlsError),
-
+    #[error("failed to make a TLS connection with the external proxy: {0}")]
+    ExtproxyTls(#[from] ExtproxyConnectionTlsError),
     /// The proxy failed to find a connection method in the provided [LayerConfig].
     #[error("invalid configuration, could not find method for connection")]
     NoConnectionMethod,
 }
 
 #[derive(Error, Debug)]
-pub enum ConnectionTlsError {
-    #[error("failed to parse any server certificate")]
-    ServerRootCertEmpty,
+pub enum ExtproxyConnectionTlsError {
+    #[error("failed to parse any external proxy certificate")]
+    ExtproxyRootCertStoreEmpty,
     #[error("failed to build the TLS connector: {0}")]
     ConnectorBuildError(#[from] TlsUtilError),
-    #[error("failed to make the TLS connection: {0}")]
-    ConnectionError(#[source] io::Error),
+    #[error(transparent)]
+    Io(#[from] io::Error),
 }
 
 /// Directive for the proxy on how to connect to the agent.
@@ -222,11 +220,12 @@ pub async fn wrap_connection_with_tls(
     tls_certificate: &Path,
     client_tls_certificate: &Path,
     client_tls_key: &Path,
-) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), ConnectionTlsError> {
+) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), ExtproxyConnectionTlsError>
+{
     let mut server_root_store = BestEffortRootStore::default();
     server_root_store.try_add_all_from_pem(tls_certificate);
     if server_root_store.certs() == 0 {
-        return Err(ConnectionTlsError::ServerRootCertEmpty);
+        return Err(ExtproxyConnectionTlsError::ExtproxyRootCertStoreEmpty);
     }
 
     let client_cert =
@@ -239,10 +238,7 @@ pub async fn wrap_connection_with_tls(
 
     let connector = TlsConnector::build_from_config(config)?;
     let server_name = ServerName::IpAddress(proxy_addr.into());
-    let stream = connector
-        .connect(server_name, stream)
-        .await
-        .map_err(ConnectionTlsError::ConnectionError)?;
+    let stream = connector.connect(server_name, stream).await?;
 
     Ok(wrap_raw_connection(stream))
 }

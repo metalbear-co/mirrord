@@ -4,9 +4,10 @@ use kube::core::ErrorResponse;
 use miette::Diagnostic;
 use mirrord_config::config::ConfigError;
 use mirrord_console::error::ConsoleError;
-use mirrord_intproxy::{agent_conn::ConnectionTlsError, error::IntProxyError};
+use mirrord_intproxy::{agent_conn::ExtproxyConnectionTlsError, error::IntProxyError};
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
+use mirrord_tls_util::TlsUtilError;
 use mirrord_vpn::error::VpnError;
 use reqwest::StatusCode;
 use thiserror::Error;
@@ -104,9 +105,12 @@ pub(crate) enum ExternalProxyError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     SetSid(nix::Error),
 
-    #[error(transparent)]
-    #[diagnostic(help("{GENERAL_BUG}"))]
-    Tls(#[from] ConnectionTlsError),
+    #[error("failed to parse any internal proxy certificate")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    IntproxyRootCertStoreEmpty,
+
+    #[error("failed to build the TLS acceptor: {0}")]
+    AcceptorBuildError(#[from] TlsUtilError),
 
     #[error(
         "there was no tls information provided, see `external_proxy` keys in config if specified"
@@ -383,8 +387,8 @@ pub(crate) enum CliError {
     #[error("Failed to make secondary agent connection: invalid configuration, could not find method for connection")]
     PortForwardingNoConnectionMethod,
 
-    #[error("Failed to make secondary agent connection (TLS): {0}")]
-    AgentConnTlsError(#[from] ConnectionTlsError),
+    #[error("Failed to make TLS connection to the external proxy: {0}")]
+    ExtproxyConnectionTlsError(#[from] ExtproxyConnectionTlsError),
 
     #[error("An error occurred in the port-forwarding process: {0}")]
     PortForwardingError(#[from] PortForwardError),
@@ -524,13 +528,15 @@ mod tests {
     };
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::ListParams, Api};
-    use rustls::{
-        crypto::aws_lc_rs::default_provider,
-        pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
-        ServerConfig,
+    use mirrord_tls_util::{
+        rustls::{
+            crypto::aws_lc_rs::default_provider,
+            pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
+            ServerConfig,
+        },
+        tokio_rustls::TlsAcceptor,
     };
     use tokio::{net::TcpListener, sync::Notify};
-    use tokio_rustls::TlsAcceptor;
 
     /// With this test we're trying to `assert` that our [`kube`] crate is (somewhat)
     /// version-synced with [`rustls`]. To give a friendlier error message on kube requests
