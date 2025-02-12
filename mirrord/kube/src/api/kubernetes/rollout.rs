@@ -121,6 +121,10 @@ impl Rollout {
         }
     }
 
+    /// Extracts [`LabelSelector`] from the [`Rollout`] or from the inner [`WorkloadRef`]
+    ///
+    /// Unlike `RuntimeDataFromLabels` trait the selector may also exist inside of the workloadRef
+    /// target thus we need an async variant to fetch with a client.
     pub async fn get_match_labels<'a>(
         &'a self,
         client: &Client,
@@ -178,7 +182,7 @@ impl WorkloadRef {
     /// Supports references to:
     /// 1. [`Deployment`]s
     /// 2. [`ReplicaSet`]s
-    /// 3. [`PodTemplate`]s
+    /// 3. [`PodTemplate`]s (uses `.metadata.labels`)
     /// 4. [`StatefulSet`]s
     pub async fn get_pod_template(
         &self,
@@ -236,6 +240,12 @@ impl WorkloadRef {
         }
     }
 
+    /// Fetched the referenced resource and extracts [`LabelSelector`].
+    /// Supports references to:
+    /// 1. [`Deployment`]s
+    /// 2. [`ReplicaSet`]s
+    /// 3. [`PodTemplate`]s
+    /// 4. [`StatefulSet`]s
     pub async fn get_match_labels(
         &self,
         client: &Client,
