@@ -7144,6 +7144,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 name = "tls-util"
 version = "3.132.1"
 dependencies = [
+ "http 1.2.0",
  "rcgen",
  "rustls 0.23.21",
  "rustls-pemfile 2.2.0",

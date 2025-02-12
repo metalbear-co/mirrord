@@ -5,6 +5,7 @@ mod connector;
 mod error;
 mod no_verifier;
 mod single_cert_root_store;
+mod uri;
 
 pub use acceptor::{AcceptorClientAuth, TlsAcceptorConfig, TlsAcceptorExt};
 pub use best_effort_root_store::BestEffortRootStore;
@@ -14,3 +15,4 @@ pub use connector::{
 };
 pub use error::*;
 pub use single_cert_root_store::SingleCertRootStore;
+pub use uri::UriExt;

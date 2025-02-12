@@ -1,6 +1,6 @@
 use std::io;
 
-use rustls::server::VerifierBuilderError;
+use rustls::{pki_types::InvalidDnsNameError, server::VerifierBuilderError};
 use thiserror::Error;
 use x509_parser::{
     error::{PEMError, X509Error},
@@ -59,4 +59,12 @@ pub enum TlsUtilError {
     ServerConfigError(#[source] rustls::Error),
     #[error("failed to build the client config: {0}")]
     ClientConfigError(#[source] rustls::Error),
+    #[error("request URI contains an invalid DNS name")]
+    InvalidUriDnsName,
+}
+
+impl From<InvalidDnsNameError> for TlsUtilError {
+    fn from(_: InvalidDnsNameError) -> Self {
+        Self::InvalidUriDnsName
+    }
 }
