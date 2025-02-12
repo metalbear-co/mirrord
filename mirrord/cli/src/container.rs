@@ -48,11 +48,13 @@ use crate::{
     },
     logging::pipe_intproxy_sidecar_logs,
     util::MIRRORD_CONSOLE_ADDR_ENV,
+    ContainerRuntimeCommand,
 };
 
 static CONTAINER_EXECUTION_KIND: ExecutionKind = ExecutionKind::Container;
 
 mod command_builder;
+mod compose;
 mod sidecar;
 
 /// Format [`Command`] to look like the executated command (currently without env because we don't
@@ -163,6 +165,7 @@ fn create_self_signed_certificate(
 
 type TlsGuard = (NamedTempFile, NamedTempFile);
 
+/// Returns [`TlsGuard`] temporary files that must be kept alive, otherwise the file gets deleted.
 fn prepare_tls_certs_for_container(
     config: &mut LayerConfig,
 ) -> CliResult<(Option<TlsGuard>, Option<TlsGuard>)> {
@@ -323,10 +326,8 @@ async fn create_runtime_command_with_sidecar<P: Progress + Send + Sync>(
     Ok((runtime_command, sidecar, execution_info))
 }
 
-/// Main entry point for the `mirrord container` command.
-/// This spawns: "agent" - "external proxy" - "intproxy sidecar" - "execution container"
-#[tracing::instrument(level = Level::INFO, skip(watch), ret, err)]
-pub(crate) async fn container_command(
+#[tracing::instrument(level = Level::DEBUG, skip(watch), ret, err)]
+async fn container_run(
     runtime_args: RuntimeArgs,
     exec_params: ExecParams,
     watch: drain::Watch,
@@ -354,9 +355,6 @@ pub(crate) async fn container_command(
     let (_internal_proxy_tls_guards, _external_proxy_tls_guards) =
         prepare_tls_certs_for_container(&mut config)?;
 
-    // TODO(alex) [high]: I have to create/copy/pass the `compose.yaml` file around here, before
-    // the proxy container is created? I don't think so. The way I see it, we just need
-    // to run the `docker compose up` command down below, refer to #1.
     let layer_config_file = create_temp_layer_config(&config)?;
     std::env::set_var(MIRRORD_CONFIG_FILE_ENV, layer_config_file.path());
 
@@ -428,6 +426,25 @@ pub(crate) async fn container_command(
             Err(ContainerError::UnableToExecuteCommand(err).into())
         }
         Ok(status) => Ok(status.code().unwrap_or_default()),
+    }
+}
+
+/// Main entry point for the `mirrord container` command.
+/// This spawns: "agent" - "external proxy" - "intproxy sidecar" - "execution container"
+#[tracing::instrument(level = Level::INFO, skip(watch), ret, err)]
+pub(crate) async fn container_command(
+    runtime_args: RuntimeArgs,
+    exec_params: ExecParams,
+    watch: drain::Watch,
+) -> CliResult<i32> {
+    // TODO(alex) [low]: Crappy check, improve this.
+    if matches!(
+        runtime_args.command,
+        ContainerRuntimeCommand::Create { .. } | ContainerRuntimeCommand::Run { .. }
+    ) {
+        container_run(runtime_args, exec_params, watch).await
+    } else {
+        todo!()
     }
 }
 

@@ -875,7 +875,7 @@ impl ContainerRuntimeCommand {
     ///
     /// `runtime_args` here should be something like:
     /// `["--rm", "ghcr.io/metalbear-co/mirrord-cli:latest", "mirrord", "intproxy"]`
-    #[tracing::instrument(level = Level::INFO, skip_all, ret)]
+    #[tracing::instrument(level = Level::DEBUG, skip_all, ret)]
     pub fn create<T: Into<String>>(runtime_args: impl IntoIterator<Item = T>) -> Self {
         ContainerRuntimeCommand::Create {
             runtime_args: runtime_args.into_iter().map(T::into).collect(),

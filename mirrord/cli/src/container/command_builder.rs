@@ -267,6 +267,8 @@ impl RuntimeCommandBuilder {
         }
     }
 
+    /// Adds `/opt/mirrord` containing mirrord stuff used to `LD_PRELOAD` in the container.
+    /// This volume comes from the `VOLUME /opt/mirrord` in the mirrord-cli `Dockerfile`.
     pub(super) fn add_volumes_from<V>(&mut self, volumes_from: V)
     where
         V: Into<String>,
