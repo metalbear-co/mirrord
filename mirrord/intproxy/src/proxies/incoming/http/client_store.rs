@@ -7,7 +7,7 @@ use std::{
 
 use hyper::Version;
 use mirrord_config::feature::network::incoming::http_filter::LocalHttpDeliveryType;
-use rustls::pki_types::ServerName;
+use mirrord_tls_util::rustls::pki_types::ServerName;
 use tokio::{
     sync::Notify,
     time::{self, Instant},

@@ -14,5 +14,7 @@ pub use connector::{
     ConnectorClientAuth, ConnectorServerAuth, TlsConnectorConfig, TlsConnectorExt,
 };
 pub use error::*;
+pub use rustls;
 pub use single_cert_root_store::SingleCertRootStore;
+pub use tokio_rustls;
 pub use uri::UriExt;

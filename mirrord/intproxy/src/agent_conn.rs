@@ -2,12 +2,9 @@
 //! mirrord crates.
 
 use std::{
-    fs::File,
     io,
-    io::BufReader,
     net::{IpAddr, SocketAddr},
-    path::{Path, PathBuf},
-    sync::Arc,
+    path::Path,
 };
 
 use mirrord_analytics::Reporter;
@@ -21,6 +18,10 @@ use mirrord_kube::{
 };
 use mirrord_operator::client::{error::OperatorApiError, OperatorApi, OperatorSession};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
+use mirrord_tls_util::{
+    rustls::pki_types::ServerName, tokio_rustls::TlsConnector, BestEffortRootStore, CertWithKey,
+    ConnectorClientAuth, ConnectorServerAuth, TlsConnectorConfig, TlsConnectorExt, TlsUtilError,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{
@@ -30,7 +31,6 @@ use tokio::{
         mpsc::{Receiver, Sender},
     },
 };
-use tokio_rustls::TlsConnector;
 use tracing::Level;
 
 use crate::{
@@ -61,29 +61,12 @@ pub enum AgentConnectionError {
 
 #[derive(Error, Debug)]
 pub enum ConnectionTlsError {
-    #[error("could not open pem data from {0}, error: {1}")]
-    MissingPem(PathBuf, io::Error),
-
-    #[error("could not parse pem data from {0}, error: {1}")]
-    ParsingPem(PathBuf, io::Error),
-
-    #[error("could not find a private_key after successfuly parsing {0}")]
-    MissingPrivateKey(PathBuf),
-
-    #[error("could not setup rustls::ClientConfig with provided certificate values: {0}")]
-    ClientConfig(rustls::Error),
-
-    #[error("could not setup rustls::WebPkiClientVerifier with provided certificate values: {0}")]
-    ClientVerifier(rustls::client::VerifierBuilderError),
-
-    #[error("could not setup rustls::ServerConfig with provided certificate values: {0}")]
-    ServerConfig(rustls::Error),
-
-    #[error("got invalid proxy addr for tls connection: {0}")]
-    InvalidDnsName(IpAddr, rustls::pki_types::InvalidDnsNameError),
-
-    #[error("could not create connection with tls: {0}")]
-    Connection(io::Error),
+    #[error("failed to parse any server certificate")]
+    ServerRootCertEmpty,
+    #[error("failed to build the TLS connector: {0}")]
+    ConnectorBuildError(#[from] TlsUtilError),
+    #[error("failed to make the TLS connection: {0}")]
+    ConnectionError(#[source] io::Error),
 }
 
 /// Directive for the proxy on how to connect to the agent.
@@ -240,46 +223,26 @@ pub async fn wrap_connection_with_tls(
     client_tls_certificate: &Path,
     client_tls_key: &Path,
 ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), ConnectionTlsError> {
-    let mut root_cert_store = rustls::RootCertStore::empty();
+    let mut server_root_store = BestEffortRootStore::default();
+    server_root_store.try_add_all_from_pem(tls_certificate);
+    if server_root_store.certs() == 0 {
+        return Err(ConnectionTlsError::ServerRootCertEmpty);
+    }
 
-    root_cert_store.add_parsable_certificates(
-        rustls_pemfile::certs(&mut BufReader::new(File::open(tls_certificate).map_err(
-            |error| ConnectionTlsError::MissingPem(tls_certificate.to_path_buf(), error),
-        )?))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| ConnectionTlsError::ParsingPem(tls_certificate.to_path_buf(), error))?,
-    );
+    let client_cert =
+        CertWithKey::read(client_tls_certificate, client_tls_key).map_err(TlsUtilError::from)?;
 
-    let client_tls_certificate = rustls_pemfile::certs(&mut BufReader::new(
-        File::open(client_tls_certificate).map_err(|error| {
-            ConnectionTlsError::MissingPem(client_tls_certificate.to_path_buf(), error)
-        })?,
-    ))
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|error| ConnectionTlsError::ParsingPem(client_tls_certificate.to_path_buf(), error))?;
+    let config = TlsConnectorConfig {
+        server_auth: ConnectorServerAuth::BestEffortRootStore(server_root_store),
+        client_auth: ConnectorClientAuth::CertWithKey(client_cert),
+    };
 
-    let client_tls_keys = rustls_pemfile::private_key(&mut BufReader::new(
-        File::open(client_tls_key)
-            .map_err(|error| ConnectionTlsError::MissingPem(client_tls_key.to_path_buf(), error))?,
-    ))
-    .map_err(|error| ConnectionTlsError::ParsingPem(client_tls_key.to_path_buf(), error))?
-    .ok_or_else(|| ConnectionTlsError::MissingPrivateKey(client_tls_key.to_path_buf()))?;
+    let connector = TlsConnector::build_from_config(config)?;
+    let server_name = ServerName::IpAddress(proxy_addr.into());
+    let stream = connector
+        .connect(server_name, stream)
+        .await
+        .map_err(ConnectionTlsError::ConnectionError)?;
 
-    let tls_config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_cert_store)
-        .with_client_auth_cert(client_tls_certificate, client_tls_keys)
-        .map_err(ConnectionTlsError::ClientConfig)?;
-
-    let connector = TlsConnector::from(Arc::new(tls_config));
-
-    let domain = rustls::pki_types::ServerName::try_from(proxy_addr.to_string())
-        .map_err(|error| ConnectionTlsError::InvalidDnsName(proxy_addr, error))?
-        .to_owned();
-
-    Ok(wrap_raw_connection(
-        connector
-            .connect(domain, stream)
-            .await
-            .map_err(ConnectionTlsError::Connection)?,
-    ))
+    Ok(wrap_raw_connection(stream))
 }

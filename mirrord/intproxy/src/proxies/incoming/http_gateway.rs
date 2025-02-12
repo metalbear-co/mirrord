@@ -18,7 +18,7 @@ use mirrord_protocol::{
         InternalHttpBody, InternalHttpBodyFrame, InternalHttpResponse,
     },
 };
-use rustls::pki_types::ServerName;
+use mirrord_tls_util::{TlsUtilError, UriExt};
 use tokio::time;
 use tracing::Level;
 
@@ -73,25 +73,6 @@ impl HttpGatewayTask {
             response_mode,
             server_addr,
         }
-    }
-
-    fn tls_server_name(&self) -> Result<Option<ServerName<'static>>, LocalHttpError> {
-        if !self.is_https {
-            return Ok(None);
-        }
-
-        let mut host = self.request.internal_request.uri.host().unwrap_or_default();
-
-        if let Some(trimmed) = host
-            .strip_prefix('[')
-            .and_then(|host| host.strip_suffix(']'))
-        {
-            host = trimmed;
-        }
-
-        let name = ServerName::try_from(host)?.to_owned();
-
-        Ok(Some(name))
     }
 
     /// Handles the response if we operate in [`ResponseMode::Chunked`].
@@ -232,13 +213,15 @@ impl HttpGatewayTask {
     /// sending [`ChunkedResponse::Start`]. The agent would get a duplicated response.
     #[tracing::instrument(level = Level::TRACE, skip_all, err(level = Level::WARN))]
     async fn send_attempt(&self, message_bus: &mut MessageBus<Self>) -> Result<(), LocalHttpError> {
+        let server_name = self
+            .is_https
+            .then(|| self.request.internal_request.uri.server_name())
+            .transpose()
+            .map_err(TlsUtilError::from)?
+            .map(|name| name.to_owned());
         let mut client = self
             .client_store
-            .get(
-                self.server_addr,
-                self.request.version(),
-                self.tls_server_name()?,
-            )
+            .get(self.server_addr, self.request.version(), server_name)
             .await?;
         let mut response = client.send_request(self.request.clone()).await?;
         let on_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS).then(|| {

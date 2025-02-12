@@ -4340,15 +4340,13 @@ dependencies = [
  "mirrord-kube",
  "mirrord-operator",
  "mirrord-protocol",
+ "mirrord-tls-util",
  "rand",
  "rstest",
- "rustls 0.23.21",
- "rustls-pemfile 2.2.0",
  "semver 1.0.25",
  "serde",
  "thiserror 2.0.11",
  "tokio",
- "tokio-rustls 0.26.1",
  "tokio-stream",
  "tracing",
 ]
@@ -4529,6 +4527,19 @@ dependencies = [
  "thiserror 2.0.11",
  "tracing",
  "which 7.0.1",
+]
+
+[[package]]
+name = "mirrord-tls-util"
+version = "3.132.1"
+dependencies = [
+ "http 1.2.0",
+ "rcgen",
+ "rustls 0.23.21",
+ "rustls-pemfile 2.2.0",
+ "thiserror 2.0.11",
+ "tokio-rustls 0.26.1",
+ "x509-parser",
 ]
 
 [[package]]
@@ -7139,19 +7150,6 @@ name = "tinyvec_macros"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
-
-[[package]]
-name = "tls-util"
-version = "3.132.1"
-dependencies = [
- "http 1.2.0",
- "rcgen",
- "rustls 0.23.21",
- "rustls-pemfile 2.2.0",
- "thiserror 2.0.11",
- "tokio-rustls 0.26.1",
- "x509-parser",
-]
 
 [[package]]
 name = "tokio"
