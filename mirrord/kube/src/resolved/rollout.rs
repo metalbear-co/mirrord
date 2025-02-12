@@ -30,6 +30,7 @@ impl RuntimeDataFromLabels for ResolvedResource<Rollout> {
         RolloutTarget::get_selector_match_labels(resource)
     }
 
+    // Override auto implementaion because `LabelSelector` needs to be async fetched for Rollout
     async fn get_pods(resource: &Self::Resource, client: &Client) -> Result<Vec<Pod>> {
         RolloutTarget::get_pods(resource, client).await
     }

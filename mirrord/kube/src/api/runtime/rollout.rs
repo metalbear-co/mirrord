@@ -33,6 +33,7 @@ impl RuntimeDataFromLabels for RolloutTarget {
             .ok_or_else(|| KubeApiError::missing_field(resource, ".spec.selector.matchLabels"))
     }
 
+    // Override auto implementaion because `LabelSelector` needs to be async fetched for Rollout
     async fn get_pods(resource: &Self::Resource, client: &Client) -> Result<Vec<Pod>> {
         let formatted_labels = resource
             .get_match_labels(client)
