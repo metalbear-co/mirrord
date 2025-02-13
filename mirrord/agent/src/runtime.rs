@@ -291,7 +291,7 @@ pub(crate) struct EphemeralContainer {
 /// `container_id`.
 ///
 /// Defaults to returning `1` when we cannot find the `pid`.
-#[tracing::instrument(level = Level::DEBUG, ret, err)]
+#[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn find_pid_for_ephemeral(container_id: &str) -> Result<u64, tokio::io::Error> {
     if container_id.is_empty().not() {
         // The only error we don't ignore here, since if this fails, we can't do the `pid`
