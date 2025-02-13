@@ -1,6 +1,7 @@
 use http::Uri;
 use rustls::pki_types::{InvalidDnsNameError, ServerName};
 
+/// Convenience trait for extracting a [`ServerName`] from the request [`Uri`].
 pub trait UriExt {
     fn server_name(&self) -> Result<ServerName, InvalidDnsNameError>;
 }

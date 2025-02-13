@@ -6,8 +6,9 @@ use x509_parser::{
     prelude::{GeneralName, X509Certificate},
 };
 
-use crate::{NicePath, TlsUtilError};
+use crate::{MaybeMappedPath, TlsUtilError};
 
+/// An x509 certificate with a guaranteed [`ServerName`].
 pub struct CertWithServerName {
     cert: CertificateDer<'static>,
     server_name: ServerName<'static>,
@@ -22,12 +23,15 @@ impl fmt::Debug for CertWithServerName {
 }
 
 impl CertWithServerName {
-    /// For this method to accept the given `certificate_pem`:
+    /// Parses the certificate from the given PEM-encoded data.
+    ///
+    /// For this method to accept the data:
     /// 1. The X509 certificate must be located in the *first* PEM block. Only the *first* PEM block
     ///    is inspected.
     /// 2. The X509 certificate must contain exactly one SAN extension.
     /// 3. The SAN extension must contain at least one SAN that is a DNS name or an IP address. This
-    ///    requirement comes from [`TlsConnector::connect`] interface.
+    ///    requirement comes from [`TlsConnector::connect`](tokio_rustls::TlsConnector::connect)
+    ///    interface.
     pub fn parse(pem: &[u8]) -> Result<Self, TlsUtilError> {
         let (_, pem) = pem::parse_x509_pem(pem)?;
         let cert = pem.parse_x509()?;
@@ -39,7 +43,8 @@ impl CertWithServerName {
         })
     }
 
-    pub fn read<P: NicePath + ?Sized>(path: &P) -> Result<Self, TlsUtilError> {
+    /// Reads the given PEM file and parses its contents with [`CertWithServerName::parse`].
+    pub fn read<P: MaybeMappedPath + ?Sized>(path: &P) -> Result<Self, TlsUtilError> {
         let data = fs::read(path.real_path()).map_err(|error| TlsUtilError::ParsePemFileError {
             error,
             path: path.display_path().to_path_buf(),
@@ -52,10 +57,7 @@ impl CertWithServerName {
         &self.server_name
     }
 
-    /// Returns the first [`ServerName`] found in the given certificate.
-    ///
-    /// If the certificate does not contain exactly one SAN extension or the extension does not
-    /// contain any SAN that is a DNS name or an IP address, this method returns [`None`].
+    /// Returns the first valid [`ServerName`] found in the given certificate.
     fn get_san(cert: &X509Certificate<'_>) -> Result<ServerName<'static>, TlsUtilError> {
         let extension = cert
             .subject_alternative_name()

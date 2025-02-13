@@ -18,7 +18,7 @@ use mirrord_tls_util::{
         ClientConfig, RootCertStore, ServerConfig,
     },
     tokio_rustls::{client, server, TlsAcceptor, TlsConnector},
-    CertChain, Certs, DangerousNoVerifier, NicePath, RandomCert, TlsUtilError,
+    CertChain, Certs, DangerousNoVerifier, MaybeMappedPath, RandomCert, TlsUtilError,
 };
 use thiserror::Error;
 use tokio::{
@@ -373,7 +373,7 @@ struct ResolvedPath<'a> {
     resolved: PathBuf,
 }
 
-impl NicePath for ResolvedPath<'_> {
+impl MaybeMappedPath for ResolvedPath<'_> {
     fn display_path(&self) -> &Path {
         self.requested
     }

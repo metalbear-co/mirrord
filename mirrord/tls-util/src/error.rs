@@ -6,6 +6,7 @@ use x509_parser::{
     nom,
 };
 
+/// Errors that can occur when using util structs and traits from this crate.
 #[derive(Error, Debug)]
 pub enum TlsUtilError {
     #[error("failed to parse the PEM file at `{path}`: {error}")]

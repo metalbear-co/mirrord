@@ -3,15 +3,17 @@ use std::{fs::File, io::BufReader};
 use rustls::pki_types::CertificateDer;
 use rustls_pemfile::Item;
 
-use crate::{NicePath, TlsUtilError};
+use crate::{MaybeMappedPath, TlsUtilError};
 
+/// An iterator over x509 certificates found in a PEM file.
 pub struct Certs<'a, P> {
     path: &'a P,
     error_encountered: bool,
     file: Option<BufReader<File>>,
 }
 
-impl<'a, P: NicePath> Certs<'a, P> {
+impl<'a, P: MaybeMappedPath> Certs<'a, P> {
+    /// Produces an iterator that yields x509 certificates found in the given PEM file.
     pub fn read(path: &'a P) -> Self {
         Self {
             path,
@@ -21,7 +23,7 @@ impl<'a, P: NicePath> Certs<'a, P> {
     }
 }
 
-impl<P: NicePath> Iterator for Certs<'_, P> {
+impl<P: MaybeMappedPath> Iterator for Certs<'_, P> {
     type Item = Result<CertificateDer<'static>, TlsUtilError>;
 
     fn next(&mut self) -> Option<Self::Item> {

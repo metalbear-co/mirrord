@@ -6,6 +6,8 @@ use rustls::{
 
 /// Custom implementation of [`ServerCertVerifier`] that **always** accepts server certificate.
 ///
+/// Use with care.
+///
 /// Copied from [`reqwest` crate](https://github.com/seanmonstar/reqwest/blob/37074368012ce42e61e5649c2fffcf8c8a979e1e/src/tls.rs#L608).
 #[derive(Debug)]
 pub struct DangerousNoVerifier;

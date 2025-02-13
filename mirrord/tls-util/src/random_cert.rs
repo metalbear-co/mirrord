@@ -2,12 +2,16 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
 use crate::{CertChain, TlsUtilError};
 
+/// A random x509 certificate with a private key.
 pub struct RandomCert {
     cert: CertificateDer<'static>,
     key: PrivateKeyDer<'static>,
 }
 
 impl RandomCert {
+    /// Generates a new random self-signed certificate and a matching key.
+    ///
+    /// The certificate contains a SAN extension with the given names.
     pub fn generate(subject_alternate_names: Vec<String>) -> Result<Self, TlsUtilError> {
         let generated = rcgen::generate_simple_self_signed(subject_alternate_names)?;
         let key = generated

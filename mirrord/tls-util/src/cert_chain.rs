@@ -3,8 +3,12 @@ use std::{fmt, fs::File, io::BufReader};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls_pemfile::Item;
 
-use crate::{error::TlsUtilError, NicePath};
+use crate::{error::TlsUtilError, MaybeMappedPath};
 
+/// An x509 certificate chain with a private key.
+///
+/// Can be parsed from files with [`CertChain::read`] and decomposed with
+/// [`CertChain::into_chain_and_key`].
 pub struct CertChain {
     pub(crate) cert_chain: Vec<CertificateDer<'static>>,
     pub(crate) key: PrivateKeyDer<'static>,
@@ -13,13 +17,23 @@ pub struct CertChain {
 impl fmt::Debug for CertChain {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CertChain")
-            .field("certifiactes", &self.cert_chain.len())
+            .field("certificates", &self.cert_chain.len())
             .finish()
     }
 }
 
 impl CertChain {
-    pub fn read<P: NicePath + ?Sized>(cert_pem: &P, key_pem: &P) -> Result<Self, TlsUtilError> {
+    /// Reads the certificate chain from the PEM file given as `cert_pem` and the private key from
+    /// the PEM file given as `key_pem`.
+    ///
+    /// The `cert_pem` file must contain at least one certificate. Entries of other types are
+    /// ignored.
+    ///
+    /// The `key_pem` file must contain exactly one private key. Entries of other types are ignored.
+    pub fn read<P: MaybeMappedPath + ?Sized>(
+        cert_pem: &P,
+        key_pem: &P,
+    ) -> Result<Self, TlsUtilError> {
         let cert_chain = Self::read_cert_chain(cert_pem)?;
         let key = Self::read_key(key_pem)?;
 
@@ -38,7 +52,7 @@ impl CertChain {
         (self.cert_chain, self.key)
     }
 
-    fn read_cert_chain<P: NicePath + ?Sized>(
+    fn read_cert_chain<P: MaybeMappedPath + ?Sized>(
         path: &P,
     ) -> Result<Vec<CertificateDer<'static>>, TlsUtilError> {
         let pem =
@@ -61,7 +75,9 @@ impl CertChain {
         Ok(cert_chain)
     }
 
-    fn read_key<P: NicePath + ?Sized>(path: &P) -> Result<PrivateKeyDer<'static>, TlsUtilError> {
+    fn read_key<P: MaybeMappedPath + ?Sized>(
+        path: &P,
+    ) -> Result<PrivateKeyDer<'static>, TlsUtilError> {
         let pem =
             File::open(path.real_path()).map_err(|error| TlsUtilError::ParsePemFileError {
                 error,

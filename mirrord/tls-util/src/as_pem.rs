@@ -1,6 +1,7 @@
 use pem::{EncodeConfig, LineEnding, Pem};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
+/// Convenience trait for producing PEM-encoded representations of TLS structs.
 pub trait AsPem {
     fn as_pem(&self) -> String;
 }
