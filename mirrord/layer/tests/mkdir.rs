@@ -11,6 +11,7 @@ pub use common::*;
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
 async fn mkdir(dylib_path: &Path, config_dir: &Path) {
+    let _tracing = init_tracing();
     let application = Application::MakeDir;
     let mut config_path = config_dir.to_path_buf();
     config_path.push("fs.json");
