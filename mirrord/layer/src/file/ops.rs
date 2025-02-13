@@ -529,18 +529,25 @@ pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isi
 }
 
 #[mirrord_layer_macro::instrument(level = "trace")]
-pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
+pub(crate) fn access(path: Detour<PathBuf>, mode: c_int) -> Detour<c_int> {
     let path = path?;
 
     check_relative_paths!(path);
 
     let path = remap_path!(path);
 
-    ensure_not_ignored!(path, false);
+    // Is the caller asking about write access to the file?
+    let is_write = (mode & libc::W_OK) != 0;
+
+    // Even though `access` is never a write operation (even if mode is write), we take the mode
+    // into account when deciding whether to ignore, because when a caller is asking whether they
+    // have write access to a file and then write to it, we want the test and the actual write to
+    // happen with the same file.
+    ensure_not_ignored!(path, is_write);
 
     let access = AccessFileRequest {
         pathname: path,
-        mode,
+        mode: mode as u8,
     };
 
     let _ = common::make_proxy_request_with_response(access)??;
