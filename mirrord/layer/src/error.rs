@@ -4,7 +4,8 @@ use errno::set_errno;
 use ignore_codes::*;
 use libc::{c_char, hostent, DIR, FILE};
 use mirrord_config::config::ConfigError;
-use mirrord_protocol::{ResponseError, SerializationError};
+use mirrord_intproxy_protocol::ProxyToLayerMessage;
+use mirrord_protocol::{FileResponse, ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
 use thiserror::Error;
@@ -224,6 +225,12 @@ impl From<HookError> for i64 {
             HookError::ResponseError(ResponseError::NotImplemented) => {
                 // this means we bypass, so we can just return to avoid setting libc.
                 return -1;
+            }
+            HookError::ProxyError(ProxyError::UnexpectedResponse(ProxyToLayerMessage::File(
+                FileResponse::ReadLimited(Err(ref error)),
+            ))) => {
+                // these errors should not be fatal
+                error!("error while reading: {error}");
             }
             HookError::ProxyError(ref err) => {
                 graceful_exit!(
