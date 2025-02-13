@@ -10,7 +10,7 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn mkdir(dylib_path: &Path) {
+async fn statfs(dylib_path: &Path) {
     let application = Application::StatfsFstatfs;
 
     let (mut test_process, mut intproxy) = application

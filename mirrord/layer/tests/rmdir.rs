@@ -10,11 +10,14 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn rmdir(dylib_path: &Path) {
+async fn rmdir(dylib_path: &Path, config_dir: &Path) {
     let application = Application::RemoveDir;
+    let mut config_path = config_dir.to_path_buf();
+    config_path.push("fs.json");
+    let config_path = Some(config_path.to_str().unwrap());
 
     let (mut test_process, mut intproxy) = application
-        .start_process_with_layer(dylib_path, Default::default(), None)
+        .start_process_with_layer(dylib_path, Default::default(), config_path)
         .await;
 
     println!("waiting for MakeDirRequest.");
