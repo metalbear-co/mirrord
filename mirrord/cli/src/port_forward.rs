@@ -440,10 +440,15 @@ impl ReversePortForwarder {
         mut agent_connection: AgentConnection,
         mappings: HashMap<RemotePort, LocalPort>,
         network_config: IncomingConfig,
+        idle_local_http_connection_timeout: Duration,
     ) -> Result<Self, PortForwardError> {
         let mut background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError> =
             Default::default();
-        let incoming = background_tasks.register(IncomingProxy::default(), (), 512);
+        let incoming = background_tasks.register(
+            IncomingProxy::new(idle_local_http_connection_timeout),
+            (),
+            512,
+        );
 
         agent_connection
             .sender
@@ -1284,12 +1289,17 @@ mod test {
         let (mut test_connection, agent_connection) = TestAgentConnection::new();
 
         tokio::spawn(async move {
-            ReversePortForwarder::new(agent_connection, mappings, network_config)
-                .await
-                .unwrap()
-                .run()
-                .await
-                .unwrap()
+            ReversePortForwarder::new(
+                agent_connection,
+                mappings,
+                network_config,
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap()
+            .run()
+            .await
+            .unwrap()
         });
 
         // expect port subscription for remote port and send subscribe result
@@ -1352,12 +1362,17 @@ mod test {
 
         let (mut test_connection, agent_connection) = TestAgentConnection::new();
         tokio::spawn(async move {
-            ReversePortForwarder::new(agent_connection, mappings, network_config)
-                .await
-                .unwrap()
-                .run()
-                .await
-                .unwrap()
+            ReversePortForwarder::new(
+                agent_connection,
+                mappings,
+                network_config,
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap()
+            .run()
+            .await
+            .unwrap()
         });
 
         // expect port subscription for remote port and send subscribe result
@@ -1436,10 +1451,14 @@ mod test {
 
         let (mut test_connection, agent_connection) = TestAgentConnection::new();
         tokio::spawn(async move {
-            let mut port_forwarder =
-                ReversePortForwarder::new(agent_connection, mappings, network_config)
-                    .await
-                    .unwrap();
+            let mut port_forwarder = ReversePortForwarder::new(
+                agent_connection,
+                mappings,
+                network_config,
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap();
             port_forwarder.run().await.unwrap()
         });
 
@@ -1548,10 +1567,14 @@ mod test {
         let (mut test_connection, agent_connection) = TestAgentConnection::new();
 
         tokio::spawn(async move {
-            let mut port_forwarder =
-                ReversePortForwarder::new(agent_connection, mappings, network_config)
-                    .await
-                    .unwrap();
+            let mut port_forwarder = ReversePortForwarder::new(
+                agent_connection,
+                mappings,
+                network_config,
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap();
             port_forwarder.run().await.unwrap()
         });
 

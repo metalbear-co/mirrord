@@ -823,6 +823,16 @@
             "null"
           ]
         },
+        "idle_local_http_connection_timeout": {
+          "title": "_experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}",
+          "description": "Sets a timeout for idle local HTTP connections (in milliseconds).\n\nHTTP requests stolen with a filter are delivered to the local application from a HTTP connection made from the local machine. Once a request is delivered, the connection is cached for some time, so that it can be reused to deliver the next request.\n\nThis timeout determines for how long such connections are cached.\n\nSet to 0 to disable caching local HTTP connections (connections will be dropped as soon as the request is delivered).\n\nDefaults to 3000ms.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
         "readlink": {
           "title": "_experimental_ readlink {#experimental-readlink}",
           "description": "DEPRECATED, WILL BE REMOVED",
