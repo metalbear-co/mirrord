@@ -23,7 +23,11 @@ impl ContainerHandle {
     /// Retrieve info about the container and initialize this struct.
     #[tracing::instrument(level = "trace")]
     pub(crate) async fn new(container: Container) -> AgentResult<Self> {
-        let ContainerInfo { pid, env: raw_env } = container.get_info().await?;
+        let ContainerInfo {
+            pid,
+            env: raw_env,
+            id,
+        } = container.get_info().await?;
 
         let inner = Inner { pid, raw_env };
 

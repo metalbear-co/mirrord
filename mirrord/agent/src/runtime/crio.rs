@@ -68,6 +68,10 @@ impl ContainerRuntime for CriOContainer {
             }
         };
 
-        Ok(ContainerInfo::new(pid, Default::default()))
+        Ok(ContainerInfo::new(
+            pid,
+            Default::default(),
+            self.container_id.clone(),
+        ))
     }
 }

@@ -84,6 +84,7 @@ impl Drop for FileManager {
     }
 }
 
+#[tracing::instrument(level = Level::DEBUG, ret)]
 pub fn get_root_path_from_optional_pid(pid: Option<u64>) -> PathBuf {
     match pid {
         Some(pid) => PathBuf::from("/proc").join(pid.to_string()).join("root"),

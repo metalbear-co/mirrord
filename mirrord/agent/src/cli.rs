@@ -70,7 +70,7 @@ impl Args {
         self.is_mesh
             || matches!(
                 self.mode,
-                Mode::Targeted { mesh: Some(_), .. } | Mode::Ephemeral { mesh: Some(_) }
+                Mode::Targeted { mesh: Some(_), .. } | Mode::Ephemeral { mesh: Some(_), .. }
             )
     }
 }
@@ -95,6 +95,10 @@ pub enum Mode {
         // This argument is being kept here only for compatibility with very old CLIs.
         #[arg(long)]
         mesh: Option<String>,
+
+        /// Container id to get traffic from
+        #[arg(short, long)]
+        container_id: Option<String>,
     },
     #[default]
     Targetless,

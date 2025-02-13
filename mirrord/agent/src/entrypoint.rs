@@ -98,9 +98,11 @@ impl State {
 
                 (false, Some(container_handle), pid)
             }
-            cli::Mode::Ephemeral { .. } => {
+            cli::Mode::Ephemeral { container_id, .. } => {
                 let container_handle = ContainerHandle::new(runtime::Container::Ephemeral(
-                    runtime::EphemeralContainer {},
+                    runtime::EphemeralContainer {
+                        container_id: container_id.clone().unwrap_or_default(),
+                    },
                 ))
                 .await?;
 
@@ -133,6 +135,7 @@ impl State {
 
     /// Return the process ID of the target container if there is one.
     pub fn container_pid(&self) -> Option<u64> {
+        tracing::info!(?self.container);
         self.container.as_ref().map(ContainerHandle::pid)
     }
 
@@ -215,6 +218,7 @@ impl Drop for ClientConnectionHandler {
 
 impl ClientConnectionHandler {
     /// Initializes [`ClientConnectionHandler`].
+    #[tracing::instrument(level = Level::DEBUG, skip(connection, bg_tasks, state), err)]
     pub async fn new(
         id: ClientId,
         mut connection: ClientConnection,
