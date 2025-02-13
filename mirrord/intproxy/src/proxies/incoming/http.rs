@@ -10,12 +10,9 @@ use mirrord_protocol::{
     tcp::{HttpRequest, HttpResponse, InternalHttpResponse},
     ConnectionId, Port, RequestId,
 };
-use mirrord_tls_util::{
-    rustls::pki_types::{InvalidDnsNameError, ServerName},
-    tokio_rustls::TlsConnector,
-};
+use mirrord_tls_util::rustls::pki_types::{InvalidDnsNameError, ServerName};
 use thiserror::Error;
-use tls_connector::LazyConnectorError;
+use tls_connector::{LocalTlsConnector, LocalTlsConnectorError};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
@@ -35,14 +32,13 @@ pub use streaming_body::StreamingBody;
 pub struct LocalHttpClient {
     /// Established HTTP connection with the user application.
     sender: HttpSender,
-    /// Server name we used when making a TLS connection (for HTTPS).
-    ///
-    /// If [`None`], this client uses a plain TCP connection (HTTP).
-    tls_server_name: Option<ServerName<'static>>,
     /// Address of the user application's HTTP server.
     local_server_address: SocketAddr,
     /// Address of this client's TCP socket.
     address: SocketAddr,
+    /// If this client uses an HTTPS connection,
+    /// this info allows us to safely reuse it.
+    tls_info: Option<(LocalTlsConnector, ServerName<'static>)>,
 }
 
 impl LocalHttpClient {
@@ -52,7 +48,7 @@ impl LocalHttpClient {
         err(level = Level::WARN),
         ret,
     )]
-    pub async fn new_plain(
+    async fn new_plain(
         local_server_address: SocketAddr,
         version: Version,
     ) -> Result<Self, LocalHttpError> {
@@ -69,9 +65,9 @@ impl LocalHttpClient {
 
         Ok(Self {
             sender,
-            tls_server_name: None,
             local_server_address,
             address,
+            tls_info: None,
         })
     }
 
@@ -82,17 +78,17 @@ impl LocalHttpClient {
         err(level = Level::WARN),
         ret,
     )]
-    pub async fn new_tls(
+    async fn new_tls(
         local_server_address: SocketAddr,
         version: Version,
         server_name: ServerName<'static>,
-        connector: &TlsConnector,
+        connector: LocalTlsConnector,
     ) -> Result<Self, LocalHttpError> {
         let stream = TcpStream::connect(local_server_address)
             .await
             .map_err(LocalHttpError::ConnectTcpFailed)?;
         let stream = connector
-            .connect(server_name, stream)
+            .connect(server_name.clone(), stream)
             .await
             .map_err(LocalHttpError::ConnectTlsFailed)?;
         let local_server_address = stream
@@ -109,9 +105,9 @@ impl LocalHttpClient {
 
         Ok(Self {
             sender,
-            tls_server_name: None,
             local_server_address,
             address,
+            tls_info: Some((connector, server_name)),
         })
     }
 
@@ -138,8 +134,8 @@ impl LocalHttpClient {
         }
     }
 
-    pub fn tls_server_name(&self) -> Option<&ServerName<'static>> {
-        self.tls_server_name.as_ref()
+    pub fn tls_info(&self) -> Option<&(LocalTlsConnector, ServerName<'static>)> {
+        self.tls_info.as_ref()
     }
 }
 
@@ -149,6 +145,7 @@ impl fmt::Debug for LocalHttpClient {
             .field("local_server_address", &self.local_server_address)
             .field("address", &self.address)
             .field("is_http_1", &matches!(self.sender, HttpSender::V1(..)))
+            .field("tls_info", &self.tls_info)
             .finish()
     }
 }
@@ -185,7 +182,7 @@ pub enum LocalHttpError {
     InvalidDnsNameError(#[from] InvalidDnsNameError),
 
     #[error("failed to prepare a TLS connector: {0}")]
-    TlsConnectorError(#[from] LazyConnectorError),
+    TlsConnectorError(#[from] LocalTlsConnectorError),
 }
 
 impl LocalHttpError {

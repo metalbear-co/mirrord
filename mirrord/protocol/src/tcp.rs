@@ -123,10 +123,28 @@ pub struct HttpRequestV2Head {
     /// Address of the original source (remote client that attempted to send this request to the
     /// target container).
     pub original_source: SocketAddr,
-    /// Whether this request has been stolen from an HTTPS connection.
-    ///
-    /// This affects how this request is delivered to the user application.
-    pub is_https: bool,
+    /// How should this request be delivered to the user application.
+    pub delivery_info: HttpRequestDeliveryInfo,
+}
+
+/// Determines how a stolen HTTP request should be delivered to the user application.
+///
+/// Introduced with [`DaemonTcp::HttpRequestV2`].
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum HttpRequestDeliveryInfo {
+    /// Plain HTTP.
+    Http,
+    /// HTTP over TLS.
+    Https {
+        /// Server name used by the original client in the SNI extension.
+        ///
+        /// [`None`] if the client did not supply the SNI extension.
+        server_name: Option<String>,
+        /// Name of the ALPN protocol negotiated with the client.
+        ///
+        /// [`None`] if the client did not use ALPN.
+        alpn_protocol: Option<Vec<u8>>,
+    },
 }
 
 /// Batch of frames of a stolen HTTP/HTTPS request body.

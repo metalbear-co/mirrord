@@ -15,11 +15,11 @@ use mirrord_agent_env::envs;
 use mirrord_protocol::{
     batched_body::{BatchedBody, Frames},
     tcp::{
-        ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, DaemonTcp, HttpRequest, HttpRequestV2,
-        HttpRequestV2Error, HttpRequestV2Head, HttpRequestV2Inner, InternalHttpBody,
-        InternalHttpBodyFrame, InternalHttpBodyV2, InternalHttpRequest, StealType, TcpClose,
-        TcpData, HTTP_CHUNKED_REQUEST_VERSION, HTTP_FILTERED_UPGRADE_VERSION, HTTP_FRAMED_VERSION,
-        HTTP_V2_REQUEST_VERSION,
+        ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, DaemonTcp, HttpRequest,
+        HttpRequestDeliveryInfo, HttpRequestV2, HttpRequestV2Error, HttpRequestV2Head,
+        HttpRequestV2Inner, InternalHttpBody, InternalHttpBodyFrame, InternalHttpBodyV2,
+        InternalHttpRequest, StealType, TcpClose, TcpData, HTTP_CHUNKED_REQUEST_VERSION,
+        HTTP_FILTERED_UPGRADE_VERSION, HTTP_FRAMED_VERSION, HTTP_V2_REQUEST_VERSION,
     },
     ConnectionId,
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
@@ -280,7 +280,13 @@ impl Client {
                 },
                 original_destination: request.original_destination,
                 original_source: request.original_source,
-                is_https: request.https_info.is_some(),
+                delivery_info: request
+                    .https_info
+                    .map(|info| HttpRequestDeliveryInfo::Https {
+                        server_name: info.server_name.map(|name| name.to_str().into_owned()),
+                        alpn_protocol: info.alpn_protocol,
+                    })
+                    .unwrap_or(HttpRequestDeliveryInfo::Http),
             }),
         });
 

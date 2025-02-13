@@ -5,6 +5,7 @@ use std::{
     fmt,
     net::SocketAddr,
     ops::ControlFlow,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -14,11 +15,11 @@ use hyper::{body::Incoming, http::response::Parts, StatusCode};
 use mirrord_protocol::{
     batched_body::BatchedBody,
     tcp::{
-        ChunkedHttpBody, ChunkedHttpError, ChunkedResponse, HttpRequest, HttpResponse,
-        InternalHttpBody, InternalHttpBodyFrame, InternalHttpResponse,
+        ChunkedHttpBody, ChunkedHttpError, ChunkedResponse, HttpRequest, HttpRequestDeliveryInfo,
+        HttpResponse, InternalHttpBody, InternalHttpBodyFrame, InternalHttpResponse,
     },
 };
-use mirrord_tls_util::UriExt;
+use mirrord_tls_util::{rustls::pki_types::ServerName, UriExt};
 use tokio::time;
 use tracing::Level;
 
@@ -37,7 +38,7 @@ pub struct HttpGatewayTask {
     /// Request to deliver.
     request: HttpRequest<StreamingBody>,
     /// Determines how we deliver the request.
-    is_https: bool,
+    delivery_info: Arc<HttpRequestDeliveryInfo>,
     /// Shared cache of [`LocalHttpClient`](super::http::LocalHttpClient)s.
     client_store: ClientStore,
     /// Determines response variant.
@@ -50,7 +51,7 @@ impl fmt::Debug for HttpGatewayTask {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HttpGatewayTask")
             .field("request", &self.request)
-            .field("is_https", &self.is_https)
+            .field("delivery_info", &self.delivery_info)
             .field("response_mode", &self.response_mode)
             .field("server_addr", &self.server_addr)
             .finish()
@@ -61,14 +62,34 @@ impl HttpGatewayTask {
     /// Creates a new gateway task.
     pub fn new(
         request: HttpRequest<StreamingBody>,
-        is_https: bool,
+        mut delivery_info: HttpRequestDeliveryInfo,
         client_store: ClientStore,
         response_mode: ResponseMode,
         server_addr: SocketAddr,
     ) -> Self {
+        match &mut delivery_info {
+            HttpRequestDeliveryInfo::Http
+            | HttpRequestDeliveryInfo::Https {
+                server_name: Some(..),
+                ..
+            } => {}
+            HttpRequestDeliveryInfo::Https { server_name, .. } => {
+                let new_name = request
+                    .internal_request
+                    .uri
+                    .server_name()
+                    .ok()
+                    .unwrap_or_else(|| ServerName::from(server_addr.ip()))
+                    .to_str()
+                    .into_owned();
+
+                server_name.replace(new_name);
+            }
+        }
+
         Self {
             request,
-            is_https,
+            delivery_info: delivery_info.into(),
             client_store,
             response_mode,
             server_addr,
@@ -213,14 +234,13 @@ impl HttpGatewayTask {
     /// sending [`ChunkedResponse::Start`]. The agent would get a duplicated response.
     #[tracing::instrument(level = Level::TRACE, skip_all, err(level = Level::WARN))]
     async fn send_attempt(&self, message_bus: &mut MessageBus<Self>) -> Result<(), LocalHttpError> {
-        let server_name = self
-            .is_https
-            .then(|| self.request.internal_request.uri.server_name())
-            .transpose()?
-            .map(|name| name.to_owned());
         let mut client = self
             .client_store
-            .get(self.server_addr, self.request.version(), server_name)
+            .get(
+                self.server_addr,
+                self.request.version(),
+                self.delivery_info.clone(),
+            )
             .await?;
         let mut response = client.send_request(self.request.clone()).await?;
         let on_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS).then(|| {
@@ -546,7 +566,7 @@ mod test {
             };
             let gateway = HttpGatewayTask::new(
                 request,
-                false,
+                HttpRequestDeliveryInfo::Http,
                 ClientStore::new(LocalHttpDeliveryType::Http, Duration::from_secs(3)),
                 ResponseMode::Basic,
                 local_destination,
@@ -702,7 +722,7 @@ mod test {
         let _gateway = tasks.register(
             HttpGatewayTask::new(
                 request,
-                false,
+                HttpRequestDeliveryInfo::Http,
                 ClientStore::new(LocalHttpDeliveryType::Http, Duration::from_secs(3)),
                 response_mode,
                 addr,
@@ -852,7 +872,7 @@ mod test {
         let _gateway = tasks.register(
             HttpGatewayTask::new(
                 request,
-                false,
+                HttpRequestDeliveryInfo::Http,
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
@@ -929,7 +949,7 @@ mod test {
         let _gateway_1 = tasks.register(
             HttpGatewayTask::new(
                 request.clone(),
-                false,
+                HttpRequestDeliveryInfo::Http,
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
@@ -940,7 +960,7 @@ mod test {
         let _gateway_2 = tasks.register(
             HttpGatewayTask::new(
                 request.clone(),
-                false,
+                HttpRequestDeliveryInfo::Http,
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,

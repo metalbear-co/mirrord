@@ -7,6 +7,7 @@ use std::{
 
 use hyper::Version;
 use mirrord_config::feature::network::incoming::http_filter::LocalHttpDeliveryType;
+use mirrord_protocol::tcp::HttpRequestDeliveryInfo;
 use mirrord_tls_util::rustls::pki_types::ServerName;
 use tokio::{
     sync::Notify,
@@ -14,7 +15,7 @@ use tokio::{
 };
 use tracing::Level;
 
-use super::{tls_connector::LazyConnector, LocalHttpClient, LocalHttpError};
+use super::{tls_connector::LocalTlsConnector, LocalHttpClient, LocalHttpError};
 
 /// Idle [`LocalHttpClient`] caches in [`ClientStore`].
 struct IdleLocalClient {
@@ -40,10 +41,8 @@ pub struct ClientStore {
     /// Idle [`LocalHttpClient`]s.
     clients: Arc<Mutex<Vec<IdleLocalClient>>>,
 
-    /// Used when making TLS connections to the user application.
-    ///
-    /// If [`None`], we're always delivering plain HTTP requests.
-    tls_connector: Option<Arc<LazyConnector>>,
+    /// Determines how we deliver HTTPS requests to the user application.
+    https_delivery: LocalHttpDeliveryType,
 
     /// Used to notify other tasks when there is a new client in the store.
     ///
@@ -61,13 +60,7 @@ impl ClientStore {
     pub fn new(https_delivery: LocalHttpDeliveryType, timeout: Duration) -> Self {
         let store = Self {
             clients: Default::default(),
-            tls_connector: match https_delivery {
-                LocalHttpDeliveryType::Http => None,
-                LocalHttpDeliveryType::HttpsAnonymous => Some(Arc::new(LazyConnector::anonymous())),
-                LocalHttpDeliveryType::HttpsWithLocalCert { cert_pem, key_pem } => {
-                    Some(Arc::new(LazyConnector::authenticated(cert_pem, key_pem)))
-                }
-            },
+            https_delivery,
             notify: Default::default(),
         };
 
@@ -82,7 +75,7 @@ impl ClientStore {
         &self,
         server_addr: SocketAddr,
         version: Version,
-        tls_server_name: Option<ServerName<'static>>,
+        delivery_info: Arc<HttpRequestDeliveryInfo>,
     ) -> Result<LocalHttpClient, LocalHttpError> {
         let ready = {
             let mut guard = self
@@ -102,8 +95,8 @@ impl ClientStore {
         }
 
         tokio::select! {
-            result = self.create_client(server_addr, version, tls_server_name.clone()) => result,
-            ready = self.wait_for_ready(server_addr, version, tls_server_name.as_ref()) => {
+            result = self.create_client(server_addr, version, delivery_info.clone()) => result,
+            ready = self.wait_for_ready(server_addr, version, delivery_info.as_ref()) => {
                 tracing::trace!(?ready, "Reused an idle client");
                 Ok(ready)
             },
@@ -115,15 +108,51 @@ impl ClientStore {
         &self,
         server_addr: SocketAddr,
         version: Version,
-        tls_server_name: Option<ServerName<'static>>,
+        delivery_info: Arc<HttpRequestDeliveryInfo>,
     ) -> Result<LocalHttpClient, LocalHttpError> {
-        let (Some(name), Some(lazy_connector)) = (tls_server_name, &self.tls_connector) else {
-            return LocalHttpClient::new_plain(server_addr, version).await;
-        };
-
-        let connector = lazy_connector.get().await?;
-
-        LocalHttpClient::new_tls(server_addr, version, name, connector).await
+        match (delivery_info.as_ref(), &self.https_delivery) {
+            (HttpRequestDeliveryInfo::Http, _) => {
+                LocalHttpClient::new_plain(server_addr, version).await
+            }
+            (_, LocalHttpDeliveryType::Http) => {
+                LocalHttpClient::new_plain(server_addr, version).await
+            }
+            (
+                HttpRequestDeliveryInfo::Https {
+                    server_name,
+                    alpn_protocol,
+                },
+                LocalHttpDeliveryType::HttpsAnonymous,
+            ) => {
+                let server_name = server_name
+                    .as_deref()
+                    .and_then(|name| ServerName::try_from(name).ok())
+                    .unwrap_or_else(|| ServerName::from(server_addr.ip()))
+                    .to_owned();
+                let connector = LocalTlsConnector::anonymous(alpn_protocol.clone()).await?;
+                LocalHttpClient::new_tls(server_addr, version, server_name, connector).await
+            }
+            (
+                HttpRequestDeliveryInfo::Https {
+                    server_name,
+                    alpn_protocol,
+                },
+                LocalHttpDeliveryType::HttpsWithLocalCert { cert_pem, key_pem },
+            ) => {
+                let server_name = server_name
+                    .as_deref()
+                    .and_then(|name| ServerName::try_from(name).ok())
+                    .unwrap_or_else(|| ServerName::from(server_addr.ip()))
+                    .to_owned();
+                let connector = LocalTlsConnector::authenticated(
+                    cert_pem.clone(),
+                    key_pem.clone(),
+                    alpn_protocol.clone(),
+                )
+                .await?;
+                LocalHttpClient::new_tls(server_addr, version, server_name, connector).await
+            }
+        }
     }
 
     /// Stores an unused [`LocalHttpClient`], so that it can be reused later.
@@ -145,7 +174,7 @@ impl ClientStore {
         &self,
         server_addr: SocketAddr,
         version: Version,
-        tls_server_name: Option<&ServerName<'static>>,
+        delivery_info: &HttpRequestDeliveryInfo,
     ) -> LocalHttpClient {
         loop {
             let notified = {
@@ -153,10 +182,30 @@ impl ClientStore {
                     .clients
                     .lock()
                     .expect("ClientStore mutex is poisoned, this is a bug");
+
                 let position = guard.iter().position(|idle| {
-                    idle.client.handles_version(version)
-                        && idle.client.local_server_address() == server_addr
-                        && idle.client.tls_server_name() == tls_server_name
+                    if !idle.client.handles_version(version)
+                        || idle.client.local_server_address() != server_addr
+                    {
+                        return false;
+                    }
+
+                    match (delivery_info, idle.client.tls_info()) {
+                        (HttpRequestDeliveryInfo::Http, None) => true,
+                        (HttpRequestDeliveryInfo::Http, Some(..)) => false,
+                        (HttpRequestDeliveryInfo::Https { .. }, None) => false,
+                        (
+                            HttpRequestDeliveryInfo::Https {
+                                server_name,
+                                alpn_protocol,
+                            },
+                            Some((connector, name)),
+                        ) => {
+                            (server_name.is_none()
+                                || server_name.as_deref() == Some(&name.to_str()))
+                                && alpn_protocol.as_deref() == connector.alpn_protocol()
+                        }
+                    }
                 });
 
                 match position {
@@ -221,7 +270,7 @@ async fn cleanup_task(store: ClientStore, idle_client_timeout: Duration) {
 
 #[cfg(test)]
 mod test {
-    use std::{convert::Infallible, time::Duration};
+    use std::{convert::Infallible, sync::Arc, time::Duration};
 
     use bytes::Bytes;
     use http_body_util::Empty;
@@ -230,6 +279,7 @@ mod test {
     };
     use hyper_util::rt::TokioIo;
     use mirrord_config::feature::network::incoming::http_filter::LocalHttpDeliveryType;
+    use mirrord_protocol::tcp::HttpRequestDeliveryInfo;
     use tokio::{net::TcpListener, time};
 
     use super::ClientStore;
@@ -255,7 +305,11 @@ mod test {
 
         let client_store = ClientStore::new(LocalHttpDeliveryType::Http, Duration::from_millis(10));
         let client = client_store
-            .get(addr, Version::HTTP_11, None)
+            .get(
+                addr,
+                Version::HTTP_11,
+                Arc::new(HttpRequestDeliveryInfo::Http),
+            )
             .await
             .unwrap();
         client_store.push_idle(client);

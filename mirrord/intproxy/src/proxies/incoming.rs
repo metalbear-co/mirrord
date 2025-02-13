@@ -19,9 +19,9 @@ use mirrord_intproxy_protocol::{
 };
 use mirrord_protocol::{
     tcp::{
-        ChunkedRequest, DaemonTcp, HttpRequest, HttpRequestV2, HttpRequestV2Inner,
-        InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnection,
-        StealType, TcpData,
+        ChunkedRequest, DaemonTcp, HttpRequest, HttpRequestDeliveryInfo, HttpRequestV2,
+        HttpRequestV2Inner, InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, LayerTcpSteal,
+        NewTcpConnection, StealType, TcpData,
     },
     ClientMessage, ConnectionId, RequestId, ResponseError,
 };
@@ -182,7 +182,7 @@ impl IncomingProxy {
     async fn start_http_gateway(
         &mut self,
         request: HttpRequest<StreamingBody>,
-        is_https: bool,
+        delivery_info: HttpRequestDeliveryInfo,
         body_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
         message_bus: &MessageBus<Self>,
     ) {
@@ -241,7 +241,7 @@ impl IncomingProxy {
         let tx = self.tasks.register(
             HttpGatewayTask::new(
                 request,
-                is_https,
+                delivery_info,
                 self.client_store.clone(),
                 self.response_mode,
                 subscription.listening_on,
@@ -448,20 +448,35 @@ impl IncomingProxy {
             }
 
             DaemonTcp::HttpRequest(request) => {
-                self.start_http_gateway(request.map_body(From::from), false, None, message_bus)
-                    .await;
+                self.start_http_gateway(
+                    request.map_body(From::from),
+                    HttpRequestDeliveryInfo::Http,
+                    None,
+                    message_bus,
+                )
+                .await;
             }
 
             DaemonTcp::HttpRequestFramed(request) => {
-                self.start_http_gateway(request.map_body(From::from), false, None, message_bus)
-                    .await;
+                self.start_http_gateway(
+                    request.map_body(From::from),
+                    HttpRequestDeliveryInfo::Http,
+                    None,
+                    message_bus,
+                )
+                .await;
             }
 
             DaemonTcp::HttpRequestChunked(ChunkedRequest::Start(start)) => {
                 let (body_tx, body_rx) = mpsc::channel(128);
                 let request = start.map_body(|frames| StreamingBody::new(body_rx, frames));
-                self.start_http_gateway(request, false, Some(body_tx), message_bus)
-                    .await;
+                self.start_http_gateway(
+                    request,
+                    HttpRequestDeliveryInfo::Http,
+                    Some(body_tx),
+                    message_bus,
+                )
+                .await;
             }
 
             DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(body)) => {
@@ -504,7 +519,6 @@ impl IncomingProxy {
                     (body, Some(body_tx))
                 };
 
-                let is_https = head.is_https;
                 let request = HttpRequest {
                     internal_request: InternalHttpRequest {
                         method: head.request.method,
@@ -518,7 +532,7 @@ impl IncomingProxy {
                     port: head.original_destination.port(),
                 };
 
-                self.start_http_gateway(request, is_https, body_tx, message_bus)
+                self.start_http_gateway(request, head.delivery_info, body_tx, message_bus)
                     .await;
             }
 
