@@ -326,7 +326,7 @@ impl StolenConnections {
                             http_filters = ?filters,
                             peer_addr = %connection.source,
                             %error,
-                            "Failed to build a steal TLS acceptor",
+                            "Failed to build a steal TLS acceptor for the stolen connection",
                         );
                     })
                     .ok()
@@ -565,17 +565,12 @@ impl ConnectionTask {
                 let mut stream = StreamWithRollback::new(stream, 16);
                 let http_version = Self::get_http_version(&mut stream).await?;
                 stream.rollback();
-                let mut stream = stream.disable_rollback();
+                let stream = stream.disable_rollback();
 
                 let Some(http_version) = http_version else {
-                    tracing::trace!(
-                        "No HTTP version detected, proxying the connection transparently"
-                    );
-
-                    let mut outgoing_io = TcpStream::connect(self.connection.destination).await?;
-                    tokio::io::copy_bidirectional(&mut stream, &mut outgoing_io).await?;
-
-                    return Ok(());
+                    // This is quite problematic, because we need to send the data over a TLS
+                    // connection, and we don't have any server name ;_;
+                    todo!()
                 };
 
                 tracing::trace!(?http_version, "Detected HTTP version");
