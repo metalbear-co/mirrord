@@ -16,6 +16,7 @@ use hyper::{
     Response,
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
+use maybe_tls::MaybeTls;
 use mirrord_protocol::{ConnectionId, RequestId};
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
@@ -30,15 +31,20 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::Level;
 
 use super::{
-    ConnectionMessageIn, ConnectionMessageOut, ConnectionTaskError,
+    ConnectionMessageIn, ConnectionMessageOut, ConnectionTaskError, RequestHttpsInfo,
     STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION,
 };
 use crate::{
     http::HttpVersion,
     metrics::STEAL_FILTERED_CONNECTION_SUBSCRIPTION,
-    steal::{connections::unfiltered::UnfilteredStealTask, http::HttpFilter},
+    steal::{
+        connections::unfiltered::UnfilteredStealTask, http::HttpFilter,
+        tls::handler::PassthroughTlsConnector,
+    },
     util::ClientId,
 };
+
+mod maybe_tls;
 
 /// [`Body`](hyper::body::Body) type used in [`FilteredStealTask`].
 pub type DynamicBody = BoxBody<Bytes, hyper::Error>;
@@ -100,6 +106,11 @@ struct FilteringService {
     /// possible). However, using a [`oneshot`] here would require a combination of an [`Arc`],
     /// a [`Mutex`](std::sync::Mutex) and an [`Option`]. [`mpsc`] is used here for simplicity.
     upgrade_tx: Sender<UpgradedConnection>,
+
+    /// For making TLS connections with the original destination.
+    ///
+    /// [`None`] if this is not an HTTPS connection.
+    tls_connector: Option<PassthroughTlsConnector>,
 }
 
 impl FilteringService {
@@ -122,17 +133,28 @@ impl FilteringService {
     /// This method always creates a new TCP connection and preforms an HTTP handshake.
     /// Also, it does not retry the request upon failure.
     async fn send_request(
+        &self,
         to: SocketAddr,
         mut request: Request<Incoming>,
     ) -> Result<Response<Incoming>, Box<dyn std::error::Error>> {
         let tcp_stream = TcpStream::connect(to).await.inspect_err(|error| {
-            tracing::error!(?error, address = %to, "Failed connecting to request destination");
+            tracing::error!(?error, address = %to, "Failed to make a TCP connection to the request destination");
         })?;
+
+        let stream = match self.tls_connector.as_ref() {
+            Some(connector) => {
+                let stream = connector.connect(to.ip(), Some(request.uri()), tcp_stream).await.inspect_err(|error| {
+                    tracing::error!(%error, address = %to, "Failed to make a TLS connection to the request destination");
+                })?;
+                MaybeTls::Tls(stream.into())
+            }
+            None => MaybeTls::NoTls(tcp_stream),
+        };
 
         match request.version() {
             Version::HTTP_2 => {
                 let (mut request_sender, connection) =
-                    http2::handshake(TokioExecutor::default(), TokioIo::new(tcp_stream))
+                    http2::handshake(TokioExecutor::default(), TokioIo::new(stream))
                         .await
                         .inspect_err(|error| {
                             tracing::error!(
@@ -161,7 +183,7 @@ impl FilteringService {
             }
 
             _ => {
-                let (mut request_sender, connection) = http1::handshake(TokioIo::new(tcp_stream))
+                let (mut request_sender, connection) = http1::handshake(TokioIo::new(stream))
                     .await
                     .inspect_err(|error| {
                         tracing::error!(?error, "HTTP1 handshake with original destination failed")
@@ -201,7 +223,8 @@ impl FilteringService {
         to: SocketAddr,
     ) -> Response<DynamicBody> {
         let version = request.version();
-        let mut response = Self::send_request(to, request)
+        let mut response = self
+            .send_request(to, request)
             .await
             .map(|response| response.map(BoxBody::new))
             .unwrap_or_else(|_| {
@@ -338,6 +361,8 @@ pub struct FilteredStealTask<T> {
     /// Original destination of the stolen connection. Used when passing through HTTP requests that
     /// don't not match any filter in [`Self::filters`].
     original_destination: SocketAddr,
+    /// Original source of the stolen connection.
+    original_source: SocketAddr,
 
     /// Stealer client to [`HttpFilter`] mapping. Allows for routing HTTP requests to correct
     /// stealer clients.
@@ -376,6 +401,11 @@ pub struct FilteredStealTask<T> {
 
     /// Helps us figuring out if we should update some metrics in the `Drop` implementation.
     metrics_updated: bool,
+
+    /// For retrieving original ALPN request and server name.
+    ///
+    /// [`None`] if not HTTPS.
+    tls_connector: Option<PassthroughTlsConnector>,
 }
 
 impl<T> Drop for FilteredStealTask<T> {
@@ -399,7 +429,7 @@ where
     ///
     /// The task will not run yet, see [`Self::run`].
     #[tracing::instrument(
-        level = "trace",
+        level = Level::TRACE,
         name = "create_new_filtered_steal_task",
         skip(filters, io)
     )]
@@ -407,7 +437,9 @@ where
         connection_id: ConnectionId,
         filters: Arc<DashMap<ClientId, HttpFilter>>,
         original_destination: SocketAddr,
+        original_source: SocketAddr,
         http_version: HttpVersion,
+        tls_connector: Option<PassthroughTlsConnector>,
         io: T,
     ) -> Self {
         let (upgrade_tx, mut upgrade_rx) = mpsc::channel(1);
@@ -416,6 +448,7 @@ where
         let service = FilteringService {
             requests_tx,
             upgrade_tx,
+            tls_connector: tls_connector.clone(),
         };
 
         let cancellation_token = CancellationToken::new();
@@ -465,6 +498,7 @@ where
         Self {
             connection_id,
             original_destination,
+            original_source,
             filters,
             subscribed: Default::default(),
             requests_rx,
@@ -473,6 +507,7 @@ where
             next_request_id: Default::default(),
             _io_type: Default::default(),
             metrics_updated: false,
+            tls_connector,
         }
     }
 
@@ -612,7 +647,15 @@ where
             connection_id: self.connection_id,
             request: request.request,
             id,
-            port: self.original_destination.port(),
+            original_destination: self.original_destination,
+            original_source: self.original_source,
+            https_info: self
+                .tls_connector
+                .as_ref()
+                .map(|connector| RequestHttpsInfo {
+                    server_name: connector.server_name().cloned(),
+                    alpn_protocol: connector.alpn_protocol().map(Vec::from),
+                }),
         })
         .await?;
 
@@ -949,15 +992,15 @@ mod test {
             let original_server_token = CancellationToken::new();
             let token_clone = original_server_token.clone();
 
-            let (server_stream, client_stream) = {
+            let (server_stream, original_source, client_stream) = {
                 let stealing_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-                let ((server_stream, _), client_stream) = tokio::try_join!(
+                let ((server_stream, original_source), client_stream) = tokio::try_join!(
                     stealing_listener.accept(),
                     TcpStream::connect(stealing_listener.local_addr().unwrap()),
                 )
                 .unwrap();
 
-                (server_stream, client_stream)
+                (server_stream, original_source, client_stream)
             };
 
             tasks.spawn(async move {
@@ -997,7 +1040,9 @@ mod test {
                     Self::CONNECTION_ID,
                     filters_clone,
                     original_address,
+                    original_source,
                     HttpVersion::V1,
+                    None,
                     server_stream,
                 );
 
@@ -1116,11 +1161,11 @@ mod test {
                             client_id: received_client_id,
                             connection_id: TestSetup::CONNECTION_ID,
                             id,
-                            port,
+                            original_destination,
                             ..
                         } => {
                             assert_eq!(received_client_id, client_id);
-                            assert_eq!(port, setup.original_address.port());
+                            assert_eq!(original_destination, setup.original_address);
                             id
                         }
                         other => unreachable!("unexpected message: {other:?}"),
@@ -1196,10 +1241,10 @@ mod test {
                         client_id: 0,
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
-                        port,
+                        original_destination,
                         ..
                     } => {
-                        assert_eq!(port, setup.original_address.port());
+                        assert_eq!(original_destination, setup.original_address);
                         id
                     }
                     other => unreachable!("unexpected message: {other:?}"),
@@ -1235,10 +1280,10 @@ mod test {
                         client_id: 0,
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
-                        port,
+                        original_destination,
                         ..
                     } => {
-                        assert_eq!(port, setup.original_address.port());
+                        assert_eq!(original_destination, setup.original_address);
                         id
                     }
                     other => unreachable!("unexpected message: {other:?}"),
@@ -1300,10 +1345,10 @@ mod test {
                         client_id: 0,
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
-                        port,
+                        original_destination,
                         ..
                     } => {
-                        assert_eq!(port, setup.original_address.port());
+                        assert_eq!(original_destination, setup.original_address);
                         id
                     }
                     other => unreachable!("unexpected message: {other:?}"),
@@ -1384,10 +1429,10 @@ mod test {
                         client_id: 0,
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
-                        port,
+                        original_destination,
                         ..
                     } => {
-                        assert_eq!(port, setup.original_address.port());
+                        assert_eq!(original_destination, setup.original_address);
                         id
                     }
                     other => unreachable!("unexpected message: {other:?}"),
@@ -1435,10 +1480,11 @@ mod test {
                         client_id: 1,
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
-                        port,
+                        original_destination,
                         request,
+                        ..
                     } => {
-                        assert_eq!(port, setup.original_address.port());
+                        assert_eq!(original_destination, setup.original_address);
                         assert_eq!(
                             request.headers().get(UPGRADE).and_then(|v| v.to_str().ok()),
                             Some(TestSetup::TEST_PROTO)
@@ -1567,10 +1613,10 @@ mod test {
                         client_id: 0,
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
-                        port,
+                        original_destination,
                         ..
                     } => {
-                        assert_eq!(port, setup.original_address.port());
+                        assert_eq!(original_destination, setup.original_address);
                         id
                     }
                     other => unreachable!("unexpected message: {other:?}"),
@@ -1625,10 +1671,10 @@ mod test {
                         client_id: 0,
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
-                        port,
+                        original_destination,
                         ..
                     } => {
-                        assert_eq!(port, setup.original_address.port());
+                        assert_eq!(original_destination, setup.original_address);
                         id
                     }
                     other => unreachable!("unexpected message: {other:?}"),

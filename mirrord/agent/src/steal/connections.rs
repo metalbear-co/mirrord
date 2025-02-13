@@ -10,7 +10,8 @@ use std::{
 
 use bytes::BufMut;
 use hyper::{body::Incoming, Request, Response};
-use mirrord_protocol::{tcp::NewTcpConnection, ConnectionId, Port, RequestId};
+use mirrord_protocol::{tcp::NewTcpConnection, ConnectionId, RequestId};
+use mirrord_tls_util::rustls::pki_types::ServerName;
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
@@ -21,7 +22,10 @@ use tokio::{
 use tracing::Level;
 
 use self::{filtered::DynamicBody, unfiltered::UnfilteredStealTask};
-use super::{subscriptions::PortSubscription, tls::StealTlsHandler, StealTlsHandlers};
+use super::{
+    subscriptions::PortSubscription,
+    tls::{handler::StealTlsHandler, http_version_ext::HttpVersionExt, StealTlsHandlerStore},
+};
 use crate::{
     http::HttpVersion,
     metrics::STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION,
@@ -117,6 +121,12 @@ impl ConnectionMessageIn {
     }
 }
 
+#[derive(Debug)]
+pub struct RequestHttpsInfo {
+    pub server_name: Option<ServerName<'static>>,
+    pub alpn_protocol: Option<Vec<u8>>,
+}
+
 /// Update from some [`StolenConnection`] managed by [`StolenConnections`].
 ///
 /// # Note
@@ -145,7 +155,9 @@ pub enum ConnectionMessageOut {
         connection_id: ConnectionId,
         request: Request<Incoming>,
         id: RequestId,
-        port: Port,
+        original_destination: SocketAddr,
+        original_source: SocketAddr,
+        https_info: Option<RequestHttpsInfo>,
     },
     /// Subscribed the client to a new TCP connection.
     ///
@@ -208,13 +220,17 @@ impl fmt::Debug for ConnectionMessageOut {
                 connection_id,
                 request,
                 id,
-                port,
+                original_destination,
+                original_source,
+                https_info,
             } => {
                 debug_struct.field("type", &"Request");
                 debug_struct.field("connection_id", connection_id);
                 debug_struct.field("client_id", client_id);
                 debug_struct.field("request_id", id);
-                debug_struct.field("port", port);
+                debug_struct.field("original_destination", original_destination);
+                debug_struct.field("original_source", original_source);
+                debug_struct.field("https_info", https_info);
                 debug_struct.field("method", request.method());
                 debug_struct.field("uri", request.uri());
             }
@@ -275,7 +291,7 @@ pub struct StolenConnections {
     main_rx: Receiver<ConnectionMessageOut>,
 
     /// For filtered HTTPS stealing.
-    tls_handlers: StealTlsHandlers,
+    tls_handlers: StealTlsHandlerStore,
 }
 
 impl StolenConnections {
@@ -287,7 +303,7 @@ impl StolenConnections {
     const TASK_IN_CHANNEL_CAPACITY: usize = 16;
 
     /// Creates a new empty set of [`StolenConnection`]s.
-    pub fn new(capacity: usize, tls_handlers: StealTlsHandlers) -> Self {
+    pub fn new(capacity: usize, tls_handlers: StealTlsHandlerStore) -> Self {
         let (main_tx, main_rx) = mpsc::channel(Self::MAIN_CHANNEL_CAPACITY);
 
         Self {
@@ -477,7 +493,7 @@ impl ConnectionTask {
     const HTTP_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
     async fn get_http_version<T>(
-        stream: &mut StreamWithRollback<true, T>,
+        stream: &mut StreamWithRollback<T>,
     ) -> Result<Option<HttpVersion>, ConnectionTaskError>
     where
         T: AsyncRead + Unpin,
@@ -534,7 +550,7 @@ impl ConnectionTask {
                 let mut stream = StreamWithRollback::new(self.connection.stream, 16);
                 let http_version = Self::get_http_version(&mut stream).await?;
                 stream.rollback();
-                let mut stream = stream.disable_rollback();
+                stream.disable_rollback();
 
                 let Some(http_version) = http_version else {
                     tracing::trace!(
@@ -553,7 +569,9 @@ impl ConnectionTask {
                     self.connection_id,
                     filters,
                     self.connection.destination,
+                    self.connection.source,
                     http_version,
+                    None,
                     stream,
                 );
 
@@ -561,16 +579,73 @@ impl ConnectionTask {
             }
 
             (PortSubscription::Filtered(filters), Some(tls_handler)) => {
-                let stream = tls_handler.accept(self.connection.stream).await?;
+                let mut stream = tls_handler.accept(self.connection.stream).await?;
+
+                let http_version = stream
+                    .get_ref()
+                    .1
+                    .alpn_protocol()
+                    .and_then(HttpVersion::from_alpn_name);
+                if let Some(http_version) = http_version {
+                    tracing::trace!(?http_version, "Detected HTTP version from ALPN");
+
+                    let task = FilteredStealTask::new(
+                        self.connection_id,
+                        filters,
+                        self.connection.destination,
+                        self.connection.source,
+                        http_version,
+                        tls_handler.into_connector(stream.get_ref().1).into(),
+                        stream,
+                    );
+
+                    task.run(self.tx.clone(), &mut self.rx).await?;
+
+                    return Ok(());
+                }
+
+                if let Some(protocol) = stream.get_ref().1.alpn_protocol() {
+                    tracing::warn!(
+                        protocol = %String::from_utf8_lossy(protocol),
+                        "Stolen TLS connection was upgraded to a non-HTTP protocol with ALPN, \
+                        proxying the connection transparently."
+                    );
+
+                    let outgoing_io = TcpStream::connect(self.connection.destination).await?;
+                    let connector = tls_handler.into_connector(stream.get_ref().1);
+                    let mut outgoing_io = connector
+                        .connect(self.connection.destination.ip(), None, outgoing_io)
+                        .await?;
+
+                    tokio::io::copy_bidirectional(&mut stream, &mut outgoing_io).await?;
+
+                    return Ok(());
+                }
+
+                tracing::trace!(
+                    "Stolen TLS connection was not upgraded to any protocol, \
+                    because the client did not use ALPN."
+                );
+
                 let mut stream = StreamWithRollback::new(stream, 16);
                 let http_version = Self::get_http_version(&mut stream).await?;
                 stream.rollback();
-                let stream = stream.disable_rollback();
+                stream.disable_rollback();
 
                 let Some(http_version) = http_version else {
-                    // This is quite problematic, because we need to send the data over a TLS
-                    // connection, and we don't have any server name ;_;
-                    todo!()
+                    tracing::warn!(
+                        "No HTTP version detected, proxying the connection transparently"
+                    );
+
+                    let outgoing_io = TcpStream::connect(self.connection.destination).await?;
+                    let connector = tls_handler.into_connector(stream.inner().get_ref().1);
+                    let mut outgoing_io = connector
+                        .connect(self.connection.destination.ip(), None, outgoing_io)
+                        .await?;
+
+                    tokio::io::copy_bidirectional(&mut stream, &mut outgoing_io).await?;
+
+                    return Ok(());
                 };
 
                 tracing::trace!(?http_version, "Detected HTTP version");
@@ -579,7 +654,11 @@ impl ConnectionTask {
                     self.connection_id,
                     filters,
                     self.connection.destination,
+                    self.connection.source,
                     http_version,
+                    tls_handler
+                        .into_connector(stream.inner().get_ref().1)
+                        .into(),
                     stream,
                 );
 

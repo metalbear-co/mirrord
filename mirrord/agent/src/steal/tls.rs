@@ -3,107 +3,26 @@ use std::{
     fmt, fs, io,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
+use error::{SetupError, StealTlsError};
+use handler::StealTlsHandler;
 use mirrord_agent_env::steal_tls::{
-    AgentClientAuth, AgentServerAuth, AlpnProtocol, RemoteClientAuth, RemoteServerAuth,
-    StealTlsConfig,
+    AgentClientAuth, AgentServerAuth, RemoteClientAuth, RemoteServerAuth, StealTlsConfig,
 };
 use mirrord_tls_util::{
-    rustls::{
-        self,
-        pki_types::ServerName,
-        server::{VerifierBuilderError, WebPkiClientVerifier},
-        ClientConfig, RootCertStore, ServerConfig,
-    },
-    tokio_rustls::{client, server, TlsAcceptor, TlsConnector},
-    CertChain, Certs, DangerousNoVerifier, MaybeMappedPath, RandomCert, TlsUtilError,
-};
-use thiserror::Error;
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    task::JoinError,
+    rustls::{server::WebPkiClientVerifier, ClientConfig, RootCertStore, ServerConfig},
+    tokio_rustls::TlsAcceptor,
+    CertChain, Certs, DangerousNoVerifier, MaybeMappedPath, RandomCert,
 };
 use tracing::Level;
 
 use crate::file::RootPath;
 
-/// Errors that can occur when building a [`TlsAcceptor`]/[`TlsConnector`].
-#[derive(Error, Debug)]
-pub enum SetupError {
-    #[error("failed to read certificate chain: {0}")]
-    ReadCertChainError(#[source] TlsUtilError),
-    #[error("failed to generate a dummy certificate: {0}")]
-    GenerateDummyCertError(#[source] TlsUtilError),
-    #[error("generated an invalid dummy certificate: {0}")]
-    DummyCertInvalid(#[source] rustls::Error),
-    #[error("no good root certificate was found")]
-    NoGoodRoot,
-    #[error("failed to build the peer verifier: {0}")]
-    BuildVerifierError(#[from] VerifierBuilderError),
-    #[error("certificate chain is invalid: {0}")]
-    CertChainInvalid(#[source] rustls::Error),
-    #[error("failed to resolve path `{path}` in the target container filesystem: {error}")]
-    PathResolutionError { path: PathBuf, error: io::Error },
-}
-
-/// Errors that can occur when building a [`StealTlsHandler`].
-#[derive(Error, Debug)]
-pub enum StealTlsError {
-    /// Building is done in a blocking tokio task due to its heavy computational nature.
-    #[error("background task panicked")]
-    BackgroundTaskPanicked,
-    /// Failure when building a [`TlsAcceptor`].
-    #[error("failed to prepare mirrord-agent's TLS server: {0}")]
-    ServerSetupError(#[source] SetupError),
-    /// Failure when building a [`TlsConnector`].
-    #[error("failed to prepare mirrord-agent's TLS client: {0}")]
-    ClientSetupError(#[source] SetupError),
-}
-
-impl From<JoinError> for StealTlsError {
-    fn from(_: JoinError) -> Self {
-        Self::BackgroundTaskPanicked
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct StealTlsHandler {
-    built_at: Instant,
-    acceptor: TlsAcceptor,
-    #[allow(unused)]
-    connector: TlsConnector,
-}
-
-impl StealTlsHandler {
-    pub(crate) async fn accept<IO>(&self, stream: IO) -> io::Result<server::TlsStream<IO>>
-    where
-        IO: AsyncRead + AsyncWrite + Unpin,
-    {
-        self.acceptor.accept(stream).await
-    }
-
-    #[allow(unused)]
-    pub(crate) async fn connect<IO>(
-        &self,
-        server_name: ServerName<'static>,
-        stream: IO,
-    ) -> io::Result<client::TlsStream<IO>>
-    where
-        IO: AsyncRead + AsyncWrite + Unpin,
-    {
-        self.connector.connect(server_name, stream).await
-    }
-}
-
-impl fmt::Debug for StealTlsHandler {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StealTlsHandler")
-            .field("age_ms", &self.built_at.elapsed().as_millis())
-            .finish()
-    }
-}
+pub(crate) mod error;
+pub(crate) mod handler;
+pub(crate) mod http_version_ext;
 
 /// Internal state of [`StealTlsHandler`].
 ///
@@ -123,9 +42,9 @@ struct State {
 
 /// Struct for building and caching [`StealTlsHandler`]s.
 #[derive(Clone, Default)]
-pub(crate) struct StealTlsHandlers(Arc<State>);
+pub(crate) struct StealTlsHandlerStore(Arc<State>);
 
-impl StealTlsHandlers {
+impl StealTlsHandlerStore {
     /// How long a [`StealTlsHandler`] remains valid.
     ///
     /// When this timeout elapses, we build a new one instead of reusing the old one.
@@ -159,7 +78,7 @@ impl StealTlsHandlers {
             .inspect_err(|_| tracing::error!("Steal TLS handlers mutex is poisoned"))
             .ok()
             .and_then(|resolved| resolved.get(&port).cloned())
-            .filter(|entry| entry.built_at.elapsed() < Self::ACCEPTOR_VALIDITY);
+            .filter(|entry| entry.age() < Self::ACCEPTOR_VALIDITY);
         if let Some(ready) = ready {
             return Ok(Some(ready));
         }
@@ -173,15 +92,11 @@ impl StealTlsHandlers {
             let acceptor = this
                 .build_acceptor(&config.agent_server_auth)
                 .map_err(StealTlsError::ServerSetupError)?;
-            let connector = this
-                .build_connector(&config.agent_client_auth)
+            let client_config = this
+                .build_client_config(&config.agent_client_auth)
                 .map_err(StealTlsError::ClientSetupError)?;
 
-            Ok::<_, StealTlsError>(StealTlsHandler {
-                acceptor,
-                connector,
-                built_at: Instant::now(),
-            })
+            Ok::<_, StealTlsError>(StealTlsHandler::new(acceptor, client_config))
         })
         .await??;
 
@@ -213,7 +128,7 @@ impl StealTlsHandlers {
         })
     }
 
-    /// Builds a [`TlsAcceptor`] used by the agent on stolen connections.
+    /// Builds a [`ServerConfig`] used by the agent on stolen connections.
     #[tracing::instrument(level = Level::DEBUG, err(level = Level::DEBUG))]
     fn build_acceptor(&self, config: &AgentServerAuth) -> Result<TlsAcceptor, SetupError> {
         let cert_pem = self.resolve_in_target_filesystem(&config.cert_pem)?;
@@ -259,8 +174,8 @@ impl StealTlsHandlers {
         server_config.alpn_protocols = config
             .alpn_protocols
             .iter()
-            .filter_map(AlpnProtocol::as_bytes)
-            .map(Vec::from)
+            .cloned()
+            .map(String::into_bytes)
             .collect();
 
         Ok(TlsAcceptor::from(Arc::new(server_config)))
@@ -364,7 +279,7 @@ impl StealTlsHandlers {
     /// Builds a [`TlsConnector`] used by the agent when passing through unmatched requests to their
     /// original destination.
     #[tracing::instrument(level = Level::DEBUG, err(level = Level::DEBUG))]
-    fn build_connector(&self, config: &AgentClientAuth) -> Result<TlsConnector, SetupError> {
+    fn build_client_config(&self, config: &AgentClientAuth) -> Result<ClientConfig, SetupError> {
         let cert_pem = self.resolve_in_target_filesystem(&config.cert_pem)?;
         let key_pem = self.resolve_in_target_filesystem(&config.key_pem)?;
         let (cert_chain, key_der) = CertChain::read(&cert_pem, &key_pem)
@@ -384,17 +299,15 @@ impl StealTlsHandlers {
                 .with_custom_certificate_verifier(Arc::new(DangerousNoVerifier)),
         };
 
-        let config = builder
+        builder
             .with_client_auth_cert(cert_chain, key_der)
-            .map_err(SetupError::CertChainInvalid)?;
-
-        Ok(TlsConnector::from(Arc::new(config)))
+            .map_err(SetupError::CertChainInvalid)
     }
 }
 
-impl fmt::Debug for StealTlsHandlers {
+impl fmt::Debug for StealTlsHandlerStore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StealTlsAcceptors")
+        f.debug_struct("StealTlsHandlerStore")
             .field("config", &self.0.config)
             .field("root_path", &self.0.root_path)
             .field(

@@ -8,36 +8,38 @@ use actix_codec::ReadBuf;
 use bytes::Buf;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-pub struct StreamWithRollback<const CAN_ROLLBACK: bool, T> {
+pub struct StreamWithRollback<T> {
     inner: T,
     buffer: Cursor<Vec<u8>>,
+    can_rollback: bool,
 }
 
-impl<T> StreamWithRollback<true, T> {
+impl<T> StreamWithRollback<T> {
     pub fn new(inner: T, capacity: usize) -> Self {
         Self {
             inner,
             buffer: Cursor::new(Vec::with_capacity(capacity)),
+            can_rollback: true,
         }
     }
 
+    pub fn inner(&self) -> &T {
+        &self.inner
+    }
+
     pub fn rollback(&mut self) {
+        if !self.can_rollback {
+            panic!("disable rollback was previously called");
+        }
+
         self.buffer.set_position(0);
     }
 
-    pub fn disable_rollback(self) -> StreamWithRollback<false, T> {
-        let mut result: StreamWithRollback<false, T> = StreamWithRollback {
-            inner: self.inner,
-            buffer: self.buffer,
-        };
-
-        result.try_drop_buffer();
-
-        result
+    pub fn disable_rollback(&mut self) {
+        self.can_rollback = false;
+        self.try_drop_buffer();
     }
-}
 
-impl<T> StreamWithRollback<false, T> {
     fn try_drop_buffer(&mut self) {
         if !self.buffer.has_remaining() {
             self.buffer = Default::default();
@@ -45,7 +47,7 @@ impl<T> StreamWithRollback<false, T> {
     }
 }
 
-impl<T> AsyncRead for StreamWithRollback<true, T>
+impl<T> AsyncRead for StreamWithRollback<T>
 where
     T: AsyncRead + Unpin,
 {
@@ -72,7 +74,7 @@ where
         let inner = Pin::new(&mut this.inner);
         let result = inner.poll_read(cx, buf);
 
-        if matches!(result, Poll::Ready(Ok(()))) {
+        if this.can_rollback && matches!(result, Poll::Ready(Ok(()))) {
             let bytes_read_now = to_fill - buf.remaining();
             let total_filled = buf.filled().len();
             let new_bytes = buf
@@ -87,38 +89,7 @@ where
     }
 }
 
-impl<T> AsyncRead for StreamWithRollback<false, T>
-where
-    T: AsyncRead + Unpin,
-{
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<Result<()>> {
-        let to_fill = buf.remaining();
-        if to_fill == 0 {
-            return Poll::Ready(Ok(()));
-        }
-
-        let this = self.get_mut();
-
-        if this.buffer.has_remaining() {
-            let mut chunk = this.buffer.chunk();
-            chunk = chunk.get(..to_fill).unwrap_or(chunk);
-            buf.put_slice(chunk);
-            this.buffer.advance(chunk.len());
-
-            this.try_drop_buffer();
-
-            return Poll::Ready(Ok(()));
-        }
-
-        Pin::new(&mut this.inner).poll_read(cx, buf)
-    }
-}
-
-impl<const CAN_ROLLBACK: bool, T> AsyncWrite for StreamWithRollback<CAN_ROLLBACK, T>
+impl<T> AsyncWrite for StreamWithRollback<T>
 where
     T: AsyncWrite + Unpin,
 {

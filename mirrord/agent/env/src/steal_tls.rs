@@ -18,11 +18,11 @@ pub struct AgentServerAuth {
     /// This file must contain exactly one private key.
     /// It can contain entries of other types, e.g certificates, which are ignored.
     pub key_pem: PathBuf,
-    /// Supported ALPN protocols.
+    /// Supported ALPN protocols, in order of preference.
     ///
     /// If empty, ALPN is disabled.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub alpn_protocols: Vec<AlpnProtocol>,
+    pub alpn_protocols: Vec<String>,
     /// Configures how mirrord-agent authenticates the clients.
     ///
     /// If not present, mirrord-agent's TLS server will not offer client authentication.
@@ -104,35 +104,4 @@ pub struct StealPortTlsConfig {
     /// mirrord-agent acts as a TLS client when passing unmatched requests to their original
     /// destinations.
     pub agent_client_auth: AgentClientAuth,
-}
-
-/// Protocol supported in [ALPN](https://www.rfc-editor.org/rfc/rfc7301.html).
-///
-/// See [complete list](https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml#alpn-protocol-ids).
-#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
-pub enum AlpnProtocol {
-    #[serde(rename = "h2")]
-    H2,
-    #[serde(rename = "http/1.0")]
-    Http10,
-    #[serde(rename = "http/1.1")]
-    Http11,
-    /// For future compatibility.
-    #[serde(other)]
-    Other,
-}
-
-impl AlpnProtocol {
-    /// Returns name of this protocol as bytes,
-    /// in the format expected by the `rustls` crate.
-    pub fn as_bytes(&self) -> Option<&[u8]> {
-        let bytes: &[u8] = match self {
-            Self::H2 => b"h2",
-            Self::Http10 => b"http/1.0",
-            Self::Http11 => b"http/1.1",
-            Self::Other => return None,
-        };
-
-        Some(bytes)
-    }
 }
