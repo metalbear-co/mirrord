@@ -1,13 +1,13 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
-use k8s_openapi::api::apps::v1::StatefulSet;
+use k8s_openapi::api::apps::v1::ReplicaSet;
 use mirrord_config::target::replica_set::ReplicaSetTarget;
 
 use super::RuntimeDataFromLabels;
 use crate::error::{KubeApiError, Result};
 
 impl RuntimeDataFromLabels for ReplicaSetTarget {
-    type Resource = StatefulSet;
+    type Resource = ReplicaSet;
 
     fn name(&self) -> Cow<str> {
         Cow::from(&self.replica_set)

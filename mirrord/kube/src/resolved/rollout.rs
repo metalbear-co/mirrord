@@ -1,9 +1,13 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
+use k8s_openapi::api::core::v1::Pod;
+use kube::Client;
+use mirrord_config::target::rollout::RolloutTarget;
+
 use super::ResolvedResource;
 use crate::{
     api::{kubernetes::rollout::Rollout, runtime::RuntimeDataFromLabels},
-    error::{KubeApiError, Result},
+    error::Result,
 };
 
 impl RuntimeDataFromLabels for ResolvedResource<Rollout> {
@@ -23,15 +27,11 @@ impl RuntimeDataFromLabels for ResolvedResource<Rollout> {
     }
 
     fn get_selector_match_labels(resource: &Self::Resource) -> Result<BTreeMap<String, String>> {
-        resource
-            .spec
-            .as_ref()
-            .and_then(|spec| spec.selector.match_labels.clone())
-            .ok_or_else(|| {
-                KubeApiError::missing_field(
-                    resource,
-                    ".spec.selector or .spec.selector.match_labels",
-                )
-            })
+        RolloutTarget::get_selector_match_labels(resource)
+    }
+
+    // Override auto implementaion because `LabelSelector` needs to be async fetched for Rollout
+    async fn get_pods(resource: &Self::Resource, client: &Client) -> Result<Vec<Pod>> {
+        RolloutTarget::get_pods(resource, client).await
     }
 }

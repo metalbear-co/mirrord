@@ -39,9 +39,8 @@ pub struct RolloutStatus {
 #[serde(rename_all = "camelCase")]
 pub struct RolloutSpec {
     pub replicas: Option<i32>,
-    pub selector: LabelSelector,
-    #[serde(deserialize_with = "rollout_pod_spec")]
-    pub template: Option<PodTemplateSpec>,
+    pub selector: Option<LabelSelector>,
+    pub template: Option<RolloutSpecTemplate>,
     pub workload_ref: Option<WorkloadRef>,
 }
 
@@ -63,44 +62,6 @@ pub struct WorkloadRef {
     pub api_version: String,
     pub kind: String,
     pub name: String,
-}
-
-/// Custom deserializer for a rollout template field due to
-/// [#548](https://github.com/metalbear-co/operator/issues/548)
-/// First deserializes it as value, fixes possible issues and then deserializes it as
-/// PodTemplateSpec.
-fn rollout_pod_spec<'de, D>(deserializer: D) -> Result<Option<PodTemplateSpec>, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let mut value = serde_json::Value::deserialize(deserializer)?;
-
-    value
-        .get_mut("spec")
-        .and_then(|spec| spec.get_mut("containers")?.as_array_mut())
-        .into_iter()
-        .flatten()
-        .filter_map(|container| container.get_mut("resources"))
-        .for_each(|resources| {
-            for field in ["limits", "requests"] {
-                let Some(object) = resources.get_mut(field) else {
-                    continue;
-                };
-
-                for field in ["cpu", "memory"] {
-                    let Some(raw) = object.get_mut(field) else {
-                        continue;
-                    };
-
-                    if let Some(number) = raw.as_number() {
-                        *raw = number.to_string().into();
-                    }
-                }
-            }
-        });
-
-    let pod_template: PodTemplateSpec = serde_json::from_value(value).map_err(de::Error::custom)?;
-    Ok(Some(pod_template))
 }
 
 impl Rollout {
@@ -139,13 +100,68 @@ impl Rollout {
             RolloutSpec {
                 template: Some(template),
                 ..
-            } => Ok(Cow::Borrowed(template)),
+            } => Ok(Cow::Borrowed(template.as_ref())),
 
             RolloutSpec {
                 workload_ref: Some(workload_ref),
                 ..
             } => workload_ref
                 .get_pod_template(client, self.metadata.namespace.as_deref())
+                .await?
+                .ok_or_else(|| {
+                    KubeApiError::invalid_state(
+                        self,
+                        format_args!(
+                            "field `.spec.workloadRef` refers to an unknown resource `{}/{}`",
+                            workload_ref.api_version, workload_ref.kind
+                        ),
+                    )
+                })
+                .map(Cow::Owned),
+        }
+    }
+
+    /// Extracts [`LabelSelector`] from the [`Rollout`] or from the inner [`WorkloadRef`]
+    ///
+    /// Unlike `RuntimeDataFromLabels` trait the selector may also exist inside of the workloadRef
+    /// target thus we need an async variant to fetch with a client.
+    pub async fn get_match_labels<'a>(
+        &'a self,
+        client: &Client,
+    ) -> Result<Cow<'a, LabelSelector>, KubeApiError> {
+        let spec = self
+            .spec
+            .as_ref()
+            .ok_or_else(|| KubeApiError::missing_field(self, ".spec"))?;
+
+        match spec {
+            RolloutSpec {
+                selector: Some(..),
+                workload_ref: Some(..),
+                ..
+            } => Err(KubeApiError::invalid_state(
+                self,
+                "both `.spec.selector` and `.spec.workladRef` fields are filled",
+            )),
+
+            RolloutSpec {
+                selector: None,
+                workload_ref: None,
+                ..
+            } => Err(KubeApiError::invalid_state(
+                self,
+                "both `.spec.selector` and `.spec.workloadRef` fields are empty",
+            )),
+
+            RolloutSpec {
+                selector: Some(selector),
+                ..
+            } => Ok(Cow::Borrowed(selector)),
+            RolloutSpec {
+                workload_ref: Some(workload_ref),
+                ..
+            } => workload_ref
+                .get_match_labels(client, self.metadata.namespace.as_deref())
                 .await?
                 .ok_or_else(|| {
                     KubeApiError::invalid_state(
@@ -166,7 +182,7 @@ impl WorkloadRef {
     /// Supports references to:
     /// 1. [`Deployment`]s
     /// 2. [`ReplicaSet`]s
-    /// 3. [`PodTemplate`]s
+    /// 3. [`PodTemplate`]s (uses `.metadata.labels`)
     /// 4. [`StatefulSet`]s
     pub async fn get_pod_template(
         &self,
@@ -223,6 +239,72 @@ impl WorkloadRef {
             _ => Ok(None),
         }
     }
+
+    /// Fetched the referenced resource and extracts [`LabelSelector`].
+    /// Supports references to:
+    /// 1. [`Deployment`]s
+    /// 2. [`ReplicaSet`]s
+    /// 3. [`PodTemplate`]s
+    /// 4. [`StatefulSet`]s
+    pub async fn get_match_labels(
+        &self,
+        client: &Client,
+        namespace: Option<&str>,
+    ) -> Result<Option<LabelSelector>, KubeApiError> {
+        match (self.api_version.as_str(), self.kind.as_str()) {
+            (Deployment::API_VERSION, Deployment::KIND) => {
+                let mut deployment = get_k8s_resource_api::<Deployment>(client, namespace)
+                    .get(&self.name)
+                    .await?;
+
+                deployment
+                    .spec
+                    .take()
+                    .ok_or_else(|| KubeApiError::missing_field(&deployment, ".spec"))
+                    .map(|spec| Some(spec.selector))
+            }
+            (ReplicaSet::API_VERSION, ReplicaSet::KIND) => {
+                let mut replica_set = get_k8s_resource_api::<ReplicaSet>(client, namespace)
+                    .get(&self.name)
+                    .await?;
+
+                replica_set
+                    .spec
+                    .take()
+                    .ok_or_else(|| KubeApiError::missing_field(&replica_set, ".spec"))
+                    .map(|spec| Some(spec.selector))
+            }
+            (PodTemplate::API_VERSION, PodTemplate::KIND) => {
+                let mut pod_template = get_k8s_resource_api::<PodTemplate>(client, namespace)
+                    .get(&self.name)
+                    .await?;
+
+                pod_template
+                    .metadata
+                    .labels
+                    .take()
+                    .ok_or_else(|| KubeApiError::missing_field(&pod_template, ".metadata.labels"))
+                    .map(|match_labels| {
+                        Some(LabelSelector {
+                            match_labels: Some(match_labels),
+                            ..Default::default()
+                        })
+                    })
+            }
+            (StatefulSet::API_VERSION, StatefulSet::KIND) => {
+                let mut stateful_set = get_k8s_resource_api::<StatefulSet>(client, namespace)
+                    .get(&self.name)
+                    .await?;
+
+                stateful_set
+                    .spec
+                    .take()
+                    .ok_or_else(|| KubeApiError::missing_field(&stateful_set, ".spec"))
+                    .map(|spec| Some(spec.selector))
+            }
+            _ => Ok(None),
+        }
+    }
 }
 
 impl Resource for Rollout {
@@ -248,6 +330,53 @@ impl Metadata for Rollout {
     fn metadata_mut(&mut self) -> &mut Self::Ty {
         &mut self.metadata
     }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+pub struct RolloutSpecTemplate(#[serde(deserialize_with = "rollout_pod_spec")] PodTemplateSpec);
+
+impl AsRef<PodTemplateSpec> for RolloutSpecTemplate {
+    fn as_ref(&self) -> &PodTemplateSpec {
+        &self.0
+    }
+}
+
+/// Custom deserializer for a rollout template field due to
+/// [#548](https://github.com/metalbear-co/operator/issues/548)
+/// First deserializes it as value, fixes possible issues and then deserializes it as
+/// PodTemplateSpec.
+#[tracing::instrument(level = "debug", skip(deserializer), ret, err)]
+fn rollout_pod_spec<'de, D>(deserializer: D) -> Result<PodTemplateSpec, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let mut value = serde_json::Value::deserialize(deserializer)?;
+
+    value
+        .get_mut("spec")
+        .and_then(|spec| spec.get_mut("containers")?.as_array_mut())
+        .into_iter()
+        .flatten()
+        .filter_map(|container| container.get_mut("resources"))
+        .for_each(|resources| {
+            for field in ["limits", "requests"] {
+                let Some(object) = resources.get_mut(field) else {
+                    continue;
+                };
+
+                for field in ["cpu", "memory"] {
+                    let Some(raw) = object.get_mut(field) else {
+                        continue;
+                    };
+
+                    if let Some(number) = raw.as_number() {
+                        *raw = number.to_string().into();
+                    }
+                }
+            }
+        });
+
+    serde_json::from_value(value).map_err(de::Error::custom)
 }
 
 #[cfg(test)]
