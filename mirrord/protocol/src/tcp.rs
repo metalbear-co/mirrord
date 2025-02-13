@@ -99,6 +99,7 @@ pub enum ChunkedRequest {
     Error(ChunkedHttpError),
 }
 
+/// An HTTP or HTTPS request stolen by the mirrord-agent.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct HttpRequestV2 {
     pub connection_id: ConnectionId,
@@ -117,17 +118,27 @@ pub enum HttpRequestV2Inner {
 pub struct HttpRequestV2Head {
     #[bincode(with_serde)]
     pub request: InternalHttpRequest<InternalHttpBodyV2>,
+    /// Address of the original destination (server running in the target container).
     pub original_destination: SocketAddr,
+    /// Address of the original source (remote client that attempted to send this request to the
+    /// target container).
     pub original_source: SocketAddr,
+    /// Whether this request has been stolen from an HTTPS connection.
+    ///
+    /// This affects how this request is delivered to the user application.
     pub is_https: bool,
 }
 
+/// Batch of frames of a stolen HTTP/HTTPS request body.
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
 pub struct InternalHttpBodyV2 {
+    /// Batch of frames.
     pub frames: Vec<InternalHttpBodyFrame>,
+    /// Indicates whether this is the last batch.
     pub body_finished: bool,
 }
 
+/// An agent-side error when reading a stolen request body.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct HttpRequestV2Error {
     pub error_message: String,
@@ -393,6 +404,10 @@ pub static HTTP_CHUNKED_REQUEST_VERSION: LazyLock<VersionReq> =
 /// Minimal mirrord-protocol version that allows [`LayerTcpSteal::HttpResponseChunked`].
 pub static HTTP_CHUNKED_RESPONSE_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.8.1".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows [`DaemonTcp::HttpRequestV2`].
+pub static HTTP_V2_REQUEST_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.18.0".parse().expect("Bad Identifier"));
 
 /// Minimal mirrord-protocol version that allows [`DaemonTcp::Data`] to be sent in the same
 /// connection as

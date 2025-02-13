@@ -177,6 +177,10 @@ pub enum LocalHttpError {
     #[error("failed to read the body of the local application's HTTP server response: {0}")]
     ReadBodyFailed(#[source] hyper::Error),
 
+    /// This can happen when we need to deliver an HTTPS request.
+    ///
+    /// We need a [`ServerName`] to make the TLS connection, and we extract it from the request
+    /// URL.
     #[error("failed to extract server name from request URI: {0}")]
     InvalidDnsNameError(#[from] InvalidDnsNameError),
 
