@@ -1,4 +1,9 @@
 //! This crate contains various utility structs and trait for logic related to TLS.
+//!
+//! All code in this struct is blocking, not async, even when it does IO.
+//! This is because processing the certificates is computationally heavy anyway, and we should not
+//! do this from the main tokio thread. If you need to process TLS certs/keys, best do this in a
+//! blocking tokio task.
 
 mod as_pem;
 mod cert_chain;

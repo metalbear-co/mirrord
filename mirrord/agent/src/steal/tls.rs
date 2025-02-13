@@ -29,6 +29,7 @@ use tracing::Level;
 
 use crate::file::RootPath;
 
+/// Errors that can occur when building a [`TlsAcceptor`]/[`TlsConnector`].
 #[derive(Error, Debug)]
 pub enum SetupError {
     #[error("failed to read certificate chain: {0}")]
@@ -47,12 +48,16 @@ pub enum SetupError {
     PathResolutionError { path: PathBuf, error: io::Error },
 }
 
+/// Errors that can occur when building a [`StealTlsHandler`].
 #[derive(Error, Debug)]
 pub enum StealTlsError {
+    /// Building is done in a blocking tokio task due to its heavy computational nature.
     #[error("background task panicked")]
     BackgroundTaskPanicked,
+    /// Failure when building a [`TlsAcceptor`].
     #[error("failed to prepare mirrord-agent's TLS server: {0}")]
     ServerSetupError(#[source] SetupError),
+    /// Failure when building a [`TlsConnector`].
     #[error("failed to prepare mirrord-agent's TLS client: {0}")]
     ClientSetupError(#[source] SetupError),
 }
@@ -100,17 +105,34 @@ impl fmt::Debug for StealTlsHandler {
     }
 }
 
+/// Internal state of [`StealTlsHandler`].
+///
+/// Extracted to a separate struct for a nice [`Arc`] wrap and [`Clone`] derive on
+/// [`StealTlsHandler`].
 #[derive(Default)]
 struct State {
+    /// Configuration supplied by the operator.
     config: StealTlsConfig,
+    /// Cache for resolved handlers.
     resolved: Mutex<HashMap<u16, StealTlsHandler>>,
+    /// Path to the target container filesystem root.
+    ///
+    /// Used to resolve paths specified in [`State::config`].
     root_path: RootPath,
 }
 
+/// Struct for building and caching [`StealTlsHandler`]s.
 #[derive(Clone, Default)]
 pub(crate) struct StealTlsHandlers(Arc<State>);
 
 impl StealTlsHandlers {
+    /// How long a [`StealTlsHandler`] remains valid.
+    ///
+    /// When this timeout elapses, we build a new one instead of reusing the old one.
+    /// This to handle the case when certificates are replaced without restarting the target
+    /// container.
+    ///
+    /// Probably an example of overengineering.
     const ACCEPTOR_VALIDITY: Duration = Duration::from_secs(60);
 
     #[tracing::instrument(level = Level::DEBUG, ret)]
@@ -122,6 +144,9 @@ impl StealTlsHandlers {
         }))
     }
 
+    /// Reuses or creates a new [`StealTlsHandler`] for the given port.
+    ///
+    /// Returns [`None`] if the configuration ([`StealTlsConfig`]) does not covert this port.
     #[tracing::instrument(level = Level::DEBUG, err(level = Level::ERROR))]
     pub(crate) async fn get_handler(
         &self,
@@ -169,6 +194,7 @@ impl StealTlsHandlers {
         Ok(Some(handler))
     }
 
+    /// Resolves the given path in the target container filesystem.
     #[tracing::instrument(level = Level::TRACE, err(level = Level::TRACE))]
     fn resolve_in_target_filesystem<'a>(
         &self,
@@ -187,6 +213,7 @@ impl StealTlsHandlers {
         })
     }
 
+    /// Builds a [`TlsAcceptor`] used by the agent on stolen connections.
     #[tracing::instrument(level = Level::DEBUG, err(level = Level::DEBUG))]
     fn build_acceptor(&self, config: &AgentServerAuth) -> Result<TlsAcceptor, SetupError> {
         let cert_pem = self.resolve_in_target_filesystem(&config.cert_pem)?;
@@ -239,6 +266,14 @@ impl StealTlsHandlers {
         Ok(TlsAcceptor::from(Arc::new(server_config)))
     }
 
+    /// Builds a [`RootCertStore`] from all of the certificates found in the files
+    /// in the target container filesystem.
+    ///
+    /// `paths` are user-specified paths to PEM files or directories containing PEM files.
+    /// They must be first resolved against the target container filesystem root.
+    ///
+    /// This method never fails, but logs warnings or errors, following
+    /// [`RootCertStore::add_parsable_certificates`] example.
     #[tracing::instrument(level = Level::DEBUG, ret)]
     fn build_root_store(&self, paths: &[PathBuf]) -> RootCertStore {
         let mut root_store = RootCertStore::empty();
@@ -326,6 +361,8 @@ impl StealTlsHandlers {
         root_store
     }
 
+    /// Builds a [`TlsConnector`] used by the agent when passing through unmatched requests to their
+    /// original destination.
     #[tracing::instrument(level = Level::DEBUG, err(level = Level::DEBUG))]
     fn build_connector(&self, config: &AgentClientAuth) -> Result<TlsConnector, SetupError> {
         let cert_pem = self.resolve_in_target_filesystem(&config.cert_pem)?;
