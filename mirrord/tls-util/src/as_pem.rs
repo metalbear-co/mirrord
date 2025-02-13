@@ -16,8 +16,15 @@ impl AsPem for CertificateDer<'_> {
 
 impl AsPem for PrivateKeyDer<'_> {
     fn as_pem(&self) -> String {
+        let tag = match self {
+            Self::Pkcs1(..) => "RSA PRIVATE KEY",
+            Self::Pkcs8(..) => "PRIVATE KEY",
+            Self::Sec1(..) => "EC PRIVATE KEY",
+            _ => panic!("unsupported key type"),
+        };
+
         pem::encode_config(
-            &Pem::new("PRIVATE KEY", self.secret_der()),
+            &Pem::new(tag, self.secret_der()),
             EncodeConfig::new().set_line_ending(LineEnding::LF),
         )
     }

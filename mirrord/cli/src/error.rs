@@ -7,7 +7,10 @@ use mirrord_console::error::ConsoleError;
 use mirrord_intproxy::{agent_conn::ExtproxyConnectionTlsError, error::IntProxyError};
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
-use mirrord_tls_util::{CertWithKeyError, TlsUtilError};
+use mirrord_tls_util::{
+    rustls::{self, server::VerifierBuilderError},
+    TlsUtilError,
+};
 use mirrord_vpn::error::VpnError;
 use reqwest::StatusCode;
 use thiserror::Error;
@@ -81,7 +84,7 @@ pub(crate) enum ContainerError {
 #[derive(Error, Debug)]
 pub(crate) enum SelfSignedCertificateError {
     #[error("failed to generate a self-signed certificate for proxy: {0}")]
-    GenerateError(#[from] CertWithKeyError),
+    GenerateError(#[from] TlsUtilError),
     #[error("failed to write a self-signed certificate for proxy to a file: {0}")]
     WriteToFileError(#[from] io::Error),
 }
@@ -109,22 +112,34 @@ pub(crate) enum ExternalProxyError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     SetSid(nix::Error),
 
-    #[error("failed to parse any internal proxy certificate")]
+    #[error("failed to prepare a TLS acceptor for communication with the internal proxy: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
-    IntproxyRootCertStoreEmpty,
-
-    #[error("failed to build the TLS acceptor: {0}")]
-    AcceptorBuildError(#[from] TlsUtilError),
-
-    #[error(
-        "there was no tls information provided, see `external_proxy` keys in config if specified"
-    )]
-    #[diagnostic(help("{GENERAL_BUG}"))]
-    MissingTlsInfo,
+    ExternalProxyTlsError(#[from] ExternalProxyTlsError),
 
     #[error("External proxy ping pong with the agent failed: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     PingPongFailed(String),
+}
+
+/// Errors that can occur when the external proxy prepares a TLS acceptor for communication with the
+/// internal proxy.
+#[derive(Debug, Error)]
+pub(crate) enum ExternalProxyTlsError {
+    #[error(
+        "no TLS configuration was provided, \
+        see `external_proxy` keys in config if specified"
+    )]
+    MissingTlsInfo,
+    #[error("failed to read external proxy TLS certificate: {0}")]
+    ExtProxyReadCertError(#[source] TlsUtilError),
+    #[error("failed to read internal proxy TLS certificate: {0}")]
+    IntProxyReadCertError(#[source] TlsUtilError),
+    #[error("internal proxy TLS certificate is invalid: {0}")]
+    InvalidIntProxyCert(#[source] rustls::Error),
+    #[error("failed to build client verifier: {0}")]
+    BuildVerifierError(#[from] VerifierBuilderError),
+    #[error("external proxy TLS certificate is invalid: {0}")]
+    InvalidExtProxyCert(#[source] rustls::Error),
 }
 
 /// Errors that can occur when executing the `mirrord intproxy` command.
@@ -533,8 +548,9 @@ mod tests {
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::ListParams, Api};
     use mirrord_tls_util::{
-        rustls::crypto::aws_lc_rs::default_provider, tokio_rustls::TlsAcceptor, AcceptorClientAuth,
-        CertWithKey, TlsAcceptorConfig, TlsAcceptorExt,
+        rustls::{crypto::aws_lc_rs::default_provider, ServerConfig},
+        tokio_rustls::TlsAcceptor,
+        CertChain, RandomCert,
     };
     use tokio::{net::TcpListener, sync::Notify};
 
@@ -591,25 +607,27 @@ mod tests {
         );
     }
 
+    /// Helper function for the [`kube_service_error_dependency_is_in_sync`] test.
+    ///
     /// Creates an [`hyper`] server with a broken certificate and a _catch-all_ route on
     /// `localhost:9669`.
     ///
-    /// The certificate is generated here with [`rcgen::generate_simple_self_signed`].
+    /// The certificate is generated here with [`RandomCert::generate`].
     async fn run_hyper_tls_server(notify: Arc<Notify>) {
         let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 9669);
 
         let incoming = TcpListener::bind(&addr).await.unwrap();
 
         // Generate a certificate that should not work with kube.
-        let cert = CertWithKey::new_random_self_signed(["mieszko.i".to_string()]).unwrap();
+        let cert = RandomCert::generate(vec!["mieszko.i".to_string()]).unwrap();
+        let (cert_chain, key_der) = CertChain::from(cert).into_chain_and_key();
 
-        let config = TlsAcceptorConfig {
-            server_auth: cert,
-            client_auth: AcceptorClientAuth::Disabled,
-            alpn_protocols: vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()],
-        };
-
-        let tls_acceptor = TlsAcceptor::build_from_config(config).unwrap();
+        let mut config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(cert_chain, key_der)
+            .unwrap();
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
+        let tls_acceptor = TlsAcceptor::from(Arc::new(config));
 
         /// Catch-all handler, we don't care about the response, any request is supposed
         /// to fail due to `InvalidCertificate`.

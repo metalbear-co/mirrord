@@ -8,9 +8,9 @@ use rustls::{
 ///
 /// Copied from [`reqwest` crate](https://github.com/seanmonstar/reqwest/blob/37074368012ce42e61e5649c2fffcf8c8a979e1e/src/tls.rs#L608).
 #[derive(Debug)]
-pub(crate) struct NoVerifier;
+pub struct DangerousNoVerifier;
 
-impl ServerCertVerifier for NoVerifier {
+impl ServerCertVerifier for DangerousNoVerifier {
     fn verify_server_cert(
         &self,
         _end_entity: &CertificateDer,

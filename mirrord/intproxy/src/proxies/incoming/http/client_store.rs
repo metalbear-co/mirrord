@@ -123,7 +123,7 @@ impl ClientStore {
 
         let connector = lazy_connector.get().await?;
 
-        LocalHttpClient::new_tls(server_addr, version, name, &connector).await
+        LocalHttpClient::new_tls(server_addr, version, name, connector).await
     }
 
     /// Stores an unused [`LocalHttpClient`], so that it can be reused later.

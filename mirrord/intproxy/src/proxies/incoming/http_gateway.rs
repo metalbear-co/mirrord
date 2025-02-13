@@ -18,7 +18,7 @@ use mirrord_protocol::{
         InternalHttpBody, InternalHttpBodyFrame, InternalHttpResponse,
     },
 };
-use mirrord_tls_util::{TlsUtilError, UriExt};
+use mirrord_tls_util::UriExt;
 use tokio::time;
 use tracing::Level;
 
@@ -216,8 +216,7 @@ impl HttpGatewayTask {
         let server_name = self
             .is_https
             .then(|| self.request.internal_request.uri.server_name())
-            .transpose()
-            .map_err(TlsUtilError::from)?
+            .transpose()?
             .map(|name| name.to_owned());
         let mut client = self
             .client_store

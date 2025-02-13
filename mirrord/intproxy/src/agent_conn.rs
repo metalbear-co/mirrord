@@ -1,11 +1,7 @@
 //! Implementation of `proxy <-> agent` connection through [`mpsc`] channels created in different
 //! mirrord crates.
 
-use std::{
-    io,
-    net::{IpAddr, SocketAddr},
-    path::Path,
-};
+use std::{io, net::SocketAddr, path::Path, sync::Arc};
 
 use mirrord_analytics::Reporter;
 use mirrord_config::LayerConfig;
@@ -19,8 +15,9 @@ use mirrord_kube::{
 use mirrord_operator::client::{error::OperatorApiError, OperatorApi, OperatorSession};
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use mirrord_tls_util::{
-    rustls::pki_types::ServerName, tokio_rustls::TlsConnector, BestEffortRootStore, CertWithKey,
-    ConnectorClientAuth, ConnectorServerAuth, TlsConnectorConfig, TlsConnectorExt, TlsUtilError,
+    rustls::{self, ClientConfig, RootCertStore},
+    tokio_rustls::TlsConnector,
+    CertChain, CertWithServerName, TlsUtilError,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -57,14 +54,19 @@ pub enum AgentConnectionError {
     NoConnectionMethod,
 }
 
+/// Errors that can occur when internal proxy makes a TLS connection to the external proxy.
 #[derive(Error, Debug)]
 pub enum ExtproxyConnectionTlsError {
-    #[error("failed to parse any external proxy certificate")]
-    ExtproxyRootCertStoreEmpty,
-    #[error("failed to build the TLS connector: {0}")]
-    ConnectorBuildError(#[from] TlsUtilError),
-    #[error(transparent)]
-    Io(#[from] io::Error),
+    #[error("failed to read external proxy certificate: {0}")]
+    ReadExtproxyCertError(#[source] TlsUtilError),
+    #[error("failed to add external proxy certificate as a root: {0}")]
+    ExtproxyCertAsRootError(#[source] rustls::Error),
+    #[error("failed to read internal proxy certificate chain: {0}")]
+    ReadIntproxyCertChainError(#[source] TlsUtilError),
+    #[error("internal proxy certificate chain is invalid: {0}")]
+    InvalidIntproxyCertChain(#[source] rustls::Error),
+    #[error("connection failed: {0}")]
+    ConnectionFailed(#[source] io::Error),
 }
 
 /// Directive for the proxy on how to connect to the agent.
@@ -125,7 +127,6 @@ impl AgentConnection {
                 {
                     wrap_connection_with_tls(
                         stream,
-                        proxy_addr.ip(),
                         tls_certificate,
                         client_tls_certificate,
                         client_tls_key,
@@ -214,31 +215,38 @@ impl BackgroundTask for AgentConnection {
     }
 }
 
+/// Accepts an established [`TcpStream`] with the external proxy, uses it to make a TLS connection
+/// and returns [`mpsc`] handles to a [`tokio::task`] that operates the stream.
 pub async fn wrap_connection_with_tls(
     stream: TcpStream,
-    proxy_addr: IpAddr,
-    tls_certificate: &Path,
-    client_tls_certificate: &Path,
-    client_tls_key: &Path,
+    extproxy_tls_certificate: &Path,
+    intproxy_tls_certificate: &Path,
+    intproxy_tls_key: &Path,
 ) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), ExtproxyConnectionTlsError>
 {
-    let mut server_root_store = BestEffortRootStore::default();
-    server_root_store.try_add_all_from_pem(tls_certificate);
-    if server_root_store.certs() == 0 {
-        return Err(ExtproxyConnectionTlsError::ExtproxyRootCertStoreEmpty);
-    }
+    let extproxy_cert = CertWithServerName::read(extproxy_tls_certificate)
+        .map_err(ExtproxyConnectionTlsError::ReadExtproxyCertError)?;
+    let server_name = extproxy_cert.server_name().clone();
 
-    let client_cert =
-        CertWithKey::read(client_tls_certificate, client_tls_key).map_err(TlsUtilError::from)?;
+    let mut root_store = RootCertStore::empty();
+    root_store
+        .add(extproxy_cert.into())
+        .map_err(ExtproxyConnectionTlsError::ExtproxyCertAsRootError)?;
 
-    let config = TlsConnectorConfig {
-        server_auth: ConnectorServerAuth::BestEffortRootStore(server_root_store),
-        client_auth: ConnectorClientAuth::CertWithKey(client_cert),
-    };
+    let intproxy_chain = CertChain::read(intproxy_tls_certificate, intproxy_tls_key)
+        .map_err(ExtproxyConnectionTlsError::ReadIntproxyCertChainError)?;
+    let (cert_chain, key_der) = intproxy_chain.into_chain_and_key();
 
-    let connector = TlsConnector::build_from_config(config)?;
-    let server_name = ServerName::IpAddress(proxy_addr.into());
-    let stream = connector.connect(server_name, stream).await?;
+    let client_config = ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_client_auth_cert(cert_chain, key_der)
+        .map_err(ExtproxyConnectionTlsError::InvalidIntproxyCertChain)?;
+    let connector = TlsConnector::from(Arc::new(client_config));
+
+    let stream = connector
+        .connect(server_name, stream)
+        .await
+        .map_err(ExtproxyConnectionTlsError::ConnectionFailed)?;
 
     Ok(wrap_raw_connection(stream))
 }

@@ -1,37 +1,51 @@
-use std::{net::IpAddr, sync::Arc};
+use std::{fmt, fs, net::IpAddr};
 
-use rustls::{
-    pki_types::{DnsName, ServerName},
-    RootCertStore,
-};
+use rustls::pki_types::{CertificateDer, DnsName, ServerName};
 use x509_parser::{
     pem,
     prelude::{GeneralName, X509Certificate},
 };
 
-use crate::SingleCertRootStoreError;
+use crate::{NicePath, TlsUtilError};
 
-pub struct SingleCertRootStore {
-    store: RootCertStore,
+pub struct CertWithServerName {
+    cert: CertificateDer<'static>,
     server_name: ServerName<'static>,
 }
 
-impl SingleCertRootStore {
+impl fmt::Debug for CertWithServerName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CertWithServerName")
+            .field("server_name", &self.server_name)
+            .finish()
+    }
+}
+
+impl CertWithServerName {
     /// For this method to accept the given `certificate_pem`:
     /// 1. The X509 certificate must be located in the *first* PEM block. Only the *first* PEM block
     ///    is inspected.
     /// 2. The X509 certificate must contain exactly one SAN extension.
     /// 3. The SAN extension must contain at least one SAN that is a DNS name or an IP address. This
     ///    requirement comes from [`TlsConnector::connect`] interface.
-    pub fn read(pem: &[u8]) -> Result<Self, SingleCertRootStoreError> {
+    pub fn parse(pem: &[u8]) -> Result<Self, TlsUtilError> {
         let (_, pem) = pem::parse_x509_pem(pem)?;
         let cert = pem.parse_x509()?;
         let server_name = Self::get_san(&cert)?;
 
-        let mut store = RootCertStore::empty();
-        store.add(pem.contents.into())?;
+        Ok(Self {
+            cert: pem.contents.into(),
+            server_name,
+        })
+    }
 
-        Ok(Self { store, server_name })
+    pub fn read<P: NicePath + ?Sized>(path: &P) -> Result<Self, TlsUtilError> {
+        let data = fs::read(path.real_path()).map_err(|error| TlsUtilError::ParsePemFileError {
+            error,
+            path: path.display_path().to_path_buf(),
+        })?;
+
+        Self::parse(&data)
     }
 
     pub fn server_name(&self) -> &ServerName<'static> {
@@ -42,13 +56,11 @@ impl SingleCertRootStore {
     ///
     /// If the certificate does not contain exactly one SAN extension or the extension does not
     /// contain any SAN that is a DNS name or an IP address, this method returns [`None`].
-    fn get_san(
-        cert: &X509Certificate<'_>,
-    ) -> Result<ServerName<'static>, SingleCertRootStoreError> {
+    fn get_san(cert: &X509Certificate<'_>) -> Result<ServerName<'static>, TlsUtilError> {
         let extension = cert
             .subject_alternative_name()
-            .map_err(SingleCertRootStoreError::InvalidSanExtension)?
-            .ok_or(SingleCertRootStoreError::NoSanExtension)?;
+            .map_err(TlsUtilError::InvalidSanExtension)?
+            .ok_or(TlsUtilError::NoSanExtension)?;
 
         extension
             .value
@@ -75,18 +87,31 @@ impl SingleCertRootStore {
 
                 _ => None,
             })
-            .ok_or(SingleCertRootStoreError::NoSubjectAlternateName)
+            .ok_or(TlsUtilError::NoSubjectAlternateName)
     }
 }
 
-impl From<SingleCertRootStore> for RootCertStore {
-    fn from(value: SingleCertRootStore) -> Self {
-        value.store
+impl From<CertWithServerName> for CertificateDer<'static> {
+    fn from(value: CertWithServerName) -> Self {
+        value.cert
     }
 }
 
-impl From<SingleCertRootStore> for Arc<RootCertStore> {
-    fn from(value: SingleCertRootStore) -> Self {
-        Arc::new(value.store)
+#[cfg(test)]
+mod test {
+    use rustls::pki_types::ServerName;
+
+    use super::CertWithServerName;
+    use crate::{AsPem, RandomCert};
+
+    #[test]
+    fn generate_random_and_parse() {
+        let random = RandomCert::generate(vec!["operator".into()]).unwrap();
+        let as_pem = random.cert().as_pem();
+        let parsed = CertWithServerName::parse(as_pem.as_bytes()).unwrap();
+        assert_eq!(
+            *parsed.server_name(),
+            ServerName::try_from("operator").unwrap()
+        );
     }
 }

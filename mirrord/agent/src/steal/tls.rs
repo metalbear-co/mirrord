@@ -1,19 +1,24 @@
 use std::{
     collections::HashMap,
-    fmt, io,
+    fmt, fs, io,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
 use mirrord_agent_env::steal_tls::{
-    AgentClientAuth, AlpnProtocol, RemoteClientAuth, StealPortTlsConfig, StealTlsConfig,
+    AgentClientAuth, AgentServerAuth, AlpnProtocol, RemoteClientAuth, RemoteServerAuth,
+    StealTlsConfig,
 };
 use mirrord_tls_util::{
-    rustls::pki_types::ServerName,
+    rustls::{
+        self,
+        pki_types::ServerName,
+        server::{VerifierBuilderError, WebPkiClientVerifier},
+        ClientConfig, RootCertStore, ServerConfig,
+    },
     tokio_rustls::{client, server, TlsAcceptor, TlsConnector},
-    AcceptorClientAuth, BestEffortRootStore, CertWithKey, ConnectorClientAuth, ConnectorServerAuth,
-    TlsAcceptorConfig, TlsAcceptorExt, TlsConnectorConfig, TlsConnectorExt, TlsUtilError,
+    CertChain, Certs, DangerousNoVerifier, NicePath, RandomCert, TlsUtilError,
 };
 use thiserror::Error;
 use tokio::{
@@ -25,15 +30,31 @@ use tracing::Level;
 use crate::file::RootPath;
 
 #[derive(Error, Debug)]
-pub enum StealTlsError {
+pub enum SetupError {
+    #[error("failed to read certificate chain: {0}")]
+    ReadCertChainError(#[source] TlsUtilError),
+    #[error("failed to generate a dummy certificate: {0}")]
+    GenerateDummyCertError(#[source] TlsUtilError),
+    #[error("generated an invalid dummy certificate: {0}")]
+    DummyCertInvalid(#[source] rustls::Error),
+    #[error("no good root certificate was found")]
+    NoGoodRoot,
+    #[error("failed to build the peer verifier: {0}")]
+    BuildVerifierError(#[from] VerifierBuilderError),
+    #[error("certificate chain is invalid: {0}")]
+    CertChainInvalid(#[source] rustls::Error),
     #[error("failed to resolve path `{path}` in the target container filesystem: {error}")]
     PathResolutionError { path: PathBuf, error: io::Error },
-    #[error(transparent)]
-    TlsUtilError(#[from] TlsUtilError),
-    #[error("produced an empty root certificates store")]
-    EmptyRootCertStore,
-    #[error("background task responsible for builing TLS configuration panicked")]
+}
+
+#[derive(Error, Debug)]
+pub enum StealTlsError {
+    #[error("background task panicked")]
     BackgroundTaskPanicked,
+    #[error("failed to prepare mirrord-agent's TLS server: {0}")]
+    ServerSetupError(#[source] SetupError),
+    #[error("failed to prepare mirrord-agent's TLS client: {0}")]
+    ClientSetupError(#[source] SetupError),
 }
 
 impl From<JoinError> for StealTlsError {
@@ -67,10 +88,7 @@ impl StealTlsHandler {
     where
         IO: AsyncRead + AsyncWrite + Unpin,
     {
-        self.connector
-            .connect(server_name, stream)
-            .await
-            .map_err(From::from)
+        self.connector.connect(server_name, stream).await
     }
 }
 
@@ -93,7 +111,7 @@ struct State {
 pub(crate) struct StealTlsHandlers(Arc<State>);
 
 impl StealTlsHandlers {
-    const ACCEPTOR_VALIDITY: Duration = Duration::from_secs(30);
+    const ACCEPTOR_VALIDITY: Duration = Duration::from_secs(60);
 
     #[tracing::instrument(level = Level::DEBUG, ret)]
     pub(crate) fn new(config: StealTlsConfig, target_pid: u64) -> Self {
@@ -126,7 +144,21 @@ impl StealTlsHandlers {
         };
 
         let this = self.clone();
-        let handler = tokio::task::spawn_blocking(move || this.build_handler(&config)).await??;
+        let handler = tokio::task::spawn_blocking(move || {
+            let acceptor = this
+                .build_acceptor(&config.agent_server_auth)
+                .map_err(StealTlsError::ServerSetupError)?;
+            let connector = this
+                .build_connector(&config.agent_client_auth)
+                .map_err(StealTlsError::ClientSetupError)?;
+
+            Ok::<_, StealTlsError>(StealTlsHandler {
+                acceptor,
+                connector,
+                built_at: Instant::now(),
+            })
+        })
+        .await??;
 
         if let Ok(mut resolved) = self.0.resolved.lock() {
             resolved.insert(port, handler.clone());
@@ -138,102 +170,188 @@ impl StealTlsHandlers {
     }
 
     #[tracing::instrument(level = Level::TRACE, err(level = Level::TRACE))]
-    fn resolve_in_target_filesystem(&self, path: &Path) -> Result<PathBuf, StealTlsError> {
-        self.0
-            .root_path
-            .resolve_path(path)
-            .map_err(|error| StealTlsError::PathResolutionError {
+    fn resolve_in_target_filesystem<'a>(
+        &self,
+        path: &'a Path,
+    ) -> Result<ResolvedPath<'a>, SetupError> {
+        let resolved = self.0.root_path.resolve_path(path).map_err(|error| {
+            SetupError::PathResolutionError {
                 path: path.to_path_buf(),
                 error,
-            })
-    }
+            }
+        })?;
 
-    #[tracing::instrument(level = Level::DEBUG, err(level = Level::DEBUG))]
-    fn build_handler(&self, config: &StealPortTlsConfig) -> Result<StealTlsHandler, StealTlsError> {
-        let acceptor = self.build_acceptor(&config)?;
-        let connector = self.build_connector(&config)?;
-
-        Ok(StealTlsHandler {
-            acceptor,
-            connector,
-            built_at: Instant::now(),
+        Ok(ResolvedPath {
+            requested: path,
+            resolved,
         })
     }
 
     #[tracing::instrument(level = Level::DEBUG, err(level = Level::DEBUG))]
-    fn build_acceptor(&self, config: &StealPortTlsConfig) -> Result<TlsAcceptor, StealTlsError> {
-        let cert_pem = self.resolve_in_target_filesystem(&config.remote_server_auth.cert_pem)?;
-        let cert_key = self.resolve_in_target_filesystem(&config.remote_server_auth.key_pem)?;
-        let server_auth = CertWithKey::read(&cert_pem, &cert_key).map_err(TlsUtilError::from)?;
+    fn build_acceptor(&self, config: &AgentServerAuth) -> Result<TlsAcceptor, SetupError> {
+        let cert_pem = self.resolve_in_target_filesystem(&config.cert_pem)?;
+        let cert_key = self.resolve_in_target_filesystem(&config.key_pem)?;
+        let (cert_chain, key_der) = CertChain::read(&cert_pem, &cert_key)
+            .map_err(SetupError::ReadCertChainError)?
+            .into_chain_and_key();
 
-        let client_auth = match &config.remote_client_auth {
+        let builder = match &config.client_auth {
             Some(RemoteClientAuth {
-                allow_unauthenticated,
+                allow_anonymous,
                 root_cert_pems,
             }) => {
-                let mut store = BestEffortRootStore::default();
+                let mut store = self.build_root_store(root_cert_pems);
 
-                for path in root_cert_pems {
-                    let Ok(path) = self.resolve_in_target_filesystem(path) else {
-                        continue;
-                    };
-
-                    store.try_add_all_from_pem(&path);
+                if store.is_empty() {
+                    if *allow_anonymous {
+                        let dummy = RandomCert::generate(vec!["dummy".into()])
+                            .map_err(SetupError::GenerateDummyCertError)?;
+                        store
+                            .add(dummy.into())
+                            .map_err(SetupError::DummyCertInvalid)?;
+                    } else {
+                        return Err(SetupError::NoGoodRoot);
+                    }
                 }
 
-                if !*allow_unauthenticated && store.certs() == 0 {
-                    return Err(StealTlsError::EmptyRootCertStore);
+                let mut builder = WebPkiClientVerifier::builder(store.into());
+                if *allow_anonymous {
+                    builder = builder.allow_unauthenticated();
                 }
 
-                AcceptorClientAuth::WithRootStore {
-                    store,
-                    allow_unauthenticated: *allow_unauthenticated,
+                let verifier = builder.build().map_err(SetupError::from)?;
+
+                ServerConfig::builder().with_client_cert_verifier(verifier)
+            }
+            None => ServerConfig::builder().with_no_client_auth(),
+        };
+
+        let mut server_config = builder
+            .with_single_cert(cert_chain, key_der)
+            .map_err(SetupError::CertChainInvalid)?;
+        server_config.alpn_protocols = config
+            .alpn_protocols
+            .iter()
+            .filter_map(AlpnProtocol::as_bytes)
+            .map(Vec::from)
+            .collect();
+
+        Ok(TlsAcceptor::from(Arc::new(server_config)))
+    }
+
+    #[tracing::instrument(level = Level::DEBUG, ret)]
+    fn build_root_store(&self, paths: &[PathBuf]) -> RootCertStore {
+        let mut root_store = RootCertStore::empty();
+
+        let mut queue = Vec::with_capacity(paths.len());
+        for path in paths {
+            match self.0.root_path.resolve_path(path) {
+                Ok(resolved) => queue.push((resolved, true)),
+                Err(error) => {
+                    tracing::error!(
+                        %error,
+                        ?path,
+                        "Tracing failed to resolve a path in the target container file system \
+                        when building a root cert store."
+                    );
                 }
             }
-            None => AcceptorClientAuth::Disabled,
-        };
+        }
 
-        let server_config = TlsAcceptorConfig {
-            server_auth,
-            client_auth,
-            alpn_protocols: config
-                .remote_server_auth
-                .alpn_protocols
-                .iter()
-                .filter_map(AlpnProtocol::as_bytes)
-                .map(Vec::from)
-                .collect(),
-        };
+        while let Some((path, read_if_dir)) = queue.pop() {
+            let entries = if read_if_dir {
+                match fs::read_dir(&path) {
+                    Ok(entries) => Some(entries),
+                    Err(error) if error.kind() == io::ErrorKind::NotADirectory => None,
+                    Err(error) => {
+                        tracing::error!(
+                            %error,
+                            ?path,
+                            "Failed to access a file when building a root cert store."
+                        );
+                        continue;
+                    }
+                }
+            } else {
+                None
+            };
 
-        TlsAcceptor::build_from_config(server_config).map_err(From::from)
+            if let Some(entries) = entries {
+                for entry in entries {
+                    match entry {
+                        Ok(entry) => {
+                            queue.push((entry.path(), false));
+                        }
+                        Err(error) => {
+                            tracing::error!(
+                                %error,
+                                ?path,
+                                "Failed to list a directory entry when building a root cert store."
+                            )
+                        }
+                    }
+                }
+                continue;
+            }
+
+            let certs = Certs::read(&path);
+            for cert in certs {
+                let cert = match cert {
+                    Ok(cert) => {
+                        tracing::trace!(?path, "Found a certificate");
+                        cert
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            ?path,
+                            %error,
+                            "Failed to parse a PEM file when building a root cert store.",
+                        );
+                        continue;
+                    }
+                };
+
+                if let Err(error) = root_store.add(cert) {
+                    tracing::warn!(
+                        %error,
+                        ?path,
+                        "Found an invalid certificate when building a root cert store.",
+                    )
+                } else {
+                    tracing::trace!(?path, "Successfully added a certificate to the root store.")
+                }
+            }
+        }
+
+        root_store
     }
 
     #[tracing::instrument(level = Level::DEBUG, err(level = Level::DEBUG))]
-    fn build_connector(&self, config: &StealPortTlsConfig) -> Result<TlsConnector, StealTlsError> {
-        let path = self.resolve_in_target_filesystem(&config.remote_server_auth.cert_pem)?;
-        let mut server_auth = BestEffortRootStore::default();
-        server_auth.try_add_all_from_pem(&path);
-        if server_auth.certs() == 0 {
-            return Err(StealTlsError::EmptyRootCertStore);
-        }
+    fn build_connector(&self, config: &AgentClientAuth) -> Result<TlsConnector, SetupError> {
+        let cert_pem = self.resolve_in_target_filesystem(&config.cert_pem)?;
+        let key_pem = self.resolve_in_target_filesystem(&config.key_pem)?;
+        let (cert_chain, key_der) = CertChain::read(&cert_pem, &key_pem)
+            .map_err(SetupError::ReadCertChainError)?
+            .into_chain_and_key();
 
-        let client_auth = match &config.agent_client_auth {
-            Some(AgentClientAuth { cert_pem, key_pem }) => {
-                let cert_pem = self.resolve_in_target_filesystem(cert_pem)?;
-                let key_pem = self.resolve_in_target_filesystem(key_pem)?;
-                let cert = CertWithKey::read(&cert_pem, &key_pem).map_err(TlsUtilError::from)?;
-                ConnectorClientAuth::CertWithKey(cert)
+        let builder = match &config.server_auth {
+            Some(RemoteServerAuth { root_cert_pems }) => {
+                let root_store = self.build_root_store(root_cert_pems);
+                if root_store.is_empty() {
+                    return Err(SetupError::NoGoodRoot);
+                }
+                ClientConfig::builder().with_root_certificates(root_store)
             }
-
-            None => ConnectorClientAuth::Anonymous,
+            None => ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(DangerousNoVerifier)),
         };
 
-        let client_config = TlsConnectorConfig {
-            server_auth: ConnectorServerAuth::BestEffortRootStore(server_auth),
-            client_auth,
-        };
+        let config = builder
+            .with_client_auth_cert(cert_chain, key_der)
+            .map_err(SetupError::CertChainInvalid)?;
 
-        TlsConnector::build_from_config(client_config).map_err(From::from)
+        Ok(TlsConnector::from(Arc::new(config)))
     }
 }
 
@@ -244,8 +362,23 @@ impl fmt::Debug for StealTlsHandlers {
             .field("root_path", &self.0.root_path)
             .field(
                 "resolved",
-                &self.0.resolved.lock().as_ref().map(|guard| &*guard),
+                &self.0.resolved.lock().as_ref().map(|guard| &**guard),
             )
             .finish()
+    }
+}
+
+struct ResolvedPath<'a> {
+    requested: &'a Path,
+    resolved: PathBuf,
+}
+
+impl NicePath for ResolvedPath<'_> {
+    fn display_path(&self) -> &Path {
+        self.requested
+    }
+
+    fn real_path(&self) -> &Path {
+        &self.resolved
     }
 }

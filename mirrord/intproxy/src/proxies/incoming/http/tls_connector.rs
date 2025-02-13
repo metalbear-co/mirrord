@@ -1,11 +1,29 @@
-use std::{fmt, path::PathBuf};
+use std::{fmt, path::PathBuf, sync::Arc};
 
 use mirrord_tls_util::{
-    tokio_rustls::TlsConnector, CertWithKey, ConnectorClientAuth, ConnectorServerAuth,
-    TlsConnectorConfig, TlsConnectorExt, TlsUtilError,
+    rustls::{self, ClientConfig},
+    tokio_rustls::TlsConnector,
+    CertChain, DangerousNoVerifier, TlsUtilError,
 };
-use tokio::sync::OnceCell;
+use thiserror::Error;
+use tokio::{sync::OnceCell, task::JoinError};
 use tracing::Level;
+
+#[derive(Error, Debug)]
+pub enum LazyConnectorError {
+    #[error("background task panicked")]
+    BackgroundTaskPanicked,
+    #[error("failed to parse internal proxy certicate chain: {0}")]
+    ParseIntproxyCertError(#[from] TlsUtilError),
+    #[error("internal proxy certificate chain is invalid: {0}")]
+    InvalidIntproxyCertError(#[from] rustls::Error),
+}
+
+impl From<JoinError> for LazyConnectorError {
+    fn from(_: JoinError) -> Self {
+        Self::BackgroundTaskPanicked
+    }
+}
 
 pub struct LazyConnector {
     cert_and_key: Option<(PathBuf, PathBuf)>,
@@ -27,7 +45,7 @@ impl LazyConnector {
         }
     }
 
-    pub async fn get(&self) -> Result<&TlsConnector, TlsUtilError> {
+    pub async fn get(&self) -> Result<&TlsConnector, LazyConnectorError> {
         let connector = self
             .connector
             .get_or_try_init(|| self.build_connector())
@@ -37,29 +55,29 @@ impl LazyConnector {
     }
 
     #[tracing::instrument(level = Level::TRACE, err)]
-    async fn build_connector(&self) -> Result<TlsConnector, TlsUtilError> {
-        let client_auth = match self.cert_and_key.as_ref() {
-            Some((cert_pem, key_pem)) => {
-                let cert_pem = cert_pem.clone();
-                let key_pem = key_pem.clone();
-                let cert_with_key =
-                    tokio::task::spawn_blocking(move || CertWithKey::read(&cert_pem, &key_pem))
-                        .await
-                        .expect("this task does not panic")?;
+    async fn build_connector(&self) -> Result<TlsConnector, LazyConnectorError> {
+        let cert_and_key = self.cert_and_key.clone();
 
-                ConnectorClientAuth::CertWithKey(cert_with_key)
-            }
-            None => ConnectorClientAuth::Anonymous,
-        };
+        tokio::task::spawn_blocking(move || {
+            let builder = ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(DangerousNoVerifier));
 
-        let config = TlsConnectorConfig {
-            server_auth: ConnectorServerAuth::DangerousAcceptAny,
-            client_auth,
-        };
+            let config = match cert_and_key {
+                Some((cert, key)) => {
+                    let chain = CertChain::read(&cert, &key)
+                        .map_err(LazyConnectorError::ParseIntproxyCertError)?;
+                    let (cert_chain, key_der) = chain.into_chain_and_key();
+                    builder
+                        .with_client_auth_cert(cert_chain, key_der)
+                        .map_err(LazyConnectorError::InvalidIntproxyCertError)?
+                }
+                None => builder.with_no_client_auth(),
+            };
 
-        let connector = TlsConnector::build_from_config(config)?;
-
-        Ok(connector)
+            Ok::<_, LazyConnectorError>(TlsConnector::from(Arc::new(config)))
+        })
+        .await?
     }
 }
 

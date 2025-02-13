@@ -10,8 +10,12 @@ use mirrord_protocol::{
     tcp::{HttpRequest, HttpResponse, InternalHttpResponse},
     ConnectionId, Port, RequestId,
 };
-use mirrord_tls_util::{rustls::pki_types::ServerName, tokio_rustls::TlsConnector, TlsUtilError};
+use mirrord_tls_util::{
+    rustls::pki_types::{InvalidDnsNameError, ServerName},
+    tokio_rustls::TlsConnector,
+};
 use thiserror::Error;
+use tls_connector::LazyConnectorError;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
@@ -173,8 +177,11 @@ pub enum LocalHttpError {
     #[error("failed to read the body of the local application's HTTP server response: {0}")]
     ReadBodyFailed(#[source] hyper::Error),
 
-    #[error(transparent)]
-    TlsUtilError(#[from] TlsUtilError),
+    #[error("failed to extract server name from request URI: {0}")]
+    InvalidDnsNameError(#[from] InvalidDnsNameError),
+
+    #[error("failed to prepare a TLS connector: {0}")]
+    TlsConnectorError(#[from] LazyConnectorError),
 }
 
 impl LocalHttpError {
@@ -184,7 +191,8 @@ impl LocalHttpError {
         match self {
             Self::SocketSetupFailed(..)
             | Self::UnsupportedHttpVersion(..)
-            | Self::TlsUtilError(..) => false,
+            | Self::InvalidDnsNameError(..)
+            | Self::TlsConnectorError(..) => false,
             Self::ConnectTcpFailed(..) | Self::ConnectTlsFailed(..) => true,
             Self::HandshakeFailed(err) | Self::SendFailed(err) | Self::ReadBodyFailed(err) => (err
                 .is_parse()

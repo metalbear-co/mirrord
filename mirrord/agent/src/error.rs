@@ -1,12 +1,12 @@
 use std::process::ExitStatus;
 
 use mirrord_protocol::outgoing::udp::DaemonUdpOutgoing;
-use mirrord_tls_util::TlsUtilError;
 use thiserror::Error;
 use tokio::sync::mpsc::{self, error::SendError};
 
 use crate::{
-    namespace::NamespaceError, runtime, sniffer::messages::SnifferCommand, steal::StealerCommand,
+    client_connection::TlsSetupError, namespace::NamespaceError, runtime,
+    sniffer::messages::SnifferCommand, steal::StealerCommand,
 };
 
 #[derive(Debug, Error)]
@@ -67,8 +67,8 @@ pub(crate) enum AgentError {
     #[error(transparent)]
     FailedNamespaceEnter(#[from] NamespaceError),
 
-    #[error("TLS setup failed: {0}")]
-    TlsSetupError(#[from] TlsUtilError),
+    #[error("agent-operator TLS setup failed: {0}")]
+    TlsSetupError(#[from] TlsSetupError),
 
     /// Child agent process spawned in `main` failed.
     #[error("Agent child process failed: {0}")]

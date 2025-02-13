@@ -36,9 +36,9 @@ use mirrord_config::LayerConfig;
 use mirrord_intproxy::agent_conn::AgentConnection;
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, LogLevel, LogMessage};
 use mirrord_tls_util::{
+    rustls::{server::WebPkiClientVerifier, RootCertStore, ServerConfig},
     tokio_rustls::{server::TlsStream, TlsAcceptor},
-    AcceptorClientAuth, BestEffortRootStore, CertWithKey, TlsAcceptorConfig, TlsAcceptorExt,
-    TlsUtilError,
+    CertChain, Certs,
 };
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::{either::Either, sync::CancellationToken};
@@ -46,7 +46,7 @@ use tracing::Level;
 
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
-    error::{CliResult, ExternalProxyError},
+    error::{CliResult, ExternalProxyError, ExternalProxyTlsError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     internal_proxy::connect_and_ping,
     logging::init_extproxy_tracing_registry,
@@ -87,7 +87,9 @@ pub async fn proxy(listen_port: u16, watch: drain::Watch) -> CliResult<()> {
     let mut own_agent_conn =
         connect_and_ping(&config, agent_connect_info.clone(), &mut analytics).await?;
 
-    let tls_acceptor = create_external_proxy_tls_acceptor(&config).await?;
+    let tls_acceptor = create_external_proxy_tls_acceptor(&config)
+        .await
+        .map_err(ExternalProxyError::from)?;
     let listener = create_listen_socket(SocketAddr::new(
         local_ip().unwrap_or_else(|_| Ipv4Addr::UNSPECIFIED.into()),
         listen_port,
@@ -221,7 +223,7 @@ pub async fn proxy(listen_port: u16, watch: drain::Watch) -> CliResult<()> {
 
 async fn create_external_proxy_tls_acceptor(
     config: &LayerConfig,
-) -> CliResult<Option<TlsAcceptor>, ExternalProxyError> {
+) -> CliResult<Option<TlsAcceptor>, ExternalProxyTlsError> {
     if !config.external_proxy.tls_enable {
         return Ok(None);
     }
@@ -231,26 +233,28 @@ async fn create_external_proxy_tls_acceptor(
         config.external_proxy.tls_certificate.as_ref(),
         config.external_proxy.tls_key.as_ref(),
     ) else {
-        return Err(ExternalProxyError::MissingTlsInfo);
+        return Err(ExternalProxyTlsError::MissingTlsInfo);
     };
 
-    let server_cert = CertWithKey::read(tls_certificate, tls_key).map_err(TlsUtilError::from)?;
-    let mut client_root_store = BestEffortRootStore::default();
-    client_root_store.try_add_all_from_pem(&client_tls_certificate);
-    if client_root_store.certs() == 0 {
-        return Err(ExternalProxyError::IntproxyRootCertStoreEmpty);
+    let (cert_chain, key_der) = CertChain::read(tls_certificate, tls_key)
+        .map_err(ExternalProxyTlsError::ExtProxyReadCertError)?
+        .into_chain_and_key();
+    let mut root_store = RootCertStore::empty();
+
+    let certs = Certs::read(client_tls_certificate);
+    for cert in certs {
+        let cert = cert.map_err(ExternalProxyTlsError::IntProxyReadCertError)?;
+        root_store
+            .add(cert)
+            .map_err(ExternalProxyTlsError::InvalidIntProxyCert)?;
     }
 
-    let config = TlsAcceptorConfig {
-        server_auth: server_cert,
-        client_auth: AcceptorClientAuth::WithRootStore {
-            store: client_root_store,
-            allow_unauthenticated: false,
-        },
-        alpn_protocols: Default::default(),
-    };
+    let config = ServerConfig::builder()
+        .with_client_cert_verifier(WebPkiClientVerifier::builder(root_store.into()).build()?)
+        .with_single_cert(cert_chain, key_der)
+        .map_err(ExternalProxyTlsError::InvalidExtProxyCert)?;
 
-    let acceptor = TlsAcceptor::build_from_config(config)?;
+    let acceptor = TlsAcceptor::from(Arc::new(config));
 
     Ok(Some(acceptor))
 }

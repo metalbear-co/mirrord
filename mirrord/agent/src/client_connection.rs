@@ -1,18 +1,26 @@
-use std::{fmt, io};
+use std::{fmt, io, sync::Arc};
 
 use actix_codec::Framed;
 use futures::{SinkExt, TryStreamExt};
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage};
 use mirrord_tls_util::{
-    rustls::pki_types::ServerName,
+    rustls::{self, pki_types::ServerName, ClientConfig, RootCertStore},
     tokio_rustls::{client::TlsStream, TlsConnector},
-    ConnectorClientAuth, ConnectorServerAuth, SingleCertRootStore, TlsConnectorConfig,
-    TlsConnectorExt, TlsUtilError,
+    CertWithServerName, TlsUtilError,
 };
+use thiserror::Error;
 use tokio::net::TcpStream;
 use tracing::Level;
 
 use crate::util::ClientId;
+
+#[derive(Error, Debug)]
+pub enum TlsSetupError {
+    #[error("failed to read the operator certificate: {0}")]
+    ParseOperatorCertError(#[source] TlsUtilError),
+    #[error("operator certificate is invalid: {0}")]
+    InvalidOperatorCertError(#[source] rustls::Error),
+}
 
 /// Wrapper over [`TlsConnector`] that can make successful TLS connections only to the server using
 /// a predefined certificate.
@@ -30,18 +38,22 @@ impl AgentTlsConnector {
     /// Crates a new instance of this connector. The connector will make successful TLS connections
     /// only to the server using the given PEM-encoded certificate.
     ///
-    /// See [`SingleCertRootStore::read`] docs for the expected certificate format.
+    /// See [`CertWithServerName::read`] docs for the expected certificate format.
     #[tracing::instrument(level = Level::TRACE, err(level = Level::ERROR))]
-    pub fn new(certificate_pem: String) -> Result<Self, TlsUtilError> {
-        let root_store = SingleCertRootStore::read(certificate_pem.as_bytes())?;
-        let server_name = root_store.server_name().clone();
+    pub fn new(certificate_pem: String) -> Result<Self, TlsSetupError> {
+        let cert = CertWithServerName::parse(certificate_pem.as_bytes())
+            .map_err(TlsSetupError::ParseOperatorCertError)?;
+        let server_name = cert.server_name().clone();
 
-        let config = TlsConnectorConfig {
-            server_auth: ConnectorServerAuth::SingleCertRootStore(root_store),
-            client_auth: ConnectorClientAuth::Anonymous,
-        };
+        let mut root_store = RootCertStore::empty();
+        root_store
+            .add(cert.into())
+            .map_err(TlsSetupError::InvalidOperatorCertError)?;
 
-        let inner = TlsConnector::build_from_config(config)?;
+        let client_config = ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+        let inner = TlsConnector::from(Arc::new(client_config));
 
         Ok(Self { inner, server_name })
     }
@@ -125,8 +137,9 @@ mod test {
     use futures::StreamExt;
     use mirrord_protocol::ClientCodec;
     use mirrord_tls_util::{
-        rustls, tokio_rustls::TlsAcceptor, AcceptorClientAuth, AsPem, CertWithKey,
-        TlsAcceptorConfig, TlsAcceptorExt,
+        rustls::{self, ServerConfig},
+        tokio_rustls::TlsAcceptor,
+        AsPem, CertChain, RandomCert,
     };
     use tokio::net::{TcpListener, TcpStream};
 
@@ -145,14 +158,15 @@ mod test {
             .expect("Failed to install crypto provider")
         });
 
-        let cert = CertWithKey::new_random_self_signed(["operator".to_string()]).unwrap();
-        let cert_pem = cert.cert_chain().first().unwrap().as_pem();
-        let config = TlsAcceptorConfig {
-            server_auth: cert,
-            client_auth: AcceptorClientAuth::Disabled,
-            alpn_protocols: Default::default(),
-        };
-        let acceptor = TlsAcceptor::build_from_config(config).unwrap();
+        let cert = RandomCert::generate(vec!["operator".to_string()]).unwrap();
+        let cert_pem = cert.cert().as_pem();
+
+        let (cert_chain, key_der) = CertChain::from(cert).into_chain_and_key();
+        let config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(cert_chain, key_der)
+            .unwrap();
+        let acceptor = TlsAcceptor::from(Arc::new(config));
 
         let connector = AgentTlsConnector::new(cert_pem).unwrap();
 
@@ -193,13 +207,13 @@ mod test {
             .expect("Failed to install crypto provider")
         });
 
-        let cert = CertWithKey::new_random_self_signed(["operator".to_string()]).unwrap();
-        let config = TlsAcceptorConfig {
-            server_auth: cert,
-            client_auth: AcceptorClientAuth::Disabled,
-            alpn_protocols: Default::default(),
-        };
-        let acceptor = TlsAcceptor::build_from_config(config).unwrap();
+        let cert = RandomCert::generate(vec!["operator".to_string()]).unwrap();
+        let (cert_chain, key_der) = CertChain::from(cert).into_chain_and_key();
+        let config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(cert_chain, key_der)
+            .unwrap();
+        let acceptor = TlsAcceptor::from(Arc::new(config));
 
         let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -207,11 +221,9 @@ mod test {
         tokio::join!(
             async move {
                 let connector = AgentTlsConnector::new(
-                    CertWithKey::new_random_self_signed(["operator".to_string()])
+                    RandomCert::generate(vec!["operator".to_string()])
                         .unwrap()
-                        .cert_chain()
-                        .first()
-                        .unwrap()
+                        .cert()
                         .as_pem(),
                 )
                 .unwrap();

@@ -21,4 +21,8 @@ rustls.workspace = true
 rustls-pemfile = "2.2"
 thiserror.workspace = true
 tokio-rustls.workspace = true
+tracing.workspace = true
 x509-parser = "0.16"
+
+[dev-dependencies]
+tempfile.workspace = true
