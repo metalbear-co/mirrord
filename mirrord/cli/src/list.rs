@@ -64,9 +64,10 @@ impl FoundTargets {
     /// Operator lookup affects returned results (e.g some targets are only available via the
     /// operator).
     ///
-    /// If `fetch_namespaces` is set, returned [`FoundTargets`] will contain info about namespaces
-    /// available in the cluster.
-    async fn resolve(config: LayerConfig, fetch_namespaces: bool) -> CliResult<Self> {
+    /// If `rich_output` is set:
+    /// 1. returned [`FoundTargets`] will contain info about namespaces available in the cluster;
+    /// 2. only deployment, rollout, and pod targets will be fetched.
+    async fn resolve(config: LayerConfig, rich_output: bool) -> CliResult<Self> {
         let client = create_kube_config(
             config.accept_invalid_certificates,
             config.kubeconfig.clone(),
@@ -97,50 +98,62 @@ impl FoundTargets {
             client: &client,
             namespace: config.target.namespace.as_deref(),
         };
-        let paths = match operator_api {
-            None if config.operator == Some(true) => Err(CliError::OperatorNotInstalled),
 
-            Some(api)
-                if ALL_TARGETS_SUPPORTED_OPERATOR_VERSION
-                    .matches(&api.operator().spec.operator_version) =>
-            {
-                seeker.all().await.map_err(|error| {
-                    CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
-                })
+        let (targets, namespaces) = tokio::try_join!(
+            async {
+                let paths = match operator_api {
+                    None if config.operator == Some(true) => Err(CliError::OperatorNotInstalled),
+
+                    Some(api)
+                        if !rich_output
+                            && ALL_TARGETS_SUPPORTED_OPERATOR_VERSION
+                                .matches(&api.operator().spec.operator_version) =>
+                    {
+                        seeker.all().await.map_err(|error| {
+                            CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
+                        })
+                    }
+
+                    _ => seeker.all_open_source().await.map_err(|error| {
+                        CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
+                    }),
+                }?;
+
+                let targets = paths
+                    .into_iter()
+                    .map(|path| FoundTarget {
+                        path,
+                        available: true,
+                    })
+                    .collect::<Vec<_>>();
+
+                Ok::<_, CliError>(targets)
+            },
+            async {
+                let namespaces = if rich_output {
+                    seeker
+                        .list_all_clusterwide::<Namespace>(None)
+                        .try_filter_map(|namespace| std::future::ready(Ok(namespace.metadata.name)))
+                        .try_collect::<Vec<_>>()
+                        .await
+                        .map_err(KubeApiError::KubeError)
+                        .map_err(|error| {
+                            CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
+                        })?
+                } else {
+                    Default::default()
+                };
+
+                Ok::<_, CliError>(namespaces)
             }
+        )?;
 
-            _ => seeker.all_open_source().await.map_err(|error| {
-                CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
-            }),
-        }?;
-
-        let targets = paths
-            .into_iter()
-            .map(|path| FoundTarget {
-                path,
-                available: true,
-            })
-            .collect();
         let current_namespace = config
             .target
             .namespace
             .as_deref()
             .unwrap_or(client.default_namespace())
             .to_owned();
-
-        let namespaces = if fetch_namespaces {
-            seeker
-                .list_all_clusterwide::<Namespace>(None)
-                .try_filter_map(|namespace| std::future::ready(Ok(namespace.metadata.name)))
-                .try_collect::<Vec<_>>()
-                .await
-                .map_err(KubeApiError::KubeError)
-                .map_err(|error| {
-                    CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
-                })?
-        } else {
-            Default::default()
-        };
 
         Ok(Self {
             targets,
@@ -179,8 +192,13 @@ static ALL_TARGETS_SUPPORTED_OPERATOR_VERSION: LazyLock<VersionReq> =
 
 /// Fetches mirrord targets from the cluster and prints output to stdout.
 ///
-/// When `rich_output` is set, targets info is printed as a JSON object containing extra data.
-/// Otherwise, targets are printed as a plain JSON array of strings (backward compatibility).
+/// When `rich_output` is set:
+/// 1. targets info is printed as a JSON object containing extra data;
+/// 2. only deployment, rollout, and pod targets are fetched.
+///
+/// Otherwise:
+/// 1. targets are printed as a plain JSON array of strings (backward compatibility);
+/// 2. all available target types are fetched.
 pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> CliResult<()> {
     let mut layer_config = if let Some(config) = &args.config_file {
         let mut cfg_context = ConfigContext::default();
