@@ -209,7 +209,7 @@ impl KubernetesAPI {
     ///   creating an agent from the operator. In usage from this repo this is always `None`.
     /// * `agent_port` - port number on which the agent will listen for client connections. If
     ///   [`None`] is given, a random high port will be used.
-    #[tracing::instrument(level = Level::DEBUG, skip(self, progress))]
+    #[tracing::instrument(level = Level::TRACE, skip(self, progress))]
     pub async fn create_agent<P>(
         &self,
         progress: &mut P,

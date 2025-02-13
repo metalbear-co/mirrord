@@ -270,8 +270,14 @@ impl ContainerRuntime for ContainerdContainer {
     }
 }
 
+/// The agent is running as an ephemeral container.
+///
+/// To see agent information, you must:
+/// 1. `kubectl describe {target-pod}`;
+/// 2. `kubectl logs {target-pod} -c {agent-container-name}`;
 #[derive(Debug, Clone)]
 pub(crate) struct EphemeralContainer {
+    /// Used to get the target's `pid`, see [`find_pid_for_ephemeral`] for more information.
     pub(crate) container_id: String,
 }
 
@@ -341,7 +347,7 @@ impl ContainerRuntime for EphemeralContainer {
     /// When running on ephemeral, root pid is either set to `1`, or we must search for it using the
     /// `container_id`, when `shareProcessNamespace` is being used. Env is the current process' env.
     /// (we copy it from the k8s spec)
-    #[tracing::instrument(level = Level::DEBUG, ret, err)]
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
     async fn get_info(&self) -> ContainerRuntimeResult<ContainerInfo> {
         Ok(ContainerInfo::new(
             find_pid_for_ephemeral(&self.container_id)
