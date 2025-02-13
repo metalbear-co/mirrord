@@ -174,15 +174,6 @@ impl<'c> EphemeralTargetedVariant<'c> {
 
         command_line.extend(["ephemeral".to_string()]);
 
-        // Ephemeral only cares about `container_id` when `shareProcessNamespace` is set.
-        // We need this to find the right `pid` for file ops in the target.
-        if runtime_data.share_process_namespace {
-            command_line.extend([
-                "--container-id".to_owned(),
-                runtime_data.container_id.to_owned(),
-            ]);
-        }
-
         EphemeralTargetedVariant {
             agent,
             params,
@@ -218,6 +209,12 @@ impl ContainerVariant for EphemeralTargetedVariant<'_> {
                 env.push(envs::ISTIO_CNI.as_k8s_spec(&true));
             }
         };
+
+        // Ephemeral only cares about `container_id` when `shareProcessNamespace` is set.
+        // We need this to find the right `pid` for file ops in the target.
+        if runtime_data.share_process_namespace {
+            env.push(envs::EPHEMERAL_CONTAINER_ID.as_k8s_spec(&runtime_data.container_id));
+        }
 
         KubeEphemeralContainer {
             name: params.name.clone(),

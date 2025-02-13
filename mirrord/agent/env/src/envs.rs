@@ -51,3 +51,10 @@ pub const POD_IPS: CheckedEnv<Vec<IpAddr>> = CheckedEnv::new("MIRRORD_AGENT_POD_
 ///
 /// Should follow `tracing` format, e.g `mirrord=trace`.
 pub const LOG_LEVEL: CheckedEnv<String> = CheckedEnv::new("RUST_LOG");
+
+/// Container id to get traffic from.
+///
+/// For [`Mode::Ephemeral`], this is also used to get the target's `pid`, when this is not
+/// present, we default it to `1`. Look at `find_pid_for_ephemeral` docs for more info.
+pub const EPHEMERAL_CONTAINER_ID: CheckedEnv<String> =
+    CheckedEnv::new("MIRRORD_AGENT_EPHEMERAL_CONTAINER_ID");

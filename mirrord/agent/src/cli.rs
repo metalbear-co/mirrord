@@ -95,10 +95,6 @@ pub enum Mode {
         // This argument is being kept here only for compatibility with very old CLIs.
         #[arg(long)]
         mesh: Option<String>,
-
-        /// Container id to get traffic from
-        #[arg(short, long)]
-        container_id: Option<String>,
     },
     #[default]
     Targetless,

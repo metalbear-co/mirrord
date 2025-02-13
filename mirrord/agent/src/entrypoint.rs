@@ -98,10 +98,14 @@ impl State {
 
                 (false, Some(container_handle), pid)
             }
-            cli::Mode::Ephemeral { container_id, .. } => {
+            cli::Mode::Ephemeral { .. } => {
                 let container_handle = ContainerHandle::new(runtime::Container::Ephemeral(
                     runtime::EphemeralContainer {
-                        container_id: container_id.clone().unwrap_or_default(),
+                        container_id: envs::EPHEMERAL_CONTAINER_ID
+                            .try_from_env()
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default(),
                     },
                 ))
                 .await?;
