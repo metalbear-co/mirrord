@@ -534,7 +534,7 @@ mod test {
             };
             let gateway = HttpGatewayTask::new(
                 request,
-                Default::default(),
+                ClientStore::new_with_timeout(Duration::from_secs(1)),
                 ResponseMode::Basic,
                 local_destination,
             );
@@ -687,7 +687,12 @@ mod test {
 
         let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> = Default::default();
         let _gateway = tasks.register(
-            HttpGatewayTask::new(request, ClientStore::default(), response_mode, addr),
+            HttpGatewayTask::new(
+                request,
+                ClientStore::new_with_timeout(Duration::from_secs(1)),
+                response_mode,
+                addr,
+            ),
             (),
             8,
         );
@@ -829,7 +834,7 @@ mod test {
             .insert(header::CONTENT_LENGTH, HeaderValue::from_static("12"));
 
         let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> = Default::default();
-        let client_store = ClientStore::default();
+        let client_store = ClientStore::new_with_timeout(Duration::from_secs(1));
         let _gateway = tasks.register(
             HttpGatewayTask::new(request, client_store.clone(), ResponseMode::Basic, addr),
             (),

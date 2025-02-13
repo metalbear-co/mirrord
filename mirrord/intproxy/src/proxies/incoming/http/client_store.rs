@@ -32,7 +32,7 @@ impl fmt::Debug for IdleLocalClient {
 /// Cache for unused [`LocalHttpClient`]s.
 ///
 /// [`LocalHttpClient`] that have not been used for some time are dropped in the background by a
-/// dedicated [`tokio::task`]. This timeout defaults to [`Self::IDLE_CLIENT_DEFAULT_TIMEOUT`].
+/// dedicated [`tokio::task`]. This timeout is configurable.
 #[derive(Clone)]
 pub struct ClientStore {
     clients: Arc<Mutex<Vec<IdleLocalClient>>>,
