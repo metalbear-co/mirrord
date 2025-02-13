@@ -10,7 +10,6 @@ use containerd_client::{
     with_namespace,
 };
 use enum_dispatch::enum_dispatch;
-use nix::NixPath;
 use oci_spec::runtime::Spec;
 use tokio::{fs::read_dir, net::UnixStream};
 use tonic::transport::{Endpoint, Uri};
@@ -47,14 +46,11 @@ pub(crate) struct ContainerInfo {
     pub(crate) pid: u64,
     /// Environment variables of the container
     pub(crate) env: HashMap<String, String>,
-
-    /// Id of the container.
-    pub(crate) id: String,
 }
 
 impl ContainerInfo {
-    pub(crate) fn new(pid: u64, env: HashMap<String, String>, id: String) -> Self {
-        ContainerInfo { pid, env, id }
+    pub(crate) fn new(pid: u64, env: HashMap<String, String>) -> Self {
+        ContainerInfo { pid, env }
     }
 }
 
@@ -142,7 +138,7 @@ impl ContainerRuntime for DockerContainer {
             })?;
         let env_vars = parse_raw_env(&raw_env);
 
-        Ok(ContainerInfo::new(pid, env_vars, self.container_id.clone()))
+        Ok(ContainerInfo::new(pid, env_vars))
     }
 }
 
@@ -270,11 +266,7 @@ impl ContainerRuntime for ContainerdContainer {
             ContainerRuntimeError::containerd("env not found in container runtime response")
         })?;
 
-        Ok(ContainerInfo::new(
-            pid as u64,
-            env_vars,
-            self.container_id.clone(),
-        ))
+        Ok(ContainerInfo::new(pid as u64, env_vars))
     }
 }
 
@@ -356,7 +348,6 @@ impl ContainerRuntime for EphemeralContainer {
                 .await
                 .unwrap_or(1),
             std::env::vars().collect(),
-            self.container_id.clone(),
         ))
     }
 }
