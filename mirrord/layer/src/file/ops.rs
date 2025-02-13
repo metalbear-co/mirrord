@@ -355,7 +355,7 @@ pub(crate) fn mkdir(pathname: Detour<PathBuf>, mode: u32) -> Detour<()> {
 
     let path = remap_path!(pathname);
 
-    ensure_not_ignored!(path, false);
+    ensure_not_ignored!(path, true);
 
     let mkdir = MakeDirRequest {
         pathname: path,
@@ -376,6 +376,9 @@ pub(crate) fn mkdirat(dirfd: RawFd, pathname: Detour<PathBuf>, mode: u32) -> Det
 
     if pathname.is_absolute() || dirfd == AT_FDCWD {
         let path = remap_path!(pathname);
+        check_relative_paths!(path);
+        ensure_not_ignored!(path, true);
+
         mkdir(Detour::Success(path), mode)
     } else {
         // Relative path requires special handling, we must identify the relative part (relative to
@@ -405,7 +408,7 @@ pub(crate) fn rmdir(pathname: Detour<PathBuf>) -> Detour<()> {
 
     let path = remap_path!(pathname);
 
-    ensure_not_ignored!(path, false);
+    ensure_not_ignored!(path, true);
 
     let rmdir = RemoveDirRequest { pathname: path };
 
@@ -425,7 +428,7 @@ pub(crate) fn unlink(pathname: Detour<PathBuf>) -> Detour<()> {
 
     let path = remap_path!(pathname);
 
-    ensure_not_ignored!(path, false);
+    ensure_not_ignored!(path, true);
 
     let unlink = RemoveDirRequest { pathname: path };
 
@@ -441,6 +444,7 @@ pub(crate) fn unlink(pathname: Detour<PathBuf>) -> Detour<()> {
 pub(crate) fn unlinkat(dirfd: RawFd, pathname: Detour<PathBuf>, flags: u32) -> Detour<()> {
     let pathname = pathname?;
 
+    // TODO: I think this is broken too
     let optional_dirfd = match pathname.is_absolute() {
         true => None,
         false => Some(get_remote_fd(dirfd)?),
