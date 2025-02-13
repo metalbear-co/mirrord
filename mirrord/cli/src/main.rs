@@ -525,6 +525,7 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
                     connection_2,
                     rev_port_mappings,
                     config.feature.network.incoming,
+                    Duration::from_millis(config.experimental.idle_local_http_connection_timeout),
                 )
                 .await?;
                 port_forward.run().await.map_err(|error| error.into())
