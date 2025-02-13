@@ -444,16 +444,23 @@ pub(crate) fn unlink(pathname: Detour<PathBuf>) -> Detour<()> {
 pub(crate) fn unlinkat(dirfd: RawFd, pathname: Detour<PathBuf>, flags: u32) -> Detour<()> {
     let pathname = pathname?;
 
-    // TODO: I think this is broken too
-    let optional_dirfd = match pathname.is_absolute() {
-        true => None,
-        false => Some(get_remote_fd(dirfd)?),
-    };
+    let unlink = if pathname.is_absolute() || dirfd == AT_FDCWD {
+        let path = remap_path!(pathname);
+        check_relative_paths!(path);
+        ensure_not_ignored!(path, true);
+        UnlinkAtRequest {
+            dirfd: None,
+            pathname: path,
+            flags,
+        }
+    } else {
+        let remote_fd = get_remote_fd(dirfd)?;
 
-    let unlink = UnlinkAtRequest {
-        dirfd: optional_dirfd,
-        pathname: pathname.clone(),
-        flags,
+        UnlinkAtRequest {
+            dirfd: Some(remote_fd),
+            pathname: pathname.clone(),
+            flags,
+        }
     };
 
     // `NotImplemented` error here means that the protocol doesn't support it.
