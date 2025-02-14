@@ -1,11 +1,3 @@
-# Cluster-side configuration
-
-Filtered HTTPS stealing is be configured using two resources: `MirrordTlsStealConfig` and `MirrordClusterTlsStealConfig`.
-The only difference between the two is that `MirrordTlsStealConfig` can apply only to session targets living in the same namespace,
-while `MirrordClusterTlsStealConfig` can apply to all session targets in the cluster.
-
-An example of `MirrordTlsStealConfig`:
-
 ```yaml
 apiVersion: mirrord.metalbear.co/v1alpha
 kind: MirrordTlsStealConfig
@@ -16,98 +8,130 @@ metadata:
   # Config resource must be created in the same namespace as the mirrord session target.
   namespace: namespace-of-example-deployment
 spec:
-  # An optional wildcard pattern that will be matched against mirrord session target path.
+  # Specify the targets for which this configuration applies, in the `pod/my-pod`,
+  # `deploy/my-deploy/container/my-container` notation.
   #
-  # `*` character matches any sequence of characters
-  # `?` character matches exactly one character
-  #
-  # mirrord session target path is built from the following components, separated with slashes:
-  # 1. Target type: `deployment`, `pod`, `rollout`, ...
-  # 2. Kubernetes name of the target resource, e.g `example-deployment`
-  # 3. Optional `container` separator
-  # 4. Optional target container name, e.g `example-container`
-  #
-  # For example:
-  # 1. mirrord session against `example-container` container
-  #    defined in a Deployment named `example-deployment`
-  #    will use target path `deployment/example-deployment/container/example-container`.
-  # 2. mirrord session against an unspecified container (picked by mirrord when the session starts)
-  #    in a Pod named `example-deployment-aabbcc`
-  #    will use target path `pod/example-deployment-aabbcc`.
-  #
-  # Pattern defined below will match both.
+  # Targets can be matched using `*` and `?` where `?` matches exactly one
+  # occurrence of any character and `*` matches arbitrary many (including zero) occurrences
+  # of any character. If not specified, this configuration does not depend on the target's path.
   targetPath: "*/example-deployment*"
-  # An optional label selector that will be matched against mirrord session target labels.
-  #
-  # Selector defined below will match any target labelled with `my-label: my-value`.
+  # If this selector is provided, this configuration will only apply to targets with labels that match all
+  # of the selector's rules.
   selector:
     matchLabels:
       my-label: my-value
-  # A list of steal TLS configurations for distinct ports in the target container.
-  # You can configure each port independently.
+  # Configuration for stealing TLS traffic, separate for each port.
   ports:
     # This entry configures how mirrord-agent handles filtered stealing from port 443.
     - port: 443
-      # This field configures how mirrord-agent authenticates itself when accepting stolen TLS connections.
-      remoteServerAuth:
-        # Path to a PEM file containing a certificate chain to use.
+      # Configures how mirrord-agent authenticates itself and the clients when acting as a TLS
+      # server.
+      #
+      # mirrord-agent acts as a TLS server when accepting stolen connections.
+      agentAsServer:
+        # Configures how the server authenticates itself to the clients.
+        authentication:
+          # Path to a PEM file containing a certificate chain to use.
+          #
+          # This file must contain at least one certificate.
+          # It can contain entries of other types, e.g private keys, which are ignored.
+          certPem: /path/to/cert.pem
+          # Path to a PEM file containing a private key matching [`CertificateChainAuthentication::cert_pem`].
+          # 
+          # This file must contain exactly one private key.
+          # It can contain entries of other types, e.g certificates, which are ignored.
+          keyPem: /path/to/key.pem
+        # ALPN protocols supported by the server, in order of preference.
         #
-        # This file must contain at least one certificate.
-        # It can contain entries of other types, e.g private keys, which will be ignored.
-        certPath: /path/to/server/cert.pem
-        # Path to a PEM file containing a private key for the `certPath` certificate.
+        # If empty, ALPN is disabled.
         #
-        # This file must contain exactly one private key.
-        # It can contain entries of other types, e.g certificates, which will be ignored.
-        keyPath: /path/to/server/key.pem
-        # Supported ALPN protocols.
-        #
-        # Optional, defaults to an empty list.
+        # Optional. Defaults to an empty list.
         alpnProtocols:
           - h2
           - http/1.1
-      # This field configures how mirrord-agent authenticates peers when accepting stolen TLS connections.
+          - http/1.0
+        # Configures how mirrord-agent's server authenticates the clients.
+        #
+        # Optional. If not present, the server will not offer client authentication.
+        verification:
+          # Whether anonymous clients should be accepted.
+          # 
+          # Optional. Defaults to `false`.
+          allowAnonymous: false
+          # Whether to accept any certificate, regardless of its validity and who signed it.
+          # 
+          # Optional. Defaults to `false`.
+          acceptAnyCert: false
+          # Paths to PEM files and directories with PEM files containing allowed root certificates.
+          # 
+          # Directories are not traversed recursively.
+          # 
+          # Each certificate found in the files is treated as an allowed root.
+          # The files can contain entries of other types, e.g private keys, which are ignored.
+          # 
+          # Optional. Defaults to an empty list.
+          trustRoots:
+            - /path/to/cert.pem
+            - /path/to/directory/with/certs
+      # Configures how mirrord-agent authenticates itself and the server when acting as a TLS
+      # client.
       #
-      # Optional. If not present, mirrord-agent's TLS server will not offer client authentication.
-      remoteClientAuth:
-        # Whether the sever should accept anonymous clients.
-        allowUnauthenticated: true
-        # A list of paths to PEM files containing allowed root certificates.
+      # mirrord-agent acts as a TLS client when passing unmatched requests to their original
+      # destination.
+      agentAsClient:
+        # Configures how mirrord-agent authenticates itself to the original destination server.
         #
-        # Each certificate found in these files is treated as an allowed root.
-        # These files can contain entries of other types, e.g private keys, which will be ignored.
-        #
-        # Invalid certificates will be ignored.
-        rootCerts:
-          - /path/to/client/root-1.pem
-          - /path/to/client/root-2.pem
-      # This field configures how mirrord-agent authenticates itself when making TLS connections
-      # to the original destination (the TLS server running in the target container).
-      #
-      # mirrord-agent will make TLS connections to the original destination
-      # when passing through requests that do not match any client filter.
-      #
-      # Optional. If not present, mirrord-agent's TLS client will be anonymous.
-      agentClientAuth:
-        # Path to a PEM file containing a certificate chain to use.
-        #
-        # This file must contain at least one certificate.
-        # It can contain entries of other types, e.g private keys, which will be ignored.
-        certPath: /path/to/client/cert.pem
-        # Path to a PEM file containing a private key for the `certPath` certificate.
-        #
-        # This file must contain exactly one private key.
-        # It can contain entries of other types, e.g certificates, which will be ignored.
-        keyPath: /path/to/client/key.pem
+        # Optional. If not present, mirrord-agent will make connections anonymously.
+        authentication:
+          # Path to a PEM file containing a certificate chain to use.
+          #
+          # This file must contain at least one certificate.
+          # It can contain entries of other types, e.g private keys, which are ignored.
+          certPem: /path/to/cert.pem
+          # Path to a PEM file containing a private key matching [`CertificateChainAuthentication::cert_pem`].
+          # 
+          # This file must contain exactly one private key.
+          # It can contain entries of other types, e.g certificates, which are ignored.
+          keyPem: /path/to/key.pem
+        # Configures how mirrord-agent verifies the server's certificate.
+        verification:
+          # Whether to accept any certificate, regardless of its validity and who signed it.
+          acceptAnyCert: bool,
+          # Paths to PEM files and directories with PEM files containing allowed root certificates.
+          #
+          # Directories are not traversed recursively.
+          #
+          # Each certificate found in the files is treated as an allowed root.
+          # The files can contain entries of other types, e.g private keys, which are ignored.
+          trustRoots:
+            - /path/to/cert.pem
+            - /path/to/directory/with/certs
 ```
 
-Note: each path defined in a config resource here must be absolute and will be resolved in the target container.
-
-# User-side configuration
-
-In their personal mirrord configs, users will be able to configure how to deliver stolen HTTPS requests to their local applications:
-
-1. Plain HTTP.
-2. HTTPS with an anonymous client.
-3. HTTPS with a client using a selected local certificate.
-4. HTTPS with a client using the agent's client certifiacate (requires `agentClientAuth` to be filled in the config resource).
+```yaml
+apiVersion: mirrord.metalbear.co/v1alpha
+kind: MirrordTlsStealConfig
+metadata:
+  name: example
+  namespace: namespace-of-example-deployment
+spec:
+  targetPath: "*/example-deployment*"
+  ports:
+    - port: 443
+      agentAsServer:
+        authentication:
+          certPem: /path/to/cert.pem
+          keyPem: /path/to/key.pem
+        alpnProtocols:
+          - h2
+          - http/1.1
+          - http/1.0
+      agentAsClient:
+        authentication:
+          certPem: /path/to/cert.pem
+          keyPem: /path/to/key.pem
+        verification:
+          trustRoots:
+            - /path/to/root/cert.pem
+            - /path/to/directory/with/root/certs
+```

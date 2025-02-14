@@ -41,6 +41,7 @@ crd = [
   "dep:k8s-openapi",
   "dep:kube",
   "dep:mirrord-config",
+  "dep:schemars",
   "dep:semver",
   "dep:serde_json",
   "dep:thiserror",
@@ -67,7 +68,7 @@ k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, features = ["derive", "ws"], optional = true }
 futures = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
-schemars = { workspace = true, features = ["chrono"] }
+schemars = { workspace = true, features = ["chrono"], optional = true }
 semver = { workspace = true, features = ["serde"], optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
