@@ -14,10 +14,15 @@ publish.workspace = true
 edition.workspace = true
 
 [features]
-default = ["k8s-openapi"]
+default = []
 k8s-openapi = ["dep:k8s-openapi"]
+schema = ["dep:schemars"]
 
 [dependencies]
+base64.workspace = true
 k8s-openapi = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

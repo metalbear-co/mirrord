@@ -4243,7 +4243,11 @@ dependencies = [
 name = "mirrord-agent-env"
 version = "3.132.1"
 dependencies = [
+ "base64 0.22.1",
  "k8s-openapi",
+ "schemars",
+ "serde",
+ "serde_json",
  "thiserror 2.0.11",
  "tracing",
 ]
@@ -4472,6 +4476,7 @@ dependencies = [
  "hyper-util",
  "k8s-openapi",
  "kube",
+ "mirrord-agent-env",
  "mirrord-analytics",
  "mirrord-auth",
  "mirrord-config",
