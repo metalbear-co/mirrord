@@ -290,7 +290,14 @@ pub(crate) struct EphemeralContainer {
 /// To find the `pid`, we look into `/proc/{pid}/cgroup`, searching for a string that matches
 /// `container_id`.
 ///
-/// Defaults to returning `1` when we cannot find the `pid`.
+/// Defaults to returning `1` when we cannot find the `pid` to keep the agent working, as not every
+/// operation is impacted by this (it's mostly file operations that won't work at all, since they'll
+/// be done in the wrong `/proc/{pid}` dir).
+///
+/// When `container_id` is empty, it might mean that `shareProcessNamespace: false`, and thus
+/// we can safely default to `/proc/1` (everything will work), or we could not identify a
+/// `container_id`, in which case some operations will fail (Alex: I think this case might only
+/// happen when we're dealing with old mirrord versions and new agent, but who knows).
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn find_pid_for_ephemeral(container_id: &str) -> Result<u64, tokio::io::Error> {
     if container_id.is_empty().not() {
@@ -331,7 +338,13 @@ async fn find_pid_for_ephemeral(container_id: &str) -> Result<u64, tokio::io::Er
                         }
                     }
                 }
-                Ok(None) => return Ok(1),
+                Ok(None) => {
+                    tracing::warn!(
+                        "Could not find `pid` of target, defaulting to `/proc/1`!\n\
+                        Some operations may not work as expected (e.g. file operations)!"
+                    );
+                    return Ok(1);
+                }
                 Err(fail) => {
                     tracing::warn!(?fail, "Searching for container pid!");
                     continue;
@@ -339,6 +352,10 @@ async fn find_pid_for_ephemeral(container_id: &str) -> Result<u64, tokio::io::Er
             }
         }
     } else {
+        tracing::warn!(
+            "No `container_id` detected, defaulting to `/proc/1`!\n\
+            Some operations may not work as expected (e.g. file operations)!"
+        );
         Ok(1)
     }
 }
@@ -352,7 +369,14 @@ impl ContainerRuntime for EphemeralContainer {
         Ok(ContainerInfo::new(
             find_pid_for_ephemeral(&self.container_id)
                 .await
-                .unwrap_or(1),
+                .unwrap_or_else(|fail| {
+                    tracing::warn!(
+                        ?fail,
+                        "Could not find `pid` of target, defaulting to `/proc/1`!\n\
+                        Some operations may not work as expected (e.g. file operations)!"
+                    );
+                    1
+                }),
             std::env::vars().collect(),
         ))
     }

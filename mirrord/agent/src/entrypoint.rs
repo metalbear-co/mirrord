@@ -101,7 +101,7 @@ impl State {
             cli::Mode::Ephemeral { .. } => {
                 let container_handle = ContainerHandle::new(runtime::Container::Ephemeral(
                     runtime::EphemeralContainer {
-                        container_id: envs::EPHEMERAL_CONTAINER_ID
+                        container_id: envs::EPHEMERAL_TARGET_CONTAINER_ID
                             .try_from_env()
                             .ok()
                             .flatten()
