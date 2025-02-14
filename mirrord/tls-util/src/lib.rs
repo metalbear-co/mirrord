@@ -21,7 +21,7 @@ pub use cert_with_server_name::CertWithServerName;
 pub use certs::Certs;
 pub use error::TlsUtilError;
 pub use maybe_mapped_path::MaybeMappedPath;
-pub use no_verifier::DangerousNoVerifier;
+pub use no_verifier::{DangerousNoVerifierClient, DangerousNoVerifierServer};
 pub use random_cert::RandomCert;
 pub use rustls;
 pub use tokio_rustls;

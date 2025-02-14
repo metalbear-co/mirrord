@@ -3,7 +3,7 @@ use std::{fmt, io, path::PathBuf, sync::Arc};
 use mirrord_tls_util::{
     rustls::{self, pki_types::ServerName, ClientConfig},
     tokio_rustls::{client::TlsStream, TlsConnector},
-    CertChain, DangerousNoVerifier, TlsUtilError,
+    CertChain, DangerousNoVerifierServer, TlsUtilError,
 };
 use thiserror::Error;
 use tokio::{net::TcpStream, task::JoinError};
@@ -57,7 +57,7 @@ impl LocalTlsConnector {
     ) -> Result<Self, LocalTlsConnectorError> {
         let builder = ClientConfig::builder()
             .dangerous()
-            .with_custom_certificate_verifier(Arc::new(DangerousNoVerifier));
+            .with_custom_certificate_verifier(Arc::new(DangerousNoVerifierServer));
 
         let mut config = match cert_and_key {
             Some((cert, key)) => {

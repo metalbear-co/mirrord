@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     fmt, fs, io,
+    ops::Not,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
@@ -9,12 +10,17 @@ use std::{
 use error::{SetupError, StealTlsError};
 use handler::StealTlsHandler;
 use mirrord_agent_env::steal_tls::{
-    AgentClientAuth, AgentServerAuth, RemoteClientAuth, RemoteServerAuth, StealTlsConfig,
+    AgentClientConfig, AgentServerConfig, StealPortTlsConfig, TlsAuthentication,
+    TlsClientVerification, TlsServerVerification,
 };
 use mirrord_tls_util::{
-    rustls::{server::WebPkiClientVerifier, ClientConfig, RootCertStore, ServerConfig},
+    rustls::{
+        server::{danger::ClientCertVerifier, WebPkiClientVerifier},
+        ClientConfig, RootCertStore, ServerConfig,
+    },
     tokio_rustls::TlsAcceptor,
-    CertChain, Certs, DangerousNoVerifier, MaybeMappedPath, RandomCert,
+    CertChain, Certs, DangerousNoVerifierClient, DangerousNoVerifierServer, MaybeMappedPath,
+    RandomCert,
 };
 use tracing::Level;
 
@@ -31,7 +37,7 @@ pub(crate) mod http_version_ext;
 #[derive(Default)]
 struct State {
     /// Configuration supplied by the operator.
-    config: StealTlsConfig,
+    config: HashMap<u16, StealPortTlsConfig>,
     /// Cache for resolved handlers.
     resolved: Mutex<HashMap<u16, StealTlsHandler>>,
     /// Path to the target container filesystem root.
@@ -55,7 +61,12 @@ impl StealTlsHandlerStore {
     const ACCEPTOR_VALIDITY: Duration = Duration::from_secs(60);
 
     #[tracing::instrument(level = Level::DEBUG, ret)]
-    pub(crate) fn new(config: StealTlsConfig, target_pid: u64) -> Self {
+    pub(crate) fn new(config: Vec<StealPortTlsConfig>, target_pid: u64) -> Self {
+        let config = config
+            .into_iter()
+            .map(|config| (config.port, config))
+            .collect();
+
         Self(Arc::new(State {
             config,
             resolved: Default::default(),
@@ -90,10 +101,10 @@ impl StealTlsHandlerStore {
         let this = self.clone();
         let handler = tokio::task::spawn_blocking(move || {
             let acceptor = this
-                .build_acceptor(&config.agent_server_auth)
+                .build_acceptor(&config.agent_as_server)
                 .map_err(StealTlsError::ServerSetupError)?;
             let client_config = this
-                .build_client_config(&config.agent_client_auth)
+                .build_client_config(&config.agent_as_client)
                 .map_err(StealTlsError::ClientSetupError)?;
 
             Ok::<_, StealTlsError>(StealTlsHandler::new(acceptor, client_config))
@@ -130,21 +141,25 @@ impl StealTlsHandlerStore {
 
     /// Builds a [`ServerConfig`] used by the agent on stolen connections.
     #[tracing::instrument(level = Level::DEBUG, err(level = Level::DEBUG))]
-    fn build_acceptor(&self, config: &AgentServerAuth) -> Result<TlsAcceptor, SetupError> {
-        let cert_pem = self.resolve_in_target_filesystem(&config.cert_pem)?;
-        let cert_key = self.resolve_in_target_filesystem(&config.key_pem)?;
-        let (cert_chain, key_der) = CertChain::read(&cert_pem, &cert_key)
-            .map_err(SetupError::ReadCertChainError)?
-            .into_chain_and_key();
+    fn build_acceptor(&self, config: &AgentServerConfig) -> Result<TlsAcceptor, SetupError> {
+        let (cert_chain, key_der) = {
+            let TlsAuthentication { cert_pem, key_pem } = &config.authentication;
+            let cert_pem = self.resolve_in_target_filesystem(cert_pem)?;
+            let cert_key = self.resolve_in_target_filesystem(key_pem)?;
+            CertChain::read(&cert_pem, &cert_key)
+                .map_err(SetupError::ReadCertChainError)?
+                .into_chain_and_key()
+        };
 
-        let builder = match &config.client_auth {
-            Some(RemoteClientAuth {
+        let builder = match &config.verification {
+            Some(TlsClientVerification {
                 allow_anonymous,
-                root_cert_pems,
+                accept_any_cert,
+                trust_roots,
             }) => {
-                let mut store = self.build_root_store(root_cert_pems);
+                let mut store = self.build_root_store(trust_roots);
 
-                if store.is_empty() {
+                if store.is_empty() && accept_any_cert.not() {
                     if *allow_anonymous {
                         let dummy = RandomCert::generate(vec!["dummy".into()])
                             .map_err(SetupError::GenerateDummyCertError)?;
@@ -156,21 +171,30 @@ impl StealTlsHandlerStore {
                     }
                 }
 
-                let mut builder = WebPkiClientVerifier::builder(store.into());
-                if *allow_anonymous {
-                    builder = builder.allow_unauthenticated();
-                }
+                let verifier: Arc<dyn ClientCertVerifier> = if *accept_any_cert {
+                    Arc::new(DangerousNoVerifierClient {
+                        allow_anonymous: *allow_anonymous,
+                        subjects: store.subjects(),
+                    })
+                } else {
+                    let mut builder = WebPkiClientVerifier::builder(store.into());
+                    if *allow_anonymous {
+                        builder = builder.allow_unauthenticated();
+                    }
 
-                let verifier = builder.build().map_err(SetupError::from)?;
+                    builder.build().map_err(SetupError::from)?
+                };
 
                 ServerConfig::builder().with_client_cert_verifier(verifier)
             }
+
             None => ServerConfig::builder().with_no_client_auth(),
         };
 
         let mut server_config = builder
             .with_single_cert(cert_chain, key_der)
             .map_err(SetupError::CertChainInvalid)?;
+
         server_config.alpn_protocols = config
             .alpn_protocols
             .iter()
@@ -279,29 +303,39 @@ impl StealTlsHandlerStore {
     /// Builds a [`TlsConnector`] used by the agent when passing through unmatched requests to their
     /// original destination.
     #[tracing::instrument(level = Level::DEBUG, err(level = Level::DEBUG))]
-    fn build_client_config(&self, config: &AgentClientAuth) -> Result<ClientConfig, SetupError> {
-        let cert_pem = self.resolve_in_target_filesystem(&config.cert_pem)?;
-        let key_pem = self.resolve_in_target_filesystem(&config.key_pem)?;
-        let (cert_chain, key_der) = CertChain::read(&cert_pem, &key_pem)
-            .map_err(SetupError::ReadCertChainError)?
-            .into_chain_and_key();
+    fn build_client_config(&self, config: &AgentClientConfig) -> Result<ClientConfig, SetupError> {
+        let TlsServerVerification {
+            accept_any_cert,
+            trust_roots,
+        } = &config.verification;
 
-        let builder = match &config.server_auth {
-            Some(RemoteServerAuth { root_cert_pems }) => {
-                let root_store = self.build_root_store(root_cert_pems);
-                if root_store.is_empty() {
-                    return Err(SetupError::NoGoodRoot);
-                }
-                ClientConfig::builder().with_root_certificates(root_store)
-            }
-            None => ClientConfig::builder()
+        let builder = if *accept_any_cert {
+            ClientConfig::builder()
                 .dangerous()
-                .with_custom_certificate_verifier(Arc::new(DangerousNoVerifier)),
+                .with_custom_certificate_verifier(Arc::new(DangerousNoVerifierServer))
+        } else {
+            let root_store = self.build_root_store(trust_roots);
+            if root_store.is_empty() {
+                return Err(SetupError::NoGoodRoot);
+            }
+
+            ClientConfig::builder().with_root_certificates(root_store)
         };
 
-        builder
-            .with_client_auth_cert(cert_chain, key_der)
-            .map_err(SetupError::CertChainInvalid)
+        match &config.authentication {
+            Some(TlsAuthentication { cert_pem, key_pem }) => {
+                let cert_pem = self.resolve_in_target_filesystem(cert_pem)?;
+                let key_pem = self.resolve_in_target_filesystem(key_pem)?;
+                let (cert_chain, key_der) = CertChain::read(&cert_pem, &key_pem)
+                    .map_err(SetupError::ReadCertChainError)?
+                    .into_chain_and_key();
+
+                builder
+                    .with_client_auth_cert(cert_chain, key_der)
+                    .map_err(SetupError::CertChainInvalid)
+            }
+            None => Ok(builder.with_no_client_auth()),
+        }
     }
 }
 
