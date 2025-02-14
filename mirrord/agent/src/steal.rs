@@ -13,11 +13,11 @@ mod http;
 pub mod ip_tables;
 mod orig_dst;
 mod subscriptions;
-#[allow(unused)]
 mod tls;
 
 pub(crate) use api::TcpStealerApi;
 pub(crate) use connection::TcpConnectionStealer;
+pub(crate) use tls::StealTlsHandlerStore;
 
 use self::http::HttpResponseFallback;
 

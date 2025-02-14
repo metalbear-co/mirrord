@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     mem,
     net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
+    ops::Not,
     path::PathBuf,
     sync::{
         atomic::{AtomicU32, Ordering},
@@ -45,9 +46,9 @@ use crate::{
             IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV, IPTABLE_MESH, IPTABLE_MESH_ENV,
             IPTABLE_PREROUTING, IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD, IPTABLE_STANDARD_ENV,
         },
-        StealerCommand, TcpConnectionStealer, TcpStealerApi,
+        StealTlsHandlerStore, StealerCommand, TcpConnectionStealer, TcpStealerApi,
     },
-    util::{run_thread_in_namespace, ClientId},
+    util::{path_resolver::InTargetPathResolver, run_thread_in_namespace, ClientId},
     watched_task::{TaskStatus, WatchedTask},
     *,
 };
@@ -611,31 +612,35 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         }
     };
 
-    let (stealer_task, stealer_status) = if args.mode.is_targetless() {
-        (None, None)
-    } else {
-        let cancellation_token = cancellation_token.clone();
-        let watched_task = WatchedTask::new(
-            TcpConnectionStealer::TASK_NAME,
-            TcpConnectionStealer::new(stealer_command_rx, args.ipv6).and_then(
-                |stealer| async move {
-                    let res = stealer.start(cancellation_token).await;
-                    if let Err(err) = res.as_ref() {
-                        error!("Stealer failed: {err}");
-                    }
-                    res
-                },
-            ),
-        );
-        let status = watched_task.status();
-        let task = run_thread_in_namespace(
-            watched_task.start(),
-            TcpConnectionStealer::TASK_NAME.to_string(),
-            state.container_pid(),
-            "net",
-        );
+    let (stealer_task, stealer_status) = match state.container_pid() {
+        None => (None, None),
+        Some(pid) => {
+            let cancellation_token = cancellation_token.clone();
+            let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
+            let tls_handler_store = tls_steal_config.is_empty().not().then(|| {
+                StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(pid))
+            });
+            let watched_task = WatchedTask::new(
+                TcpConnectionStealer::TASK_NAME,
+                TcpConnectionStealer::new(stealer_command_rx, args.ipv6, tls_handler_store)
+                    .and_then(|stealer| async move {
+                        let res = stealer.start(cancellation_token).await;
+                        if let Err(err) = res.as_ref() {
+                            error!("Stealer failed: {err}");
+                        }
+                        res
+                    }),
+            );
+            let status = watched_task.status();
+            let task = run_thread_in_namespace(
+                watched_task.start(),
+                TcpConnectionStealer::TASK_NAME.to_string(),
+                state.container_pid(),
+                "net",
+            );
 
-        (Some(task), Some(status))
+            (Some(task), Some(status))
+        }
     };
 
     let (dns_task, dns_status) = {

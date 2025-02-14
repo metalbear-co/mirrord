@@ -30,7 +30,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{warn, Level};
 
-use super::{http::HttpResponseFallback, subscriptions::PortRedirector};
+use super::{http::HttpResponseFallback, subscriptions::PortRedirector, tls::StealTlsHandlerStore};
 use crate::{
     error::{AgentError, AgentResult},
     metrics::HTTP_REQUEST_IN_PROGRESS_COUNT,
@@ -330,6 +330,7 @@ impl TcpConnectionStealer<IpTablesRedirector> {
     pub(crate) async fn new(
         command_rx: Receiver<StealerCommand>,
         support_ipv6: bool,
+        tls_handler_store: Option<StealTlsHandlerStore>,
     ) -> AgentResult<Self> {
         let config = TcpStealerConfig::from_env();
         let redirector = IpTablesRedirector::new(
@@ -339,7 +340,12 @@ impl TcpConnectionStealer<IpTablesRedirector> {
         )
         .await?;
 
-        Ok(Self::with_redirector(command_rx, support_ipv6, redirector))
+        Ok(Self::with_redirector(
+            command_rx,
+            support_ipv6,
+            redirector,
+            tls_handler_store,
+        ))
     }
 }
 
@@ -356,13 +362,14 @@ where
         command_rx: Receiver<StealerCommand>,
         support_ipv6: bool,
         redirector: Redirector,
+        tls_handler_store: Option<StealTlsHandlerStore>,
     ) -> Self {
         Self {
             port_subscriptions: PortSubscriptions::new(redirector, 4),
             command_rx,
             clients: HashMap::with_capacity(8),
             clients_closed: Default::default(),
-            connections: StolenConnections::with_capacity(8),
+            connections: StolenConnections::new(8, tls_handler_store),
             support_ipv6,
         }
     }
@@ -998,6 +1005,7 @@ mod test {
             command_rx,
             false,
             NotifyingRedirector(redirect_tx),
+            None,
         );
 
         tokio::spawn(stealer.start(CancellationToken::new()));

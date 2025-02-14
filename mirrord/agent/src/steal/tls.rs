@@ -2,9 +2,9 @@ use std::{
     collections::HashMap,
     fmt,
     fs::{self, File},
-    io::{self, BufReader},
+    io::BufReader,
     ops::Not,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{Arc, Mutex},
 };
 
@@ -21,7 +21,6 @@ use rustls::{
     ClientConfig, RootCertStore, ServerConfig,
 };
 use rustls_pemfile::Item;
-use tokio_rustls::TlsAcceptor;
 use tracing::Level;
 
 use crate::util::path_resolver::InTargetPathResolver;
@@ -29,6 +28,13 @@ use crate::util::path_resolver::InTargetPathResolver;
 pub mod error;
 pub mod handler;
 mod no_verifier;
+
+/// Name of HTTP/2 in the ALPN protocol.
+pub const HTTP_2_ALPN_NAME: &[u8] = b"h2";
+/// Name of HTTP/1.1 in the ALPN protocol.
+pub const HTTP_1_1_ALPN_NAME: &[u8] = b"http/1.1";
+/// Name of HTTP/1.0 in the ALPN protocol.
+pub const HTTP_1_0_ALPN_NAME: &[u8] = b"http/1.0";
 
 /// An already built [`StealTlsHandler`] or a configuration to build one.
 #[derive(Debug)]
@@ -260,6 +266,8 @@ impl StealTlsHandlerStore {
                         result
                             .inspect_err(|error| {
                                 tracing::error!(
+                                    %error,
+                                    ?path,
                                     "Failed to list a directory when building a root cert store."
                                 )
                             })
