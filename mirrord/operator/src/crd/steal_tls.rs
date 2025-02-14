@@ -1,9 +1,9 @@
 use kube::CustomResource;
+use mirrord_agent_env::steal_tls::StealPortTlsConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::label_selector::LabelSelector;
-use crate::types::StealPortTlsConfig;
 
 /// Custom resource for configuring how the mirrord-agent handles stealing TLS traffic from some
 /// targets.

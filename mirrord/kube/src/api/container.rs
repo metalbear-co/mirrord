@@ -1,7 +1,7 @@
 use std::{collections::HashSet, net::IpAddr, sync::LazyLock};
 
 use k8s_openapi::api::core::v1::{ContainerStatus, Pod};
-use mirrord_agent_env::{mesh::MeshVendor, steal_tls::StealTlsConfig};
+use mirrord_agent_env::{mesh::MeshVendor, steal_tls::StealPortTlsConfig};
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
 use rand::{
@@ -46,7 +46,7 @@ pub struct ContainerParams {
     pub pod_ips: Option<Vec<IpAddr>>,
     /// Support IPv6-only clusters
     pub support_ipv6: bool,
-    pub steal_tls_config: Option<StealTlsConfig>,
+    pub steal_tls_config: Option<Vec<StealPortTlsConfig>>,
 }
 
 impl ContainerParams {
@@ -55,7 +55,7 @@ impl ContainerParams {
         pod_ips: Option<Vec<IpAddr>>,
         support_ipv6: bool,
         port: Option<u16>,
-        steal_tls_config: Option<StealTlsConfig>,
+        steal_tls_config: Option<Vec<StealPortTlsConfig>>,
     ) -> ContainerParams {
         let port = port.unwrap_or_else(|| rand::thread_rng().gen_range(30000..=65535));
         let gid: u16 = rand::thread_rng().gen_range(3000..u16::MAX);

@@ -6,7 +6,7 @@ use kube::{
     config::{KubeConfigOptions, Kubeconfig},
     Api, Client, Config, Discovery,
 };
-use mirrord_agent_env::{mesh::MeshVendor, steal_tls::StealTlsConfig};
+use mirrord_agent_env::{mesh::MeshVendor, steal_tls::StealPortTlsConfig};
 use mirrord_config::{
     agent::AgentConfig,
     target::{Target, TargetConfig},
@@ -184,7 +184,7 @@ impl KubernetesAPI {
         tls_cert: Option<String>,
         support_ipv6: bool,
         agent_port: Option<u16>,
-        steal_tls_config: Option<StealTlsConfig>,
+        steal_tls_config: Option<Vec<StealPortTlsConfig>>,
     ) -> Result<(ContainerParams, Option<RuntimeData>), KubeApiError> {
         let runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
             Target::Targetless => None,
@@ -226,7 +226,7 @@ impl KubernetesAPI {
         config: Option<&LayerConfig>,
         tls_cert: Option<String>,
         agent_port: Option<u16>,
-        steal_tls_config: Option<StealTlsConfig>,
+        steal_tls_config: Option<Vec<StealPortTlsConfig>>,
     ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
     where
         P: Progress + Send + Sync,

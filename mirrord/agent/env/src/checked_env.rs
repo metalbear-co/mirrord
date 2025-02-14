@@ -13,7 +13,7 @@ use base64::{engine::general_purpose, Engine};
 use k8s_openapi::api::core::v1::EnvVar;
 use thiserror::Error;
 
-use crate::steal_tls::StealTlsConfig;
+use crate::steal_tls::StealPortTlsConfig;
 
 /// Type of an environment variable value.
 pub trait EnvValue: Sized {
@@ -206,7 +206,7 @@ pub enum ParseStealTlsConfigError {
     DeserializeError(#[from] serde_json::Error),
 }
 
-impl EnvValue for StealTlsConfig {
+impl EnvValue for Vec<StealPortTlsConfig> {
     type IntoReprError = Infallible;
     type FromReprError = ParseStealTlsConfigError;
 

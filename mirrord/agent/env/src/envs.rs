@@ -4,7 +4,7 @@
 
 use std::net::{IpAddr, SocketAddr};
 
-use crate::{checked_env::CheckedEnv, steal_tls::StealTlsConfig};
+use crate::{checked_env::CheckedEnv, steal_tls::StealPortTlsConfig};
 
 /// Used to pass operator's x509 certificate to the agent.
 ///
@@ -53,5 +53,5 @@ pub const POD_IPS: CheckedEnv<Vec<IpAddr>> = CheckedEnv::new("MIRRORD_AGENT_POD_
 pub const LOG_LEVEL: CheckedEnv<String> = CheckedEnv::new("RUST_LOG");
 
 /// Provides the agent with a steal TLS configuration.
-pub const STEAL_TLS_CONFIG: CheckedEnv<StealTlsConfig> =
+pub const STEAL_TLS_CONFIG: CheckedEnv<Vec<StealPortTlsConfig>> =
     CheckedEnv::new("MIRRORD_AGENT_STEAL_TLS_CONFIG");
