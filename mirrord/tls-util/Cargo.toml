@@ -16,4 +16,5 @@ edition.workspace = true
 [features]
 
 [dependencies]
+http.workspace = true
 rustls.workspace = true

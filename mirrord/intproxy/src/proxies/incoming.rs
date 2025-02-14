@@ -19,7 +19,8 @@ use mirrord_intproxy_protocol::{
 use mirrord_protocol::{
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, DaemonTcp, HttpRequest,
-        InternalHttpBodyFrame, LayerTcp, LayerTcpSteal, NewTcpConnection, StealType, TcpData,
+        HttpRequestMetadata, HttpRequestTransportType, InternalHttpBodyFrame, InternalHttpRequest,
+        LayerTcp, LayerTcpSteal, NewTcpConnection, StealType, TcpData,
     },
     ClientMessage, ConnectionId, RequestId, ResponseError,
 };
@@ -178,6 +179,7 @@ impl IncomingProxy {
         &mut self,
         request: HttpRequest<StreamingBody>,
         body_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
+        use_tls: bool,
         message_bus: &MessageBus<Self>,
     ) {
         let subscription = self.subscriptions.get(request.port).filter(|subscription| {
@@ -238,6 +240,7 @@ impl IncomingProxy {
                 self.client_store.clone(),
                 self.response_mode,
                 subscription.listening_on,
+                use_tls,
             ),
             InProxyTask::HttpGateway(id),
             Self::CHANNEL_SIZE,
@@ -345,12 +348,43 @@ impl IncomingProxy {
             ChunkedRequest::StartV1(request) => {
                 let (body_tx, body_rx) = mpsc::channel(128);
                 let request = request.map_body(|frames| StreamingBody::new(body_rx, frames));
-                self.start_http_gateway(request, Some(body_tx), message_bus)
+                self.start_http_gateway(request, Some(body_tx), false, message_bus)
                     .await;
             }
 
-            ChunkedRequest::StartV2(..) => {
-                todo!()
+            ChunkedRequest::StartV2(request) => {
+                let (body, body_tx) = if request.request.body.is_last {
+                    (StreamingBody::from(request.request.body.frames), None)
+                } else {
+                    let (body_tx, body_rx) = mpsc::channel(128);
+                    (
+                        StreamingBody::new(body_rx, request.request.body.frames),
+                        Some(body_tx),
+                    )
+                };
+
+                let HttpRequestMetadata::V1 { destination, .. } = request.metadata;
+
+                let use_tls = match request.transport {
+                    HttpRequestTransportType::Tcp => false,
+                    HttpRequestTransportType::Tls => true,
+                };
+
+                let request = HttpRequest {
+                    connection_id: request.connection_id,
+                    request_id: request.request_id,
+                    internal_request: InternalHttpRequest {
+                        method: request.request.method,
+                        uri: request.request.uri,
+                        headers: request.request.headers,
+                        version: request.request.version,
+                        body,
+                    },
+                    port: destination.port(),
+                };
+
+                self.start_http_gateway(request, body_tx, use_tls, message_bus)
+                    .await;
             }
 
             ChunkedRequest::Body(ChunkedRequestBodyV1 {
@@ -461,12 +495,12 @@ impl IncomingProxy {
             }
 
             DaemonTcp::HttpRequest(request) => {
-                self.start_http_gateway(request.map_body(From::from), None, message_bus)
+                self.start_http_gateway(request.map_body(From::from), None, false, message_bus)
                     .await;
             }
 
             DaemonTcp::HttpRequestFramed(request) => {
-                self.start_http_gateway(request.map_body(From::from), None, message_bus)
+                self.start_http_gateway(request.map_body(From::from), None, false, message_bus)
                     .await;
             }
 

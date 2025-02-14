@@ -1,6 +1,7 @@
 use std::{fmt, io, net::IpAddr, sync::Arc};
 
 use http::Uri;
+use mirrord_tls_util::UriExt;
 use rustls::{pki_types::ServerName, ClientConfig, ServerConfig, ServerConnection};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::{client, TlsAcceptor, TlsConnector};
@@ -85,7 +86,7 @@ impl PassThroughTlsConnector {
         let server_name = self
             .server_name
             .clone()
-            .or_else(|| Self::server_name_from_uri(request_uri?)?.to_owned().into())
+            .or_else(|| request_uri?.get_server_name()?.to_owned().into())
             .unwrap_or_else(|| ServerName::from(server_ip));
 
         let connector = TlsConnector::from(self.client_config.clone());
@@ -104,15 +105,6 @@ impl PassThroughTlsConnector {
                 );
             })
             .map(Box::new)
-    }
-
-    /// Attempts to extract a [`ServerName`] from the given request [`Uri`].
-    ///
-    /// Copied from [hyper-tls](https://github.com/hyperium/hyper-tls/blob/0265e166a8886f01253050516316a95900315b81/src/client.rs#L140).
-    fn server_name_from_uri(uri: &'_ Uri) -> Option<ServerName<'_>> {
-        let hostname = uri.host()?.trim_matches(|c| c == '[' || c == ']');
-
-        ServerName::try_from(hostname).ok()
     }
 }
 

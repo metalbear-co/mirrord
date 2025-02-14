@@ -41,6 +41,8 @@ pub struct HttpGatewayTask {
     response_mode: ResponseMode,
     /// Address of the HTTP server in the user application.
     server_addr: SocketAddr,
+    /// Whether to use TLS when making a connection to the use application.
+    use_tls: bool,
 }
 
 impl fmt::Debug for HttpGatewayTask {
@@ -49,6 +51,7 @@ impl fmt::Debug for HttpGatewayTask {
             .field("request", &self.request)
             .field("response_mode", &self.response_mode)
             .field("server_addr", &self.server_addr)
+            .field("use_tls", &self.use_tls)
             .finish()
     }
 }
@@ -60,12 +63,14 @@ impl HttpGatewayTask {
         client_store: ClientStore,
         response_mode: ResponseMode,
         server_addr: SocketAddr,
+        use_tls: bool,
     ) -> Self {
         Self {
             request,
             client_store,
             response_mode,
             server_addr,
+            use_tls,
         }
     }
 
@@ -209,7 +214,12 @@ impl HttpGatewayTask {
     async fn send_attempt(&self, message_bus: &mut MessageBus<Self>) -> Result<(), LocalHttpError> {
         let mut client = self
             .client_store
-            .get(self.server_addr, self.request.version())
+            .get(
+                self.server_addr,
+                self.request.version(),
+                self.use_tls,
+                self.request.internal_request.uri.clone(),
+            )
             .await?;
         let mut response = client.send_request(self.request.clone()).await?;
         let on_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS).then(|| {
@@ -537,6 +547,7 @@ mod test {
                 ClientStore::new_with_timeout(Duration::from_secs(1)),
                 ResponseMode::Basic,
                 local_destination,
+                false,
             );
             tasks.register(gateway, 0, 8)
         };
@@ -681,7 +692,7 @@ mod test {
                 uri: "/".parse().unwrap(),
                 headers: Default::default(),
                 version: Version::HTTP_11,
-                body: StreamingBody::from(vec![]),
+                body: StreamingBody::from(Vec::<u8>::new()),
             },
         };
 
@@ -692,6 +703,7 @@ mod test {
                 ClientStore::new_with_timeout(Duration::from_secs(1)),
                 response_mode,
                 addr,
+                false,
             ),
             (),
             8,
@@ -836,7 +848,13 @@ mod test {
         let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> = Default::default();
         let client_store = ClientStore::new_with_timeout(Duration::from_secs(1));
         let _gateway = tasks.register(
-            HttpGatewayTask::new(request, client_store.clone(), ResponseMode::Basic, addr),
+            HttpGatewayTask::new(
+                request,
+                client_store.clone(),
+                ResponseMode::Basic,
+                addr,
+                false,
+            ),
             (),
             8,
         );
@@ -909,6 +927,7 @@ mod test {
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
+                false,
             ),
             0,
             8,
@@ -919,6 +938,7 @@ mod test {
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
+                false,
             ),
             1,
             8,

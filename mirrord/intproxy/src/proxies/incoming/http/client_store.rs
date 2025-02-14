@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use hyper::Version;
+use hyper::{Uri, Version};
 use tokio::{
     sync::Notify,
     time::{self, Instant},
@@ -64,6 +64,8 @@ impl ClientStore {
         &self,
         server_addr: SocketAddr,
         version: Version,
+        use_tls: bool,
+        request_uri: Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
         let ready = {
             let mut guard = self
@@ -73,6 +75,7 @@ impl ClientStore {
             let position = guard.iter().position(|idle| {
                 idle.client.handles_version(version)
                     && idle.client.local_server_address() == server_addr
+                    && idle.client.uses_tls() == use_tls
             });
             position.map(|position| guard.swap_remove(position))
         };
@@ -82,11 +85,13 @@ impl ClientStore {
             return Ok(ready.client);
         }
 
-        let connect_task = tokio::spawn(LocalHttpClient::new(server_addr, version));
+        let connect_task = tokio::spawn(async move {
+            LocalHttpClient::new(server_addr, version, use_tls, &request_uri).await
+        });
 
         tokio::select! {
             result = connect_task => result.expect("this task should not panic"),
-            ready = self.wait_for_ready(server_addr, version) => {
+            ready = self.wait_for_ready(server_addr, version, use_tls) => {
                 tracing::trace!(?ready, "Reused an idle client");
                 Ok(ready)
             },
@@ -108,7 +113,12 @@ impl ClientStore {
     }
 
     /// Waits until there is a ready unused client.
-    async fn wait_for_ready(&self, server_addr: SocketAddr, version: Version) -> LocalHttpClient {
+    async fn wait_for_ready(
+        &self,
+        server_addr: SocketAddr,
+        version: Version,
+        uses_tls: bool,
+    ) -> LocalHttpClient {
         loop {
             let notified = {
                 let mut guard = self
@@ -118,6 +128,7 @@ impl ClientStore {
                 let position = guard.iter().position(|idle| {
                     idle.client.handles_version(version)
                         && idle.client.local_server_address() == server_addr
+                        && idle.client.uses_tls() == uses_tls
                 });
 
                 match position {
@@ -214,7 +225,15 @@ mod test {
         });
 
         let client_store = ClientStore::new_with_timeout(Duration::from_millis(10));
-        let client = client_store.get(addr, Version::HTTP_11).await.unwrap();
+        let client = client_store
+            .get(
+                addr,
+                Version::HTTP_11,
+                false,
+                "http://some.server.com".parse().unwrap(),
+            )
+            .await
+            .unwrap();
         client_store.push_idle(client);
 
         time::sleep(Duration::from_millis(100)).await;
