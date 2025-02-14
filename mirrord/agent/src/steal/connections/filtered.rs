@@ -30,8 +30,8 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::Level;
 
 use super::{
-    ConnectionMessageIn, ConnectionMessageOut, ConnectionTaskError,
-    STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION,
+    original_destination::OriginalDestination, ConnectionMessageIn, ConnectionMessageOut,
+    ConnectionTaskError, STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION,
 };
 use crate::{
     http::HttpVersion,
@@ -52,11 +52,8 @@ struct ExtractedRequest {
 /// Response instruction for [`FilteringService`].
 /// Sent from [`FilteredStealTask`] in [`ExtractedRequest::response_tx`].
 enum RequestHandling {
-    /// The [`Request`] should be handled by the HTTP server running at the given address.
-    LetThrough {
-        to: SocketAddr,
-        unchanged: Request<Incoming>,
-    },
+    /// The [`Request`] should be handled by the original HTTP server.
+    LetThrough { unchanged: Request<Incoming> },
     /// The [`FilteringService`] should respond immediately with the given [`Response`]
     /// on behalf of the given stealer client.
     RespondWith {
@@ -100,6 +97,9 @@ struct FilteringService {
     /// possible). However, using a [`oneshot`] here would require a combination of an [`Arc`],
     /// a [`Mutex`](std::sync::Mutex) and an [`Option`]. [`mpsc`] is used here for simplicity.
     upgrade_tx: Sender<UpgradedConnection>,
+
+    /// Original destination of the stolen requests.
+    original_destination: OriginalDestination,
 }
 
 impl FilteringService {
@@ -115,36 +115,44 @@ impl FilteringService {
             .expect("creating an empty response should not fail")
     }
 
-    /// Sends the given [`Request`] to the destination given as `to`.
+    /// Sends the given [`Request`] to the original destination given as `to`.
     ///
     /// # TODO
     ///
     /// This method always creates a new TCP connection and preforms an HTTP handshake.
     /// Also, it does not retry the request upon failure.
     async fn send_request(
-        to: SocketAddr,
+        &self,
         mut request: Request<Incoming>,
     ) -> Result<Response<Incoming>, Box<dyn std::error::Error>> {
-        let tcp_stream = TcpStream::connect(to).await.inspect_err(|error| {
-            tracing::error!(?error, address = %to, "Failed connecting to request destination");
-        })?;
+        let stream = self
+            .original_destination
+            .connect(request.uri())
+            .await
+            .inspect_err(|error| {
+                tracing::error!(
+                    %error,
+                    destination = ?self.original_destination,
+                    "Failed to connect to the request original destination HTTP server",
+                );
+            })?;
 
         match request.version() {
             Version::HTTP_2 => {
                 let (mut request_sender, connection) =
-                    http2::handshake(TokioExecutor::default(), TokioIo::new(tcp_stream))
+                    http2::handshake(TokioExecutor::default(), TokioIo::new(stream))
                         .await
                         .inspect_err(|error| {
                             tracing::error!(
                                 ?error,
-                                "HTTP2 handshake with original destination failed"
+                                "HTTP2 handshake with the original destination failed"
                             )
                         })?;
 
                 // We need this to progress the connection forward (hyper thing).
                 tokio::spawn(async move {
                     if let Err(error) = connection.await {
-                        tracing::error!(?error, "Connection with original destination failed");
+                        tracing::error!(?error, "Connection with the original destination failed");
                     }
                 });
 
@@ -161,16 +169,19 @@ impl FilteringService {
             }
 
             _ => {
-                let (mut request_sender, connection) = http1::handshake(TokioIo::new(tcp_stream))
+                let (mut request_sender, connection) = http1::handshake(TokioIo::new(stream))
                     .await
                     .inspect_err(|error| {
-                        tracing::error!(?error, "HTTP1 handshake with original destination failed")
+                        tracing::error!(
+                            ?error,
+                            "HTTP1 handshake with the original destination failed"
+                        )
                     })?;
 
                 // We need this to progress the connection forward (hyper thing).
                 tokio::spawn(async move {
                     if let Err(error) = connection.with_upgrades().await {
-                        tracing::error!(?error, "Connection with original destination failed");
+                        tracing::error!(?error, "Connection with the original destination failed");
                     }
                 });
 
@@ -198,10 +209,10 @@ impl FilteringService {
         &self,
         request: Request<Incoming>,
         on_upgrade: OnUpgrade,
-        to: SocketAddr,
     ) -> Response<DynamicBody> {
         let version = request.version();
-        let mut response = Self::send_request(to, request)
+        let mut response = self
+            .send_request(request)
             .await
             .map(|response| response.map(BoxBody::new))
             .unwrap_or_else(|_| {
@@ -294,8 +305,8 @@ impl FilteringService {
             .await?;
 
         let response = match response_rx.await {
-            Ok(RequestHandling::LetThrough { to, unchanged }) => {
-                self.let_through(unchanged, on_upgrade, to).await
+            Ok(RequestHandling::LetThrough { unchanged }) => {
+                self.let_through(unchanged, on_upgrade).await
             }
             Ok(RequestHandling::RespondWith {
                 response,
@@ -335,8 +346,7 @@ impl Service<Request<Incoming>> for FilteringService {
 /// stream into a series requests and provide responses.
 pub struct FilteredStealTask<T> {
     connection_id: ConnectionId,
-    /// Original destination of the stolen connection. Used when passing through HTTP requests that
-    /// don't not match any filter in [`Self::filters`].
+    /// Original destination of the stolen connection.
     original_destination: SocketAddr,
 
     /// Stealer client to [`HttpFilter`] mapping. Allows for routing HTTP requests to correct
@@ -406,16 +416,18 @@ where
     pub fn new(
         connection_id: ConnectionId,
         filters: Arc<DashMap<ClientId, HttpFilter>>,
-        original_destination: SocketAddr,
+        original_destination: OriginalDestination,
         http_version: HttpVersion,
         io: T,
     ) -> Self {
         let (upgrade_tx, mut upgrade_rx) = mpsc::channel(1);
         let (requests_tx, requests_rx) = mpsc::channel(Self::MAX_CONCURRENT_REQUESTS);
+        let original_dst_address = original_destination.address();
 
         let service = FilteringService {
             requests_tx,
             upgrade_tx,
+            original_destination,
         };
 
         let cancellation_token = CancellationToken::new();
@@ -464,7 +476,7 @@ where
 
         Self {
             connection_id,
-            original_destination,
+            original_destination: original_dst_address,
             filters,
             subscribed: Default::default(),
             requests_rx,
@@ -588,7 +600,6 @@ where
     ) -> Result<(), ConnectionTaskError> {
         let Some(client_id) = self.match_request(&mut request.request) else {
             let _ = request.response_tx.send(RequestHandling::LetThrough {
-                to: self.original_destination,
                 unchanged: request.request,
             });
 
@@ -996,7 +1007,7 @@ mod test {
                 let task = FilteredStealTask::new(
                     Self::CONNECTION_ID,
                     filters_clone,
-                    original_address,
+                    OriginalDestination::new(original_address, None),
                     HttpVersion::V1,
                     server_stream,
                 );

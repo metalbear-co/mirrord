@@ -5,6 +5,7 @@ use std::{collections::HashMap, fmt, io, net::SocketAddr, time::Duration};
 
 use hyper::{body::Incoming, Request, Response};
 use mirrord_protocol::{tcp::NewTcpConnection, ConnectionId, Port, RequestId};
+use original_destination::OriginalDestination;
 use thiserror::Error;
 use tokio::{
     net::TcpStream,
@@ -25,6 +26,7 @@ use crate::{
 };
 
 mod filtered;
+mod original_destination;
 mod unfiltered;
 
 /// Messages consumed by [`StolenConnections`] manager. Targeted at a specific [`StolenConnection`].
@@ -515,7 +517,7 @@ impl ConnectionTask {
             let task = FilteredStealTask::new(
                 self.connection_id,
                 filters,
-                self.connection.destination,
+                OriginalDestination::new(self.connection.destination, None),
                 http_version,
                 stream,
             );
@@ -593,10 +595,11 @@ impl ConnectionTask {
                     return Ok(());
                 };
 
+                let connector = tls_handler.connector(stream.inner().get_ref().1);
                 let task = FilteredStealTask::new(
                     self.connection_id,
                     filters,
-                    self.connection.destination,
+                    OriginalDestination::new(self.connection.destination, Some(connector)),
                     http_version,
                     stream,
                 );
@@ -605,10 +608,11 @@ impl ConnectionTask {
             }
         };
 
+        let connector = tls_handler.connector(tls_stream.get_ref().1);
         let task = FilteredStealTask::new(
             self.connection_id,
             filters,
-            self.connection.destination,
+            OriginalDestination::new(self.connection.destination, Some(connector)),
             http_version,
             tls_stream,
         );

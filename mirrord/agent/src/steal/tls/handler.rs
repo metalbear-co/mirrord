@@ -1,4 +1,4 @@
-use std::{io, net::IpAddr, sync::Arc};
+use std::{fmt, io, net::IpAddr, sync::Arc};
 
 use http::Uri;
 use rustls::{pki_types::ServerName, ClientConfig, ServerConfig, ServerConnection};
@@ -53,6 +53,7 @@ impl StealTlsHandler {
 ///
 /// This allows us to use the same ALPN protocol and SNI extension as the original connection
 /// source.
+#[derive(Clone)]
 pub struct PassThroughTlsConnector {
     /// Constructing [`TlsConnector`] from this is cheap.
     ///
@@ -112,5 +113,21 @@ impl PassThroughTlsConnector {
         let hostname = uri.host()?.trim_matches(|c| c == '[' || c == ']');
 
         ServerName::try_from(hostname).ok()
+    }
+}
+
+impl fmt::Debug for PassThroughTlsConnector {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PassThroughTlsConnector")
+            .field(
+                "alpn_protocol",
+                &self
+                    .client_config
+                    .alpn_protocols
+                    .first()
+                    .map(|proto| String::from_utf8_lossy(proto)),
+            )
+            .field("server_name", &self.server_name)
+            .finish()
     }
 }
