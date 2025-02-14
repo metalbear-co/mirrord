@@ -101,6 +101,10 @@ impl OriginalDestination {
         self.address
     }
 
+    pub fn uses_tls(&self) -> bool {
+        self.connector.is_some()
+    }
+
     /// Makes a connection to the server.
     ///
     /// Given [`Uri`] will be used in case we need a TLS connection and we don't have the original

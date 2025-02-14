@@ -16,7 +16,10 @@ use hyper::{
     Response,
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use mirrord_protocol::{ConnectionId, RequestId};
+use mirrord_protocol::{
+    tcp::{HttpRequestMetadata, HttpRequestTransportType},
+    ConnectionId, RequestId,
+};
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
     net::TcpStream,
@@ -347,7 +350,9 @@ impl Service<Request<Incoming>> for FilteringService {
 pub struct FilteredStealTask<T> {
     connection_id: ConnectionId,
     /// Original destination of the stolen connection.
-    original_destination: SocketAddr,
+    original_destination: OriginalDestination,
+    /// Address of connection peer.
+    peer_address: SocketAddr,
 
     /// Stealer client to [`HttpFilter`] mapping. Allows for routing HTTP requests to correct
     /// stealer clients.
@@ -417,17 +422,17 @@ where
         connection_id: ConnectionId,
         filters: Arc<DashMap<ClientId, HttpFilter>>,
         original_destination: OriginalDestination,
+        peer_address: SocketAddr,
         http_version: HttpVersion,
         io: T,
     ) -> Self {
         let (upgrade_tx, mut upgrade_rx) = mpsc::channel(1);
         let (requests_tx, requests_rx) = mpsc::channel(Self::MAX_CONCURRENT_REQUESTS);
-        let original_dst_address = original_destination.address();
 
         let service = FilteringService {
             requests_tx,
             upgrade_tx,
-            original_destination,
+            original_destination: original_destination.clone(),
         };
 
         let cancellation_token = CancellationToken::new();
@@ -476,7 +481,8 @@ where
 
         Self {
             connection_id,
-            original_destination: original_dst_address,
+            original_destination,
+            peer_address,
             filters,
             subscribed: Default::default(),
             requests_rx,
@@ -519,7 +525,7 @@ where
         fields(
             status = u16::from(response.status()),
             connection_id = self.connection_id,
-            original_destination = %self.original_destination,
+            original_destination = %self.original_destination.address(),
         )
     )]
     fn handle_response(
@@ -568,7 +574,7 @@ where
         skip(self),
         fields(
             connection_id = self.connection_id,
-            original_destination = %self.original_destination,
+            original_destination = %self.original_destination.address(),
         )
     )]
     fn handle_response_failure(&mut self, client_id: ClientId, request_id: RequestId) {
@@ -623,7 +629,15 @@ where
             connection_id: self.connection_id,
             request: request.request,
             id,
-            port: self.original_destination.port(),
+            metadata: HttpRequestMetadata::V1 {
+                destination: self.original_destination.address(),
+                source: self.peer_address,
+            },
+            transport: if self.original_destination.uses_tls() {
+                HttpRequestTransportType::Tls
+            } else {
+                HttpRequestTransportType::Tcp
+            },
         })
         .await?;
 
@@ -960,15 +974,15 @@ mod test {
             let original_server_token = CancellationToken::new();
             let token_clone = original_server_token.clone();
 
-            let (server_stream, client_stream) = {
+            let (server_stream, peer_address, client_stream) = {
                 let stealing_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-                let ((server_stream, _), client_stream) = tokio::try_join!(
+                let ((server_stream, peer_address), client_stream) = tokio::try_join!(
                     stealing_listener.accept(),
                     TcpStream::connect(stealing_listener.local_addr().unwrap()),
                 )
                 .unwrap();
 
-                (server_stream, client_stream)
+                (server_stream, peer_address, client_stream)
             };
 
             tasks.spawn(async move {
@@ -1008,6 +1022,7 @@ mod test {
                     Self::CONNECTION_ID,
                     filters_clone,
                     OriginalDestination::new(original_address, None),
+                    peer_address,
                     HttpVersion::V1,
                     server_stream,
                 );
@@ -1127,11 +1142,11 @@ mod test {
                             client_id: received_client_id,
                             connection_id: TestSetup::CONNECTION_ID,
                             id,
-                            port,
+                            metadata: HttpRequestMetadata::V1 { destination, .. },
                             ..
                         } => {
                             assert_eq!(received_client_id, client_id);
-                            assert_eq!(port, setup.original_address.port());
+                            assert_eq!(destination, setup.original_address);
                             id
                         }
                         other => unreachable!("unexpected message: {other:?}"),
@@ -1207,10 +1222,10 @@ mod test {
                         client_id: 0,
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
-                        port,
+                        metadata: HttpRequestMetadata::V1 { destination, .. },
                         ..
                     } => {
-                        assert_eq!(port, setup.original_address.port());
+                        assert_eq!(destination, setup.original_address);
                         id
                     }
                     other => unreachable!("unexpected message: {other:?}"),
@@ -1246,10 +1261,10 @@ mod test {
                         client_id: 0,
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
-                        port,
+                        metadata: HttpRequestMetadata::V1 { destination, .. },
                         ..
                     } => {
-                        assert_eq!(port, setup.original_address.port());
+                        assert_eq!(destination, setup.original_address);
                         id
                     }
                     other => unreachable!("unexpected message: {other:?}"),
@@ -1311,10 +1326,10 @@ mod test {
                         client_id: 0,
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
-                        port,
+                        metadata: HttpRequestMetadata::V1 { destination, .. },
                         ..
                     } => {
-                        assert_eq!(port, setup.original_address.port());
+                        assert_eq!(destination, setup.original_address);
                         id
                     }
                     other => unreachable!("unexpected message: {other:?}"),
@@ -1395,10 +1410,10 @@ mod test {
                         client_id: 0,
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
-                        port,
+                        metadata: HttpRequestMetadata::V1 { destination, .. },
                         ..
                     } => {
-                        assert_eq!(port, setup.original_address.port());
+                        assert_eq!(destination, setup.original_address);
                         id
                     }
                     other => unreachable!("unexpected message: {other:?}"),
@@ -1446,10 +1461,11 @@ mod test {
                         client_id: 1,
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
-                        port,
+                        metadata: HttpRequestMetadata::V1 { destination, .. },
                         request,
+                        ..
                     } => {
-                        assert_eq!(port, setup.original_address.port());
+                        assert_eq!(destination, setup.original_address);
                         assert_eq!(
                             request.headers().get(UPGRADE).and_then(|v| v.to_str().ok()),
                             Some(TestSetup::TEST_PROTO)
@@ -1578,10 +1594,10 @@ mod test {
                         client_id: 0,
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
-                        port,
+                        metadata: HttpRequestMetadata::V1 { destination, .. },
                         ..
                     } => {
-                        assert_eq!(port, setup.original_address.port());
+                        assert_eq!(destination, setup.original_address);
                         id
                     }
                     other => unreachable!("unexpected message: {other:?}"),
@@ -1636,10 +1652,10 @@ mod test {
                         client_id: 0,
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
-                        port,
+                        metadata: HttpRequestMetadata::V1 { destination, .. },
                         ..
                     } => {
-                        assert_eq!(port, setup.original_address.port());
+                        assert_eq!(destination, setup.original_address);
                         id
                     }
                     other => unreachable!("unexpected message: {other:?}"),

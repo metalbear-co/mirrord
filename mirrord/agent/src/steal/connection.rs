@@ -15,11 +15,12 @@ use mirrord_agent_env::envs;
 use mirrord_protocol::{
     batched_body::{BatchedBody, Frames},
     tcp::{
-        ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, DaemonTcp, HttpRequest,
-        InternalHttpBody, InternalHttpBodyFrame, InternalHttpRequest, StealType, TcpClose, TcpData,
-        HTTP_CHUNKED_REQUEST_VERSION, HTTP_FILTERED_UPGRADE_VERSION, HTTP_FRAMED_VERSION,
+        ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, DaemonTcp, HttpRequest,
+        HttpRequestMetadata, HttpRequestTransportType, InternalHttpBody, InternalHttpBodyFrame,
+        InternalHttpRequest, StealType, TcpClose, TcpData, HTTP_CHUNKED_REQUEST_VERSION,
+        HTTP_FILTERED_UPGRADE_VERSION, HTTP_FRAMED_VERSION,
     },
-    ConnectionId, Port,
+    ConnectionId,
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
     RequestId,
 };
@@ -50,25 +51,28 @@ use crate::{
 #[derive(Debug)]
 struct MatchedHttpRequest {
     connection_id: ConnectionId,
-    port: Port,
     request_id: RequestId,
     request: Request<Incoming>,
+    metadata: HttpRequestMetadata,
+    transport: HttpRequestTransportType,
 }
 
 impl MatchedHttpRequest {
     fn new(
         connection_id: ConnectionId,
-        port: Port,
         request_id: RequestId,
         request: Request<Incoming>,
+        metadata: HttpRequestMetadata,
+        transport: HttpRequestTransportType,
     ) -> Self {
         HTTP_REQUEST_IN_PROGRESS_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         Self {
             connection_id,
-            port,
             request_id,
             request,
+            metadata,
+            transport,
         }
     }
 
@@ -94,8 +98,10 @@ impl MatchedHttpRequest {
             body,
         };
 
+        let HttpRequestMetadata::V1 { destination, .. } = self.metadata;
+
         Ok(HttpRequest {
-            port: self.port,
+            port: destination.port(),
             connection_id: self.connection_id,
             request_id: self.request_id,
             internal_request,
@@ -124,8 +130,10 @@ impl MatchedHttpRequest {
             body,
         };
 
+        let HttpRequestMetadata::V1 { destination, .. } = self.metadata;
+
         Ok(HttpRequest {
-            port: self.port,
+            port: destination.port(),
             connection_id: self.connection_id,
             request_id: self.request_id,
             internal_request,
@@ -190,6 +198,8 @@ impl Client {
                     },
                     mut body,
                 ) = request.request.into_parts();
+                let HttpRequestMetadata::V1 { destination, .. } = request.metadata;
+
                 match body.ready_frames() {
                     Err(..) => return,
                     // We don't check is_last here since loop will finish when body.next_frames()
@@ -201,7 +211,7 @@ impl Client {
                             .filter_map(AgentResult::ok)
                             .collect();
                         let message =
-                            DaemonTcp::HttpRequestChunked(ChunkedRequest::Start(HttpRequest {
+                            DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV1(HttpRequest {
                                 internal_request: InternalHttpRequest {
                                     method,
                                     uri,
@@ -211,11 +221,11 @@ impl Client {
                                 },
                                 connection_id,
                                 request_id,
-                                port: request.port,
+                                port: destination.port(),
                             }));
 
                         if let Err(e) = tx.send(message).await {
-                            warn!(?e, ?connection_id, ?request_id, ?request.port, "failed to send chunked request start");
+                            warn!(?e, ?connection_id, ?request_id, destination = ?destination.port(), "failed to send chunked request start");
                             return;
                         }
                     }
@@ -230,7 +240,7 @@ impl Client {
                                 .filter_map(AgentResult::ok)
                                 .collect();
                             let message = DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
-                                ChunkedHttpBody {
+                                ChunkedRequestBodyV1 {
                                     frames,
                                     is_last,
                                     connection_id,
@@ -239,7 +249,7 @@ impl Client {
                             ));
 
                             if let Err(e) = tx.send(message).await {
-                                warn!(?e, ?connection_id, ?request_id, ?request.port, "failed to send chunked request body");
+                                warn!(?e, ?connection_id, ?request_id, port = ?destination.port(), "failed to send chunked request body");
                                 return;
                             }
 
@@ -249,8 +259,8 @@ impl Client {
                         }
                         Err(_) => {
                             let _ = tx
-                                .send(DaemonTcp::HttpRequestChunked(ChunkedRequest::Error(
-                                    ChunkedHttpError {
+                                .send(DaemonTcp::HttpRequestChunked(ChunkedRequest::ErrorV1(
+                                    ChunkedRequestErrorV1 {
                                         connection_id,
                                         request_id,
                                     },
@@ -559,7 +569,8 @@ where
                 connection_id,
                 request,
                 id,
-                port,
+                metadata,
+                transport,
             } => {
                 let Some(client) = self.clients.get(&client_id) else {
                     tracing::trace!(client_id, connection_id, "Client has already exited");
@@ -571,7 +582,8 @@ where
                     return Ok(());
                 }
 
-                let matched_request = MatchedHttpRequest::new(connection_id, port, id, request);
+                let matched_request =
+                    MatchedHttpRequest::new(connection_id, id, request, metadata, transport);
 
                 if !client.send_request_async(matched_request) {
                     self.connections
@@ -748,7 +760,10 @@ mod test {
     };
     use hyper_util::rt::TokioIo;
     use mirrord_protocol::{
-        tcp::{ChunkedRequest, DaemonTcp, Filter, HttpFilter, InternalHttpBodyFrame, StealType},
+        tcp::{
+            ChunkedRequest, DaemonTcp, Filter, HttpFilter, HttpRequestMetadata,
+            HttpRequestTransportType, InternalHttpBodyFrame, StealType,
+        },
         Port,
     };
     use rstest::rstest;
@@ -900,7 +915,11 @@ mod test {
         let (request, response_tx) = request_rx.recv().await.unwrap();
         client.send_request_async(MatchedHttpRequest {
             connection_id: 0,
-            port: 80,
+            metadata: HttpRequestMetadata::V1 {
+                source: "1.3.3.7:1337".parse().unwrap(),
+                destination: "2.1.3.7:80".parse().unwrap(),
+            },
+            transport: HttpRequestTransportType::Tcp,
             request_id: 0,
             request,
         });
@@ -908,7 +927,7 @@ mod test {
         // Verify that single-framed ChunkedRequest::Start requests are as expected, containing any
         // ready frames that were sent before Request was first sent
         let msg = client_rx.recv().await.unwrap();
-        let DaemonTcp::HttpRequestChunked(ChunkedRequest::Start(x)) = msg else {
+        let DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV1(x)) = msg else {
             panic!("unexpected type received: {msg:?}")
         };
         assert_eq!(
@@ -969,14 +988,18 @@ mod test {
         let (request, response_tx) = request_rx.recv().await.unwrap();
         client.send_request_async(MatchedHttpRequest {
             connection_id: 0,
-            port: 80,
+            metadata: HttpRequestMetadata::V1 {
+                source: "1.3.3.7:1337".parse().unwrap(),
+                destination: "2.1.3.7:80".parse().unwrap(),
+            },
+            transport: HttpRequestTransportType::Tcp,
             request_id: 0,
             request,
         });
 
         // Verify that ChunkedRequest::Start request is as expected
         let msg = client_rx.recv().await.unwrap();
-        let DaemonTcp::HttpRequestChunked(ChunkedRequest::Start(_)) = msg else {
+        let DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV1(_)) = msg else {
             panic!("unexpected type received: {msg:?}")
         };
 

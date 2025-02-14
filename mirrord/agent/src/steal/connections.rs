@@ -4,7 +4,10 @@
 use std::{collections::HashMap, fmt, io, net::SocketAddr, time::Duration};
 
 use hyper::{body::Incoming, Request, Response};
-use mirrord_protocol::{tcp::NewTcpConnection, ConnectionId, Port, RequestId};
+use mirrord_protocol::{
+    tcp::{HttpRequestMetadata, HttpRequestTransportType, NewTcpConnection},
+    ConnectionId, RequestId,
+};
 use original_destination::OriginalDestination;
 use thiserror::Error;
 use tokio::{
@@ -142,7 +145,8 @@ pub enum ConnectionMessageOut {
         connection_id: ConnectionId,
         request: Request<Incoming>,
         id: RequestId,
-        port: Port,
+        metadata: HttpRequestMetadata,
+        transport: HttpRequestTransportType,
     },
     /// Subscribed the client to a new TCP connection.
     ///
@@ -205,13 +209,15 @@ impl fmt::Debug for ConnectionMessageOut {
                 connection_id,
                 request,
                 id,
-                port,
+                metadata,
+                transport,
             } => {
                 debug_struct.field("type", &"Request");
                 debug_struct.field("connection_id", connection_id);
                 debug_struct.field("client_id", client_id);
                 debug_struct.field("request_id", id);
-                debug_struct.field("port", port);
+                debug_struct.field("metadata", metadata);
+                debug_struct.field("transport", transport);
                 debug_struct.field("method", request.method());
                 debug_struct.field("uri", request.uri());
             }
@@ -518,6 +524,7 @@ impl ConnectionTask {
                 self.connection_id,
                 filters,
                 OriginalDestination::new(self.connection.destination, None),
+                self.connection.source,
                 http_version,
                 stream,
             );
@@ -600,6 +607,7 @@ impl ConnectionTask {
                     self.connection_id,
                     filters,
                     OriginalDestination::new(self.connection.destination, Some(connector)),
+                    self.connection.source,
                     http_version,
                     stream,
                 );
@@ -613,6 +621,7 @@ impl ConnectionTask {
             self.connection_id,
             filters,
             OriginalDestination::new(self.connection.destination, Some(connector)),
+            self.connection.source,
             http_version,
             tls_stream,
         );

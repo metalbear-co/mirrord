@@ -14,7 +14,7 @@ use hyper::{body::Incoming, http::response::Parts, StatusCode};
 use mirrord_protocol::{
     batched_body::BatchedBody,
     tcp::{
-        ChunkedHttpBody, ChunkedHttpError, ChunkedResponse, HttpRequest, HttpResponse,
+        ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedResponse, HttpRequest, HttpResponse,
         InternalHttpBody, InternalHttpBodyFrame, InternalHttpResponse,
     },
 };
@@ -159,7 +159,7 @@ impl HttpGatewayTask {
 
                     message_bus
                         .send(HttpOut::ResponseChunked(ChunkedResponse::Body(
-                            ChunkedHttpBody {
+                            ChunkedRequestBodyV1 {
                                 frames,
                                 is_last,
                                 connection_id: self.request.connection_id,
@@ -185,7 +185,7 @@ impl HttpGatewayTask {
 
                     message_bus
                         .send(HttpOut::ResponseChunked(ChunkedResponse::Error(
-                            ChunkedHttpError {
+                            ChunkedRequestErrorV1 {
                                 connection_id: self.request.connection_id,
                                 request_id: self.request.request_id,
                             },

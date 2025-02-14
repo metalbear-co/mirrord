@@ -18,7 +18,7 @@ use mirrord_intproxy_protocol::{
 };
 use mirrord_protocol::{
     tcp::{
-        ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, DaemonTcp, HttpRequest,
+        ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, DaemonTcp, HttpRequest,
         InternalHttpBodyFrame, LayerTcp, LayerTcpSteal, NewTcpConnection, StealType, TcpData,
     },
     ClientMessage, ConnectionId, RequestId, ResponseError,
@@ -342,14 +342,18 @@ impl IncomingProxy {
         message_bus: &mut MessageBus<Self>,
     ) {
         match request {
-            ChunkedRequest::Start(request) => {
+            ChunkedRequest::StartV1(request) => {
                 let (body_tx, body_rx) = mpsc::channel(128);
                 let request = request.map_body(|frames| StreamingBody::new(body_rx, frames));
                 self.start_http_gateway(request, Some(body_tx), message_bus)
                     .await;
             }
 
-            ChunkedRequest::Body(ChunkedHttpBody {
+            ChunkedRequest::StartV2(..) => {
+                todo!()
+            }
+
+            ChunkedRequest::Body(ChunkedRequestBodyV1 {
                 frames,
                 is_last,
                 connection_id,
@@ -400,7 +404,7 @@ impl IncomingProxy {
                 }
             }
 
-            ChunkedRequest::Error(ChunkedHttpError {
+            ChunkedRequest::ErrorV1(ChunkedRequestErrorV1 {
                 connection_id,
                 request_id,
             }) => {
@@ -413,6 +417,10 @@ impl IncomingProxy {
                 if let Some(gateways) = self.http_gateways.get_mut(&connection_id) {
                     gateways.remove(&request_id);
                 };
+            }
+
+            ChunkedRequest::ErrorV2(..) => {
+                todo!()
             }
         }
     }
