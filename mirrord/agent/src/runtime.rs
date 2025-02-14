@@ -326,7 +326,10 @@ async fn find_pid_for_ephemeral(container_id: &str) -> Result<u64, tokio::io::Er
                             {
                                 return Ok(potential_pid);
                             } else {
-                                tracing::debug!(?potential_pid, "the pid found");
+                                tracing::trace!(
+                                    "`/proc/{potential_pid}/cgroup` did not \
+                                    contain {container_id}, skipping."
+                                );
                                 continue;
                             }
                         }
