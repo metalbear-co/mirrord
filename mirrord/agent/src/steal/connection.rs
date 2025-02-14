@@ -15,10 +15,11 @@ use mirrord_agent_env::envs;
 use mirrord_protocol::{
     batched_body::{BatchedBody, Frames},
     tcp::{
-        ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, DaemonTcp, HttpRequest,
-        HttpRequestMetadata, HttpRequestTransportType, InternalHttpBody, InternalHttpBodyFrame,
-        InternalHttpRequest, StealType, TcpClose, TcpData, HTTP_CHUNKED_REQUEST_VERSION,
-        HTTP_FILTERED_UPGRADE_VERSION, HTTP_FRAMED_VERSION,
+        ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestErrorV2,
+        ChunkedRequestStartV1, ChunkedRequestStartV2, DaemonTcp, HttpRequest, HttpRequestMetadata,
+        HttpRequestTransportType, InternalHttpBody, InternalHttpBodyFrame, InternalHttpBodyNew,
+        InternalHttpRequest, StealType, TcpClose, TcpData, HTTP_CHUNKED_REQUEST_V2_VERSION,
+        HTTP_CHUNKED_REQUEST_VERSION, HTTP_FILTERED_UPGRADE_VERSION, HTTP_FRAMED_VERSION,
     },
     ConnectionId,
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
@@ -29,7 +30,7 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{warn, Level};
+use tracing::Level;
 
 use super::{http::HttpResponseFallback, subscriptions::PortRedirector, tls::StealTlsHandlerStore};
 use crate::{
@@ -75,70 +76,6 @@ impl MatchedHttpRequest {
             transport,
         }
     }
-
-    async fn into_serializable(self) -> Result<HttpRequest<InternalHttpBody>, hyper::Error> {
-        let (
-            Parts {
-                method,
-                uri,
-                version,
-                headers,
-                ..
-            },
-            body,
-        ) = self.request.into_parts();
-
-        let body = InternalHttpBody::from_body(body).await?;
-
-        let internal_request = InternalHttpRequest {
-            method,
-            uri,
-            headers,
-            version,
-            body,
-        };
-
-        let HttpRequestMetadata::V1 { destination, .. } = self.metadata;
-
-        Ok(HttpRequest {
-            port: destination.port(),
-            connection_id: self.connection_id,
-            request_id: self.request_id,
-            internal_request,
-        })
-    }
-
-    async fn into_serializable_fallback(self) -> Result<HttpRequest<Vec<u8>>, hyper::Error> {
-        let (
-            Parts {
-                method,
-                uri,
-                version,
-                headers,
-                ..
-            },
-            body,
-        ) = self.request.into_parts();
-
-        let body = body.collect().await?.to_bytes().to_vec();
-
-        let internal_request = InternalHttpRequest {
-            method,
-            uri,
-            headers,
-            version,
-            body,
-        };
-
-        let HttpRequestMetadata::V1 { destination, .. } = self.metadata;
-
-        Ok(HttpRequest {
-            port: destination.port(),
-            connection_id: self.connection_id,
-            request_id: self.request_id,
-            internal_request,
-        })
-    }
 }
 
 /// A stealer client.
@@ -154,6 +91,194 @@ struct Client {
 }
 
 impl Client {
+    async fn send_legacy(request: MatchedHttpRequest, tx: Sender<DaemonTcp>) {
+        let (
+            Parts {
+                method,
+                uri,
+                version,
+                headers,
+                ..
+            },
+            body,
+        ) = request.request.into_parts();
+
+        let Ok(body) = body.collect().await else {
+            return;
+        };
+
+        let internal_request = InternalHttpRequest {
+            method,
+            uri,
+            headers,
+            version,
+            body: body.to_bytes().to_vec(),
+        };
+
+        let HttpRequestMetadata::V1 { destination, .. } = request.metadata;
+
+        let request = HttpRequest {
+            port: destination.port(),
+            connection_id: request.connection_id,
+            request_id: request.request_id,
+            internal_request,
+        };
+
+        let _ = tx.send(DaemonTcp::HttpRequest(request)).await;
+    }
+
+    async fn send_framed(request: MatchedHttpRequest, tx: Sender<DaemonTcp>) {
+        let (
+            Parts {
+                method,
+                uri,
+                version,
+                headers,
+                ..
+            },
+            body,
+        ) = request.request.into_parts();
+
+        let Ok(body) = InternalHttpBody::from_body(body).await else {
+            return;
+        };
+
+        let internal_request = InternalHttpRequest {
+            method,
+            uri,
+            headers,
+            version,
+            body,
+        };
+
+        let HttpRequestMetadata::V1 { destination, .. } = request.metadata;
+
+        let request = HttpRequest {
+            port: destination.port(),
+            connection_id: request.connection_id,
+            request_id: request.request_id,
+            internal_request,
+        };
+
+        let _ = tx.send(DaemonTcp::HttpRequestFramed(request)).await;
+    }
+
+    async fn send_chunked(request: MatchedHttpRequest, use_v2: bool, tx: Sender<DaemonTcp>) {
+        let (
+            Parts {
+                method,
+                uri,
+                version,
+                headers,
+                ..
+            },
+            mut body,
+        ) = request.request.into_parts();
+
+        let Ok(Frames { frames, is_last }) = body.ready_frames() else {
+            return;
+        };
+
+        let frames = frames
+            .into_iter()
+            .map(InternalHttpBodyFrame::from)
+            .collect();
+
+        let message = if use_v2 {
+            ChunkedRequest::StartV2(ChunkedRequestStartV2 {
+                connection_id: request.connection_id,
+                request_id: request.request_id,
+                metadata: request.metadata,
+                transport: request.transport,
+                request: InternalHttpRequest {
+                    method,
+                    uri,
+                    headers,
+                    version,
+                    body: InternalHttpBodyNew { frames, is_last },
+                },
+            })
+        } else {
+            let HttpRequestMetadata::V1 { destination, .. } = request.metadata;
+            ChunkedRequest::StartV1(ChunkedRequestStartV1 {
+                connection_id: request.connection_id,
+                request_id: request.request_id,
+                port: destination.port(),
+                internal_request: InternalHttpRequest {
+                    method,
+                    uri,
+                    headers,
+                    version,
+                    body: frames,
+                },
+            })
+        };
+
+        if tx
+            .send(DaemonTcp::HttpRequestChunked(message))
+            .await
+            .is_err()
+        {
+            return;
+        }
+
+        if is_last {
+            if use_v2 {
+                return;
+            }
+
+            let message =
+                DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
+                    connection_id: request.connection_id,
+                    request_id: request.request_id,
+                    frames: Default::default(),
+                    is_last: true,
+                }));
+            let _ = tx.send(message).await;
+            return;
+        }
+
+        loop {
+            let Frames { frames, is_last } = match body.next_frames().await {
+                Ok(frames) => frames,
+                Err(error) => {
+                    let message = if use_v2 {
+                        ChunkedRequest::ErrorV2(ChunkedRequestErrorV2 {
+                            connection_id: request.connection_id,
+                            request_id: request.request_id,
+                            error_message: error.to_string(),
+                        })
+                    } else {
+                        ChunkedRequest::ErrorV1(ChunkedRequestErrorV1 {
+                            connection_id: request.connection_id,
+                            request_id: request.request_id,
+                        })
+                    };
+
+                    let _ = tx.send(DaemonTcp::HttpRequestChunked(message)).await;
+                    break;
+                }
+            };
+
+            let frames = frames
+                .into_iter()
+                .map(InternalHttpBodyFrame::from)
+                .collect();
+
+            let message =
+                DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
+                    frames,
+                    is_last,
+                    connection_id: request.connection_id,
+                    request_id: request.request_id,
+                }));
+
+            if tx.send(message).await.is_err() || is_last {
+                break;
+            }
+        }
+    }
+
     /// Attempts to spawn a new [`tokio::task`] to transform the given [`MatchedHttpRequest`] into
     /// [`DaemonTcp::HttpRequest`], [`DaemonTcp::HttpRequestFramed`] or
     /// [`DaemonTcp::HttpRequestChunked`] and send it via cloned [`Client::tx`].
@@ -166,122 +291,41 @@ impl Client {
     /// [`MatchedHttpRequest`] is an upgrade request, but client's protocol version does not match
     /// [`HTTP_FILTERED_UPGRADE_VERSION`].
     ///
-    /// # Why async?
+    /// # Why in the background?
     ///
     /// This method spawns a [`tokio::task`] to read the [`Incoming`] body od the request without
     /// blocking the main [`TcpConnectionStealer`] loop.
-    fn send_request_async(&self, request: MatchedHttpRequest) -> bool {
-        if request.request.headers().contains_key(UPGRADE)
-            && !HTTP_FILTERED_UPGRADE_VERSION.matches(&self.protocol_version)
-        {
+    fn send_request_in_bg(&self, request: MatchedHttpRequest) -> bool {
+        let is_upgrade = request.request.headers().contains_key(UPGRADE);
+        let is_tls = matches!(request.transport, HttpRequestTransportType::Tls);
+
+        if is_upgrade && !HTTP_FILTERED_UPGRADE_VERSION.matches(&self.protocol_version) {
+            return false;
+        }
+
+        if is_tls && !HTTP_CHUNKED_REQUEST_V2_VERSION.matches(&self.protocol_version) {
             return false;
         }
 
         let framed = HTTP_FRAMED_VERSION.matches(&self.protocol_version);
         let chunked = HTTP_CHUNKED_REQUEST_VERSION.matches(&self.protocol_version);
+        let chunked_v2 = HTTP_CHUNKED_REQUEST_V2_VERSION.matches(&self.protocol_version);
+
         let tx = self.tx.clone();
 
+        tracing::trace!(
+            ?request,
+            client_protocol_version = %self.protocol_version,
+            "Sending stolen request to the client",
+        );
+
         tokio::spawn(async move {
-            tracing::trace!(?request.connection_id, ?request.request_id, ?chunked, ?framed, "starting request");
-            // Chunked data is preferred over framed data
             if chunked {
-                // Send headers
-                let connection_id = request.connection_id;
-                let request_id = request.request_id;
-                let (
-                    Parts {
-                        method,
-                        uri,
-                        version,
-                        headers,
-                        ..
-                    },
-                    mut body,
-                ) = request.request.into_parts();
-                let HttpRequestMetadata::V1 { destination, .. } = request.metadata;
-
-                match body.ready_frames() {
-                    Err(..) => return,
-                    // We don't check is_last here since loop will finish when body.next_frames()
-                    // returns None
-                    Ok(Frames { frames, .. }) => {
-                        let frames = frames
-                            .into_iter()
-                            .map(InternalHttpBodyFrame::try_from)
-                            .filter_map(AgentResult::ok)
-                            .collect();
-                        let message =
-                            DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV1(HttpRequest {
-                                internal_request: InternalHttpRequest {
-                                    method,
-                                    uri,
-                                    headers,
-                                    version,
-                                    body: frames,
-                                },
-                                connection_id,
-                                request_id,
-                                port: destination.port(),
-                            }));
-
-                        if let Err(e) = tx.send(message).await {
-                            warn!(?e, ?connection_id, ?request_id, destination = ?destination.port(), "failed to send chunked request start");
-                            return;
-                        }
-                    }
-                }
-
-                loop {
-                    match body.next_frames().await {
-                        Ok(Frames { frames, is_last }) => {
-                            let frames = frames
-                                .into_iter()
-                                .map(InternalHttpBodyFrame::try_from)
-                                .filter_map(AgentResult::ok)
-                                .collect();
-                            let message = DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
-                                ChunkedRequestBodyV1 {
-                                    frames,
-                                    is_last,
-                                    connection_id,
-                                    request_id,
-                                },
-                            ));
-
-                            if let Err(e) = tx.send(message).await {
-                                warn!(?e, ?connection_id, ?request_id, port = ?destination.port(), "failed to send chunked request body");
-                                return;
-                            }
-
-                            if is_last {
-                                return;
-                            }
-                        }
-                        Err(_) => {
-                            let _ = tx
-                                .send(DaemonTcp::HttpRequestChunked(ChunkedRequest::ErrorV1(
-                                    ChunkedRequestErrorV1 {
-                                        connection_id,
-                                        request_id,
-                                    },
-                                )))
-                                .await;
-                            return;
-                        }
-                    }
-                }
+                Self::send_chunked(request, chunked_v2, tx).await;
             } else if framed {
-                let Ok(request) = request.into_serializable().await else {
-                    return;
-                };
-
-                let _ = tx.send(DaemonTcp::HttpRequestFramed(request)).await;
+                Self::send_framed(request, tx).await;
             } else {
-                let Ok(request) = request.into_serializable_fallback().await else {
-                    return;
-                };
-
-                let _ = tx.send(DaemonTcp::HttpRequest(request)).await;
+                Self::send_legacy(request, tx).await;
             }
         });
 
@@ -585,7 +629,7 @@ where
                 let matched_request =
                     MatchedHttpRequest::new(connection_id, id, request, metadata, transport);
 
-                if !client.send_request_async(matched_request) {
+                if !client.send_request_in_bg(matched_request) {
                     self.connections
                         .send(
                             connection_id,
@@ -913,7 +957,7 @@ mod test {
         };
 
         let (request, response_tx) = request_rx.recv().await.unwrap();
-        client.send_request_async(MatchedHttpRequest {
+        client.send_request_in_bg(MatchedHttpRequest {
             connection_id: 0,
             metadata: HttpRequestMetadata::V1 {
                 source: "1.3.3.7:1337".parse().unwrap(),
@@ -986,7 +1030,7 @@ mod test {
         };
 
         let (request, response_tx) = request_rx.recv().await.unwrap();
-        client.send_request_async(MatchedHttpRequest {
+        client.send_request_in_bg(MatchedHttpRequest {
             connection_id: 0,
             metadata: HttpRequestMetadata::V1 {
                 source: "1.3.3.7:1337".parse().unwrap(),
