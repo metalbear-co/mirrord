@@ -21,6 +21,7 @@ workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 mirrord-protocol = { path = "../protocol" }
 mirrord-agent-env = { path = "./env", default-features = false }
+mirrord-tls-util = { path = "../tls-util" }
 
 containerd-client = "0.6"
 tokio = { workspace = true, features = [

@@ -14,7 +14,7 @@ use mirrord_agent_env::steal_tls::{
     AgentClientConfig, AgentServerConfig, StealPortTlsConfig, TlsAuthentication,
     TlsClientVerification, TlsServerVerification,
 };
-use no_verifier::{DangerousNoVerifierClient, DangerousNoVerifierServer};
+use mirrord_tls_util::{DangerousNoVerifierClient, DangerousNoVerifierServer};
 use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer},
     server::{danger::ClientCertVerifier, NoClientAuth, WebPkiClientVerifier},
@@ -27,7 +27,6 @@ use crate::util::path_resolver::InTargetPathResolver;
 
 pub mod error;
 pub mod handler;
-mod no_verifier;
 
 /// Name of HTTP/2 in the ALPN protocol.
 pub const HTTP_2_ALPN_NAME: &[u8] = b"h2";

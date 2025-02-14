@@ -4208,6 +4208,7 @@ dependencies = [
  "libc",
  "mirrord-agent-env",
  "mirrord-protocol",
+ "mirrord-tls-util",
  "mockall",
  "nix 0.29.0",
  "oci-spec",
@@ -4542,6 +4543,13 @@ dependencies = [
  "thiserror 2.0.11",
  "tracing",
  "which 7.0.1",
+]
+
+[[package]]
+name = "mirrord-tls-util"
+version = "3.132.1"
+dependencies = [
+ "rustls 0.23.21",
 ]
 
 [[package]]
