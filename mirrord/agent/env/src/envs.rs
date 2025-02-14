@@ -56,8 +56,8 @@ pub const LOG_LEVEL: CheckedEnv<String> = CheckedEnv::new("RUST_LOG");
 /// pod/glorious-cat/container/[cat-container]`, this is the id of `cat-container` that you
 /// can retrieve with `kubectl describe glorious-cat`.
 ///
-/// For `Mode::Ephemeral`, this is also used to get the target's `pid`. When this is not
-/// present, we default it to `1`, meaning file operations are done in `/proc/1`.
+/// For `Mode::Ephemeral`, this is used to get the target's `pid`.
+/// When this is not present, we default it to `1`, meaning file operations are done in `/proc/1`.
 /// Look at `find_pid_for_ephemeral` docs for more info.
 ///
 /// **Attention**: this is **not** the ephemeral container id, it's the target's!
