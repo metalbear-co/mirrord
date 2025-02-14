@@ -70,7 +70,7 @@ impl Args {
         self.is_mesh
             || matches!(
                 self.mode,
-                Mode::Targeted { mesh: Some(_), .. } | Mode::Ephemeral { mesh: Some(_), .. }
+                Mode::Targeted { mesh: Some(_), .. } | Mode::Ephemeral { mesh: Some(_) }
             )
     }
 }
