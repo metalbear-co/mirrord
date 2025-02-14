@@ -7,7 +7,7 @@ use std::{
 /// root host.
 ///
 /// Should be used whenever we need to access a file in the target container filesystem.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InTargetPathResolver {
     root: PathBuf,
 }
