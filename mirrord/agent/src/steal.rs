@@ -29,7 +29,7 @@ use self::http::HttpResponseFallback;
 enum Command {
     /// Contains the channel that's used by the stealer worker to respond back to the agent
     /// (stealer -> agent -> layer).
-    NewClient(Sender<DaemonTcp>, semver::Version),
+    NewClient(Sender<DaemonTcp>),
 
     /// A layer wants to subscribe to this [`Port`].
     ///

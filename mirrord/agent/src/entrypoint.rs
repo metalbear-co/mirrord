@@ -286,15 +286,7 @@ impl ClientConnectionHandler {
         connection: &mut ClientConnection,
     ) -> AgentResult<Option<TcpStealerApi>> {
         if let BackgroundTask::Running(stealer_status, stealer_sender) = task {
-            match TcpStealerApi::new(
-                id,
-                stealer_sender,
-                stealer_status,
-                CHANNEL_SIZE,
-                mirrord_protocol::VERSION.clone(),
-            )
-            .await
-            {
+            match TcpStealerApi::new(id, stealer_sender, stealer_status, CHANNEL_SIZE).await {
                 Ok(api) => Ok(Some(api)),
                 Err(e) => {
                     let _ = connection

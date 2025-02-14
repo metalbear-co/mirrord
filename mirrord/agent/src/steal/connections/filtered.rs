@@ -1,11 +1,9 @@
 use std::{
     collections::HashMap, future::Future, marker::PhantomData, net::SocketAddr, ops::Not, pin::Pin,
-    sync::Arc,
 };
 
 use bytes::Bytes;
-use dashmap::DashMap;
-use http::Version;
+use http::{header::UPGRADE, Version};
 use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::{
     body::Incoming,
@@ -17,7 +15,10 @@ use hyper::{
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use mirrord_protocol::{
-    tcp::{HttpRequestMetadata, HttpRequestTransportType},
+    tcp::{
+        HttpRequestMetadata, HttpRequestTransportType, HTTP_CHUNKED_REQUEST_V2_VERSION,
+        HTTP_FILTERED_UPGRADE_VERSION,
+    },
     ConnectionId, RequestId,
 };
 use tokio::{
@@ -39,7 +40,7 @@ use super::{
 use crate::{
     http::HttpVersion,
     metrics::STEAL_FILTERED_CONNECTION_SUBSCRIPTION,
-    steal::{connections::unfiltered::UnfilteredStealTask, http::HttpFilter},
+    steal::{connections::unfiltered::UnfilteredStealTask, subscriptions::Filters},
     util::ClientId,
 };
 
@@ -361,7 +362,7 @@ pub struct FilteredStealTask<T> {
     ///
     /// This mapping is shared via [`Arc`], allowing for dynamic updates from the outside.
     /// This allows for *injecting* new stealer clients into exisiting connections.
-    filters: Arc<DashMap<ClientId, HttpFilter>>,
+    filters: Filters,
 
     /// Stealer client to subscription state mapping.
     /// 1. `true` -> client is subscribed
@@ -420,7 +421,7 @@ where
     )]
     pub fn new(
         connection_id: ConnectionId,
-        filters: Arc<DashMap<ClientId, HttpFilter>>,
+        filters: Filters,
         original_destination: OriginalDestination,
         peer_address: SocketAddr,
         http_version: HttpVersion,
@@ -507,9 +508,32 @@ where
         ret,
     )]
     fn match_request<B>(&self, request: &mut Request<B>) -> Option<ClientId> {
+        let protocol_version_req = if self.original_destination.uses_tls() {
+            &HTTP_CHUNKED_REQUEST_V2_VERSION
+        } else if request.headers().contains_key(UPGRADE) {
+            &HTTP_FILTERED_UPGRADE_VERSION
+        } else {
+            &semver::VersionReq::STAR
+        };
+
         self.filters
             .iter()
-            .filter_map(|entry| entry.value().matches(request).then(|| *entry.key()))
+            .filter_map(|entry| {
+                if entry
+                    .value()
+                    .1
+                    .as_ref()
+                    .is_none_or(|v| !protocol_version_req.matches(v))
+                {
+                    return None;
+                }
+
+                if !entry.value().0.matches(request) {
+                    return None;
+                }
+
+                Some(*entry.key())
+            })
             .find(|client_id| self.subscribed.get(client_id).copied().unwrap_or(true))
     }
 
@@ -873,11 +897,12 @@ mod test {
     use tokio::{io::AsyncReadExt, net::TcpListener, task::JoinSet};
 
     use super::*;
+    use crate::steal::http::HttpFilter;
 
     /// Full setup for [`FilteredStealTask`] tests.
     struct TestSetup {
         /// [`HttpFilter`]s mapping used by the task.
-        filters: Arc<DashMap<ClientId, HttpFilter>>,
+        filters: Filters,
         /// Address of the original HTTP server (the one we steal from).
         original_address: SocketAddr,
         /// Stolen connection wrapped into HTTP.
@@ -1011,7 +1036,7 @@ mod test {
                 tasks.shutdown().await;
             });
 
-            let filters: Arc<DashMap<ClientId, HttpFilter>> = Default::default();
+            let filters: Filters = Default::default();
             let filters_clone = filters.clone();
 
             let (in_tx, mut in_rx) = mpsc::channel(8);
@@ -1074,7 +1099,10 @@ mod test {
                 builder = builder.header("x-client", &client_id.to_string());
                 self.filters.insert(
                     client_id,
-                    HttpFilter::Header(format!("x-client: {client_id}").parse().unwrap()),
+                    (
+                        HttpFilter::Header(format!("x-client: {client_id}").parse().unwrap()),
+                        Some("1.19.0".parse().unwrap()),
+                    ),
                 );
             }
 
