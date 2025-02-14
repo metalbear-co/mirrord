@@ -25,9 +25,10 @@ use mirrord_protocol::{
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
     RequestId,
 };
+use thiserror::Error;
 use tokio::{
     net::TcpStream,
-    sync::mpsc::{Receiver, Sender},
+    sync::mpsc::{error::SendError, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
@@ -78,12 +79,29 @@ impl MatchedHttpRequest {
     }
 }
 
+/// Errors that can occur when we try to send a stolen request to the client.
+#[derive(Error, Debug)]
+enum PassRequestError {
+    #[error("failed to read request body: {0}")]
+    ReadBodyError(#[from] hyper::Error),
+    #[error("client disonnected")]
+    ClientDisconnected,
+}
+
+impl From<SendError<DaemonTcp>> for PassRequestError {
+    fn from(_: SendError<DaemonTcp>) -> Self {
+        Self::ClientDisconnected
+    }
+}
+
 /// A stealer client.
 struct Client {
     /// For sending messages to client's [`TcpStealerApi`](super::api::TcpStealerApi).
     /// Comes to [`TcpConnectionStealer`] in [`Command::NewClient`].
     tx: Sender<DaemonTcp>,
-    /// Clients [`mirrord_protocol`] verison.
+    /// Client's [`mirrord_protocol`] verison.
+    ///
+    /// Determines which variant of [`DaemonTcp`] we use to send stolen HTTP requests.
     protocol_version: semver::Version,
     /// Client subscriptions to stolen connections.
     /// Used to unsubscribe when the client exits.
@@ -91,7 +109,11 @@ struct Client {
 }
 
 impl Client {
-    async fn send_legacy(request: MatchedHttpRequest, tx: Sender<DaemonTcp>) {
+    #[tracing::instrument(level = Level::DEBUG, skip(tx), err(level = Level::DEBUG))]
+    async fn send_legacy(
+        request: MatchedHttpRequest,
+        tx: Sender<DaemonTcp>,
+    ) -> Result<(), PassRequestError> {
         let (
             Parts {
                 method,
@@ -103,45 +125,7 @@ impl Client {
             body,
         ) = request.request.into_parts();
 
-        let Ok(body) = body.collect().await else {
-            return;
-        };
-
-        let internal_request = InternalHttpRequest {
-            method,
-            uri,
-            headers,
-            version,
-            body: body.to_bytes().to_vec(),
-        };
-
-        let HttpRequestMetadata::V1 { destination, .. } = request.metadata;
-
-        let request = HttpRequest {
-            port: destination.port(),
-            connection_id: request.connection_id,
-            request_id: request.request_id,
-            internal_request,
-        };
-
-        let _ = tx.send(DaemonTcp::HttpRequest(request)).await;
-    }
-
-    async fn send_framed(request: MatchedHttpRequest, tx: Sender<DaemonTcp>) {
-        let (
-            Parts {
-                method,
-                uri,
-                version,
-                headers,
-                ..
-            },
-            body,
-        ) = request.request.into_parts();
-
-        let Ok(body) = InternalHttpBody::from_body(body).await else {
-            return;
-        };
+        let body = body.collect().await?.to_bytes().to_vec();
 
         let internal_request = InternalHttpRequest {
             method,
@@ -160,10 +144,57 @@ impl Client {
             internal_request,
         };
 
-        let _ = tx.send(DaemonTcp::HttpRequestFramed(request)).await;
+        tx.send(DaemonTcp::HttpRequest(request)).await?;
+
+        Ok(())
     }
 
-    async fn send_chunked(request: MatchedHttpRequest, use_v2: bool, tx: Sender<DaemonTcp>) {
+    #[tracing::instrument(level = Level::DEBUG, skip(tx), err(level = Level::DEBUG))]
+    async fn send_framed(
+        request: MatchedHttpRequest,
+        tx: Sender<DaemonTcp>,
+    ) -> Result<(), PassRequestError> {
+        let (
+            Parts {
+                method,
+                uri,
+                version,
+                headers,
+                ..
+            },
+            body,
+        ) = request.request.into_parts();
+
+        let body = InternalHttpBody::from_body(body).await?;
+
+        let internal_request = InternalHttpRequest {
+            method,
+            uri,
+            headers,
+            version,
+            body,
+        };
+
+        let HttpRequestMetadata::V1 { destination, .. } = request.metadata;
+
+        let request = HttpRequest {
+            port: destination.port(),
+            connection_id: request.connection_id,
+            request_id: request.request_id,
+            internal_request,
+        };
+
+        tx.send(DaemonTcp::HttpRequestFramed(request)).await?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = Level::DEBUG, skip(tx), err(level = Level::DEBUG))]
+    async fn send_chunked(
+        request: MatchedHttpRequest,
+        use_v2: bool,
+        tx: Sender<DaemonTcp>,
+    ) -> Result<(), PassRequestError> {
         let (
             Parts {
                 method,
@@ -175,9 +206,7 @@ impl Client {
             mut body,
         ) = request.request.into_parts();
 
-        let Ok(Frames { frames, is_last }) = body.ready_frames() else {
-            return;
-        };
+        let Frames { frames, is_last } = body.ready_frames()?;
 
         let frames = frames
             .into_iter()
@@ -214,17 +243,11 @@ impl Client {
             })
         };
 
-        if tx
-            .send(DaemonTcp::HttpRequestChunked(message))
-            .await
-            .is_err()
-        {
-            return;
-        }
+        tx.send(DaemonTcp::HttpRequestChunked(message)).await?;
 
         if is_last {
             if use_v2 {
-                return;
+                return Ok(());
             }
 
             let message =
@@ -234,8 +257,8 @@ impl Client {
                     frames: Default::default(),
                     is_last: true,
                 }));
-            let _ = tx.send(message).await;
-            return;
+            tx.send(message).await?;
+            return Ok(());
         }
 
         loop {
@@ -256,7 +279,8 @@ impl Client {
                     };
 
                     let _ = tx.send(DaemonTcp::HttpRequestChunked(message)).await;
-                    break;
+
+                    break Err(error.into());
                 }
             };
 
@@ -273,8 +297,10 @@ impl Client {
                     request_id: request.request_id,
                 }));
 
-            if tx.send(message).await.is_err() || is_last {
-                break;
+            tx.send(message).await?;
+
+            if is_last {
+                break Ok(());
             }
         }
     }
@@ -295,6 +321,13 @@ impl Client {
     ///
     /// This method spawns a [`tokio::task`] to read the [`Incoming`] body od the request without
     /// blocking the main [`TcpConnectionStealer`] loop.
+    ///
+    /// # Tracing
+    ///
+    /// The spawned background task calls one of `send_` helper methods.
+    /// These can fail only when we encounter an error while reading request body, or when the
+    /// client disconnects. Both cases are quite normal, so don't log errors higher than on
+    /// `DEBUG`.
     fn send_request_in_bg(&self, request: MatchedHttpRequest) -> bool {
         let is_upgrade = request.request.headers().contains_key(UPGRADE);
         let is_tls = matches!(request.transport, HttpRequestTransportType::Tls);
@@ -320,13 +353,13 @@ impl Client {
         );
 
         tokio::spawn(async move {
-            if chunked {
-                Self::send_chunked(request, chunked_v2, tx).await;
+            let _ = if chunked {
+                Self::send_chunked(request, chunked_v2, tx).await
             } else if framed {
-                Self::send_framed(request, tx).await;
+                Self::send_framed(request, tx).await
             } else {
-                Self::send_legacy(request, tx).await;
-            }
+                Self::send_legacy(request, tx).await
+            };
         });
 
         true
