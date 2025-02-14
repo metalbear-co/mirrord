@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Not};
 
 use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
 use containerd_client::{
@@ -11,9 +11,10 @@ use containerd_client::{
 };
 use enum_dispatch::enum_dispatch;
 use oci_spec::runtime::Spec;
-use tokio::net::UnixStream;
+use tokio::{fs::read_dir, net::UnixStream};
 use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
+use tracing::Level;
 
 use crate::{env::parse_raw_env, runtime::crio::CriOContainer};
 
@@ -269,13 +270,117 @@ impl ContainerRuntime for ContainerdContainer {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct EphemeralContainer;
+/// The agent is running as an ephemeral container.
+///
+/// To see agent information, you must:
+/// 1. `kubectl describe {target-pod}`;
+/// 2. `kubectl logs {target-pod} -c {agent-container-name}`;
+#[derive(Debug, Clone)]
+pub(crate) struct EphemeralContainer {
+    /// Used to get the target's `pid`, see [`find_pid_for_ephemeral`] for more information.
+    pub(crate) container_id: String,
+}
+
+/// Searches for the `pid` of the target container when the agent is running in `Mode::Ephemeral`.
+///
+/// It does so by navigating through the dirs in `/proc`, skipping over non-number dirs (like
+/// `/proc/fs`), or when the next dir entry returns an error (since this probably means that
+/// it's not a dir we should be interested in).
+///
+/// To find the `pid`, we look into `/proc/{pid}/cgroup`, searching for a string that matches
+/// `container_id`.
+///
+/// Defaults to returning `1` when we cannot find the `pid` to keep the agent working, as not every
+/// operation is impacted by this (it's mostly file operations that won't work at all, since they'll
+/// be done in the wrong `/proc/{pid}` dir).
+///
+/// When `container_id` is empty, it might mean that `shareProcessNamespace: false`, and thus
+/// we can safely default to `/proc/1` (everything will work), or we could not identify a
+/// `container_id`, in which case some operations will fail (Alex: I think this case might only
+/// happen when we're dealing with old mirrord versions and new agent, but who knows).
+#[tracing::instrument(level = Level::TRACE, ret, err)]
+async fn find_pid_for_ephemeral(container_id: &str) -> Result<u64, tokio::io::Error> {
+    if container_id.is_empty().not() {
+        // The only error we don't ignore here, since if this fails, we can't do the `pid`
+        // search, and this'll break mirrord remote file operations.
+        let mut dir_entries = read_dir("/proc").await?;
+
+        loop {
+            match dir_entries.next_entry().await {
+                Ok(Some(dir)) => {
+                    match dir
+                        .path()
+                        .to_string_lossy()
+                        .split_terminator("/")
+                        .last()
+                        .map(|path| path.parse::<u64>())
+                    {
+                        Some(Ok(potential_pid)) => {
+                            let mut cgroup_path = dir.path();
+                            cgroup_path.push("cgroup");
+
+                            if tokio::fs::read_to_string(cgroup_path)
+                                .await
+                                .map(|read| read.contains(container_id))
+                                .is_ok_and(|found_id| found_id)
+                            {
+                                return Ok(potential_pid);
+                            } else {
+                                tracing::trace!(
+                                    "`/proc/{potential_pid}/cgroup` did not \
+                                    contain {container_id}, skipping."
+                                );
+                                continue;
+                            }
+                        }
+                        // Skip over `parse` errors, since this means that this dir is not a
+                        // `/proc/{pid}`.
+                        _ => {
+                            tracing::debug!("skipping not-number!");
+                            continue;
+                        }
+                    }
+                }
+                Ok(None) => {
+                    tracing::warn!(
+                        "Could not find `pid` of target, defaulting to `/proc/1`!\n\
+                        Some operations may not work as expected (e.g. file operations)!"
+                    );
+                    return Ok(1);
+                }
+                Err(fail) => {
+                    tracing::warn!(?fail, "Searching for container pid!");
+                    continue;
+                }
+            }
+        }
+    } else {
+        tracing::warn!(
+            "No `container_id` detected, defaulting to `/proc/1`!\n\
+            Some operations may not work as expected (e.g. file operations)!"
+        );
+        Ok(1)
+    }
+}
 
 impl ContainerRuntime for EphemeralContainer {
-    /// When running on ephemeral, root pid is always 1 and env is the current process' env. (we
-    /// copy it from the k8s spec)
+    /// When running on ephemeral, root pid is either set to `1`, or we must search for it using the
+    /// `container_id`, when `shareProcessNamespace` is being used. Env is the current process' env.
+    /// (we copy it from the k8s spec)
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
     async fn get_info(&self) -> ContainerRuntimeResult<ContainerInfo> {
-        Ok(ContainerInfo::new(1, std::env::vars().collect()))
+        Ok(ContainerInfo::new(
+            find_pid_for_ephemeral(&self.container_id)
+                .await
+                .unwrap_or_else(|fail| {
+                    tracing::warn!(
+                        ?fail,
+                        "Could not find `pid` of target, defaulting to `/proc/1`!\n\
+                        Some operations may not work as expected (e.g. file operations)!"
+                    );
+                    1
+                }),
+            std::env::vars().collect(),
+        ))
     }
 }
