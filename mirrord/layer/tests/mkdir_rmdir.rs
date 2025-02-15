@@ -6,13 +6,13 @@ use rstest::rstest;
 mod common;
 pub use common::*;
 
-/// Test for the [`libc::mkdir`] function.
+/// Test for the [`libc::mkdir`], [`libc::mkdirat`] and [`libc::rmdir`] hooks.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn mkdir(dylib_path: &Path, config_dir: &Path) {
+async fn mkdir_rmdir(dylib_path: &Path, config_dir: &Path) {
     let _tracing = init_tracing();
-    let application = Application::MakeDir;
+    let application = Application::MkdirRmdir;
     let mut config_path = config_dir.to_path_buf();
     config_path.push("fs.json");
     let config_path = Some(config_path.to_str().unwrap());
@@ -22,10 +22,20 @@ async fn mkdir(dylib_path: &Path, config_dir: &Path) {
         .await;
 
     println!("waiting for MakeDirRequest.");
-    intproxy.expect_make_dir("/mkdir_test_path", 0o777).await;
+    intproxy
+        .expect_make_dir("/mkdir_rmdir_test_dir", 0o777)
+        .await;
+
+    println!("waiting for RemoveDirRequest.");
+    intproxy.expect_remove_dir("/mkdir_rmdir_test_dir").await;
 
     println!("waiting for MakeDirRequest.");
-    intproxy.expect_make_dir("/mkdirat_test_path", 0o777).await;
+    intproxy
+        .expect_make_dir("/mkdirat_rmdir_test_dir", 0o777)
+        .await;
+
+    println!("waiting for RemoveDirRequest.");
+    intproxy.expect_remove_dir("/mkdirat_rmdir_test_dir").await;
 
     assert_eq!(intproxy.try_recv().await, None);
 
