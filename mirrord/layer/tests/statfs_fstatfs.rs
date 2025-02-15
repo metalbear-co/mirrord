@@ -17,11 +17,6 @@ async fn statfs(dylib_path: &Path) {
         .start_process_with_layer(dylib_path, Default::default(), None)
         .await;
 
-    println!("waiting for file request (mkdir).");
-    intproxy
-        .expect_make_dir("/statfs_fstatfs_test_path", 0o777)
-        .await;
-
     println!("waiting for file request (statfs).");
     intproxy.expect_statfs("/statfs_fstatfs_test_path").await;
 
