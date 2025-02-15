@@ -181,9 +181,9 @@ mod file_ops_tests {
         assert!(res.success());
     }
 
-    /// On Linux: Test our getdents64 Go syscall hook, for `os.ReadDir` on go.
+    /// Test our getdents64 Go syscall hook, for `os.ReadDir` on go, and mkdir and rmdir.
     /// This is an E2E test and not an integration test in order to test the agent side of the
-    /// detour.
+    /// detours.
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[trace]
@@ -198,7 +198,7 @@ mod file_ops_tests {
         let service = service.await;
         let command = ops.command();
 
-        let mut args = vec!["--fs-mode", "read"];
+        let mut args = Vec::new();
 
         if cfg!(feature = "ephemeral") {
             args.extend(["-e"].into_iter());
@@ -209,7 +209,10 @@ mod file_ops_tests {
             &service.pod_container_target(),
             Some(&service.namespace),
             Some(args),
-            None,
+            Some(vec![(
+                "MIRRORD_FILE_READ_WRITE_PATTERN",
+                "^/app/test_mkdir$",
+            )]),
         )
         .await;
         let res = process.wait().await;
