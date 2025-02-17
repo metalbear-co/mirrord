@@ -299,67 +299,68 @@ pub(crate) struct EphemeralContainer {
 /// `container_id`, in which case some operations will fail (Alex: I think this case might only
 /// happen when we're dealing with old mirrord versions and new agent, but who knows).
 #[tracing::instrument(level = Level::TRACE, ret, err)]
-async fn find_pid_for_ephemeral(container_id: &str) -> Result<u64, tokio::io::Error> {
-    if container_id.is_empty().not() {
-        // The only error we don't ignore here, since if this fails, we can't do the `pid`
-        // search, and this'll break mirrord remote file operations.
-        let mut dir_entries = read_dir("/proc").await?;
+async fn find_pid_for_ephemeral(container_id: &str) -> Result<u64, std::io::Error> {
+    if container_id.is_empty() {
+        tracing::info!(
+            "No `container_id` detected, defaulting to `/proc/1`!\n\
+            Some operations may not work as expected (e.g. file operations) when\
+            `shareProcessNamespace` is set!"
+        );
+        return Ok(1);
+    }
 
-        loop {
-            match dir_entries.next_entry().await {
-                Ok(Some(dir)) => {
-                    match dir
-                        .path()
-                        .to_string_lossy()
-                        .split_terminator("/")
-                        .last()
-                        .map(|path| path.parse::<u64>())
-                    {
-                        Some(Ok(potential_pid)) => {
-                            let mut cgroup_path = dir.path();
-                            cgroup_path.push("cgroup");
+    // The only error we don't ignore here, since if this fails, we can't do the `pid`
+    // search, and this'll break mirrord remote file operations.
+    let mut dir_entries = tokio::fs::read_dir("/proc").await?;
 
-                            if tokio::fs::read_to_string(cgroup_path)
-                                .await
-                                .map(|read| read.contains(container_id))
-                                .is_ok_and(|found_id| found_id)
-                            {
-                                return Ok(potential_pid);
-                            } else {
-                                tracing::trace!(
-                                    "`/proc/{potential_pid}/cgroup` did not \
+    loop {
+        match dir_entries.next_entry().await {
+            Ok(Some(dir)) => {
+                let dir_name = dir.file_name();
+                let dir_name = dir_name.to_string_lossy();
+
+                match dir_name.parse::<u64>() {
+                    Ok(potential_pid) => {
+                        let mut cgroup_path = dir.path();
+                        cgroup_path.push("cgroup");
+
+                        if tokio::fs::read_to_string(cgroup_path)
+                            .await
+                            .map(|read| read.contains(container_id))
+                            .inspect_err(|fail| {
+                                tracing::trace!(?fail, "Could not read `cgroup` file! Skipping.")
+                            })
+                            .is_ok_and(|found_id| found_id)
+                        {
+                            return Ok(potential_pid);
+                        } else {
+                            tracing::trace!(
+                                "`/proc/{potential_pid}/cgroup` did not \
                                     contain {container_id}, skipping."
-                                );
-                                continue;
-                            }
-                        }
-                        // Skip over `parse` errors, since this means that this dir is not a
-                        // `/proc/{pid}`.
-                        _ => {
-                            tracing::debug!("skipping not-number!");
+                            );
                             continue;
                         }
                     }
-                }
-                Ok(None) => {
-                    tracing::warn!(
-                        "Could not find `pid` of target, defaulting to `/proc/1`!\n\
-                        Some operations may not work as expected (e.g. file operations)!"
-                    );
-                    return Ok(1);
-                }
-                Err(fail) => {
-                    tracing::warn!(?fail, "Searching for container pid!");
-                    continue;
+                    // Skip over `parse` errors, since this means that this dir is not a
+                    // `/proc/{pid}`.
+                    _ => {
+                        tracing::trace!(?dir, "Skipping not-number!");
+                        continue;
+                    }
                 }
             }
+            Ok(None) => {
+                tracing::warn!(
+                    "Could not find `pid` of target, defaulting to `/proc/1`!\n\
+                        Some operations may not work as expected (e.g. file operations)!"
+                );
+                return Ok(1);
+            }
+            Err(fail) => {
+                tracing::warn!(?fail, "Searching for container pid!");
+                continue;
+            }
         }
-    } else {
-        tracing::warn!(
-            "No `container_id` detected, defaulting to `/proc/1`!\n\
-            Some operations may not work as expected (e.g. file operations)!"
-        );
-        Ok(1)
     }
 }
 
