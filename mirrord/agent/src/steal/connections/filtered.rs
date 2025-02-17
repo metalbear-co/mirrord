@@ -890,6 +890,8 @@ where
 #[cfg(test)]
 mod test {
 
+    use std::{fs, sync::Arc};
+
     use bytes::BytesMut;
     use http::{
         header::{CONNECTION, UPGRADE},
@@ -897,14 +899,26 @@ mod test {
     };
     use http_body_util::Empty;
     use hyper::{client::conn::http1::SendRequest, service::service_fn};
+    use mirrord_agent_env::steal_tls::{
+        AgentClientConfig, AgentServerConfig, StealPortTlsConfig, TlsAuthentication,
+        TlsClientVerification, TlsServerVerification,
+    };
+    use rustls::{
+        crypto::CryptoProvider, pki_types::ServerName, server::WebPkiClientVerifier, ClientConfig,
+        RootCertStore, ServerConfig,
+    };
     use tokio::{
         io::AsyncReadExt,
         net::{TcpListener, TcpStream},
         task::JoinSet,
     };
+    use tokio_rustls::{TlsAcceptor, TlsConnector};
 
     use super::*;
-    use crate::steal::http::HttpFilter;
+    use crate::{
+        steal::{http::HttpFilter, tls, StealTlsHandlerStore},
+        util::path_resolver::InTargetPathResolver,
+    };
 
     /// Full setup for [`FilteredStealTask`] tests.
     struct TestSetup {
@@ -1178,6 +1192,7 @@ mod test {
                             connection_id: TestSetup::CONNECTION_ID,
                             id,
                             metadata: HttpRequestMetadata::V1 { destination, .. },
+                            transport: HttpRequestTransportType::Tcp,
                             ..
                         } => {
                             assert_eq!(received_client_id, client_id);
@@ -1258,6 +1273,7 @@ mod test {
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
                         metadata: HttpRequestMetadata::V1 { destination, .. },
+                        transport: HttpRequestTransportType::Tcp,
                         ..
                     } => {
                         assert_eq!(destination, setup.original_address);
@@ -1297,6 +1313,7 @@ mod test {
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
                         metadata: HttpRequestMetadata::V1 { destination, .. },
+                        transport: HttpRequestTransportType::Tcp,
                         ..
                     } => {
                         assert_eq!(destination, setup.original_address);
@@ -1362,6 +1379,7 @@ mod test {
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
                         metadata: HttpRequestMetadata::V1 { destination, .. },
+                        transport: HttpRequestTransportType::Tcp,
                         ..
                     } => {
                         assert_eq!(destination, setup.original_address);
@@ -1446,6 +1464,7 @@ mod test {
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
                         metadata: HttpRequestMetadata::V1 { destination, .. },
+                        transport: HttpRequestTransportType::Tcp,
                         ..
                     } => {
                         assert_eq!(destination, setup.original_address);
@@ -1498,6 +1517,7 @@ mod test {
                         id,
                         metadata: HttpRequestMetadata::V1 { destination, .. },
                         request,
+                        transport: HttpRequestTransportType::Tcp,
                         ..
                     } => {
                         assert_eq!(destination, setup.original_address);
@@ -1630,6 +1650,7 @@ mod test {
                         connection_id: TestSetup::CONNECTION_ID,
                         id,
                         metadata: HttpRequestMetadata::V1 { destination, .. },
+                        transport: HttpRequestTransportType::Tcp,
                         ..
                     } => {
                         assert_eq!(destination, setup.original_address);
@@ -1649,5 +1670,271 @@ mod test {
         let mut rx = setup.shutdown().await;
         // The task should not produce the `Closed` message - the client has unsubscribed.
         assert!(rx.recv().await.is_none());
+    }
+
+    /// Verifies that [`FilteredStealTask`] correctly handles HTTPS connections.
+    ///
+    /// The setup here uses:
+    /// 1. An HTTPS server that expects ALPN upgrade to `h2` and always responds with
+    ///    [`StatusCode::OK`].
+    /// 2. An HTTPS client that uses ALPN upgrade to `h2` and sends two requests. The first request
+    ///    is expected to result in [`StatusCode::IM_A_TEAPOT`] and contains a header that matches a
+    ///    filter. The second request is expected to result in [`StatusCode::OK`] and does not
+    ///    contain the header.
+    ///
+    /// All parties are configured with strict TLS verification.
+    #[tokio::test]
+    async fn with_tls() {
+        async fn handle_request(
+            mut request: hyper::Request<Incoming>,
+        ) -> hyper::Result<Response<DynamicBody>> {
+            while let Some(frame) = request.body_mut().frame().await {
+                frame?;
+            }
+
+            let mut response = Response::new(Empty::new().map_err(|_| unreachable!()).boxed());
+            *response.version_mut() = request.version();
+            *response.status_mut() = StatusCode::OK;
+
+            Ok(response)
+        }
+
+        let _ = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider());
+
+        let original_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let original_destination = original_listener.local_addr().unwrap();
+
+        let common_root = tls::test::generate_cert("root".into(), None, true);
+
+        let original_server_chain =
+            tls::test::CertChainWithKey::new("server".into(), Some(&common_root));
+        let agent_server_chain =
+            tls::test::CertChainWithKey::new("server".into(), Some(&common_root));
+        let client_chain = tls::test::CertChainWithKey::new("client".into(), Some(&common_root));
+
+        let root_store = {
+            let mut store = RootCertStore::empty();
+            store.add(common_root.cert.der().clone()).unwrap();
+            Arc::new(store)
+        };
+
+        let handler = {
+            let root_dir = tempfile::tempdir().unwrap();
+            let root_pem = root_dir.path().join("root.pem");
+            fs::write(root_pem, common_root.cert.pem()).unwrap();
+            let auth_pem = root_dir.path().join("auth.pem");
+            agent_server_chain.to_file(&auth_pem);
+
+            let config = StealPortTlsConfig {
+                port: original_destination.port(),
+                agent_as_server: AgentServerConfig {
+                    authentication: TlsAuthentication {
+                        cert_pem: "auth.pem".into(),
+                        key_pem: "auth.pem".into(),
+                    },
+                    verification: Some(TlsClientVerification {
+                        allow_anonymous: false,
+                        accept_any_cert: false,
+                        trust_roots: vec!["/root.pem".into()],
+                    }),
+                    alpn_protocols: vec![std::str::from_utf8(tls::HTTP_2_ALPN_NAME)
+                        .unwrap()
+                        .into()],
+                },
+                agent_as_client: AgentClientConfig {
+                    authentication: Some(TlsAuthentication {
+                        cert_pem: "auth.pem".into(),
+                        key_pem: "auth.pem".into(),
+                    }),
+                    verification: TlsServerVerification {
+                        accept_any_cert: false,
+                        trust_roots: vec!["/root.pem".into()],
+                    },
+                },
+            };
+            let store = StealTlsHandlerStore::new(
+                vec![config],
+                InTargetPathResolver::with_root_path(root_dir.path().to_path_buf()),
+            );
+            store
+                .get(original_destination.port())
+                .await
+                .unwrap()
+                .unwrap()
+        };
+
+        let _original_server_task = tokio::spawn({
+            let verifier = WebPkiClientVerifier::builder(root_store.clone())
+                .build()
+                .unwrap();
+            let mut server_config = ServerConfig::builder()
+                .with_client_cert_verifier(verifier)
+                .with_single_cert(original_server_chain.certs, original_server_chain.key)
+                .unwrap();
+            server_config
+                .alpn_protocols
+                .push(tls::HTTP_2_ALPN_NAME.into());
+            let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+            async move {
+                loop {
+                    let stream = original_listener.accept().await.unwrap().0;
+                    let acceptor = acceptor.clone();
+
+                    tokio::spawn(async move {
+                        let stream = acceptor.accept(stream).await.unwrap();
+
+                        match stream.get_ref().1.alpn_protocol() {
+                            Some(tls::HTTP_2_ALPN_NAME) => {
+                                hyper::server::conn::http2::Builder::new(TokioExecutor::default())
+                                    .serve_connection(
+                                        TokioIo::new(stream),
+                                        service_fn(handle_request),
+                                    )
+                                    .await
+                                    .unwrap();
+                            }
+                            other => panic!("unexpected ALPN upgrade: {other:?}"),
+                        }
+                    });
+                }
+            }
+        });
+
+        let agent_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let agent_addr = agent_listener.local_addr().unwrap();
+
+        let client_task = tokio::spawn({
+            let mut client_config = ClientConfig::builder()
+                .with_root_certificates(root_store.clone())
+                .with_client_auth_cert(client_chain.certs, client_chain.key)
+                .unwrap();
+            client_config
+                .alpn_protocols
+                .extend([tls::HTTP_1_1_ALPN_NAME.into(), tls::HTTP_2_ALPN_NAME.into()]);
+            let connector = TlsConnector::from(Arc::new(client_config));
+
+            async move {
+                let stream = TcpStream::connect(agent_addr).await.unwrap();
+                let stream = connector
+                    .connect(ServerName::try_from("server").unwrap(), stream)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    stream.get_ref().1.alpn_protocol(),
+                    Some(tls::HTTP_2_ALPN_NAME)
+                );
+                let (mut sender, conn) = hyper::client::conn::http2::handshake(
+                    TokioExecutor::new(),
+                    TokioIo::new(stream),
+                )
+                .await
+                .unwrap();
+                tokio::spawn(conn);
+
+                let mut request = Request::new(Empty::<Bytes>::new());
+                request
+                    .headers_mut()
+                    .insert("x-capture", HeaderValue::from_static("true"));
+                let mut response = sender.send_request(request).await.unwrap();
+                assert_eq!(response.status(), StatusCode::IM_A_TEAPOT); // request handled by client.
+                let _ = response.body_mut().collect().await.unwrap();
+
+                let request = Request::new(Empty::<Bytes>::new());
+                let mut response = sender.send_request(request).await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK); // request handled by by the original server.
+                let _ = response.body_mut().collect().await.unwrap();
+            }
+        });
+
+        let filters = Filters::default();
+        filters.insert(
+            0,
+            (
+                HttpFilter::Header("x-capture: true".parse().unwrap()),
+                Some("1.19.0".parse().unwrap()),
+            ),
+        );
+
+        let (stream, peer_address) = agent_listener.accept().await.unwrap();
+        let stream = handler.acceptor().accept(stream).await.unwrap();
+        assert_eq!(
+            stream.get_ref().1.alpn_protocol(),
+            Some(tls::HTTP_2_ALPN_NAME)
+        );
+        assert_eq!(stream.get_ref().1.server_name(), Some("server"));
+        let original_destination = OriginalDestination::new(
+            original_destination,
+            Some(handler.connector(stream.get_ref().1)),
+        );
+
+        let filtered_steal_task = FilteredStealTask::new(
+            0,
+            filters,
+            original_destination,
+            peer_address,
+            HttpVersion::V2,
+            Box::new(stream),
+        );
+
+        let (msg_in_tx, mut msg_in_rx) = mpsc::channel(8);
+        let (msg_out_tx, mut msg_out_rx) = mpsc::channel(8);
+        let task_handle = tokio::spawn(async move {
+            filtered_steal_task
+                .run(msg_out_tx, &mut msg_in_rx)
+                .await
+                .unwrap();
+        });
+
+        match msg_out_rx.recv().await.unwrap() {
+            ConnectionMessageOut::SubscribedHttp {
+                client_id: 0,
+                connection_id: 0,
+            } => {}
+            other => panic!("unexpected message from filtered steal task: {other:?}"),
+        }
+
+        match msg_out_rx.recv().await.unwrap() {
+            ConnectionMessageOut::Request {
+                client_id: 0,
+                connection_id: 0,
+                id: 0,
+                transport:
+                    HttpRequestTransportType::Tls {
+                        alpn_protocol,
+                        server_name,
+                    },
+                ..
+            } => {
+                assert_eq!(alpn_protocol, Some(tls::HTTP_2_ALPN_NAME.into()));
+                assert_eq!(server_name, Some("server".into()));
+            }
+            other => panic!("unexpected message from filtered steal task: {other:?}"),
+        }
+
+        let mut response = Response::new(Empty::<Bytes>::new().map_err(|_| unreachable!()).boxed());
+        *response.status_mut() = StatusCode::IM_A_TEAPOT;
+        msg_in_tx
+            .send(ConnectionMessageIn::Response {
+                client_id: 0,
+                request_id: 0,
+                response,
+            })
+            .await
+            .unwrap();
+
+        match msg_out_rx.recv().await.unwrap() {
+            ConnectionMessageOut::Closed {
+                client_id: 0,
+                connection_id: 0,
+            } => {}
+            other => panic!("unexpected message from filtered steal task: {other:?}"),
+        }
+
+        // assert that the client received expected messages from both the client and the original
+        // server
+        client_task.await.unwrap();
+        // assert that the filtered steal task did not fail
+        task_handle.await.unwrap();
     }
 }

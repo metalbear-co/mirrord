@@ -24,7 +24,7 @@ use tokio_rustls::{TlsAcceptor, TlsConnector};
 use crate::{steal::StealTlsHandlerStore, util::path_resolver::InTargetPathResolver};
 
 /// Generates a new [`CertifiedKey`] with a random [`KeyPair`].
-fn generate_cert(
+pub fn generate_cert(
     name: String,
     issuer: Option<&CertifiedKey>,
     can_sign_others: bool,
@@ -51,13 +51,13 @@ fn generate_cert(
     CertifiedKey { cert, key_pair }
 }
 
-struct CertChainWithKey {
-    key: PrivateKeyDer<'static>,
-    certs: Vec<CertificateDer<'static>>,
+pub struct CertChainWithKey {
+    pub key: PrivateKeyDer<'static>,
+    pub certs: Vec<CertificateDer<'static>>,
 }
 
 impl CertChainWithKey {
-    fn new(end_entity_name: String, root_cert: Option<&CertifiedKey>) -> Self {
+    pub fn new(end_entity_name: String, root_cert: Option<&CertifiedKey>) -> Self {
         let mut new_root = None;
 
         let root = match root_cert {
@@ -81,7 +81,7 @@ impl CertChainWithKey {
         }
     }
 
-    fn to_file(&self, path: &Path) {
+    pub fn to_file(&self, path: &Path) {
         let mut pems = Vec::with_capacity(self.certs.len() + 1);
 
         pems.push(Pem::new("PRIVATE KEY", self.key.secret_der()));
@@ -489,9 +489,7 @@ async fn agent_connects_with_original_params() {
     };
 
     let acceptor = {
-        let verifier = WebPkiClientVerifier::builder(root_store.into())
-            .build()
-            .unwrap();
+        let verifier = WebPkiClientVerifier::builder(root_store).build().unwrap();
         let server_chain = CertChainWithKey::new("server".into(), Some(&trusted_root));
         let mut config = ServerConfig::builder()
             .with_client_cert_verifier(verifier)
