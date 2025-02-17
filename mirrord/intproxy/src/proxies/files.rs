@@ -696,6 +696,32 @@ impl FilesProxy {
                     .await;
             }
 
+            FileResponse::ReadLimited(Err(error)) => {
+                // need to ensure that if a Read request was sent by layer, a Read response is
+                // returned containing the error rather than a ReadLimited
+                let (message_id, layer_id, additional_data) =
+                    self.request_queue.pop_front_with_data().ok_or_else(|| {
+                        UnexpectedAgentMessage(DaemonMessage::File(FileResponse::ReadLimited(Err(
+                            error.clone(),
+                        ))))
+                    })?;
+
+                let message = match additional_data {
+                    AdditionalRequestData::ReadBuffered {
+                        update_fd_position, ..
+                    } if update_fd_position => FileResponse::Read(Err(error)),
+                    _ => FileResponse::ReadLimited(Err(error)),
+                };
+
+                message_bus
+                    .send(ToLayer {
+                        message_id,
+                        layer_id,
+                        message: ProxyToLayerMessage::File(message),
+                    })
+                    .await;
+            }
+
             // If the file is buffered, update `files_data`.
             FileResponse::Seek(Ok(seek)) => {
                 let (message_id, layer_id, additional_data) =
@@ -1129,6 +1155,22 @@ mod tests {
         tasks.next().await.unwrap().1.unwrap_message()
     }
 
+    async fn respond_to_read_request_with_err(
+        proxy: &TaskSender<FilesProxy>,
+        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+        error: ResponseError,
+        limited: bool,
+    ) -> ProxyMessage {
+        let response = if limited {
+            FileResponse::ReadLimited(Err(error))
+        } else {
+            FileResponse::Read(Err(error))
+        };
+
+        proxy.send(FilesProxyMessage::FileRes(response)).await;
+        tasks.next().await.unwrap().1.unwrap_message()
+    }
+
     #[rstest]
     #[case(true, false)]
     #[case(false, true)]
@@ -1404,5 +1446,39 @@ mod tests {
             .unwrap_message()
             .unwrap_proxy_to_layer_message();
         assert_eq!(update, ProxyToLayerMessage::File(seek_response),);
+    }
+
+    #[tokio::test]
+    async fn reading_from_dir() {
+        // relevant ticket: MBE-717: intproxy crashes when attempting to `cat` a remote dir
+        // test that a ReadLimited response from agent is sent to the layer the same variant as the
+        // original request type
+        let (proxy, mut tasks) = setup_proxy(mirrord_protocol::VERSION.clone(), 4096).await;
+
+        // create dir - use empty file
+        let fd = open_file(&proxy, &mut tasks, true).await;
+
+        // send read request from layer, check that proxy sends readlimited request to agent
+        let update = make_read_request(&proxy, &mut tasks, fd, 1, None).await;
+        assert_eq!(
+            update,
+            ProxyMessage::ToAgent(ClientMessage::FileRequest(FileRequest::ReadLimited(
+                ReadLimitedFileRequest {
+                    remote_fd: fd,
+                    buffer_size: 4096,
+                    start_from: 0,
+                }
+            ))),
+        );
+
+        // reply from agent with readlimited error, check that proxy sends read response to layer
+        let res_error = ResponseError::NotFile(fd);
+        let update = respond_to_read_request_with_err(&proxy, &mut tasks, res_error.clone(), true)
+            .await
+            .unwrap_proxy_to_layer_message();
+        assert_eq!(
+            update,
+            ProxyToLayerMessage::File(FileResponse::Read(Err(res_error))),
+        );
     }
 }
