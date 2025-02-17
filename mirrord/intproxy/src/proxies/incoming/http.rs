@@ -7,7 +7,7 @@ use hyper::{
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use mirrord_protocol::{
-    tcp::{HttpRequest, HttpResponse, InternalHttpResponse},
+    tcp::{HttpRequest, HttpRequestTransportType, HttpResponse, InternalHttpResponse},
     ConnectionId, Port, RequestId,
 };
 use mirrord_tls_util::UriExt;
@@ -36,8 +36,8 @@ pub struct LocalHttpClient {
     local_server_address: SocketAddr,
     /// Address of this client's TCP socket.
     address: SocketAddr,
-    /// Whether this client uses TLS.
-    uses_tls: bool,
+    /// How this client transports requests to the HTTP server.
+    transport: HttpRequestTransportType,
 }
 
 impl LocalHttpClient {
@@ -46,7 +46,7 @@ impl LocalHttpClient {
     pub async fn new(
         local_server_address: SocketAddr,
         version: Version,
-        use_tls: bool,
+        transport: HttpRequestTransportType,
         request_uri: &Uri,
     ) -> Result<Self, LocalHttpError> {
         let stream = TcpStream::connect(local_server_address)
@@ -58,25 +58,31 @@ impl LocalHttpClient {
         let address = stream
             .local_addr()
             .map_err(LocalHttpError::SocketSetupFailed)?;
-        let sender = if use_tls {
-            let server_name = request_uri
-                .get_server_name()
-                .unwrap_or_else(|| ServerName::from(local_server_address.ip()))
-                .to_owned();
-            let stream = tls::make_tls_connector()
-                .connect(server_name, stream)
-                .await
-                .map_err(LocalHttpError::ConnectTlsFailed)?;
-            HttpSender::handshake(version, Box::new(stream)).await?
-        } else {
-            HttpSender::handshake(version, stream).await?
+
+        let sender = match &transport {
+            HttpRequestTransportType::Tcp => HttpSender::handshake(version, stream).await?,
+            HttpRequestTransportType::Tls {
+                alpn_protocol,
+                server_name,
+            } => {
+                let server_name = server_name
+                    .as_ref()
+                    .and_then(|name| ServerName::try_from(name.as_str()).ok()?.to_owned().into())
+                    .or_else(|| request_uri.get_server_name()?.to_owned().into())
+                    .unwrap_or_else(|| ServerName::from(local_server_address.ip()));
+                let stream = tls::make_tls_connector(alpn_protocol.clone())
+                    .connect(server_name, stream)
+                    .await
+                    .map_err(LocalHttpError::ConnectTlsFailed)?;
+                HttpSender::handshake(version, Box::new(stream)).await?
+            }
         };
 
         Ok(Self {
             sender,
             local_server_address,
             address,
-            uses_tls: use_tls,
+            transport: transport.clone(),
         })
     }
 
@@ -103,8 +109,8 @@ impl LocalHttpClient {
         }
     }
 
-    pub fn uses_tls(&self) -> bool {
-        self.uses_tls
+    pub fn transport(&self) -> &HttpRequestTransportType {
+        &self.transport
     }
 }
 
@@ -114,6 +120,7 @@ impl fmt::Debug for LocalHttpClient {
             .field("local_server_address", &self.local_server_address)
             .field("address", &self.address)
             .field("is_http_1", &matches!(self.sender, HttpSender::V1(..)))
+            .field("transport", &self.transport)
             .finish()
     }
 }

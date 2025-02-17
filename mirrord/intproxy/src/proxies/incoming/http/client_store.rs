@@ -6,6 +6,7 @@ use std::{
 };
 
 use hyper::{Uri, Version};
+use mirrord_protocol::tcp::HttpRequestTransportType;
 use tokio::{
     sync::Notify,
     time::{self, Instant},
@@ -64,8 +65,8 @@ impl ClientStore {
         &self,
         server_addr: SocketAddr,
         version: Version,
-        use_tls: bool,
-        request_uri: Uri,
+        transport: &HttpRequestTransportType,
+        request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
         let ready = {
             let mut guard = self
@@ -75,7 +76,7 @@ impl ClientStore {
             let position = guard.iter().position(|idle| {
                 idle.client.handles_version(version)
                     && idle.client.local_server_address() == server_addr
-                    && idle.client.uses_tls() == use_tls
+                    && idle.client.transport() == transport
             });
             position.map(|position| guard.swap_remove(position))
         };
@@ -85,13 +86,15 @@ impl ClientStore {
             return Ok(ready.client);
         }
 
+        let transport_cloned = transport.clone();
+        let uri_cloned = request_uri.clone();
         let connect_task = tokio::spawn(async move {
-            LocalHttpClient::new(server_addr, version, use_tls, &request_uri).await
+            LocalHttpClient::new(server_addr, version, transport_cloned, &uri_cloned).await
         });
 
         tokio::select! {
             result = connect_task => result.expect("this task should not panic"),
-            ready = self.wait_for_ready(server_addr, version, use_tls) => {
+            ready = self.wait_for_ready(server_addr, version, transport) => {
                 tracing::trace!(?ready, "Reused an idle client");
                 Ok(ready)
             },
@@ -117,7 +120,7 @@ impl ClientStore {
         &self,
         server_addr: SocketAddr,
         version: Version,
-        uses_tls: bool,
+        transport: &HttpRequestTransportType,
     ) -> LocalHttpClient {
         loop {
             let notified = {
@@ -128,7 +131,7 @@ impl ClientStore {
                 let position = guard.iter().position(|idle| {
                     idle.client.handles_version(version)
                         && idle.client.local_server_address() == server_addr
-                        && idle.client.uses_tls() == uses_tls
+                        && idle.client.transport() == transport
                 });
 
                 match position {
@@ -201,6 +204,7 @@ mod test {
         body::Incoming, server::conn::http1, service::service_fn, Request, Response, Version,
     };
     use hyper_util::rt::TokioIo;
+    use mirrord_protocol::tcp::HttpRequestTransportType;
     use tokio::{net::TcpListener, time};
 
     use super::ClientStore;
@@ -229,8 +233,8 @@ mod test {
             .get(
                 addr,
                 Version::HTTP_11,
-                false,
-                "http://some.server.com".parse().unwrap(),
+                &HttpRequestTransportType::Tcp,
+                &"http://some.server.com".parse().unwrap(),
             )
             .await
             .unwrap();

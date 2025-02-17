@@ -508,7 +508,7 @@ where
         ret,
     )]
     fn match_request<B>(&self, request: &mut Request<B>) -> Option<ClientId> {
-        let protocol_version_req = if self.original_destination.uses_tls() {
+        let protocol_version_req = if self.original_destination.connector().is_some() {
             &HTTP_CHUNKED_REQUEST_V2_VERSION
         } else if request.headers().contains_key(UPGRADE) {
             &HTTP_FILTERED_UPGRADE_VERSION
@@ -648,6 +648,14 @@ where
         let id = self.next_request_id;
         self.next_request_id += 1;
 
+        let transport = match self.original_destination.connector() {
+            Some(connector) => HttpRequestTransportType::Tls {
+                alpn_protocol: connector.alpn_protocol().map(Vec::from),
+                server_name: connector.server_name().map(|name| name.to_str().into()),
+            },
+            None => HttpRequestTransportType::Tcp,
+        };
+
         tx.send(ConnectionMessageOut::Request {
             client_id,
             connection_id: self.connection_id,
@@ -657,11 +665,7 @@ where
                 destination: self.original_destination.address(),
                 source: self.peer_address,
             },
-            transport: if self.original_destination.uses_tls() {
-                HttpRequestTransportType::Tls
-            } else {
-                HttpRequestTransportType::Tcp
-            },
+            transport,
         })
         .await?;
 

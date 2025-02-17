@@ -106,6 +106,17 @@ impl PassThroughTlsConnector {
             })
             .map(Box::new)
     }
+
+    pub fn server_name(&self) -> Option<&ServerName<'static>> {
+        self.server_name.as_ref()
+    }
+
+    pub fn alpn_protocol(&self) -> Option<&[u8]> {
+        self.client_config
+            .alpn_protocols
+            .first()
+            .map(|proto| proto.as_slice())
+    }
 }
 
 impl fmt::Debug for PassThroughTlsConnector {

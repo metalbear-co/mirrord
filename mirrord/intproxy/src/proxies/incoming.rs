@@ -179,7 +179,7 @@ impl IncomingProxy {
         &mut self,
         request: HttpRequest<StreamingBody>,
         body_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
-        use_tls: bool,
+        transport: HttpRequestTransportType,
         message_bus: &MessageBus<Self>,
     ) {
         let subscription = self.subscriptions.get(request.port).filter(|subscription| {
@@ -240,7 +240,7 @@ impl IncomingProxy {
                 self.client_store.clone(),
                 self.response_mode,
                 subscription.listening_on,
-                use_tls,
+                transport,
             ),
             InProxyTask::HttpGateway(id),
             Self::CHANNEL_SIZE,
@@ -348,8 +348,13 @@ impl IncomingProxy {
             ChunkedRequest::StartV1(request) => {
                 let (body_tx, body_rx) = mpsc::channel(128);
                 let request = request.map_body(|frames| StreamingBody::new(body_rx, frames));
-                self.start_http_gateway(request, Some(body_tx), false, message_bus)
-                    .await;
+                self.start_http_gateway(
+                    request,
+                    Some(body_tx),
+                    HttpRequestTransportType::Tcp,
+                    message_bus,
+                )
+                .await;
             }
 
             ChunkedRequest::StartV2(request) => {
@@ -363,13 +368,9 @@ impl IncomingProxy {
                     )
                 };
 
+                let transport = request.transport;
+
                 let HttpRequestMetadata::V1 { destination, .. } = request.metadata;
-
-                let use_tls = match request.transport {
-                    HttpRequestTransportType::Tcp => false,
-                    HttpRequestTransportType::Tls => true,
-                };
-
                 let request = HttpRequest {
                     connection_id: request.connection_id,
                     request_id: request.request_id,
@@ -383,7 +384,7 @@ impl IncomingProxy {
                     port: destination.port(),
                 };
 
-                self.start_http_gateway(request, body_tx, use_tls, message_bus)
+                self.start_http_gateway(request, body_tx, transport, message_bus)
                     .await;
             }
 
@@ -495,13 +496,23 @@ impl IncomingProxy {
             }
 
             DaemonTcp::HttpRequest(request) => {
-                self.start_http_gateway(request.map_body(From::from), None, false, message_bus)
-                    .await;
+                self.start_http_gateway(
+                    request.map_body(From::from),
+                    None,
+                    HttpRequestTransportType::Tcp,
+                    message_bus,
+                )
+                .await;
             }
 
             DaemonTcp::HttpRequestFramed(request) => {
-                self.start_http_gateway(request.map_body(From::from), None, false, message_bus)
-                    .await;
+                self.start_http_gateway(
+                    request.map_body(From::from),
+                    None,
+                    HttpRequestTransportType::Tcp,
+                    message_bus,
+                )
+                .await;
             }
 
             DaemonTcp::HttpRequestChunked(request) => {

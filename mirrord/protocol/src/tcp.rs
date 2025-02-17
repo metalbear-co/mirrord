@@ -141,7 +141,10 @@ pub struct ChunkedRequestStartV2 {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum HttpRequestTransportType {
     Tcp,
-    Tls,
+    Tls {
+        alpn_protocol: Option<Vec<u8>>,
+        server_name: Option<String>,
+    },
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

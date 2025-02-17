@@ -101,8 +101,8 @@ impl OriginalDestination {
         self.address
     }
 
-    pub fn uses_tls(&self) -> bool {
-        self.connector.is_some()
+    pub fn connector(&self) -> Option<&PassThroughTlsConnector> {
+        self.connector.as_ref()
     }
 
     /// Makes a connection to the server.

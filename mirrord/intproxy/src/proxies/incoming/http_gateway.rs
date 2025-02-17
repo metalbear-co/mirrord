@@ -14,8 +14,9 @@ use hyper::{body::Incoming, http::response::Parts, StatusCode};
 use mirrord_protocol::{
     batched_body::BatchedBody,
     tcp::{
-        ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedResponse, HttpRequest, HttpResponse,
-        InternalHttpBody, InternalHttpBodyFrame, InternalHttpResponse,
+        ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedResponse, HttpRequest,
+        HttpRequestTransportType, HttpResponse, InternalHttpBody, InternalHttpBodyFrame,
+        InternalHttpResponse,
     },
 };
 use tokio::time;
@@ -41,8 +42,8 @@ pub struct HttpGatewayTask {
     response_mode: ResponseMode,
     /// Address of the HTTP server in the user application.
     server_addr: SocketAddr,
-    /// Whether to use TLS when making a connection to the use application.
-    use_tls: bool,
+    /// How to transport the HTTP request to the server.
+    transport: HttpRequestTransportType,
 }
 
 impl fmt::Debug for HttpGatewayTask {
@@ -51,7 +52,7 @@ impl fmt::Debug for HttpGatewayTask {
             .field("request", &self.request)
             .field("response_mode", &self.response_mode)
             .field("server_addr", &self.server_addr)
-            .field("use_tls", &self.use_tls)
+            .field("transport", &self.transport)
             .finish()
     }
 }
@@ -63,14 +64,14 @@ impl HttpGatewayTask {
         client_store: ClientStore,
         response_mode: ResponseMode,
         server_addr: SocketAddr,
-        use_tls: bool,
+        transport: HttpRequestTransportType,
     ) -> Self {
         Self {
             request,
             client_store,
             response_mode,
             server_addr,
-            use_tls,
+            transport,
         }
     }
 
@@ -217,8 +218,8 @@ impl HttpGatewayTask {
             .get(
                 self.server_addr,
                 self.request.version(),
-                self.use_tls,
-                self.request.internal_request.uri.clone(),
+                &self.transport,
+                &self.request.internal_request.uri,
             )
             .await?;
         let mut response = client.send_request(self.request.clone()).await?;
@@ -547,7 +548,7 @@ mod test {
                 ClientStore::new_with_timeout(Duration::from_secs(1)),
                 ResponseMode::Basic,
                 local_destination,
-                false,
+                HttpRequestTransportType::Tcp,
             );
             tasks.register(gateway, 0, 8)
         };
@@ -703,7 +704,7 @@ mod test {
                 ClientStore::new_with_timeout(Duration::from_secs(1)),
                 response_mode,
                 addr,
-                false,
+                HttpRequestTransportType::Tcp,
             ),
             (),
             8,
@@ -853,7 +854,7 @@ mod test {
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
-                false,
+                HttpRequestTransportType::Tcp,
             ),
             (),
             8,
@@ -927,7 +928,7 @@ mod test {
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
-                false,
+                HttpRequestTransportType::Tcp,
             ),
             0,
             8,
@@ -938,7 +939,7 @@ mod test {
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
-                false,
+                HttpRequestTransportType::Tcp,
             ),
             1,
             8,
