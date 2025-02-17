@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Not};
+use std::collections::HashMap;
 
 use bollard::{container::InspectContainerOptions, Docker, API_DEFAULT_VERSION};
 use containerd_client::{
@@ -11,7 +11,7 @@ use containerd_client::{
 };
 use enum_dispatch::enum_dispatch;
 use oci_spec::runtime::Spec;
-use tokio::{fs::read_dir, net::UnixStream};
+use tokio::net::UnixStream;
 use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
 use tracing::Level;
@@ -344,7 +344,7 @@ async fn find_pid_for_ephemeral(container_id: &str) -> Result<u64, std::io::Erro
                     // Skip over `parse` errors, since this means that this dir is not a
                     // `/proc/{pid}`.
                     _ => {
-                        tracing::trace!(?dir, "Skipping not-number!");
+                        tracing::trace!(?dir, "Skipping not-number dir!");
                         continue;
                     }
                 }
@@ -357,7 +357,7 @@ async fn find_pid_for_ephemeral(container_id: &str) -> Result<u64, std::io::Erro
                 return Ok(1);
             }
             Err(fail) => {
-                tracing::warn!(?fail, "Searching for container pid!");
+                tracing::warn!(?fail, "Searching for container pid! Skipping this dir.");
                 continue;
             }
         }
