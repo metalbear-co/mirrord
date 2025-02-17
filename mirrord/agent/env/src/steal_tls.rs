@@ -77,7 +77,7 @@ pub struct TlsServerVerification {
     /// Each certificate found in the files is treated as an allowed root.
     /// The files can contain entries of other types, e.g private keys, which are ignored.
     ///
-    /// Optional. Defaults to `false`.
+    /// Optional. Defaults to an empty list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trust_roots: Vec<PathBuf>,
 }
