@@ -20,6 +20,7 @@ use std::{
 };
 
 use clap::ValueEnum;
+use compose::ComposeRunner;
 use local_ip_address::local_ip;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, ExecutionKind, Reporter};
 use mirrord_config::{
@@ -54,7 +55,7 @@ use crate::{
 static CONTAINER_EXECUTION_KIND: ExecutionKind = ExecutionKind::Container;
 
 mod command_builder;
-mod compose;
+pub mod compose;
 mod sidecar;
 
 /// Format [`Command`] to look like the executated command (currently without env because we don't
@@ -444,7 +445,25 @@ pub(crate) async fn container_command(
     ) {
         container_run(runtime_args, exec_params, watch).await
     } else {
-        todo!()
+        let wat = ComposeRunner::try_new(runtime_args, exec_params)
+            .unwrap()
+            .prepare_config_and_analytics(watch)
+            .unwrap()
+            .prepare_tls()
+            .unwrap()
+            .prepare_layer_config()
+            .unwrap()
+            .start_external_proxy()
+            .await
+            .unwrap()
+            .prepare_compose_file()
+            .await
+            .unwrap()
+            .debug_stuff()
+            .await
+            .unwrap();
+
+        Ok(0)
     }
 }
 

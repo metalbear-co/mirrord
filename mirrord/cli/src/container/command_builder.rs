@@ -1,12 +1,11 @@
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
-    io::{Read, Write},
+    io::Write,
     path::Path,
 };
 
 use tempfile::NamedTempFile;
-use tokio::fs::OpenOptions;
 use tracing::Level;
 
 use crate::{
@@ -162,8 +161,8 @@ fn create_compose_file(
 pub struct RuntimeCommandBuilder<T = Empty> {
     step: T,
     runtime: ContainerRuntime,
-    env_vars: HashMap<String, String>,
-    volumes: HashMap<String, String>,
+    pub(crate) env_vars: HashMap<String, String>,
+    pub(crate) volumes: HashMap<String, String>,
     /// `--volumes-from={container}`
     volumes_from: HashSet<String>,
     /// [`docker run --network`](https://docs.docker.com/engine/network/)

@@ -10,7 +10,7 @@ use mirrord_config::LayerConfig;
 use rand::{distributions::Alphanumeric, Rng};
 use tokio::io::AsyncWriteExt;
 use tokio_stream::Stream;
-use tracing_subscriber::{prelude::*, EnvFilter};
+use tracing_subscriber::{fmt::format::FmtSpan, prelude::*, EnvFilter};
 
 use crate::{
     config::Commands,
@@ -58,7 +58,14 @@ pub async fn init_tracing_registry(
 
     if force_log || init_ext_error_handler(command) {
         tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(std::io::stderr)
+                    .pretty()
+                    .with_file(true)
+                    .with_line_number(true)
+                    .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE),
+            )
             .with(tracing_subscriber::EnvFilter::from_default_env())
             .init();
     }
