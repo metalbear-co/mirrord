@@ -10,16 +10,11 @@ pub use common::*;
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(60))]
-async fn mkdir(dylib_path: &Path) {
+async fn statfs(dylib_path: &Path) {
     let application = Application::StatfsFstatfs;
 
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(dylib_path, Default::default(), None)
-        .await;
-
-    println!("waiting for file request (mkdir).");
-    intproxy
-        .expect_make_dir("/statfs_fstatfs_test_path", 0o777)
         .await;
 
     println!("waiting for file request (statfs).");

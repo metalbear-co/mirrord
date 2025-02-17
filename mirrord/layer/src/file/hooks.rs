@@ -662,7 +662,7 @@ pub(crate) unsafe extern "C" fn _write_nocancel_detour(
 
 /// Implementation of access_detour, used in access_detour and faccessat_detour
 unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int {
-    access(raw_path.checked_into(), mode as u8).unwrap_or_bypass_with(|bypass| {
+    access(raw_path.checked_into(), mode).unwrap_or_bypass_with(|bypass| {
         let raw_path = update_ptr_from_bypass(raw_path, &bypass);
         FN_ACCESS(raw_path, mode)
     })

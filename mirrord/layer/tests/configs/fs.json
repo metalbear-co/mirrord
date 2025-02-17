@@ -1,0 +1,10 @@
+{
+  "feature": {
+    "fs": {
+      "read_write": [
+        "^/mkdir_rmdir_test_dir$",
+        "^/mkdirat_rmdir_test_dir$"
+      ]
+    }
+  }
+}

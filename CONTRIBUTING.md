@@ -518,9 +518,19 @@ In order to have a more structured approach, here’s the flow you should follow
     5. When `read` is called, I will check if the fd being read was previously opened by us, and if it is we’ll send a blocking `read` request to the agent. The result will be sent back to the caller.
     6. And so on.
 5. This doc should go later on to our mirrord docs for advanced developers so people can understand how stuff works
-6. After approval of the implementation, you can start writing code, and add relevant e2e tests.
+6. After approval, you can start implementing. As part of the implementation you need to add E2E tests (in the `tests`
+   crate). For each new hook, please test:
+    1. A call that should be sent to the agent. Make sure it has a result that is distinguishable from the result of
+       performing that operation locally.
+    2. A call that should be bypassed. Make sure the result of the operation proves it happened locally. Please test
+       different reasons for bypassing. E.g. for file operations, make a call with a relative path, and make a call
+       with a path that is configured to be local. If it's easier for you, you can test bypassing in an integration
+       test of mirrord-layer (under mirrord/layer/tests).
+    3. If the configuration supports mappings that are relevant for this hook, add test cases with those mappings,
+       and test that the mappings take effect correctly. E.g. for file operations test with a path mapping.
 
-# Compliling on MacOS
+
+# Compiling on MacOS
 
 The `mirrord-agent` crate makes use of the `#[cfg(target_os = "linux")]` attribute to allow the whole repo to compile on MacOS when you run `cargo build`.
 

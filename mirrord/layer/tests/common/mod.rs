@@ -826,9 +826,8 @@ pub enum Application {
     RustListenPorts,
     Fork,
     ReadLink,
-    MakeDir,
     StatfsFstatfs,
-    RemoveDir,
+    MkdirRmdir,
     OpenFile,
     CIssue2055,
     CIssue2178,
@@ -884,9 +883,8 @@ impl Application {
             Application::PythonFastApiHTTP | Application::PythonIssue864 => String::from("uvicorn"),
             Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
             Application::ReadLink => String::from("tests/apps/readlink/out.c_test_app"),
-            Application::MakeDir => String::from("tests/apps/mkdir/out.c_test_app"),
             Application::StatfsFstatfs => String::from("tests/apps/statfs_fstatfs/out.c_test_app"),
-            Application::RemoveDir => String::from("tests/apps/rmdir/out.c_test_app"),
+            Application::MkdirRmdir => String::from("tests/apps/mkdir_rmdir/out.c_test_app"),
             Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
             Application::NodeHTTP | Application::NodeIssue2283 | Application::NodeIssue2807 => {
                 String::from("node")
@@ -1124,9 +1122,8 @@ impl Application {
             | Application::Go23FAccessAt
             | Application::Fork
             | Application::ReadLink
-            | Application::MakeDir
             | Application::StatfsFstatfs
-            | Application::RemoveDir
+            | Application::MkdirRmdir
             | Application::Realpath
             | Application::RustFileOps
             | Application::RustIssue1123
@@ -1204,9 +1201,8 @@ impl Application {
             | Application::BashShebang
             | Application::Fork
             | Application::ReadLink
-            | Application::MakeDir
             | Application::StatfsFstatfs
-            | Application::RemoveDir
+            | Application::MkdirRmdir
             | Application::Realpath
             | Application::Go21Issue834
             | Application::Go22Issue834
