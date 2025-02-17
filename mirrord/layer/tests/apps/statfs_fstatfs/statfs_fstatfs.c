@@ -20,7 +20,6 @@
 int main()
 {
   char *tmp_test_path = "/statfs_fstatfs_test_path";
-  mkdir(tmp_test_path, 0777);
 
   // statfs
   struct statfs statfs_buf;
