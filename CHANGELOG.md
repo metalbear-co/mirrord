@@ -8,6 +8,45 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.133.0](https://github.com/metalbear-co/mirrord/tree/3.133.0) - 2025-02-17
+
+
+### Added
+
+- Added an option to configure timeout for idle local HTTP connections
+  (`experimental.idle_local_http_connection_timeout`).
+
+
+### Changed
+
+- Improved the warning produced when the user specifies agent namespace for a
+  targetless run.
+
+
+### Fixed
+
+- Correct statfs data for Go.
+  [#3044](https://github.com/metalbear-co/mirrord/issues/3044)
+- Updated `hickory-resolver` and `hickory-proto` to `0.25.0-alpha.5` and `rand`
+  from `0.8` to `0.9`.
+  [#3079](https://github.com/metalbear-co/mirrord/issues/3079)
+- Respect ignored paths and path mapping in statfs hook.
+  [#3082](https://github.com/metalbear-co/mirrord/issues/3082)
+- Some FS libc calls could be carried out remotely instead of locally in some
+  cases. [#3083](https://github.com/metalbear-co/mirrord/issues/3083)
+- `mirrord ls` command now does not list unnecessary target types when called
+  from a plugin/extension.
+  [#3086](https://github.com/metalbear-co/mirrord/issues/3086)
+- Fixed wrong link for ipv6 config docs.
+
+
+### Internal
+
+- Cleanup ci.yaml - we don't need the "docker" flag in E2E tests anymore.
+- Elaborate in CONTRIBUTING.md about things to be tested when adding a new
+  hook.
+- Extracted agent configuration to a separate crate.
+
 ## [3.132.1](https://github.com/metalbear-co/mirrord/tree/3.132.1) - 2025-02-06
 
 
