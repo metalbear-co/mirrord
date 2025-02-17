@@ -20,3 +20,8 @@ http.workspace = true
 rustls.workspace = true
 rustls-pemfile.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+pem = "3"
+rcgen.workspace = true
+tempfile.workspace = true

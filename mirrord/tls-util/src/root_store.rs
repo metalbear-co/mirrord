@@ -91,3 +91,104 @@ pub fn best_effort_root_store<P: IntoIterator<Item = PathBuf>>(paths: P) -> Root
 
     root_store
 }
+
+#[cfg(test)]
+mod test {
+    use std::fs;
+
+    use pem::{EncodeConfig, LineEnding, Pem};
+
+    /// Verifies that [`super::best_effort_root_store`] correctly parses certificates from the given
+    /// paths.
+    #[test]
+    fn parse_root_certs() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let mut file_idx = 0;
+        let mut certs = Vec::new();
+        let mut paths = Vec::new();
+
+        // To files in the main directory, each containing one certificate.
+        for _ in 0..2 {
+            let file = format!("root-{file_idx}.pem");
+            file_idx += 1;
+
+            let path = dir.path().join(file);
+            let cert = rcgen::generate_simple_self_signed(vec![format!("issuer-{}", certs.len())])
+                .unwrap();
+            let pem = cert.cert.pem();
+            fs::write(&path, &pem).unwrap();
+            certs.push(cert);
+            paths.push(path);
+        }
+
+        // One file in the main directory, containing two certificates.
+        let file = format!("root-{file_idx}.pem");
+        file_idx += 1;
+        let path = dir.path().join(file);
+        let cert_1 =
+            rcgen::generate_simple_self_signed(vec![format!("issuer-{}", certs.len())]).unwrap();
+        let cert_1_der = cert_1.cert.der().to_vec();
+        certs.push(cert_1);
+        let cert_2 =
+            rcgen::generate_simple_self_signed(vec![format!("issuer-{}", certs.len())]).unwrap();
+        let cert_2_der = cert_2.cert.der().to_vec();
+        certs.push(cert_2);
+        let content = pem::encode_many_config(
+            &[
+                Pem::new("CERTIFICATE", cert_1_der),
+                Pem::new("CERTIFICATE", cert_2_der),
+            ],
+            EncodeConfig::new().set_line_ending(LineEnding::LF),
+        );
+        fs::write(&path, &content).unwrap();
+        paths.push(path);
+
+        let subdir = dir.path().join("subdir");
+        fs::create_dir(&subdir).unwrap();
+        paths.push(subdir.clone());
+
+        // One file in a subdirectory, containing one certificate and a malformed entry.
+        let file = format!("root-{file_idx}.pem");
+        file_idx += 1;
+        let path = subdir.join(file);
+        let cert =
+            rcgen::generate_simple_self_signed(vec![format!("issuer-{}", certs.len())]).unwrap();
+        let cert_der = cert.cert.der().to_vec();
+        certs.push(cert);
+        let content = pem::encode_many_config(
+            &[
+                Pem::new("CERTIFICATE", cert_der),
+                Pem::new("NOT A VALID TAG", b"hello"),
+            ],
+            EncodeConfig::new().set_line_ending(LineEnding::LF),
+        );
+        fs::write(path, content).unwrap();
+
+        // One malformed PEM file in a subdirectory.
+        let file = format!("root-{file_idx}.pem");
+        file_idx += 1;
+        let path = subdir.join(file);
+        fs::write(path, b"hello there").unwrap();
+
+        // One file in a subdirectory, containing one certificate and a private key.
+        let file = format!("root-{file_idx}.pem");
+        let path = subdir.join(file);
+        let cert =
+            rcgen::generate_simple_self_signed(vec![format!("issuer-{}", certs.len())]).unwrap();
+        let cert_der = cert.cert.der().to_vec();
+        let key_der = cert.key_pair.serialize_der();
+        certs.push(cert);
+        let content = pem::encode_many_config(
+            &[
+                Pem::new("CERTIFICATE", cert_der),
+                Pem::new("PRIVATE KEY", key_der),
+            ],
+            EncodeConfig::new().set_line_ending(LineEnding::LF),
+        );
+        fs::write(path, content).unwrap();
+
+        let store = super::best_effort_root_store(paths);
+        assert_eq!(store.len(), certs.len());
+    }
+}
