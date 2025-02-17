@@ -4303,6 +4303,7 @@ dependencies = [
  "mirrord-config-derive",
  "nom",
  "rstest",
+ "rustls 0.23.21",
  "schemars",
  "serde",
  "serde_json",
@@ -4345,6 +4346,7 @@ version = "3.132.1"
 dependencies = [
  "bytes",
  "exponential-backoff",
+ "futures",
  "http-body-util",
  "hyper 1.5.2",
  "hyper-util",

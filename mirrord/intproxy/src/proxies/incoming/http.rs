@@ -3,20 +3,16 @@ use std::{fmt, io, net::SocketAddr, ops::Not};
 use hyper::{
     body::Incoming,
     client::conn::{http1, http2},
-    Request, Response, StatusCode, Uri, Version,
+    Request, Response, StatusCode, Version,
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use mirrord_protocol::{
-    tcp::{HttpRequest, HttpRequestTransportType, HttpResponse, InternalHttpResponse},
+    tcp::{HttpRequest, HttpResponse, InternalHttpResponse},
     ConnectionId, Port, RequestId,
 };
-use mirrord_tls_util::UriExt;
-use rustls::pki_types::ServerName;
 use thiserror::Error;
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::TcpStream,
-};
+use tls::LocalTlsSetupError;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::Level;
 
 mod client_store;
@@ -36,56 +32,11 @@ pub struct LocalHttpClient {
     local_server_address: SocketAddr,
     /// Address of this client's TCP socket.
     address: SocketAddr,
-    /// How this client transports requests to the HTTP server.
-    transport: HttpRequestTransportType,
+    /// Whether this client uses TLS.
+    uses_tls: bool,
 }
 
 impl LocalHttpClient {
-    /// Makes an HTTP connection with the given server and creates a new client.
-    #[tracing::instrument(level = Level::TRACE, err(level = Level::WARN), ret)]
-    pub async fn new(
-        local_server_address: SocketAddr,
-        version: Version,
-        transport: HttpRequestTransportType,
-        request_uri: &Uri,
-    ) -> Result<Self, LocalHttpError> {
-        let stream = TcpStream::connect(local_server_address)
-            .await
-            .map_err(LocalHttpError::ConnectTcpFailed)?;
-        let local_server_address = stream
-            .peer_addr()
-            .map_err(LocalHttpError::SocketSetupFailed)?;
-        let address = stream
-            .local_addr()
-            .map_err(LocalHttpError::SocketSetupFailed)?;
-
-        let sender = match &transport {
-            HttpRequestTransportType::Tcp => HttpSender::handshake(version, stream).await?,
-            HttpRequestTransportType::Tls {
-                alpn_protocol,
-                server_name,
-            } => {
-                let server_name = server_name
-                    .as_ref()
-                    .and_then(|name| ServerName::try_from(name.as_str()).ok()?.to_owned().into())
-                    .or_else(|| request_uri.get_server_name()?.to_owned().into())
-                    .unwrap_or_else(|| ServerName::from(local_server_address.ip()));
-                let stream = tls::make_tls_connector(alpn_protocol.clone())
-                    .connect(server_name, stream)
-                    .await
-                    .map_err(LocalHttpError::ConnectTlsFailed)?;
-                HttpSender::handshake(version, Box::new(stream)).await?
-            }
-        };
-
-        Ok(Self {
-            sender,
-            local_server_address,
-            address,
-            transport: transport.clone(),
-        })
-    }
-
     /// Send the given `request` to the user application's HTTP server.
     #[tracing::instrument(level = Level::DEBUG, err(level = Level::WARN), ret)]
     pub async fn send_request(
@@ -109,8 +60,8 @@ impl LocalHttpClient {
         }
     }
 
-    pub fn transport(&self) -> &HttpRequestTransportType {
-        &self.transport
+    pub fn uses_tls(&self) -> bool {
+        self.uses_tls
     }
 }
 
@@ -120,7 +71,7 @@ impl fmt::Debug for LocalHttpClient {
             .field("local_server_address", &self.local_server_address)
             .field("address", &self.address)
             .field("is_http_1", &matches!(self.sender, HttpSender::V1(..)))
-            .field("transport", &self.transport)
+            .field("uses_tls", &self.uses_tls)
             .finish()
     }
 }
@@ -148,6 +99,9 @@ pub enum LocalHttpError {
 
     #[error("failed to read the body of the local application's HTTP server response: {0}")]
     ReadBodyFailed(#[source] hyper::Error),
+
+    #[error("failed to prepare TLS client configuration: {0}")]
+    TlsSetupError(#[from] LocalTlsSetupError),
 }
 
 impl LocalHttpError {
@@ -155,7 +109,9 @@ impl LocalHttpError {
     /// error.
     pub fn can_retry(&self) -> bool {
         match self {
-            Self::SocketSetupFailed(..) | Self::UnsupportedHttpVersion(..) => false,
+            Self::SocketSetupFailed(..)
+            | Self::UnsupportedHttpVersion(..)
+            | Self::TlsSetupError(..) => false,
             Self::ConnectTcpFailed(..) | Self::ConnectTlsFailed(..) => true,
             Self::HandshakeFailed(err) | Self::SendFailed(err) | Self::ReadBodyFailed(err) => (err
                 .is_parse()

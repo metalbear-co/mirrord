@@ -12,6 +12,7 @@ use bound_socket::BoundTcpSocket;
 use http::{ClientStore, ResponseMode, StreamingBody};
 use http_gateway::HttpGatewayTask;
 use metadata_store::MetadataStore;
+use mirrord_config::feature::network::incoming::https_delivery::LocalHttpsDelivery;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
     MessageId, PortSubscription, ProxyToLayerMessage,
@@ -157,12 +158,18 @@ impl IncomingProxy {
     /// Used when registering new tasks in the internal [`BackgroundTasks`] instance.
     const CHANNEL_SIZE: usize = 512;
 
-    pub fn new(idle_local_http_connection_timeout: Duration) -> Self {
+    pub fn new(
+        idle_local_http_connection_timeout: Duration,
+        https_delivery: LocalHttpsDelivery,
+    ) -> Self {
         Self {
             subscriptions: Default::default(),
             metadata_store: Default::default(),
             response_mode: Default::default(),
-            client_store: ClientStore::new_with_timeout(idle_local_http_connection_timeout),
+            client_store: ClientStore::new_with_timeout(
+                idle_local_http_connection_timeout,
+                https_delivery,
+            ),
             mirror_tcp_proxies: Default::default(),
             steal_tcp_proxies: Default::default(),
             http_gateways: Default::default(),
