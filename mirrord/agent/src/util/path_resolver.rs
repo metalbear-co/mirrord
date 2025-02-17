@@ -69,3 +69,10 @@ impl InTargetPathResolver {
         Ok(self.root.join(temp_path))
     }
 }
+
+#[cfg(test)]
+impl InTargetPathResolver {
+    pub fn with_root_path(root: PathBuf) -> Self {
+        Self { root }
+    }
+}

@@ -29,6 +29,8 @@ use crate::util::path_resolver::InTargetPathResolver;
 
 pub mod error;
 pub mod handler;
+#[cfg(test)]
+mod test;
 
 /// Name of HTTP/2 in the ALPN protocol.
 pub const HTTP_2_ALPN_NAME: &[u8] = b"h2";

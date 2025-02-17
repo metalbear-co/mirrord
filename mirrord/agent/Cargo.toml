@@ -80,7 +80,10 @@ rcgen.workspace = true
 rustls-pemfile.workspace = true
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-rstest.workspace = true
 mockall = "0.13"
-test_bin = "0.4"
+pem = "3"
+rcgen.workspace = true
 reqwest.workspace = true
+rstest.workspace = true
+tempfile.workspace = true
+test_bin = "0.4"
