@@ -428,3 +428,116 @@ async fn server_verification(
         assert_cannot_talk(acceptor, connector, "server").await;
     }
 }
+
+/// Verifies that agent uses original SNI and ALPN protocol when making a passthrough connection.
+#[tokio::test]
+async fn agent_connects_with_original_params() {
+    let _ = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider());
+
+    let root_dir = tempfile::tempdir().unwrap();
+
+    let trusted_root = generate_cert("root".into(), None, true);
+    let root_pem = root_dir.path().join("root.pem");
+    fs::write(root_pem, trusted_root.cert.pem()).unwrap();
+
+    let agent_chain = CertChainWithKey::new("server".into(), Some(&trusted_root));
+    let auth_pem = root_dir.path().join("auth.pem");
+    agent_chain.to_file(&auth_pem);
+
+    let store = StealTlsHandlerStore::new(
+        vec![StealPortTlsConfig {
+            port: 443,
+            agent_as_server: AgentServerConfig {
+                authentication: TlsAuthentication {
+                    cert_pem: "/auth.pem".into(),
+                    key_pem: "/auth.pem".into(),
+                },
+                alpn_protocols: vec!["h2".into(), "http/1.1".into()],
+                verification: Some(TlsClientVerification {
+                    allow_anonymous: false,
+                    accept_any_cert: false,
+                    trust_roots: vec!["/root.pem".into()],
+                }),
+            },
+            agent_as_client: AgentClientConfig {
+                authentication: Some(TlsAuthentication {
+                    cert_pem: "/auth.pem".into(),
+                    key_pem: "/auth.pem".into(),
+                }),
+                verification: TlsServerVerification {
+                    accept_any_cert: false,
+                    trust_roots: vec!["/root.pem".into()],
+                },
+            },
+        }],
+        InTargetPathResolver::with_root_path(root_dir.path().to_path_buf()),
+    );
+    let handler = store.get(443).await.unwrap().unwrap();
+
+    let mut root_store = RootCertStore::empty();
+    root_store.add(trusted_root.cert.der().clone()).unwrap();
+    let root_store = Arc::new(root_store);
+
+    let connector = {
+        let chain = CertChainWithKey::new("client".into(), Some(&trusted_root));
+        let mut config = ClientConfig::builder()
+            .with_root_certificates(root_store.clone())
+            .with_client_auth_cert(chain.certs, chain.key)
+            .unwrap();
+        config.alpn_protocols.push(b"http/1.1".into());
+        TlsConnector::from(Arc::new(config))
+    };
+
+    let acceptor = {
+        let verifier = WebPkiClientVerifier::builder(root_store.into())
+            .build()
+            .unwrap();
+        let server_chain = CertChainWithKey::new("server".into(), Some(&trusted_root));
+        let mut config = ServerConfig::builder()
+            .with_client_cert_verifier(verifier)
+            .with_single_cert(server_chain.certs, server_chain.key)
+            .unwrap();
+        config.alpn_protocols = vec![b"h2".into(), b"http/1.1".into()];
+        TlsAcceptor::from(Arc::new(config))
+    };
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let _client_handle = tokio::spawn(async move {
+        let client_agent = TcpStream::connect(addr).await.unwrap();
+        connector
+            .connect(
+                ServerName::try_from("server".to_string()).unwrap(),
+                client_agent,
+            )
+            .await
+    });
+
+    let agent_client = listener.accept().await.unwrap().0;
+    let agent_client = handler.acceptor().accept(agent_client).await.unwrap();
+    assert_eq!(
+        agent_client.get_ref().1.alpn_protocol(),
+        Some(b"http/1.1".as_slice())
+    );
+    assert_eq!(agent_client.get_ref().1.server_name(), Some("server"));
+
+    let server_handle = tokio::spawn(async move {
+        let server_agent = listener.accept().await.unwrap().0;
+        acceptor.accept(server_agent).await.unwrap()
+    });
+
+    let agent_server = TcpStream::connect(addr).await.unwrap();
+    let _agent_server = handler
+        .connector(agent_client.get_ref().1)
+        .connect(addr.ip(), None, agent_server)
+        .await
+        .unwrap();
+
+    let server_agent = server_handle.await.unwrap();
+    assert_eq!(
+        server_agent.get_ref().1.alpn_protocol(),
+        Some(b"http/1.1".as_slice())
+    );
+    assert_eq!(server_agent.get_ref().1.server_name(), Some("server"));
+}
