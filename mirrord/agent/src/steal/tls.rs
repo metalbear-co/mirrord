@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fmt,
-    fs::{self, File},
+    fs::File,
     io::BufReader,
     ops::Not,
     path::PathBuf,
@@ -14,7 +14,9 @@ use mirrord_agent_env::steal_tls::{
     AgentClientConfig, AgentServerConfig, StealPortTlsConfig, TlsAuthentication,
     TlsClientVerification, TlsServerVerification,
 };
-use mirrord_tls_util::{DangerousNoVerifierClient, DangerousNoVerifierServer};
+use mirrord_tls_util::{
+    best_effort_root_store, DangerousNoVerifierClient, DangerousNoVerifierServer,
+};
 use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer},
     server::{danger::ClientCertVerifier, NoClientAuth, WebPkiClientVerifier},
@@ -125,7 +127,11 @@ impl StealTlsHandlerStore {
                 accept_any_cert,
                 trust_roots,
             }) => {
-                let mut root_store = self.build_root_store(trust_roots);
+                let trust_roots = trust_roots
+                    .into_iter()
+                    .map(|root| self.resolve_path(root))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut root_store = best_effort_root_store(trust_roots);
 
                 if root_store.is_empty() && accept_any_cert.not() {
                     if allow_anonymous {
@@ -188,7 +194,11 @@ impl StealTlsHandlerStore {
                 .dangerous()
                 .with_custom_certificate_verifier(Arc::new(DangerousNoVerifierServer))
         } else {
-            let root_store = self.build_root_store(trust_roots);
+            let trust_roots = trust_roots
+                .into_iter()
+                .map(|root| self.resolve_path(root))
+                .collect::<Result<Vec<_>, _>>()?;
+            let root_store = best_effort_root_store(trust_roots);
 
             if root_store.is_empty() {
                 return Err(StealTlsSetupErrorInner::NoGoodRoot);
@@ -210,108 +220,6 @@ impl StealTlsHandlerStore {
         };
 
         Ok(Arc::new(client_config))
-    }
-
-    /// Builds a [`RootCertStore`] from all certificates founds under the given paths.
-    ///
-    /// Accepts paths to:
-    /// 1. PEM files
-    /// 2. Directories containing PEM files
-    ///
-    /// Directories are not traversed recursively.
-    ///
-    /// Does not fail, see [`RootCertStore::add_parsable_certificates`] for rationale.
-    /// Instead, it logs warnings and errors.
-    fn build_root_store(&self, paths: Vec<PathBuf>) -> RootCertStore {
-        let mut root_store = RootCertStore::empty();
-
-        let mut queue = paths
-            .iter()
-            .filter_map(|path| {
-                let resolved = self
-                    .0
-                    .path_resolver
-                    .resolve(path)
-                    .inspect_err(|error| {
-                        tracing::error!(
-                            %error,
-                            ?path,
-                            "Failed to resolve a path in the target container file system \
-                            when building a root cert store."
-                        );
-                    })
-                    .ok()?;
-
-                Some((resolved, true))
-            })
-            .collect::<Vec<_>>();
-
-        while let Some((path, read_if_dir)) = queue.pop() {
-            let is_dir = path.is_dir();
-
-            if is_dir && read_if_dir {
-                let Ok(entries) = fs::read_dir(&path).inspect_err(|error| {
-                    tracing::error!(
-                        %error,
-                        ?path,
-                        "Failed to list a directory when building a root cert store."
-                    );
-                }) else {
-                    continue;
-                };
-
-                entries
-                    .filter_map(|result| {
-                        result
-                            .inspect_err(|error| {
-                                tracing::error!(
-                                    %error,
-                                    ?path,
-                                    "Failed to list a directory when building a root cert store."
-                                )
-                            })
-                            .ok()
-                    })
-                    .for_each(|entry| queue.push((entry.path(), false)))
-            } else if is_dir {
-                continue;
-            } else {
-                let Ok(file) = File::open(&path).inspect_err(|error| {
-                    tracing::error!(
-                        %error,
-                        ?path,
-                        "Failed to open a file when building a root cert store."
-                    );
-                }) else {
-                    continue;
-                };
-
-                let mut file = BufReader::new(file);
-                let certs = rustls_pemfile::certs(&mut file).filter_map(|result| {
-                    result
-                        .inspect_err(|error| {
-                            tracing::error!(
-                                %error,
-                                ?path,
-                                "Failed to parse a file when building a root cert store.",
-                            )
-                        })
-                        .ok()
-                });
-
-                let (added, ignored) = root_store.add_parsable_certificates(certs);
-
-                if ignored > 0 {
-                    tracing::warn!(
-                        ?path,
-                        added,
-                        "Ignored {ignored} invalid certificate(s) when building a root cert store."
-                    );
-                }
-            }
-        }
-
-        root_store
     }
 
     /// Adds a dummy self-signed certificate to the given [`RootCertStore`].

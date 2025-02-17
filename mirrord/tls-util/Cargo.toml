@@ -18,3 +18,5 @@ edition.workspace = true
 [dependencies]
 http.workspace = true
 rustls.workspace = true
+rustls-pemfile.workspace = true
+tracing.workspace = true
