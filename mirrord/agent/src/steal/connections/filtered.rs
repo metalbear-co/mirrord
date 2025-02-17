@@ -68,13 +68,13 @@ enum RequestHandling {
 
 /// HTTP server side of an upgraded connection retrieved from [`FilteringService`].
 pub enum UpgradedServerSide {
-    /// Stealer client. Their [`HttpFilter`] matched the upgrade request.
-    /// The rest of the connection should be proxied between the HTTP client and this stealer
-    /// client (which acts as an HTTP server).
+    /// Stealer client. Their [`HttpFilter`](crate::steal::http::HttpFilter) matched the upgrade
+    /// request. The rest of the connection should be proxied between the HTTP client and this
+    /// stealer client (which acts as an HTTP server).
     MatchedClient(ClientId),
     /// TCP connection with the HTTP server that was the original destination of the HTTP client
-    /// (no [`HttpFilter`] matched the upgrade request). The rest of the connection should be
-    /// proxied between the HTTP client and this HTTP server.
+    /// (no [`HttpFilter`](crate::steal::http::HttpFilter) matched the upgrade request). The rest
+    /// of the connection should be proxied between the HTTP client and this HTTP server.
     OriginalDestination(Upgraded),
 }
 
@@ -98,8 +98,9 @@ struct FilteringService {
     /// # Note
     ///
     /// At most one value will **always** be sent through this channel (only one http upgrade is
-    /// possible). However, using a [`oneshot`] here would require a combination of an [`Arc`],
-    /// a [`Mutex`](std::sync::Mutex) and an [`Option`]. [`mpsc`] is used here for simplicity.
+    /// possible). However, using a [`oneshot`] here would require a combination of an
+    /// [`Arc`](std::sync::Arc), a [`Mutex`](std::sync::Mutex) and an [`Option`]. [`mpsc`] is
+    /// used here for simplicity.
     upgrade_tx: Sender<UpgradedConnection>,
 
     /// Original destination of the stolen requests.
@@ -355,13 +356,13 @@ pub struct FilteredStealTask<T> {
     /// Address of connection peer.
     peer_address: SocketAddr,
 
-    /// Stealer client to [`HttpFilter`] mapping. Allows for routing HTTP requests to correct
-    /// stealer clients.
+    /// Stealer client to [`HttpFilter`](crate::steal::http::HttpFilter) mapping. Allows for
+    /// routing HTTP requests to correct stealer clients.
     ///
     /// # Note
     ///
-    /// This mapping is shared via [`Arc`], allowing for dynamic updates from the outside.
-    /// This allows for *injecting* new stealer clients into exisiting connections.
+    /// This mapping is shared via [`Arc`](std::sync::Arc), allowing for dynamic updates from the
+    /// outside. This allows for *injecting* new stealer clients into exisiting connections.
     filters: Filters,
 
     /// Stealer client to subscription state mapping.
@@ -702,10 +703,6 @@ where
                     ConnectionMessageIn::Response { response, request_id, client_id } => {
                         queued_raw_data.remove(&client_id);
                         self.handle_response(client_id, request_id, response);
-                    },
-                    ConnectionMessageIn::ResponseFailed { request_id, client_id } => {
-                        queued_raw_data.remove(&client_id);
-                        self.handle_response_failure(client_id, request_id);
                     },
                     ConnectionMessageIn::Unsubscribed { client_id } => {
                         queued_raw_data.remove(&client_id);
@@ -1597,64 +1594,6 @@ mod test {
         let request = setup.prepare_request(None, false);
         let response = setup.request_sender.send_request(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-    }
-
-    /// The stolen connection receives a request that matches some client's filter.
-    /// The client fails to provide a response and the request sender gets a
-    /// [`StatusCode::BAD_GATEWAY`] response.
-    #[tokio::test]
-    async fn response_from_client_failed() {
-        let mut setup = TestSetup::new().await;
-
-        let request = setup.prepare_request(Some(0), false);
-        tokio::join!(
-            async {
-                let response = setup.request_sender.send_request(request).await.unwrap();
-                assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-            },
-            async {
-                match setup.task_out_rx.recv().await.unwrap() {
-                    ConnectionMessageOut::SubscribedHttp {
-                        client_id: 0,
-                        connection_id: TestSetup::CONNECTION_ID,
-                    } => {}
-                    other => unreachable!("unexpected message: {other:?}"),
-                };
-
-                let request_id = match setup.task_out_rx.recv().await.unwrap() {
-                    ConnectionMessageOut::Request {
-                        client_id: 0,
-                        connection_id: TestSetup::CONNECTION_ID,
-                        id,
-                        metadata: HttpRequestMetadata::V1 { destination, .. },
-                        ..
-                    } => {
-                        assert_eq!(destination, setup.original_address);
-                        id
-                    }
-                    other => unreachable!("unexpected message: {other:?}"),
-                };
-
-                setup
-                    .task_in_tx
-                    .send(ConnectionMessageIn::ResponseFailed {
-                        client_id: 0,
-                        request_id,
-                    })
-                    .await
-                    .unwrap();
-            }
-        );
-
-        setup
-            .task_in_tx
-            .send(ConnectionMessageIn::Unsubscribed { client_id: 0 })
-            .await
-            .unwrap();
-
-        let mut rx = setup.shutdown().await;
-        // The task should not produce the `Closed` message - the client has unsubscribed.
-        assert!(rx.recv().await.is_none());
     }
 
     /// The stolen connection receives a request that matches some client's filter.

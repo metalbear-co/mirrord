@@ -25,8 +25,8 @@ pub struct TlsAuthentication {
     /// This file must contain at least one certificate.
     /// It can contain entries of other types, e.g private keys, which are ignored.
     pub cert_pem: PathBuf,
-    /// Path to a PEM file containing a private key matching
-    /// [`CertificateChainAuthentication::cert_pem`].
+    /// Path to a PEM file containing a private key matching the certificate chain found in
+    /// `cert_pem`.
     ///
     /// This file must contain exactly one private key.
     /// It can contain entries of other types, e.g certificates, which are ignored.

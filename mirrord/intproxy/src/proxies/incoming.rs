@@ -119,7 +119,8 @@ struct HttpGatewayHandle {
 ///
 /// The request can be cancelled only when one of the following happen:
 /// 1. The agent closes the remote connection to which this request belongs
-/// 2. The agent informs us that it failed to read request body ([`ChunkedRequest::Error`])
+/// 2. The agent informs us that it failed to read request body ([`ChunkedRequest::ErrorV1`] or
+///    [`ChunkedRequest::ErrorV2`])
 ///
 /// When we want to cancel the request, we drop the [`HttpGatewayTask`]'s [`TaskSender`].
 ///

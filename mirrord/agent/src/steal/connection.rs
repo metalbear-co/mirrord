@@ -309,11 +309,6 @@ impl Client {
     /// Inspects [`Client::protocol_version`] to pick between [`DaemonTcp`] variants and check for
     /// upgrade requests.
     ///
-    /// Returns `true` if the [`tokio::task`] was spawned.
-    /// Otherwise, returns `false`. Currently, this is the case only when the given
-    /// [`MatchedHttpRequest`] is an upgrade request, but client's protocol version does not match
-    /// [`HTTP_FILTERED_UPGRADE_VERSION`].
-    ///
     /// # Why in the background?
     ///
     /// This method spawns a [`tokio::task`] to read the [`Incoming`] body od the request without
@@ -324,8 +319,8 @@ impl Client {
     /// The spawned background task calls one of `send_` helper methods.
     /// These can fail only when we encounter an error while reading request body, or when the
     /// client disconnects. Both cases are quite normal, so don't log errors higher than on
-    /// `DEBUG`.
-    fn send_request_in_bg(&self, request: MatchedHttpRequest) -> bool {
+    /// [`Level::DEBUG`].
+    fn send_request_in_bg(&self, request: MatchedHttpRequest) {
         let framed = self
             .protocol_version
             .as_ref()
@@ -356,8 +351,6 @@ impl Client {
                 Self::send_legacy(request, tx).await
             };
         });
-
-        true
     }
 }
 
@@ -657,17 +650,7 @@ where
                 let matched_request =
                     MatchedHttpRequest::new(connection_id, id, request, metadata, transport);
 
-                if !client.send_request_in_bg(matched_request) {
-                    self.connections
-                        .send(
-                            connection_id,
-                            ConnectionMessageIn::ResponseFailed {
-                                client_id,
-                                request_id: id,
-                            },
-                        )
-                        .await;
-                }
+                client.send_request_in_bg(matched_request);
             }
         }
 

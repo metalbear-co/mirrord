@@ -49,16 +49,6 @@ pub enum ConnectionMessageIn {
         request_id: RequestId,
         response: Response<DynamicBody>,
     },
-    /// Client failed to provide an HTTP response to a stolen request.
-    ///
-    /// This variant does not translate to any
-    /// [`LayerTcpSteal`](mirrord_protocol::tcp::LayerTcpSteal) message. It is used only
-    /// internally, to notify [`StolenConnections`] that the client failed to provide a response
-    /// (e.g. client abruptly disconnected from the agent).
-    ResponseFailed {
-        client_id: ClientId,
-        request_id: RequestId,
-    },
     /// Client unsubscribed the connection.
     ///
     /// This variant translates to
@@ -87,14 +77,6 @@ impl fmt::Debug for ConnectionMessageIn {
                 debug_struct.field("request_id", request_id);
                 debug_struct.field("status_code", &response.status());
             }
-            Self::ResponseFailed {
-                client_id,
-                request_id,
-            } => {
-                debug_struct.field("type", &"ResponseFailed");
-                debug_struct.field("client_id", client_id);
-                debug_struct.field("request_id", request_id);
-            }
             Self::Unsubscribed { client_id } => {
                 debug_struct.field("type", &"Unsubscribed");
                 debug_struct.field("client_id", client_id);
@@ -111,7 +93,6 @@ impl ConnectionMessageIn {
         match self {
             Self::Raw { client_id, .. } => *client_id,
             Self::Response { client_id, .. } => *client_id,
-            Self::ResponseFailed { client_id, .. } => *client_id,
             Self::Unsubscribed { client_id } => *client_id,
         }
     }
