@@ -23,7 +23,6 @@ use mirrord_protocol::{
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
-    net::TcpStream,
     sync::{
         mpsc::{self, Receiver, Sender},
         oneshot,
@@ -40,7 +39,10 @@ use super::{
 use crate::{
     http::HttpVersion,
     metrics::STEAL_FILTERED_CONNECTION_SUBSCRIPTION,
-    steal::{connections::unfiltered::UnfilteredStealTask, subscriptions::Filters},
+    steal::{
+        connections::{original_destination::MaybeTls, unfiltered::UnfilteredStealTask},
+        subscriptions::Filters,
+    },
     util::ClientId,
 };
 
@@ -826,7 +828,7 @@ where
                 }
 
                 let parts = upgraded
-                    .downcast::<TokioIo<TcpStream>>()
+                    .downcast::<TokioIo<MaybeTls>>()
                     .expect("IO type is known");
                 let mut http_server_io = parts.io.into_inner();
                 let http_server_read_buf = parts.read_buf;
@@ -895,7 +897,11 @@ mod test {
     };
     use http_body_util::Empty;
     use hyper::{client::conn::http1::SendRequest, service::service_fn};
-    use tokio::{io::AsyncReadExt, net::TcpListener, task::JoinSet};
+    use tokio::{
+        io::AsyncReadExt,
+        net::{TcpListener, TcpStream},
+        task::JoinSet,
+    };
 
     use super::*;
     use crate::steal::http::HttpFilter;
