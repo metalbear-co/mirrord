@@ -696,6 +696,32 @@ impl FilesProxy {
                     .await;
             }
 
+            FileResponse::ReadLimited(Err(error)) => {
+                // need to ensure that if a Read request was sent by layer, a Read response is
+                // returned containing the error rather than a ReadLimited
+                let (message_id, layer_id, additional_data) =
+                    self.request_queue.pop_front_with_data().ok_or_else(|| {
+                        UnexpectedAgentMessage(DaemonMessage::File(FileResponse::ReadLimited(Err(
+                            error.clone(),
+                        ))))
+                    })?;
+
+                let message = match additional_data {
+                    AdditionalRequestData::ReadBuffered {
+                        update_fd_position, ..
+                    } if update_fd_position => FileResponse::Read(Err(error)),
+                    _ => FileResponse::ReadLimited(Err(error)),
+                };
+
+                message_bus
+                    .send(ToLayer {
+                        message_id,
+                        layer_id,
+                        message: ProxyToLayerMessage::File(message),
+                    })
+                    .await;
+            }
+
             // If the file is buffered, update `files_data`.
             FileResponse::Seek(Ok(seek)) => {
                 let (message_id, layer_id, additional_data) =
