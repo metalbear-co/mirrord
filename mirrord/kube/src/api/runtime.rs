@@ -87,6 +87,8 @@ pub struct RuntimeData {
 
     /// Used to check if we're running with a mesh/sidecar in `detect_mesh_mirror_mode`.
     pub mesh: Option<MeshVendor>,
+
+    pub share_process_namespace: bool,
 }
 
 impl RuntimeData {
@@ -208,6 +210,11 @@ impl RuntimeData {
             container_name,
             guessed_container,
             mesh,
+            share_process_namespace: pod
+                .spec
+                .as_ref()
+                .and_then(|spec| spec.share_process_namespace)
+                .unwrap_or_default(),
         })
     }
 

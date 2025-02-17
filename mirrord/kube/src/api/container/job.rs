@@ -353,6 +353,7 @@ mod test {
                 container_runtime: ContainerRuntime::Docker,
                 container_name: "foo".to_string(),
                 guessed_container: false,
+                share_process_namespace: false,
             },
         )
         .as_update();
