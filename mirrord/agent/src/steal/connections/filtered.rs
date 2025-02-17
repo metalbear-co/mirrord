@@ -1685,6 +1685,7 @@ mod test {
     /// All parties are configured with strict TLS verification.
     #[tokio::test]
     async fn with_tls() {
+        /// Request handler for the original HTTPS server.
         async fn handle_request(
             mut request: hyper::Request<Incoming>,
         ) -> hyper::Result<Response<DynamicBody>> {
@@ -1704,14 +1705,13 @@ mod test {
         let original_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let original_destination = original_listener.local_addr().unwrap();
 
+        // Root certificate trusted by everyone.
         let common_root = tls::test::generate_cert("root".into(), None, true);
-
         let original_server_chain =
             tls::test::CertChainWithKey::new("server".into(), Some(&common_root));
         let agent_server_chain =
             tls::test::CertChainWithKey::new("server".into(), Some(&common_root));
         let client_chain = tls::test::CertChainWithKey::new("client".into(), Some(&common_root));
-
         let root_store = {
             let mut store = RootCertStore::empty();
             store.add(common_root.cert.der().clone()).unwrap();
