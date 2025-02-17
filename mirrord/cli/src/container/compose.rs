@@ -316,126 +316,28 @@ impl ComposeRunner<PrepareCompose> {
                     analytics,
                     config,
                     layer_config_file,
-                    mut runtime_command_builder,
+                    runtime_command_builder,
                 },
             runtime,
             runtime_args,
         } = self;
 
-        // TODO(alex) [mid]: Break this into steps, maybe we could have each step be a new type
-        // that looks like `ComposeRunner<FillingVolume>`.
-        let modify_user_services_with_mirrord_stuff = |compose: &mut serde_yaml::Value| {
-            let services = compose
-                .get_mut("services")
-                .ok_or_else(|| ComposeError::MissingField("services".to_string()))?
+        let services = Self::prepare_services(&mut user_compose)?;
+
+        for (service_key, service) in services.iter_mut() {
+            if service_key
+                .as_str()
+                .is_some_and(|key| key == MIRRORD_COMPOSE_SIDECAR_SERVICE)
+            {
+                continue;
+            }
+
+            let service = service
                 .as_mapping_mut()
                 .ok_or_else(|| ComposeError::UnexpectedType("mapping".to_string()))?;
 
-            services.insert(
-                serde_yaml::from_str(MIRRORD_COMPOSE_SIDECAR_SERVICE)?,
-                serde_yaml::from_str(&format!(
-                    r#"
-                        image: meowjesty/mirrord-cli:latest
-                        ports:
-                          - "8000:5000"
-                    "#
-                ))?,
-            );
-
-            for (service_key, service) in services.iter_mut() {
-                if service_key
-                    .as_str()
-                    .is_some_and(|key| key == MIRRORD_COMPOSE_SIDECAR_SERVICE)
-                {
-                    continue;
-                }
-
-                let service = service
-                    .as_mapping_mut()
-                    .ok_or_else(|| ComposeError::UnexpectedType("mapping".to_string()))?;
-
-                for (mirrord_volume_key, mirrord_volume) in runtime_command_builder.volumes.iter() {
-                    match service
-                        .get_mut("volumes")
-                        .and_then(|volume| volume.as_sequence_mut())
-                    {
-                        Some(volume) => {
-                            volume.push(serde_yaml::from_str(&format!(
-                                "{mirrord_volume_key}:{mirrord_volume}"
-                            ))?);
-                        }
-                        None => {
-                            service.insert(
-                                serde_yaml::from_str("volumes")?,
-                                serde_yaml::from_str(&format!(
-                                    "- {mirrord_volume_key}:{mirrord_volume}"
-                                ))?,
-                            );
-                        }
-                    };
-                }
-
-                match service
-                    .get_mut("volumes_from")
-                    .and_then(|volumes_from| volumes_from.as_sequence_mut())
-                {
-                    Some(volumes_from) => {
-                        volumes_from.push(serde_yaml::from_str("mirrord-sidecar")?)
-                    }
-                    None => {
-                        service.insert(
-                            serde_yaml::from_str("volumes_from")?,
-                            serde_yaml::from_str("- mirrord-sidecar")?,
-                        );
-                    }
-                };
-
-                for (mirrord_env_key, mirrord_env) in runtime_command_builder.env_vars.iter() {
-                    match service
-                        .get_mut("environment")
-                        .and_then(|env| env.as_mapping_mut())
-                    {
-                        Some(env) => {
-                            env.insert(
-                                serde_yaml::from_str(&format!("{mirrord_env_key}"))?,
-                                serde_yaml::from_str(&format!("{mirrord_env}"))?,
-                            );
-                        }
-                        None => {
-                            service.insert(
-                                serde_yaml::from_str("environment")?,
-                                serde_yaml::from_str(&format!(
-                                    r#"{mirrord_env_key}: "{mirrord_env}""#
-                                ))?,
-                            );
-                        }
-                    }
-                }
-
-                service.insert(
-                    serde_yaml::from_str("network_mode")?,
-                    serde_yaml::from_str("service:mirrord-sidecar")?,
-                );
-                service.remove("networks");
-
-                match service
-                    .get_mut("depends_on")
-                    .and_then(|depends_on| depends_on.as_sequence_mut())
-                {
-                    Some(depends_on) => depends_on.push(serde_yaml::from_str("mirrord-sidecar")?),
-                    None => {
-                        service.insert(
-                            serde_yaml::from_str("depends_on")?,
-                            serde_yaml::from_str("- mirrord-sidecar")?,
-                        );
-                    }
-                };
-            }
-
-            Ok::<_, ComposeError>(())
-        };
-
-        modify_user_services_with_mirrord_stuff(&mut user_compose)?;
+            ComposeYamler::prepare_yaml(service, &runtime_command_builder)?;
+        }
 
         let mut compose_yaml = tempfile::Builder::new()
             .prefix("mirrord-compose")
@@ -482,6 +384,29 @@ impl ComposeRunner<PrepareCompose> {
 
         Ok(user_compose)
     }
+
+    fn prepare_services(
+        compose: &mut serde_yaml::Value,
+    ) -> ComposeResult<&mut serde_yaml::Mapping> {
+        let services = compose
+            .get_mut("services")
+            .ok_or_else(|| ComposeError::MissingField("services".to_string()))?
+            .as_mapping_mut()
+            .ok_or_else(|| ComposeError::UnexpectedType("mapping".to_string()))?;
+
+        services.insert(
+            serde_yaml::from_str(MIRRORD_COMPOSE_SIDECAR_SERVICE)?,
+            serde_yaml::from_str(&format!(
+                r#"
+                        image: meowjesty/mirrord-cli:latest
+                        ports:
+                          - "8000:5000"
+                    "#
+            ))?,
+        );
+
+        Ok(services)
+    }
 }
 
 impl ComposeRunner<RunCompose> {
@@ -512,6 +437,8 @@ impl ComposeRunner<RunCompose> {
         // Is it random though? If it is, then maybe refactor it into a config so it stops being
         // random.
         //
+        // Must also start the external proxy!
+        //
         // runtime_command.add_env(
         //     MIRRORD_CONNECT_TCP_ENV,
         //     sidecar_intproxy_address.to_string(),
@@ -521,6 +448,9 @@ impl ComposeRunner<RunCompose> {
             "--file".to_string(),
             path.to_string_lossy().to_string(),
             "up".to_string(),
+            // "run".to_string(),
+            // "interactive".to_string(),
+            // "/bin/bash".to_string(),
         ];
         // runtime_args.remove(0);
         // args.extend(runtime_args.clone());
