@@ -445,7 +445,10 @@ impl ReversePortForwarder {
         let mut background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError> =
             Default::default();
         let incoming = background_tasks.register(
-            IncomingProxy::new(idle_local_http_connection_timeout),
+            IncomingProxy::new(
+                idle_local_http_connection_timeout,
+                network_config.https_delivery.clone(),
+            ),
             (),
             512,
         );

@@ -1,5 +1,5 @@
 [package]
-name = "mirrord-agent-env"
+name = "mirrord-tls-util"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -14,15 +14,14 @@ publish.workspace = true
 edition.workspace = true
 
 [features]
-default = []
-k8s-openapi = ["dep:k8s-openapi"]
-schema = ["dep:schemars"]
 
 [dependencies]
-base64.workspace = true
-k8s-openapi = { workspace = true, optional = true }
-schemars = { workspace = true, optional = true }
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
+http.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+pem = "3"
+rcgen.workspace = true
+tempfile.workspace = true

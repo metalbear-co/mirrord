@@ -21,7 +21,7 @@ use tokio::{
     net::{TcpStream, UnixStream},
 };
 
-use crate::file::{get_root_path_from_optional_pid, resolve_path};
+use crate::util::path_resolver::InTargetPathResolver;
 
 /// An enum that can mostly be used like tokio's [`TcpStream`] and [`UnixStream`], but can hold
 /// either of them.
@@ -66,10 +66,13 @@ impl SocketStream {
             SocketAddress::Unix(Pathname(path)) => {
                 // In order to connect to a unix socket on the target pod, instead of connecting to
                 // /the/target/path we connect to /proc/<PID>/root/the/target/path.
-                let root_path = get_root_path_from_optional_pid(pid);
-                let final_path = resolve_path(path, root_path)?;
+                let path = if let Some(pid) = pid {
+                    InTargetPathResolver::new(pid).resolve(&path)?
+                } else {
+                    path
+                };
 
-                Ok(Self::from(UnixStream::connect(&final_path).await?))
+                Ok(Self::from(UnixStream::connect(path).await?))
             }
             SocketAddress::Unix(Abstract(bytes)) => {
                 // Tokio's UnixStream does not support connecting to an abstract address so we first

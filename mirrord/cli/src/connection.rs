@@ -4,7 +4,7 @@ use mirrord_analytics::Reporter;
 use mirrord_config::{target::Target, LayerConfig};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
-    api::{kubernetes::KubernetesAPI, wrap_raw_connection},
+    api::{container::ContainerConfig, kubernetes::KubernetesAPI, wrap_raw_connection},
     error::KubeApiError,
     resolved::ResolvedTarget,
 };
@@ -171,9 +171,13 @@ where
         .inspect_err(|fail| tracing::debug!(?fail, "Failed to detect OpenShift!"))
         .ok();
 
+    let agent_container_config = ContainerConfig {
+        support_ipv6: config.feature.network.ipv6,
+        ..Default::default()
+    };
     let agent_connect_info = tokio::time::timeout(
         Duration::from_secs(config.agent.startup_timeout),
-        k8s_api.create_agent(progress, &config.target, Some(config), None, None),
+        k8s_api.create_agent(progress, &config.target, agent_container_config),
     )
     .await
     .unwrap_or(Err(KubeApiError::AgentReadyTimeout))

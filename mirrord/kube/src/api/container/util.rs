@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::{ops::Not, sync::LazyLock};
 
 use futures::{AsyncBufReadExt, TryStreamExt};
 use k8s_openapi::api::core::v1::{EnvVar, Pod, Toleration};
@@ -33,7 +33,7 @@ pub(super) fn get_capabilities(agent: &AgentConfig) -> Vec<LinuxCapability> {
 }
 
 /// Builds mirrord agent environment variables.
-pub(super) fn agent_env(agent: &AgentConfig, params: &&ContainerParams) -> Vec<EnvVar> {
+pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<EnvVar> {
     let mut env = vec![
         envs::LOG_LEVEL.as_k8s_spec(&agent.log_level),
         envs::STEALER_FLUSH_CONNECTIONS.as_k8s_spec(&agent.flush_connections),
@@ -64,6 +64,10 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &&ContainerParams) -> Vec<E
 
     if let Some(cert) = &params.tls_cert {
         env.push(envs::OPERATOR_CERT.as_k8s_spec(cert));
+    }
+
+    if params.steal_tls_config.is_empty().not() {
+        env.push(envs::STEAL_TLS_CONFIG.as_k8s_spec(&params.steal_tls_config));
     }
 
     env

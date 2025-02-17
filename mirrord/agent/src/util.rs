@@ -17,6 +17,8 @@ use crate::{
     namespace::{set_namespace, NamespaceType},
 };
 
+pub mod path_resolver;
+
 /// Struct that helps you manage topic -> subscribers
 ///
 /// When a topic has no subscribers, it is removed.

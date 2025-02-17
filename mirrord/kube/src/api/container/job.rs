@@ -250,6 +250,7 @@ mod test {
             tls_cert: None,
             pod_ips: None,
             support_ipv6,
+            steal_tls_config: Default::default(),
         };
 
         let update = JobVariant::new(&agent, &params).as_update();
@@ -338,6 +339,7 @@ mod test {
             tls_cert: None,
             pod_ips: None,
             support_ipv6,
+            steal_tls_config: Default::default(),
         };
 
         let update = JobTargetedVariant::new(

@@ -4208,9 +4208,11 @@ dependencies = [
  "libc",
  "mirrord-agent-env",
  "mirrord-protocol",
+ "mirrord-tls-util",
  "mockall",
  "nix 0.29.0",
  "oci-spec",
+ "pem",
  "pnet",
  "procfs 0.17.0",
  "prometheus",
@@ -4220,11 +4222,13 @@ dependencies = [
  "reqwest 0.12.12",
  "rstest",
  "rustls 0.23.21",
+ "rustls-pemfile 2.2.0",
  "semver 1.0.25",
  "serde",
  "serde_json",
  "socket2",
  "streammap-ext",
+ "tempfile",
  "test_bin",
  "thiserror 2.0.11",
  "tokio",
@@ -4243,7 +4247,11 @@ dependencies = [
 name = "mirrord-agent-env"
 version = "3.133.0"
 dependencies = [
+ "base64 0.22.1",
  "k8s-openapi",
+ "schemars",
+ "serde",
+ "serde_json",
  "thiserror 2.0.11",
  "tracing",
 ]
@@ -4297,6 +4305,7 @@ dependencies = [
  "mirrord-config-derive",
  "nom",
  "rstest",
+ "rustls 0.23.21",
  "schemars",
  "serde",
  "serde_json",
@@ -4339,6 +4348,7 @@ version = "3.133.0"
 dependencies = [
  "bytes",
  "exponential-backoff",
+ "futures",
  "http-body-util",
  "hyper 1.5.2",
  "hyper-util",
@@ -4348,6 +4358,7 @@ dependencies = [
  "mirrord-kube",
  "mirrord-operator",
  "mirrord-protocol",
+ "mirrord-tls-util",
  "rand 0.9.0",
  "rstest",
  "rustls 0.23.21",
@@ -4472,6 +4483,7 @@ dependencies = [
  "hyper-util",
  "k8s-openapi",
  "kube",
+ "mirrord-agent-env",
  "mirrord-analytics",
  "mirrord-auth",
  "mirrord-config",
@@ -4503,7 +4515,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.18.0"
+version = "1.19.0"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -4536,6 +4548,19 @@ dependencies = [
  "thiserror 2.0.11",
  "tracing",
  "which 7.0.1",
+]
+
+[[package]]
+name = "mirrord-tls-util"
+version = "3.132.1"
+dependencies = [
+ "http 1.2.0",
+ "pem",
+ "rcgen",
+ "rustls 0.23.21",
+ "rustls-pemfile 2.2.0",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

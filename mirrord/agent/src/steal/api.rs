@@ -65,14 +65,13 @@ impl TcpStealerApi {
         command_tx: Sender<StealerCommand>,
         task_status: TaskStatus,
         channel_size: usize,
-        protocol_version: semver::Version,
     ) -> AgentResult<Self> {
         let (daemon_tx, daemon_rx) = mpsc::channel(channel_size);
 
         command_tx
             .send(StealerCommand {
                 client_id,
-                command: Command::NewClient(daemon_tx, protocol_version),
+                command: Command::NewClient(daemon_tx),
             })
             .await?;
 

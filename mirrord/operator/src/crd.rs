@@ -23,6 +23,7 @@ pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
 pub mod policy;
+pub mod steal_tls;
 
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 

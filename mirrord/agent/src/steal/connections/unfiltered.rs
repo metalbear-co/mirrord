@@ -133,7 +133,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> UnfilteredStealTask<T> {
                         }
                     },
 
-                    ConnectionMessageIn::Response { request_id, .. } | ConnectionMessageIn::ResponseFailed { request_id, .. } => {
+                    ConnectionMessageIn::Response { request_id, .. } => {
                         tracing::trace!(
                             connection_id = self.connection_id,
                             request_id,

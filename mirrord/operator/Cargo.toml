@@ -40,6 +40,7 @@ client = [
 crd = [
   "dep:k8s-openapi",
   "dep:kube",
+  "dep:mirrord-agent-env",
   "dep:mirrord-config",
   "dep:semver",
   "dep:serde_json",
@@ -49,6 +50,7 @@ setup = ["crd", "dep:serde_yaml"]
 
 
 [dependencies]
+mirrord-agent-env = { path = "../agent/env", features = ["schema"], optional = true }
 mirrord-analytics = { path = "../analytics", optional = true }
 mirrord-auth = { path = "../auth", features = ["client"], optional = true }
 mirrord-config = { path = "../config", optional = true }
