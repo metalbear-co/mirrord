@@ -326,10 +326,10 @@ async fn find_pid_for_ephemeral(container_id: &str) -> Result<u64, std::io::Erro
 
                         if tokio::fs::read_to_string(cgroup_path)
                             .await
-                            .map(|read| read.contains(container_id))
                             .inspect_err(|fail| {
                                 tracing::trace!(?fail, "Could not read `cgroup` file! Skipping.")
                             })
+                            .map(|read| read.contains(container_id))
                             .is_ok_and(|found_id| found_id)
                         {
                             return Ok(potential_pid);
