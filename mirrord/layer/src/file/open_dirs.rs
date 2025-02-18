@@ -3,7 +3,7 @@
 
 use std::{
     collections::HashMap,
-    ffi::CString,
+    ffi::{CStr, CString},
     sync::{Arc, LazyLock, Mutex},
 };
 
@@ -246,12 +246,12 @@ pub fn assign_direntry(
     out_entry.d_type = in_entry.file_type;
 
     let dir_name = CString::new(in_entry.name)?;
-    let dir_name_bytes = dir_name.as_bytes_with_nul();
+    let dir_name_bytes = cstr_as_i8_slice(&dir_name);
     out_entry
         .d_name
         .get_mut(..dir_name_bytes.len())
         .expect("directory name length exceeds limit")
-        .copy_from_slice(bytemuck::cast_slice(dir_name_bytes));
+        .copy_from_slice(dir_name_bytes);
 
     #[cfg(target_os = "macos")]
     {
@@ -284,14 +284,23 @@ pub fn assign_direntry64(
     out_entry.d_type = in_entry.file_type;
 
     let dir_name = CString::new(in_entry.name)?;
-    let dir_name_bytes = dir_name.as_bytes_with_nul();
+    let dir_name_bytes = cstr_as_i8_slice(&dir_name);
     out_entry
         .d_name
         .get_mut(..dir_name_bytes.len())
         .expect("directory name length exceeds limit")
-        .copy_from_slice(bytemuck::cast_slice(dir_name_bytes));
+        .copy_from_slice(dir_name_bytes);
 
     out_entry.d_off = in_entry.position as i64;
 
     Ok(())
+}
+
+/// Returns [`CStr`]s bytes as a an [i8] slice (including the trailing null byte).
+fn cstr_as_i8_slice(s: &CStr) -> &[i8] {
+    let len = s.to_bytes_with_nul().len();
+    unsafe {
+        // u8 has the same alignment as i8, this cast is safe
+        core::slice::from_raw_parts(s.as_ptr(), len)
+    }
 }

@@ -4403,7 +4403,6 @@ dependencies = [
  "actix-codec",
  "base64 0.22.1",
  "bincode",
- "bytemuck",
  "ctor",
  "dotenv",
  "errno 0.3.10",

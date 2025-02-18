@@ -29,7 +29,6 @@ mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = [
 
 base64.workspace = true
 bincode.workspace = true
-bytemuck = "1"
 ctor = "0.2"
 dotenv.workspace = true
 errno = "0.3"
