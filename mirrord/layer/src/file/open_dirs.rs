@@ -246,7 +246,7 @@ pub fn assign_direntry(
     out_entry.d_type = in_entry.file_type;
 
     let dir_name = CString::new(in_entry.name)?;
-    let dir_name_bytes = cstr_as_i8_slice(&dir_name);
+    let dir_name_bytes = cstr_as_slice_for_d_name(&dir_name);
     out_entry
         .d_name
         .get_mut(..dir_name_bytes.len())
@@ -284,7 +284,7 @@ pub fn assign_direntry64(
     out_entry.d_type = in_entry.file_type;
 
     let dir_name = CString::new(in_entry.name)?;
-    let dir_name_bytes = cstr_as_i8_slice(&dir_name);
+    let dir_name_bytes = cstr_as_slice_for_d_name(&dir_name);
     out_entry
         .d_name
         .get_mut(..dir_name_bytes.len())
@@ -296,11 +296,20 @@ pub fn assign_direntry64(
     Ok(())
 }
 
-/// Returns [`CStr`]s bytes as a an [i8] slice (including the trailing null byte).
-fn cstr_as_i8_slice(s: &CStr) -> &[i8] {
+/// Returns [`CStr`]s bytes as a slice compatible with [libc::dirent::d_name] type
+/// (including the trailing nul byte).
+#[cfg(any(not(target_os = "linux"), not(target_arch = "aarch64")))]
+fn cstr_as_slice_for_d_name(s: &CStr) -> &[i8] {
     let len = s.to_bytes_with_nul().len();
     unsafe {
         // u8 has the same alignment as i8, this cast is safe
         core::slice::from_raw_parts(s.as_ptr(), len)
     }
+}
+
+/// Returns [`CStr`]s bytes as a slice compatible with [libc::dirent::d_name] type
+/// (including the trailing nul byte).
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+fn cstr_as_slice_for_d_name(s: &CStr) -> &[u8] {
+    s.to_bytes_with_nul()
 }
