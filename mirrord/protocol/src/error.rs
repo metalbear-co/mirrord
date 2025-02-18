@@ -7,8 +7,8 @@ use std::{
 };
 
 use bincode::{Decode, Encode};
-use hickory_proto::ProtoErrorKind;
-use hickory_resolver::{ResolveError, ResolveErrorKind};
+use hickory_proto::error::ProtoErrorKind;
+use hickory_resolver::error::{ResolveError, ResolveErrorKind};
 use semver::VersionReq;
 use thiserror::Error;
 use tracing::warn;
@@ -351,21 +351,19 @@ impl From<ResolveErrorKind> for ResolveErrorKindInternal {
                 ResolveErrorKindInternal::Message(message.to_string())
             }
             ResolveErrorKind::Msg(message) => ResolveErrorKindInternal::Message(message),
+            ResolveErrorKind::NoConnections => ResolveErrorKindInternal::NoConnections,
+            ResolveErrorKind::NoRecordsFound { response_code, .. } => {
+                ResolveErrorKindInternal::NoRecordsFound(response_code.into())
+            }
             ResolveErrorKind::Proto(proto_error) => match *proto_error.kind {
-                ProtoErrorKind::NoConnections => ResolveErrorKindInternal::NoConnections,
-                ProtoErrorKind::NoRecordsFound { response_code, .. } => {
-                    ResolveErrorKindInternal::NoRecordsFound(response_code.into())
-                }
                 ProtoErrorKind::Timeout => ResolveErrorKindInternal::Timeout,
-                ProtoErrorKind::Io(fail) => match fail.kind() {
-                    io::ErrorKind::NotFound => ResolveErrorKindInternal::NotFound,
-                    io::ErrorKind::PermissionDenied => ResolveErrorKindInternal::PermissionDenied,
-                    other => {
-                        warn!(?other, "unknown IO error");
-                        ResolveErrorKindInternal::Unknown
-                    }
-                },
-                _ => ResolveErrorKindInternal::Proto,
+                ProtoErrorKind::Io(e) if e.kind() == io::ErrorKind::NotFound => {
+                    ResolveErrorKindInternal::NotFound
+                }
+                ProtoErrorKind::Io(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+                    ResolveErrorKindInternal::PermissionDenied
+                }
+                error => ResolveErrorKindInternal::Message(format!("proto error: {error}")),
             },
             _ => {
                 warn!(?error_kind, "unknown error kind");

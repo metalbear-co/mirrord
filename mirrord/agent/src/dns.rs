@@ -1,7 +1,7 @@
 use std::{future, path::PathBuf, time::Duration};
 
 use futures::{stream::FuturesOrdered, StreamExt};
-use hickory_resolver::{system_conf::parse_resolv_conf, Hosts, Resolver};
+use hickory_resolver::{system_conf::parse_resolv_conf, Hosts, TokioAsyncResolver};
 use mirrord_agent_env::envs;
 use mirrord_protocol::{
     dns::{DnsLookup, GetAddrInfoRequest, GetAddrInfoRequestV2, GetAddrInfoResponse},
@@ -138,11 +138,10 @@ impl DnsWorker {
             };
             tracing::debug!(?config, ?options, "updated config options");
 
-            let mut resolver = Resolver::tokio(config, options);
+            let mut resolver = TokioAsyncResolver::tokio(config, options);
             tracing::debug!(?resolver, "tokio resolver");
 
-            let mut hosts = Hosts::default();
-            hosts.read_hosts_conf(hosts_conf.as_slice())?;
+            let hosts = Hosts::default().read_hosts_conf(hosts_conf.as_slice())?;
             resolver.set_hosts(Some(hosts));
 
             resolver
