@@ -498,8 +498,7 @@ impl MirrordExecution {
         };
 
         if let Some(file) = &config.feature.env.env_file {
-            #[allow(deprecated)]
-            let envs_from_file = dotenv::from_path_iter(file)
+            let envs_from_file = dotenvy::from_path_iter(file)
                 .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
                 .map_err(|error| CliError::EnvFileAccessError(file.clone(), error))?;
 

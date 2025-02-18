@@ -331,7 +331,7 @@ impl ExecParams {
             // Set canonicalized path to env file, in case forks/children are in different
             // working directories.
             let full_path = std::fs::canonicalize(env_file).map_err(|e| {
-                CliError::EnvFileAccessError(env_file.clone(), dotenv::Error::Io(e))
+                CliError::EnvFileAccessError(env_file.clone(), dotenvy::Error::Io(e))
             })?;
             envs.insert(
                 MIRRORD_OVERRIDE_ENV_FILE_ENV.into(),

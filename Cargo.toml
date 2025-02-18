@@ -89,11 +89,11 @@ kube = { git = "https://github.com/kube-rs/kube.git", rev = "ecbdafc214538aadc78
     "socks5",
     "http-proxy",
 ] }
-hickory-resolver = { version = "0.25.0-alpha.5", features = [
+hickory-resolver = { version = "0.24.3", features = [
     "serde",
     "tokio-runtime",
 ] }
-hickory-proto = "0.25.0-alpha.5"
+hickory-proto = "0.24.3"
 tokio-util = { version = "0.7", features = ["net", "codec"] }
 
 # Used by `layer`, `intproxy`, `tests`, `medschool`, `cli`, `agent`, `operator`.
@@ -102,7 +102,7 @@ streammap-ext = "0.1"
 regex = { version = "1", features = ["unicode-case"] }
 fancy-regex = { version = "0.14" }
 enum_dispatch = "0.3"
-dotenv = "0.15"
+dotenvy = "0.15"
 
 # If you update `hyper`, check that `h2` version is compatible in `intproxy/Cargo.toml`.
 # There is a test for this: `cargo test -p mirrord-intproxy hyper_and_h2_versions_in_sync`
