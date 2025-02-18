@@ -3,6 +3,8 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+use tracing::Level;
+
 /// A helper struct for resolving paths as seen in the target container to paths accessible from the
 /// root host.
 ///
@@ -13,6 +15,7 @@ pub struct InTargetPathResolver {
 }
 
 impl InTargetPathResolver {
+    #[tracing::instrument(level = Level::TRACE, ret)]
     pub fn new(target_pid: u64) -> Self {
         let root = format!("/proc/{target_pid}/root");
 
@@ -25,6 +28,7 @@ impl InTargetPathResolver {
         &self.root
     }
 
+    #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     pub fn resolve(&self, path: &Path) -> io::Result<PathBuf> {
         let mut temp_path = PathBuf::new();
 
@@ -72,6 +76,9 @@ impl InTargetPathResolver {
 
 #[cfg(test)]
 impl InTargetPathResolver {
+    /// Constructs a new resolver with the given root path.
+    /// 
+    /// Makes it easy to test with [`tempfile::tempdir`].
     pub fn with_root_path(root: PathBuf) -> Self {
         Self { root }
     }

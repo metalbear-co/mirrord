@@ -109,7 +109,7 @@ where
 ///    mirrord-operator is not found or its license is invalid.
 ///
 /// Here is where we start interactions with the kubernetes API.
-#[tracing::instrument(level = Level::TRACE, skip_all)]
+#[tracing::instrument(level = Level::TRACE, skip_all, err)]
 pub(crate) async fn create_and_connect<P, R: Reporter>(
     config: &LayerConfig,
     progress: &mut P,

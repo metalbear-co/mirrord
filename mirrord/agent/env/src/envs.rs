@@ -57,3 +57,15 @@ pub const LOG_LEVEL: CheckedEnv<String> = CheckedEnv::new("RUST_LOG");
 /// Not yet used by the agent.
 pub const STEAL_TLS_CONFIG: CheckedEnv<Vec<StealPortTlsConfig>> =
     CheckedEnv::new("MIRRORD_AGENT_STEAL_TLS_CONFIG");
+
+/// Container id of the target we're attaching to, e.g. `mirrord exec -t
+/// pod/glorious-cat/container/[cat-container]`, this is the id of `cat-container` that you
+/// can retrieve with `kubectl describe glorious-cat`.
+///
+/// For `Mode::Ephemeral`, this is used to get the target's `pid`.
+/// When this is not present, we default it to `1`, meaning file operations are done in `/proc/1`.
+/// Look at `find_pid_for_ephemeral` docs for more info.
+///
+/// **Attention**: this is **not** the ephemeral container id, it's the target's!
+pub const EPHEMERAL_TARGET_CONTAINER_ID: CheckedEnv<String> =
+    CheckedEnv::new("MIRRORD_AGENT_EPHEMERAL_TARGET_CONTAINER_ID");

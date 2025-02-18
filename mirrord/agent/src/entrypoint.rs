@@ -101,7 +101,13 @@ impl State {
             }
             cli::Mode::Ephemeral { .. } => {
                 let container_handle = ContainerHandle::new(runtime::Container::Ephemeral(
-                    runtime::EphemeralContainer {},
+                    runtime::EphemeralContainer {
+                        container_id: envs::EPHEMERAL_TARGET_CONTAINER_ID
+                            .try_from_env()
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default(),
+                    },
                 ))
                 .await?;
 
@@ -216,6 +222,7 @@ impl Drop for ClientConnectionHandler {
 
 impl ClientConnectionHandler {
     /// Initializes [`ClientConnectionHandler`].
+    #[tracing::instrument(level = Level::TRACE, skip(connection, bg_tasks, state), err)]
     pub async fn new(
         id: ClientId,
         mut connection: ClientConnection,
