@@ -41,7 +41,6 @@ null-terminated = "0.3"
 num-traits = "0.2"
 rand.workspace = true
 regex.workspace = true
-serde_json.workspace = true
 socket2.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
@@ -62,6 +61,7 @@ mirrord-intproxy = { path = "../intproxy" }
 actix-codec.workspace = true
 futures.workspace = true
 rstest.workspace = true
+serde_json.workspace = true
 tempfile.workspace = true
 tests = { path = "../../tests" }
 test-cdylib = "1"

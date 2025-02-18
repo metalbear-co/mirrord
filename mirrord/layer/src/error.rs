@@ -148,9 +148,6 @@ pub(crate) enum LayerError {
     #[error("mirrord-layer: IO failed with `{0}`!")]
     IO(#[from] std::io::Error),
 
-    #[error("mirrord-layer: JSON convert error")]
-    JSONConvertError(#[from] serde_json::Error),
-
     #[error("mirrord-layer: Failed setting up mirrord with configuration error `{0}`!")]
     Config(#[from] ConfigError),
 
