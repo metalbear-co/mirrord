@@ -186,9 +186,9 @@ unsafe fn opendir_bypass(raw_filename: *const c_char) -> usize {
 
     let dir = libc::fdopendir(fd);
     if dir.is_null() {
-        let errno = errno::errno();
+        let errno = Errno::las_raw();
         libc::close(fd);
-        set_errno(errno);
+        Errno::set_raw(errno);
         return 0;
     }
     dir as usize
