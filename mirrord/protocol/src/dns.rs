@@ -3,7 +3,7 @@ use core::ops::Deref;
 use std::{net::IpAddr, sync::LazyLock};
 
 use bincode::{Decode, Encode};
-use hickory_resolver::{lookup_ip::LookupIp, proto::rr::resource::RecordParts};
+use hickory_resolver::lookup_ip::LookupIp;
 use semver::VersionReq;
 
 use crate::RemoteResult;
@@ -27,14 +27,10 @@ impl From<LookupIp> for DnsLookup {
             .as_lookup()
             .records()
             .iter()
-            .cloned()
             .filter_map(|record| {
-                let RecordParts {
-                    name_labels, rdata, ..
-                } = record.into_parts();
-
-                rdata.ip_addr().map(|ip| LookupRecord {
-                    name: name_labels.to_string(),
+                let ip = record.data()?.ip_addr()?;
+                Some(LookupRecord {
+                    name: record.name().to_string(),
                     ip,
                 })
             })
