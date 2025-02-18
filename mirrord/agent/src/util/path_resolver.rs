@@ -77,7 +77,7 @@ impl InTargetPathResolver {
 #[cfg(test)]
 impl InTargetPathResolver {
     /// Constructs a new resolver with the given root path.
-    /// 
+    ///
     /// Makes it easy to test with [`tempfile::tempdir`].
     pub fn with_root_path(root: PathBuf) -> Self {
         Self { root }
