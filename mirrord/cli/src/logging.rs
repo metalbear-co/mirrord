@@ -55,7 +55,13 @@ pub async fn init_tracing_registry(
 
     if do_init {
         tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(std::io::stderr)
+                    .with_file(true)
+                    .with_line_number(true)
+                    .pretty(),
+            )
             .with(tracing_subscriber::EnvFilter::from_default_env())
             .init();
     }
@@ -95,6 +101,8 @@ fn init_proxy_tracing_registry(
         .with_writer(output_file)
         .with_ansi(false)
         .with_env_filter(env_filter)
+        .with_file(true)
+        .with_line_number(true)
         .pretty()
         .init();
 
@@ -127,6 +135,8 @@ pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), Intern
             .with_writer(std::io::stderr)
             .with_ansi(false)
             .with_env_filter(env_filter)
+            .with_file(true)
+            .with_line_number(true)
             .pretty()
             .init();
 
