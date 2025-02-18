@@ -17,29 +17,19 @@ use crate::{
     error::{CliError, ExternalProxyError, InternalProxyError},
 };
 
-// only ls and ext commands need the errors in json format
-// error logs are disabled for extensions
-fn init_ext_error_handler(commands: &Commands) -> bool {
-    match commands {
-        Commands::ListTargets(_) | Commands::ExtensionExec(_) => {
-            let _ = miette::set_hook(Box::new(|_| Box::new(miette::JSONReportHandler::new())));
-
-            true
-        }
-        _ => false,
-    }
-}
-
+/// Tries to initialize tracing in the current process.
 pub async fn init_tracing_registry(
     command: &Commands,
     watch: drain::Watch,
 ) -> Result<(), CliError> {
+    // Logging to the mirrord-console always takes precedence.
     if let Ok(console_addr) = std::env::var("MIRRORD_CONSOLE_ADDR") {
         mirrord_console::init_async_logger(&console_addr, watch.clone(), 124).await?;
 
         return Ok(());
     }
 
+    // Proxies initialize tracing independently.
     if matches!(
         command,
         Commands::InternalProxy { .. } | Commands::ExternalProxy { .. }
@@ -47,16 +37,31 @@ pub async fn init_tracing_registry(
         return Ok(());
     }
 
-    // There are situations where even if running "ext" commands that shouldn't log, we want those
-    // to log to be able to debug issues.
-    let force_log = std::env::var("MIRRORD_FORCE_LOG")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(false);
+    let do_init = match command {
+        Commands::ListTargets(_) | Commands::ExtensionExec(_) => {
+            // `ls` and `ext` commands need the errors in json format.
+            let _ = miette::set_hook(Box::new(|_| Box::new(miette::JSONReportHandler::new())));
 
-    if force_log || init_ext_error_handler(command) {
+            // There are situations where even if running "ext" commands that shouldn't log,
+            // we need the logs for debugging issues.
+            std::env::var("MIRRORD_FORCE_LOG")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(false)
+        }
+
+        _ => true,
+    };
+
+    if do_init {
         tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(std::io::stderr)
+                    .with_file(true)
+                    .with_line_number(true)
+                    .pretty(),
+            )
             .with(tracing_subscriber::EnvFilter::from_default_env())
             .init();
     }
@@ -64,6 +69,7 @@ pub async fn init_tracing_registry(
     Ok(())
 }
 
+/// Returns a default randomized path for intproxy/extproxy logs.
 fn default_logfile_path(prefix: &str) -> PathBuf {
     let random_name: String = Alphanumeric.sample_string(&mut rand::rng(), 7);
     let timestamp = SystemTime::UNIX_EPOCH
@@ -95,6 +101,8 @@ fn init_proxy_tracing_registry(
         .with_writer(output_file)
         .with_ansi(false)
         .with_env_filter(env_filter)
+        .with_file(true)
+        .with_line_number(true)
         .pretty()
         .init();
 
@@ -127,6 +135,8 @@ pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), Intern
             .with_writer(std::io::stderr)
             .with_ansi(false)
             .with_env_filter(env_filter)
+            .with_file(true)
+            .with_line_number(true)
             .pretty()
             .init();
 
