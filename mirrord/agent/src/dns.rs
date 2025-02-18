@@ -88,13 +88,14 @@ impl DnsWorker {
         }
     }
 
-    /// Reads `/etc/resolv.conf` and `/etc/hosts` files, then uses [`hickory_resolver::Resolver`] to
+    /// Reads `/etc/resolv.conf` and `/etc/hosts` files, then uses [`TokioAsyncResolver`] to
     /// resolve address of the given `host`.
     ///
     /// # TODO
     ///
     /// We could probably cache results here.
-    /// We cannot cache the [`Resolver`] itself, becaues the configuration in `etc` may change.
+    /// We cannot cache the [`TokioAsyncResolver`] itself, becaues the configuration in `etc` may
+    /// change.
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn do_lookup(
         etc_path: PathBuf,
