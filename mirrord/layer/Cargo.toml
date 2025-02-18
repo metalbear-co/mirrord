@@ -30,7 +30,7 @@ mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = [
 base64.workspace = true
 bincode.workspace = true
 ctor = "0.2"
-dotenv.workspace = true
+dotenvy.workspace = true
 frida-gum = { version = "0.15", features = ["auto-download"] }
 http.workspace = true
 libc.workspace = true

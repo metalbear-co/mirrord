@@ -461,8 +461,7 @@ fn fetch_env_vars() -> HashMap<String, String> {
         .unwrap_or_default();
 
     if let Some(file) = &setup().env_config().env_file {
-        #[allow(deprecated)]
-        let envs_from_file = dotenv::from_path_iter(file)
+        let envs_from_file = dotenvy::from_path_iter(file)
             .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
             .expect("failed to access the env file");
 
