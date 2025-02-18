@@ -38,7 +38,7 @@ mod ignore_codes {
 
 /// Errors that occur in the layer's hook functions, and will reach the user's application.
 ///
-/// These errors are converted to [`libc`] error codes, and are also used to [`set_errno`].
+/// These errors are converted to [`libc`] error codes, and are also used to [`Errno::set_raw`].
 #[derive(Error, Debug)]
 pub(crate) enum HookError {
     #[error("mirrord-layer: `{0}`")]
