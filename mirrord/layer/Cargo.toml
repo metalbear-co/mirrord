@@ -32,7 +32,7 @@ bincode.workspace = true
 ctor = "0.2"
 dotenv.workspace = true
 frida-gum = { version = "0.15", features = ["auto-download"] }
-hyper = { workspace = true }
+http.workspace = true
 libc.workspace = true
 nix = { workspace = true, features = ["net", "process", "signal"] }
 null-terminated = "0.3"

@@ -4408,7 +4408,7 @@ dependencies = [
  "exec",
  "frida-gum",
  "futures",
- "hyper 1.5.2",
+ "http 1.2.0",
  "libc",
  "mirrord-config",
  "mirrord-console",
