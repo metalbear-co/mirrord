@@ -496,6 +496,22 @@ but the feature is not stable and may cause other issues.
 
 Enables `getifaddrs` hook that removes IPv6 interfaces from the list returned by libc.
 
+### _experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}
+
+Sets a timeout for idle local HTTP connections (in milliseconds).
+
+HTTP requests stolen with a filter are delivered to the local application
+from a HTTP connection made from the local machine. Once a request is delivered,
+the connection is cached for some time, so that it can be reused to deliver
+the next request.
+
+This timeout determines for how long such connections are cached.
+
+Set to 0 to disable caching local HTTP connections (connections will be dropped as soon as
+the request is delivered).
+
+Defaults to 3000ms.
+
 ### _experimental_ readlink {#experimental-readlink}
 
 DEPRECATED, WILL BE REMOVED
@@ -1303,9 +1319,10 @@ List of ports to mirror/steal traffic from. Other ports will remain local.
 Mutually exclusive with
 [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
 
-### feature.network.ipv6 {#feature-network-dns}
+### feature.network.ipv6 {#feature-network-ipv6}
 
-Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6.
+Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6,
+or connects to other services over IPv6.
 
 ### feature.network.outgoing {#feature-network-outgoing}
 

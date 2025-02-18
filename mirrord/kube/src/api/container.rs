@@ -4,10 +4,7 @@ use k8s_openapi::api::core::v1::{ContainerStatus, Pod};
 use mirrord_agent_env::mesh::MeshVendor;
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
-use rand::{
-    distributions::{Alphanumeric, DistString},
-    Rng,
-};
+use rand::distr::{Alphanumeric, SampleString};
 
 use crate::{api::kubernetes::AgentKubernetesConnectInfo, error::Result};
 
@@ -55,13 +52,13 @@ impl ContainerParams {
         support_ipv6: bool,
         port: Option<u16>,
     ) -> ContainerParams {
-        let port = port.unwrap_or_else(|| rand::thread_rng().gen_range(30000..=65535));
-        let gid: u16 = rand::thread_rng().gen_range(3000..u16::MAX);
+        let port = port.unwrap_or_else(|| rand::random_range(30000..=65535));
+        let gid: u16 = rand::random_range(3000..u16::MAX);
 
         let name = format!(
             "mirrord-agent-{}",
             Alphanumeric
-                .sample_string(&mut rand::thread_rng(), 10)
+                .sample_string(&mut rand::rng(), 10)
                 .to_lowercase()
         );
 

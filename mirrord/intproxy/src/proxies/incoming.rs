@@ -6,7 +6,7 @@
 //!    until connection becomes readable (is TCP) or receives an http request.
 //! 2. HttpSender -
 
-use std::{collections::HashMap, io, net::SocketAddr};
+use std::{collections::HashMap, io, net::SocketAddr, time::Duration};
 
 use bound_socket::BoundTcpSocket;
 use http::{ClientStore, ResponseMode, StreamingBody};
@@ -127,7 +127,6 @@ struct HttpGatewayHandle {
 /// An HTTP request stolen with a filter can result in an HTTP upgrade.
 /// When this happens, the TCP connection is recovered and passed to a new [`TcpProxyTask`].
 /// The TCP connection is then treated as stolen without a filter.
-#[derive(Default)]
 pub struct IncomingProxy {
     /// Active port subscriptions for all layers.
     subscriptions: SubscriptionsManager,
@@ -157,6 +156,19 @@ pub struct IncomingProxy {
 impl IncomingProxy {
     /// Used when registering new tasks in the internal [`BackgroundTasks`] instance.
     const CHANNEL_SIZE: usize = 512;
+
+    pub fn new(idle_local_http_connection_timeout: Duration) -> Self {
+        Self {
+            subscriptions: Default::default(),
+            metadata_store: Default::default(),
+            response_mode: Default::default(),
+            client_store: ClientStore::new_with_timeout(idle_local_http_connection_timeout),
+            mirror_tcp_proxies: Default::default(),
+            steal_tcp_proxies: Default::default(),
+            http_gateways: Default::default(),
+            tasks: Default::default(),
+        }
+    }
 
     /// Starts a new [`HttpGatewayTask`] to handle the given request.
     ///

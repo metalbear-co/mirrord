@@ -17,7 +17,7 @@ use mirrord_intproxy::{agent_conn::AgentConnection, IntProxy};
 use mirrord_protocol::{
     file::{
         AccessFileRequest, AccessFileResponse, OpenFileRequest, OpenOptionsInternal,
-        ReadFileRequest, SeekFromInternal, XstatFsResponse, XstatRequest, XstatResponse,
+        ReadFileRequest, SeekFromInternal, XstatFsResponseV2, XstatRequest, XstatResponse,
     },
     tcp::{DaemonTcp, LayerTcp, NewTcpConnection, TcpClose, TcpData},
     ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
@@ -111,7 +111,8 @@ impl TestIntProxy {
             let agent_conn = AgentConnection::new_for_raw_address(fake_agent_address)
                 .await
                 .unwrap();
-            let intproxy = IntProxy::new_with_connection(agent_conn, listener, 0);
+            let intproxy =
+                IntProxy::new_with_connection(agent_conn, listener, 0, Duration::from_secs(3));
             intproxy
                 .run(Duration::from_secs(5), Duration::from_secs(5))
                 .await
@@ -494,15 +495,15 @@ impl TestIntProxy {
         // Expecting `statfs` call with path.
         assert_matches!(
             self.recv().await,
-            ClientMessage::FileRequest(FileRequest::StatFs(
-                mirrord_protocol::file::StatFsRequest { path }
+            ClientMessage::FileRequest(FileRequest::StatFsV2(
+                mirrord_protocol::file::StatFsRequestV2 { path }
             )) if path.to_str().unwrap() == expected_path
         );
 
         // Answer `statfs`.
         self.codec
-            .send(DaemonMessage::File(FileResponse::XstatFs(Ok(
-                XstatFsResponse {
+            .send(DaemonMessage::File(FileResponse::XstatFsV2(Ok(
+                XstatFsResponseV2 {
                     metadata: Default::default(),
                 },
             ))))
@@ -515,15 +516,15 @@ impl TestIntProxy {
         // Expecting `fstatfs` call with path.
         assert_matches!(
             self.recv().await,
-            ClientMessage::FileRequest(FileRequest::XstatFs(
-                mirrord_protocol::file::XstatFsRequest { fd }
+            ClientMessage::FileRequest(FileRequest::XstatFsV2(
+                mirrord_protocol::file::XstatFsRequestV2 { fd }
             )) if expected_fd == fd
         );
 
         // Answer `fstatfs`.
         self.codec
-            .send(DaemonMessage::File(FileResponse::XstatFs(Ok(
-                XstatFsResponse {
+            .send(DaemonMessage::File(FileResponse::XstatFsV2(Ok(
+                XstatFsResponseV2 {
                     metadata: Default::default(),
                 },
             ))))
@@ -825,9 +826,8 @@ pub enum Application {
     RustListenPorts,
     Fork,
     ReadLink,
-    MakeDir,
     StatfsFstatfs,
-    RemoveDir,
+    MkdirRmdir,
     OpenFile,
     CIssue2055,
     CIssue2178,
@@ -883,9 +883,8 @@ impl Application {
             Application::PythonFastApiHTTP | Application::PythonIssue864 => String::from("uvicorn"),
             Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
             Application::ReadLink => String::from("tests/apps/readlink/out.c_test_app"),
-            Application::MakeDir => String::from("tests/apps/mkdir/out.c_test_app"),
             Application::StatfsFstatfs => String::from("tests/apps/statfs_fstatfs/out.c_test_app"),
-            Application::RemoveDir => String::from("tests/apps/rmdir/out.c_test_app"),
+            Application::MkdirRmdir => String::from("tests/apps/mkdir_rmdir/out.c_test_app"),
             Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
             Application::NodeHTTP | Application::NodeIssue2283 | Application::NodeIssue2807 => {
                 String::from("node")
@@ -1123,9 +1122,8 @@ impl Application {
             | Application::Go23FAccessAt
             | Application::Fork
             | Application::ReadLink
-            | Application::MakeDir
             | Application::StatfsFstatfs
-            | Application::RemoveDir
+            | Application::MkdirRmdir
             | Application::Realpath
             | Application::RustFileOps
             | Application::RustIssue1123
@@ -1203,9 +1201,8 @@ impl Application {
             | Application::BashShebang
             | Application::Fork
             | Application::ReadLink
-            | Application::MakeDir
             | Application::StatfsFstatfs
-            | Application::RemoveDir
+            | Application::MkdirRmdir
             | Application::Realpath
             | Application::Go21Issue834
             | Application::Go22Issue834

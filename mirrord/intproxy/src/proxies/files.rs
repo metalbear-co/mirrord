@@ -57,6 +57,7 @@ impl From<AgentLostFileResponse> for ToLayer {
             FileResponse::WriteLimited(..) => FileResponse::WriteLimited(Err(error)),
             FileResponse::Xstat(..) => FileResponse::Xstat(Err(error)),
             FileResponse::XstatFs(..) => FileResponse::XstatFs(Err(error)),
+            FileResponse::XstatFsV2(..) => FileResponse::XstatFsV2(Err(error)),
             FileResponse::ReadLink(..) => FileResponse::ReadLink(Err(error)),
             FileResponse::MakeDir(..) => FileResponse::MakeDir(Err(error)),
             FileResponse::RemoveDir(..) => FileResponse::RemoveDir(Err(error)),
@@ -109,6 +110,7 @@ impl FileRequestExt for FileRequest {
             Self::WriteLimited(..) => dummy_file_response!(WriteLimited),
             Self::Xstat(..) => dummy_file_response!(Xstat),
             Self::XstatFs(..) => dummy_file_response!(XstatFs),
+            Self::XstatFsV2(..) => dummy_file_response!(XstatFsV2),
             Self::ReadLink(..) => dummy_file_response!(ReadLink),
             Self::MakeDir(..) => dummy_file_response!(MakeDir),
             Self::MakeDirAt(..) => dummy_file_response!(MakeDir),
@@ -116,6 +118,7 @@ impl FileRequestExt for FileRequest {
             Self::UnlinkAt(..) => dummy_file_response!(Unlink),
             Self::RemoveDir(..) => dummy_file_response!(RemoveDir),
             Self::StatFs(..) => dummy_file_response!(XstatFs),
+            Self::StatFsV2(..) => dummy_file_response!(XstatFsV2),
         };
 
         Some(AgentLostFileResponse(layer_id, message_id, response))
@@ -271,6 +274,7 @@ impl RouterFileOps {
             | FileRequest::Unlink(..)
             | FileRequest::RemoveDir(..)
             | FileRequest::StatFs(..)
+            | FileRequest::StatFsV2(..)
             | FileRequest::UnlinkAt(UnlinkAtRequest { dirfd: None, .. }) => {}
 
             // These requests do not require any response from the agent.
@@ -304,6 +308,7 @@ impl RouterFileOps {
                 ..
             })
             | FileRequest::XstatFs(XstatFsRequest { fd: remote_fd })
+            | FileRequest::XstatFsV2(XstatFsRequestV2 { fd: remote_fd })
             | FileRequest::MakeDirAt(MakeDirAtRequest {
                 dirfd: remote_fd, ..
             })
@@ -344,6 +349,7 @@ impl RouterFileOps {
             | FileResponse::WriteLimited(..)
             | FileResponse::Xstat(..)
             | FileResponse::XstatFs(..)
+            | FileResponse::XstatFsV2(..)
             | FileResponse::GetDEnts64(Err(..))
             | FileResponse::Open(Err(..))
             | FileResponse::OpenDir(Err(..))
@@ -538,7 +544,7 @@ impl FilesProxy {
             {
                 Err(FileResponse::RemoveDir(Err(ResponseError::NotImplemented)))
             }
-            FileRequest::StatFs(..)
+            FileRequest::StatFs(..) | FileRequest::StatFsV2(..)
                 if protocol_version
                     .is_none_or(|version: &Version| !STATFS_VERSION.matches(version)) =>
             {
@@ -803,6 +809,32 @@ impl FilesProxy {
                     .send(ClientMessage::FileRequest(FileRequest::Seek(seek)))
                     .await;
             }
+            FileRequest::StatFsV2(statfs_v2)
+                if self
+                    .protocol_version
+                    .as_ref()
+                    .is_none_or(|version| !STATFS_V2_VERSION.matches(version)) =>
+            {
+                self.request_queue.push_back(message_id, layer_id);
+                message_bus
+                    .send(ClientMessage::FileRequest(FileRequest::StatFs(
+                        statfs_v2.into(),
+                    )))
+                    .await;
+            }
+            FileRequest::XstatFsV2(xstatfs_v2)
+                if self
+                    .protocol_version
+                    .as_ref()
+                    .is_none_or(|version| !STATFS_V2_VERSION.matches(version)) =>
+            {
+                self.request_queue.push_back(message_id, layer_id);
+                message_bus
+                    .send(ClientMessage::FileRequest(FileRequest::XstatFs(
+                        xstatfs_v2.into(),
+                    )))
+                    .await;
+            }
 
             // Doesn't require any special logic.
             other => {
@@ -934,6 +966,32 @@ impl FilesProxy {
                     .await;
             }
 
+            FileResponse::ReadLimited(Err(error)) => {
+                // need to ensure that if a Read request was sent by layer, a Read response is
+                // returned containing the error rather than a ReadLimited
+                let (message_id, layer_id, additional_data) =
+                    self.request_queue.pop_front_with_data().ok_or_else(|| {
+                        UnexpectedAgentMessage(DaemonMessage::File(FileResponse::ReadLimited(Err(
+                            error.clone(),
+                        ))))
+                    })?;
+
+                let message = match additional_data {
+                    AdditionalRequestData::ReadBuffered {
+                        update_fd_position, ..
+                    } if update_fd_position => FileResponse::Read(Err(error)),
+                    _ => FileResponse::ReadLimited(Err(error)),
+                };
+
+                message_bus
+                    .send(ToLayer {
+                        message_id,
+                        layer_id,
+                        message: ProxyToLayerMessage::File(message),
+                    })
+                    .await;
+            }
+
             // If the file is buffered, update `files_data`.
             FileResponse::Seek(Ok(seek)) => {
                 let (message_id, layer_id, additional_data) =
@@ -1003,6 +1061,21 @@ impl FilesProxy {
                         message: ProxyToLayerMessage::File(FileResponse::ReadDir(Ok(
                             ReadDirResponse { direntry },
                         ))),
+                    })
+                    .await;
+            }
+            // Convert to XstatFsV2 so that the layer doesn't ever need to deal with the old type.
+            FileResponse::XstatFs(res) => {
+                let (message_id, layer_id) = self.request_queue.pop_front().ok_or_else(|| {
+                    UnexpectedAgentMessage(DaemonMessage::File(FileResponse::XstatFs(res.clone())))
+                })?;
+                message_bus
+                    .send(ToLayer {
+                        message_id,
+                        layer_id,
+                        message: ProxyToLayerMessage::File(FileResponse::XstatFsV2(
+                            res.map(Into::into),
+                        )),
                     })
                     .await;
             }
@@ -1383,6 +1456,22 @@ mod tests {
         tasks.next().await.unwrap().1.unwrap_message()
     }
 
+    async fn respond_to_read_request_with_err(
+        proxy: &TaskSender<FilesProxy>,
+        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+        error: ResponseError,
+        limited: bool,
+    ) -> ProxyMessage {
+        let response = if limited {
+            FileResponse::ReadLimited(Err(error))
+        } else {
+            FileResponse::Read(Err(error))
+        };
+
+        proxy.send(FilesProxyMessage::FileRes(response)).await;
+        tasks.next().await.unwrap().1.unwrap_message()
+    }
+
     #[rstest]
     #[case(true, false)]
     #[case(false, true)]
@@ -1658,5 +1747,39 @@ mod tests {
             .unwrap_message()
             .unwrap_proxy_to_layer_message();
         assert_eq!(update, ProxyToLayerMessage::File(seek_response),);
+    }
+
+    #[tokio::test]
+    async fn reading_from_dir() {
+        // relevant ticket: MBE-717: intproxy crashes when attempting to `cat` a remote dir
+        // test that a ReadLimited response from agent is sent to the layer the same variant as the
+        // original request type
+        let (proxy, mut tasks) = setup_proxy(mirrord_protocol::VERSION.clone(), 4096).await;
+
+        // create dir - use empty file
+        let fd = open_file(&proxy, &mut tasks, true).await;
+
+        // send read request from layer, check that proxy sends readlimited request to agent
+        let update = make_read_request(&proxy, &mut tasks, fd, 1, None).await;
+        assert_eq!(
+            update,
+            ProxyMessage::ToAgent(ClientMessage::FileRequest(FileRequest::ReadLimited(
+                ReadLimitedFileRequest {
+                    remote_fd: fd,
+                    buffer_size: 4096,
+                    start_from: 0,
+                }
+            ))),
+        );
+
+        // reply from agent with readlimited error, check that proxy sends read response to layer
+        let res_error = ResponseError::NotFile(fd);
+        let update = respond_to_read_request_with_err(&proxy, &mut tasks, res_error.clone(), true)
+            .await
+            .unwrap_proxy_to_layer_message();
+        assert_eq!(
+            update,
+            ProxyToLayerMessage::File(FileResponse::Read(Err(res_error))),
+        );
     }
 }

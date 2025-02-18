@@ -4,7 +4,6 @@
 
 use std::{os::unix::fs::PermissionsExt, path::Path, time::Duration};
 
-use rand::{thread_rng, Rng};
 use rstest::rstest;
 
 mod common;
@@ -20,7 +19,7 @@ async fn test_issue2614(dylib_path: &Path) {
     let tmpdir = tempfile::tempdir().unwrap();
     let file_path = tmpdir
         .path()
-        .join(format!("testfile-{}", thread_rng().gen::<u64>(),));
+        .join(format!("testfile-{}", rand::random::<u64>(),));
     let application = Application::Go23Open {
         path: file_path.to_str().unwrap().into(),
         flags: libc::O_CREAT | libc::O_RDWR,

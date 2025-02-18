@@ -21,7 +21,8 @@ use libc::{
 use libc::{dirent64, stat64, statx, EBADF, ENOENT, ENOTDIR};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
-    FsMetadataInternal, MetadataInternal, ReadFileResponse, ReadLinkFileResponse, WriteFileResponse,
+    FsMetadataInternalV2, MetadataInternal, ReadFileResponse, ReadLinkFileResponse,
+    WriteFileResponse,
 };
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
@@ -661,7 +662,7 @@ pub(crate) unsafe extern "C" fn _write_nocancel_detour(
 
 /// Implementation of access_detour, used in access_detour and faccessat_detour
 unsafe fn access_logic(raw_path: *const c_char, mode: c_int) -> c_int {
-    access(raw_path.checked_into(), mode as u8).unwrap_or_bypass_with(|bypass| {
+    access(raw_path.checked_into(), mode).unwrap_or_bypass_with(|bypass| {
         let raw_path = update_ptr_from_bypass(raw_path, &bypass);
         FN_ACCESS(raw_path, mode)
     })
@@ -736,12 +737,11 @@ unsafe extern "C" fn fill_stat(out_stat: *mut stat64, metadata: &MetadataInterna
 }
 
 /// Fills the `statfs` struct with the metadata
-unsafe extern "C" fn fill_statfs(out_stat: *mut statfs, metadata: &FsMetadataInternal) {
+unsafe extern "C" fn fill_statfs(out_stat: *mut statfs, metadata: &FsMetadataInternalV2) {
     // Acording to linux documentation "Fields that are undefined for a particular file system are
     // set to 0."
     out_stat.write_bytes(0, 1);
     let out = &mut *out_stat;
-    // on macOS the types might be different, so we try to cast and do our best..
     out.f_type = best_effort_cast(metadata.filesystem_type);
     out.f_bsize = best_effort_cast(metadata.block_size);
     out.f_blocks = metadata.blocks;
@@ -749,6 +749,37 @@ unsafe extern "C" fn fill_statfs(out_stat: *mut statfs, metadata: &FsMetadataInt
     out.f_bavail = metadata.blocks_available;
     out.f_files = metadata.files;
     out.f_ffree = metadata.files_free;
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: fsid_t has C repr and holds just an array with two i32s.
+        out.f_fsid = std::mem::transmute::<[i32; 2], libc::fsid_t>(metadata.filesystem_id);
+        out.f_namelen = metadata.name_len;
+        out.f_frsize = metadata.fragment_size;
+    }
+}
+
+/// Fills the `statfs` struct with the metadata
+#[cfg(target_os = "linux")]
+unsafe extern "C" fn fill_statfs64(out_stat: *mut libc::statfs64, metadata: &FsMetadataInternalV2) {
+    // Acording to linux documentation "Fields that are undefined for a particular file system are
+    // set to 0."
+    out_stat.write_bytes(0, 1);
+    let out = &mut *out_stat;
+    out.f_type = best_effort_cast(metadata.filesystem_type);
+    out.f_bsize = best_effort_cast(metadata.block_size);
+    out.f_blocks = metadata.blocks;
+    out.f_bfree = metadata.blocks_free;
+    out.f_bavail = metadata.blocks_available;
+    out.f_files = metadata.files;
+    out.f_ffree = metadata.files_free;
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: fsid_t has C repr and holds just an array with two i32s.
+        out.f_fsid = std::mem::transmute::<[i32; 2], libc::fsid_t>(metadata.filesystem_id);
+        out.f_namelen = metadata.name_len;
+        out.f_frsize = metadata.fragment_size;
+        out.f_flags = metadata.flags;
+    }
 }
 
 fn stat_logic<const FOLLOW_SYMLINK: bool>(
@@ -917,7 +948,27 @@ unsafe extern "C" fn fstatfs_detour(fd: c_int, out_stat: *mut statfs) -> c_int {
             fill_statfs(out_stat, &res);
             0
         })
-        .unwrap_or_bypass_with(|_| FN_FSTATFS(fd, out_stat))
+        .unwrap_or_bypass_with(|_| crate::file::hooks::FN_FSTATFS(fd, out_stat))
+}
+
+/// Hook for `libc::fstatfs64`.
+#[cfg(target_os = "linux")]
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn fstatfs64_detour(
+    fd: c_int,
+    out_stat: *mut libc::statfs64,
+) -> c_int {
+    if out_stat.is_null() {
+        return HookError::BadPointer.into();
+    }
+
+    xstatfs(fd)
+        .map(|res| {
+            let res = res.metadata;
+            fill_statfs64(out_stat, &res);
+            0
+        })
+        .unwrap_or_bypass_with(|_| FN_FSTATFS64(fd, out_stat))
 }
 
 /// Hook for `libc::statfs`.
@@ -934,6 +985,26 @@ unsafe extern "C" fn statfs_detour(raw_path: *const c_char, out_stat: *mut statf
             0
         })
         .unwrap_or_bypass_with(|_| FN_STATFS(raw_path, out_stat))
+}
+
+/// Hook for `libc::statfs`.
+#[cfg(target_os = "linux")]
+#[hook_guard_fn]
+pub(crate) unsafe extern "C" fn statfs64_detour(
+    raw_path: *const c_char,
+    out_stat: *mut libc::statfs64,
+) -> c_int {
+    if out_stat.is_null() {
+        return HookError::BadPointer.into();
+    }
+
+    crate::file::ops::statfs(raw_path.checked_into())
+        .map(|res| {
+            let res = res.metadata;
+            fill_statfs64(out_stat, &res);
+            0
+        })
+        .unwrap_or_bypass_with(|_| crate::file::hooks::FN_STATFS64(raw_path, out_stat))
 }
 
 unsafe fn realpath_logic(
@@ -1293,6 +1364,20 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
     #[cfg(target_os = "linux")]
     {
         replace!(hook_manager, "statx", statx_detour, FnStatx, FN_STATX);
+        replace!(
+            hook_manager,
+            "fstatfs64",
+            fstatfs64_detour,
+            FnFstatfs64,
+            FN_FSTATFS64
+        );
+        replace!(
+            hook_manager,
+            "statfs64",
+            statfs64_detour,
+            FnStatfs64,
+            FN_STATFS64
+        );
     }
 
     #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
@@ -1342,7 +1427,6 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FnFstatat,
             FN_FSTATAT
         );
-
         replace!(
             hook_manager,
             "fstatfs",
@@ -1351,7 +1435,6 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
             FN_FSTATFS
         );
         replace!(hook_manager, "statfs", statfs_detour, FnStatfs, FN_STATFS);
-
         replace!(
             hook_manager,
             "fdopendir",

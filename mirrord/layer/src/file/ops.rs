@@ -9,12 +9,12 @@ use mirrord_protocol::{
     file::{
         MakeDirAtRequest, MakeDirRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
         ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse, RemoveDirRequest,
-        SeekFileResponse, StatFsRequest, UnlinkAtRequest, WriteFileResponse, XstatFsResponse,
-        XstatResponse,
+        SeekFileResponse, StatFsRequestV2, UnlinkAtRequest, WriteFileResponse, XstatFsRequestV2,
+        XstatFsResponseV2, XstatResponse,
     },
     ResponseError,
 };
-use rand::distributions::{Alphanumeric, DistString};
+use rand::distr::{Alphanumeric, SampleString};
 #[cfg(debug_assertions)]
 use tracing::Level;
 use tracing::{error, trace};
@@ -150,7 +150,7 @@ fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
     if crate::setup().experimental().use_dev_null {
         return create_local_devnull_file(remote_fd);
     }
-    let random_string = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
+    let random_string = Alphanumeric.sample_string(&mut rand::rng(), 16);
     let file_name = format!("{remote_fd}-{random_string}");
     let file_path = env::temp_dir().join(file_name);
     let file_c_string = CString::new(file_path.to_string_lossy().to_string())?;
@@ -355,7 +355,7 @@ pub(crate) fn mkdir(pathname: Detour<PathBuf>, mode: u32) -> Detour<()> {
 
     let path = remap_path!(pathname);
 
-    ensure_not_ignored!(path, false);
+    ensure_not_ignored!(path, true);
 
     let mkdir = MakeDirRequest {
         pathname: path,
@@ -376,6 +376,9 @@ pub(crate) fn mkdirat(dirfd: RawFd, pathname: Detour<PathBuf>, mode: u32) -> Det
 
     if pathname.is_absolute() || dirfd == AT_FDCWD {
         let path = remap_path!(pathname);
+        check_relative_paths!(path);
+        ensure_not_ignored!(path, true);
+
         mkdir(Detour::Success(path), mode)
     } else {
         // Relative path requires special handling, we must identify the relative part (relative to
@@ -405,7 +408,7 @@ pub(crate) fn rmdir(pathname: Detour<PathBuf>) -> Detour<()> {
 
     let path = remap_path!(pathname);
 
-    ensure_not_ignored!(path, false);
+    ensure_not_ignored!(path, true);
 
     let rmdir = RemoveDirRequest { pathname: path };
 
@@ -425,7 +428,7 @@ pub(crate) fn unlink(pathname: Detour<PathBuf>) -> Detour<()> {
 
     let path = remap_path!(pathname);
 
-    ensure_not_ignored!(path, false);
+    ensure_not_ignored!(path, true);
 
     let unlink = RemoveDirRequest { pathname: path };
 
@@ -441,15 +444,23 @@ pub(crate) fn unlink(pathname: Detour<PathBuf>) -> Detour<()> {
 pub(crate) fn unlinkat(dirfd: RawFd, pathname: Detour<PathBuf>, flags: u32) -> Detour<()> {
     let pathname = pathname?;
 
-    let optional_dirfd = match pathname.is_absolute() {
-        true => None,
-        false => Some(get_remote_fd(dirfd)?),
-    };
+    let unlink = if pathname.is_absolute() || dirfd == AT_FDCWD {
+        let path = remap_path!(pathname);
+        check_relative_paths!(path);
+        ensure_not_ignored!(path, true);
+        UnlinkAtRequest {
+            dirfd: None,
+            pathname: path,
+            flags,
+        }
+    } else {
+        let remote_fd = get_remote_fd(dirfd)?;
 
-    let unlink = UnlinkAtRequest {
-        dirfd: optional_dirfd,
-        pathname: pathname.clone(),
-        flags,
+        UnlinkAtRequest {
+            dirfd: Some(remote_fd),
+            pathname: pathname.clone(),
+            flags,
+        }
     };
 
     // `NotImplemented` error here means that the protocol doesn't support it.
@@ -518,18 +529,25 @@ pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isi
 }
 
 #[mirrord_layer_macro::instrument(level = "trace")]
-pub(crate) fn access(path: Detour<PathBuf>, mode: u8) -> Detour<c_int> {
+pub(crate) fn access(path: Detour<PathBuf>, mode: c_int) -> Detour<c_int> {
     let path = path?;
 
     check_relative_paths!(path);
 
     let path = remap_path!(path);
 
-    ensure_not_ignored!(path, false);
+    // Is the caller asking about write access to the file?
+    let is_write = (mode & libc::W_OK) != 0;
+
+    // Even though `access` is never a write operation (even if mode is write), we take the mode
+    // into account when deciding whether to ignore, because when a caller is asking whether they
+    // have write access to a file and then write to it, we want the test and the actual write to
+    // happen with the same file.
+    ensure_not_ignored!(path, is_write);
 
     let access = AccessFileRequest {
         pathname: path,
-        mode,
+        mode: mode as u8,
     };
 
     let _ = common::make_proxy_request_with_response(access)??;
@@ -729,22 +747,34 @@ pub(crate) fn statx_logic(
 }
 
 #[mirrord_layer_macro::instrument(level = "trace")]
-pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponse> {
+pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponseV2> {
     let fd = get_remote_fd(fd)?;
 
-    let lstatfs = XstatFsRequest { fd };
+    // intproxy downgrades to old version if new one is not supported by agent, and converts
+    // old version responses to V2 responses.
+    let xstatfs = XstatFsRequestV2 { fd };
 
-    let response = common::make_proxy_request_with_response(lstatfs)??;
+    let response = common::make_proxy_request_with_response(xstatfs)??;
 
     Detour::Success(response)
 }
 
+/// Gets all the data for statfs64, but can be used also for statfs.
 #[mirrord_layer_macro::instrument(level = "trace")]
-pub(crate) fn statfs(path: Detour<PathBuf>) -> Detour<XstatFsResponse> {
+pub(crate) fn statfs(path: Detour<PathBuf>) -> Detour<XstatFsResponseV2> {
     let path = path?;
-    let lstatfs = StatFsRequest { path };
 
-    let response = common::make_proxy_request_with_response(lstatfs)??;
+    check_relative_paths!(path);
+
+    let path = remap_path!(path);
+
+    ensure_not_ignored!(path, false);
+
+    // intproxy downgrades to old version if new one is not supported by agent, and converts
+    // old version responses to V2 responses.
+    let statfs = StatFsRequestV2 { path };
+
+    let response = common::make_proxy_request_with_response(statfs)??;
 
     Detour::Success(response)
 }
