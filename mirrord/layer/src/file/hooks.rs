@@ -12,13 +12,12 @@ use std::{
     time::Duration,
 };
 
-use errno::{set_errno, Errno};
 use libc::{
     self, c_char, c_int, c_void, dirent, iovec, off_t, size_t, ssize_t, stat, statfs, AT_EACCESS,
     AT_FDCWD, DIR, EINVAL, O_DIRECTORY, O_RDONLY,
 };
 #[cfg(target_os = "linux")]
-use libc::{dirent64, stat64, statx, EBADF, ENOENT, ENOTDIR};
+use libc::{dirent64, stat64, statx};
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
 use mirrord_protocol::file::{
     FsMetadataInternalV2, MetadataInternal, ReadFileResponse, ReadLinkFileResponse,
@@ -26,6 +25,7 @@ use mirrord_protocol::file::{
 };
 #[cfg(target_os = "linux")]
 use mirrord_protocol::ResponseError::{NotDirectory, NotFound};
+use nix::errno::Errno;
 use num_traits::Bounded;
 use tracing::trace;
 #[cfg(target_os = "linux")]
@@ -267,7 +267,7 @@ pub(crate) unsafe extern "C" fn readdir64_detour(dirp: *mut DIR) -> usize {
         Detour::Success(entry) => entry as usize,
         Detour::Bypass(..) => FN_READDIR64(dirp),
         Detour::Error(e) => {
-            set_errno(Errno(e.into()));
+            Errno::from_raw(e.into()).set();
             std::ptr::null::<dirent64>() as usize
         }
     }
@@ -279,7 +279,7 @@ pub(crate) unsafe extern "C" fn readdir_detour(dirp: *mut DIR) -> usize {
         Detour::Success(entry) => entry as usize,
         Detour::Bypass(..) => FN_READDIR(dirp),
         Detour::Error(e) => {
-            set_errno(Errno(e.into()));
+            Errno::from_raw(e.into()).set();
             std::ptr::null::<dirent>() as usize
         }
     }
@@ -374,12 +374,12 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
             for dent in res.entries {
                 if next.byte_add(dent.get_d_reclen64() as usize) > end {
                     error!("Remote result for getdents64 would overflow local buffer.");
-                    set_errno(Errno(EINVAL));
+                    Errno::EINVAL.set();
                     return -1;
                 }
 
                 let Some(next_ref) = next.as_mut() else {
-                    set_errno(Errno(EINVAL));
+                    Errno::EINVAL.set();
                     return -1;
                 };
 
@@ -390,7 +390,7 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
                         );
                         // There is no appropriate error code for "We hijacked this operation and
                         // had an error while trying to create a CString."
-                        set_errno(Errno(EBADF)); // Invalid file descriptor.
+                        Errno::EBADF.set(); // Invalid file descriptor.
                         return -1;
                     }
                     Ok(()) => next = next.byte_add((*next).d_reclen as usize),
@@ -408,7 +408,7 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
                 remote destination, however that directory was not found over there (local fd: \
                 {fd}, remote fd: {not_found_fd})."
             );
-            set_errno(Errno(ENOENT)); // "No such directory."
+            Errno::ENOENT.set(); // "No such directory."
             -1
         }
         Detour::Error(ResponseError(NotDirectory(file_fd))) => {
@@ -417,7 +417,7 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
                 remote destination, however the type of that file on the remote destination is not \
                 a directory (local fd: {fd}, remote fd: {file_fd})."
             );
-            set_errno(Errno(ENOTDIR)); // "No such directory."
+            Errno::ENOTDIR.set(); // "Not a directory."
             -1
         }
         Detour::Error(err) => {
@@ -425,7 +425,7 @@ pub(crate) unsafe extern "C" fn getdents64_detour(
             // There is no appropriate error code for "We hijacked this operation to a remote agent
             // and the agent returned an error". We could try to map more (remote) errors to
             // the error codes though.
-            set_errno(Errno(EBADF));
+            Errno::EBADF.set();
             -1
         }
     }

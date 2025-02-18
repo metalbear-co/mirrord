@@ -1,12 +1,12 @@
 use std::{env::VarError, net::SocketAddr, ptr, str::ParseBoolError};
 
-use errno::set_errno;
 use ignore_codes::*;
 use libc::{c_char, hostent, DIR, FILE};
 use mirrord_config::config::ConfigError;
 use mirrord_protocol::{ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
+use nix::errno::Errno;
 use thiserror::Error;
 use tracing::{error, info};
 
@@ -306,7 +306,7 @@ impl From<HookError> for i64 {
             HookError::InvalidBindAddressForDomain => libc::EINVAL,
         };
 
-        set_errno(errno::Errno(libc_error));
+        Errno::from_raw(libc_error).set();
 
         -1
     }

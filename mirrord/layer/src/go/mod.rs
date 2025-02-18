@@ -2,7 +2,7 @@
     any(target_arch = "x86_64", target_arch = "aarch64"),
     target_os = "linux"
 ))]
-use errno::errno;
+use nix::errno::Errno;
 use tracing::trace;
 
 use crate::{close_detour, file::hooks::*, socket::hooks::*};
@@ -92,7 +92,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                             .map(|success| success as i64)
                             .map_err(|fail| {
                                 let raw_errno = fail.into_raw();
-                                errno::set_errno(errno::Errno(raw_errno));
+                                Errno::from_raw(raw_errno).set();
 
                                 -(raw_errno as i64)
                             });
@@ -133,7 +133,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                     .map(|success| success as i64)
                     .map_err(|fail| {
                         let raw_errno = fail.into_raw();
-                        errno::set_errno(errno::Errno(raw_errno));
+                        Errno::from_raw(raw_errno).set();
 
                         -(raw_errno as i64)
                     });
@@ -154,7 +154,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
             .map(|success| success as i64)
             .map_err(|fail| {
                 let raw_errno = fail.into_raw();
-                errno::set_errno(errno::Errno(raw_errno));
+                Errno::from_raw(raw_errno).set();
 
                 -(raw_errno as i64)
             });
@@ -164,7 +164,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
 
     if syscall_result.is_negative() {
         // Might not be an exact mapping, but it should be good enough.
-        -errno().0 as i64
+        -(Errno::last_raw() as i64)
     } else {
         syscall_result
     }

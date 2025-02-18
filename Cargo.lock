@@ -4405,7 +4405,6 @@ dependencies = [
  "bincode",
  "ctor",
  "dotenv",
- "errno 0.3.10",
  "exec",
  "frida-gum",
  "futures",
