@@ -34,7 +34,6 @@ ctor = "0.2"
 dotenv.workspace = true
 errno = "0.3"
 frida-gum = { version = "0.15", features = ["auto-download"] }
-hashbrown = "0.15"
 hyper = { workspace = true }
 libc.workspace = true
 nix = { workspace = true, features = ["net", "process", "signal"] }

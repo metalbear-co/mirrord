@@ -4410,7 +4410,6 @@ dependencies = [
  "exec",
  "frida-gum",
  "futures",
- "hashbrown 0.15.2",
  "hyper 1.5.2",
  "libc",
  "mirrord-config",
