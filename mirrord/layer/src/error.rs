@@ -306,7 +306,7 @@ impl From<HookError> for i64 {
             HookError::InvalidBindAddressForDomain => libc::EINVAL,
         };
 
-        Errno::from_raw(libc_error).set();
+        Errno::set_raw(libc_error);
 
         -1
     }

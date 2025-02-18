@@ -267,7 +267,7 @@ pub(crate) unsafe extern "C" fn readdir64_detour(dirp: *mut DIR) -> usize {
         Detour::Success(entry) => entry as usize,
         Detour::Bypass(..) => FN_READDIR64(dirp),
         Detour::Error(e) => {
-            Errno::from_raw(e.into()).set();
+            Errno::set_raw(e.into());
             std::ptr::null::<dirent64>() as usize
         }
     }
@@ -279,7 +279,7 @@ pub(crate) unsafe extern "C" fn readdir_detour(dirp: *mut DIR) -> usize {
         Detour::Success(entry) => entry as usize,
         Detour::Bypass(..) => FN_READDIR(dirp),
         Detour::Error(e) => {
-            Errno::from_raw(e.into()).set();
+            Errno::set_raw(e.into());
             std::ptr::null::<dirent>() as usize
         }
     }

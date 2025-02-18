@@ -87,13 +87,13 @@ static mut GETHOSTBYNAME_HOSTENT: hostent = hostent {
 #[derive(Debug)]
 pub(super) struct ConnectResult {
     result: i32,
-    error: Option<Errno>,
+    error: Option<i32>,
 }
 
 impl ConnectResult {
     pub(super) fn is_failure(&self) -> bool {
         self.error
-            .is_none_or(|error| error != Errno::EINTR && error != Errno::EINPROGRESS)
+            .is_none_or(|error| error != libc::EINTR && error != libc::EINPROGRESS)
     }
 }
 
@@ -102,7 +102,7 @@ impl From<i32> for ConnectResult {
         if result == -1 {
             ConnectResult {
                 result,
-                error: Some(Errno::last()),
+                error: Some(Errno::last_raw()),
             }
         } else {
             ConnectResult {
@@ -116,7 +116,7 @@ impl From<i32> for ConnectResult {
 impl From<ConnectResult> for i32 {
     fn from(connect_result: ConnectResult) -> Self {
         if let Some(error) = connect_result.error {
-            error.set();
+            Errno::set_raw(error);
         }
         connect_result.result
     }

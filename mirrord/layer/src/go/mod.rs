@@ -92,7 +92,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                             .map(|success| success as i64)
                             .map_err(|fail| {
                                 let raw_errno = fail.into_raw();
-                                Errno::from_raw(raw_errno).set();
+                                Errno::set_raw(raw_errno);
 
                                 -(raw_errno as i64)
                             });
@@ -133,7 +133,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
                     .map(|success| success as i64)
                     .map_err(|fail| {
                         let raw_errno = fail.into_raw();
-                        Errno::from_raw(raw_errno).set();
+                        Errno::set_raw(raw_errno);
 
                         -(raw_errno as i64)
                     });
@@ -154,7 +154,7 @@ unsafe extern "C" fn c_abi_syscall6_handler(
             .map(|success| success as i64)
             .map_err(|fail| {
                 let raw_errno = fail.into_raw();
-                Errno::from_raw(raw_errno).set();
+                Errno::set_raw(raw_errno);
 
                 -(raw_errno as i64)
             });
