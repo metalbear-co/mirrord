@@ -1,7 +1,7 @@
 use std::io;
 
 use mirrord_intproxy_protocol::{codec::CodecError, LayerToProxyMessage};
-use mirrord_protocol::DaemonMessage;
+use mirrord_protocol::{DaemonMessage, ErrorKindInternal, RemoteIOError, ResponseError};
 use thiserror::Error;
 
 use crate::{
@@ -59,3 +59,10 @@ pub enum IntProxyError {
 }
 
 pub type Result<T> = core::result::Result<T, IntProxyError>;
+
+pub fn agent_lost_io_error() -> ResponseError {
+    ResponseError::RemoteIO(RemoteIOError {
+        raw_os_error: None,
+        kind: ErrorKindInternal::Unknown("connection with mirrord-agent was lost".to_string()),
+    })
+}

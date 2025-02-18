@@ -13,7 +13,7 @@ use thiserror::Error;
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    error::UnexpectedAgentMessage,
+    error::{agent_lost_io_error, UnexpectedAgentMessage},
     main_tasks::ToLayer,
     request_queue::RequestQueue,
     ProxyMessage,
@@ -33,6 +33,45 @@ pub enum SimpleProxyMessage {
 #[derive(Error, Debug)]
 #[error(transparent)]
 pub struct SimpleProxyError(#[from] UnexpectedAgentMessage);
+
+pub enum AgentLostSimpleResponseKind {
+    AddrInfo,
+    GetEnv,
+}
+
+/// Lightweight (no allocations) [`ProxyMessage`] to be returned when connection with the
+/// mirrord-agent is lost. Must be converted into real [`ProxyMessage`] via [`From`].
+pub struct AgentLostSimpleResponse(AgentLostSimpleResponseKind, LayerId, MessageId);
+
+impl AgentLostSimpleResponse {
+    pub fn addr_info(layer_id: LayerId, message_id: MessageId) -> Self {
+        AgentLostSimpleResponse(AgentLostSimpleResponseKind::AddrInfo, layer_id, message_id)
+    }
+
+    pub fn get_env(layer_id: LayerId, message_id: MessageId) -> Self {
+        AgentLostSimpleResponse(AgentLostSimpleResponseKind::GetEnv, layer_id, message_id)
+    }
+}
+
+impl From<AgentLostSimpleResponse> for ToLayer {
+    fn from(value: AgentLostSimpleResponse) -> Self {
+        let AgentLostSimpleResponse(kind, layer_id, message_id) = value;
+        let error = agent_lost_io_error();
+
+        let message = match kind {
+            AgentLostSimpleResponseKind::AddrInfo => {
+                ProxyToLayerMessage::GetAddrInfo(GetAddrInfoResponse(Err(error)))
+            }
+            AgentLostSimpleResponseKind::GetEnv => ProxyToLayerMessage::GetEnv(Err(error)),
+        };
+
+        ToLayer {
+            layer_id,
+            message_id,
+            message,
+        }
+    }
+}
 
 /// For passing messages between the layer and the agent without custom internal logic.
 /// Run as a [`BackgroundTask`].
@@ -60,9 +99,27 @@ impl SimpleProxy {
             .is_some_and(|version| ADDRINFO_V2_VERSION.matches(version))
     }
 
-    fn handle_connection_refresh(&mut self) {
-        self.addr_info_reqs.clear();
-        self.get_env_reqs.clear();
+    async fn handle_connection_refresh(
+        &mut self,
+        message_bus: &mut MessageBus<Self>,
+    ) -> Result<(), SimpleProxyError> {
+        while let Some((message_id, layer_id)) = self.addr_info_reqs.pop_front() {
+            message_bus
+                .send(ToLayer::from(AgentLostSimpleResponse::addr_info(
+                    layer_id, message_id,
+                )))
+                .await;
+        }
+
+        while let Some((message_id, layer_id)) = self.get_env_reqs.pop_front() {
+            message_bus
+                .send(ToLayer::from(AgentLostSimpleResponse::get_env(
+                    layer_id, message_id,
+                )))
+                .await;
+        }
+
+        Ok(())
     }
 }
 
@@ -129,7 +186,9 @@ impl BackgroundTask for SimpleProxy {
                         .await
                 }
                 SimpleProxyMessage::ProtocolVersion(version) => self.set_protocol_version(version),
-                SimpleProxyMessage::ConnectionRefresh => self.handle_connection_refresh(),
+                SimpleProxyMessage::ConnectionRefresh => {
+                    self.handle_connection_refresh(message_bus).await?
+                }
             }
         }
 

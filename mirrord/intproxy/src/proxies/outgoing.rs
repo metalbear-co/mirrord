@@ -16,7 +16,7 @@ use tracing::Level;
 use self::interceptor::Interceptor;
 use crate::{
     background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
-    error::UnexpectedAgentMessage,
+    error::{agent_lost_io_error, UnexpectedAgentMessage},
     main_tasks::ToLayer,
     proxies::outgoing::net_protocol_ext::NetProtocolExt,
     request_queue::RequestQueue,
@@ -60,6 +60,23 @@ impl fmt::Display for InterceptorId {
             "outgoing interceptor {}-{}",
             self.connection_id, self.protocol
         )
+    }
+}
+
+/// Lightweight (no allocations) [`ProxyMessage`] to be returned when connection with the
+/// mirrord-agent is lost. Must be converted into real [`ProxyMessage`] via [`From`].
+pub struct AgentLostOutgoingResponse(LayerId, MessageId);
+
+impl From<AgentLostOutgoingResponse> for ToLayer {
+    fn from(value: AgentLostOutgoingResponse) -> Self {
+        let AgentLostOutgoingResponse(layer_id, message_id) = value;
+        let error = agent_lost_io_error();
+
+        ToLayer {
+            layer_id,
+            message_id,
+            message: ProxyToLayerMessage::OutgoingConnect(Err(error)),
+        }
     }
 }
 
@@ -221,10 +238,24 @@ impl OutgoingProxy {
         message_bus.send(ProxyMessage::ToAgent(msg)).await;
     }
 
-    async fn handle_connection_refresh(&mut self) {
-        self.datagrams_reqs.clear();
-        self.stream_reqs.clear();
+    async fn handle_connection_refresh(&mut self, message_bus: &mut MessageBus<Self>) {
         self.txs.clear();
+
+        while let Some((message_id, layer_id)) = self.datagrams_reqs.pop_front() {
+            message_bus
+                .send(ToLayer::from(AgentLostOutgoingResponse(
+                    layer_id, message_id,
+                )))
+                .await;
+        }
+
+        while let Some((message_id, layer_id)) = self.stream_reqs.pop_front() {
+            message_bus
+                .send(ToLayer::from(AgentLostOutgoingResponse(
+                    layer_id, message_id,
+                )))
+                .await;
+        }
     }
 }
 
@@ -271,7 +302,7 @@ impl BackgroundTask for OutgoingProxy {
                         req,
                         message_bus
                     ).await,
-                    Some(OutgoingProxyMessage::ConnectionRefresh) => self.handle_connection_refresh().await,
+                    Some(OutgoingProxyMessage::ConnectionRefresh) => self.handle_connection_refresh(message_bus).await,
                 },
 
                 Some(task_update) = self.background_tasks.next() => match task_update {

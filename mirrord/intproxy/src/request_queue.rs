@@ -69,10 +69,4 @@ impl<T: fmt::Debug> RequestQueue<T> {
     pub fn pop_front_with_data(&mut self) -> Option<(MessageId, LayerId, T)> {
         self.inner.pop_front()
     }
-
-    /// Clear request queue.
-    #[tracing::instrument(level = Level::TRACE)]
-    pub fn clear(&mut self) {
-        self.inner.clear()
-    }
 }

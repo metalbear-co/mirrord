@@ -15,18 +15,11 @@ use tracing::Level;
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    error::UnexpectedAgentMessage,
+    error::{agent_lost_io_error, UnexpectedAgentMessage},
     main_tasks::{LayerClosed, LayerForked, ProxyMessage, ToLayer},
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
 };
-
-fn agent_lost_io_error() -> ResponseError {
-    ResponseError::RemoteIO(RemoteIOError {
-        raw_os_error: None,
-        kind: ErrorKindInternal::Unknown("connection with mirrord-agent was lost".to_string()),
-    })
-}
 
 macro_rules! dummy_file_response {
     ($name: ident) => {
