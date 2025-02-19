@@ -456,6 +456,8 @@ pub(crate) async fn container_command(
             .start_external_proxy()
             .await
             .unwrap()
+            .prepare_runtime_command()
+            .unwrap()
             .prepare_compose_file()
             .await
             .unwrap()
