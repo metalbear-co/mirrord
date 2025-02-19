@@ -1,3 +1,8 @@
+//! # Note on path handling
+//!
+//! When operating on the paths provided from the user application, remember to verify/remap them.
+//! Canonical order of operations can be found in [`common_path_check`].
+
 #[cfg(target_os = "linux")]
 use std::time::Duration;
 use std::{
@@ -38,7 +43,9 @@ use crate::{
 /// 1 Megabyte. Large read requests can lead to timeouts.
 const MAX_READ_SIZE: u64 = 1024 * 1024;
 
+/// Convenience extension for verifying that a [`Path`] is not relative.
 trait PathExt {
+    /// If this [`Path`] is relative, returns a [`Detour::Bypass`].
     fn ensure_not_relative(&self) -> Detour<()>;
 }
 
@@ -52,6 +59,14 @@ impl PathExt for Path {
     }
 }
 
+/// Performs standard verification of paths accessed by the user application.
+///
+/// Operations in order:
+/// 1. Bypass if the path is not relative.
+/// 2. Remap the file according to the config.
+/// 3. Bypass if the new path should be accessed locally.
+///
+/// Returns the remapped path.
 fn common_path_check(path: PathBuf, write: bool) -> Detour<PathBuf> {
     path.ensure_not_relative()?;
     let path = crate::setup().file_remapper().change_path(path);
