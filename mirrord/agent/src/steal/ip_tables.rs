@@ -58,16 +58,6 @@ pub(crate) static IPTABLE_STANDARD: LazyLock<String> = LazyLock::new(|| {
     })
 });
 
-pub static IPTABLE_INPUT_ENV: &str = "MIRRORD_IPTABLE_INPUT_NAME";
-pub static IPTABLE_INPUT: LazyLock<String> = LazyLock::new(|| {
-    std::env::var(IPTABLE_INPUT_ENV).unwrap_or_else(|_| {
-        format!(
-            "MIRRORD_INPUT_{}",
-            Alphanumeric.sample_string(&mut rand::rng(), 5)
-        )
-    })
-});
-
 pub static IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV: &str = "IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL";
 pub static IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV).unwrap_or_else(|_| {
@@ -212,7 +202,7 @@ pub(crate) enum Redirects<IPT: IPTables + Send + Sync> {
     Ambient(AmbientRedirect<IPT>),
     Standard(StandardRedirect<IPT>),
     Mesh(MeshRedirect<IPT>),
-    FlushConnections(FlushConnections<IPT, Redirects<IPT>>),
+    FlushConnections(FlushConnections<Redirects<IPT>>),
     PrerouteFallback(PreroutingRedirect<IPT>),
 }
 
@@ -258,8 +248,7 @@ where
         };
 
         if flush_connections {
-            redirect =
-                Redirects::FlushConnections(FlushConnections::create(ipt, Box::new(redirect))?)
+            redirect = Redirects::FlushConnections(FlushConnections::create(Box::new(redirect))?)
         }
 
         redirect.mount_entrypoint().await?;
@@ -287,7 +276,7 @@ where
         };
 
         if flush_connections {
-            redirect = Redirects::FlushConnections(FlushConnections::load(ipt, Box::new(redirect))?)
+            redirect = Redirects::FlushConnections(FlushConnections::load(Box::new(redirect))?)
         }
 
         Ok(Self { redirect })
