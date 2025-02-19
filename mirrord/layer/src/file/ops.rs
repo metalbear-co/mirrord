@@ -52,12 +52,6 @@ impl PathExt for Path {
     }
 }
 
-macro_rules! remap_path {
-    ($path:expr) => {
-        $crate::setup().file_remapper().change_path($path)
-    };
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RemoteFile {
     pub fd: u64,
@@ -200,7 +194,7 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
     let path = path?;
 
     path.ensure_not_relative()?;
-    let path = remap_path!(path);
+    let path = crate::setup().file_remapper().change_path(path);
     crate::setup()
         .file_filter()
         .ensure_remote(&path, open_options.is_write())?;
@@ -262,7 +256,7 @@ pub(crate) fn openat(
     // `openat` behaves the same as `open` when the path is absolute. When called with AT_FDCWD, the
     // call is propagated to `open`.
     if path.is_absolute() || fd == AT_FDCWD {
-        let path = remap_path!(path);
+        let path = crate::setup().file_remapper().change_path(path);
         open(Detour::Success(path), open_options)
     } else {
         // Relative path requires special handling, we must identify the relative part (relative to
@@ -325,7 +319,7 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
 /// Resolves the symbolic link `path`.
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
-    let path = remap_path!(path?);
+    let path = crate::setup().file_remapper().change_path(path?);
 
     path.ensure_not_relative()?;
     crate::setup().file_filter().ensure_remote(&path, false)?;
@@ -346,7 +340,7 @@ pub(crate) fn mkdir(pathname: Detour<PathBuf>, mode: u32) -> Detour<()> {
 
     pathname.ensure_not_relative()?;
 
-    let path = remap_path!(pathname);
+    let path = crate::setup().file_remapper().change_path(pathname);
 
     crate::setup().file_filter().ensure_remote(&path, true)?;
 
@@ -368,7 +362,7 @@ pub(crate) fn mkdirat(dirfd: RawFd, pathname: Detour<PathBuf>, mode: u32) -> Det
     let pathname: PathBuf = pathname?;
 
     if pathname.is_absolute() || dirfd == AT_FDCWD {
-        let path = remap_path!(pathname);
+        let path = crate::setup().file_remapper().change_path(pathname);
         path.ensure_not_relative()?;
         crate::setup().file_filter().ensure_remote(&path, true)?;
 
@@ -399,7 +393,7 @@ pub(crate) fn rmdir(pathname: Detour<PathBuf>) -> Detour<()> {
 
     pathname.ensure_not_relative()?;
 
-    let path = remap_path!(pathname);
+    let path = crate::setup().file_remapper().change_path(pathname);
 
     crate::setup().file_filter().ensure_remote(&path, true)?;
 
@@ -419,7 +413,7 @@ pub(crate) fn unlink(pathname: Detour<PathBuf>) -> Detour<()> {
 
     pathname.ensure_not_relative()?;
 
-    let path = remap_path!(pathname);
+    let path = crate::setup().file_remapper().change_path(pathname);
 
     crate::setup().file_filter().ensure_remote(&path, true)?;
 
@@ -438,7 +432,7 @@ pub(crate) fn unlinkat(dirfd: RawFd, pathname: Detour<PathBuf>, flags: u32) -> D
     let pathname = pathname?;
 
     let unlink = if pathname.is_absolute() || dirfd == AT_FDCWD {
-        let path = remap_path!(pathname);
+        let path = crate::setup().file_remapper().change_path(pathname);
         path.ensure_not_relative()?;
         crate::setup().file_filter().ensure_remote(&path, true)?;
         UnlinkAtRequest {
@@ -527,7 +521,7 @@ pub(crate) fn access(path: Detour<PathBuf>, mode: c_int) -> Detour<c_int> {
 
     path.ensure_not_relative()?;
 
-    let path = remap_path!(path);
+    let path = crate::setup().file_remapper().change_path(path);
 
     // Is the caller asking about write access to the file?
     let is_write = (mode & libc::W_OK) != 0;
@@ -578,7 +572,7 @@ pub(crate) fn xstat(
                 if fd == AT_FDCWD {
                     path.ensure_not_relative()?;
 
-                    path = remap_path!(path);
+                    path = crate::setup().file_remapper().change_path(path);
                     crate::setup().file_filter().ensure_remote(&path, false)?;
                     None
                 } else {
@@ -593,7 +587,7 @@ pub(crate) fn xstat(
 
             path.ensure_not_relative()?;
 
-            let path = remap_path!(path);
+            let path = crate::setup().file_remapper().change_path(path);
 
             crate::setup().file_filter().ensure_remote(&path, false)?;
             (Some(path), None)
@@ -763,7 +757,7 @@ pub(crate) fn statfs(path: Detour<PathBuf>) -> Detour<XstatFsResponseV2> {
 
     path.ensure_not_relative()?;
 
-    let path = remap_path!(path);
+    let path = crate::setup().file_remapper().change_path(path);
 
     crate::setup().file_filter().ensure_remote(&path, false)?;
 
@@ -817,7 +811,7 @@ pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
 
     path.ensure_not_relative()?;
 
-    let path = remap_path!(path);
+    let path = crate::setup().file_remapper().change_path(path);
 
     let realpath = absolute_path(path);
 
