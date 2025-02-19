@@ -225,10 +225,6 @@ impl Bypass {
     pub fn relative_path(path: impl Into<Vec<u8>>) -> Self {
         Bypass::RelativePath(CString::new(path).expect("Should be CStringable"))
     }
-
-    pub fn ignored_file(path: impl Into<Vec<u8>>) -> Self {
-        Bypass::IgnoredFile(CString::new(path).expect("Should be CStringable"))
-    }
 }
 
 /// [`ControlFlow`](std::ops::ControlFlow)-like enum to be used by hooks.

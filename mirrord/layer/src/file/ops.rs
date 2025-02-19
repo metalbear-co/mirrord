@@ -32,25 +32,6 @@ use crate::{
 /// 1 Megabyte. Large read requests can lead to timeouts.
 const MAX_READ_SIZE: u64 = 1024 * 1024;
 
-/// Helper macro for checking if the given path should be handled remotely.
-/// Uses global [`crate::setup()`].
-///
-/// Should the file be ignored, this macro exists current context with [`Bypass::IgnoredFile`].
-///
-/// # Arguments
-///
-/// * `path` - [`PathBuf`]
-/// * `write` - [`bool`], stating whether the file is accessed for writing
-macro_rules! ensure_not_ignored {
-    ($path:expr, $write:expr) => {
-        $crate::setup().file_filter().continue_or_bypass_with(
-            $path.to_str().unwrap_or_default(),
-            $write,
-            || Bypass::ignored_file($path.to_str().unwrap_or_default()),
-        )?;
-    };
-}
-
 macro_rules! check_relative_paths {
     ($path:expr) => {
         if $path.is_relative() {
@@ -210,7 +191,9 @@ pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> 
 
     let path = remap_path!(path);
 
-    ensure_not_ignored!(path, open_options.is_write());
+    crate::setup()
+        .file_filter()
+        .ensure_remote(&path, open_options.is_write())?;
 
     let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)
         .or_else(|fail| match fail {
@@ -336,7 +319,7 @@ pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
 
     check_relative_paths!(path);
 
-    ensure_not_ignored!(path, false);
+    crate::setup().file_filter().ensure_remote(&path, false)?;
 
     let requesting_path = ReadLinkFileRequest { path };
 
@@ -356,7 +339,7 @@ pub(crate) fn mkdir(pathname: Detour<PathBuf>, mode: u32) -> Detour<()> {
 
     let path = remap_path!(pathname);
 
-    ensure_not_ignored!(path, true);
+    crate::setup().file_filter().ensure_remote(&path, true)?;
 
     let mkdir = MakeDirRequest {
         pathname: path,
@@ -378,7 +361,7 @@ pub(crate) fn mkdirat(dirfd: RawFd, pathname: Detour<PathBuf>, mode: u32) -> Det
     if pathname.is_absolute() || dirfd == AT_FDCWD {
         let path = remap_path!(pathname);
         check_relative_paths!(path);
-        ensure_not_ignored!(path, true);
+        crate::setup().file_filter().ensure_remote(&path, true)?;
 
         mkdir(Detour::Success(path), mode)
     } else {
@@ -409,7 +392,7 @@ pub(crate) fn rmdir(pathname: Detour<PathBuf>) -> Detour<()> {
 
     let path = remap_path!(pathname);
 
-    ensure_not_ignored!(path, true);
+    crate::setup().file_filter().ensure_remote(&path, true)?;
 
     let rmdir = RemoveDirRequest { pathname: path };
 
@@ -429,7 +412,7 @@ pub(crate) fn unlink(pathname: Detour<PathBuf>) -> Detour<()> {
 
     let path = remap_path!(pathname);
 
-    ensure_not_ignored!(path, true);
+    crate::setup().file_filter().ensure_remote(&path, true)?;
 
     let unlink = RemoveDirRequest { pathname: path };
 
@@ -448,7 +431,7 @@ pub(crate) fn unlinkat(dirfd: RawFd, pathname: Detour<PathBuf>, flags: u32) -> D
     let unlink = if pathname.is_absolute() || dirfd == AT_FDCWD {
         let path = remap_path!(pathname);
         check_relative_paths!(path);
-        ensure_not_ignored!(path, true);
+        crate::setup().file_filter().ensure_remote(&path, true)?;
         UnlinkAtRequest {
             dirfd: None,
             pathname: path,
@@ -544,7 +527,9 @@ pub(crate) fn access(path: Detour<PathBuf>, mode: c_int) -> Detour<c_int> {
     // into account when deciding whether to ignore, because when a caller is asking whether they
     // have write access to a file and then write to it, we want the test and the actual write to
     // happen with the same file.
-    ensure_not_ignored!(path, is_write);
+    crate::setup()
+        .file_filter()
+        .ensure_remote(&path, is_write)?;
 
     let access = AccessFileRequest {
         pathname: path,
@@ -585,7 +570,7 @@ pub(crate) fn xstat(
                     check_relative_paths!(path);
 
                     path = remap_path!(path);
-                    ensure_not_ignored!(path, false);
+                    crate::setup().file_filter().ensure_remote(&path, false)?;
                     None
                 } else {
                     Some(get_remote_fd(fd)?)
@@ -601,7 +586,7 @@ pub(crate) fn xstat(
 
             let path = remap_path!(path);
 
-            ensure_not_ignored!(path, false);
+            crate::setup().file_filter().ensure_remote(&path, false)?;
             (Some(path), None)
         }
         // fstat
@@ -660,7 +645,9 @@ pub(crate) fn statx_logic(
     }
 
     let (fd, path) = if path_name.is_absolute() {
-        ensure_not_ignored!(path_name, false);
+        crate::setup()
+            .file_filter()
+            .ensure_remote(&path_name, false)?;
         (None, Some(path_name))
     } else if !path_name.as_os_str().is_empty() && dir_fd == libc::AT_FDCWD {
         return Detour::Bypass(Bypass::relative_path(
@@ -769,7 +756,7 @@ pub(crate) fn statfs(path: Detour<PathBuf>) -> Detour<XstatFsResponseV2> {
 
     let path = remap_path!(path);
 
-    ensure_not_ignored!(path, false);
+    crate::setup().file_filter().ensure_remote(&path, false)?;
 
     // intproxy downgrades to old version if new one is not supported by agent, and converts
     // old version responses to V2 responses.
@@ -825,7 +812,9 @@ pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
 
     let realpath = absolute_path(path);
 
-    ensure_not_ignored!(realpath, false);
+    crate::setup()
+        .file_filter()
+        .ensure_remote(&realpath, false)?;
 
     // check that file exists
     xstat(Some(Detour::Success(realpath.clone())), None, true)?;
