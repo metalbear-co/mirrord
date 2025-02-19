@@ -44,7 +44,7 @@ shellexpand = "3"
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-tokio-retry = { version = "0.3", optional = true }
+tokio-retry = { workspace = true, optional = true }
 
 [dev-dependencies]
 rstest.workspace = true

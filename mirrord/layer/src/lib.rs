@@ -109,6 +109,7 @@ mod integration_tests_deps {
     use actix_codec as _;
     use futures as _;
     use mirrord_intproxy as _;
+    use serde_json as _;
     use tempfile as _;
     use test_cdylib as _;
     use tests as _;

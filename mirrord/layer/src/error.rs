@@ -1,12 +1,12 @@
 use std::{env::VarError, net::SocketAddr, ptr, str::ParseBoolError};
 
-use errno::set_errno;
 use ignore_codes::*;
 use libc::{c_char, hostent, DIR, FILE};
 use mirrord_config::config::ConfigError;
 use mirrord_protocol::{ResponseError, SerializationError};
 #[cfg(target_os = "macos")]
 use mirrord_sip::SipError;
+use nix::errno::Errno;
 use thiserror::Error;
 use tracing::{error, info};
 
@@ -38,7 +38,7 @@ mod ignore_codes {
 
 /// Errors that occur in the layer's hook functions, and will reach the user's application.
 ///
-/// These errors are converted to [`libc`] error codes, and are also used to [`set_errno`].
+/// These errors are converted to [`libc`] error codes, and are also used to [`Errno::set_raw`].
 #[derive(Error, Debug)]
 pub(crate) enum HookError {
     #[error("mirrord-layer: `{0}`")]
@@ -147,9 +147,6 @@ pub(crate) enum LayerError {
 
     #[error("mirrord-layer: IO failed with `{0}`!")]
     IO(#[from] std::io::Error),
-
-    #[error("mirrord-layer: JSON convert error")]
-    JSONConvertError(#[from] serde_json::Error),
 
     #[error("mirrord-layer: Failed setting up mirrord with configuration error `{0}`!")]
     Config(#[from] ConfigError),
@@ -309,7 +306,7 @@ impl From<HookError> for i64 {
             HookError::InvalidBindAddressForDomain => libc::EINVAL,
         };
 
-        set_errno(errno::Errno(libc_error));
+        Errno::set_raw(libc_error);
 
         -1
     }
