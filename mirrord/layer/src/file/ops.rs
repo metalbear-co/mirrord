@@ -523,9 +523,11 @@ pub(crate) fn fsync(fd: RawFd) -> Detour<c_int> {
 }
 
 /// General stat function that can be used for lstat, fstat, stat and fstatat.
+///
 /// Note: We treat cases of `AT_SYMLINK_NOFOLLOW_ANY` as `AT_SYMLINK_NOFOLLOW` because even Go does
 /// that.
-/// `rawish_path` is Option<Detour<PathBuf>> because we need to differentiate between null pointer
+///
+/// `rawish_path` is `Option<Detour<PathBuf>>` because we need to differentiate between null pointer
 /// and non existing argument (for error handling)
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(crate) fn xstat(

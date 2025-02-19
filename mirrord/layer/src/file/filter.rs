@@ -409,7 +409,7 @@ mod tests {
 
         let file_filter = FileFilter::new(fs_config);
 
-        let res = file_filter.ensure_remote(&Path::new(path), write);
+        let res = file_filter.ensure_remote(Path::new(path), write);
         println!("filter result: {res:?}");
         assert_eq!(res.kind(), expected);
     }
@@ -444,7 +444,7 @@ mod tests {
 
         let file_filter = FileFilter::new(fs_config);
 
-        let res = file_filter.ensure_remote(&Path::new(path), write);
+        let res = file_filter.ensure_remote(Path::new(path), write);
         println!("filter result: {res:?}");
 
         assert_eq!(res.kind(), expected);
@@ -468,7 +468,7 @@ mod tests {
     #[case("/root/.nuget/packages/microsoft.azure.amqp", DetourKind::Success)]
     fn not_found_set(#[case] path: &str, #[case] expected: DetourKind) {
         let filter = FileFilter::new(Default::default());
-        let res = filter.ensure_remote(&Path::new(path), false);
+        let res = filter.ensure_remote(Path::new(path), false);
         println!("filter result: {res:?}");
 
         assert_eq!(res.kind(), expected);
