@@ -35,7 +35,7 @@ frida-gum = { version = "0.15", features = ["auto-download"] }
 http.workspace = true
 libc.workspace = true
 nix = { workspace = true, features = ["net", "process", "signal"] }
-null-terminated = "0.3"
+null-terminated = { version = "0.3", default-features = false }
 num-traits = "0.2"
 rand.workspace = true
 regex.workspace = true
