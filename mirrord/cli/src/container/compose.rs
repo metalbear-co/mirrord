@@ -277,9 +277,9 @@ impl ComposeRunner<PrepareRuntimeCommand> {
         );
 
         add_env_vars_to_both(MIRRORD_CONFIG_FILE_ENV, "/tmp/mirrord-config.json");
-        add_env_vars_to_both(
-            &layer_config_file.path().to_string_lossy(),
-            "/tmp/mirrord-config.json",
+        sidecar_info.volumes.insert(
+            layer_config_file.path().to_string_lossy().into(),
+            "/tmp/mirrord-config.json".into(),
         );
 
         let mut load_env_and_mount_pem = |env: &str, path: &Path| {
