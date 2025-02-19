@@ -8,6 +8,36 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.133.1](https://github.com/metalbear-co/mirrord/tree/3.133.1) - 2025-02-19
+
+
+### Fixed
+
+- Added a reconnection mechanism when using mirrord operator.
+  [#2901](https://github.com/metalbear-co/mirrord/issues/2901)
+- Fixed issues with rollout targets without a `selector` field present.
+  [#3063](https://github.com/metalbear-co/mirrord/issues/3063)
+- Look for the correct pid that matches the targets container_id (by searching
+  /proc/pid/cgroup).
+  [#3076](https://github.com/metalbear-co/mirrord/issues/3076)
+- Prevent reading a remote directory from producing an 'unexpected response'
+  error and crashing.
+  [#3081](https://github.com/metalbear-co/mirrord/issues/3081)
+- Fixed a remote DNS regression introduced when `hickory-resolver` and
+  `hickory-proto` versions were bumped.
+  [#3098](https://github.com/metalbear-co/mirrord/issues/3098)
+- mirrord CLI now correctly emits logs when enabled with `RUST_LOG` environment
+  variable. [#3099](https://github.com/metalbear-co/mirrord/issues/3099)
+
+
+### Internal
+
+- Removed dependency on the umaintained `dotenv` crate. Replaced with a
+  dependency on the `dotenvy` crate.
+- Removed some unnecessary dependencies from the `mirrord-layer` crate.
+- Added a naive update to our port forward wrapper to force first check error
+  channel instead of ranomly picking branch on `tokio::select!` impl.
+
 ## [3.133.0](https://github.com/metalbear-co/mirrord/tree/3.133.0) - 2025-02-17
 
 
