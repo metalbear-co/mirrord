@@ -240,10 +240,19 @@ impl ComposeRunner<PrepareRuntimeCommand> {
                 },
         } = self;
 
-        let mut runtime_command_builder = RuntimeCommandBuilder::new(runtime);
+        let mut sidecar_info = ServiceInfo::default();
+        let mut user_service_info = ServiceInfo::default();
 
-        let mut sidecar_info = ContainerInfo::default();
-        let mut user_service_info = ContainerInfo::default();
+        // TODO(alex) [mid]: This is dumb, just clone at the end and not add to both what is sidecar
+        // only.
+        let mut add_env_vars_to_both = |key: &str, value: &str| {
+            sidecar_info
+                .env_vars
+                .insert(key.to_string(), value.to_string());
+            user_service_info
+                .env_vars
+                .insert(key.to_string(), value.to_string());
+        };
 
         if let Ok(console_addr) = std::env::var(MIRRORD_CONSOLE_ADDR_ENV) {
             if console_addr
@@ -251,7 +260,7 @@ impl ComposeRunner<PrepareRuntimeCommand> {
                 .map(|addr: SocketAddr| !addr.ip().is_loopback())
                 .unwrap_or_default()
             {
-                runtime_command_builder.add_env(MIRRORD_CONSOLE_ADDR_ENV, console_addr);
+                add_env_vars_to_both(MIRRORD_CONSOLE_ADDR_ENV.into(), &console_addr);
             } else {
                 // TODO(alex) [mid]: Use eth0 ip.
                 tracing::warn!(
@@ -261,21 +270,26 @@ impl ComposeRunner<PrepareRuntimeCommand> {
             }
         }
 
-        runtime_command_builder.add_env(MIRRORD_PROGRESS_ENV, "off");
-        runtime_command_builder.add_env(
+        add_env_vars_to_both(MIRRORD_PROGRESS_ENV, "off");
+        add_env_vars_to_both(
             MIRRORD_EXECUTION_KIND_ENV,
-            (CONTAINER_EXECUTION_KIND as u32).to_string(),
+            &(CONTAINER_EXECUTION_KIND as u32).to_string(),
         );
 
-        runtime_command_builder.add_env(MIRRORD_CONFIG_FILE_ENV, "/tmp/mirrord-config.json");
-        runtime_command_builder
-            .add_volume::<true, _, _>(layer_config_file.path(), "/tmp/mirrord-config.json");
+        add_env_vars_to_both(MIRRORD_CONFIG_FILE_ENV, "/tmp/mirrord-config.json");
+        add_env_vars_to_both(
+            &layer_config_file.path().to_string_lossy(),
+            "/tmp/mirrord-config.json",
+        );
 
         let mut load_env_and_mount_pem = |env: &str, path: &Path| {
             let container_path = format!("/tmp/{}.pem", env.to_lowercase());
 
-            runtime_command_builder.add_env(env, &container_path);
-            runtime_command_builder.add_volume::<true, _, _>(path, container_path);
+            add_env_vars_to_both(env, &container_path);
+            sidecar_info.volumes.insert(
+                path.to_string_lossy().into(),
+                format!("{}:ro", container_path),
+            );
         };
 
         if let Some(path) = config.internal_proxy.client_tls_certificate.as_ref() {
@@ -294,6 +308,10 @@ impl ComposeRunner<PrepareRuntimeCommand> {
             load_env_and_mount_pem(MIRRORD_EXTERNAL_TLS_KEY_ENV, path)
         }
 
+        sidecar_info
+            .env_vars
+            .insert(MIRRORD_INTPROXY_CONTAINER_MODE_ENV.into(), "true".into());
+
         let mut connection_info = Vec::new();
         let mut execution_info_env_without_connection_info = Vec::new();
         for (key, value) in &external_proxy.environment {
@@ -304,12 +322,29 @@ impl ComposeRunner<PrepareRuntimeCommand> {
             }
         }
 
-        runtime_command_builder.add_envs(execution_info_env_without_connection_info);
-
-        runtime_command_builder.add_env(
-            LINUX_INJECTION_ENV_VAR,
-            config.container.cli_image_lib_path.clone(),
+        sidecar_info.env_vars.extend(
+            execution_info_env_without_connection_info
+                .clone()
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string())),
         );
+        user_service_info.env_vars.extend(
+            execution_info_env_without_connection_info
+                .clone()
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string())),
+        );
+
+        sidecar_info.env_vars.insert(
+            LINUX_INJECTION_ENV_VAR.to_string(),
+            config.container.cli_image_lib_path.to_string_lossy().into(),
+        );
+
+        user_service_info
+            .volumes_from
+            .insert("mirrord-sidecar".into());
+        user_service_info.network_mode.replace("".to_string());
+        user_service_info.depends_on.replace("".to_string());
 
         Ok(ComposeRunner {
             progress,
@@ -320,7 +355,8 @@ impl ComposeRunner<PrepareRuntimeCommand> {
                 external_proxy_tls_guards,
                 analytics,
                 layer_config_file,
-                runtime_command_builder,
+                sidecar_info,
+                user_service_info,
             },
         })
     }
@@ -343,7 +379,8 @@ impl ComposeRunner<PrepareCompose> {
                     external_proxy_tls_guards,
                     analytics,
                     layer_config_file,
-                    runtime_command_builder,
+                    sidecar_info,
+                    user_service_info,
                 },
             runtime,
             runtime_args,
@@ -352,25 +389,23 @@ impl ComposeRunner<PrepareCompose> {
         let services = Self::prepare_services(&mut user_compose)?;
 
         for (service_key, service) in services.iter_mut() {
-            let mut runtime_command_builder = runtime_command_builder.clone();
             if service_key
                 .as_str()
                 .is_some_and(|key| key == MIRRORD_COMPOSE_SIDECAR_SERVICE)
             {
                 // continue;
-                runtime_command_builder.add_env(MIRRORD_INTPROXY_CONTAINER_MODE_ENV, "true");
                 // sidecar_command.add_envs(connection_info);
                 let service = service
                     .as_mapping_mut()
                     .ok_or_else(|| ComposeError::UnexpectedType("mapping".to_string()))?;
 
-                ComposeYamler::prepare_yaml::<true>(service, &runtime_command_builder)?;
+                sidecar_info.clone().prepare_yaml(service)?;
             } else {
                 let service = service
                     .as_mapping_mut()
                     .ok_or_else(|| ComposeError::UnexpectedType("mapping".to_string()))?;
 
-                ComposeYamler::prepare_yaml::<false>(service, &runtime_command_builder)?;
+                user_service_info.clone().prepare_yaml(service)?;
             }
         }
 
@@ -389,7 +424,6 @@ impl ComposeRunner<PrepareCompose> {
                 external_proxy_tls_guards,
                 analytics,
                 layer_config_file,
-                runtime_command_builder,
                 compose_yaml,
             },
             runtime,
@@ -433,6 +467,7 @@ impl ComposeRunner<PrepareCompose> {
             serde_yaml::from_str(&format!(
                 r#"
                         image: meowjesty/mirrord-cli:latest
+                        command: mirrord intproxy --port 8888
                         ports:
                           - "8000:5000"
                     "#
@@ -456,7 +491,6 @@ impl ComposeRunner<RunCompose> {
                     external_proxy_tls_guards,
                     mut analytics,
                     layer_config_file,
-                    runtime_command_builder,
                     compose_yaml,
                 },
         } = self;
