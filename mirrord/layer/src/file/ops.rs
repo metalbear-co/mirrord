@@ -14,6 +14,7 @@ use mirrord_protocol::{
     },
     ResponseError,
 };
+use nix::errno::Errno;
 use rand::distr::{Alphanumeric, SampleString};
 #[cfg(debug_assertions)]
 use tracing::Level;
@@ -157,10 +158,10 @@ fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
     let file_path_ptr = file_c_string.as_ptr();
     let local_file_fd: RawFd = unsafe { FN_OPEN(file_path_ptr, O_RDONLY | O_CREAT) };
     if local_file_fd == -1 {
-        let error = errno::errno();
+        let error = Errno::last_raw();
         // Close the remote file if creating a tmp local file failed and we have an invalid local fd
         close_remote_file_on_failure(remote_fd)?;
-        Detour::Error(HookError::LocalFileCreation(remote_fd, error.0))
+        Detour::Error(HookError::LocalFileCreation(remote_fd, error))
     } else {
         unsafe { libc::unlink(file_path_ptr) };
         Detour::Success(local_file_fd)
@@ -174,10 +175,10 @@ fn create_local_devnull_file(remote_fd: u64) -> Detour<RawFd> {
     let file_path_ptr = file_c_string.as_ptr();
     let local_file_fd: RawFd = unsafe { FN_OPEN(file_path_ptr, O_RDONLY) };
     if local_file_fd == -1 {
-        let error = errno::errno();
+        let error = Errno::last_raw();
         // Close the remote file if creating a tmp local file failed and we have an invalid local fd
         close_remote_file_on_failure(remote_fd)?;
-        Detour::Error(HookError::LocalFileCreation(remote_fd, error.0))
+        Detour::Error(HookError::LocalFileCreation(remote_fd, error))
     } else {
         Detour::Success(local_file_fd)
     }

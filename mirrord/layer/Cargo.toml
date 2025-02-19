@@ -29,20 +29,16 @@ mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = [
 
 base64.workspace = true
 bincode.workspace = true
-bytemuck = "1"
 ctor = "0.2"
 dotenvy.workspace = true
-errno = "0.3"
 frida-gum = { version = "0.15", features = ["auto-download"] }
-hashbrown = "0.15"
-hyper = { workspace = true }
+http.workspace = true
 libc.workspace = true
 nix = { workspace = true, features = ["net", "process", "signal"] }
-null-terminated = "0.3"
+null-terminated = { version = "0.3", default-features = false }
 num-traits = "0.2"
 rand.workspace = true
 regex.workspace = true
-serde_json.workspace = true
 socket2.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
@@ -63,6 +59,7 @@ mirrord-intproxy = { path = "../intproxy" }
 actix-codec.workspace = true
 futures.workspace = true
 rstest.workspace = true
+serde_json.workspace = true
 tempfile.workspace = true
 tests = { path = "../../tests" }
 test-cdylib = "1"

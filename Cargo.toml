@@ -170,6 +170,9 @@ quote = "1"
 # Used by `console`, `cli`.
 miette = "7"
 
+# Used by `kube`, `intproxy`.
+tokio-retry = "0.3"
+
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 

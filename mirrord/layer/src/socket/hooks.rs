@@ -6,10 +6,10 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
-use errno::{set_errno, Errno};
-use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t, EINVAL};
+use libc::{c_char, c_int, c_void, hostent, size_t, sockaddr, socklen_t, ssize_t};
 use mirrord_config::experimental::ExperimentalConfig;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
+use nix::errno::Errno;
 
 #[cfg(target_os = "macos")]
 use super::apple_dnsinfo::*;
@@ -104,7 +104,7 @@ pub(crate) unsafe extern "C" fn gethostname_detour(
             raw_name.copy_from_nonoverlapping(host.as_ptr(), cmp::min(name_length, host_len));
 
             if host_len > name_length {
-                set_errno(Errno(EINVAL));
+                Errno::EINVAL.set();
 
                 -1
             } else {
