@@ -301,7 +301,7 @@ impl BackgroundTask for HttpGatewayTask {
     type MessageOut = InProxyTaskMessage;
 
     #[tracing::instrument(level = Level::TRACE, name = "http_gateway_task_main_loop", skip(message_bus))]
-    async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         // Will return 9 backoffs: 50ms, 100ms, 200ms, 400ms, 500ms, 500ms, ...
         let mut backoffs = ExponentialBackoff::from_millis(2)
             .factor(25)
