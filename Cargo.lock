@@ -1768,9 +1768,9 @@ dependencies = [
 
 [[package]]
 name = "csv-core"
-version = "0.1.11"
+version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5efa2b3d7902f4b634a20cae3c9c4e6209dc4779feb6863329607560143efa70"
+checksum = "7d02f3b0da4c6504f86e9cd789d8dbafab48c2321be74e9987593de5a894d93d"
 dependencies = [
  "memchr",
 ]
@@ -2310,15 +2310,6 @@ checksum = "886b70328cba8871bfc025858e1de4be16b1d5088f2ba50b57816f4210672615"
 dependencies = [
  "errno 0.2.8",
  "libc",
-]
-
-[[package]]
-name = "exponential-backoff"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ffb309d235a642598183aeda8925e871e85dd5a433c2c877e69ff0a960f4c02"
-dependencies = [
- "fastrand",
 ]
 
 [[package]]
@@ -4305,7 +4296,6 @@ name = "mirrord-intproxy"
 version = "3.133.0"
 dependencies = [
  "bytes",
- "exponential-backoff",
  "http-body-util",
  "hyper 1.5.2",
  "hyper-util",
@@ -4323,6 +4313,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.11",
  "tokio",
+ "tokio-retry",
  "tokio-rustls 0.26.1",
  "tokio-stream",
  "tracing",
