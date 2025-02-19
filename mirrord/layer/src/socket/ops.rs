@@ -93,7 +93,7 @@ pub(super) struct ConnectResult {
 impl ConnectResult {
     pub(super) fn is_failure(&self) -> bool {
         self.error
-            .is_none_or(|error| error != libc::EINTR && error != libc::EINPROGRESS)
+            .is_some_and(|error| error != libc::EINTR && error != libc::EINPROGRESS)
     }
 }
 
