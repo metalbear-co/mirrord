@@ -1,6 +1,12 @@
 #[cfg(target_os = "linux")]
 use std::time::Duration;
-use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
+use std::{
+    env,
+    ffi::CString,
+    io::SeekFrom,
+    os::unix::io::RawFd,
+    path::{Path, PathBuf},
+};
 
 #[cfg(target_os = "linux")]
 use libc::{c_char, statx, statx_timestamp};
@@ -32,12 +38,18 @@ use crate::{
 /// 1 Megabyte. Large read requests can lead to timeouts.
 const MAX_READ_SIZE: u64 = 1024 * 1024;
 
-macro_rules! check_relative_paths {
-    ($path:expr) => {
-        if $path.is_relative() {
-            Detour::Bypass(Bypass::relative_path($path.to_str().unwrap_or_default()))?
-        };
-    };
+trait PathExt {
+    fn ensure_not_relative(&self) -> Detour<()>;
+}
+
+impl PathExt for Path {
+    fn ensure_not_relative(&self) -> Detour<()> {
+        if self.is_relative() {
+            Detour::Bypass(Bypass::relative_path(self.to_str().unwrap_or_default()))
+        } else {
+            Detour::Success(())
+        }
+    }
 }
 
 macro_rules! remap_path {
@@ -187,10 +199,8 @@ fn close_remote_file_on_failure(fd: u64) -> Result<()> {
 pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
     let path = path?;
 
-    check_relative_paths!(path);
-
+    path.ensure_not_relative()?;
     let path = remap_path!(path);
-
     crate::setup()
         .file_filter()
         .ensure_remote(&path, open_options.is_write())?;
@@ -317,8 +327,7 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
 pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
     let path = remap_path!(path?);
 
-    check_relative_paths!(path);
-
+    path.ensure_not_relative()?;
     crate::setup().file_filter().ensure_remote(&path, false)?;
 
     let requesting_path = ReadLinkFileRequest { path };
@@ -335,7 +344,7 @@ pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
 pub(crate) fn mkdir(pathname: Detour<PathBuf>, mode: u32) -> Detour<()> {
     let pathname = pathname?;
 
-    check_relative_paths!(pathname);
+    pathname.ensure_not_relative()?;
 
     let path = remap_path!(pathname);
 
@@ -360,7 +369,7 @@ pub(crate) fn mkdirat(dirfd: RawFd, pathname: Detour<PathBuf>, mode: u32) -> Det
 
     if pathname.is_absolute() || dirfd == AT_FDCWD {
         let path = remap_path!(pathname);
-        check_relative_paths!(path);
+        path.ensure_not_relative()?;
         crate::setup().file_filter().ensure_remote(&path, true)?;
 
         mkdir(Detour::Success(path), mode)
@@ -388,7 +397,7 @@ pub(crate) fn mkdirat(dirfd: RawFd, pathname: Detour<PathBuf>, mode: u32) -> Det
 pub(crate) fn rmdir(pathname: Detour<PathBuf>) -> Detour<()> {
     let pathname = pathname?;
 
-    check_relative_paths!(pathname);
+    pathname.ensure_not_relative()?;
 
     let path = remap_path!(pathname);
 
@@ -408,7 +417,7 @@ pub(crate) fn rmdir(pathname: Detour<PathBuf>) -> Detour<()> {
 pub(crate) fn unlink(pathname: Detour<PathBuf>) -> Detour<()> {
     let pathname = pathname?;
 
-    check_relative_paths!(pathname);
+    pathname.ensure_not_relative()?;
 
     let path = remap_path!(pathname);
 
@@ -430,7 +439,7 @@ pub(crate) fn unlinkat(dirfd: RawFd, pathname: Detour<PathBuf>, flags: u32) -> D
 
     let unlink = if pathname.is_absolute() || dirfd == AT_FDCWD {
         let path = remap_path!(pathname);
-        check_relative_paths!(path);
+        path.ensure_not_relative()?;
         crate::setup().file_filter().ensure_remote(&path, true)?;
         UnlinkAtRequest {
             dirfd: None,
@@ -516,7 +525,7 @@ pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isi
 pub(crate) fn access(path: Detour<PathBuf>, mode: c_int) -> Detour<c_int> {
     let path = path?;
 
-    check_relative_paths!(path);
+    path.ensure_not_relative()?;
 
     let path = remap_path!(path);
 
@@ -567,7 +576,7 @@ pub(crate) fn xstat(
             let mut path = path?;
             let fd = {
                 if fd == AT_FDCWD {
-                    check_relative_paths!(path);
+                    path.ensure_not_relative()?;
 
                     path = remap_path!(path);
                     crate::setup().file_filter().ensure_remote(&path, false)?;
@@ -582,7 +591,7 @@ pub(crate) fn xstat(
         (Some(path), None) => {
             let path = path?;
 
-            check_relative_paths!(path);
+            path.ensure_not_relative()?;
 
             let path = remap_path!(path);
 
@@ -752,7 +761,7 @@ pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponseV2> {
 pub(crate) fn statfs(path: Detour<PathBuf>) -> Detour<XstatFsResponseV2> {
     let path = path?;
 
-    check_relative_paths!(path);
+    path.ensure_not_relative()?;
 
     let path = remap_path!(path);
 
@@ -806,7 +815,7 @@ fn absolute_path(path: PathBuf) -> PathBuf {
 pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
     let path = path?;
 
-    check_relative_paths!(path);
+    path.ensure_not_relative()?;
 
     let path = remap_path!(path);
 
