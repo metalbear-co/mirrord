@@ -41,7 +41,7 @@ pub enum LocalTcpConnection {
 #[derive(Debug)]
 pub struct TcpProxyTask {
     /// The local connection between this task and the user application.
-    connection: LocalTcpConnection,
+    connection: Option<LocalTcpConnection>,
     /// Whether this task should silently discard data coming from the user application.
     ///
     /// The data is discarded only when the remote connection is mirrored.
@@ -60,7 +60,7 @@ impl TcpProxyTask {
     ///   application.
     pub fn new(connection: LocalTcpConnection, discard_data: bool) -> Self {
         Self {
-            connection,
+            connection: Some(connection),
             discard_data,
         }
     }
@@ -72,8 +72,12 @@ impl BackgroundTask for TcpProxyTask {
     type MessageOut = InProxyTaskMessage;
 
     #[tracing::instrument(level = Level::TRACE, name = "tcp_proxy_task_main_loop", skip(message_bus), err(level = Level::WARN))]
-    async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        let mut stream = match self.connection {
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+        let mut stream = match self
+            .connection
+            .take()
+            .expect("task should have a valid connection before run")
+        {
             LocalTcpConnection::FromTheStart { socket, peer } => {
                 let Some(stream) = message_bus
                     .closed()

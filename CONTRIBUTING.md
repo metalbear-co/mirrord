@@ -465,6 +465,14 @@ To debug it with a debugger:
 
 ## Retrieving Agent Logs
 
+You can change the minimum severity of logs emitted by the agent by setting `agent.log_level` in the mirrord config
+file, for example:
+```json
+"agent": {
+	"log_level": "mirrord=trace"
+}
+```
+
 By default, the agent's pod will complete and disappear shortly after the agent exits. In order to be able to retrieve 
 the agent's logs after it crashes, set the agent's pod's TTL to a comfortable number of seconds. This configuration can
 be specified either as a command line argument (`--agent-ttl`), environment variable (`MIRRORD_AGENT_TTL`), or in a
@@ -510,9 +518,19 @@ In order to have a more structured approach, here’s the flow you should follow
     5. When `read` is called, I will check if the fd being read was previously opened by us, and if it is we’ll send a blocking `read` request to the agent. The result will be sent back to the caller.
     6. And so on.
 5. This doc should go later on to our mirrord docs for advanced developers so people can understand how stuff works
-6. After approval of the implementation, you can start writing code, and add relevant e2e tests.
+6. After approval, you can start implementing. As part of the implementation you need to add E2E tests (in the `tests`
+   crate). For each new hook, please test:
+    1. A call that should be sent to the agent. Make sure it has a result that is distinguishable from the result of
+       performing that operation locally.
+    2. A call that should be bypassed. Make sure the result of the operation proves it happened locally. Please test
+       different reasons for bypassing. E.g. for file operations, make a call with a relative path, and make a call
+       with a path that is configured to be local. If it's easier for you, you can test bypassing in an integration
+       test of mirrord-layer (under mirrord/layer/tests).
+    3. If the configuration supports mappings that are relevant for this hook, add test cases with those mappings,
+       and test that the mappings take effect correctly. E.g. for file operations test with a path mapping.
 
-# Compliling on MacOS
+
+# Compiling on MacOS
 
 The `mirrord-agent` crate makes use of the `#[cfg(target_os = "linux")]` attribute to allow the whole repo to compile on MacOS when you run `cargo build`.
 
@@ -570,3 +588,13 @@ cargo-zigbuild clippy --lib --bins --all-features --target x86_64-unknown-linux-
 If it doesn't work, try updating `cargo-zigbuild`
 (`cargo install cargo-zigbuild` or maybe `cargo install cargo-zigbuild --force`)
 or via `homebrew` if it was installed via homebrew.
+
+# Adding new target types
+
+Adding a new target type for mirrord requires changes in:
+
+1. `mirrord-config` crate - parsing the target from the user config;
+2. `mirrord-cli` crate - verifying the user config;
+3. `mirrord-kube` crate - resolving the target to the Kubernetes resource;
+4. `mirrord-operator` crate - defining operator's `ClusterRole`;
+5. `test` crate - testing `mirrord ls` command

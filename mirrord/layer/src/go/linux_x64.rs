@@ -1,6 +1,6 @@
 use std::arch::naked_asm;
 
-use errno::errno;
+use nix::errno::Errno;
 use tracing::trace;
 
 use crate::{
@@ -340,8 +340,8 @@ unsafe extern "C" fn c_abi_syscall_handler(
                 faccessat_detour(param1 as _, param2 as _, param3 as _, 0) as i64
             }
             libc::SYS_fstat => fstat_detour(param1 as _, param2 as _) as i64,
-            libc::SYS_statfs => statfs_detour(param1 as _, param2 as _) as i64,
-            libc::SYS_fstatfs => fstatfs_detour(param1 as _, param2 as _) as i64,
+            libc::SYS_statfs => statfs64_detour(param1 as _, param2 as _) as i64,
+            libc::SYS_fstatfs => fstatfs64_detour(param1 as _, param2 as _) as i64,
             libc::SYS_getdents64 => getdents64_detour(param1 as _, param2 as _, param3 as _) as i64,
             #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
             libc::SYS_mkdir => mkdir_detour(param1 as _, param2 as _) as i64,
@@ -361,7 +361,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
                 .map(|success| success as i64)
                 .map_err(|fail| {
                     let raw_errno = fail.into_raw();
-                    errno::set_errno(errno::Errno(raw_errno));
+                    Errno::set_raw(raw_errno);
 
                     -(raw_errno as i64)
                 });
@@ -378,7 +378,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
             .map(|success| success as i64)
             .map_err(|fail| {
                 let raw_errno = fail.into_raw();
-                errno::set_errno(errno::Errno(raw_errno));
+                Errno::set_raw(raw_errno);
 
                 -(raw_errno as i64)
             });
@@ -388,7 +388,7 @@ unsafe extern "C" fn c_abi_syscall_handler(
 
     if syscall_result.is_negative() {
         // Might not be an exact mapping, but it should be good enough.
-        -errno().0 as i64
+        -(Errno::last_raw() as i64)
     } else {
         syscall_result
     }

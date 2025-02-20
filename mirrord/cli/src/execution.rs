@@ -498,9 +498,10 @@ impl MirrordExecution {
         };
 
         if let Some(file) = &config.feature.env.env_file {
-            let envs_from_file = envfile::EnvFile::new(file)
-                .map_err(|error| CliError::EnvFileAccessError(file.clone(), error))?
-                .store;
+            let envs_from_file = dotenvy::from_path_iter(file)
+                .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
+                .map_err(|error| CliError::EnvFileAccessError(file.clone(), error))?;
+
             env_vars.extend(envs_from_file);
         }
 

@@ -250,7 +250,7 @@
       "additionalProperties": false
     },
     "AgentFileConfig": {
-      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json { \"agent\": { \"log_level\": \"info\", \"json_log\": false, \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"flush_connections\": false } } ```",
+      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator. Agent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json { \"agent\": { \"log_level\": \"info\", \"json_log\": false, \"namespace\": \"default\", \"image\": \"ghcr.io/metalbear-co/mirrord:latest\", \"image_pull_policy\": \"IfNotPresent\", \"image_pull_secrets\": [ { \"secret-key\": \"secret\" } ], \"ttl\": 30, \"ephemeral\": false, \"communication_timeout\": 30, \"startup_timeout\": 360, \"network_interface\": \"eth0\", \"flush_connections\": false } } ```",
       "type": "object",
       "properties": {
         "annotations": {
@@ -306,7 +306,7 @@
         },
         "ephemeral": {
           "title": "agent.ephemeral {#agent-ephemeral}",
-          "description": "Runs the agent as an [ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)\n\nDefaults to `false`.",
+          "description": "Runs the agent as an [ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/).\n\nNot compatible with targetless runs.\n\nDefaults to `false`.",
           "type": [
             "boolean",
             "null"
@@ -388,7 +388,7 @@
         },
         "namespace": {
           "title": "agent.namespace {#agent-namespace}",
-          "description": "Namespace where the agent shall live. Note: Doesn't work with ephemeral containers. Defaults to the current kubernetes namespace.",
+          "description": "Namespace where the agent shall live.\n\n**Note:** ignored in targetless runs or when the agent is run as an ephemeral container.\n\nDefaults to the current kubernetes namespace.",
           "type": [
             "string",
             "null"
@@ -823,6 +823,16 @@
             "null"
           ]
         },
+        "idle_local_http_connection_timeout": {
+          "title": "_experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}",
+          "description": "Sets a timeout for idle local HTTP connections (in milliseconds).\n\nHTTP requests stolen with a filter are delivered to the local application from a HTTP connection made from the local machine. Once a request is delivered, the connection is cached for some time, so that it can be reused to deliver the next request.\n\nThis timeout determines for how long such connections are cached.\n\nSet to 0 to disable caching local HTTP connections (connections will be dropped as soon as the request is delivered).\n\nDefaults to 3000ms.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
         "readlink": {
           "title": "_experimental_ readlink {#experimental-readlink}",
           "description": "DEPRECATED, WILL BE REMOVED",
@@ -1090,7 +1100,7 @@
       ]
     },
     "HttpFilterFileConfig": {
-      "description": "Filter configuration for the HTTP traffic stealer feature.\n\nAllows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is set as `\"steal\"`, ignored otherwise.\n\nFor example, to filter based on header: ```json { \"header_filter\": \"host: api\\\\..+\" } ``` Setting that filter will make mirrord only steal requests with the `host` header set to hosts that start with \"api\", followed by a dot, and then at least one more character.\n\nFor example, to filter based on path: ```json { \"path_filter\": \"^/api/\" } ``` Setting this filter will make mirrord only steal requests to URIs starting with \"/api/\".\n\nThis can be useful for filtering out Kubernetes liveness, readiness and startup probes. For example, for avoiding stealing any probe sent by kubernetes, you can set this filter: ```json { \"header_filter\": \"^User-Agent: (?!kube-probe)\" } ``` Setting this filter will make mirrord only steal requests that **do** have a user agent that **does not** begin with \"kube-probe\".\n\nSimilarly, you can exclude certain paths using a negative look-ahead: ```json { \"path_filter\": \"^(?!/health/)\" } ``` Setting this filter will make mirrord only steal requests to URIs that do not start with \"/health/\".\n\nWith `all_of` and `any_of`, you can use multiple HTTP filters at the same time.\n\nIf you want to steal HTTP requests that match **every** pattern specified, use `all_of`. For example, this filter steals only HTTP requests to endpoint `/api/my-endpoint` that contain header `x-debug-session` with value `121212`. ```json { \"all_of\": [ { \"header\": \"^x-debug-session: 121212$\" }, { \"path\": \"^/api/my-endpoint$\" } ] }\n\nIf you want to steal HTTP requests that match **any** of the patterns specified, use `any_of`. For example, this filter steals HTTP requests to endpoint `/api/my-endpoint` **and** HTTP requests that contain header `x-debug-session` with value `121212`. ```json { \"any_of\": [ { \"path\": \"^/api/my-endpoint$\"}, { \"header\": \"^x-debug-session: 121212$\" } ] }",
+      "description": "Filter configuration for the HTTP traffic stealer feature.\n\nAllows the user to set a filter (regex) for the HTTP headers, so that the stealer traffic feature only captures HTTP requests that match the specified filter, forwarding unmatched requests to their original destinations.\n\nOnly does something when [`feature.network.incoming.mode`](#feature-network-incoming-mode) is set as `\"steal\"`, ignored otherwise.\n\nFor example, to filter based on header: ```json { \"header_filter\": \"host: api\\\\..+\" } ``` Setting that filter will make mirrord only steal requests with the `host` header set to hosts that start with \"api\", followed by a dot, and then at least one more character.\n\nFor example, to filter based on path: ```json { \"path_filter\": \"^/api/\" } ``` Setting this filter will make mirrord only steal requests to URIs starting with \"/api/\".\n\nThis can be useful for filtering out Kubernetes liveness, readiness and startup probes. For example, for avoiding stealing any probe sent by kubernetes, you can set this filter: ```json { \"header_filter\": \"^User-Agent: (?!kube-probe)\" } ``` Setting this filter will make mirrord only steal requests that **do** have a user agent that **does not** begin with \"kube-probe\".\n\nSimilarly, you can exclude certain paths using a negative look-ahead: ```json { \"path_filter\": \"^(?!/health/)\" } ``` Setting this filter will make mirrord only steal requests to URIs that do not start with \"/health/\".\n\nWith `all_of` and `any_of`, you can use multiple HTTP filters at the same time.\n\nIf you want to steal HTTP requests that match **every** pattern specified, use `all_of`. For example, this filter steals only HTTP requests to endpoint `/api/my-endpoint` that contain header `x-debug-session` with value `121212`. ```json { \"all_of\": [ { \"header\": \"^x-debug-session: 121212$\" }, { \"path\": \"^/api/my-endpoint$\" } ] } ```\n\nIf you want to steal HTTP requests that match **any** of the patterns specified, use `any_of`. For example, this filter steals HTTP requests to endpoint `/api/my-endpoint` **and** HTTP requests that contain header `x-debug-session` with value `121212`. ```json { \"any_of\": [ { \"path\": \"^/api/my-endpoint$\"}, { \"header\": \"^x-debug-session: 121212$\" } ] } ```",
       "type": "object",
       "properties": {
         "all_of": {
@@ -1483,8 +1493,8 @@
           ]
         },
         "ipv6": {
-          "title": "feature.network.ipv6 {#feature-network-dns}",
-          "description": "Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6.",
+          "title": "feature.network.ipv6 {#feature-network-ipv6}",
+          "description": "Enable ipv6 support. Turn on if your application listens to incoming traffic over IPv6, or connects to other services over IPv6.",
           "type": [
             "boolean",
             "null"
@@ -1669,6 +1679,24 @@
         }
       ]
     },
+    "ReplicaSetTarget": {
+      "type": "object",
+      "required": [
+        "replica_set"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replica_set": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "RolloutTarget": {
       "description": "<!--${internal}--> Mirror the rollout specified by [`RolloutTarget::rollout`].",
       "type": "object",
@@ -1733,7 +1761,7 @@
       "additionalProperties": false
     },
     "Target": {
-      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `targetless` - `pod/{pod-name}[/container/{container-name}]`; - `deployment/{deployment-name}[/container/{container-name}]`; - `rollout/{rollout-name}[/container/{container-name}]`; - `job/{job-name}[/container/{container-name}]`; - `cronjob/{cronjob-name}[/container/{container-name}]`; - `statefulset/{statefulset-name}[/container/{container-name}]`; - `service/{service-name}[/container/{container-name}]`;",
+      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `targetless` - `pod/{pod-name}[/container/{container-name}]`; - `deployment/{deployment-name}[/container/{container-name}]`; - `rollout/{rollout-name}[/container/{container-name}]`; - `job/{job-name}[/container/{container-name}]`; - `cronjob/{cronjob-name}[/container/{container-name}]`; - `statefulset/{statefulset-name}[/container/{container-name}]`; - `service/{service-name}[/container/{container-name}]`; - `replicaset/{replicaset-name}[/container/{container-name}]`;",
       "anyOf": [
         {
           "description": "<!--${internal}--> [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/).",
@@ -1788,6 +1816,14 @@
           "allOf": [
             {
               "$ref": "#/definitions/ServiceTarget"
+            }
+          ]
+        },
+        {
+          "description": "<!--${internal}--> [ReplicaSet](https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReplicaSetTarget"
             }
           ]
         },

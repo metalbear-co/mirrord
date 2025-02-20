@@ -8,6 +8,119 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.133.1](https://github.com/metalbear-co/mirrord/tree/3.133.1) - 2025-02-19
+
+
+### Fixed
+
+- Added a reconnection mechanism when using mirrord operator.
+  [#2901](https://github.com/metalbear-co/mirrord/issues/2901)
+- Fixed issues with rollout targets without a `selector` field present.
+  [#3063](https://github.com/metalbear-co/mirrord/issues/3063)
+- Look for the correct pid that matches the targets container_id (by searching
+  /proc/pid/cgroup).
+  [#3076](https://github.com/metalbear-co/mirrord/issues/3076)
+- Prevent reading a remote directory from producing an 'unexpected response'
+  error and crashing.
+  [#3081](https://github.com/metalbear-co/mirrord/issues/3081)
+- Fixed a remote DNS regression introduced when `hickory-resolver` and
+  `hickory-proto` versions were bumped.
+  [#3098](https://github.com/metalbear-co/mirrord/issues/3098)
+- mirrord CLI now correctly emits logs when enabled with `RUST_LOG` environment
+  variable. [#3099](https://github.com/metalbear-co/mirrord/issues/3099)
+
+
+### Internal
+
+- Removed dependency on the umaintained `dotenv` crate. Replaced with a
+  dependency on the `dotenvy` crate.
+- Removed some unnecessary dependencies from the `mirrord-layer` crate.
+- Added a naive update to our port forward wrapper to force first check error
+  channel instead of ranomly picking branch on `tokio::select!` impl.
+
+## [3.133.0](https://github.com/metalbear-co/mirrord/tree/3.133.0) - 2025-02-17
+
+
+### Added
+
+- Added an option to configure timeout for idle local HTTP connections
+  (`experimental.idle_local_http_connection_timeout`).
+
+
+### Changed
+
+- Improved the warning produced when the user specifies agent namespace for a
+  targetless run.
+
+
+### Fixed
+
+- Correct statfs data for Go.
+  [#3044](https://github.com/metalbear-co/mirrord/issues/3044)
+- Updated `hickory-resolver` and `hickory-proto` to `0.25.0-alpha.5` and `rand`
+  from `0.8` to `0.9`.
+  [#3079](https://github.com/metalbear-co/mirrord/issues/3079)
+- Respect ignored paths and path mapping in statfs hook.
+  [#3082](https://github.com/metalbear-co/mirrord/issues/3082)
+- Some FS libc calls could be carried out remotely instead of locally in some
+  cases. [#3083](https://github.com/metalbear-co/mirrord/issues/3083)
+- `mirrord ls` command now does not list unnecessary target types when called
+  from a plugin/extension.
+  [#3086](https://github.com/metalbear-co/mirrord/issues/3086)
+- Fixed wrong link for ipv6 config docs.
+
+
+### Internal
+
+- Cleanup ci.yaml - we don't need the "docker" flag in E2E tests anymore.
+- Elaborate in CONTRIBUTING.md about things to be tested when adding a new
+  hook.
+- Extracted agent configuration to a separate crate.
+
+## [3.132.1](https://github.com/metalbear-co/mirrord/tree/3.132.1) - 2025-02-06
+
+
+### Fixed
+
+- Fixed operator connect URL produced by the CLI when a target container is
+  specified.
+
+## [3.132.0](https://github.com/metalbear-co/mirrord/tree/3.132.0) - 2025-02-06
+
+
+### Removed
+
+- Removed faulty `statfs` hook for Go applications.
+
+
+### Added
+
+- Added Kubernetes ReplicaSet as a new target type (requires mirrord Operator).
+
+
+### Changed
+
+- Namespace for `targetless` runs is now specified with the
+  `target.namespace` config field (or the `MIRRORD_TARGET_NAMESPACE`
+  environment variable).
+  `agent.namespace` field is ignored in targetless runs.
+
+
+### Internal
+
+- Some code snippets in the configuration documentation were missing the
+  closing backticks, which resulted in bad formatting when converted to
+  markdown and displayed on the website.
+- Added instructions to CONTRIBUTING.md for changing the agent log level in
+  mirrord config.
+- Added mirrord policy support for specifying pattern requirment for header
+  filter when performing steal-with-filter.
+- Removed `envfile` dependency.
+- Update policy doc for http_filter header.
+- Updated `tests::operator::sanity::mirrord_ls` test after adding ReplicaSet
+  support.
+- `mirrord-kube` now allows for setting agent listen port.
+
 ## [3.131.2](https://github.com/metalbear-co/mirrord/tree/3.131.2) - 2025-01-29
 
 

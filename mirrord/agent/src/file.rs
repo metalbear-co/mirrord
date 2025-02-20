@@ -84,6 +84,7 @@ impl Drop for FileManager {
     }
 }
 
+#[tracing::instrument(level = Level::TRACE, ret)]
 pub fn get_root_path_from_optional_pid(pid: Option<u64>) -> PathBuf {
     match pid {
         Some(pid) => PathBuf::from("/proc").join(pid.to_string()).join("root"),
@@ -223,12 +224,22 @@ impl FileManager {
                 Some(FileResponse::Xstat(xstat_result))
             }
             FileRequest::XstatFs(XstatFsRequest { fd }) => {
-                let xstatfs_result = self.xstatfs(fd);
-                Some(FileResponse::XstatFs(xstatfs_result))
+                let xstatfs_result = self.fstatfs(fd);
+                // convert V2 response to old response for old client.
+                Some(FileResponse::XstatFs(xstatfs_result.map(Into::into)))
+            }
+            FileRequest::XstatFsV2(XstatFsRequestV2 { fd }) => {
+                let xstatfs_result = self.fstatfs(fd);
+                Some(FileResponse::XstatFsV2(xstatfs_result))
             }
             FileRequest::StatFs(StatFsRequest { path }) => {
                 let statfs_result = self.statfs(path);
-                Some(FileResponse::XstatFs(statfs_result))
+                // convert V2 response to old response for old client.
+                Some(FileResponse::XstatFs(statfs_result.map(Into::into)))
+            }
+            FileRequest::StatFsV2(StatFsRequestV2 { path }) => {
+                let statfs_result = self.statfs(path);
+                Some(FileResponse::XstatFsV2(statfs_result))
             }
 
             // dir operations
@@ -755,7 +766,7 @@ impl FileManager {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn xstatfs(&mut self, fd: u64) -> RemoteResult<XstatFsResponse> {
+    pub(crate) fn fstatfs(&mut self, fd: u64) -> RemoteResult<XstatFsResponseV2> {
         let target = self
             .open_files
             .get(&fd)
@@ -768,19 +779,19 @@ impl FileManager {
                 .map_err(|err| std::io::Error::from_raw_os_error(err as i32))?,
         };
 
-        Ok(XstatFsResponse {
+        Ok(XstatFsResponseV2 {
             metadata: statfs.into(),
         })
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) fn statfs(&mut self, path: PathBuf) -> RemoteResult<XstatFsResponse> {
+    pub(crate) fn statfs(&mut self, path: PathBuf) -> RemoteResult<XstatFsResponseV2> {
         let path = resolve_path(path, &self.root_path)?;
 
         let statfs = nix::sys::statfs::statfs(&path)
             .map_err(|err| std::io::Error::from_raw_os_error(err as i32))?;
 
-        Ok(XstatFsResponse {
+        Ok(XstatFsResponseV2 {
             metadata: statfs.into(),
         })
     }

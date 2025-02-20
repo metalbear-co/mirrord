@@ -1,8 +1,8 @@
-use core::fmt;
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
 use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
+use replica_set::ReplicaSetTarget;
 use schemars::{gen::SchemaGenerator, schema::SchemaObject, JsonSchema};
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +23,7 @@ pub mod cron_job;
 pub mod deployment;
 pub mod job;
 pub mod pod;
+pub mod replica_set;
 pub mod rollout;
 pub mod service;
 pub mod stateful_set;
@@ -86,7 +87,7 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
 /// - `job`, `cronjob`, `statefulset` and `service` targets require the mirrord Operator
 /// - `job` and `cronjob` targets require the [`copy_target`](#feature-copy_target) feature
 ///
-/// Shortened setup:
+/// Shortened setup with a target:
 ///
 ///```json
 /// {
@@ -97,7 +98,7 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
 /// The setup above will result in a session targeting the `bear-pod` Kubernetes pod
 /// in the user's default namespace. A target container will be chosen by mirrord.
 ///
-/// Shortened setup with target container:
+/// Shortened setup with a target container:
 ///
 /// ```json
 /// {
@@ -108,7 +109,7 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
 /// The setup above will result in a session targeting the `bear-pod-container` container
 /// in the `bear-pod` Kubernetes pod in the user's default namespace.
 ///
-/// Complete setup:
+/// Complete setup with a target container:
 ///
 /// ```json
 /// {
@@ -124,12 +125,28 @@ fn make_simple_target_custom_schema(gen: &mut SchemaGenerator) -> schemars::sche
 ///
 /// The setup above will result in a session targeting the `bear-pod-container` container
 /// in the `bear-pod` Kubernetes pod in the `bear-pod-namespace` namespace.
+///
+/// Setup with a namespace for a targetless run:
+///
+/// ```json
+/// {
+///   "target": {
+///     "path": "targetless",
+///     "namespace": "bear-namespace"
+///   }
+/// }
+/// ```
+///
+/// The setup above will result in a session without any target.
+/// Remote outgoing traffic and DNS will be done from the `bear-namespace` namespace.
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct TargetConfig {
     /// ### target.path {#target-path}
     ///
     /// Specifies the Kubernetes resource to target.
+    ///
+    /// If not given, defaults to `targetless`.
     ///
     /// Note: targeting services and whole workloads is available only in mirrord for Teams.
     /// If you target a workload without the mirrord Operator, it will choose a random pod replica
@@ -147,12 +164,15 @@ pub struct TargetConfig {
     /// - `statefulset/{statefulset-name}[/container/{container-name}]`; (requires mirrord
     ///   Operator)
     /// - `service/{service-name}[/container/{container-name}]`; (requires mirrord Operator)
+    /// - `replicaset/{replicaset-name}[/container/{container-name}]`; (requires mirrord Operator)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<Target>,
 
     /// ### target.namespace {#target-namespace}
     ///
     /// Namespace where the target lives.
+    ///
+    /// For targetless runs, this the namespace in which remote networking is done.
     ///
     /// Defaults to the Kubernetes user's default namespace (defined in Kubernetes context).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -221,6 +241,7 @@ mirrord-layer failed to parse the provided target!
     >> `cronjob/{cronjob-name}[/container/{container-name}]`;
     >> `statefulset/{statefulset-name}[/container/{container-name}]`;
     >> `service/{service-name}[/container/{container-name}]`;
+    >> `replicaset/{replicaset-name}[/container/{container-name}]`;
 
 - Note:
     >> specifying container name is optional, defaults to a container chosen by mirrord
@@ -246,6 +267,7 @@ mirrord-layer failed to parse the provided target!
 /// - `cronjob/{cronjob-name}[/container/{container-name}]`;
 /// - `statefulset/{statefulset-name}[/container/{container-name}]`;
 /// - `service/{service-name}[/container/{container-name}]`;
+/// - `replicaset/{replicaset-name}[/container/{container-name}]`;
 #[warn(clippy::wildcard_enum_match_arm)]
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
@@ -283,6 +305,10 @@ pub enum Target {
     Service(service::ServiceTarget),
 
     /// <!--${internal}-->
+    /// [ReplicaSet](https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/).
+    ReplicaSet(replica_set::ReplicaSetTarget),
+
+    /// <!--${internal}-->
     /// Spawn a new pod.
     Targetless,
 }
@@ -305,6 +331,7 @@ impl FromStr for Target {
             Some("cronjob") => cron_job::CronJobTarget::from_split(&mut split).map(Target::CronJob),
             Some("statefulset") => stateful_set::StatefulSetTarget::from_split(&mut split).map(Target::StatefulSet),
             Some("service") => service::ServiceTarget::from_split(&mut split).map(Target::Service),
+            Some("replicaset") => replica_set::ReplicaSetTarget::from_split(&mut split).map(Target::ReplicaSet),
             _ => Err(ConfigError::InvalidTarget(format!(
                 "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
@@ -313,22 +340,6 @@ impl FromStr for Target {
 }
 
 impl Target {
-    /// Get the target name - pod name, deployment name, rollout name..
-    pub fn get_target_name(&self) -> String {
-        match self {
-            Target::Deployment(target) => target.deployment.clone(),
-            Target::Pod(target) => target.pod.clone(),
-            Target::Rollout(target) => target.rollout.clone(),
-            Target::Job(target) => target.job.clone(),
-            Target::CronJob(target) => target.cron_job.clone(),
-            Target::StatefulSet(target) => target.stateful_set.clone(),
-            Target::Service(target) => target.service.clone(),
-            Target::Targetless => {
-                unreachable!("this shouldn't happen - called from operator on a flow where it's not targetless.")
-            }
-        }
-    }
-
     /// `true` if this [`Target`] is only supported when the copy target feature is enabled.
     pub(super) fn requires_copy(&self) -> bool {
         matches!(self, Target::Job(_) | Target::CronJob(_))
@@ -338,7 +349,11 @@ impl Target {
     pub(super) fn requires_operator(&self) -> bool {
         matches!(
             self,
-            Target::Job(_) | Target::CronJob(_) | Target::StatefulSet(_) | Target::Service(_)
+            Target::Job(_)
+                | Target::CronJob(_)
+                | Target::StatefulSet(_)
+                | Target::Service(_)
+                | Target::ReplicaSet(_)
         )
     }
 }
@@ -399,6 +414,7 @@ impl_target_display!(JobTarget, job, "job");
 impl_target_display!(CronJobTarget, cron_job, "cronjob");
 impl_target_display!(StatefulSetTarget, stateful_set, "statefulset");
 impl_target_display!(ServiceTarget, service, "service");
+impl_target_display!(ReplicaSetTarget, replica_set, "replicaset");
 
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -411,6 +427,7 @@ impl fmt::Display for Target {
             Target::CronJob(target) => target.fmt(f),
             Target::StatefulSet(target) => target.fmt(f),
             Target::Service(target) => target.fmt(f),
+            Target::ReplicaSet(target) => target.fmt(f),
         }
     }
 }
@@ -426,6 +443,7 @@ impl TargetDisplay for Target {
             Target::CronJob(target) => target.type_(),
             Target::StatefulSet(target) => target.type_(),
             Target::Service(target) => target.type_(),
+            Target::ReplicaSet(target) => target.type_(),
         }
     }
 
@@ -439,6 +457,7 @@ impl TargetDisplay for Target {
             Target::CronJob(target) => target.name(),
             Target::StatefulSet(target) => target.name(),
             Target::Service(target) => target.name(),
+            Target::ReplicaSet(target) => target.name(),
         }
     }
 
@@ -452,6 +471,7 @@ impl TargetDisplay for Target {
             Target::CronJob(target) => target.container(),
             Target::StatefulSet(target) => target.container(),
             Target::Service(target) => target.container(),
+            Target::ReplicaSet(target) => target.container(),
         }
     }
 }
@@ -469,6 +489,7 @@ bitflags::bitflags! {
         const CRON_JOB = 64;
         const STATEFUL_SET = 128;
         const SERVICE = 256;
+        const REPLICA_SET = 512;
     }
 }
 
@@ -518,6 +539,12 @@ impl CollectAnalytics for &TargetConfig {
                 }
                 Target::Service(target) => {
                     flags |= TargetAnalyticFlags::SERVICE;
+                    if target.container.is_some() {
+                        flags |= TargetAnalyticFlags::CONTAINER;
+                    }
+                }
+                Target::ReplicaSet(target) => {
+                    flags |= TargetAnalyticFlags::REPLICA_SET;
                     if target.container.is_some() {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }

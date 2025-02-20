@@ -11,7 +11,8 @@ use crate::config::source::MirrordConfigSource;
 //     env!("CARGO_PKG_VERSION")
 // );
 
-static DEFAULT_CLI_IMAGE: &str = concat!("meowjesty/mirrord-cli:", "latest");
+// static DEFAULT_CLI_IMAGE: &str = concat!("meowjesty/mirrord-cli:", "latest");
+static DEFAULT_CLI_IMAGE: &str = concat!("ghcr.io/metalbear-co/mirrord-cli:", "3.133.1");
 
 /// Unstable: `mirrord container` command specific config.
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]

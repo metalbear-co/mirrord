@@ -5,7 +5,7 @@ use std::{
     str::FromStr,
 };
 
-use hyper::Uri;
+use http::Uri;
 
 /// Environment variable used to tell the layer that it should dynamically detect the local
 /// port used by the given debugger. Value passed through this variable should parse into

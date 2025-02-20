@@ -250,7 +250,7 @@ pub(crate) enum CliError {
 
     #[error("Failed to access env file at `{0}`: {1}")]
     #[diagnostic(help("Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"))]
-    EnvFileAccessError(PathBuf, std::io::Error),
+    EnvFileAccessError(PathBuf, dotenvy::Error),
 
     #[cfg(target_os = "macos")]
     #[error("SIP Error: `{0:#?}`")]

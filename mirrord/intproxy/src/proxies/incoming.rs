@@ -6,7 +6,7 @@
 //!    until connection becomes readable (is TCP) or receives an http request.
 //! 2. HttpSender -
 
-use std::{collections::HashMap, io, net::SocketAddr};
+use std::{collections::HashMap, io, net::SocketAddr, time::Duration};
 
 use bound_socket::BoundTcpSocket;
 use http::{ClientStore, ResponseMode, StreamingBody};
@@ -66,6 +66,7 @@ pub enum IncomingProxyMessage {
     AgentSteal(DaemonTcp),
     /// Agent responded to [`ClientMessage::SwitchProtocolVersion`].
     AgentProtocolVersion(semver::Version),
+    ConnectionRefresh,
 }
 
 /// Handle to a running [`HttpGatewayTask`].
@@ -126,7 +127,6 @@ struct HttpGatewayHandle {
 /// An HTTP request stolen with a filter can result in an HTTP upgrade.
 /// When this happens, the TCP connection is recovered and passed to a new [`TcpProxyTask`].
 /// The TCP connection is then treated as stolen without a filter.
-#[derive(Default)]
 pub struct IncomingProxy {
     /// Active port subscriptions for all layers.
     subscriptions: SubscriptionsManager,
@@ -156,6 +156,19 @@ pub struct IncomingProxy {
 impl IncomingProxy {
     /// Used when registering new tasks in the internal [`BackgroundTasks`] instance.
     const CHANNEL_SIZE: usize = 512;
+
+    pub fn new(idle_local_http_connection_timeout: Duration) -> Self {
+        Self {
+            subscriptions: Default::default(),
+            metadata_store: Default::default(),
+            response_mode: Default::default(),
+            client_store: ClientStore::new_with_timeout(idle_local_http_connection_timeout),
+            mirror_tcp_proxies: Default::default(),
+            steal_tcp_proxies: Default::default(),
+            http_gateways: Default::default(),
+            tasks: Default::default(),
+        }
+    }
 
     /// Starts a new [`HttpGatewayTask`] to handle the given request.
     ///
@@ -533,6 +546,20 @@ impl IncomingProxy {
             IncomingProxyMessage::AgentProtocolVersion(version) => {
                 self.response_mode = ResponseMode::from(&version);
             }
+
+            IncomingProxyMessage::ConnectionRefresh => {
+                self.mirror_tcp_proxies.clear();
+                self.steal_tcp_proxies.clear();
+                self.tasks.clear();
+
+                for subscription in self.subscriptions.iter_mut() {
+                    tracing::debug!(?subscription, "resubscribing");
+
+                    message_bus
+                        .send(ProxyMessage::ToAgent(subscription.resubscribe_message()))
+                        .await
+                }
+            }
         }
 
         Ok(())
@@ -701,7 +728,7 @@ impl BackgroundTask for IncomingProxy {
     type MessageOut = ProxyMessage;
 
     #[tracing::instrument(level = Level::TRACE, name = "incoming_proxy_main_loop", skip_all, err)]
-    async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         loop {
             tokio::select! {
                 msg = message_bus.recv() => match msg {

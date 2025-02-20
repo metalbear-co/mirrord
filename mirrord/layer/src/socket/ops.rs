@@ -14,7 +14,6 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 
-use errno::set_errno;
 use libc::{c_int, c_void, hostent, sockaddr, socklen_t, AF_UNIX};
 use mirrord_config::feature::network::incoming::{IncomingConfig, IncomingMode};
 use mirrord_intproxy_protocol::{
@@ -25,7 +24,10 @@ use mirrord_protocol::{
     dns::{AddressFamily, GetAddrInfoRequestV2, LookupRecord, SockType},
     file::{OpenFileResponse, OpenOptionsInternal, ReadFileResponse},
 };
-use nix::sys::socket::{sockopt, SockaddrIn, SockaddrIn6, SockaddrLike, SockaddrStorage};
+use nix::{
+    errno::Errno,
+    sys::socket::{sockopt, SockaddrIn, SockaddrIn6, SockaddrLike, SockaddrStorage},
+};
 use socket2::SockAddr;
 #[cfg(debug_assertions)]
 use tracing::Level;
@@ -85,12 +87,13 @@ static mut GETHOSTBYNAME_HOSTENT: hostent = hostent {
 #[derive(Debug)]
 pub(super) struct ConnectResult {
     result: i32,
-    error: Option<errno::Errno>,
+    error: Option<i32>,
 }
 
 impl ConnectResult {
     pub(super) fn is_failure(&self) -> bool {
-        matches!(self.error, Some(err) if err.0 != libc::EINTR && err.0 != libc::EINPROGRESS)
+        self.error
+            .is_some_and(|error| error != libc::EINTR && error != libc::EINPROGRESS)
     }
 }
 
@@ -99,7 +102,7 @@ impl From<i32> for ConnectResult {
         if result == -1 {
             ConnectResult {
                 result,
-                error: Some(errno::errno()),
+                error: Some(Errno::last_raw()),
             }
         } else {
             ConnectResult {
@@ -113,7 +116,7 @@ impl From<i32> for ConnectResult {
 impl From<ConnectResult> for i32 {
     fn from(connect_result: ConnectResult) -> Self {
         if let Some(error) = connect_result.error {
-            errno::set_errno(error);
+            Errno::set_raw(error);
         }
         connect_result.result
     }
@@ -338,7 +341,7 @@ pub(super) fn bind(
 
     // node reads errno to check if bind was successful and doesn't care about the return value
     // (???)
-    errno::set_errno(errno::Errno(0));
+    Errno::set_raw(0);
     Detour::Success(0)
 }
 
@@ -1111,7 +1114,7 @@ pub(super) fn gethostbyname(raw_name: Option<&CStr>) -> Detour<*mut hostent> {
     let host_name = CString::new(name)?;
 
     if hosts_and_ips.is_empty() {
-        set_errno(errno::Errno(libc::EAI_NODATA));
+        Errno::set_raw(libc::EAI_NODATA);
         return Detour::Success(ptr::null_mut());
     }
 
@@ -1248,7 +1251,7 @@ pub(super) fn recv_from(
         .map(SocketAddress::try_into)?
         .map(|address| fill_address(raw_source, source_length, address))??;
 
-    errno::set_errno(errno::Errno(0));
+    Errno::set_raw(0);
     Detour::Success(recv_from_result)
 }
 

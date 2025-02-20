@@ -26,6 +26,7 @@ portforward = [
 ]
 
 [dependencies]
+mirrord-agent-env = { path = "../agent/env" }
 mirrord-config = { path = "../config"}
 mirrord-progress = { path = "../progress" }
 mirrord-protocol = { path = "../protocol" }
@@ -43,7 +44,7 @@ shellexpand = "3"
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-tokio-retry = { version = "0.3", optional = true }
+tokio-retry = { workspace = true, optional = true }
 
 [dev-dependencies]
 rstest.workspace = true

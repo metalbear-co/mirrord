@@ -64,6 +64,7 @@ impl TargetCrd {
             Target::CronJob(target) => ("cronjob", &target.cron_job, &target.container),
             Target::StatefulSet(target) => ("statefulset", &target.stateful_set, &target.container),
             Target::Service(target) => ("service", &target.service, &target.container),
+            Target::ReplicaSet(target) => ("replicaset", &target.replica_set, &target.container),
             Target::Targetless => return TARGETLESS_TARGET_NAME.to_string(),
         };
 
@@ -272,6 +273,7 @@ pub enum NewOperatorFeature {
     SessionManagement,
     SqsQueueSplitting,
     KafkaQueueSplitting,
+    LayerReconnect,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -287,6 +289,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SessionManagement => "session management",
             NewOperatorFeature::SqsQueueSplitting => "SQS queue splitting",
             NewOperatorFeature::KafkaQueueSplitting => "Kafka queue splitting",
+            NewOperatorFeature::LayerReconnect => "layer reconnect",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)

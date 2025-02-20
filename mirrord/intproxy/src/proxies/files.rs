@@ -1,15 +1,13 @@
 use core::fmt;
-use std::{collections::HashMap, vec};
+use std::{
+    collections::{HashMap, VecDeque},
+    vec,
+};
 
 use mirrord_intproxy_protocol::{LayerId, MessageId, ProxyToLayerMessage};
 use mirrord_protocol::{
-    file::{
-        CloseDirRequest, CloseFileRequest, DirEntryInternal, ReadDirBatchRequest, ReadDirResponse,
-        ReadFileResponse, ReadLimitedFileRequest, SeekFromInternal, MKDIR_VERSION,
-        READDIR_BATCH_VERSION, READLINK_VERSION, RMDIR_VERSION, STATFS_VERSION,
-    },
-    ClientMessage, DaemonMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError,
-    ResponseError,
+    file::*, ClientMessage, DaemonMessage, ErrorKindInternal, FileRequest, FileResponse,
+    RemoteIOError, ResponseError,
 };
 use semver::Version;
 use thiserror::Error;
@@ -17,11 +15,108 @@ use tracing::Level;
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
-    error::UnexpectedAgentMessage,
+    error::{agent_lost_io_error, UnexpectedAgentMessage},
     main_tasks::{LayerClosed, LayerForked, ProxyMessage, ToLayer},
     remote_resources::RemoteResources,
     request_queue::RequestQueue,
 };
+
+macro_rules! dummy_file_response {
+    ($name: ident) => {
+        FileResponse::$name(Err(ResponseError::NotImplemented))
+    };
+}
+
+/// Lightweight (no allocations) [`FileResponse`] to be returned when connection with the
+/// mirrord-agent is lost. Must be converted into real [`FileResponse`] via [`From`].
+pub struct AgentLostFileResponse(LayerId, MessageId, FileResponse);
+
+impl From<AgentLostFileResponse> for ToLayer {
+    fn from(value: AgentLostFileResponse) -> Self {
+        let AgentLostFileResponse(layer_id, message_id, response) = value;
+        let error = agent_lost_io_error();
+
+        let real_response = match response {
+            FileResponse::Access(..) => FileResponse::Access(Err(error)),
+            FileResponse::GetDEnts64(..) => FileResponse::GetDEnts64(Err(error)),
+            FileResponse::Open(..) => FileResponse::Open(Err(error)),
+            FileResponse::OpenDir(..) => FileResponse::OpenDir(Err(error)),
+            FileResponse::Read(..) => FileResponse::Read(Err(error)),
+            FileResponse::ReadDir(..) => FileResponse::ReadDir(Err(error)),
+            FileResponse::ReadDirBatch(..) => FileResponse::ReadDirBatch(Err(error)),
+            FileResponse::ReadLimited(..) => FileResponse::ReadLimited(Err(error)),
+            FileResponse::Seek(..) => FileResponse::Seek(Err(error)),
+            FileResponse::Write(..) => FileResponse::Write(Err(error)),
+            FileResponse::WriteLimited(..) => FileResponse::WriteLimited(Err(error)),
+            FileResponse::Xstat(..) => FileResponse::Xstat(Err(error)),
+            FileResponse::XstatFs(..) => FileResponse::XstatFs(Err(error)),
+            FileResponse::XstatFsV2(..) => FileResponse::XstatFsV2(Err(error)),
+            FileResponse::ReadLink(..) => FileResponse::ReadLink(Err(error)),
+            FileResponse::MakeDir(..) => FileResponse::MakeDir(Err(error)),
+            FileResponse::RemoveDir(..) => FileResponse::RemoveDir(Err(error)),
+            FileResponse::Unlink(..) => FileResponse::Unlink(Err(error)),
+        };
+
+        debug_assert_eq!(
+            std::mem::discriminant(&response),
+            std::mem::discriminant(&real_response),
+        );
+
+        ToLayer {
+            layer_id,
+            message_id,
+            message: ProxyToLayerMessage::File(real_response),
+        }
+    }
+}
+
+/// Convenience trait for [`FileRequest`].
+trait FileRequestExt: Sized {
+    /// If this [`FileRequest`] requires a [`FileResponse`] from the agent, return corresponding
+    /// [`AgentLostFileResponse`].
+    fn agent_lost_response(
+        &self,
+        layer_id: LayerId,
+        message_id: MessageId,
+    ) -> Option<AgentLostFileResponse>;
+}
+
+impl FileRequestExt for FileRequest {
+    fn agent_lost_response(
+        &self,
+        layer_id: LayerId,
+        message_id: MessageId,
+    ) -> Option<AgentLostFileResponse> {
+        let response = match self {
+            Self::Close(..) | Self::CloseDir(..) => return None,
+            Self::Access(..) => dummy_file_response!(Access),
+            Self::FdOpenDir(..) => dummy_file_response!(OpenDir),
+            Self::GetDEnts64(..) => dummy_file_response!(GetDEnts64),
+            Self::Open(..) => dummy_file_response!(Open),
+            Self::OpenRelative(..) => dummy_file_response!(Open),
+            Self::Read(..) => dummy_file_response!(Read),
+            Self::ReadDir(..) => dummy_file_response!(ReadDir),
+            Self::ReadDirBatch(..) => dummy_file_response!(ReadDirBatch),
+            Self::ReadLimited(..) => dummy_file_response!(ReadLimited),
+            Self::Seek(..) => dummy_file_response!(Seek),
+            Self::Write(..) => dummy_file_response!(Write),
+            Self::WriteLimited(..) => dummy_file_response!(WriteLimited),
+            Self::Xstat(..) => dummy_file_response!(Xstat),
+            Self::XstatFs(..) => dummy_file_response!(XstatFs),
+            Self::XstatFsV2(..) => dummy_file_response!(XstatFsV2),
+            Self::ReadLink(..) => dummy_file_response!(ReadLink),
+            Self::MakeDir(..) => dummy_file_response!(MakeDir),
+            Self::MakeDirAt(..) => dummy_file_response!(MakeDir),
+            Self::Unlink(..) => dummy_file_response!(Unlink),
+            Self::UnlinkAt(..) => dummy_file_response!(Unlink),
+            Self::RemoveDir(..) => dummy_file_response!(RemoveDir),
+            Self::StatFs(..) => dummy_file_response!(XstatFs),
+            Self::StatFsV2(..) => dummy_file_response!(XstatFsV2),
+        };
+
+        Some(AgentLostFileResponse(layer_id, message_id, response))
+    }
+}
 
 /// Messages handled by [`FilesProxy`].
 #[derive(Debug)]
@@ -36,6 +131,8 @@ pub enum FilesProxyMessage {
     LayerForked(LayerForked),
     /// Layer instance closed.
     LayerClosed(LayerClosed),
+    /// Agent connection was refreshed
+    ConnectionRefresh,
 }
 
 /// Error that can occur in [`FilesProxy`].
@@ -123,6 +220,167 @@ enum AdditionalRequestData {
     Other,
 }
 
+/// Manages state of file operations. Remaps remote file descriptors and returns early
+/// [`ResponseError`]s for [`FileRequest`]s related to invalidated (agent lost) descriptors.
+/// Tracks state of outstanding [`FileRequest`]s to respond with errors in case the agent is lost.
+#[derive(Default)]
+pub struct RouterFileOps {
+    /// Highest file fd we've returned to the client (after remapping).
+    highest_user_facing_fd: Option<u64>,
+    /// Offset we need to add to every fd we receive from the mirrord-agent.
+    /// All lesser fds received from the clients are invalid (probably lost with previous
+    /// mirrord-agent responsible for file ops).
+    current_fd_offset: u64,
+    /// Prepared error responses to outstanding [`FileRequest`]s.
+    /// We must flush these when connection to the mirrord-agent is lost, otherwise the layer will
+    /// hang.
+    queued_error_responses: VecDeque<AgentLostFileResponse>,
+}
+
+impl fmt::Debug for RouterFileOps {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RouterFileOps")
+            .field("highest_user_facing_fd", &self.highest_user_facing_fd)
+            .field("current_fd_offset", &self.current_fd_offset)
+            .finish()
+    }
+}
+
+impl RouterFileOps {
+    /// Return a request to be sent to the agent ([`Ok`] variant) or
+    /// a response to be sent to the user ([`Err`] variant).
+    #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE, Debug))]
+    pub fn map_request(
+        &mut self,
+        layer_id: LayerId,
+        message_id: MessageId,
+        mut request: FileRequest,
+    ) -> Result<Option<FileRequest>, ToLayer> {
+        match &mut request {
+            // These requests do not refer to any open remote fd.
+            // It's safe to pass them as they are.
+            FileRequest::Open(..)
+            | FileRequest::Access(..)
+            | FileRequest::Xstat(XstatRequest { fd: None, .. })
+            | FileRequest::ReadLink(..)
+            | FileRequest::MakeDir(..)
+            | FileRequest::Unlink(..)
+            | FileRequest::RemoveDir(..)
+            | FileRequest::StatFs(..)
+            | FileRequest::StatFsV2(..)
+            | FileRequest::UnlinkAt(UnlinkAtRequest { dirfd: None, .. }) => {}
+
+            // These requests do not require any response from the agent.
+            // We need to remap the fd, but if the fd is invalid we simply drop them.
+            FileRequest::Close(CloseFileRequest { fd: remote_fd })
+            | FileRequest::CloseDir(CloseDirRequest { remote_fd }) => {
+                if *remote_fd < self.current_fd_offset {
+                    return Ok(None);
+                }
+
+                *remote_fd -= self.current_fd_offset;
+            }
+
+            // These requests refer to an open remote fd and require a response from the agent.
+            // We need to remap the fd and respond with an error if the fd is invalid.
+            FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd })
+            | FileRequest::GetDEnts64(GetDEnts64Request { remote_fd, .. })
+            | FileRequest::OpenRelative(OpenRelativeFileRequest {
+                relative_fd: remote_fd,
+                ..
+            })
+            | FileRequest::Read(ReadFileRequest { remote_fd, .. })
+            | FileRequest::ReadDir(ReadDirRequest { remote_fd, .. })
+            | FileRequest::ReadDirBatch(ReadDirBatchRequest { remote_fd, .. })
+            | FileRequest::ReadLimited(ReadLimitedFileRequest { remote_fd, .. })
+            | FileRequest::Seek(SeekFileRequest { fd: remote_fd, .. })
+            | FileRequest::Write(WriteFileRequest { fd: remote_fd, .. })
+            | FileRequest::WriteLimited(WriteLimitedFileRequest { remote_fd, .. })
+            | FileRequest::Xstat(XstatRequest {
+                fd: Some(remote_fd),
+                ..
+            })
+            | FileRequest::XstatFs(XstatFsRequest { fd: remote_fd })
+            | FileRequest::XstatFsV2(XstatFsRequestV2 { fd: remote_fd })
+            | FileRequest::MakeDirAt(MakeDirAtRequest {
+                dirfd: remote_fd, ..
+            })
+            | FileRequest::UnlinkAt(UnlinkAtRequest {
+                dirfd: Some(remote_fd),
+                ..
+            }) => {
+                if *remote_fd < self.current_fd_offset {
+                    let error_response = request
+                        .agent_lost_response(layer_id, message_id)
+                        .expect("these requests require responses")
+                        .into();
+                    return Err(error_response);
+                }
+
+                *remote_fd -= self.current_fd_offset;
+            }
+        };
+
+        if let Some(response) = request.agent_lost_response(layer_id, message_id) {
+            self.queued_error_responses.push_back(response);
+        }
+
+        Ok(Some(request))
+    }
+
+    /// Return a response to be sent to the client.
+    #[tracing::instrument(level = Level::TRACE, ret)]
+    pub fn map_response(&mut self, mut response: FileResponse) -> FileResponse {
+        match &mut response {
+            // These responses do not refer to any open remote fd.
+            FileResponse::Access(..)
+            | FileResponse::Read(..)
+            | FileResponse::ReadLimited(..)
+            | FileResponse::ReadDir(..)
+            | FileResponse::Seek(..)
+            | FileResponse::Write(..)
+            | FileResponse::WriteLimited(..)
+            | FileResponse::Xstat(..)
+            | FileResponse::XstatFs(..)
+            | FileResponse::XstatFsV2(..)
+            | FileResponse::GetDEnts64(Err(..))
+            | FileResponse::Open(Err(..))
+            | FileResponse::OpenDir(Err(..))
+            | FileResponse::ReadDirBatch(Err(..))
+            | FileResponse::ReadLink(..)
+            | FileResponse::MakeDir(..)
+            | FileResponse::Unlink(..)
+            | FileResponse::RemoveDir(..) => {}
+
+            FileResponse::GetDEnts64(Ok(GetDEnts64Response { fd: remote_fd, .. }))
+            | FileResponse::Open(Ok(OpenFileResponse { fd: remote_fd }))
+            | FileResponse::OpenDir(Ok(OpenDirResponse { fd: remote_fd, .. }))
+            | FileResponse::ReadDirBatch(Ok(ReadDirBatchResponse { fd: remote_fd, .. })) => {
+                *remote_fd += self.current_fd_offset;
+
+                self.highest_user_facing_fd =
+                    std::cmp::max(self.highest_user_facing_fd, Some(*remote_fd));
+            }
+        }
+
+        self.queued_error_responses.pop_front();
+
+        response
+    }
+
+    /// Notify this manager that the agent was lost.
+    /// Return messages to be sent to the user.
+    #[tracing::instrument(level = Level::TRACE)]
+    pub fn agent_lost(&mut self) -> impl Iterator<Item = ProxyMessage> {
+        self.current_fd_offset = self.highest_user_facing_fd.map(|fd| fd + 1).unwrap_or(0);
+
+        std::mem::take(&mut self.queued_error_responses)
+            .into_iter()
+            .map(ToLayer::from)
+            .map(ProxyMessage::ToLayer)
+    }
+}
+
 /// For handling all file operations.
 /// Run as a [`BackgroundTask`].
 ///
@@ -169,6 +427,8 @@ pub struct FilesProxy {
     remote_dirs: RemoteResources<u64>,
     /// Locally stored data of buffered directories.
     buffered_dirs: HashMap<u64, BufferedDirData>,
+
+    reconnect_tracker: RouterFileOps,
 }
 
 impl fmt::Debug for FilesProxy {
@@ -180,6 +440,7 @@ impl fmt::Debug for FilesProxy {
             .field("buffered_dirs", &self.buffered_dirs)
             .field("protocol_version", &self.protocol_version)
             .field("request_queue", &self.request_queue)
+            .field("reconnect_tracker", &self.reconnect_tracker)
             .finish()
     }
 }
@@ -206,6 +467,8 @@ impl FilesProxy {
 
             remote_dirs: Default::default(),
             buffered_dirs: Default::default(),
+
+            reconnect_tracker: Default::default(),
         }
     }
 
@@ -274,7 +537,7 @@ impl FilesProxy {
             {
                 Err(FileResponse::RemoveDir(Err(ResponseError::NotImplemented)))
             }
-            FileRequest::StatFs(..)
+            FileRequest::StatFs(..) | FileRequest::StatFsV2(..)
                 if protocol_version
                     .is_none_or(|version: &Version| !STATFS_VERSION.matches(version)) =>
             {
@@ -539,6 +802,32 @@ impl FilesProxy {
                     .send(ClientMessage::FileRequest(FileRequest::Seek(seek)))
                     .await;
             }
+            FileRequest::StatFsV2(statfs_v2)
+                if self
+                    .protocol_version
+                    .as_ref()
+                    .is_none_or(|version| !STATFS_V2_VERSION.matches(version)) =>
+            {
+                self.request_queue.push_back(message_id, layer_id);
+                message_bus
+                    .send(ClientMessage::FileRequest(FileRequest::StatFs(
+                        statfs_v2.into(),
+                    )))
+                    .await;
+            }
+            FileRequest::XstatFsV2(xstatfs_v2)
+                if self
+                    .protocol_version
+                    .as_ref()
+                    .is_none_or(|version| !STATFS_V2_VERSION.matches(version)) =>
+            {
+                self.request_queue.push_back(message_id, layer_id);
+                message_bus
+                    .send(ClientMessage::FileRequest(FileRequest::XstatFs(
+                        xstatfs_v2.into(),
+                    )))
+                    .await;
+            }
 
             // Doesn't require any special logic.
             other => {
@@ -670,6 +959,32 @@ impl FilesProxy {
                     .await;
             }
 
+            FileResponse::ReadLimited(Err(error)) => {
+                // need to ensure that if a Read request was sent by layer, a Read response is
+                // returned containing the error rather than a ReadLimited
+                let (message_id, layer_id, additional_data) =
+                    self.request_queue.pop_front_with_data().ok_or_else(|| {
+                        UnexpectedAgentMessage(DaemonMessage::File(FileResponse::ReadLimited(Err(
+                            error.clone(),
+                        ))))
+                    })?;
+
+                let message = match additional_data {
+                    AdditionalRequestData::ReadBuffered {
+                        update_fd_position, ..
+                    } if update_fd_position => FileResponse::Read(Err(error)),
+                    _ => FileResponse::ReadLimited(Err(error)),
+                };
+
+                message_bus
+                    .send(ToLayer {
+                        message_id,
+                        layer_id,
+                        message: ProxyToLayerMessage::File(message),
+                    })
+                    .await;
+            }
+
             // If the file is buffered, update `files_data`.
             FileResponse::Seek(Ok(seek)) => {
                 let (message_id, layer_id, additional_data) =
@@ -742,6 +1057,21 @@ impl FilesProxy {
                     })
                     .await;
             }
+            // Convert to XstatFsV2 so that the layer doesn't ever need to deal with the old type.
+            FileResponse::XstatFs(res) => {
+                let (message_id, layer_id) = self.request_queue.pop_front().ok_or_else(|| {
+                    UnexpectedAgentMessage(DaemonMessage::File(FileResponse::XstatFs(res.clone())))
+                })?;
+                message_bus
+                    .send(ToLayer {
+                        message_id,
+                        layer_id,
+                        message: ProxyToLayerMessage::File(FileResponse::XstatFsV2(
+                            res.map(Into::into),
+                        )),
+                    })
+                    .await;
+            }
 
             // Doesn't require any special logic.
             other => {
@@ -761,6 +1091,24 @@ impl FilesProxy {
 
         Ok(())
     }
+
+    async fn handle_reconnect(&mut self, message_bus: &mut MessageBus<Self>) {
+        for (_, fds) in self.remote_files.drain() {
+            for fd in fds {
+                self.buffered_files.remove(&fd);
+            }
+        }
+
+        for (_, fds) in self.remote_dirs.drain() {
+            for fd in fds {
+                self.buffered_dirs.remove(&fd);
+            }
+        }
+
+        for response in self.reconnect_tracker.agent_lost() {
+            message_bus.send(response).await;
+        }
+    }
 }
 
 impl BackgroundTask for FilesProxy {
@@ -768,16 +1116,28 @@ impl BackgroundTask for FilesProxy {
     type MessageOut = ProxyMessage;
     type Error = FilesProxyError;
 
-    async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         while let Some(message) = message_bus.recv().await {
             tracing::trace!(?message, "new message in message_bus");
 
             match message {
                 FilesProxyMessage::FileReq(message_id, layer_id, request) => {
-                    self.file_request(request, layer_id, message_id, message_bus)
-                        .await;
+                    match self
+                        .reconnect_tracker
+                        .map_request(layer_id, message_id, request)
+                    {
+                        Ok(None) => {}
+                        Err(response) => {
+                            message_bus.send(response).await;
+                        }
+                        Ok(Some(request)) => {
+                            self.file_request(request, layer_id, message_id, message_bus)
+                                .await
+                        }
+                    };
                 }
                 FilesProxyMessage::FileRes(response) => {
+                    let response = self.reconnect_tracker.map_response(response);
                     self.file_response(response, message_bus).await?;
                 }
                 FilesProxyMessage::LayerClosed(closed) => {
@@ -785,6 +1145,7 @@ impl BackgroundTask for FilesProxy {
                 }
                 FilesProxyMessage::LayerForked(forked) => self.layer_forked(forked),
                 FilesProxyMessage::ProtocolVersion(version) => self.protocol_version(version),
+                FilesProxyMessage::ConnectionRefresh => self.handle_reconnect(message_bus).await,
             }
         }
 
@@ -1088,6 +1449,22 @@ mod tests {
         tasks.next().await.unwrap().1.unwrap_message()
     }
 
+    async fn respond_to_read_request_with_err(
+        proxy: &TaskSender<FilesProxy>,
+        tasks: &mut BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
+        error: ResponseError,
+        limited: bool,
+    ) -> ProxyMessage {
+        let response = if limited {
+            FileResponse::ReadLimited(Err(error))
+        } else {
+            FileResponse::Read(Err(error))
+        };
+
+        proxy.send(FilesProxyMessage::FileRes(response)).await;
+        tasks.next().await.unwrap().1.unwrap_message()
+    }
+
     #[rstest]
     #[case(true, false)]
     #[case(false, true)]
@@ -1363,5 +1740,39 @@ mod tests {
             .unwrap_message()
             .unwrap_proxy_to_layer_message();
         assert_eq!(update, ProxyToLayerMessage::File(seek_response),);
+    }
+
+    #[tokio::test]
+    async fn reading_from_dir() {
+        // relevant ticket: MBE-717: intproxy crashes when attempting to `cat` a remote dir
+        // test that a ReadLimited response from agent is sent to the layer the same variant as the
+        // original request type
+        let (proxy, mut tasks) = setup_proxy(mirrord_protocol::VERSION.clone(), 4096).await;
+
+        // create dir - use empty file
+        let fd = open_file(&proxy, &mut tasks, true).await;
+
+        // send read request from layer, check that proxy sends readlimited request to agent
+        let update = make_read_request(&proxy, &mut tasks, fd, 1, None).await;
+        assert_eq!(
+            update,
+            ProxyMessage::ToAgent(ClientMessage::FileRequest(FileRequest::ReadLimited(
+                ReadLimitedFileRequest {
+                    remote_fd: fd,
+                    buffer_size: 4096,
+                    start_from: 0,
+                }
+            ))),
+        );
+
+        // reply from agent with readlimited error, check that proxy sends read response to layer
+        let res_error = ResponseError::NotFile(fd);
+        let update = respond_to_read_request_with_err(&proxy, &mut tasks, res_error.clone(), true)
+            .await
+            .unwrap_proxy_to_layer_message();
+        assert_eq!(
+            update,
+            ProxyToLayerMessage::File(FileResponse::Read(Err(res_error))),
+        );
     }
 }

@@ -109,6 +109,7 @@ mod integration_tests_deps {
     use actix_codec as _;
     use futures as _;
     use mirrord_intproxy as _;
+    use serde_json as _;
     use tempfile as _;
     use test_cdylib as _;
     use tests as _;
@@ -460,9 +461,10 @@ fn fetch_env_vars() -> HashMap<String, String> {
         .unwrap_or_default();
 
     if let Some(file) = &setup().env_config().env_file {
-        let envs_from_file = envfile::EnvFile::new(file)
-            .expect("failed to access env file")
-            .store;
+        let envs_from_file = dotenvy::from_path_iter(file)
+            .and_then(|iter| iter.collect::<Result<Vec<_>, _>>())
+            .expect("failed to access the env file");
+
         env_vars.extend(envs_from_file);
     }
 

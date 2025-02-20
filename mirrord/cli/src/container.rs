@@ -131,6 +131,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
 #[tracing::instrument(level = Level::DEBUG, skip(config), ret, err)]
 fn create_temp_layer_config(config: &LayerConfig) -> Result<NamedTempFile, ContainerError> {
     let mut layer_config_file = tempfile::Builder::new()
+        .prefix("mirrord-config-")
         .suffix(".json")
         .tempfile()
         .map_err(ContainerError::ConfigWrite)?;

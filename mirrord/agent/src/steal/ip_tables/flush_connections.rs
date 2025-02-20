@@ -5,85 +5,47 @@
 //! which is hit only for new connections.
 //! Flush connections overcomes this by marking all existing connections of a specific port,
 //! and adding a rule that marked connections will be rejected.
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use mirrord_protocol::Port;
 use tokio::process::Command;
 use tracing::warn;
 
-use crate::{
-    error::AgentResult,
-    steal::ip_tables::{chain::IPTableChain, redirect::Redirect, IPTables, IPTABLE_INPUT},
-};
-
-const MARK: &str = "0x1";
+use crate::{error::AgentResult, steal::ip_tables::redirect::Redirect};
 
 #[derive(Debug)]
-pub(crate) struct FlushConnections<IPT: IPTables, T> {
-    managed: IPTableChain<IPT>,
+pub(crate) struct FlushConnections<T> {
     inner: Box<T>,
 }
 
-impl<IPT, T> FlushConnections<IPT, T>
+impl<T> FlushConnections<T>
 where
-    IPT: IPTables,
     T: Redirect,
 {
-    const ENTRYPOINT: &'static str = "INPUT";
-
-    #[tracing::instrument(level = "trace", skip(ipt, inner))]
-    pub fn create(ipt: Arc<IPT>, inner: Box<T>) -> AgentResult<Self> {
-        let managed =
-            IPTableChain::create(ipt.with_table("filter").into(), IPTABLE_INPUT.to_string())?;
-
-        // specify tcp protocol, if we don't we can't reject with tcp-reset
-        if let Err(e) = managed.add_rule(&format!(
-            "-p tcp -m connmark --mark {MARK} -j REJECT --reject-with tcp-reset"
-        )) {
-            warn!("Failed to add rule to reject connections: {e}");
-        }
-
-        Ok(FlushConnections { managed, inner })
+    #[tracing::instrument(level = "trace", skip(inner))]
+    pub fn create(inner: Box<T>) -> AgentResult<Self> {
+        Ok(FlushConnections { inner })
     }
 
-    #[tracing::instrument(level = "trace", skip(ipt, inner))]
-    pub fn load(ipt: Arc<IPT>, inner: Box<T>) -> AgentResult<Self> {
-        let managed =
-            IPTableChain::load(ipt.with_table("filter").into(), IPTABLE_INPUT.to_string())?;
-
-        Ok(FlushConnections { managed, inner })
+    #[tracing::instrument(level = "trace", skip(inner))]
+    pub fn load(inner: Box<T>) -> AgentResult<Self> {
+        Ok(FlushConnections { inner })
     }
 }
 
 #[async_trait]
-impl<IPT, T> Redirect for FlushConnections<IPT, T>
+impl<T> Redirect for FlushConnections<T>
 where
-    IPT: IPTables + Send + Sync,
     T: Redirect + Send + Sync,
 {
     #[tracing::instrument(level = "trace", skip(self), ret)]
     async fn mount_entrypoint(&self) -> AgentResult<()> {
-        self.inner.mount_entrypoint().await?;
-
-        self.managed.inner().add_rule(
-            Self::ENTRYPOINT,
-            &format!("-j {}", self.managed.chain_name()),
-        )?;
-
-        Ok(())
+        self.inner.mount_entrypoint().await
     }
 
     #[tracing::instrument(level = "trace", skip(self), ret)]
     async fn unmount_entrypoint(&self) -> AgentResult<()> {
-        self.inner.unmount_entrypoint().await?;
-
-        self.managed.inner().remove_rule(
-            Self::ENTRYPOINT,
-            &format!("-j {}", self.managed.chain_name()),
-        )?;
-
-        Ok(())
+        self.inner.unmount_entrypoint().await
     }
 
     #[tracing::instrument(level = "trace", skip(self), ret)]
@@ -96,13 +58,13 @@ where
         // so that they will be rejected by the rule we added in `create`
         let conntrack = Command::new("conntrack")
             .args([
-                "-U",
+                "-D",
                 "-p",
                 "tcp",
                 "--dport",
                 &redirected_port.to_string(),
-                "-m",
-                MARK,
+                "--state",
+                "ESTABLISHED",
             ])
             .output()
             .await?;

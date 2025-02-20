@@ -18,7 +18,6 @@ use crate::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
         udp::{DaemonUdpOutgoing, LayerUdpOutgoing},
     },
-    pause::DaemonPauseTarget,
     tcp::{DaemonTcp, LayerTcp, LayerTcpSteal},
     vpn::{ClientVpn, ServerVpn},
     ResponseError,
@@ -95,6 +94,12 @@ pub enum FileRequest {
     Unlink(UnlinkRequest),
     UnlinkAt(UnlinkAtRequest),
     StatFs(StatFsRequest),
+
+    /// Same as XstatFs, but results in the V2 response.
+    XstatFsV2(XstatFsRequestV2),
+
+    /// Same as StatFs, but results in the V2 response.
+    StatFsV2(StatFsRequestV2),
 }
 
 /// Minimal mirrord-protocol version that allows `ClientMessage::ReadyForLogs` message.
@@ -161,11 +166,13 @@ pub enum FileResponse {
     MakeDir(RemoteResult<()>),
     RemoveDir(RemoteResult<()>),
     Unlink(RemoteResult<()>),
+    XstatFsV2(RemoteResult<XstatFsResponseV2>),
 }
 
 /// `-agent` --> `-layer` messages.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 #[protocol_break(2)]
+#[allow(deprecated)] // We can't remove deprecated variants without breaking the protocol
 pub enum DaemonMessage {
     /// Kills the intproxy, no guarantee that messages that were sent before a `Close` will be
     /// handled by the intproxy and forwarded to the layer before the intproxy exits.
@@ -181,7 +188,7 @@ pub enum DaemonMessage {
     GetEnvVarsResponse(RemoteResult<HashMap<String, String>>),
     GetAddrInfoResponse(GetAddrInfoResponse),
     /// Pause is deprecated but we don't want to break protocol
-    PauseTarget(DaemonPauseTarget),
+    PauseTarget(crate::pause::DaemonPauseTarget),
     SwitchProtocolVersionResponse(#[bincode(with_serde)] semver::Version),
     Vpn(ServerVpn),
 }

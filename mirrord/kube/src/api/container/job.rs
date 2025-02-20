@@ -226,6 +226,7 @@ impl ContainerVariant for JobTargetedVariant<'_> {
 #[cfg(test)]
 mod test {
 
+    use mirrord_agent_env::envs;
     use mirrord_config::{
         agent::AgentFileConfig,
         config::{ConfigContext, MirrordConfig},
@@ -293,11 +294,11 @@ mod test {
                                 "imagePullPolicy": agent.image_pull_policy,
                                 "command": ["./mirrord-agent", "-l", "3000", "targetless"],
                                 "env": [
-                                    { "name": "RUST_LOG", "value": agent.log_level },
-                                    { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() },
-                                    { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() },
-                                    { "name": "MIRRORD_AGENT_JSON_LOG", "value": Some(agent.json_log.to_string()) },
-                                    { "name": "MIRRORD_AGENT_SUPPORT_IPV6", "value": Some(support_ipv6.to_string()) }
+                                    { "name": envs::LOG_LEVEL.name, "value": agent.log_level },
+                                    { "name": envs::STEALER_FLUSH_CONNECTIONS.name, "value": agent.flush_connections.to_string() },
+                                    { "name": envs::NFTABLES.name, "value": agent.nftables.to_string() },
+                                    { "name": envs::JSON_LOG.name, "value": Some(agent.json_log.to_string()) },
+                                    { "name": envs::IPV6_SUPPORT.name, "value": Some(support_ipv6.to_string()) }
 
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
@@ -352,6 +353,7 @@ mod test {
                 container_runtime: ContainerRuntime::Docker,
                 container_name: "foo".to_string(),
                 guessed_container: false,
+                share_process_namespace: false,
             },
         )
         .as_update();
@@ -430,11 +432,11 @@ mod test {
                                 ],
                                 "command": ["./mirrord-agent", "-l", "3000", "targeted", "--container-id", "container", "--container-runtime", "docker"],
                                 "env": [
-                                    { "name": "RUST_LOG", "value": agent.log_level },
-                                    { "name": "MIRRORD_AGENT_STEALER_FLUSH_CONNECTIONS", "value": agent.flush_connections.to_string() },
-                                    { "name": "MIRRORD_AGENT_NFTABLES", "value": agent.nftables.to_string() },
-                                    { "name": "MIRRORD_AGENT_JSON_LOG", "value": Some(agent.json_log.to_string()) },
-                                    { "name": "MIRRORD_AGENT_SUPPORT_IPV6", "value": Some(support_ipv6.to_string()) }
+                                    { "name": envs::LOG_LEVEL.name, "value": agent.log_level },
+                                    { "name": envs::STEALER_FLUSH_CONNECTIONS.name, "value": agent.flush_connections.to_string() },
+                                    { "name": envs::NFTABLES.name, "value": agent.nftables.to_string() },
+                                    { "name": envs::JSON_LOG.name, "value": Some(agent.json_log.to_string()) },
+                                    { "name": envs::IPV6_SUPPORT.name, "value": Some(support_ipv6.to_string()) }
                                 ],
                                 "resources": // Add requests to avoid getting defaulted https://github.com/metalbear-co/mirrord/issues/579
                                 {

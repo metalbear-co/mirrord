@@ -151,89 +151,85 @@ impl IpTablesRedirector {
     ///   redirects
     pub(crate) async fn new(
         flush_connections: bool,
-        pod_ips: Option<String>,
+        pod_ips: Vec<IpAddr>,
         support_ipv6: bool,
     ) -> AgentResult<Self> {
-        let (pod_ips4, pod_ips6) = pod_ips.map_or_else(
-            || (None, None),
-            |ips| {
-                // TODO: probably nicer to split at the client and avoid the conversion to and back
-                //   from a string.
-                let (ip4s, ip6s): (Vec<_>, Vec<_>) = ips.split(',').partition(|ip_str| {
-                    ip_str
-                        .parse::<IpAddr>()
-                        .inspect_err(|e| tracing::warn!(%e, "failed to parse pod IP {ip_str}"))
-                        .as_ref()
-                        .map(IpAddr::is_ipv4)
-                        .unwrap_or_default()
-                });
-                // Convert to options, `None` if vector is empty.
-                (
-                    ip4s.is_empty().not().then(|| ip4s.join(",")),
-                    ip6s.is_empty().not().then(|| ip6s.join(",")),
-                )
-            },
-        );
-        tracing::debug!("pod IPv4 addresses: {pod_ips4:?}, pod IPv6 addresses: {pod_ips6:?}");
+        let (pod_ips4, pod_ips6) = pod_ips
+            .into_iter()
+            .partition::<Vec<IpAddr>, _>(IpAddr::is_ipv4);
+        tracing::debug!(?pod_ips4, ?pod_ips6, "Resolved pod IP addresses from env",);
 
         tracing::debug!("Creating IPv4 iptables redirection listener");
         let listener4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await
+            .inspect_err(
+                |error| tracing::debug!(%error, "Failed to bind the IPv4 listener."),
+            )
+            .ok()
+            .and_then(|listener| {
+                let redirect_to = listener
+                    .local_addr()
+                    .inspect_err(
+                        |error| tracing::debug!(%error, "Failed to obtain the IPv4 listener local address."),
+                    )
+                    .ok()?
+                    .port();
+                let pod_ips = pod_ips4.is_empty().not().then(|| pod_ips4.iter().map(ToString::to_string).collect::<Vec<_>>().join(","));
+                Some(IptablesListener {
+                    iptables: None,
+                    redirect_to,
+                    listener,
+                    pod_ips,
+                    flush_connections,
+                    ipv6: false,
+                })
+            });
+
+        tracing::debug!("Creating IPv6 iptables redirection listener");
+        let listener6 = if support_ipv6 {
+            TcpListener::bind((Ipv6Addr::UNSPECIFIED, 0)).await
                 .inspect_err(
-                    |err| tracing::debug!(%err, "Could not bind IPv4, continuing with IPv6 only."),
+                    |error| tracing::debug!(%error, "Failed to bind the IPv6 listener."),
                 )
                 .ok()
                 .and_then(|listener| {
                     let redirect_to = listener
                         .local_addr()
                         .inspect_err(
-                            |err| tracing::debug!(%err, "Get IPv4 listener address, continuing with IPv6 only."),
+                            |error| tracing::debug!(%error, "Failed to obtain the IPv6 listener local address."),
                         )
                         .ok()?
                         .port();
+                    let pod_ips = pod_ips6.is_empty().not().then(|| pod_ips6.iter().map(ToString::to_string).collect::<Vec<_>>().join(","));
                     Some(IptablesListener {
                         iptables: None,
                         redirect_to,
                         listener,
-                        pod_ips: pod_ips4,
+                        pod_ips,
                         flush_connections,
-                        ipv6: false,
+                        ipv6: true,
                     })
-                });
-        tracing::debug!("Creating IPv6 iptables redirection listener");
-        let listener6 = if support_ipv6 {
-            TcpListener::bind((Ipv6Addr::UNSPECIFIED, 0)).await
-                    .inspect_err(
-                        |err| tracing::debug!(%err, "Could not bind IPv6, continuing with IPv4 only."),
-                    )
-                    .ok()
-                    .and_then(|listener| {
-                        let redirect_to = listener
-                            .local_addr()
-                            .inspect_err(
-                                |err| tracing::debug!(%err, "Get IPv6 listener address, continuing with IPv4 only."),
-                            )
-                            .ok()?
-                            .port();
-                        Some(IptablesListener {
-                            iptables: None,
-                            redirect_to,
-                            listener,
-                            pod_ips: pod_ips6,
-                            flush_connections,
-                            ipv6: true,
-                        })
-                    })
+                })
         } else {
             None
         };
+
         match (listener4, listener6) {
             (None, None) => Err(AgentError::CannotListenForStolenConnections),
-            (Some(ipv4_listener), None) => Ok(Self::Ipv4Only(ipv4_listener)),
-            (None, Some(ipv6_listener)) => Ok(Self::Ipv6Only(ipv6_listener)),
-            (Some(ipv4_listener), Some(ipv6_listener)) => Ok(Self::Dual {
-                ipv4_listener,
-                ipv6_listener,
-            }),
+            (Some(ipv4_listener), None) => {
+                tracing::debug!("Continuing with only the IPv4 steal listener.");
+                Ok(Self::Ipv4Only(ipv4_listener))
+            }
+            (None, Some(ipv6_listener)) => {
+                tracing::debug!("Continuing with only the IPv6 steal listener.");
+                Ok(Self::Ipv6Only(ipv6_listener))
+            }
+            (Some(ipv4_listener), Some(ipv6_listener)) => {
+                tracing::debug!("Continuing with both the IPv4 and the IPv6 steal listeners.");
+                Ok(Self::Dual {
+                    ipv4_listener,
+                    ipv6_listener,
+                })
+            }
         }
     }
 

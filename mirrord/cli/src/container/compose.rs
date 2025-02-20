@@ -386,7 +386,17 @@ impl ComposeRunner<PrepareCompose> {
             runtime_args,
         } = self;
 
-        let services = Self::prepare_services(&mut user_compose)?;
+        let intproxy_port = sidecar_info.env_vars.iter().find_map(|(k, v)| {
+            k.contains("CONNECT_TCP")
+                .then(|| {
+                    let split = v.clone();
+                    let f = split.split_terminator(":");
+                    f.map(|f| f.to_string()).last()
+                })
+                .flatten()
+        });
+
+        let services = Self::prepare_services(&mut user_compose, intproxy_port)?;
 
         for (service_key, service) in services.iter_mut() {
             if service_key
@@ -455,6 +465,7 @@ impl ComposeRunner<PrepareCompose> {
 
     fn prepare_services(
         compose: &mut serde_yaml::Value,
+        port: Option<String>,
     ) -> ComposeResult<&mut serde_yaml::Mapping> {
         let services = compose
             .get_mut("services")
@@ -462,17 +473,33 @@ impl ComposeRunner<PrepareCompose> {
             .as_mapping_mut()
             .ok_or_else(|| ComposeError::UnexpectedType("mapping".to_string()))?;
 
-        services.insert(
-            serde_yaml::from_str(MIRRORD_COMPOSE_SIDECAR_SERVICE)?,
-            serde_yaml::from_str(&format!(
-                r#"
-                        image: meowjesty/mirrord-cli:latest
+        if let Some(port) = port {
+            services.insert(
+                serde_yaml::from_str(MIRRORD_COMPOSE_SIDECAR_SERVICE)?,
+                serde_yaml::from_str(&format!(
+                    r#"
+                        # image: meowjesty/mirrord-cli:latest
+                        image: ghcr.io/metalbear-co/mirrord-cli:3.133.1
+                        command: mirrord intproxy --port {port}
+                        ports:
+                          - "8000:5000"
+                    "#
+                ))?,
+            );
+        } else {
+            services.insert(
+                serde_yaml::from_str(MIRRORD_COMPOSE_SIDECAR_SERVICE)?,
+                serde_yaml::from_str(&format!(
+                    r#"
+                        # image: meowjesty/mirrord-cli:latest
+                        image: ghcr.io/metalbear-co/mirrord-cli:3.133.1
                         command: mirrord intproxy --port 8888
                         ports:
                           - "8000:5000"
                     "#
-            ))?,
-        );
+                ))?,
+            );
+        }
 
         Ok(services)
     }

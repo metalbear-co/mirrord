@@ -1,7 +1,7 @@
 //! We implement each hook function in a safe function as much as possible, having the unsafe do the
 //! absolute minimum
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     net::{SocketAddr, ToSocketAddrs},
     os::unix::io::RawFd,
     str::FromStr,
@@ -10,7 +10,6 @@ use std::{
 
 use base64::prelude::*;
 use bincode::{Decode, Encode};
-use hashbrown::hash_set::HashSet;
 use hooks::FN_FCNTL;
 use libc::{c_int, sockaddr, socklen_t};
 use mirrord_config::feature::network::{

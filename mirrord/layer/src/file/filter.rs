@@ -126,7 +126,7 @@ impl FileFilter {
     }
 
     /// Checks if `text` matches the regex held by the initialized variant of `FileFilter`,
-    /// and the whether the path is queried for write converting the result a `Detour`.
+    /// and whether the path is queried for write converting the result a `Detour`.
     ///
     /// `op` is used to lazily initialize a `Bypass` case.
     pub fn continue_or_bypass_with<F>(&self, text: &str, write: bool, op: F) -> Detour<()>

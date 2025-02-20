@@ -14,8 +14,8 @@ use k8s_openapi::{
     NamespaceResourceScope,
 };
 use kube::{api::ListParams, Api, Client, Resource};
+use mirrord_agent_env::mesh::MeshVendor;
 use mirrord_config::target::Target;
-use mirrord_protocol::MeshVendor;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 use tracing::Level;
@@ -33,6 +33,7 @@ pub mod cron_job;
 pub mod deployment;
 pub mod job;
 pub mod pod;
+pub mod replica_set;
 pub mod rollout;
 pub mod service;
 pub mod stateful_set;
@@ -86,6 +87,8 @@ pub struct RuntimeData {
 
     /// Used to check if we're running with a mesh/sidecar in `detect_mesh_mirror_mode`.
     pub mesh: Option<MeshVendor>,
+
+    pub share_process_namespace: bool,
 }
 
 impl RuntimeData {
@@ -207,6 +210,11 @@ impl RuntimeData {
             container_name,
             guessed_container,
             mesh,
+            share_process_namespace: pod
+                .spec
+                .as_ref()
+                .and_then(|spec| spec.share_process_namespace)
+                .unwrap_or_default(),
         })
     }
 
@@ -374,6 +382,7 @@ impl RuntimeDataProvider for Target {
             Target::CronJob(target) => target.runtime_data(client, namespace).await,
             Target::StatefulSet(target) => target.runtime_data(client, namespace).await,
             Target::Service(target) => target.runtime_data(client, namespace).await,
+            Target::ReplicaSet(target) => target.runtime_data(client, namespace).await,
             Target::Targetless => Err(KubeApiError::MissingRuntimeData),
         }
     }
@@ -389,6 +398,7 @@ impl RuntimeDataProvider for ResolvedTarget<true> {
             Self::CronJob(target) => target.runtime_data(client, namespace).await,
             Self::StatefulSet(target) => target.runtime_data(client, namespace).await,
             Self::Service(target) => target.runtime_data(client, namespace).await,
+            Self::ReplicaSet(target) => target.runtime_data(client, namespace).await,
             Self::Targetless(_) => Err(KubeApiError::MissingRuntimeData),
         }
     }

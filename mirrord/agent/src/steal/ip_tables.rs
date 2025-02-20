@@ -4,8 +4,9 @@ use std::{
 };
 
 use enum_dispatch::enum_dispatch;
-use mirrord_protocol::{MeshVendor, Port};
-use rand::distributions::{Alphanumeric, DistString};
+use mirrord_agent_env::{envs, mesh::MeshVendor};
+use mirrord_protocol::Port;
+use rand::distr::{Alphanumeric, SampleString};
 use tracing::warn;
 
 use crate::{
@@ -32,7 +33,7 @@ pub static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_PREROUTING_ENV).unwrap_or_else(|_| {
         format!(
             "MIRRORD_INPUT_{}",
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+            Alphanumeric.sample_string(&mut rand::rng(), 5)
         )
     })
 });
@@ -42,7 +43,7 @@ pub(crate) static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_MESH_ENV).unwrap_or_else(|_| {
         format!(
             "MIRRORD_OUTPUT_{}",
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+            Alphanumeric.sample_string(&mut rand::rng(), 5)
         )
     })
 });
@@ -52,17 +53,7 @@ pub(crate) static IPTABLE_STANDARD: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_STANDARD_ENV).unwrap_or_else(|_| {
         format!(
             "MIRRORD_STANDARD_{}",
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
-        )
-    })
-});
-
-pub static IPTABLE_INPUT_ENV: &str = "MIRRORD_IPTABLE_INPUT_NAME";
-pub static IPTABLE_INPUT: LazyLock<String> = LazyLock::new(|| {
-    std::env::var(IPTABLE_INPUT_ENV).unwrap_or_else(|_| {
-        format!(
-            "MIRRORD_INPUT_{}",
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 5)
+            Alphanumeric.sample_string(&mut rand::rng(), 5)
         )
     })
 });
@@ -101,9 +92,7 @@ pub struct IPTablesWrapper {
 
 /// wrapper around iptables::new that uses nft or legacy based on env
 pub fn new_iptables() -> iptables::IPTables {
-    if let Ok(val) = std::env::var("MIRRORD_AGENT_NFTABLES")
-        && val.to_lowercase() == "true"
-    {
+    if envs::NFTABLES.from_env_or_default() {
         iptables::new_with_cmd("/usr/sbin/iptables-nft")
     } else {
         iptables::new_with_cmd("/usr/sbin/iptables-legacy")
@@ -113,9 +102,7 @@ pub fn new_iptables() -> iptables::IPTables {
 
 /// wrapper around iptables::new that uses nft or legacy based on env
 pub fn new_ip6tables() -> iptables::IPTables {
-    if let Ok(val) = std::env::var("MIRRORD_AGENT_NFTABLES")
-        && val.to_lowercase() == "true"
-    {
+    if envs::NFTABLES.from_env_or_default() {
         iptables::new_with_cmd("/usr/sbin/ip6tables-nft")
     } else {
         iptables::new_with_cmd("/usr/sbin/ip6tables-legacy")
@@ -215,7 +202,7 @@ pub(crate) enum Redirects<IPT: IPTables + Send + Sync> {
     Ambient(AmbientRedirect<IPT>),
     Standard(StandardRedirect<IPT>),
     Mesh(MeshRedirect<IPT>),
-    FlushConnections(FlushConnections<IPT, Redirects<IPT>>),
+    FlushConnections(FlushConnections<Redirects<IPT>>),
     PrerouteFallback(PreroutingRedirect<IPT>),
 }
 
@@ -261,8 +248,7 @@ where
         };
 
         if flush_connections {
-            redirect =
-                Redirects::FlushConnections(FlushConnections::create(ipt, Box::new(redirect))?)
+            redirect = Redirects::FlushConnections(FlushConnections::create(Box::new(redirect))?)
         }
 
         redirect.mount_entrypoint().await?;
@@ -290,7 +276,7 @@ where
         };
 
         if flush_connections {
-            redirect = Redirects::FlushConnections(FlushConnections::load(ipt, Box::new(redirect))?)
+            redirect = Redirects::FlushConnections(FlushConnections::load(Box::new(redirect))?)
         }
 
         Ok(Self { redirect })

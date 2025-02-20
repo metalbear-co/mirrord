@@ -8,7 +8,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use exponential_backoff::Backoff;
 use http_body_util::BodyExt;
 use hyper::{body::Incoming, http::response::Parts, StatusCode};
 use mirrord_protocol::{
@@ -19,6 +18,7 @@ use mirrord_protocol::{
     },
 };
 use tokio::time;
+use tokio_retry::strategy::ExponentialBackoff;
 use tracing::Level;
 
 use super::{
@@ -301,9 +301,13 @@ impl BackgroundTask for HttpGatewayTask {
     type MessageOut = InProxyTaskMessage;
 
     #[tracing::instrument(level = Level::TRACE, name = "http_gateway_task_main_loop", skip(message_bus))]
-    async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        let mut backoffs =
-            Backoff::new(10, Duration::from_millis(50), Duration::from_millis(500)).into_iter();
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+        // Will return 9 backoffs: 50ms, 100ms, 200ms, 400ms, 500ms, 500ms, ...
+        let mut backoffs = ExponentialBackoff::from_millis(2)
+            .factor(25)
+            .max_delay(Duration::from_millis(500))
+            .take(9);
+
         let guard = message_bus.closed();
 
         let mut attempt = 0;
@@ -313,11 +317,8 @@ impl BackgroundTask for HttpGatewayTask {
             match guard.cancel_on_close(self.send_attempt(message_bus)).await {
                 None | Some(Ok(())) => return Ok(()),
                 Some(Err(error)) => {
-                    let backoff = error
-                        .can_retry()
-                        .then(|| backoffs.next())
-                        .flatten()
-                        .flatten();
+                    let backoff = error.can_retry().then(|| backoffs.next()).flatten();
+
                     let Some(backoff) = backoff else {
                         tracing::warn!(
                             gateway = ?self,
@@ -534,7 +535,7 @@ mod test {
             };
             let gateway = HttpGatewayTask::new(
                 request,
-                Default::default(),
+                ClientStore::new_with_timeout(Duration::from_secs(1)),
                 ResponseMode::Basic,
                 local_destination,
             );
@@ -687,7 +688,12 @@ mod test {
 
         let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> = Default::default();
         let _gateway = tasks.register(
-            HttpGatewayTask::new(request, ClientStore::default(), response_mode, addr),
+            HttpGatewayTask::new(
+                request,
+                ClientStore::new_with_timeout(Duration::from_secs(1)),
+                response_mode,
+                addr,
+            ),
             (),
             8,
         );
@@ -829,7 +835,7 @@ mod test {
             .insert(header::CONTENT_LENGTH, HeaderValue::from_static("12"));
 
         let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> = Default::default();
-        let client_store = ClientStore::default();
+        let client_store = ClientStore::new_with_timeout(Duration::from_secs(1));
         let _gateway = tasks.register(
             HttpGatewayTask::new(request, client_store.clone(), ResponseMode::Basic, addr),
             (),

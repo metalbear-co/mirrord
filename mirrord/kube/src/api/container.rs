@@ -1,13 +1,10 @@
-use std::{collections::HashSet, sync::LazyLock};
+use std::{collections::HashSet, net::IpAddr, sync::LazyLock};
 
 use k8s_openapi::api::core::v1::{ContainerStatus, Pod};
+use mirrord_agent_env::mesh::MeshVendor;
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
-use mirrord_protocol::MeshVendor;
-use rand::{
-    distributions::{Alphanumeric, DistString},
-    Rng,
-};
+use rand::distr::{Alphanumeric, SampleString};
 
 use crate::{api::kubernetes::AgentKubernetesConnectInfo, error::Result};
 
@@ -40,10 +37,10 @@ pub struct ContainerParams {
     pub name: String,
     pub gid: u16,
     pub port: u16,
-    /// Value for [`AGENT_OPERATOR_CERT_ENV`](mirrord_protocol::AGENT_OPERATOR_CERT_ENV) set in
+    /// Value for [`OPERATOR_CERT`](mirrord_agent_env::envs::OPERATOR_CERT) set in
     /// the agent container.
     pub tls_cert: Option<String>,
-    pub pod_ips: Option<String>,
+    pub pod_ips: Option<Vec<IpAddr>>,
     /// Support IPv6-only clusters
     pub support_ipv6: bool,
 }
@@ -51,16 +48,17 @@ pub struct ContainerParams {
 impl ContainerParams {
     pub fn new(
         tls_cert: Option<String>,
-        pod_ips: Option<String>,
+        pod_ips: Option<Vec<IpAddr>>,
         support_ipv6: bool,
+        port: Option<u16>,
     ) -> ContainerParams {
-        let port: u16 = rand::thread_rng().gen_range(30000..=65535);
-        let gid: u16 = rand::thread_rng().gen_range(3000..u16::MAX);
+        let port = port.unwrap_or_else(|| rand::random_range(30000..=65535));
+        let gid: u16 = rand::random_range(3000..u16::MAX);
 
         let name = format!(
             "mirrord-agent-{}",
             Alphanumeric
-                .sample_string(&mut rand::thread_rng(), 10)
+                .sample_string(&mut rand::rng(), 10)
                 .to_lowercase()
         );
 

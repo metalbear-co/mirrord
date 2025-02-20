@@ -47,6 +47,9 @@ impl fmt::Display for LinuxCapability {
 
 /// Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.
 ///
+/// **Note:** this configuration is ignored when using the mirrord Operator.
+/// Agent configuration is done by the cluster admin.
+///
 /// We provide sane defaults for this option, so you don't have to set up anything here.
 ///
 /// ```json
@@ -106,7 +109,9 @@ pub struct AgentConfig {
     /// ### agent.namespace {#agent-namespace}
     ///
     /// Namespace where the agent shall live.
-    /// Note: Doesn't work with ephemeral containers.
+    ///
+    /// **Note:** ignored in targetless runs or when the agent is run as an ephemeral container.
+    ///
     /// Defaults to the current kubernetes namespace.
     #[config(env = "MIRRORD_AGENT_NAMESPACE")]
     pub namespace: Option<String>,
@@ -183,7 +188,9 @@ pub struct AgentConfig {
     /// ### agent.ephemeral {#agent-ephemeral}
     ///
     /// Runs the agent as an
-    /// [ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/)
+    /// [ephemeral container](https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/).
+    ///
+    /// Not compatible with targetless runs.
     ///
     /// Defaults to `false`.
     #[config(env = "MIRRORD_EPHEMERAL_CONTAINER", default = false)]

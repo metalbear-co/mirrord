@@ -106,6 +106,7 @@ pub(crate) async fn proxy(
         agent_conn,
         listener,
         config.experimental.readonly_file_buffer,
+        Duration::from_millis(config.experimental.idle_local_http_connection_timeout),
     )
     .run(first_connection_timeout, consecutive_connection_timeout)
     .await

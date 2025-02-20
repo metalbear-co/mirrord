@@ -388,10 +388,24 @@ impl_request!(
 );
 
 impl_request!(
+    req = XstatFsRequestV2,
+    res = RemoteResult<XstatFsResponseV2>,
+    req_path = LayerToProxyMessage::File => FileRequest::XstatFsV2,
+    res_path = ProxyToLayerMessage::File => FileResponse::XstatFsV2,
+);
+
+impl_request!(
     req = StatFsRequest,
     res = RemoteResult<XstatFsResponse>,
     req_path = LayerToProxyMessage::File => FileRequest::StatFs,
     res_path = ProxyToLayerMessage::File => FileResponse::XstatFs,
+);
+
+impl_request!(
+    req = StatFsRequestV2,
+    res = RemoteResult<XstatFsResponseV2>,
+    req_path = LayerToProxyMessage::File => FileRequest::StatFsV2,
+    res_path = ProxyToLayerMessage::File => FileResponse::XstatFsV2,
 );
 
 impl_request!(
