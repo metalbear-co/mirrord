@@ -18,7 +18,7 @@ use mirrord_intproxy_protocol::{
 };
 use mirrord_protocol::{
     tcp::{
-        ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, DaemonTcp, HttpRequest,
+        ChunkedHttpBody, ChunkedHttpError, ChunkedRequest, ChunkedResponse, DaemonTcp, HttpRequest,
         InternalHttpBodyFrame, LayerTcp, LayerTcpSteal, NewTcpConnection, StealType, TcpData,
     },
     ClientMessage, ConnectionId, RequestId, ResponseError,
@@ -174,13 +174,18 @@ impl IncomingProxy {
     ///
     /// If we don't have a [`PortSubscription`] for the port, the task is not started.
     /// Instead, we respond immediately to the agent.
-    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
+    #[tracing::instrument(
+        level = Level::TRACE,
+        skip(self, message_bus),
+    )]
     async fn start_http_gateway(
         &mut self,
         request: HttpRequest<StreamingBody>,
         body_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
         message_bus: &MessageBus<Self>,
     ) {
+        tracing::trace!(full_headers = ?request.internal_request.headers);
+
         let subscription = self.subscriptions.get(request.port).filter(|subscription| {
             matches!(
                 subscription.subscription,
@@ -684,6 +689,7 @@ impl IncomingProxy {
 
                 match message {
                     HttpOut::ResponseBasic(response) => {
+                        tracing::trace!(full_headers = ?response.internal_response.headers);
                         message_bus
                             .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(
                                 response,
@@ -691,6 +697,7 @@ impl IncomingProxy {
                             .await
                     }
                     HttpOut::ResponseFramed(response) => {
+                        tracing::trace!(full_headers = ?response.internal_response.headers);
                         message_bus
                             .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(
                                 response,
@@ -698,6 +705,9 @@ impl IncomingProxy {
                             .await
                     }
                     HttpOut::ResponseChunked(response) => {
+                        if let ChunkedResponse::Start(start) = &response {
+                            tracing::trace!(full_headers = ?start.internal_response.headers);
+                        }
                         message_bus
                             .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
                                 response,
