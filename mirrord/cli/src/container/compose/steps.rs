@@ -84,10 +84,15 @@ impl ServiceInfo {
                 .and_then(|env| env.as_mapping_mut())
             {
                 Some(env) => {
-                    env.insert(
-                        serde_yaml::from_str(&format!("{mirrord_env_key}"))?,
-                        serde_yaml::from_str(&format!("{mirrord_env}"))?,
-                    );
+                    if mirrord_env_key.contains("MIRRORD_AGENT_CONNECT_INFO") {
+                        let v = serde_yaml::Value::String(mirrord_env.clone());
+                        env.insert(serde_yaml::from_str(&format!("{mirrord_env_key}"))?, v);
+                    } else {
+                        env.insert(
+                            serde_yaml::from_str(&format!("{mirrord_env_key}"))?,
+                            serde_yaml::from_str(&format!("{mirrord_env}"))?,
+                        );
+                    }
                 }
                 None => {
                     service.insert(

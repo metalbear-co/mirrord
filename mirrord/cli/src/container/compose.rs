@@ -18,6 +18,7 @@ use mirrord_config::{
     },
     LayerConfig, MIRRORD_CONFIG_FILE_ENV,
 };
+use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::{Progress, ProgressTracker, MIRRORD_PROGRESS_ENV};
 use steps::*;
 use tempfile::NamedTempFile;
@@ -314,7 +315,7 @@ impl ComposeRunner<PrepareRuntimeCommand> {
 
         let mut connection_info = Vec::new();
         let mut execution_info_env_without_connection_info = Vec::new();
-        for (key, value) in &external_proxy.environment {
+        for (key, value) in external_proxy.environment.iter() {
             if key == MIRRORD_CONNECT_TCP_ENV || key == AGENT_CONNECT_INFO_ENV_KEY {
                 connection_info.push((key.as_str(), value.as_str()));
             } else {
@@ -323,11 +324,12 @@ impl ComposeRunner<PrepareRuntimeCommand> {
         }
 
         sidecar_info.env_vars.extend(
-            execution_info_env_without_connection_info
+            connection_info
                 .clone()
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v.to_string())),
         );
+
         user_service_info.env_vars.extend(
             execution_info_env_without_connection_info
                 .clone()
@@ -379,7 +381,7 @@ impl ComposeRunner<PrepareCompose> {
                     external_proxy_tls_guards,
                     analytics,
                     layer_config_file,
-                    sidecar_info,
+                    mut sidecar_info,
                     user_service_info,
                 },
             runtime,
@@ -396,6 +398,7 @@ impl ComposeRunner<PrepareCompose> {
                 .flatten()
         });
 
+        sidecar_info.env_vars.remove("LD_PRELOAD");
         let services = Self::prepare_services(&mut user_compose, intproxy_port)?;
 
         for (service_key, service) in services.iter_mut() {
