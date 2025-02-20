@@ -223,7 +223,11 @@ pub(crate) enum Bypass {
 
 impl Bypass {
     pub fn relative_path(path: impl Into<Vec<u8>>) -> Self {
-        Bypass::RelativePath(CString::new(path).expect("Should be CStringable"))
+        Bypass::RelativePath(CString::new(path).expect("should be a valid C string"))
+    }
+
+    pub fn ignored_file(path: impl Into<Vec<u8>>) -> Self {
+        Bypass::IgnoredFile(CString::new(path).expect("should be a valid C string"))
     }
 }
 

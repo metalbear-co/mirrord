@@ -6,7 +6,7 @@
 ///    match [`generate_local_set`];
 ///
 /// 2. Using the overrides for `read_only`, `read_write` and `local`.
-use std::{env, ffi::CString, path::Path};
+use std::{env, path::Path};
 
 use mirrord_config::{
     feature::fs::{FsConfig, FsModeConfig},
@@ -130,29 +130,21 @@ impl FileFilter {
         let text = path.to_str().unwrap_or_default();
 
         match self.mode {
-            FsModeConfig::Local => {
-                Detour::Bypass(Bypass::IgnoredFile(CString::new(text).unwrap_or_default()))
-            }
+            FsModeConfig::Local => Detour::Bypass(Bypass::ignored_file(text)),
             _ if self.not_found.is_match(text) => Detour::Error(HookError::FileNotFound),
             _ if self.read_write.is_match(text) => Detour::Success(()),
             _ if self.read_only.is_match(text) => {
                 if write {
-                    Detour::Bypass(Bypass::IgnoredFile(CString::new(text).unwrap_or_default()))
+                    Detour::Bypass(Bypass::ignored_file(text))
                 } else {
                     Detour::Success(())
                 }
             }
-            _ if self.local.is_match(text) => {
-                Detour::Bypass(Bypass::IgnoredFile(CString::new(text).unwrap_or_default()))
-            }
+            _ if self.local.is_match(text) => Detour::Bypass(Bypass::ignored_file(text)),
             _ if self.default_not_found.is_match(text) => Detour::Error(HookError::FileNotFound),
             _ if self.default_remote_ro.is_match(text) && !write => Detour::Success(()),
-            _ if self.default_local.is_match(text) => {
-                Detour::Bypass(Bypass::IgnoredFile(CString::new(text).unwrap_or_default()))
-            }
-            FsModeConfig::LocalWithOverrides => {
-                Detour::Bypass(Bypass::IgnoredFile(CString::new(text).unwrap_or_default()))
-            }
+            _ if self.default_local.is_match(text) => Detour::Bypass(Bypass::ignored_file(text)),
+            FsModeConfig::LocalWithOverrides => Detour::Bypass(Bypass::ignored_file(text)),
             FsModeConfig::Write => Detour::Success(()),
             FsModeConfig::Read if write => Detour::Bypass(Bypass::ReadOnly(text.into())),
             FsModeConfig::Read => Detour::Success(()),
