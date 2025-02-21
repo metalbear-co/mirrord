@@ -1,3 +1,4 @@
+use mirrord_config::config::ConfigError;
 use thiserror::Error;
 
 use crate::{error::ContainerError, CliError};
@@ -21,4 +22,7 @@ pub(crate) enum ComposeError {
 
     #[error("Compose value expected type `{0}`!")]
     UnexpectedType(String),
+
+    #[error(transparent)]
+    LayerConfig(#[from] ConfigError),
 }

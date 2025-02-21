@@ -448,7 +448,9 @@ pub(crate) async fn container_command(
     } else {
         let wat = ComposeRunner::try_new(runtime_args, exec_params)
             .unwrap()
-            .prepare_config_and_analytics(watch)
+            .layer_config()
+            .unwrap()
+            .analytics(watch)
             .unwrap()
             .prepare_tls()
             .unwrap()
