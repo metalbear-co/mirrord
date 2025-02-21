@@ -72,7 +72,7 @@ where
 /// This is done even if on x86 due to the possibility of mirrord being run emulated
 /// If prefix is true, add a random prefix to the file name that identifies the specific build
 /// of the layer. This is useful for debug purposes usually.
-#[cfg(all(target_os = "macos"))]
+#[cfg(target_os = "macos")]
 pub(crate) fn extract_arm64<P>(progress: &P, prefix: bool) -> CliResult<PathBuf>
 where
     P: Progress + Send + Sync,

@@ -29,7 +29,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn, Level};
 
-#[cfg(all(target_os = "macos"))]
+#[cfg(target_os = "macos")]
 use crate::extract::extract_arm64;
 use crate::{
     connection::{create_and_connect, AgentConnection, AGENT_CONNECT_INFO_ENV_KEY},
@@ -226,7 +226,7 @@ impl MirrordExecution {
                 .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
         };
 
-        #[cfg(all(target_os = "macos"))]
+        #[cfg(target_os = "macos")]
         env_vars.insert(
             "MIRRORD_MACOS_ARM64_LIBRARY".to_string(),
             extract_arm64(progress, true)?.to_string_lossy().into(),
