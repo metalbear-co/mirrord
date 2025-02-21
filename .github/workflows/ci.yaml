@@ -399,11 +399,11 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      # this is required for clippy lint because the layer path variable is checked at compile time
+      - name: create fake layer file
+        run: touch /tmp/file.dylib
       - name: clippy x64
         run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=x86_64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
-      # this is required for clippy lint because the layer path variable is checked at compile time
-      - name: create fake layer file for arm 64
-        run: touch /tmp/file.dylib
       - name: clippy aarch64
         run: cargo clippy -p mirrord -p mirrord-layer -p mirrord-sip --target=aarch64-apple-darwin --tests -- -Wclippy::indexing_slicing -D warnings
       - name: mirrord SIP UT
