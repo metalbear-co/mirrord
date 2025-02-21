@@ -343,7 +343,8 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     ///
     /// * `client_id` - identifier of the client that issued the subscription
     /// * `port` - number of the port to steal from
-    /// * `client_protocol_version` - version of client's [`mirrord_protocol`]
+    /// * `client_protocol_version` - version of client's [`mirrord_protocol`], [`None`] if the
+    ///   version has not been negotiated yet
     /// * `filter` - optional [`HttpFilter`]
     ///
     /// # Warning
@@ -495,6 +496,10 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     }
 }
 
+/// Maps id of the client to their active [`HttpFilter`] and their negotiated [`mirrord_protocol`]
+/// version, if any.
+///
+/// [`mirrord_protocol`] version affects which stolen requests can be handled by the client.
 pub type Filters = Arc<DashMap<ClientId, (HttpFilter, Option<semver::Version>)>>;
 
 /// Steal subscription for a port.

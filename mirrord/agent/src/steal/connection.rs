@@ -96,9 +96,11 @@ struct Client {
     /// For sending messages to client's [`TcpStealerApi`](super::api::TcpStealerApi).
     /// Comes to [`TcpConnectionStealer`] in [`Command::NewClient`].
     tx: Sender<DaemonTcp>,
-    /// Client's [`mirrord_protocol`] verison.
+    /// Client's [`mirrord_protocol`] version.
     ///
     /// Determines which variant of [`DaemonTcp`] we use to send stolen HTTP requests.
+    /// 
+    /// [`None`] until protocol version negotiation concludes.
     protocol_version: Option<semver::Version>,
     /// Client subscriptions to stolen connections.
     /// Used to unsubscribe when the client exits.
