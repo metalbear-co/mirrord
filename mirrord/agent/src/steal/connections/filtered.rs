@@ -511,32 +511,31 @@ where
         ret,
     )]
     fn match_request<B>(&self, request: &mut Request<B>) -> Option<ClientId> {
-        let protocol_version_req = if self.original_destination.connector().is_some() {
-            &HTTP_CHUNKED_REQUEST_V2_VERSION
-        } else if request.headers().contains_key(UPGRADE) {
-            &HTTP_FILTERED_UPGRADE_VERSION
-        } else {
-            &semver::VersionReq::STAR
-        };
+        let protocol_version_req = self
+            .original_destination
+            .connector()
+            .is_some()
+            .then_some(&*HTTP_CHUNKED_REQUEST_V2_VERSION)
+            .or_else(|| {
+                request
+                    .headers()
+                    .contains_key(UPGRADE)
+                    .then_some(&*HTTP_FILTERED_UPGRADE_VERSION)
+            });
 
         self.filters
             .iter()
-            .filter_map(|entry| {
-                if entry
-                    .value()
-                    .1
-                    .as_ref()
-                    .is_none_or(|v| !protocol_version_req.matches(v))
-                {
-                    return None;
-                }
+            // Check if the client can handle the request.
+            .filter(|entry| {
+                let Some(req) = &protocol_version_req else {
+                    return true;
+                };
 
-                if !entry.value().0.matches(request) {
-                    return None;
-                }
-
-                Some(*entry.key())
+                entry.value().1.as_ref().is_some_and(|v| req.matches(v))
             })
+            // Check if the client's filter matches the request.
+            .filter(|entry| entry.value().0.matches(request))
+            .map(|entry| *entry.key())
             .find(|client_id| self.subscribed.get(client_id).copied().unwrap_or(true))
     }
 
