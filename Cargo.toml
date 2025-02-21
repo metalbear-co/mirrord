@@ -173,6 +173,9 @@ miette = "7"
 # Used by `kube`, `intproxy`.
 tokio-retry = "0.3"
 
+# Used by `agent`, `tls-util`.
+x509-parser = "0.17"
+
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 

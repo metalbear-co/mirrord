@@ -19,7 +19,7 @@ mod root_store;
 mod san;
 mod uri_ext;
 
-pub use error::FromPemError;
+pub use error::{FromPemError, GetSanError};
 pub use no_verifier::{DangerousNoVerifierClient, DangerousNoVerifierServer};
 pub use read_pem::{read_cert_chain, read_key_der};
 pub use root_store::best_effort_root_store;

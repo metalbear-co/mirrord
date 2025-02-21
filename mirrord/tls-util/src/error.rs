@@ -2,10 +2,7 @@ use std::{io, path::PathBuf};
 
 use thiserror::Error;
 use tokio::task::JoinError;
-use x509_parser::{
-    error::{PEMError, X509Error},
-    nom,
-};
+use x509_parser::{error::X509Error, nom};
 
 /// Errors that can occur when reading a certificate chain or a private key from a PEM file.
 #[derive(Error, Debug)]
@@ -45,8 +42,6 @@ pub enum GetSanError {
     InvalidSanExtension(#[source] X509Error),
     #[error("SAN extension was not found")]
     NoSanExtension,
-    #[error("failed to parse DER data as an x509 certificate: {0}")]
+    #[error("failed to parse the x509 certificate: {0}")]
     ParseDerError(#[from] nom::Err<X509Error>),
-    #[error("failed to parse PEM data as an x509 certificate: {0}")]
-    ParsePemError(#[from] nom::Err<PEMError>),
 }
