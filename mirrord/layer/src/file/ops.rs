@@ -1,6 +1,17 @@
+//! # Note on path handling
+//!
+//! When operating on the paths provided from the user application, remember to verify/remap them.
+//! Canonical order of operations can be found in [`common_path_check`].
+
 #[cfg(target_os = "linux")]
 use std::time::Duration;
-use std::{env, ffi::CString, io::SeekFrom, os::unix::io::RawFd, path::PathBuf};
+use std::{
+    env,
+    ffi::CString,
+    io::SeekFrom,
+    os::unix::io::RawFd,
+    path::{Path, PathBuf},
+};
 
 #[cfg(target_os = "linux")]
 use libc::{c_char, statx, statx_timestamp};
@@ -14,6 +25,7 @@ use mirrord_protocol::{
     },
     ResponseError,
 };
+use nix::errno::Errno;
 use rand::distr::{Alphanumeric, SampleString};
 #[cfg(debug_assertions)]
 use tracing::Level;
@@ -31,37 +43,35 @@ use crate::{
 /// 1 Megabyte. Large read requests can lead to timeouts.
 const MAX_READ_SIZE: u64 = 1024 * 1024;
 
-/// Helper macro for checking if the given path should be handled remotely.
-/// Uses global [`crate::setup()`].
-///
-/// Should the file be ignored, this macro exists current context with [`Bypass::IgnoredFile`].
-///
-/// # Arguments
-///
-/// * `path` - [`PathBuf`]
-/// * `write` - [`bool`], stating whether the file is accessed for writing
-macro_rules! ensure_not_ignored {
-    ($path:expr, $write:expr) => {
-        $crate::setup().file_filter().continue_or_bypass_with(
-            $path.to_str().unwrap_or_default(),
-            $write,
-            || Bypass::ignored_file($path.to_str().unwrap_or_default()),
-        )?;
-    };
+/// Convenience extension for verifying that a [`Path`] is not relative.
+trait PathExt {
+    /// If this [`Path`] is relative, returns a [`Detour::Bypass`].
+    fn ensure_not_relative(&self) -> Detour<()>;
 }
 
-macro_rules! check_relative_paths {
-    ($path:expr) => {
-        if $path.is_relative() {
-            Detour::Bypass(Bypass::relative_path($path.to_str().unwrap_or_default()))?
-        };
-    };
+impl PathExt for Path {
+    fn ensure_not_relative(&self) -> Detour<()> {
+        if self.is_relative() {
+            Detour::Bypass(Bypass::relative_path(self.to_str().unwrap_or_default()))
+        } else {
+            Detour::Success(())
+        }
+    }
 }
 
-macro_rules! remap_path {
-    ($path:expr) => {
-        $crate::setup().file_remapper().change_path($path)
-    };
+/// Performs standard verification of paths accessed by the user application.
+///
+/// Operations in order:
+/// 1. Bypass if the path is not relative.
+/// 2. Remap the file according to the config.
+/// 3. Bypass if the new path should be accessed locally.
+///
+/// Returns the remapped path.
+fn common_path_check(path: PathBuf, write: bool) -> Detour<PathBuf> {
+    path.ensure_not_relative()?;
+    let path = crate::setup().file_remapper().change_path(path);
+    crate::setup().file_filter().ensure_remote(&path, write)?;
+    Detour::Success(path)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -157,10 +167,10 @@ fn create_local_fake_file(remote_fd: u64) -> Detour<RawFd> {
     let file_path_ptr = file_c_string.as_ptr();
     let local_file_fd: RawFd = unsafe { FN_OPEN(file_path_ptr, O_RDONLY | O_CREAT) };
     if local_file_fd == -1 {
-        let error = errno::errno();
+        let error = Errno::last_raw();
         // Close the remote file if creating a tmp local file failed and we have an invalid local fd
         close_remote_file_on_failure(remote_fd)?;
-        Detour::Error(HookError::LocalFileCreation(remote_fd, error.0))
+        Detour::Error(HookError::LocalFileCreation(remote_fd, error))
     } else {
         unsafe { libc::unlink(file_path_ptr) };
         Detour::Success(local_file_fd)
@@ -174,10 +184,10 @@ fn create_local_devnull_file(remote_fd: u64) -> Detour<RawFd> {
     let file_path_ptr = file_c_string.as_ptr();
     let local_file_fd: RawFd = unsafe { FN_OPEN(file_path_ptr, O_RDONLY) };
     if local_file_fd == -1 {
-        let error = errno::errno();
+        let error = Errno::last_raw();
         // Close the remote file if creating a tmp local file failed and we have an invalid local fd
         close_remote_file_on_failure(remote_fd)?;
-        Detour::Error(HookError::LocalFileCreation(remote_fd, error.0))
+        Detour::Error(HookError::LocalFileCreation(remote_fd, error))
     } else {
         Detour::Success(local_file_fd)
     }
@@ -203,13 +213,7 @@ fn close_remote_file_on_failure(fd: u64) -> Result<()> {
 /// [`OPEN_FILES`].
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn open(path: Detour<PathBuf>, open_options: OpenOptionsInternal) -> Detour<RawFd> {
-    let path = path?;
-
-    check_relative_paths!(path);
-
-    let path = remap_path!(path);
-
-    ensure_not_ignored!(path, open_options.is_write());
+    let path = common_path_check(path?, open_options.is_write())?;
 
     let OpenFileResponse { fd: remote_fd } = RemoteFile::remote_open(path.clone(), open_options)
         .or_else(|fail| match fail {
@@ -268,31 +272,30 @@ pub(crate) fn openat(
     // `openat` behaves the same as `open` when the path is absolute. When called with AT_FDCWD, the
     // call is propagated to `open`.
     if path.is_absolute() || fd == AT_FDCWD {
-        let path = remap_path!(path);
-        open(Detour::Success(path), open_options)
-    } else {
-        // Relative path requires special handling, we must identify the relative part (relative to
-        // what).
-        let remote_fd = get_remote_fd(fd)?;
-
-        let requesting_file = OpenRelativeFileRequest {
-            relative_fd: remote_fd,
-            path: path.clone(),
-            open_options,
-        };
-
-        let OpenFileResponse { fd: remote_fd } =
-            common::make_proxy_request_with_response(requesting_file)??;
-
-        let local_file_fd = create_local_fake_file(remote_fd)?;
-
-        OPEN_FILES.lock()?.insert(
-            local_file_fd,
-            Arc::new(RemoteFile::new(remote_fd, path.display().to_string())),
-        );
-
-        Detour::Success(local_file_fd)
+        return open(Detour::Success(path), open_options);
     }
+
+    // Relative path requires special handling, we must identify the relative part
+    // (relative to what).
+    let remote_fd = get_remote_fd(fd)?;
+
+    let requesting_file = OpenRelativeFileRequest {
+        relative_fd: remote_fd,
+        path: path.clone(),
+        open_options,
+    };
+
+    let OpenFileResponse { fd: remote_fd } =
+        common::make_proxy_request_with_response(requesting_file)??;
+
+    let local_file_fd = create_local_fake_file(remote_fd)?;
+
+    OPEN_FILES.lock()?.insert(
+        local_file_fd,
+        Arc::new(RemoteFile::new(remote_fd, path.display().to_string())),
+    );
+
+    Detour::Success(local_file_fd)
 }
 
 /// Blocking wrapper around [`libc::read`] call.
@@ -331,11 +334,7 @@ pub(crate) fn pread(local_fd: RawFd, buffer_size: u64, offset: u64) -> Detour<Re
 /// Resolves the symbolic link `path`.
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
 pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
-    let path = remap_path!(path?);
-
-    check_relative_paths!(path);
-
-    ensure_not_ignored!(path, false);
+    let path = common_path_check(path?, false)?;
 
     let requesting_path = ReadLinkFileRequest { path };
 
@@ -348,14 +347,8 @@ pub(crate) fn read_link(path: Detour<PathBuf>) -> Detour<ReadLinkFileResponse> {
 }
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
-pub(crate) fn mkdir(pathname: Detour<PathBuf>, mode: u32) -> Detour<()> {
-    let pathname = pathname?;
-
-    check_relative_paths!(pathname);
-
-    let path = remap_path!(pathname);
-
-    ensure_not_ignored!(path, true);
+pub(crate) fn mkdir(path: Detour<PathBuf>, mode: u32) -> Detour<()> {
+    let path = common_path_check(path?, true)?;
 
     let mkdir = MakeDirRequest {
         pathname: path,
@@ -371,44 +364,34 @@ pub(crate) fn mkdir(pathname: Detour<PathBuf>, mode: u32) -> Detour<()> {
 }
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
-pub(crate) fn mkdirat(dirfd: RawFd, pathname: Detour<PathBuf>, mode: u32) -> Detour<()> {
-    let pathname: PathBuf = pathname?;
+pub(crate) fn mkdirat(dirfd: RawFd, path: Detour<PathBuf>, mode: u32) -> Detour<()> {
+    let path = path?;
 
-    if pathname.is_absolute() || dirfd == AT_FDCWD {
-        let path = remap_path!(pathname);
-        check_relative_paths!(path);
-        ensure_not_ignored!(path, true);
+    if path.is_absolute() || dirfd == AT_FDCWD {
+        return mkdir(Detour::Success(path), mode);
+    }
 
-        mkdir(Detour::Success(path), mode)
-    } else {
-        // Relative path requires special handling, we must identify the relative part (relative to
-        // what).
-        let remote_fd = get_remote_fd(dirfd)?;
+    // Relative path requires special handling, we must identify the relative part (relative to
+    // what).
+    let remote_fd = get_remote_fd(dirfd)?;
 
-        let mkdir: MakeDirAtRequest = MakeDirAtRequest {
-            dirfd: remote_fd,
-            pathname: pathname.clone(),
-            mode,
-        };
+    let mkdir: MakeDirAtRequest = MakeDirAtRequest {
+        dirfd: remote_fd,
+        pathname: path.clone(),
+        mode,
+    };
 
-        // `NotImplemented` error here means that the protocol doesn't support it.
-        match common::make_proxy_request_with_response(mkdir)? {
-            Ok(response) => Detour::Success(response),
-            Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
-            Err(fail) => Detour::Error(fail.into()),
-        }
+    // `NotImplemented` error here means that the protocol doesn't support it.
+    match common::make_proxy_request_with_response(mkdir)? {
+        Ok(response) => Detour::Success(response),
+        Err(ResponseError::NotImplemented) => Detour::Bypass(Bypass::NotImplemented),
+        Err(fail) => Detour::Error(fail.into()),
     }
 }
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
-pub(crate) fn rmdir(pathname: Detour<PathBuf>) -> Detour<()> {
-    let pathname = pathname?;
-
-    check_relative_paths!(pathname);
-
-    let path = remap_path!(pathname);
-
-    ensure_not_ignored!(path, true);
+pub(crate) fn rmdir(path: Detour<PathBuf>) -> Detour<()> {
+    let path = common_path_check(path?, true)?;
 
     let rmdir = RemoveDirRequest { pathname: path };
 
@@ -421,14 +404,8 @@ pub(crate) fn rmdir(pathname: Detour<PathBuf>) -> Detour<()> {
 }
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
-pub(crate) fn unlink(pathname: Detour<PathBuf>) -> Detour<()> {
-    let pathname = pathname?;
-
-    check_relative_paths!(pathname);
-
-    let path = remap_path!(pathname);
-
-    ensure_not_ignored!(path, true);
+pub(crate) fn unlink(path: Detour<PathBuf>) -> Detour<()> {
+    let path = common_path_check(path?, true)?;
 
     let unlink = RemoveDirRequest { pathname: path };
 
@@ -441,13 +418,19 @@ pub(crate) fn unlink(pathname: Detour<PathBuf>) -> Detour<()> {
 }
 
 #[mirrord_layer_macro::instrument(level = Level::TRACE, ret)]
-pub(crate) fn unlinkat(dirfd: RawFd, pathname: Detour<PathBuf>, flags: u32) -> Detour<()> {
-    let pathname = pathname?;
+pub(crate) fn unlinkat(dirfd: RawFd, path: Detour<PathBuf>, flags: u32) -> Detour<()> {
+    let mut path = path?;
 
-    let unlink = if pathname.is_absolute() || dirfd == AT_FDCWD {
-        let path = remap_path!(pathname);
-        check_relative_paths!(path);
-        ensure_not_ignored!(path, true);
+    if dirfd == AT_FDCWD {
+        path.ensure_not_relative()?;
+    }
+
+    if path.is_absolute() {
+        path = crate::setup().file_remapper().change_path(path);
+        crate::setup().file_filter().ensure_remote(&path, true)?;
+    }
+
+    let unlink = if path.is_absolute() || dirfd == AT_FDCWD {
         UnlinkAtRequest {
             dirfd: None,
             pathname: path,
@@ -458,7 +441,7 @@ pub(crate) fn unlinkat(dirfd: RawFd, pathname: Detour<PathBuf>, flags: u32) -> D
 
         UnlinkAtRequest {
             dirfd: Some(remote_fd),
-            pathname: pathname.clone(),
+            pathname: path,
             flags,
         }
     };
@@ -530,20 +513,11 @@ pub(crate) fn write(local_fd: RawFd, write_bytes: Option<Vec<u8>>) -> Detour<isi
 
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn access(path: Detour<PathBuf>, mode: c_int) -> Detour<c_int> {
-    let path = path?;
-
-    check_relative_paths!(path);
-
-    let path = remap_path!(path);
-
-    // Is the caller asking about write access to the file?
-    let is_write = (mode & libc::W_OK) != 0;
-
     // Even though `access` is never a write operation (even if mode is write), we take the mode
     // into account when deciding whether to ignore, because when a caller is asking whether they
     // have write access to a file and then write to it, we want the test and the actual write to
     // happen with the same file.
-    ensure_not_ignored!(path, is_write);
+    let path = common_path_check(path?, (mode & libc::W_OK) != 0)?;
 
     let access = AccessFileRequest {
         pathname: path,
@@ -564,10 +538,12 @@ pub(crate) fn fsync(fd: RawFd) -> Detour<c_int> {
 }
 
 /// General stat function that can be used for lstat, fstat, stat and fstatat.
+///
 /// Note: We treat cases of `AT_SYMLINK_NOFOLLOW_ANY` as `AT_SYMLINK_NOFOLLOW` because even Go does
 /// that.
-/// rawish_path is Option<Option<&CStr>> because we need to differentiate between null pointer
-/// and non existing argument (For error handling)
+///
+/// `rawish_path` is `Option<Detour<PathBuf>>` because we need to differentiate between null pointer
+/// and non existing argument (for error handling)
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(crate) fn xstat(
     rawish_path: Option<Detour<PathBuf>>,
@@ -579,43 +555,43 @@ pub(crate) fn xstat(
         // fstatat
         (Some(path), Some(fd)) => {
             let mut path = path?;
+
             let fd = {
                 if fd == AT_FDCWD {
-                    check_relative_paths!(path);
-
-                    path = remap_path!(path);
-                    ensure_not_ignored!(path, false);
+                    path = common_path_check(path, false)?;
+                    None
+                } else if path.is_absolute() {
+                    path = crate::setup().file_remapper().change_path(path);
+                    crate::setup().file_filter().ensure_remote(&path, true)?;
                     None
                 } else {
                     Some(get_remote_fd(fd)?)
                 }
             };
+
             (Some(path), fd)
         }
+
         // lstat/stat
         (Some(path), None) => {
-            let path = path?;
-
-            check_relative_paths!(path);
-
-            let path = remap_path!(path);
-
-            ensure_not_ignored!(path, false);
+            let path = common_path_check(path?, false)?;
             (Some(path), None)
         }
+
         // fstat
         (None, Some(fd)) => (None, Some(get_remote_fd(fd)?)),
+
         // can't happen
         (None, None) => return Detour::Error(HookError::NullPointer),
     };
 
-    let lstat = XstatRequest {
+    let xstat = XstatRequest {
         fd,
         path,
         follow_symlink,
     };
 
-    let response = common::make_proxy_request_with_response(lstat)??;
+    let response = common::make_proxy_request_with_response(xstat)??;
 
     Detour::Success(response)
 }
@@ -638,7 +614,7 @@ pub(crate) fn xstat(
 /// caller about respective fields being skipped.
 #[cfg(target_os = "linux")]
 pub(crate) fn statx_logic(
-    dir_fd: RawFd,
+    dirfd: RawFd,
     path_name: *const c_char,
     flags: c_int,
     mask: c_int,
@@ -646,31 +622,43 @@ pub(crate) fn statx_logic(
 ) -> Detour<c_int> {
     // SAFETY: we don't check pointers passed as arguments to hooked functions
 
-    use std::mem;
-    let statx_buf = unsafe { statx_buf.as_mut().ok_or(HookError::BadPointer)? };
+    use std::{mem, ops::Not};
 
-    if path_name.is_null() {
-        return Detour::Error(HookError::BadPointer);
-    }
-    let path_name: PathBuf = path_name.checked_into()?;
+    use crate::detour::OptionDetourExt;
+
+    let statx_buf = unsafe { statx_buf.as_mut().ok_or(HookError::BadPointer)? };
 
     if (mask & libc::STATX__RESERVED) != 0 {
         return Detour::Error(HookError::BadFlag);
     }
 
-    let (fd, path) = if path_name.is_absolute() {
-        ensure_not_ignored!(path_name, false);
-        (None, Some(path_name))
-    } else if !path_name.as_os_str().is_empty() && dir_fd == libc::AT_FDCWD {
-        return Detour::Bypass(Bypass::relative_path(
-            path_name.to_str().unwrap_or_default(),
-        ));
-    } else if !path_name.as_os_str().is_empty() {
-        (Some(get_remote_fd(dir_fd)?), Some(path_name))
-    } else if (flags & libc::AT_EMPTY_PATH) != 0 {
-        (Some(get_remote_fd(dir_fd)?), None)
-    } else {
+    let mut path: Option<PathBuf> = path_name
+        .is_null()
+        .not()
+        .then(|| path_name.checked_into())
+        .transpose()?;
+    if path.is_none() && (flags & libc::AT_EMPTY_PATH) == 0 {
+        return Detour::Error(HookError::BadPointer);
+    }
+
+    path = path.filter(|p| p.as_os_str().is_empty().not());
+    if path.is_none() && (flags & libc::AT_EMPTY_PATH) == 0 {
         return Detour::Error(HookError::EmptyPath);
+    }
+
+    let fd = (dirfd != libc::AT_FDCWD).then_some(dirfd);
+
+    let (fd, path) = match (fd, path) {
+        (None, None) => return Detour::Bypass(Bypass::LocalFdNotFound(dirfd)),
+        (Some(fd), None) => (Some(get_remote_fd(fd)?), None),
+        (Some(fd), Some(path)) if path.is_relative() => {
+            let fd = get_remote_fd(fd)?;
+            (Some(fd), Some(path))
+        }
+        (_, Some(path)) => {
+            let path = common_path_check(path, false)?;
+            (None, Some(path))
+        }
     };
 
     let response = {
@@ -762,13 +750,7 @@ pub(crate) fn xstatfs(fd: RawFd) -> Detour<XstatFsResponseV2> {
 /// Gets all the data for statfs64, but can be used also for statfs.
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn statfs(path: Detour<PathBuf>) -> Detour<XstatFsResponseV2> {
-    let path = path?;
-
-    check_relative_paths!(path);
-
-    let path = remap_path!(path);
-
-    ensure_not_ignored!(path, false);
+    let path = common_path_check(path?, false)?;
 
     // intproxy downgrades to old version if new one is not supported by agent, and converts
     // old version responses to V2 responses.
@@ -816,15 +798,9 @@ fn absolute_path(path: PathBuf) -> PathBuf {
 
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(crate) fn realpath(path: Detour<PathBuf>) -> Detour<PathBuf> {
-    let path = path?;
-
-    check_relative_paths!(path);
-
-    let path = remap_path!(path);
+    let path = common_path_check(path?, false)?;
 
     let realpath = absolute_path(path);
-
-    ensure_not_ignored!(realpath, false);
 
     // check that file exists
     xstat(Some(Detour::Success(realpath.clone())), None, true)?;

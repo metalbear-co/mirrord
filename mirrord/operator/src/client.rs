@@ -117,6 +117,9 @@ pub struct OperatorSession {
     /// Version of [`mirrord_protocol`] used by the operator.
     /// Used to create [`ConnectionWrapper`].
     pub operator_protocol_version: Option<Version>,
+
+    /// Allow the layer to attempt reconnection
+    pub allow_reconnect: bool,
 }
 
 impl fmt::Debug for OperatorSession {
@@ -130,6 +133,7 @@ impl fmt::Debug for OperatorSession {
                 &self.operator_license_fingerprint,
             )
             .field("operator_protocol_version", &self.operator_protocol_version)
+            .field("allow_reconnect", &self.allow_reconnect)
             .finish()
     }
 }
@@ -644,6 +648,12 @@ impl OperatorApi<PreparedClientCert> {
 
         tracing::debug!("connect_url {connect_url:?}");
 
+        let allow_reconnect = self
+            .operator
+            .spec
+            .supported_features()
+            .contains(&NewOperatorFeature::LayerReconnect);
+
         let session = OperatorSession {
             // Re-use the `session_id` generated from the `CopyTargetCrd`, or random if
             // this is not a copy target session.
@@ -660,6 +670,7 @@ impl OperatorApi<PreparedClientCert> {
                 .protocol_version
                 .as_ref()
                 .and_then(|version| version.parse().ok()),
+            allow_reconnect,
         };
 
         let mut connection_subtask = progress.subtask("connecting to the target");

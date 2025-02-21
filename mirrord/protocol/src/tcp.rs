@@ -324,7 +324,7 @@ pub enum ChunkedResponse {
 }
 
 /// (De-)Serializable HTTP request.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct InternalHttpRequest<B> {
     #[serde(with = "http_serde::method")]
     pub method: Method,
@@ -381,6 +381,18 @@ impl<B> From<InternalHttpRequest<B>> for Request<B> {
         *request.headers_mut() = headers;
 
         request
+    }
+}
+
+impl<B: fmt::Debug> fmt::Debug for InternalHttpRequest<B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InternalHttpRequest")
+            .field("method", &self.method)
+            .field("uri", &self.uri)
+            .field("headers", &self.headers.len())
+            .field("version", &self.version)
+            .field("body", &self.body)
+            .finish()
     }
 }
 
@@ -452,7 +464,7 @@ impl<B> HttpRequest<B> {
 }
 
 /// (De-)Serializable HTTP response.
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct InternalHttpResponse<Body> {
     #[serde(with = "http_serde::status_code")]
     pub status: StatusCode,
@@ -502,6 +514,17 @@ impl<B> From<InternalHttpResponse<B>> for Response<B> {
         *response.headers_mut() = headers;
 
         response
+    }
+}
+
+impl<B: fmt::Debug> fmt::Debug for InternalHttpResponse<B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InternalHttpResponse")
+            .field("status", &self.status)
+            .field("version", &self.version)
+            .field("headers", &self.headers.len())
+            .field("body", &self.body)
+            .finish()
     }
 }
 

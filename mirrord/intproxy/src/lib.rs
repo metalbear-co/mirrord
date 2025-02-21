@@ -2,7 +2,10 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    time::Duration,
+};
 
 use background_tasks::{BackgroundTasks, TaskSender, TaskUpdate};
 use error::UnexpectedAgentMessage;
@@ -12,19 +15,22 @@ use main_tasks::{FromLayer, LayerForked, MainTaskId, ProxyMessage, ToLayer};
 use mirrord_config::feature::network::incoming::https_delivery::LocalHttpsDelivery;
 use mirrord_intproxy_protocol::{LayerId, LayerToProxyMessage, LocalMessage};
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, CLIENT_READY_FOR_LOGS};
-use ping_pong::{AgentSentPong, PingPong};
+use ping_pong::{PingPong, PingPongMessage};
 use proxies::{
     files::{FilesProxy, FilesProxyMessage},
     incoming::{IncomingProxy, IncomingProxyMessage},
     outgoing::{OutgoingProxy, OutgoingProxyMessage},
     simple::{SimpleProxy, SimpleProxyMessage},
 };
+use semver::Version;
 use tokio::{net::TcpListener, time};
 use tracing::Level;
 
 use crate::{
-    agent_conn::AgentConnection, background_tasks::TaskError, error::IntProxyError,
-    main_tasks::LayerClosed,
+    agent_conn::AgentConnection,
+    background_tasks::{RestartableBackgroundTaskWrapper, TaskError},
+    error::IntProxyError,
+    main_tasks::{ConnectionRefresh, LayerClosed},
 };
 
 pub mod agent_conn;
@@ -42,7 +48,7 @@ mod request_queue;
 struct TaskTxs {
     layers: HashMap<LayerId, TaskSender<LayerConnection>>,
     _layer_initializer: TaskSender<LayerInitializer>,
-    agent: TaskSender<AgentConnection>,
+    agent: TaskSender<RestartableBackgroundTaskWrapper<AgentConnection>>,
     simple: TaskSender<SimpleProxy>,
     outgoing: TaskSender<OutgoingProxy>,
     incoming: TaskSender<IncomingProxy>,
@@ -59,6 +65,13 @@ pub struct IntProxy {
     any_connection_accepted: bool,
     background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError>,
     task_txs: TaskTxs,
+
+    /// [`mirrord_protocol`] version negotiated with the agent.
+    protocol_version: Option<Version>,
+
+    /// Temporary message queue for any [`ProxyMessage`] from layer or to agent that are sent
+    /// during reconnection state.
+    reconnect_task_queue: Option<VecDeque<ProxyMessage>>,
 }
 
 impl IntProxy {
@@ -80,8 +93,11 @@ impl IntProxy {
         let mut background_tasks: BackgroundTasks<MainTaskId, ProxyMessage, IntProxyError> =
             Default::default();
 
-        let agent =
-            background_tasks.register(agent_conn, MainTaskId::AgentConnection, Self::CHANNEL_SIZE);
+        let agent = background_tasks.register_restartable(
+            agent_conn,
+            MainTaskId::AgentConnection,
+            Self::CHANNEL_SIZE,
+        );
         let layer_initializer = background_tasks.register(
             LayerInitializer::new(listener),
             MainTaskId::LayerInitializer,
@@ -126,6 +142,8 @@ impl IntProxy {
                 ping_pong,
                 files,
             },
+            protocol_version: None,
+            reconnect_task_queue: Default::default(),
         }
     }
 
@@ -179,6 +197,15 @@ impl IntProxy {
     /// [`ProxyMessage::NewLayer`] is handled here, as an exception.
     async fn handle(&mut self, msg: ProxyMessage) -> Result<(), IntProxyError> {
         match msg {
+            ProxyMessage::NewLayer(_) | ProxyMessage::FromLayer(_) | ProxyMessage::ToAgent(_)
+                if self.reconnect_task_queue.is_some() =>
+            {
+                // We are in reconnect state so should queue this message.
+                self.reconnect_task_queue
+                    .as_mut()
+                    .expect("reconnect_task_queue should contain value when in reconnect state")
+                    .push_back(msg);
+            }
             ProxyMessage::NewLayer(new_layer) => {
                 self.any_connection_accepted = true;
 
@@ -223,6 +250,7 @@ impl IntProxy {
                     .await;
                 }
             }
+            ProxyMessage::ConnectionRefresh(kind) => self.handle_connection_refresh(kind).await?,
         }
 
         Ok(())
@@ -273,10 +301,15 @@ impl IntProxy {
 
     /// Routes most messages from the agent to the correct background task.
     /// Some messages are handled here.
-    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     async fn handle_agent_message(&mut self, message: DaemonMessage) -> Result<(), IntProxyError> {
         match message {
-            DaemonMessage::Pong => self.task_txs.ping_pong.send(AgentSentPong).await,
+            DaemonMessage::Pong => {
+                self.task_txs
+                    .ping_pong
+                    .send(PingPongMessage::AgentSentPong)
+                    .await
+            }
             DaemonMessage::Close(reason) => return Err(IntProxyError::AgentFailed(reason)),
             DaemonMessage::TcpOutgoing(msg) => {
                 self.task_txs
@@ -315,6 +348,8 @@ impl IntProxy {
                     .await
             }
             DaemonMessage::SwitchProtocolVersionResponse(protocol_version) => {
+                let _ = self.protocol_version.insert(protocol_version.clone());
+
                 if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
                     self.task_txs.agent.send(ClientMessage::ReadyForLogs).await;
                 }
@@ -358,7 +393,7 @@ impl IntProxy {
     }
 
     /// Routes a message from the layer to the correct background task.
-    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     async fn handle_layer_message(&self, message: FromLayer) -> Result<(), IntProxyError> {
         let FromLayer {
             message_id,
@@ -402,6 +437,75 @@ impl IntProxy {
                     .await
             }
             other => return Err(IntProxyError::UnexpectedLayerMessage(other)),
+        }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
+    async fn handle_connection_refresh(
+        &mut self,
+        kind: ConnectionRefresh,
+    ) -> Result<(), IntProxyError> {
+        self.task_txs
+            .ping_pong
+            .send(PingPongMessage::ConnectionRefresh(kind))
+            .await;
+
+        match kind {
+            ConnectionRefresh::Start => {
+                // Initialise default reconnect message queue
+                self.reconnect_task_queue.get_or_insert_default();
+
+                self.task_txs
+                    .simple
+                    .send(SimpleProxyMessage::ConnectionRefresh)
+                    .await;
+
+                self.task_txs
+                    .outgoing
+                    .send(OutgoingProxyMessage::ConnectionRefresh)
+                    .await;
+            }
+            ConnectionRefresh::End => {
+                let Some(task_queue) = self.reconnect_task_queue.take() else {
+                    return Err(IntProxyError::AgentFailed(
+                        "unexpected state: agent reconnected finished without correctly initialzing a reconnect"
+                            .into(),
+                    ));
+                };
+
+                self.task_txs
+                    .agent
+                    .send(ClientMessage::SwitchProtocolVersion(
+                        self.protocol_version
+                            .as_ref()
+                            .unwrap_or(&mirrord_protocol::VERSION)
+                            .clone(),
+                    ))
+                    .await;
+
+                self.task_txs
+                    .files
+                    .send(FilesProxyMessage::ConnectionRefresh)
+                    .await;
+
+                self.task_txs
+                    .incoming
+                    .send(IncomingProxyMessage::ConnectionRefresh)
+                    .await;
+
+                Box::pin(async {
+                    for msg in task_queue {
+                        tracing::debug!(?msg, "dequeueing message for reconnect");
+
+                        self.handle(msg).await?
+                    }
+
+                    Ok::<(), IntProxyError>(())
+                })
+                .await?
+            }
         }
 
         Ok(())

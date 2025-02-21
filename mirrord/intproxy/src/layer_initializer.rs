@@ -92,7 +92,7 @@ impl BackgroundTask for LayerInitializer {
     type MessageIn = ();
     type MessageOut = ProxyMessage;
 
-    async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         loop {
             tokio::select! {
                 None = message_bus.recv() => {

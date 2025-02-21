@@ -19,9 +19,10 @@ use mirrord_intproxy_protocol::{
 };
 use mirrord_protocol::{
     tcp::{
-        ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, DaemonTcp, HttpRequest,
-        HttpRequestMetadata, HttpRequestTransportType, InternalHttpBodyFrame, InternalHttpRequest,
-        LayerTcp, LayerTcpSteal, NewTcpConnection, StealType, TcpData,
+        ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestErrorV2,
+        ChunkedResponse, DaemonTcp, HttpRequest, HttpRequestMetadata, HttpRequestTransportType,
+        InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnection,
+        StealType, TcpData,
     },
     ClientMessage, ConnectionId, RequestId, ResponseError,
 };
@@ -68,6 +69,7 @@ pub enum IncomingProxyMessage {
     AgentSteal(DaemonTcp),
     /// Agent responded to [`ClientMessage::SwitchProtocolVersion`].
     AgentProtocolVersion(semver::Version),
+    ConnectionRefresh,
 }
 
 /// Handle to a running [`HttpGatewayTask`].
@@ -182,7 +184,10 @@ impl IncomingProxy {
     ///
     /// If we don't have a [`PortSubscription`] for the port, the task is not started.
     /// Instead, we respond immediately to the agent.
-    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
+    #[tracing::instrument(
+        level = Level::TRACE,
+        skip(self, message_bus),
+    )]
     async fn start_http_gateway(
         &mut self,
         request: HttpRequest<StreamingBody>,
@@ -190,6 +195,8 @@ impl IncomingProxy {
         transport: HttpRequestTransportType,
         message_bus: &MessageBus<Self>,
     ) {
+        tracing::trace!(full_headers = ?request.internal_request.headers);
+
         let subscription = self.subscriptions.get(request.port).filter(|subscription| {
             matches!(
                 subscription.subscription,
@@ -462,8 +469,21 @@ impl IncomingProxy {
                 };
             }
 
-            ChunkedRequest::ErrorV2(..) => {
-                todo!()
+            ChunkedRequest::ErrorV2(ChunkedRequestErrorV2 {
+                connection_id,
+                request_id,
+                error_message,
+            }) => {
+                tracing::debug!(
+                    connection_id,
+                    request_id,
+                    error = error_message,
+                    "Received an error in an HTTP request body",
+                );
+
+                if let Some(gateways) = self.http_gateways.get_mut(&connection_id) {
+                    gateways.remove(&request_id);
+                };
             }
         }
     }
@@ -606,6 +626,20 @@ impl IncomingProxy {
             IncomingProxyMessage::AgentProtocolVersion(version) => {
                 self.response_mode = ResponseMode::from(&version);
             }
+
+            IncomingProxyMessage::ConnectionRefresh => {
+                self.mirror_tcp_proxies.clear();
+                self.steal_tcp_proxies.clear();
+                self.tasks.clear();
+
+                for subscription in self.subscriptions.iter_mut() {
+                    tracing::debug!(?subscription, "resubscribing");
+
+                    message_bus
+                        .send(ProxyMessage::ToAgent(subscription.resubscribe_message()))
+                        .await
+                }
+            }
         }
 
         Ok(())
@@ -730,6 +764,7 @@ impl IncomingProxy {
 
                 match message {
                     HttpOut::ResponseBasic(response) => {
+                        tracing::trace!(full_headers = ?response.internal_response.headers);
                         message_bus
                             .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(
                                 response,
@@ -737,6 +772,7 @@ impl IncomingProxy {
                             .await
                     }
                     HttpOut::ResponseFramed(response) => {
+                        tracing::trace!(full_headers = ?response.internal_response.headers);
                         message_bus
                             .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(
                                 response,
@@ -744,6 +780,9 @@ impl IncomingProxy {
                             .await
                     }
                     HttpOut::ResponseChunked(response) => {
+                        if let ChunkedResponse::Start(start) = &response {
+                            tracing::trace!(full_headers = ?start.internal_response.headers);
+                        }
                         message_bus
                             .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
                                 response,
@@ -774,7 +813,7 @@ impl BackgroundTask for IncomingProxy {
     type MessageOut = ProxyMessage;
 
     #[tracing::instrument(level = Level::TRACE, name = "incoming_proxy_main_loop", skip_all, err)]
-    async fn run(mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         loop {
             tokio::select! {
                 msg = message_bus.recv() => match msg {

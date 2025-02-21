@@ -12,14 +12,16 @@ use crate::{
 /// Multiple instances are run as [`BackgroundTask`]s by one [`OutgoingProxy`](super::OutgoingProxy)
 /// to manage individual connections.
 pub struct Interceptor {
-    socket: PreparedSocket,
+    socket: Option<PreparedSocket>,
 }
 
 impl Interceptor {
     /// Creates a new instance. This instance will use the provided [`PreparedSocket`] to accept the
     /// layer's connection and manage it.
     pub fn new(socket: PreparedSocket) -> Self {
-        Self { socket }
+        Self {
+            socket: Some(socket),
+        }
     }
 }
 
@@ -42,8 +44,12 @@ impl BackgroundTask for Interceptor {
     ///
     /// 3. This implementation exits only when an error is encountered or the [`MessageBus`] is
     ///    closed.
-    async fn run(self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        let mut connected_socket = self.socket.accept().await?;
+    async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
+        let Some(socket) = self.socket.take() else {
+            return Ok(());
+        };
+
+        let mut connected_socket = socket.accept().await?;
         let mut reading_closed = false;
 
         loop {

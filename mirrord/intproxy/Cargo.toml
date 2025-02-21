@@ -42,7 +42,7 @@ rand.workspace = true
 tokio-rustls.workspace = true
 rustls.workspace = true
 rustls-pemfile.workspace = true
-exponential-backoff = "2"
+tokio-retry.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true
