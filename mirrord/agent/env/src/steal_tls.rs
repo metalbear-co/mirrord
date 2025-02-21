@@ -38,6 +38,9 @@ pub struct TlsClientVerification {
     pub allow_anonymous: bool,
     /// Whether to accept any certificate, regardless of its validity and who signed it.
     ///
+    /// Note that this setting does not affect whether anononymous clients are accepted or not.
+    /// If `allow_anonymous` is not set, a certificate will still be required.
+    ///
     /// Optional. Defaults to `false`.
     #[serde(default, skip_serializing_if = "Not::not")]
     pub accept_any_cert: bool,
