@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::{ConfigContext, ConfigError};
 
 /// Stolen HTTPS requests can be delivered to the local application either as HTTPS or as plain HTTP
-/// requests. Note that stealing HTTPS requests required mirrord Operator support.
+/// requests. Note that stealing HTTPS requests requires mirrord Operator support.
 ///
 /// To have the stolen HTTPS requests delivered with plain HTTP, use:
 ///
@@ -24,10 +24,10 @@ use crate::config::{ConfigContext, ConfigError};
 /// }
 /// ```
 ///
-/// By default, local mirrord TLS client will trust any server certificate.
+/// By default, the local mirrord TLS client will trust any server certificate.
 /// To override this behavior, you can specify a list of paths to trust roots.
 /// These paths can lead either to PEM files or PEM file directories.
-/// Each found certificate will be treated used a trust anchor.
+/// Each found certificate will be treated used as a trust anchor.
 ///
 /// ```json
 /// {
@@ -36,10 +36,10 @@ use crate::config::{ConfigContext, ConfigError};
 /// }
 /// ```
 ///
-/// By default local mirrord TLS client will connect to the local server using the server name
+/// By default, the local mirrord TLS client will connect to the local server using the server name
 /// from the original client's SNI extension. When such SNI is not supplied,
-/// mirrord will extract host name from the request URL.
-/// When this fails, mirrord will use local server's IP address.
+/// mirrord will extract the host name from the request URL.
+/// When this fails, mirrord will use the local server's IP address.
 ///
 /// You can override this behavior by supplying a server name to use.
 ///
@@ -75,8 +75,8 @@ pub struct LocalHttpsDelivery {
     /// Optional. If not given, mirrord will try to use
     /// the server name supplied in the SNI extension
     /// from the original client. When such SNI is not supplied,
-    /// mirrord will extract host name from the request URL.
-    /// When this fails, mirrord will use local server's IP address.
+    /// mirrord will extract the host name from the request URL.
+    /// When this fails, mirrord will use the local server's IP address.
     pub server_name: Option<String>,
 }
 
