@@ -8,13 +8,6 @@ use std::{ops::Not, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// Used to skip serializing fields where default value is `true`.
-///
-/// serde's `skip_serializing_if` expects a path to a function.
-fn is_false(value: &bool) -> bool {
-    value.not()
-}
-
 /// Configures how a TLS client or server should authenticate itself.
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -41,12 +34,12 @@ pub struct TlsClientVerification {
     /// Whether anonymous clients should be accepted.
     ///
     /// Optional. Defaults to `false`.
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "Not::not")]
     pub allow_anonymous: bool,
     /// Whether to accept any certificate, regardless of its validity and who signed it.
     ///
     /// Optional. Defaults to `false`.
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "Not::not")]
     pub accept_any_cert: bool,
     /// Paths to PEM files and directories with PEM files containing allowed root certificates.
     ///
@@ -68,7 +61,7 @@ pub struct TlsServerVerification {
     /// Whether to accept any certificate, regardless of its validity and who signed it.
     ///
     /// Optional. Defaults to `false`.
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "Not::not")]
     pub accept_any_cert: bool,
     /// Paths to PEM files and directories with PEM files containing allowed root certificates.
     ///
