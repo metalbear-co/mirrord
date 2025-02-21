@@ -19,6 +19,8 @@ edition.workspace = true
 http.workspace = true
 rustls.workspace = true
 rustls-pemfile.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

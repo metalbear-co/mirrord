@@ -60,8 +60,7 @@ impl LazyTlsConnector {
         let builder = match self.trust_roots.as_ref() {
             Some(trust_roots) => {
                 let paths = trust_roots.clone();
-                let store =
-                    tokio::task::spawn_blocking(move || best_effort_root_store(paths)).await?;
+                let store = best_effort_root_store(paths).await?;
 
                 if store.is_empty() {
                     return Err(LocalTlsSetupError::NoGoodRoot);

@@ -1,8 +1,6 @@
 use std::{
     collections::HashMap,
     fmt,
-    fs::File,
-    io::BufReader,
     ops::Not,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -18,11 +16,10 @@ use mirrord_tls_util::{
     best_effort_root_store, DangerousNoVerifierClient, DangerousNoVerifierServer,
 };
 use rustls::{
-    pki_types::{CertificateDer, PrivateKeyDer},
+    pki_types::CertificateDer,
     server::{danger::ClientCertVerifier, NoClientAuth, WebPkiClientVerifier},
     ClientConfig, RootCertStore, ServerConfig,
 };
-use rustls_pemfile::Item;
 use tracing::Level;
 
 use crate::util::path_resolver::InTargetPathResolver;
@@ -83,21 +80,23 @@ impl StealTlsHandlerStore {
             Some(MaybeBuilt::Config(config)) => config.clone(),
         };
 
-        let this = self.clone();
-        let handler = tokio::task::spawn_blocking(move || {
-            let server_config = this
-                .build_server_config(config.agent_as_server)
-                .map_err(StealTlsSetupError::ServerSetupError)?;
-            let client_config = this
-                .build_client_config(config.agent_as_client)
-                .map_err(StealTlsSetupError::ClientSetupError)?;
+        let (server_config, client_config) = tokio::try_join!(
+            async {
+                self.build_server_config(config.agent_as_server)
+                    .await
+                    .map_err(StealTlsSetupError::ServerSetupError)
+            },
+            async {
+                self.build_client_config(config.agent_as_client)
+                    .await
+                    .map_err(StealTlsSetupError::ClientSetupError)
+            },
+        )?;
 
-            Ok::<_, StealTlsSetupError>(StealTlsHandler {
-                server_config,
-                client_config,
-            })
-        })
-        .await??;
+        let handler = StealTlsHandler {
+            server_config,
+            client_config,
+        };
 
         let handler_cloned = handler.clone();
         self.0
@@ -119,7 +118,7 @@ impl StealTlsHandlerStore {
 
     /// Builds [`ServerConfig`] for the mirrord-agent's TLS acceptor.
     #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))] // errors are already logged on `ERROR` level in `get`
-    fn build_server_config(
+    async fn build_server_config(
         &self,
         config: AgentServerConfig,
     ) -> Result<Arc<ServerConfig>, StealTlsSetupErrorInner> {
@@ -133,7 +132,7 @@ impl StealTlsHandlerStore {
                     .into_iter()
                     .map(|root| self.resolve_path(root))
                     .collect::<Result<Vec<_>, _>>()?;
-                let mut root_store = best_effort_root_store(trust_roots);
+                let mut root_store = best_effort_root_store(trust_roots).await?;
 
                 if root_store.is_empty() && accept_any_cert.not() {
                     if allow_anonymous {
@@ -163,8 +162,14 @@ impl StealTlsHandlerStore {
         };
 
         let TlsAuthentication { cert_pem, key_pem } = config.authentication;
-        let cert_chain = self.read_cert_chain(cert_pem)?;
-        let key_der = self.read_key_der(key_pem)?;
+        let cert_chain = {
+            let path = self.resolve_path(cert_pem)?;
+            mirrord_tls_util::read_cert_chain(path).await?
+        };
+        let key_der = {
+            let path = self.resolve_path(key_pem)?;
+            mirrord_tls_util::read_key_der(path).await?
+        };
 
         let mut server_config = ServerConfig::builder()
             .with_client_cert_verifier(verifier)
@@ -182,7 +187,7 @@ impl StealTlsHandlerStore {
 
     /// Builds base [`ClientConfig`] for the mirrord-agent's TLS connector.
     #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))] // errors are already logged on `ERROR` level in `get`
-    fn build_client_config(
+    async fn build_client_config(
         &self,
         config: AgentClientConfig,
     ) -> Result<Arc<ClientConfig>, StealTlsSetupErrorInner> {
@@ -200,7 +205,7 @@ impl StealTlsHandlerStore {
                 .into_iter()
                 .map(|root| self.resolve_path(root))
                 .collect::<Result<Vec<_>, _>>()?;
-            let root_store = best_effort_root_store(trust_roots);
+            let root_store = best_effort_root_store(trust_roots).await?;
 
             if root_store.is_empty() {
                 return Err(StealTlsSetupErrorInner::NoGoodRoot);
@@ -211,8 +216,14 @@ impl StealTlsHandlerStore {
 
         let client_config = match config.authentication {
             Some(TlsAuthentication { cert_pem, key_pem }) => {
-                let cert_chain = self.read_cert_chain(cert_pem)?;
-                let key_der = self.read_key_der(key_pem)?;
+                let cert_chain = {
+                    let path = self.resolve_path(cert_pem)?;
+                    mirrord_tls_util::read_cert_chain(path).await?
+                };
+                let key_der = {
+                    let path = self.resolve_path(key_pem)?;
+                    mirrord_tls_util::read_key_der(path).await?
+                };
 
                 builder
                     .with_client_auth_cert(cert_chain, key_der)
@@ -236,66 +247,6 @@ impl StealTlsHandlerStore {
             .map_err(StealTlsSetupErrorInner::GeneratedInvalidDummy)?;
 
         Ok(())
-    }
-
-    /// Reads a certificate chain from the given PEM file.
-    ///
-    /// PEM items of other types are ignored.
-    /// At least one certificate is required.
-    #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))] // errors are already logged on `ERROR` level in `get`
-    fn read_cert_chain(
-        &self,
-        path: PathBuf,
-    ) -> Result<Vec<CertificateDer<'static>>, StealTlsSetupErrorInner> {
-        let path = self.resolve_path(path)?;
-
-        let mut file = match File::open(&path) {
-            Ok(file) => BufReader::new(file),
-            Err(error) => return Err(StealTlsSetupErrorInner::ParsePemError { error, path }),
-        };
-
-        let cert_chain = rustls_pemfile::certs(&mut file).collect::<Result<Vec<_>, _>>();
-
-        match cert_chain {
-            Ok(cert_chain) if cert_chain.is_empty().not() => Ok(cert_chain),
-            Ok(..) => Err(StealTlsSetupErrorInner::NoCertFound(path)),
-            Err(error) => Err(StealTlsSetupErrorInner::ParsePemError { error, path }),
-        }
-    }
-
-    /// Reads a private key from the given PEM file.
-    ///
-    /// PEM items of other types are ignored.
-    /// Exactly one private key is required.
-    #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))] // errors are already logged on `ERROR` level in `get`
-    fn read_key_der(
-        &self,
-        path: PathBuf,
-    ) -> Result<PrivateKeyDer<'static>, StealTlsSetupErrorInner> {
-        let path = self.resolve_path(path)?;
-
-        let mut file = match File::open(&path) {
-            Ok(file) => BufReader::new(file),
-            Err(error) => return Err(StealTlsSetupErrorInner::ParsePemError { error, path }),
-        };
-
-        let mut found_key = None;
-
-        for entry in rustls_pemfile::read_all(&mut file) {
-            let key = match entry {
-                Ok(Item::Pkcs1Key(key)) => PrivateKeyDer::Pkcs1(key),
-                Ok(Item::Pkcs8Key(key)) => PrivateKeyDer::Pkcs8(key),
-                Ok(Item::Sec1Key(key)) => PrivateKeyDer::Sec1(key),
-                Ok(..) => continue,
-                Err(error) => return Err(StealTlsSetupErrorInner::ParsePemError { error, path }),
-            };
-
-            if found_key.replace(key).is_some() {
-                return Err(StealTlsSetupErrorInner::MultipleKeysFound(path));
-            }
-        }
-
-        found_key.ok_or(StealTlsSetupErrorInner::NoKeyFound(path))
     }
 }
 

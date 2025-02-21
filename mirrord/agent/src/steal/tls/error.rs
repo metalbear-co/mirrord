@@ -1,5 +1,6 @@
 use std::{io, path::PathBuf, sync::PoisonError};
 
+use mirrord_tls_util::FromPemError;
 use rustls::server::VerifierBuilderError;
 use thiserror::Error;
 use tokio::task::JoinError;
@@ -8,22 +9,12 @@ use tokio::task::JoinError;
 /// with [`StealTlsHandlerStore`](super::StealTlsHandlerStore).
 #[derive(Error, Debug)]
 pub enum StealTlsSetupError {
-    /// Building is done in a blocking [`tokio::task`],
-    /// because it's heavy computationally.
-    #[error("background task panicked")]
-    BackgroundTaskPanicked,
     #[error("TLS handlers store mutex is poisoned")]
     MutexPoisoned,
     #[error("failed to build mirrord-agent's TLS server: {0}")]
     ServerSetupError(#[source] StealTlsSetupErrorInner),
     #[error("failed to build mirrord-agent's TLS client: {0}")]
     ClientSetupError(#[source] StealTlsSetupErrorInner),
-}
-
-impl From<JoinError> for StealTlsSetupError {
-    fn from(_: JoinError) -> Self {
-        Self::BackgroundTaskPanicked
-    }
 }
 
 impl<T> From<PoisonError<T>> for StealTlsSetupError {
@@ -49,18 +40,16 @@ pub enum StealTlsSetupErrorInner {
     GenerateDummyError(#[from] rcgen::Error),
     #[error("failed to build a certificate verifier: {0}")]
     VerifierBuilderError(#[from] VerifierBuilderError),
-    #[error("failed to parse PEM file `{path}`: {error}")]
-    ParsePemError {
-        #[source]
-        error: io::Error,
-        path: PathBuf,
-    },
-    #[error("no certificate was found in PEM file `{0}`")]
-    NoCertFound(PathBuf),
-    #[error("multiple private keys were found in PEM file `{0}`")]
-    MultipleKeysFound(PathBuf),
-    #[error("no private key was found in PEM file `{0}`")]
-    NoKeyFound(PathBuf),
     #[error("certificate chain is invalid: {0}")]
     CertChainInvalid(#[source] rustls::Error),
+    #[error("background task panicked")]
+    BackgroundTaskPanicked,
+    #[error(transparent)]
+    FromPemError(#[from] FromPemError),
+}
+
+impl From<JoinError> for StealTlsSetupErrorInner {
+    fn from(_: JoinError) -> Self {
+        Self::BackgroundTaskPanicked
+    }
 }
