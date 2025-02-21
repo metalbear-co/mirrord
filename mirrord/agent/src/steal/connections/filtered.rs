@@ -122,7 +122,7 @@ impl FilteringService {
             .expect("creating an empty response should not fail")
     }
 
-    /// Sends the given [`Request`] to the original destination given as `to`.
+    /// Sends the given [`Request`] to the original destination.
     ///
     /// # TODO
     ///

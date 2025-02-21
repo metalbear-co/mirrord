@@ -311,7 +311,7 @@ impl Client {
     ///
     /// # Why in the background?
     ///
-    /// This method spawns a [`tokio::task`] to read the [`Incoming`] body od the request without
+    /// This method spawns a [`tokio::task`] to read the [`Incoming`] body of the request without
     /// blocking the main [`TcpConnectionStealer`] loop.
     ///
     /// # Tracing

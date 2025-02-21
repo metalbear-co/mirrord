@@ -72,6 +72,7 @@ impl Iterator for GetDEnts64Stream {
 
 #[derive(Debug)]
 pub(crate) struct FileManager {
+    /// [`None`] when targetless.
     path_resolver: Option<InTargetPathResolver>,
     open_files: HashMap<u64, RemoteFile>,
     dir_streams: HashMap<u64, Enumerate<ReadDir>>,
