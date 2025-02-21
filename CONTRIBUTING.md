@@ -10,11 +10,12 @@ Make sure to take a look at the project's [style guide](STYLE.md).
 
 # Contents
 
-- [Contents](#contents)
-  - [Getting Started](#getting-started)
-  - [Debugging mirrord](#debugging-mirrord)
-  - [New Hook Guidelines](#new-hook-guidelines)
-  - [Compiling on MacOs](#compliling-on-macos)
+- [Getting Started](#getting-started)
+- [Debugging mirrord](#debugging-mirrord)
+- [New Hook Guidelines](#new-hook-guidelines)
+- [Compiling on MacOs](#compliling-on-macos)
+- [Adding new target types](#adding-new-target-types)
+- [Testing the release workflow](#testing-the-release-workflow)
 
 # Getting Started
 
@@ -598,3 +599,23 @@ Adding a new target type for mirrord requires changes in:
 3. `mirrord-kube` crate - resolving the target to the Kubernetes resource;
 4. `mirrord-operator` crate - defining operator's `ClusterRole`;
 5. `test` crate - testing `mirrord ls` command
+
+# Testing the release workflow
+
+The standard CI workflow runs when you open a new PR, but in some cases you'll also need to test that the release workflow works properly.
+
+From [the release workflow definition](/.github/workflows/release.yaml):
+>   Running from workflow dispatch (AKA manual) will not publish anything. This is intended for testing changes to this flow.
+
+To test the release workflow:
+
+1. Push your changes to a branch on the main mirrord repo (not a fork)
+1. Go to [the release workflow section under the Actions tab on the mirrord repo](https://github.com/metalbear-co/mirrord/actions/workflows/release.yaml)
+1. On the right of the "This workflow has a `workflow_dispatch` event trigger." banner, select the dropdown labelled "Run workflow"
+1. Select the branch with your changes and run
+
+You can check the run as it progresses and download the completed artifacts from the "Summary" tab in the sidebar.
+
+### Changing the release on MacOS
+
+If you're making changes to the release and/or CI workflows for MacOS specifically - for example changing how the universal binary is created, you need to ensure that [the script for building the universal binary](/scripts/build_fat_mac.sh) that is run manually when developing has also been updated if necessary.
