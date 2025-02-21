@@ -6,7 +6,7 @@ use std::{
 
 use rustls::RootCertStore;
 
-/// Builds a [`RootCertStore`] from all certificates founds under the given paths.
+/// Builds a [`RootCertStore`] from all certificates found under the given paths.
 ///
 /// Accepts paths to:
 /// 1. PEM files
