@@ -20,7 +20,7 @@ use tokio::{
 };
 use tracing::Level;
 
-use super::{tls::LazyTlsConnector, HttpSender, LocalHttpClient, LocalHttpError};
+use super::{tls::LocalTlsSetup, HttpSender, LocalHttpClient, LocalHttpError};
 
 /// Idle [`LocalHttpClient`] caches in [`ClientStore`].
 struct IdleLocalClient {
@@ -60,7 +60,7 @@ impl fmt::Debug for IdleLocalClient {
 #[derive(Clone)]
 pub struct ClientStore {
     clients: Arc<Mutex<Vec<IdleLocalClient>>>,
-    lazy_connector: Option<Arc<LazyTlsConnector>>,
+    tls_setup: Option<Arc<LocalTlsSetup>>,
     /// Used to notify other tasks when there is a new client in the store.
     ///
     /// Make sure to only call [`Notify::notify_waiters`] and [`Notify::notified`] when holding a
@@ -76,7 +76,7 @@ impl ClientStore {
         let store = Self {
             clients: Default::default(),
             notify: Default::default(),
-            lazy_connector: match https_delivery.protocol {
+            tls_setup: match https_delivery.protocol {
                 HttpsDeliveryProtocol::Tcp => None,
                 HttpsDeliveryProtocol::Tls => {
                     let server_name = https_delivery.server_name.and_then(|name| {
@@ -90,8 +90,9 @@ impl ClientStore {
                             .ok()
                     });
 
-                    Some(Arc::new(LazyTlsConnector::new(
+                    Some(Arc::new(LocalTlsSetup::new(
                         https_delivery.trust_roots,
+                        https_delivery.server_cert,
                         server_name,
                     )))
                 }
@@ -112,8 +113,8 @@ impl ClientStore {
         transport: &HttpRequestTransportType,
         request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
-        let uses_tls = matches!(transport, HttpRequestTransportType::Tls { .. })
-            && self.lazy_connector.is_some();
+        let uses_tls =
+            matches!(transport, HttpRequestTransportType::Tls { .. }) && self.tls_setup.is_some();
 
         if let Some(ready) = self
             .wait_for_ready(server_addr, version, uses_tls)
@@ -187,26 +188,27 @@ impl ClientStore {
         transport: &HttpRequestTransportType,
         request_uri: &Uri,
     ) -> Result<LocalHttpClient, LocalHttpError> {
-        let connector_and_name = match (transport, self.lazy_connector.as_ref()) {
+        let connector_and_name = match (transport, self.tls_setup.as_ref()) {
             (HttpRequestTransportType::Tcp, ..) => None,
             (.., None) => None,
             (
                 HttpRequestTransportType::Tls {
                     alpn_protocol,
-                    server_name,
+                    server_name: original_server_name,
                 },
-                Some(lazy),
+                Some(setup),
             ) => {
-                let connector = lazy.get(alpn_protocol.clone()).await?;
-                let server_name = lazy
-                    .server_name()
-                    .cloned()
+                let (connector, server_name) = setup.get(alpn_protocol.clone()).await?;
+
+                let server_name = server_name
                     .or_else(|| {
-                        let name = server_name.clone()?;
+                        let name = original_server_name.clone()?;
                         ServerName::try_from(name).ok()
                     })
                     .or_else(|| request_uri.get_server_name()?.to_owned().into())
-                    .unwrap_or_else(|| ServerName::from(local_server_address.ip()));
+                    .unwrap_or_else(|| {
+                        ServerName::try_from("localhost").expect("'localhost' is a valid DNS name")
+                    });
 
                 Some((connector, server_name))
             }

@@ -2,6 +2,10 @@ use std::{io, path::PathBuf};
 
 use thiserror::Error;
 use tokio::task::JoinError;
+use x509_parser::{
+    error::{PEMError, X509Error},
+    nom,
+};
 
 /// Errors that can occur when reading a certificate chain or a private key from a PEM file.
 #[derive(Error, Debug)]
@@ -32,4 +36,17 @@ impl From<JoinError> for FromPemError {
     fn from(_: JoinError) -> Self {
         Self::BlockingTaskPanicked
     }
+}
+
+/// Errors that can occur when extracting Subject Alternate Names from a certificate.
+#[derive(Error, Debug)]
+pub enum GetSanError {
+    #[error("SAN extension is invalid or present more than once")]
+    InvalidSanExtension(#[source] X509Error),
+    #[error("SAN extension was not found")]
+    NoSanExtension,
+    #[error("failed to parse DER data as an x509 certificate: {0}")]
+    ParseDerError(#[from] nom::Err<X509Error>),
+    #[error("failed to parse PEM data as an x509 certificate: {0}")]
+    ParsePemError(#[from] nom::Err<PEMError>),
 }

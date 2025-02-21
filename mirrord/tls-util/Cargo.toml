@@ -22,6 +22,7 @@ rustls-pemfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+x509-parser = "0.17"
 
 [dev-dependencies]
 pem = "3"
