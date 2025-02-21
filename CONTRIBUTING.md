@@ -610,9 +610,9 @@ From [the release workflow definition](/.github/workflows/release.yaml):
 To test the release workflow:
 
 1. Push your changes to a branch on the main mirrord repo (not a fork)
-1. Go to [the release workflow section under the Actions tab on the mirrord repo](https://github.com/metalbear-co/mirrord/actions/workflows/release.yaml)
-1. On the right of the "This workflow has a `workflow_dispatch` event trigger." banner, select the dropdown labelled "Run workflow"
-1. Select the branch with your changes and run
+2. Go to [the release workflow section under the Actions tab on the mirrord repo](https://github.com/metalbear-co/mirrord/actions/workflows/release.yaml)
+3. On the right of the "This workflow has a `workflow_dispatch` event trigger." banner, select the dropdown labelled "Run workflow"
+4. Select the branch with your changes and run
 
 You can check the run as it progresses and download the completed artifacts from the "Summary" tab in the sidebar.
 
