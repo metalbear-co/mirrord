@@ -60,8 +60,8 @@ pub struct StealTlsHandlerStore(Arc<State>);
 
 impl StealTlsHandlerStore {
     #[tracing::instrument(level = Level::DEBUG, ret)]
-    pub fn new(config: Vec<StealPortTlsConfig>, path_resolver: InTargetPathResolver) -> Self {
-        let by_port = config
+    pub fn new(configs: Vec<StealPortTlsConfig>, path_resolver: InTargetPathResolver) -> Self {
+        let by_port = configs
             .into_iter()
             .map(|config| (config.port, MaybeBuilt::Config(config)))
             .collect();
