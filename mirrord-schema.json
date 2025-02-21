@@ -1196,6 +1196,7 @@
           "description": "(Operator Only): configures how mirrord delivers stolen HTTPS requests to the local application.",
           "default": {
             "protocol": "tls",
+            "server_cert": null,
             "server_name": null,
             "trust_roots": null
           },
@@ -1499,7 +1500,7 @@
       ]
     },
     "LocalHttpsDelivery": {
-      "description": "Stolen HTTPS requests can be delivered to the local application either as HTTPS or as plain HTTP requests. Note that stealing HTTPS requests required mirrord Operator support.\n\nTo have the stolen HTTPS requests delivered with plain HTTP, use:\n\n```json { \"protocol\": \"tcp\" } ```\n\nTo have the requests delivered with HTTPS, use: ```json { \"protocol\": \"tls\" } ```\n\nBy default, local mirrord TLS client will trust any server certificate. To override this behavior, you can specify a list of paths to trust roots. These paths can lead either to PEM files or PEM file directories. Each found certificate will be treated used a trust anchor.\n\n```json { \"protocol\": \"tls\", \"trust_roots\": [\"/path/to/cert.pem\", \"/path/to/cert/dir\"] } ```\n\nBy default local mirrord TLS client will connect to the local server using the server name from the original client's SNI extension. When such SNI is not supplied, mirrord will extract host name from the request URL. When this fails, mirrord will use local server's IP address.\n\nYou can override this behavior by supplying a server name to use.\n\n```json { \"protocol\": \"tls\", \"server_name\": \"127.0.0.1:9999\" } ```",
+      "description": "Stolen HTTPS requests can be delivered to the local application either as HTTPS or as plain HTTP requests. Note that stealing HTTPS requests requires mirrord Operator support.\n\nTo have the stolen HTTPS requests delivered with plain HTTP, use:\n\n```json { \"protocol\": \"tcp\" } ```\n\nTo have the requests delivered with HTTPS, use: ```json { \"protocol\": \"tls\" } ```\n\nBy default, the local mirrord TLS client will trust any certificate presented by the local application's HTTP server. To override this behavior, you can either:\n\n1. Specify a list of paths to trust roots. These paths can lead either to PEM files or PEM file directories. Each found certificate will be used as a trust anchor. 2. Specify a path to the cartificate chain used by the server.\n\nExample with trust roots: ```json { \"protocol\": \"tls\", \"trust_roots\": [\"/path/to/cert.pem\", \"/path/to/cert/dir\"] } ```\n\nExample with certificate chain: ```json { \"protocol\": \"tls\", \"server_cert\": \"/path/to/cert.pem\" } ```\n\nTo make a TLS connection to the local application's HTTPS server, mirrord's TLS client needs a server name. You can supply it manually like this: ```json { \"protocol\": \"tls\", \"server_name\": \"my.test.server.name\" } ```\n\nIf you don't supply the server name:\n\n1. If `server_cert` is given, and the found end-entity certificate contains a valid server name, this server name will be used; 2. Otherwise, if the original client supplied an SNI extension, the server name from that extension will be used; 3. Otherwise, host name from the stolen request's URL will be used; 4. Otherwise, \"localhost\" will be used.",
       "type": "object",
       "required": [
         "protocol"
@@ -1514,9 +1515,16 @@
             }
           ]
         },
+        "server_cert": {
+          "description": "Path to a PEM file containing the certificate chain used by the local application's HTTPS server.\n\nThis file must contain at least one certificate. It can contain entries of other types, e.g private keys, which are ignored.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "server_name": {
           "title": "feature.network.incoming.https_delivery.server_name {#feature-network-incoming-https_delivery-server_name}",
-          "description": "Server name to use when making a connection.\n\nMust be a valid DNS name or an IP address.\n\nOptional. If not given, mirrord will try to use the server name supplied in the SNI extension from the original client. When such SNI is not supplied, mirrord will extract host name from the request URL. When this fails, mirrord will use local server's IP address.",
+          "description": "Server name to use when making a connection.\n\nMust be a valid DNS name or an IP address.",
           "type": [
             "string",
             "null"
@@ -1524,7 +1532,7 @@
         },
         "trust_roots": {
           "title": "feature.network.incoming.https_delivery.trust_roots {#feature-network-incoming-https_delivery-trust_roots}",
-          "description": "Paths to PEM files and directories with PEM files containing allowed root certificates.\n\nDirectories are not traversed recursively.\n\nEach certificate found in the files is treated as an allowed root. The files can contain entries of other types, e.g private keys, which are ignored.\n\nOptional. If not given, mirrord will not verify the local server's certificate at all.",
+          "description": "Paths to PEM files and directories with PEM files containing allowed root certificates.\n\nDirectories are not traversed recursively.\n\nEach certificate found in the files is treated as an allowed root. The files can contain entries of other types, e.g private keys, which are ignored.",
           "type": [
             "array",
             "null"
