@@ -27,7 +27,7 @@ use crate::config::{ConfigContext, ConfigError};
 /// By default, the local mirrord TLS client will trust any server certificate.
 /// To override this behavior, you can specify a list of paths to trust roots.
 /// These paths can lead either to PEM files or PEM file directories.
-/// Each found certificate will be treated used as a trust anchor.
+/// Each found certificate will be used as a trust anchor.
 ///
 /// ```json
 /// {
