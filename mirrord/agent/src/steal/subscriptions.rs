@@ -524,11 +524,10 @@ impl PortSubscription {
         filter: Option<HttpFilter>,
     ) -> Self {
         match filter {
-            Some(filter) => Self::Filtered(Arc::new(
-                [(client_id, (filter, client_protocol_version))]
-                    .into_iter()
-                    .collect(),
-            )),
+            Some(filter) => Self::Filtered(Arc::new(DashMap::from_iter([(
+                client_id,
+                (filter, client_protocol_version),
+            )]))),
             None => Self::Unfiltered(client_id),
         }
     }
