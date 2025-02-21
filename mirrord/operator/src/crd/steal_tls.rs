@@ -60,12 +60,17 @@ pub struct MirrordClusterTlsStealConfigSpec {
     pub ports: Vec<StealPortTlsConfig>,
 }
 
-#[test]
-fn check_one_api_group() {
+#[cfg(test)]
+mod test {
     use kube::Resource;
 
-    assert_eq!(
-        MirrordTlsStealConfig::group(&()),
-        MirrordClusterTlsStealConfig::group(&()),
-    )
+    use crate::crd::steal_tls::{MirrordClusterTlsStealConfig, MirrordTlsStealConfig};
+
+    #[test]
+    fn check_one_api_group() {
+        assert_eq!(
+            MirrordTlsStealConfig::group(&()),
+            MirrordClusterTlsStealConfig::group(&()),
+        )
+    }
 }
