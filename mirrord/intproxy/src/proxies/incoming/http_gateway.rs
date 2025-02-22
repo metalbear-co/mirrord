@@ -13,8 +13,9 @@ use hyper::{body::Incoming, http::response::Parts, StatusCode};
 use mirrord_protocol::{
     batched_body::BatchedBody,
     tcp::{
-        ChunkedHttpBody, ChunkedHttpError, ChunkedResponse, HttpRequest, HttpResponse,
-        InternalHttpBody, InternalHttpBodyFrame, InternalHttpResponse,
+        ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedResponse, HttpRequest,
+        HttpRequestTransportType, HttpResponse, InternalHttpBody, InternalHttpBodyFrame,
+        InternalHttpResponse,
     },
 };
 use tokio::time;
@@ -41,6 +42,8 @@ pub struct HttpGatewayTask {
     response_mode: ResponseMode,
     /// Address of the HTTP server in the user application.
     server_addr: SocketAddr,
+    /// How to transport the HTTP request to the server.
+    transport: HttpRequestTransportType,
 }
 
 impl fmt::Debug for HttpGatewayTask {
@@ -49,6 +52,7 @@ impl fmt::Debug for HttpGatewayTask {
             .field("request", &self.request)
             .field("response_mode", &self.response_mode)
             .field("server_addr", &self.server_addr)
+            .field("transport", &self.transport)
             .finish()
     }
 }
@@ -60,12 +64,14 @@ impl HttpGatewayTask {
         client_store: ClientStore,
         response_mode: ResponseMode,
         server_addr: SocketAddr,
+        transport: HttpRequestTransportType,
     ) -> Self {
         Self {
             request,
             client_store,
             response_mode,
             server_addr,
+            transport,
         }
     }
 
@@ -159,7 +165,7 @@ impl HttpGatewayTask {
 
                     message_bus
                         .send(HttpOut::ResponseChunked(ChunkedResponse::Body(
-                            ChunkedHttpBody {
+                            ChunkedRequestBodyV1 {
                                 frames,
                                 is_last,
                                 connection_id: self.request.connection_id,
@@ -185,7 +191,7 @@ impl HttpGatewayTask {
 
                     message_bus
                         .send(HttpOut::ResponseChunked(ChunkedResponse::Error(
-                            ChunkedHttpError {
+                            ChunkedRequestErrorV1 {
                                 connection_id: self.request.connection_id,
                                 request_id: self.request.request_id,
                             },
@@ -209,7 +215,12 @@ impl HttpGatewayTask {
     async fn send_attempt(&self, message_bus: &mut MessageBus<Self>) -> Result<(), LocalHttpError> {
         let mut client = self
             .client_store
-            .get(self.server_addr, self.request.version())
+            .get(
+                self.server_addr,
+                self.request.version(),
+                &self.transport,
+                &self.request.internal_request.uri,
+            )
             .await?;
         let mut response = client.send_request(self.request.clone()).await?;
         let on_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS).then(|| {
@@ -535,9 +546,10 @@ mod test {
             };
             let gateway = HttpGatewayTask::new(
                 request,
-                ClientStore::new_with_timeout(Duration::from_secs(1)),
+                ClientStore::new_with_timeout(Duration::from_secs(1), Default::default()),
                 ResponseMode::Basic,
                 local_destination,
+                HttpRequestTransportType::Tcp,
             );
             tasks.register(gateway, 0, 8)
         };
@@ -682,7 +694,7 @@ mod test {
                 uri: "/".parse().unwrap(),
                 headers: Default::default(),
                 version: Version::HTTP_11,
-                body: StreamingBody::from(vec![]),
+                body: StreamingBody::from(Vec::<u8>::new()),
             },
         };
 
@@ -690,9 +702,10 @@ mod test {
         let _gateway = tasks.register(
             HttpGatewayTask::new(
                 request,
-                ClientStore::new_with_timeout(Duration::from_secs(1)),
+                ClientStore::new_with_timeout(Duration::from_secs(1), Default::default()),
                 response_mode,
                 addr,
+                HttpRequestTransportType::Tcp,
             ),
             (),
             8,
@@ -835,9 +848,16 @@ mod test {
             .insert(header::CONTENT_LENGTH, HeaderValue::from_static("12"));
 
         let mut tasks: BackgroundTasks<(), InProxyTaskMessage, Infallible> = Default::default();
-        let client_store = ClientStore::new_with_timeout(Duration::from_secs(1));
+        let client_store =
+            ClientStore::new_with_timeout(Duration::from_secs(1), Default::default());
         let _gateway = tasks.register(
-            HttpGatewayTask::new(request, client_store.clone(), ResponseMode::Basic, addr),
+            HttpGatewayTask::new(
+                request,
+                client_store.clone(),
+                ResponseMode::Basic,
+                addr,
+                HttpRequestTransportType::Tcp,
+            ),
             (),
             8,
         );
@@ -903,13 +923,15 @@ mod test {
             .insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
 
         let mut tasks: BackgroundTasks<u32, InProxyTaskMessage, Infallible> = Default::default();
-        let client_store = ClientStore::new_with_timeout(Duration::from_secs(1337 * 21 * 37));
+        let client_store =
+            ClientStore::new_with_timeout(Duration::from_secs(1337 * 21 * 37), Default::default());
         let _gateway_1 = tasks.register(
             HttpGatewayTask::new(
                 request.clone(),
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
+                HttpRequestTransportType::Tcp,
             ),
             0,
             8,
@@ -920,6 +942,7 @@ mod test {
                 client_store.clone(),
                 ResponseMode::Basic,
                 addr,
+                HttpRequestTransportType::Tcp,
             ),
             1,
             8,

@@ -1,6 +1,7 @@
 use std::{collections::HashSet, fmt, str::FromStr};
 
 use bimap::BiMap;
+use https_delivery::LocalHttpsDelivery;
 use mirrord_analytics::{AnalyticValue, Analytics, CollectAnalytics};
 use schemars::JsonSchema;
 use serde::{de, ser, ser::SerializeSeq as _, Deserialize, Serialize};
@@ -15,6 +16,7 @@ use crate::{
 };
 
 pub mod http_filter;
+pub mod https_delivery;
 
 use http_filter::*;
 
@@ -132,6 +134,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .transpose()?
                     .unwrap_or_default(),
                 ports: advanced.ports.map(|ports| ports.into_iter().collect()),
+                https_delivery: advanced.https_delivery,
             },
         };
 
@@ -304,6 +307,13 @@ pub struct IncomingAdvancedFileConfig {
     ///
     /// Mutually exclusive with [`ignore_ports`](###ignore_ports).
     pub ports: Option<Vec<u16>>,
+
+    /// ### https_delivery
+    ///
+    /// (Operator Only): configures how mirrord delivers stolen HTTPS requests
+    /// to the local application.
+    #[serde(default)]
+    pub https_delivery: LocalHttpsDelivery,
 }
 
 fn serialize_bi_map<S>(map: &BiMap<u16, u16>, serializer: S) -> Result<S::Ok, S::Error>
@@ -468,6 +478,13 @@ pub struct IncomingConfig {
     /// Mutually exclusive with
     /// [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
     pub ports: Option<HashSet<u16>>,
+
+    /// #### feature.network.incoming.https_delivery {#feature-network-incoming-https_delivery}
+    ///
+    /// (Operator Only): configures how mirrord delivers stolen HTTPS requests
+    /// to the local application.
+    #[serde(default)]
+    pub https_delivery: LocalHttpsDelivery,
 }
 
 impl IncomingConfig {

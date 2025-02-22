@@ -489,6 +489,12 @@ impl LayerConfig {
             }
         }
 
+        self.feature
+            .network
+            .incoming
+            .https_delivery
+            .verify(context)?;
+
         if !self.feature.copy_target.enabled
             && self
                 .target
@@ -942,6 +948,7 @@ mod tests {
                             listen_ports: None,
                             on_concurrent_steal: None,
                             ports: None,
+                            https_delivery: Default::default(),
                         }),
                     ))),
                     outgoing: Some(ToggleableConfig::Config(OutgoingFileConfig {

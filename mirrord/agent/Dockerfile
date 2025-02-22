@@ -17,6 +17,7 @@ FROM chef AS planner
 # so we start with the most static files, then the most dynamic ones
 COPY .cargo /app/.cargo
 COPY mirrord/macros /app/mirrord/macros
+COPY mirrord/tls-util /app/mirrord/tls-util
 COPY mirrord/protocol /app/mirrord/protocol
 COPY mirrord/agent /app/mirrord/agent
 COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /app/
@@ -36,6 +37,7 @@ RUN cargo +nightly-2025-01-22 chef cook --release --zigbuild --target $(cat /.pl
 # so we start with the most static files, then the most dynamic ones
 COPY .cargo /app/.cargo
 COPY mirrord/macros /app/mirrord/macros
+COPY mirrord/tls-util /app/mirrord/tls-util
 COPY mirrord/protocol /app/mirrord/protocol
 COPY mirrord/agent /app/mirrord/agent
 COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /app/

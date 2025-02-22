@@ -343,6 +343,8 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     ///
     /// * `client_id` - identifier of the client that issued the subscription
     /// * `port` - number of the port to steal from
+    /// * `client_protocol_version` - version of client's [`mirrord_protocol`], [`None`] if the
+    ///   version has not been negotiated yet
     /// * `filter` - optional [`HttpFilter`]
     ///
     /// # Warning
@@ -354,12 +356,15 @@ impl<R: PortRedirector> PortSubscriptions<R> {
         &mut self,
         client_id: ClientId,
         port: Port,
+        client_protocol_version: Option<semver::Version>,
         filter: Option<HttpFilter>,
     ) -> Result<RemoteResult<Port>, R::Error> {
         let add_redirect = match self.subscriptions.entry(port) {
             Entry::Occupied(mut e) => {
                 let filtered = filter.is_some();
-                if e.get_mut().try_extend(client_id, filter) {
+                if e.get_mut()
+                    .try_extend(client_id, client_protocol_version, filter)
+                {
                     if filtered {
                         STEAL_FILTERED_PORT_SUBSCRIPTION
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -383,7 +388,11 @@ impl<R: PortRedirector> PortSubscriptions<R> {
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
 
-                e.insert(PortSubscription::new(client_id, filter));
+                e.insert(PortSubscription::new(
+                    client_id,
+                    client_protocol_version,
+                    filter,
+                ));
                 Ok(true)
             }
         };
@@ -487,6 +496,12 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     }
 }
 
+/// Maps id of the client to their active [`HttpFilter`] and their negotiated [`mirrord_protocol`]
+/// version, if any.
+///
+/// [`mirrord_protocol`] version affects which stolen requests can be handled by the client.
+pub type Filters = Arc<DashMap<ClientId, (HttpFilter, Option<semver::Version>)>>;
+
 /// Steal subscription for a port.
 #[derive(Debug, Clone)]
 pub enum PortSubscription {
@@ -498,21 +513,33 @@ pub enum PortSubscription {
     /// filter owner).
     ///
     /// Can be shared by multiple clients.
-    Filtered(Arc<DashMap<ClientId, HttpFilter>>),
+    Filtered(Filters),
 }
 
 impl PortSubscription {
     /// Create a new instance. Variant is picked based on the optional `filter`.
-    fn new(client_id: ClientId, filter: Option<HttpFilter>) -> Self {
+    fn new(
+        client_id: ClientId,
+        client_protocol_version: Option<semver::Version>,
+        filter: Option<HttpFilter>,
+    ) -> Self {
         match filter {
-            Some(filter) => Self::Filtered(Arc::new([(client_id, filter)].into_iter().collect())),
+            Some(filter) => Self::Filtered(Arc::new(DashMap::from_iter([(
+                client_id,
+                (filter, client_protocol_version),
+            )]))),
             None => Self::Unfiltered(client_id),
         }
     }
 
     /// Try extending this subscription with a new subscription request.
     /// Return whether extension was successful.
-    fn try_extend(&mut self, client_id: ClientId, filter: Option<HttpFilter>) -> bool {
+    fn try_extend(
+        &mut self,
+        client_id: ClientId,
+        client_protocol_version: Option<semver::Version>,
+        filter: Option<HttpFilter>,
+    ) -> bool {
         match (self, filter) {
             (_, None) => false,
 
@@ -521,7 +548,7 @@ impl PortSubscription {
             (Self::Filtered(filters), Some(filter)) => match filters.entry(client_id) {
                 DashMapEntry::Occupied(..) => false,
                 DashMapEntry::Vacant(e) => {
-                    e.insert(filter);
+                    e.insert((filter, client_protocol_version));
                     true
                 }
             },
@@ -619,14 +646,14 @@ mod test {
         check_redirector!(subscriptions.redirector);
 
         // Adding unfiltered subscription.
-        subscriptions.add(0, 80, None).await.unwrap().unwrap();
+        subscriptions.add(0, 80, None, None).await.unwrap().unwrap();
         check_redirector!(subscriptions.redirector, 80);
         let sub = subscriptions.get(80).unwrap();
         assert!(matches!(sub, PortSubscription::Unfiltered(0)), "{sub:?}");
 
         // Same client cannot subscribe again (unfiltered).
         assert_eq!(
-            subscriptions.add(0, 80, None).await.unwrap(),
+            subscriptions.add(0, 80, None, None).await.unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
         );
         check_redirector!(subscriptions.redirector, 80);
@@ -636,7 +663,7 @@ mod test {
         // Same client cannot subscribe again (filtered).
         assert_eq!(
             subscriptions
-                .add(0, 80, Some(dummy_filter()))
+                .add(0, 80, None, Some(dummy_filter()))
                 .await
                 .unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
@@ -647,7 +674,7 @@ mod test {
 
         // Another client cannot subscribe (unfiltered).
         assert_eq!(
-            subscriptions.add(1, 80, None).await.unwrap(),
+            subscriptions.add(1, 80, None, None).await.unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
         );
         check_redirector!(subscriptions.redirector, 80);
@@ -657,7 +684,7 @@ mod test {
         // Another client cannot subscribe (filtered).
         assert_eq!(
             subscriptions
-                .add(1, 80, Some(dummy_filter()))
+                .add(1, 80, None, Some(dummy_filter()))
                 .await
                 .unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
@@ -677,7 +704,7 @@ mod test {
 
         // Adding filtered subscription.
         subscriptions
-            .add(0, 80, Some(dummy_filter()))
+            .add(0, 80, None, Some(dummy_filter()))
             .await
             .unwrap()
             .unwrap();
@@ -690,7 +717,7 @@ mod test {
 
         // Same client cannot subscribe again (unfiltered).
         assert_eq!(
-            subscriptions.add(0, 80, None).await.unwrap(),
+            subscriptions.add(0, 80, None, None).await.unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
         );
         check_redirector!(subscriptions.redirector, 80);
@@ -703,7 +730,7 @@ mod test {
         // Same client cannot subscribe again (filtered).
         assert_eq!(
             subscriptions
-                .add(0, 80, Some(dummy_filter()))
+                .add(0, 80, None, Some(dummy_filter()))
                 .await
                 .unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
@@ -717,7 +744,7 @@ mod test {
 
         // Another client cannot subscribe (unfiltered).
         assert_eq!(
-            subscriptions.add(1, 80, None).await.unwrap(),
+            subscriptions.add(1, 80, None, None).await.unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
         );
         check_redirector!(subscriptions.redirector, 80);
@@ -729,7 +756,7 @@ mod test {
 
         // Another client can subscribe (filtered).
         subscriptions
-            .add(1, 80, Some(dummy_filter()))
+            .add(1, 80, None, Some(dummy_filter()))
             .await
             .unwrap()
             .unwrap();
@@ -768,11 +795,11 @@ mod test {
         check_redirector!(subscriptions.redirector);
 
         // Adding unfiltered subscription for port 80.
-        subscriptions.add(0, 80, None).await.unwrap().unwrap();
+        subscriptions.add(0, 80, None, None).await.unwrap().unwrap();
 
         // Adding filtered subscription for port 81.
         subscriptions
-            .add(1, 81, Some(dummy_filter()))
+            .add(1, 81, None, Some(dummy_filter()))
             .await
             .unwrap()
             .unwrap();
@@ -809,11 +836,11 @@ mod test {
         check_redirector!(subscriptions.redirector);
 
         // Adding unfiltered subscription for port 80.
-        subscriptions.add(0, 80, None).await.unwrap().unwrap();
+        subscriptions.add(0, 80, None, None).await.unwrap().unwrap();
 
         // Adding filtered subscription for port 81.
         subscriptions
-            .add(0, 81, Some(dummy_filter()))
+            .add(0, 81, None, Some(dummy_filter()))
             .await
             .unwrap()
             .unwrap();

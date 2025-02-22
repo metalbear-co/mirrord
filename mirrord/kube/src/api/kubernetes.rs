@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::ops::{Deref, Not};
 
 use k8s_openapi::{api::core::v1::Namespace, NamespaceResourceScope};
 use kube::{
@@ -16,6 +16,7 @@ use mirrord_progress::Progress;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, Level};
 
+use super::container::ContainerConfig;
 use crate::{
     api::{
         container::{
@@ -169,20 +170,15 @@ impl KubernetesAPI {
         Ok(stream)
     }
 
-    /// # Params
+    /// Prepares params to create an agent.
     ///
-    /// * `config` - if passed, will be checked against cluster setup
-    /// * `tls_cert` - value for [`OPERATOR_CERT`](mirrord_agent_env::envs::OPERATOR_CERT), for
-    ///   creating an agent from the operator. In usage from this repo this is always `None`.
-    /// * `agent_port` - port number on which the agent will listen for client connections. If
-    ///   [`None`] is given, a random high port will be user.
-    #[tracing::instrument(level = "trace", skip(self), ret, err)]
+    /// Unless targetless, fetches [`RuntimeData`] for the given target and fills
+    /// [`ContainerConfig::pod_ips`].
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     pub async fn create_agent_params(
         &self,
         target: &TargetConfig,
-        tls_cert: Option<String>,
-        support_ipv6: bool,
-        agent_port: Option<u16>,
+        mut config: ContainerConfig,
     ) -> Result<(ContainerParams, Option<RuntimeData>), KubeApiError> {
         let runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
             Target::Targetless => None,
@@ -197,36 +193,27 @@ impl KubernetesAPI {
             .map(|runtime_data| runtime_data.pod_ips.clone())
             .filter(|pod_ips| !pod_ips.is_empty());
 
-        let params = ContainerParams::new(tls_cert, pod_ips, support_ipv6, agent_port);
+        config.pod_ips = pod_ips;
 
-        Ok((params, runtime_data))
+        Ok((config.into(), runtime_data))
     }
 
-    /// # Params
+    /// Creates an agent.
     ///
-    /// * `config` - if passed, will be checked against cluster setup
-    /// * `tls_cert` - value for [`OPERATOR_CERT`](mirrord_agent_env::envs::OPERATOR_CERT), for
-    ///   creating an agent from the operator. In usage from this repo this is always `None`.
-    /// * `agent_port` - port number on which the agent will listen for client connections. If
-    ///   [`None`] is given, a random high port will be used.
-    #[tracing::instrument(level = Level::TRACE, skip(self, progress))]
+    /// Unless targetless, fetches [`RuntimeData`] for the given target and fills
+    /// [`ContainerConfig::pod_ips`].
+    #[tracing::instrument(level = "trace", skip(self, progress))]
     pub async fn create_agent<P>(
         &self,
         progress: &mut P,
         target: &TargetConfig,
-        config: Option<&LayerConfig>,
-        tls_cert: Option<String>,
-        agent_port: Option<u16>,
+        config: ContainerConfig,
     ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
     where
         P: Progress + Send + Sync,
     {
-        let support_ipv6 = config
-            .map(|layer_conf| layer_conf.feature.network.ipv6)
-            .unwrap_or_default();
-        let (params, runtime_data) = self
-            .create_agent_params(target, tls_cert, support_ipv6, agent_port)
-            .await?;
+        let (params, runtime_data) = self.create_agent_params(target, config).await?;
+
         if let Some(RuntimeData {
             guessed_container: true,
             container_name,
@@ -239,11 +226,7 @@ impl KubernetesAPI {
         if let Some(mesh) = runtime_data.as_ref().and_then(|data| data.mesh.as_ref()) {
             progress.info(&format!("service mesh detected: {mesh}"));
 
-            let privileged = config
-                .map(|config| config.agent.privileged)
-                .unwrap_or_default();
-
-            if matches!(mesh, MeshVendor::IstioAmbient) && !privileged {
+            if matches!(mesh, MeshVendor::IstioAmbient) && self.agent.privileged.not() {
                 progress.warning(
                     "mirrord detected an ambient Istio service mesh but\
                      the agent is not configured to run in a privileged SecurityContext.\

@@ -1,29 +1,22 @@
 use std::{
     fmt::{self, Debug},
     io,
-    net::IpAddr,
     sync::Arc,
 };
 
 use actix_codec::Framed;
 use futures::{SinkExt, TryStreamExt};
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage};
+use mirrord_tls_util::{GetSanError, HasSubjectAlternateNames};
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio_rustls::{
     client::TlsStream,
-    rustls::{
-        pki_types::{DnsName, ServerName},
-        ClientConfig, RootCertStore,
-    },
+    rustls::{pki_types::ServerName, ClientConfig, RootCertStore},
     TlsConnector,
 };
-use x509_parser::{
-    certificate::X509Certificate,
-    error::{PEMError, X509Error},
-    extensions::GeneralName,
-    nom, pem,
-};
+use tracing::Level;
+use x509_parser::{error::PEMError, nom, pem};
 
 use crate::util::ClientId;
 
@@ -49,11 +42,14 @@ impl AgentTlsConnector {
     /// 2. The X509 certificate must contain exactly one SAN extension.
     /// 3. The SAN extension must contain at least one SAN that is a DNS name or an IP address. This
     ///    requirement comes from [`TlsConnector::connect`] interface.
-    #[tracing::instrument(level = "trace", err(Debug))]
+    #[tracing::instrument(level = Level::TRACE, err(Debug))]
     pub fn new(certificate_pem: String) -> Result<Self, TlsSetupError> {
         let (_, pem) = pem::parse_x509_pem(certificate_pem.as_bytes())?;
-        let cert = pem.parse_x509()?;
-        let server_name = Self::get_san(&cert).ok_or(TlsSetupError::NoSubjectAlternateName)?;
+        let server_name = pem
+            .subject_alternate_names()?
+            .into_iter()
+            .next()
+            .ok_or(TlsSetupError::NoSubjectAlternateName)?;
 
         let mut root_store = RootCertStore::empty();
         root_store.add(pem.contents.into())?;
@@ -66,73 +62,23 @@ impl AgentTlsConnector {
 
         Ok(Self { inner, server_name })
     }
-
-    /// Retrieves [`ServerName`] from the given certificate.
-    /// If the certificate does not contain exactly one SAN extension or the extension does not
-    /// contain any SAN that is a DNS name or an IP address, this method returns [`None`].
-    fn get_san(cert: &X509Certificate<'_>) -> Option<ServerName<'static>> {
-        let extension = match cert.subject_alternative_name() {
-            Ok(Some(extension)) => extension,
-            Ok(None) => {
-                tracing::error!("no SAN extension found");
-                return None;
-            }
-            Err(error) => {
-                tracing::error!(%error, "failed to extract SAN extension");
-                return None;
-            }
-        };
-
-        extension
-            .value
-            .general_names
-            .iter()
-            .find_map(|general_name| match *general_name {
-                GeneralName::DNSName(name) => {
-                    let dns_name = DnsName::try_from(name)
-                        .inspect_err(|error| {
-                            tracing::error!(%error, name, "SAN extension contains an invalid DNS name")
-                        })
-                        .ok()?
-                        .to_owned();
-
-                    Some(ServerName::DnsName(dns_name))
-                }
-
-                GeneralName::IPAddress(ip) => {
-                    let addr = if let Ok(addr) = <[u8; 4]>::try_from(ip) {
-                        IpAddr::from(addr)
-                    } else if let Ok(addr) = <[u8; 16]>::try_from(ip) {
-                        IpAddr::from(addr)
-                    } else {
-                        tracing::error!(?ip, "SAN extension contains an invalid IP address");
-                        return None;
-                    };
-
-                    Some(ServerName::IpAddress(addr.into()))
-                }
-
-                _ => None,
-            })
-    }
 }
 
 /// Errors that can occur when creating an [`AgentTlsConnector`].
 #[derive(Debug, Error)]
 pub(crate) enum TlsSetupError {
-    /// We managed to decode the given PEM, but failed to extract the certificate from the decoded
-    /// data.
-    #[error("failed to extract the X509 certificate from PEM data")]
-    Parse(#[from] nom::Err<X509Error>),
     /// We failed to parse the PEM.
     #[error("failed to parse certificate PEM: {0}")]
-    Pem(#[from] nom::Err<PEMError>),
+    PemError(#[from] nom::Err<PEMError>),
     /// The certificate did not contain any SAN we can use when making TLS connections.
     #[error("provided operator certificate has no valid Subject Alternate Name")]
     NoSubjectAlternateName,
+    /// We failed to extract the names from the certificate.
+    #[error("failed to extract Subject Alternate Names: {0}")]
+    GetSanError(#[from] GetSanError),
     /// We failed to add the certificate to the [`RootCertStore`].
-    #[error("rustls failed: {0}")]
-    Rustls(#[from] tokio_rustls::rustls::Error),
+    #[error("failed to add the certificate to the root store: {0}")]
+    AddToRootStoreError(#[from] tokio_rustls::rustls::Error),
 }
 
 /// Wrapper over client's network connection with the agent.
@@ -208,7 +154,7 @@ enum ConnectionFramed {
 
 #[cfg(test)]
 mod test {
-    use std::sync::{Arc, Once};
+    use std::sync::Arc;
 
     use futures::StreamExt;
     use mirrord_protocol::ClientCodec;
@@ -220,18 +166,13 @@ mod test {
 
     use super::*;
 
-    static CRYPTO_PROVIDER: Once = Once::new();
-
     /// Verifies that [`AgentTlsConnector`] correctly accepts a
     /// connection from a server using the provided certificate.
     #[tokio::test]
     async fn agent_tls_connector_valid_cert() {
-        CRYPTO_PROVIDER.call_once(|| {
-            rustls::crypto::CryptoProvider::install_default(
-                rustls::crypto::aws_lc_rs::default_provider(),
-            )
-            .expect("Failed to install crypto provider")
-        });
+        let _ = rustls::crypto::CryptoProvider::install_default(
+            rustls::crypto::aws_lc_rs::default_provider(),
+        );
 
         let cert = rcgen::generate_simple_self_signed(vec!["operator".to_string()]).unwrap();
         let cert_bytes = cert.cert.der();
@@ -278,12 +219,9 @@ mod test {
     /// connection from a server using some other certificate.
     #[tokio::test]
     async fn agent_tls_connector_invalid_cert() {
-        CRYPTO_PROVIDER.call_once(|| {
-            rustls::crypto::CryptoProvider::install_default(
-                rustls::crypto::aws_lc_rs::default_provider(),
-            )
-            .expect("Failed to install crypto provider")
-        });
+        let _ = rustls::crypto::CryptoProvider::install_default(
+            rustls::crypto::aws_lc_rs::default_provider(),
+        );
 
         let server_cert = rcgen::generate_simple_self_signed(vec!["operator".to_string()]).unwrap();
         let cert_bytes = server_cert.cert.der();

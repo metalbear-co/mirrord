@@ -21,6 +21,7 @@ workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 mirrord-protocol = { path = "../protocol" }
 mirrord-agent-env = { path = "./env", default-features = false }
+mirrord-tls-util = { path = "../tls-util" }
 
 containerd-client = "0.6"
 tokio = { workspace = true, features = [
@@ -67,7 +68,7 @@ http.workspace = true
 k8s-cri = "0.9"
 semver.workspace = true
 tokio-rustls.workspace = true
-x509-parser = "0.16"
+x509-parser.workspace = true
 rustls.workspace = true
 socket2.workspace = true
 prometheus = { version = "0.13", features = ["process"] }
@@ -75,10 +76,13 @@ axum = { version = "0.7", features = ["macros"] }
 iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624" }
 rawsocket = { git = "https://github.com/metalbear-co/rawsocket.git" }
 procfs = "0.17.0"
+rcgen.workspace = true
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-rstest.workspace = true
 mockall = "0.13"
-test_bin = "0.4"
+pem = "3"
 rcgen.workspace = true
 reqwest.workspace = true
+rstest.workspace = true
+tempfile.workspace = true
+test_bin = "0.4"

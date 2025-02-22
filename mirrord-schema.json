@@ -1156,6 +1156,24 @@
       },
       "additionalProperties": false
     },
+    "HttpsDeliveryProtocol": {
+      "oneOf": [
+        {
+          "description": "HTTPS requests will be delivered over TCP, as plain HTTP.",
+          "type": "string",
+          "enum": [
+            "tcp"
+          ]
+        },
+        {
+          "description": "HTTPS requests will be delivered over TLS, as HTTPS.",
+          "type": "string",
+          "enum": [
+            "tls"
+          ]
+        }
+      ]
+    },
     "IncomingAdvancedFileConfig": {
       "title": "incoming (advanced setup)",
       "description": "Advanced user configuration for network incoming traffic.",
@@ -1170,6 +1188,21 @@
             },
             {
               "type": "null"
+            }
+          ]
+        },
+        "https_delivery": {
+          "title": "https_delivery",
+          "description": "(Operator Only): configures how mirrord delivers stolen HTTPS requests to the local application.",
+          "default": {
+            "protocol": "tls",
+            "server_cert": null,
+            "server_name": null,
+            "trust_roots": null
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/LocalHttpsDelivery"
             }
           ]
         },
@@ -1465,6 +1498,50 @@
         "NET_RAW",
         "NET_ADMIN"
       ]
+    },
+    "LocalHttpsDelivery": {
+      "description": "Stolen HTTPS requests can be delivered to the local application either as HTTPS or as plain HTTP requests. Note that stealing HTTPS requests requires mirrord Operator support.\n\nTo have the stolen HTTPS requests delivered with plain HTTP, use:\n\n```json { \"protocol\": \"tcp\" } ```\n\nTo have the requests delivered with HTTPS, use: ```json { \"protocol\": \"tls\" } ```\n\nBy default, the local mirrord TLS client will trust any certificate presented by the local application's HTTP server. To override this behavior, you can either:\n\n1. Specify a list of paths to trust roots. These paths can lead either to PEM files or PEM file directories. Each found certificate will be used as a trust anchor. 2. Specify a path to the cartificate chain used by the server.\n\nExample with trust roots: ```json { \"protocol\": \"tls\", \"trust_roots\": [\"/path/to/cert.pem\", \"/path/to/cert/dir\"] } ```\n\nExample with certificate chain: ```json { \"protocol\": \"tls\", \"server_cert\": \"/path/to/cert.pem\" } ```\n\nTo make a TLS connection to the local application's HTTPS server, mirrord's TLS client needs a server name. You can supply it manually like this: ```json { \"protocol\": \"tls\", \"server_name\": \"my.test.server.name\" } ```\n\nIf you don't supply the server name:\n\n1. If `server_cert` is given, and the found end-entity certificate contains a valid server name, this server name will be used; 2. Otherwise, if the original client supplied an SNI extension, the server name from that extension will be used; 3. Otherwise, if the stolen request's URL contains a valid server name, that server name will be used; 4. Otherwise, `localhost` will be used.",
+      "type": "object",
+      "required": [
+        "protocol"
+      ],
+      "properties": {
+        "protocol": {
+          "title": "feature.network.incoming.https_delivery.protocol {#feature-network-incoming-https_delivery-protocol}",
+          "description": "Protocol to use when delivering the HTTPS requests locally.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/HttpsDeliveryProtocol"
+            }
+          ]
+        },
+        "server_cert": {
+          "description": "Path to a PEM file containing the certificate chain used by the local application's HTTPS server.\n\nThis file must contain at least one certificate. It can contain entries of other types, e.g private keys, which are ignored.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "server_name": {
+          "title": "feature.network.incoming.https_delivery.server_name {#feature-network-incoming-https_delivery-server_name}",
+          "description": "Server name to use when making a connection.\n\nMust be a valid DNS name or an IP address.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trust_roots": {
+          "title": "feature.network.incoming.https_delivery.trust_roots {#feature-network-incoming-https_delivery-trust_roots}",
+          "description": "Paths to PEM files and directories with PEM files containing allowed root certificates.\n\nDirectories are not traversed recursively.\n\nEach certificate found in the files is treated as an allowed root. The files can contain entries of other types, e.g private keys, which are ignored.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     },
     "NetworkFileConfig": {
       "description": "Controls mirrord network operations.\n\nSee the network traffic [reference](https://mirrord.dev/docs/reference/traffic/) for more details.\n\n```json { \"feature\": { \"network\": { \"incoming\": { \"mode\": \"steal\", \"http_filter\": { \"header_filter\": \"host: api\\\\..+\" }, \"port_mapping\": [[ 7777, 8888 ]], \"ignore_localhost\": false, \"ignore_ports\": [9999, 10000] }, \"outgoing\": { \"tcp\": true, \"udp\": true, \"filter\": { \"local\": [\"tcp://1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\", \":53\"] }, \"ignore_localhost\": false, \"unix_streams\": \"bear.+\" }, \"dns\": { \"enabled\": true, \"filter\": { \"local\": [\"1.1.1.0/24:1337\", \"1.1.5.0/24\", \"google.com\"] } } } } } ```",

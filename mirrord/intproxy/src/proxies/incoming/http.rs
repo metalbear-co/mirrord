@@ -11,12 +11,14 @@ use mirrord_protocol::{
     ConnectionId, Port, RequestId,
 };
 use thiserror::Error;
-use tokio::net::TcpStream;
+use tls::LocalTlsSetupError;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::Level;
 
 mod client_store;
 mod response_mode;
 mod streaming_body;
+mod tls;
 
 pub use client_store::ClientStore;
 pub use response_mode::ResponseMode;
@@ -30,33 +32,11 @@ pub struct LocalHttpClient {
     local_server_address: SocketAddr,
     /// Address of this client's TCP socket.
     address: SocketAddr,
+    /// Whether this client uses TLS.
+    uses_tls: bool,
 }
 
 impl LocalHttpClient {
-    /// Makes an HTTP connection with the given server and creates a new client.
-    #[tracing::instrument(level = Level::TRACE, err(level = Level::WARN), ret)]
-    pub async fn new(
-        local_server_address: SocketAddr,
-        version: Version,
-    ) -> Result<Self, LocalHttpError> {
-        let stream = TcpStream::connect(local_server_address)
-            .await
-            .map_err(LocalHttpError::ConnectTcpFailed)?;
-        let local_server_address = stream
-            .peer_addr()
-            .map_err(LocalHttpError::SocketSetupFailed)?;
-        let address = stream
-            .local_addr()
-            .map_err(LocalHttpError::SocketSetupFailed)?;
-        let sender = HttpSender::handshake(version, stream).await?;
-
-        Ok(Self {
-            sender,
-            local_server_address,
-            address,
-        })
-    }
-
     /// Send the given `request` to the user application's HTTP server.
     #[tracing::instrument(level = Level::DEBUG, err(level = Level::WARN), ret)]
     pub async fn send_request(
@@ -79,6 +59,10 @@ impl LocalHttpClient {
             (HttpSender::V2(..), _) => false,
         }
     }
+
+    pub fn uses_tls(&self) -> bool {
+        self.uses_tls
+    }
 }
 
 impl fmt::Debug for LocalHttpClient {
@@ -87,6 +71,7 @@ impl fmt::Debug for LocalHttpClient {
             .field("local_server_address", &self.local_server_address)
             .field("address", &self.address)
             .field("is_http_1", &matches!(self.sender, HttpSender::V1(..)))
+            .field("uses_tls", &self.uses_tls)
             .finish()
     }
 }
@@ -109,8 +94,14 @@ pub enum LocalHttpError {
     #[error("failed to make a TCP connection with the local application's HTTP server: {0}")]
     ConnectTcpFailed(#[source] io::Error),
 
+    #[error("failed to make a TLS connection with the local application's HTTP server: {0}")]
+    ConnectTlsFailed(#[source] io::Error),
+
     #[error("failed to read the body of the local application's HTTP server response: {0}")]
     ReadBodyFailed(#[source] hyper::Error),
+
+    #[error("failed to prepare TLS client configuration: {0}")]
+    TlsSetupError(#[from] LocalTlsSetupError),
 }
 
 impl LocalHttpError {
@@ -118,8 +109,10 @@ impl LocalHttpError {
     /// error.
     pub fn can_retry(&self) -> bool {
         match self {
-            Self::SocketSetupFailed(..) | Self::UnsupportedHttpVersion(..) => false,
-            Self::ConnectTcpFailed(..) => true,
+            Self::SocketSetupFailed(..)
+            | Self::UnsupportedHttpVersion(..)
+            | Self::TlsSetupError(..) => false,
+            Self::ConnectTcpFailed(..) | Self::ConnectTlsFailed(..) => true,
             Self::HandshakeFailed(err) | Self::SendFailed(err) | Self::ReadBodyFailed(err) => (err
                 .is_parse()
                 || err.is_parse_status()
@@ -158,15 +151,11 @@ enum HttpSender {
 }
 
 impl HttpSender {
-    /// Performs an HTTP handshake over the given [`TcpStream`].
-    async fn handshake(version: Version, target_stream: TcpStream) -> Result<Self, LocalHttpError> {
-        let local_addr = target_stream
-            .local_addr()
-            .map_err(LocalHttpError::SocketSetupFailed)?;
-        let peer_addr = target_stream
-            .peer_addr()
-            .map_err(LocalHttpError::SocketSetupFailed)?;
-
+    /// Performs an HTTP handshake over the given IO stream.
+    async fn handshake<IO>(version: Version, target_stream: IO) -> Result<Self, LocalHttpError>
+    where
+        IO: 'static + AsyncRead + AsyncWrite + Unpin + Send,
+    {
         match version {
             Version::HTTP_2 => {
                 let (sender, connection) =
@@ -177,10 +166,10 @@ impl HttpSender {
                 tokio::spawn(async move {
                     match connection.await {
                         Ok(()) => {
-                            tracing::trace!(%local_addr, %peer_addr, "HTTP connection with the local application finished");
+                            tracing::trace!("HTTP connection with the local application finished");
                         }
                         Err(error) => {
-                            tracing::warn!(%error, %local_addr, %peer_addr, "HTTP connection with the local application failed");
+                            tracing::warn!(%error, "HTTP connection with the local application failed");
                         }
                     }
                 });
@@ -198,10 +187,10 @@ impl HttpSender {
                 tokio::spawn(async move {
                     match connection.with_upgrades().await {
                         Ok(()) => {
-                            tracing::trace!(%local_addr, %peer_addr, "HTTP connection with the local application finished");
+                            tracing::trace!("HTTP connection with the local application finished");
                         }
                         Err(error) => {
-                            tracing::warn!(%error, %local_addr, %peer_addr, "HTTP connection with the local application failed");
+                            tracing::warn!(%error, "HTTP connection with the local application failed");
                         }
                     }
                 });

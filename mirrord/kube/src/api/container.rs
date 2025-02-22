@@ -1,7 +1,7 @@
 use std::{collections::HashSet, net::IpAddr, sync::LazyLock};
 
 use k8s_openapi::api::core::v1::{ContainerStatus, Pod};
-use mirrord_agent_env::mesh::MeshVendor;
+use mirrord_agent_env::{mesh::MeshVendor, steal_tls::StealPortTlsConfig};
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
 use rand::distr::{Alphanumeric, SampleString};
@@ -32,27 +32,45 @@ pub static SKIP_NAMES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     ])
 });
 
-#[derive(Clone, Debug)]
-pub struct ContainerParams {
-    pub name: String,
-    pub gid: u16,
-    pub port: u16,
+/// Configuration of the mirrord-agent container.
+#[derive(Clone, Debug, Default)]
+pub struct ContainerConfig {
+    /// Predefined port on which the agent will accept client connections.
+    pub port: Option<u16>,
     /// Value for [`OPERATOR_CERT`](mirrord_agent_env::envs::OPERATOR_CERT) set in
     /// the agent container.
     pub tls_cert: Option<String>,
     pub pod_ips: Option<Vec<IpAddr>>,
-    /// Support IPv6-only clusters
+    /// Whether to support IPv6-only clusters.
     pub support_ipv6: bool,
+    /// Configuration for stealing TLS traffic.
+    pub steal_tls_config: Vec<StealPortTlsConfig>,
 }
 
-impl ContainerParams {
-    pub fn new(
-        tls_cert: Option<String>,
-        pod_ips: Option<Vec<IpAddr>>,
-        support_ipv6: bool,
-        port: Option<u16>,
-    ) -> ContainerParams {
-        let port = port.unwrap_or_else(|| rand::random_range(30000..=65535));
+#[derive(Clone, Debug)]
+pub struct ContainerParams {
+    /// Container name.
+    pub name: String,
+    /// Group id.
+    pub gid: u16,
+    /// Port on which the agent will accept client connections.
+    pub port: u16,
+    /// Value for [`OPERATOR_CERT`](mirrord_agent_env::envs::OPERATOR_CERT) set in
+    /// the agent container.
+    pub tls_cert: Option<String>,
+    /// IP addresses of the target pod.
+    pub pod_ips: Option<Vec<IpAddr>>,
+    /// Whether to support IPv6-only clusters.
+    pub support_ipv6: bool,
+    /// Configuration for stealing TLS traffic.
+    pub steal_tls_config: Vec<StealPortTlsConfig>,
+}
+
+impl From<ContainerConfig> for ContainerParams {
+    fn from(value: ContainerConfig) -> Self {
+        let port = value
+            .port
+            .unwrap_or_else(|| rand::random_range(30000..=65535));
         let gid: u16 = rand::random_range(3000..u16::MAX);
 
         let name = format!(
@@ -62,13 +80,14 @@ impl ContainerParams {
                 .to_lowercase()
         );
 
-        ContainerParams {
+        Self {
             name,
             gid,
             port,
-            tls_cert,
-            pod_ips,
-            support_ipv6,
+            tls_cert: value.tls_cert,
+            pod_ips: value.pod_ips,
+            support_ipv6: value.support_ipv6,
+            steal_tls_config: value.steal_tls_config,
         }
     }
 }
