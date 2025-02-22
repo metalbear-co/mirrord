@@ -1,0 +1,1 @@
+Add a section to CONTRIBUTING.md on how to test the release workflow.
