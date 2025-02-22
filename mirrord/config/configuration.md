@@ -1305,12 +1305,13 @@ mirrord's TLS client needs a server name. You can supply it manually like this:
 
 If you don't supply the server name:
 
-1. If `server_cert` is given, and the found end-entity certificate contains a valid server
-   name, this server name will be used;
+1. If `server_cert` is given, and the found end-entity certificate contains a valid server name,
+   this server name will be used;
 2. Otherwise, if the original client supplied an SNI extension, the server name from that
    extension will be used;
-3. Otherwise, host name from the stolen request's URL will be used;
-4. Otherwise, "localhost" will be used.
+3. Otherwise, if the stolen request's URL contains a valid server name, that server name will be
+   used;
+4. Otherwise, `localhost` will be used.
 
 ##### feature.network.incoming.https_delivery.protocol {#feature-network-incoming-https_delivery-protocol}
 

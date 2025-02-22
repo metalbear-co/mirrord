@@ -62,8 +62,9 @@ use crate::config::{ConfigContext, ConfigError};
 ///    this server name will be used;
 /// 2. Otherwise, if the original client supplied an SNI extension, the server name from that
 ///    extension will be used;
-/// 3. Otherwise, host name from the stolen request's URL will be used;
-/// 4. Otherwise, "localhost" will be used.
+/// 3. Otherwise, if the stolen request's URL contains a valid server name, that server name will be
+///    used;
+/// 4. Otherwise, `localhost` will be used.
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema, PartialEq, Eq, Default)]
 pub struct LocalHttpsDelivery {
     /// ##### feature.network.incoming.https_delivery.protocol {#feature-network-incoming-https_delivery-protocol}
