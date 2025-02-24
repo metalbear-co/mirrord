@@ -368,7 +368,6 @@ mod test {
         let expected: Job = serde_json::from_value(serde_json::json!({
             "metadata": {
                 "name": "foobar",
-                "namespace": "default",
                 "labels": {
                     "kuma.io/sidecar-injection": "disabled",
                     "app": "mirrord"
