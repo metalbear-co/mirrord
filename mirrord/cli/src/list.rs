@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::{sync::LazyLock, time::Instant};
 
 use futures::TryStreamExt;
 use k8s_openapi::api::core::v1::Namespace;
@@ -15,6 +15,7 @@ use mirrord_kube::{
 use mirrord_operator::client::OperatorApi;
 use semver::VersionReq;
 use serde::{ser::SerializeSeq, Serialize, Serializer};
+use tracing::Level;
 
 use crate::{util, CliError, CliResult, Format, ListTargetArgs};
 
@@ -67,6 +68,7 @@ impl FoundTargets {
     /// If `rich_output` is set:
     /// 1. returned [`FoundTargets`] will contain info about namespaces available in the cluster;
     /// 2. only deployment, rollout, and pod targets will be fetched.
+    #[tracing::instrument(level = Level::DEBUG, skip(config), name = "resolve_targets", err)]
     async fn resolve(config: LayerConfig, rich_output: bool) -> CliResult<Self> {
         let client = create_kube_config(
             config.accept_invalid_certificates,
@@ -79,10 +81,13 @@ impl FoundTargets {
             CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed)
         })?;
 
+        let start = Instant::now();
         let mut reporter = NullReporter::default();
         let operator_api = if config.operator != Some(false)
             && let Some(api) = OperatorApi::try_new(&config, &mut reporter).await?
         {
+            tracing::debug!(elapsed_s = start.elapsed().as_secs_f32(), "Operator found");
+
             let api = api.prepare_client_cert(&mut reporter).await;
 
             api.inspect_cert_error(
@@ -96,7 +101,11 @@ impl FoundTargets {
 
         let seeker = KubeResourceSeeker {
             client: &client,
-            namespace: config.target.namespace.as_deref(),
+            namespace: config
+                .target
+                .namespace
+                .as_deref()
+                .unwrap_or(client.default_namespace()),
         };
 
         let (targets, namespaces) = tokio::try_join!(
