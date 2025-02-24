@@ -85,6 +85,12 @@ where
         .as_ref()
         .ok_or_else(|| KubeApiError::missing_field(&agent_pod, ".metadata.name"))?
         .clone();
+    let pod_namespace = agent_pod
+        .metadata
+        .namespace
+        .as_ref()
+        .ok_or_else(|| KubeApiError::missing_field(&agent_pod, ".metadata.name"))?
+        .clone();
 
     let version = wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
     match version.as_ref() {
@@ -102,9 +108,8 @@ where
 
     Ok(AgentKubernetesConnectInfo {
         pod_name,
+        pod_namespace,
         agent_port: params.port,
-        namespace: agent.namespace.clone(),
-        agent_version: version,
     })
 }
 
@@ -349,7 +354,7 @@ mod test {
                 mesh: None,
                 pod_name: "pod".to_string(),
                 pod_ips: vec![],
-                pod_namespace: None,
+                pod_namespace: "default".to_string(),
                 node_name: "foobaz".to_string(),
                 container_id: "container".to_string(),
                 container_runtime: ContainerRuntime::Docker,
@@ -363,6 +368,7 @@ mod test {
         let expected: Job = serde_json::from_value(serde_json::json!({
             "metadata": {
                 "name": "foobar",
+                "namespace": "default",
                 "labels": {
                     "kuma.io/sidecar-injection": "disabled",
                     "app": "mirrord"

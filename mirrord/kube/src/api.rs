@@ -12,7 +12,7 @@ const CONNECTION_CHANNEL_SIZE: usize = 1000;
 
 /// Spawns a background [`tokio::task`] that sends and receives [`mirrord_protocol`] messages
 /// over the given IO stream.
-/// 
+///
 /// The task handles the encoding/decoding of the [`mirrord_protocol`].
 pub fn wrap_raw_connection<IO>(
     stream: IO,
