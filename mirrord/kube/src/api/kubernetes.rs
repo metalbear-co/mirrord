@@ -1,8 +1,7 @@
 use std::ops::{Deref, Not};
 
-use k8s_openapi::{api::core::v1::Namespace, NamespaceResourceScope};
+use k8s_openapi::NamespaceResourceScope;
 use kube::{
-    api::ListParams,
     config::{KubeConfigOptions, Kubeconfig},
     Api, Client, Config, Discovery,
 };
@@ -106,19 +105,19 @@ impl KubernetesAPI {
         &self,
         AgentKubernetesConnectInfo {
             pod_name,
+            pod_namespace,
             agent_port,
-            namespace,
             ..
-        }: AgentKubernetesConnectInfo,
+        }: &AgentKubernetesConnectInfo,
     ) -> Result<tokio::net::TcpStream> {
         use std::{net::IpAddr, time::Duration};
 
         use k8s_openapi::api::core::v1::Pod;
         use tokio::net::TcpStream;
 
-        let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, namespace.as_deref());
+        let pod_api: Api<Pod> = Api::namespaced(self.client.clone(), pod_namespace);
 
-        let pod = pod_api.get(&pod_name).await?;
+        let pod = pod_api.get(pod_name).await?;
 
         let pod_ip = pod
             .status
@@ -134,20 +133,17 @@ impl KubernetesAPI {
 
             tokio::time::timeout(
                 Duration::from_secs(self.agent.startup_timeout),
-                TcpStream::connect((ip, agent_port)),
+                TcpStream::connect((ip, *agent_port)),
             )
             .await
             .map_err(|_| KubeApiError::AgentReadyTimeout)??
         } else {
-            let hostname = match namespace {
-                Some(namespace) => format!("{pod_name}.{namespace}"),
-                None => pod_name,
-            };
+            let hostname = format!("{pod_name}.{pod_namespace}");
             tracing::trace!("connecting to pod {hostname}:{agent_port}");
 
             tokio::time::timeout(
                 Duration::from_secs(self.agent.startup_timeout),
-                TcpStream::connect((hostname.as_str(), agent_port)),
+                TcpStream::connect((hostname.as_str(), *agent_port)),
             )
             .await
             .map_err(|_| KubeApiError::AgentReadyTimeout)??
@@ -284,12 +280,15 @@ impl<T> UnpinStream for T where
 {
 }
 
+/// Provides information necessary to make a connection to a running mirrord agent.
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct AgentKubernetesConnectInfo {
+    /// Name of the pod that hosts the agent container.
     pub pod_name: String,
+    /// Namespace where the pod hosting the agent container lives.
+    pub pod_namespace: String,
+    /// Port on which the agent accepts connections.
     pub agent_port: u16,
-    pub namespace: Option<String>,
-    pub agent_version: Option<String>,
 }
 
 pub async fn create_kube_config<P>(
@@ -337,28 +336,4 @@ where
     } else {
         Api::default_namespaced(client.clone())
     }
-}
-
-/// Get a vector of namespaces from an optional namespace.
-///
-/// If the given namespace is Some, then
-/// fetch its Namespace object, and return a vector only with that.
-/// If the namespace is None - return all namespaces.
-pub async fn get_namespaces(
-    client: &Client,
-    namespace: Option<&str>,
-    lp: &ListParams,
-) -> Result<Vec<Namespace>> {
-    let api: Api<Namespace> = Api::all(client.clone());
-    Ok(if let Some(namespace) = namespace {
-        vec![api.get(namespace).await?]
-    } else {
-        api.list(lp).await?.items
-    })
-}
-
-/// Check if the client can see a given namespace.
-pub async fn namespace_exists_for_client(namespace: &str, client: &Client) -> bool {
-    let api: Api<Namespace> = Api::all(client.clone());
-    api.get(namespace).await.is_ok()
 }
