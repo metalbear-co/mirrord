@@ -101,7 +101,7 @@ or
 curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh | bash
 ```
 
-or using Nix:
+or using Nix (not official, community maintained):
 
 ```sh
 # Using nix-env (legacy)
