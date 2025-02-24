@@ -8,6 +8,37 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.134.0](https://github.com/metalbear-co/mirrord/tree/3.134.0) - 2025-02-24
+
+
+### Added
+
+- Added support for stealing HTTPS requests with a filter (requires mirrord
+  Operator). [#2771](https://github.com/metalbear-co/mirrord/issues/2771)
+- Added Nix installation instructions to the README.
+  [#3034](https://github.com/metalbear-co/mirrord/issues/3034)
+
+
+### Fixed
+
+- Fixed an issue where stealing a remote port was preventing the application
+  from making TCP connections with the same destination port number.
+  [#3006](https://github.com/metalbear-co/mirrord/issues/3006)
+- Fixed the order of path checks/operations in file ops handlers in the mirrord
+  layer. [#3095](https://github.com/metalbear-co/mirrord/issues/3095)
+- Fixed an issue where mirrord was sometimes unable to steal traffic from more
+  than one port with an HTTP filter.
+
+
+### Internal
+
+- Add a section to `CONTRIBUTING.md` on how to test the release workflow.
+- Changed `Debug` implementation for `InternalHttpRequest` and
+  `InternalHttpResponse` not to print full headers.
+  Printing full headers creates a lot of spam in the logs.
+- Changed the `conntrack` subcommand used to flush connections when traffic
+  stealing starts.
+
 ## [3.133.1](https://github.com/metalbear-co/mirrord/tree/3.133.1) - 2025-02-19
 
 

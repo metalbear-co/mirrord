@@ -2372,7 +2372,7 @@ dependencies = [
 
 [[package]]
 name = "fileops"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "libc",
 ]
@@ -3487,7 +3487,7 @@ checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
 
 [[package]]
 name = "issue1317"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "actix-web",
  "env_logger 0.11.6",
@@ -3497,7 +3497,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "errno 0.3.10",
  "libc",
@@ -3506,7 +3506,7 @@ dependencies = [
 
 [[package]]
 name = "issue1776portnot53"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "libc",
  "socket2",
@@ -3514,14 +3514,14 @@ dependencies = [
 
 [[package]]
 name = "issue1899"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "issue2001"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "libc",
 ]
@@ -3848,7 +3848,7 @@ checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
 
 [[package]]
 name = "listen_ports"
-version = "3.133.1"
+version = "3.134.0"
 
 [[package]]
 name = "litemap"
@@ -4085,7 +4085,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "actix-codec",
  "clap",
@@ -4141,7 +4141,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "actix-codec",
  "async-trait",
@@ -4202,7 +4202,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-agent-env"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "base64 0.22.1",
  "k8s-openapi",
@@ -4215,7 +4215,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-analytics"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "assert-json-diff",
  "base64 0.22.1",
@@ -4229,7 +4229,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-auth"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "bcder",
  "chrono",
@@ -4250,7 +4250,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "base64 0.22.1",
  "bimap",
@@ -4275,7 +4275,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-config-derive"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4285,7 +4285,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-console"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "bincode",
  "drain",
@@ -4301,7 +4301,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "bytes",
  "futures",
@@ -4331,7 +4331,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-intproxy-protocol"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "bincode",
  "mirrord-protocol",
@@ -4341,7 +4341,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-kube"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "actix-codec",
  "async-stream",
@@ -4366,7 +4366,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "actix-codec",
  "base64 0.22.1",
@@ -4406,7 +4406,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-layer-macro"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4415,7 +4415,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-macros"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -4425,7 +4425,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-operator"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -4459,7 +4459,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-progress"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "enum_dispatch",
  "indicatif",
@@ -4493,7 +4493,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-sip"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "apple-codesign",
  "object 0.36.7",
@@ -4506,7 +4506,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-tls-util"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "http 1.2.0",
  "pem",
@@ -4522,7 +4522,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-vpn"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "futures",
  "ipnet",
@@ -4850,7 +4850,7 @@ dependencies = [
 
 [[package]]
 name = "outgoing"
-version = "3.133.1"
+version = "3.134.0"
 
 [[package]]
 name = "outref"
@@ -5988,14 +5988,14 @@ dependencies = [
 
 [[package]]
 name = "rust-bypassed-unix-socket"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "rust-e2e-fileops"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "libc",
 ]
@@ -6011,7 +6011,7 @@ dependencies = [
 
 [[package]]
 name = "rust-unix-socket-client"
-version = "3.133.1"
+version = "3.134.0"
 dependencies = [
  "tokio",
 ]
