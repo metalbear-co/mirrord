@@ -26,7 +26,7 @@ use super::{create_temp_layer_config, prepare_tls_certs_for_container};
 use crate::{
     config::RuntimeArgs,
     connection::AGENT_CONNECT_INFO_ENV_KEY,
-    container::{create_config_and_analytics, CONTAINER_EXECUTION_KIND},
+    container::CONTAINER_EXECUTION_KIND,
     error::ContainerError,
     execution::{LINUX_INJECTION_ENV_VAR, MIRRORD_CONNECT_TCP_ENV, MIRRORD_EXECUTION_KIND_ENV},
     util::MIRRORD_CONSOLE_ADDR_ENV,
@@ -337,7 +337,10 @@ impl ComposeRunner<PrepareRuntimeCommand> {
         let mut connection_info = Vec::new();
         let mut execution_info_env_without_connection_info = Vec::new();
         for (key, value) in external_proxy.environment.iter() {
-            if key == MIRRORD_CONNECT_TCP_ENV || key == AGENT_CONNECT_INFO_ENV_KEY {
+            if key == MIRRORD_CONNECT_TCP_ENV {
+                connection_info.push((key.as_str(), value.as_str()));
+                execution_info_env_without_connection_info.push((key.as_str(), value.as_str()))
+            } else if key == AGENT_CONNECT_INFO_ENV_KEY {
                 connection_info.push((key.as_str(), value.as_str()));
             } else {
                 execution_info_env_without_connection_info.push((key.as_str(), value.as_str()))
@@ -361,6 +364,20 @@ impl ComposeRunner<PrepareRuntimeCommand> {
         // TODO(alex) [high]: User service needs `LD_PRELOAD`, right?
         // If so, then it fails with `missing internal proxy address`, even though the address
         // is in the service's env vars.
+        //
+        // This is what we need? Somehow get the sidecar intproxy's address?
+        //
+        // runtime_command.add_env(
+        //     MIRRORD_CONNECT_TCP_ENV,
+        //     sidecar_intproxy_address.to_string(),
+        // );
+        //
+        //
+        user_service_info.env_vars.insert(
+            MIRRORD_CONNECT_TCP_ENV.to_string(),
+            "127.0.0.1:8888".to_string(),
+        );
+
         user_service_info.env_vars.insert(
             LINUX_INJECTION_ENV_VAR.to_string(),
             config.container.cli_image_lib_path.to_string_lossy().into(),
@@ -391,7 +408,7 @@ impl ComposeRunner<PrepareRuntimeCommand> {
 const MIRRORD_COMPOSE_SIDECAR_SERVICE: &str = "mirrord-sidecar";
 
 impl ComposeRunner<PrepareCompose> {
-    #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
+    #[tracing::instrument(level = Level::DEBUG, err)]
     pub(super) async fn prepare_compose_file(self) -> ComposeResult<ComposeRunner<RunCompose>> {
         // TODO(alex) [high]: Prepare the compose file, read `services` adding our mirrord proxy,
         // and modify user's with `depends_on`.
@@ -421,6 +438,8 @@ impl ComposeRunner<PrepareCompose> {
                 })
                 .flatten()
         });
+
+        tracing::info!("CONNECT_TCP is here! {intproxy_port:?}");
 
         let services = Self::prepare_services(&mut user_compose, intproxy_port)?;
 
@@ -489,6 +508,7 @@ impl ComposeRunner<PrepareCompose> {
         Ok(user_compose)
     }
 
+    #[tracing::instrument(level = Level::DEBUG, ret, err)]
     fn prepare_services(
         compose: &mut serde_yaml::Value,
         port: Option<String>,
