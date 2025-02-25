@@ -665,7 +665,17 @@ pub async fn run_exec(
 pub async fn run_ls(namespace: &str) -> TestProcess {
     let mut mirrord_args = vec!["ls"];
     mirrord_args.extend(vec!["--namespace", namespace]);
-    run_mirrord(mirrord_args, Default::default()).await
+
+    #[cfg(feature = "operator")]
+    let env = Default::default();
+    #[cfg(not(feature = "operator"))]
+    let env = {
+        let mut env = HashMap::new();
+        env.insert("MIRRORD_OPERATOR_ENABLE", "false");
+        env
+    };
+
+    run_mirrord(mirrord_args, env).await
 }
 
 /// Runs `mirrord verify-config [--ide] "/path/config.json"`.
