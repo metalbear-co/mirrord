@@ -1,3 +1,5 @@
+use std::num::ParseIntError;
+
 use mirrord_config::config::ConfigError;
 use thiserror::Error;
 
@@ -25,4 +27,7 @@ pub(crate) enum ComposeError {
 
     #[error(transparent)]
     LayerConfig(#[from] ConfigError),
+
+    #[error(transparent)]
+    ParseInt(#[from] ParseIntError),
 }

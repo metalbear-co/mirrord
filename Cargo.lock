@@ -2061,6 +2061,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 
 [[package]]
+name = "docker-compose-types"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b9656ab75a70aad3d8d154d40826c53b9b2eee054d7587d6e36284e6d9dabb6"
+dependencies = [
+ "derive_builder",
+ "indexmap 2.7.1",
+ "serde",
+ "serde_yaml",
+]
+
+[[package]]
 name = "dotenvy"
 version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4091,6 +4103,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "const-random",
+ "docker-compose-types",
  "dotenvy",
  "drain",
  "futures",
@@ -6491,9 +6504,9 @@ dependencies = [
 
 [[package]]
 name = "serde_yaml"
-version = "0.9.34+deprecated"
+version = "0.9.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+checksum = "a0623d197252096520c6f2a5e1171ee436e5af99a5d7caa2891e55e61950e6d9"
 dependencies = [
  "indexmap 2.7.1",
  "itoa",

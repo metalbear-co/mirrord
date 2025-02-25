@@ -7,6 +7,9 @@ use std::{
     process::Stdio,
 };
 
+use docker_compose_types::{
+    Compose, DependsCondition, Networks, Port, Ports, PublishedPort, Service, SingleValue, Volumes,
+};
 use error::ComposeError;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::{
@@ -18,7 +21,9 @@ use mirrord_config::{
     LayerConfig, MIRRORD_CONFIG_FILE_ENV,
 };
 use mirrord_progress::{Progress, ProgressTracker, MIRRORD_PROGRESS_ENV};
+use service::ServiceInfo;
 use steps::*;
+use tempfile::NamedTempFile;
 use tokio::process::Command;
 use tracing::Level;
 
@@ -36,7 +41,27 @@ use crate::{
 type ComposeResult<T> = Result<T, ComposeError>;
 
 mod error;
+mod service;
 mod steps;
+
+trait ComposeExt {
+    fn clear_conflicting_fields(&mut self);
+}
+
+#[derive(Debug)]
+struct TlsFileGuard {
+    cert: NamedTempFile,
+    key: NamedTempFile,
+}
+
+impl From<(NamedTempFile, NamedTempFile)> for TlsFileGuard {
+    fn from(value: (NamedTempFile, NamedTempFile)) -> Self {
+        Self {
+            cert: value.0,
+            key: value.1,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub(super) struct ComposeRunner<Step>
@@ -74,11 +99,13 @@ impl ComposeRunner<New> {
             (CONTAINER_EXECUTION_KIND as u32).to_string(),
         );
 
+        let runtime_args = vec![vec!["compose".to_string()], command.into_parts().1].concat();
+
         Ok(ComposeRunner {
             progress,
-            step: PrepareConfig,
             runtime,
-            runtime_args: vec![vec!["compose".to_string()], command.into_parts().1].concat(),
+            runtime_args,
+            step: PrepareConfig,
         })
     }
 }
@@ -93,30 +120,50 @@ impl ComposeRunner<PrepareConfig> {
             step: _,
         } = self;
 
-        let (config, mut context) = LayerConfig::from_env_with_warnings()?;
+        let (mut config, mut context) = LayerConfig::from_env_with_warnings()?;
 
         config.verify(&mut context)?;
         for warning in context.get_warnings() {
             progress.warning(warning);
         }
 
+        let (internal_proxy_tls_guards, external_proxy_tls_guards) =
+            prepare_tls_certs_for_container(&mut config)?;
+
+        let layer_config_file = create_temp_layer_config(&config)?;
+        std::env::set_var(MIRRORD_CONFIG_FILE_ENV, layer_config_file.path());
+
         Ok(ComposeRunner {
-            progress,
-            step: PrepareAnalytics { config },
             runtime,
             runtime_args,
+            progress,
+            step: PrepareAnalytics {
+                config,
+                layer_config_file,
+                internal_proxy_tls_guards: internal_proxy_tls_guards.map(From::from),
+                external_proxy_tls_guards: external_proxy_tls_guards.map(From::from),
+            },
         })
     }
 }
 
 impl ComposeRunner<PrepareAnalytics> {
     #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
-    pub(super) fn analytics(self, watch: drain::Watch) -> ComposeResult<ComposeRunner<PrepareTLS>> {
+    pub(super) fn analytics(
+        self,
+        watch: drain::Watch,
+    ) -> ComposeResult<ComposeRunner<PrepareExternalProxy>> {
         let Self {
             progress,
             runtime,
             runtime_args,
-            step: PrepareAnalytics { config },
+            step:
+                PrepareAnalytics {
+                    config,
+                    internal_proxy_tls_guards,
+                    external_proxy_tls_guards,
+                    layer_config_file,
+                },
         } = self;
 
         // Initialize only error analytics, extproxy will be the full AnalyticsReporter.
@@ -127,62 +174,6 @@ impl ComposeRunner<PrepareAnalytics> {
             progress,
             runtime,
             runtime_args,
-            step: PrepareTLS { config, analytics },
-        })
-    }
-}
-
-impl ComposeRunner<PrepareTLS> {
-    #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
-    pub(super) fn prepare_tls(self) -> ComposeResult<ComposeRunner<PrepareLayerConfig>> {
-        let Self {
-            progress,
-            step: PrepareTLS {
-                mut config,
-                analytics,
-            },
-            runtime,
-            runtime_args,
-        } = self;
-
-        let (internal_proxy_tls_guards, external_proxy_tls_guards) =
-            prepare_tls_certs_for_container(&mut config)?;
-
-        Ok(ComposeRunner {
-            progress,
-            step: PrepareLayerConfig {
-                internal_proxy_tls_guards: internal_proxy_tls_guards.map(From::from),
-                external_proxy_tls_guards: external_proxy_tls_guards.map(From::from),
-                analytics,
-                config,
-            },
-            runtime,
-            runtime_args,
-        })
-    }
-}
-
-impl ComposeRunner<PrepareLayerConfig> {
-    #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
-    pub(super) fn prepare_layer_config(self) -> ComposeResult<ComposeRunner<PrepareExternalProxy>> {
-        let Self {
-            progress,
-            step:
-                PrepareLayerConfig {
-                    internal_proxy_tls_guards,
-                    external_proxy_tls_guards,
-                    analytics,
-                    config,
-                },
-            runtime,
-            runtime_args,
-        } = self;
-
-        let layer_config_file = create_temp_layer_config(&config)?;
-        std::env::set_var(MIRRORD_CONFIG_FILE_ENV, layer_config_file.path());
-
-        Ok(ComposeRunner {
-            progress,
             step: PrepareExternalProxy {
                 internal_proxy_tls_guards,
                 external_proxy_tls_guards,
@@ -190,19 +181,17 @@ impl ComposeRunner<PrepareLayerConfig> {
                 config,
                 layer_config_file,
             },
-            runtime,
-            runtime_args,
         })
     }
 }
 
 impl ComposeRunner<PrepareExternalProxy> {
     #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
-    pub(super) async fn start_external_proxy(
-        self,
-    ) -> ComposeResult<ComposeRunner<PrepareRuntimeCommand>> {
+    pub(super) async fn external_proxy(self) -> ComposeResult<ComposeRunner<PrepareServices>> {
         let Self {
             progress,
+            runtime,
+            runtime_args,
             step:
                 PrepareExternalProxy {
                     internal_proxy_tls_guards,
@@ -211,8 +200,6 @@ impl ComposeRunner<PrepareExternalProxy> {
                     config,
                     layer_config_file,
                 },
-            runtime,
-            runtime_args,
         } = self;
 
         let mut external_proxy_progress = progress.subtask("preparing external proxy");
@@ -226,7 +213,9 @@ impl ComposeRunner<PrepareExternalProxy> {
         // added to the user's services, and then `docker compose run`?
         Ok(ComposeRunner {
             progress,
-            step: PrepareRuntimeCommand {
+            runtime,
+            runtime_args,
+            step: PrepareServices {
                 internal_proxy_tls_guards,
                 external_proxy_tls_guards,
                 analytics,
@@ -234,21 +223,19 @@ impl ComposeRunner<PrepareExternalProxy> {
                 external_proxy,
                 config,
             },
-            runtime,
-            runtime_args,
         })
     }
 }
 
-impl ComposeRunner<PrepareRuntimeCommand> {
+impl ComposeRunner<PrepareServices> {
     #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
-    pub(super) fn prepare_runtime_command(self) -> ComposeResult<ComposeRunner<PrepareCompose>> {
+    pub(super) fn services(self) -> ComposeResult<ComposeRunner<PrepareCompose>> {
         let Self {
             progress,
             runtime,
             runtime_args,
             step:
-                PrepareRuntimeCommand {
+                PrepareServices {
                     internal_proxy_tls_guards,
                     external_proxy_tls_guards,
                     analytics,
@@ -373,6 +360,7 @@ impl ComposeRunner<PrepareRuntimeCommand> {
         // );
         //
         //
+        // TODO(alex) [high]: This is hardcoded, but there's a config for this!
         user_service_info.env_vars.insert(
             MIRRORD_CONNECT_TCP_ENV.to_string(),
             "127.0.0.1:8888".to_string(),
@@ -383,11 +371,14 @@ impl ComposeRunner<PrepareRuntimeCommand> {
             config.container.cli_image_lib_path.to_string_lossy().into(),
         );
 
-        user_service_info
-            .volumes_from
-            .insert("mirrord-sidecar".into());
-        user_service_info.network_mode.replace("".to_string());
-        user_service_info.depends_on.replace("".to_string());
+        // TODO(alex) [high] [#2]: Now that we have the user compose file from the start,
+        // `user_service_info` is only really holding env vars, `volumes_from` is something
+        // we can insert at tmp compose file creation?
+        // user_service_info
+        //     .volumes_from
+        //     .insert("mirrord-sidecar".into());
+        // user_service_info.network_mode.replace("".to_string());
+        // user_service_info.depends_on.replace("".to_string());
 
         Ok(ComposeRunner {
             progress,
@@ -407,15 +398,21 @@ impl ComposeRunner<PrepareRuntimeCommand> {
 
 const MIRRORD_COMPOSE_SIDECAR_SERVICE: &str = "mirrord-sidecar";
 
+// TODO(alex) [high] [#1]: This and `PrepareServices` are kinda intermixed, I want `ServiceInfo` to
+// have the user stuff, but we only read the user compose file here, AFTER `ServiceInfo` has been
+// created.
+//
+// I think it should be `read->service_info(user + remove obvious conflicts)->add our stuff`.
 impl ComposeRunner<PrepareCompose> {
-    #[tracing::instrument(level = Level::DEBUG, err)]
-    pub(super) async fn prepare_compose_file(self) -> ComposeResult<ComposeRunner<RunCompose>> {
-        // TODO(alex) [high]: Prepare the compose file, read `services` adding our mirrord proxy,
-        // and modify user's with `depends_on`.
-        let mut user_compose = self.read_user_compose_file()?;
+    #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
+    pub(super) async fn make_temp_compose_file(self) -> ComposeResult<ComposeRunner<RunCompose>> {
+        let mut compose = self.read_user_compose_file()?;
+        tracing::debug!(?compose, "User compose file.");
 
         let Self {
             progress,
+            runtime,
+            runtime_args,
             step:
                 PrepareCompose {
                     internal_proxy_tls_guards,
@@ -425,44 +422,134 @@ impl ComposeRunner<PrepareCompose> {
                     sidecar_info,
                     user_service_info,
                 },
-            runtime,
-            runtime_args,
         } = self;
 
-        let intproxy_port = sidecar_info.env_vars.iter().find_map(|(k, v)| {
-            k.contains("CONNECT_TCP")
-                .then(|| {
-                    let split = v.clone();
-                    let f = split.split_terminator(":");
-                    f.map(|f| f.to_string()).last()
-                })
-                .flatten()
-        });
+        let intproxy_port = sidecar_info
+            .env_vars
+            .get("MIRRORD_CONNECT_TCP")
+            .and_then(|address| address.split_terminator(":").last())
+            .map(|port| port.parse())
+            .transpose()?
+            .unwrap_or(8888);
 
-        tracing::info!("CONNECT_TCP is here! {intproxy_port:?}");
+        let mut user_ports = None;
 
-        let services = Self::prepare_services(&mut user_compose, intproxy_port)?;
-
-        for (service_key, service) in services.iter_mut() {
-            if service_key
-                .as_str()
-                .is_some_and(|key| key == MIRRORD_COMPOSE_SIDECAR_SERVICE)
-            {
-                // continue;
-                // sidecar_command.add_envs(connection_info);
-                let service = service
-                    .as_mapping_mut()
-                    .ok_or_else(|| ComposeError::UnexpectedType("mapping".to_string()))?;
-
-                sidecar_info.clone().prepare_yaml(service)?;
-            } else {
-                let service = service
-                    .as_mapping_mut()
-                    .ok_or_else(|| ComposeError::UnexpectedType("mapping".to_string()))?;
-
-                user_service_info.clone().prepare_yaml(service)?;
+        // TODO(alex) [high] [#5]: Abstract this as a builder-like typestate-y thing, since there's
+        // some finnickyness.
+        for (service, _) in compose
+            .services
+            .0
+            .iter_mut()
+            .filter_map(|(n, s)| s.as_mut().zip(Some(n)))
+        {
+            match &mut service.environment {
+                docker_compose_types::Environment::List(items) => {
+                    items.extend(
+                        user_service_info
+                            .env_vars
+                            .iter()
+                            // TODO(alex) [mid] [#4]: Remove this.
+                            .filter(|(k, _)| !k.contains("LOCALSTACK"))
+                            .map(|(k, v)| format!("{k}:{v}")),
+                    );
+                }
+                docker_compose_types::Environment::KvPair(index_map) => {
+                    index_map.extend(
+                        user_service_info
+                            .env_vars
+                            .iter()
+                            // TODO(alex) [mid] [#4]: Remove this.
+                            .filter(|(k, _)| !k.contains("LOCALSTACK"))
+                            .map(|(k, v)| {
+                                (k.to_owned(), serde_yaml::from_str(&format!("{v}")).ok())
+                            }),
+                    );
+                }
             }
+
+            match &mut service.depends_on {
+                docker_compose_types::DependsOnOptions::Simple(items) => {
+                    items.push("mirrord-sidecar".to_owned())
+                }
+                docker_compose_types::DependsOnOptions::Conditional(index_map) => {
+                    index_map.insert(
+                        "mirrord-sidecar".to_owned(),
+                        DependsCondition {
+                            condition: "service_started".to_owned(),
+                        },
+                    );
+                }
+            }
+
+            service.network_mode = Some("service:mirrord-sidecar".to_owned());
+
+            user_ports = Some(service.ports.clone());
+
+            // Do NOT reset ports before assigning it to the outer scopped `user_ports`!
+            service.ports = Default::default();
+            service.networks = Default::default();
+
+            // TODO(alex) [high] [#3]: Now I also need to add `environment`, `volumes_from`,
+            // and `network_mode`.
         }
+
+        let mut mirrord_sidecar_service: Service = serde_yaml::from_str(&format!(
+            r#"
+                image: ghcr.io/metalbear-co/mirrord-cli:3.133.1
+                command: mirrord intproxy --port 8888
+                ports:
+                  - "8000:5000"
+            "#
+        ))?;
+
+        match (&mut mirrord_sidecar_service.ports, user_ports) {
+            (Ports::Short(items), Some(Ports::Short(user_ports))) => {
+                items.extend(user_ports);
+            }
+            (Ports::Short(_), Some(Ports::Long(user_ports))) => {
+                let long_sidecar_port = Port {
+                    target: 5000,
+                    host_ip: Some("0.0.0.0".to_owned()),
+                    published: Some(PublishedPort::Single(8000)),
+                    protocol: Some("tcp".to_owned()),
+                    mode: Some("ingress".to_owned()),
+                };
+
+                let mut ports = vec![long_sidecar_port];
+                ports.extend(user_ports);
+
+                mirrord_sidecar_service.ports = Ports::Long(ports);
+            }
+            (Ports::Short(_), None) => (),
+            _ => unreachable!("BUG! We set the `ports` using the short syntax!"),
+        }
+
+        match &mut mirrord_sidecar_service.environment {
+            docker_compose_types::Environment::List(items) => items.extend(
+                sidecar_info
+                    .env_vars
+                    .iter()
+                    // TODO(alex) [mid] [#4]: Remove this.
+                    .filter(|(k, _)| !k.contains("LOCALSTACK"))
+                    .map(|(k, v)| format!("{k}={v}")),
+            ),
+            _ => unreachable!("BUG! `environment` defaults to using the short syntax!"),
+        }
+
+        // TODO(alex) [high] [#5]: I think file ops/volumes are not working properly.
+        // `java.lang.Exception: Path /data/events.jsonl.gz does not exist, but these files do:`
+
+        mirrord_sidecar_service.volumes.extend(
+            sidecar_info
+                .volumes
+                .iter()
+                .map(|(k, v)| Volumes::Simple(format!("{k}:{v}"))),
+        );
+
+        compose
+            .services
+            .0
+            .insert("mirrord-sidecar".to_owned(), Some(mirrord_sidecar_service));
 
         let mut compose_yaml = tempfile::Builder::new()
             .prefix("mirrord-compose-")
@@ -470,10 +557,12 @@ impl ComposeRunner<PrepareCompose> {
             .tempfile()
             .map_err(ContainerError::ConfigWrite)?;
 
-        compose_yaml.write_all(serde_yaml::to_string(&user_compose)?.as_bytes())?;
+        compose_yaml.write_all(serde_yaml::to_string(&compose)?.as_bytes())?;
 
         Ok(ComposeRunner {
             progress,
+            runtime,
+            runtime_args,
             step: RunCompose {
                 internal_proxy_tls_guards,
                 external_proxy_tls_guards,
@@ -481,13 +570,11 @@ impl ComposeRunner<PrepareCompose> {
                 layer_config_file,
                 compose_yaml,
             },
-            runtime,
-            runtime_args,
         })
     }
 
-    #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
-    fn read_user_compose_file(&self) -> ComposeResult<serde_yaml::Value> {
+    #[tracing::instrument(level = Level::DEBUG, skip(self), ret, err)]
+    fn read_user_compose_file(&self) -> ComposeResult<Compose> {
         self.progress.info("Preparing mirrord `compose.yaml`.");
 
         let compose_file_path = self
@@ -503,51 +590,9 @@ impl ComposeRunner<PrepareCompose> {
 
         let user_compose_file = File::open(compose_file_path)?;
         let reader = BufReader::new(user_compose_file);
-        let user_compose: serde_yaml::Value = serde_yaml::from_reader(reader)?;
+        let user_compose: Compose = serde_yaml::from_reader(reader)?;
 
         Ok(user_compose)
-    }
-
-    #[tracing::instrument(level = Level::DEBUG, ret, err)]
-    fn prepare_services(
-        compose: &mut serde_yaml::Value,
-        port: Option<String>,
-    ) -> ComposeResult<&mut serde_yaml::Mapping> {
-        let services = compose
-            .get_mut("services")
-            .ok_or_else(|| ComposeError::MissingField("services".to_string()))?
-            .as_mapping_mut()
-            .ok_or_else(|| ComposeError::UnexpectedType("mapping".to_string()))?;
-
-        if let Some(port) = port {
-            services.insert(
-                serde_yaml::from_str(MIRRORD_COMPOSE_SIDECAR_SERVICE)?,
-                serde_yaml::from_str(&format!(
-                    r#"
-                        # image: meowjesty/mirrord-cli:latest
-                        image: ghcr.io/metalbear-co/mirrord-cli:3.133.1
-                        command: mirrord intproxy --port {port}
-                        ports:
-                          - "8000:5000"
-                    "#
-                ))?,
-            );
-        } else {
-            services.insert(
-                serde_yaml::from_str(MIRRORD_COMPOSE_SIDECAR_SERVICE)?,
-                serde_yaml::from_str(&format!(
-                    r#"
-                        # image: meowjesty/mirrord-cli:latest
-                        image: ghcr.io/metalbear-co/mirrord-cli:3.133.1
-                        command: mirrord intproxy --port 8888
-                        ports:
-                          - "8000:5000"
-                    "#
-                ))?,
-            );
-        }
-
-        Ok(services)
     }
 }
 
