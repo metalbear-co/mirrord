@@ -661,25 +661,11 @@ pub async fn run_exec(
     run_mirrord(args, base_env).await
 }
 
-/// Runs `mirrord ls` command and asserts if the json matches the expected format
-pub async fn run_ls<const USE_OPERATOR: bool>(
-    args: Option<Vec<&str>>,
-    namespace: Option<&str>,
-) -> TestProcess {
+/// Runs `mirrord ls` command.
+pub async fn run_ls(namespace: &str) -> TestProcess {
     let mut mirrord_args = vec!["ls"];
-    if let Some(args) = args {
-        mirrord_args.extend(args);
-    }
-    if let Some(namespace) = namespace {
-        mirrord_args.extend(vec!["--namespace", namespace]);
-    }
-
-    let mut env = HashMap::new();
-    if USE_OPERATOR {
-        env.insert("MIRRORD_OPERATOR_ENABLE", "true");
-    };
-
-    run_mirrord(mirrord_args, env).await
+    mirrord_args.extend(vec!["--namespace", namespace]);
+    run_mirrord(mirrord_args, Default::default()).await
 }
 
 /// Runs `mirrord verify-config [--ide] "/path/config.json"`.
