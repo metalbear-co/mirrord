@@ -666,14 +666,9 @@ pub async fn run_ls(namespace: &str) -> TestProcess {
     let mut mirrord_args = vec!["ls"];
     mirrord_args.extend(vec!["--namespace", namespace]);
 
-    #[cfg(feature = "operator")]
-    let env = Default::default();
-    #[cfg(not(feature = "operator"))]
-    let env = {
-        let mut env = HashMap::new();
-        env.insert("MIRRORD_OPERATOR_ENABLE", "false");
-        env
-    };
+    let mut env = HashMap::new();
+    let use_operator = cfg!(feature = "operator").to_string();
+    env.insert("MIRRORD_OPERATOR_ENABLE", use_operator.as_str());
 
     run_mirrord(mirrord_args, env).await
 }
