@@ -7,9 +7,6 @@ use std::{
     process::Stdio,
 };
 
-use docker_compose_types::{
-    Compose, DependsCondition, Networks, Port, Ports, PublishedPort, Service, SingleValue, Volumes,
-};
 use error::ComposeError;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::{
@@ -44,8 +41,54 @@ mod error;
 mod service;
 mod steps;
 
-trait ComposeExt {
-    fn clear_conflicting_fields(&mut self);
+trait ServiceExt {
+    fn modify_environment(&mut self, service_info: &ServiceInfo);
+    fn modify_depends_on(&mut self);
+}
+
+impl ServiceExt for docker_compose_types::Service {
+    fn modify_environment(&mut self, service_info: &ServiceInfo) {
+        match &mut self.environment {
+            docker_compose_types::Environment::List(items) => {
+                items.extend(
+                    service_info
+                        .env_vars
+                        .iter()
+                        // TODO(alex) [mid] [#4]: Remove this.
+                        .filter(|(k, _)| !k.contains("LOCALSTACK"))
+                        .map(|(k, v)| format!("{k}:{v}")),
+                );
+            }
+            docker_compose_types::Environment::KvPair(index_map) => {
+                index_map.extend(
+                    service_info
+                        .env_vars
+                        .iter()
+                        // TODO(alex) [mid] [#4]: Remove this.
+                        .filter(|(k, _)| !k.contains("LOCALSTACK"))
+                        .map(|(k, v)| (k.to_owned(), serde_yaml::from_str(&format!("{v}")).ok())),
+                );
+            }
+        }
+    }
+
+    fn modify_depends_on(&mut self) {
+        use docker_compose_types::DependsCondition;
+
+        match &mut self.depends_on {
+            docker_compose_types::DependsOnOptions::Simple(items) => {
+                items.push("mirrord-sidecar".to_owned())
+            }
+            docker_compose_types::DependsOnOptions::Conditional(index_map) => {
+                index_map.insert(
+                    "mirrord-sidecar".to_owned(),
+                    DependsCondition {
+                        condition: "service_started".to_owned(),
+                    },
+                );
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -406,6 +449,8 @@ const MIRRORD_COMPOSE_SIDECAR_SERVICE: &str = "mirrord-sidecar";
 impl ComposeRunner<PrepareCompose> {
     #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
     pub(super) async fn make_temp_compose_file(self) -> ComposeResult<ComposeRunner<RunCompose>> {
+        use docker_compose_types::{Port, Ports, PublishedPort, Service, Volumes};
+
         let mut compose = self.read_user_compose_file()?;
         tracing::debug!(?compose, "User compose file.");
 
@@ -442,55 +487,17 @@ impl ComposeRunner<PrepareCompose> {
             .iter_mut()
             .filter_map(|(n, s)| s.as_mut().zip(Some(n)))
         {
-            match &mut service.environment {
-                docker_compose_types::Environment::List(items) => {
-                    items.extend(
-                        user_service_info
-                            .env_vars
-                            .iter()
-                            // TODO(alex) [mid] [#4]: Remove this.
-                            .filter(|(k, _)| !k.contains("LOCALSTACK"))
-                            .map(|(k, v)| format!("{k}:{v}")),
-                    );
-                }
-                docker_compose_types::Environment::KvPair(index_map) => {
-                    index_map.extend(
-                        user_service_info
-                            .env_vars
-                            .iter()
-                            // TODO(alex) [mid] [#4]: Remove this.
-                            .filter(|(k, _)| !k.contains("LOCALSTACK"))
-                            .map(|(k, v)| {
-                                (k.to_owned(), serde_yaml::from_str(&format!("{v}")).ok())
-                            }),
-                    );
-                }
-            }
+            service.modify_environment(&user_service_info);
+            service.modify_depends_on();
 
-            match &mut service.depends_on {
-                docker_compose_types::DependsOnOptions::Simple(items) => {
-                    items.push("mirrord-sidecar".to_owned())
-                }
-                docker_compose_types::DependsOnOptions::Conditional(index_map) => {
-                    index_map.insert(
-                        "mirrord-sidecar".to_owned(),
-                        DependsCondition {
-                            condition: "service_started".to_owned(),
-                        },
-                    );
-                }
-            }
-
-            service.network_mode = Some("service:mirrord-sidecar".to_owned());
+            service.volumes_from.push("mirrord-sidecar".into());
+            service.network_mode = Some("service:mirrord-sidecar".into());
 
             user_ports = Some(service.ports.clone());
 
             // Do NOT reset ports before assigning it to the outer scopped `user_ports`!
             service.ports = Default::default();
             service.networks = Default::default();
-
-            // TODO(alex) [high] [#3]: Now I also need to add `environment`, `volumes_from`,
-            // and `network_mode`.
         }
 
         let mut mirrord_sidecar_service: Service = serde_yaml::from_str(&format!(
@@ -538,6 +545,18 @@ impl ComposeRunner<PrepareCompose> {
 
         // TODO(alex) [high] [#5]: I think file ops/volumes are not working properly.
         // `java.lang.Exception: Path /data/events.jsonl.gz does not exist, but these files do:`
+        // I'm not sure it's volume related, the volume is mounted relative path with `./data`.
+        /*
+        Error:
+        mirrord-sidecar-1    |   × Main internal proxy logic failed: connecting with agent failed: Connection
+        mirrord-sidecar-1    |   │ refused (os error 111)
+        mirrord-sidecar-1    |   ├─▶ connecting with agent failed: Connection refused (os error 111)
+        mirrord-sidecar-1    |   ├─▶ Connection refused (os error 111)
+        mirrord-sidecar-1    |   ╰─▶ Connection refused (os error 111)
+        mirrord-sidecar-1    |   help:
+        mirrord-sidecar-1    |
+        mirrord-sidecar-1    |         - If you're still stuck:
+                */
 
         mirrord_sidecar_service.volumes.extend(
             sidecar_info
@@ -574,7 +593,7 @@ impl ComposeRunner<PrepareCompose> {
     }
 
     #[tracing::instrument(level = Level::DEBUG, skip(self), ret, err)]
-    fn read_user_compose_file(&self) -> ComposeResult<Compose> {
+    fn read_user_compose_file(&self) -> ComposeResult<docker_compose_types::Compose> {
         self.progress.info("Preparing mirrord `compose.yaml`.");
 
         let compose_file_path = self
@@ -590,9 +609,8 @@ impl ComposeRunner<PrepareCompose> {
 
         let user_compose_file = File::open(compose_file_path)?;
         let reader = BufReader::new(user_compose_file);
-        let user_compose: Compose = serde_yaml::from_reader(reader)?;
 
-        Ok(user_compose)
+        Ok(serde_yaml::from_reader(reader)?)
     }
 }
 
