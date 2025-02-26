@@ -55,7 +55,7 @@ where
 
     /// Creates a new instance of this watcher.
     ///
-    /// Given [`Api`] and [`Config`] will be used to to create the [`runtime::watcher`] stream.
+    /// Given [`Api`] and [`Config`] will be used to to create the [`runtime::watcher()`] stream.
     ///
     /// Given `condition` will be used to whether the set of observed resources has reached its
     /// desired state.
