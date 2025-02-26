@@ -77,11 +77,11 @@ impl ServiceExt for docker_compose_types::Service {
 
         match &mut self.depends_on {
             docker_compose_types::DependsOnOptions::Simple(items) => {
-                items.push("mirrord-sidecar".to_owned())
+                items.push(MIRRORD_COMPOSE_SIDECAR_SERVICE.into())
             }
             docker_compose_types::DependsOnOptions::Conditional(index_map) => {
                 index_map.insert(
-                    "mirrord-sidecar".to_owned(),
+                    MIRRORD_COMPOSE_SIDECAR_SERVICE.into(),
                     DependsCondition {
                         condition: "service_started".to_owned(),
                     },
@@ -133,8 +133,8 @@ impl ComposeRunner<New> {
 
         progress.warning("mirrord container is currently an unstable feature");
 
-        for (name, value) in exec_params.as_env_vars()? {
-            std::env::set_var(name, value);
+        for (key, value) in exec_params.as_env_vars()? {
+            std::env::set_var(key, value);
         }
 
         std::env::set_var(
@@ -490,8 +490,10 @@ impl ComposeRunner<PrepareCompose> {
             service.modify_environment(&user_service_info);
             service.modify_depends_on();
 
-            service.volumes_from.push("mirrord-sidecar".into());
-            service.network_mode = Some("service:mirrord-sidecar".into());
+            service
+                .volumes_from
+                .push(MIRRORD_COMPOSE_SIDECAR_SERVICE.into());
+            service.network_mode = Some(format!("service:{MIRRORD_COMPOSE_SIDECAR_SERVICE}"));
 
             user_ports = Some(service.ports.clone());
 
@@ -546,17 +548,8 @@ impl ComposeRunner<PrepareCompose> {
         // TODO(alex) [high] [#5]: I think file ops/volumes are not working properly.
         // `java.lang.Exception: Path /data/events.jsonl.gz does not exist, but these files do:`
         // I'm not sure it's volume related, the volume is mounted relative path with `./data`.
-        /*
-        Error:
-        mirrord-sidecar-1    |   × Main internal proxy logic failed: connecting with agent failed: Connection
-        mirrord-sidecar-1    |   │ refused (os error 111)
-        mirrord-sidecar-1    |   ├─▶ connecting with agent failed: Connection refused (os error 111)
-        mirrord-sidecar-1    |   ├─▶ Connection refused (os error 111)
-        mirrord-sidecar-1    |   ╰─▶ Connection refused (os error 111)
-        mirrord-sidecar-1    |   help:
-        mirrord-sidecar-1    |
-        mirrord-sidecar-1    |         - If you're still stuck:
-                */
+        //
+        // Also name resolution doesn't work properly.
 
         mirrord_sidecar_service.volumes.extend(
             sidecar_info
@@ -565,10 +558,10 @@ impl ComposeRunner<PrepareCompose> {
                 .map(|(k, v)| Volumes::Simple(format!("{k}:{v}"))),
         );
 
-        compose
-            .services
-            .0
-            .insert("mirrord-sidecar".to_owned(), Some(mirrord_sidecar_service));
+        compose.services.0.insert(
+            MIRRORD_COMPOSE_SIDECAR_SERVICE.into(),
+            Some(mirrord_sidecar_service),
+        );
 
         let mut compose_yaml = tempfile::Builder::new()
             .prefix("mirrord-compose-")

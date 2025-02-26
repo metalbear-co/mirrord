@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use mirrord_analytics::AnalyticsReporter;
 use mirrord_config::LayerConfig;
 use tempfile::NamedTempFile;
