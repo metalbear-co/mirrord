@@ -7,7 +7,10 @@ mod http_tests {
     use rstest::*;
     use tokio::time::timeout;
 
-    use crate::utils::{kube_client, send_requests, service, Application, KubeService};
+    use crate::utils::{
+        kube_client, send_requests, service, service_addr::TestServiceAddr, Application,
+        KubeService,
+    };
 
     /// ## Warning
     ///
@@ -35,8 +38,6 @@ mod http_tests {
         )]
         application: Application,
     ) {
-        use crate::utils::service_addr::TestServiceAddr;
-
         let service = service.await;
         let kube_client = kube_client.await;
         let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
