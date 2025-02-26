@@ -1,4 +1,5 @@
 use std::{
+    fmt::Debug,
     fs::File,
     io::{BufReader, Write},
     net::SocketAddr,
@@ -22,7 +23,7 @@ use service::ServiceInfo;
 use steps::*;
 use tempfile::NamedTempFile;
 use tokio::process::Command;
-use tracing::Level;
+use tracing::{instrument::WithSubscriber, Level};
 
 use super::{create_temp_layer_config, prepare_tls_certs_for_container};
 use crate::{
@@ -40,6 +41,52 @@ type ComposeResult<T> = Result<T, ComposeError>;
 mod error;
 mod service;
 mod steps;
+
+struct ServiceComposer<'a, Step> {
+    step: Step,
+    service: &'a mut docker_compose_types::Service,
+}
+
+struct ResetConflicts {
+    ports: docker_compose_types::Ports,
+}
+
+impl<'a> ServiceComposer<'a, New> {
+    fn modify(
+        service: &'a mut docker_compose_types::Service,
+        service_info: &ServiceInfo,
+    ) -> ServiceComposer<'a, ResetConflicts> {
+        service.modify_environment(service_info);
+        service.modify_depends_on();
+
+        service
+            .volumes_from
+            .push(MIRRORD_COMPOSE_SIDECAR_SERVICE.into());
+        service.network_mode = Some(format!("service:{MIRRORD_COMPOSE_SIDECAR_SERVICE}"));
+
+        ServiceComposer {
+            step: ResetConflicts {
+                ports: service.ports.clone(),
+            },
+            service,
+        }
+    }
+}
+
+impl<'a> ServiceComposer<'a, ResetConflicts> {
+    #[must_use]
+    fn reset_conflicts(self) -> docker_compose_types::Ports {
+        let Self {
+            service,
+            step: ResetConflicts { ports },
+        } = self;
+
+        service.ports = Default::default();
+        service.networks = Default::default();
+
+        ports
+    }
+}
 
 trait ServiceExt {
     fn modify_environment(&mut self, service_info: &ServiceInfo);
@@ -155,7 +202,10 @@ impl ComposeRunner<New> {
 
 impl ComposeRunner<PrepareConfig> {
     #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
-    pub(super) fn layer_config(self) -> ComposeResult<ComposeRunner<PrepareAnalytics>> {
+    pub(super) fn layer_config_and_analytics(
+        self,
+        watch: drain::Watch,
+    ) -> ComposeResult<ComposeRunner<PrepareExternalProxy>> {
         let Self {
             progress,
             runtime,
@@ -176,53 +226,20 @@ impl ComposeRunner<PrepareConfig> {
         let layer_config_file = create_temp_layer_config(&config)?;
         std::env::set_var(MIRRORD_CONFIG_FILE_ENV, layer_config_file.path());
 
-        Ok(ComposeRunner {
-            runtime,
-            runtime_args,
-            progress,
-            step: PrepareAnalytics {
-                config,
-                layer_config_file,
-                internal_proxy_tls_guards: internal_proxy_tls_guards.map(From::from),
-                external_proxy_tls_guards: external_proxy_tls_guards.map(From::from),
-            },
-        })
-    }
-}
-
-impl ComposeRunner<PrepareAnalytics> {
-    #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
-    pub(super) fn analytics(
-        self,
-        watch: drain::Watch,
-    ) -> ComposeResult<ComposeRunner<PrepareExternalProxy>> {
-        let Self {
-            progress,
-            runtime,
-            runtime_args,
-            step:
-                PrepareAnalytics {
-                    config,
-                    internal_proxy_tls_guards,
-                    external_proxy_tls_guards,
-                    layer_config_file,
-                },
-        } = self;
-
         // Initialize only error analytics, extproxy will be the full AnalyticsReporter.
         let analytics =
             AnalyticsReporter::only_error(config.telemetry, CONTAINER_EXECUTION_KIND, watch);
 
         Ok(ComposeRunner {
-            progress,
             runtime,
             runtime_args,
+            progress,
             step: PrepareExternalProxy {
-                internal_proxy_tls_guards,
-                external_proxy_tls_guards,
-                analytics,
                 config,
                 layer_config_file,
+                analytics,
+                internal_proxy_tls_guards: internal_proxy_tls_guards.map(From::from),
+                external_proxy_tls_guards: external_proxy_tls_guards.map(From::from),
             },
         })
     }
@@ -477,7 +494,8 @@ impl ComposeRunner<PrepareCompose> {
             .transpose()?
             .unwrap_or(8888);
 
-        let mut user_ports = None;
+        // Ports::Short by default, so build it as `Ports::Long`.
+        let mut user_ports = Ports::Long(Default::default());
 
         // TODO(alex) [high] [#5]: Abstract this as a builder-like typestate-y thing, since there's
         // some finnickyness.
@@ -487,19 +505,35 @@ impl ComposeRunner<PrepareCompose> {
             .iter_mut()
             .filter_map(|(n, s)| s.as_mut().zip(Some(n)))
         {
-            service.modify_environment(&user_service_info);
-            service.modify_depends_on();
+            let ports = ServiceComposer::modify(service, &user_service_info).reset_conflicts();
 
-            service
-                .volumes_from
-                .push(MIRRORD_COMPOSE_SIDECAR_SERVICE.into());
-            service.network_mode = Some(format!("service:{MIRRORD_COMPOSE_SIDECAR_SERVICE}"));
+            match (ports, &mut user_ports) {
+                (Ports::Short(items), Ports::Long(user)) => {
+                    for (published, target) in items.into_iter().filter_map(|port| {
+                        // TODO(alex) [high] [#6]: Parsing ports is hell, we can't just default here
+                        // since there are more fields, need to improve parsing.
+                        let port = port.split_terminator(":").collect::<Vec<_>>();
+                        let published = port.first().map(|p| p.to_string())?;
+                        let target = port.last().map(|p| p.to_string())?;
 
-            user_ports = Some(service.ports.clone());
+                        Some((published, target))
+                    }) {
+                        let long_port = Port {
+                            target: target.parse()?,
+                            host_ip: Some("0.0.0.0".to_owned()),
+                            published: Some(PublishedPort::Single(published.parse()?)),
+                            protocol: Some("tcp".to_owned()),
+                            mode: Some("ingress".to_owned()),
+                        };
 
-            // Do NOT reset ports before assigning it to the outer scopped `user_ports`!
-            service.ports = Default::default();
-            service.networks = Default::default();
+                        user.push(long_port);
+                    }
+                }
+                (Ports::Long(items), Ports::Long(user)) => user.extend(items),
+                _ => {
+                    unreachable!("BUG! Our ports are always started as `Ports::Long`!");
+                }
+            }
         }
 
         let mut mirrord_sidecar_service: Service = serde_yaml::from_str(&format!(
@@ -512,10 +546,7 @@ impl ComposeRunner<PrepareCompose> {
         ))?;
 
         match (&mut mirrord_sidecar_service.ports, user_ports) {
-            (Ports::Short(items), Some(Ports::Short(user_ports))) => {
-                items.extend(user_ports);
-            }
-            (Ports::Short(_), Some(Ports::Long(user_ports))) => {
+            (Ports::Short(_), Ports::Long(user_ports)) => {
                 let long_sidecar_port = Port {
                     target: 5000,
                     host_ip: Some("0.0.0.0".to_owned()),
@@ -529,8 +560,10 @@ impl ComposeRunner<PrepareCompose> {
 
                 mirrord_sidecar_service.ports = Ports::Long(ports);
             }
-            (Ports::Short(_), None) => (),
-            _ => unreachable!("BUG! We set the `ports` using the short syntax!"),
+            _ => unreachable!(
+                "BUG! We set the `ports` using the short syntax,\
+                and user ports are converted to `Ports::Long`!"
+            ),
         }
 
         match &mut mirrord_sidecar_service.environment {
