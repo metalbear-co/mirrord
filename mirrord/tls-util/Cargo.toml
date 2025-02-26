@@ -25,6 +25,6 @@ tracing.workspace = true
 x509-parser.workspace = true
 
 [dev-dependencies]
-pem = "3"
+pem.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true

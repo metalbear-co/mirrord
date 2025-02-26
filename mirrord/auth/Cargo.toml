@@ -37,7 +37,7 @@ client = [
 chrono.workspace = true
 whoami = { version = "1", optional = true }
 home = { version = "0.5", optional = true }
-pem = "3"
+pem.workspace = true
 fs4 = { version = "0.12", features = ["tokio"], optional = true, default-features = false}
 k8s-openapi = { workspace = true, optional = true }
 kube = { workspace = true, optional = true }

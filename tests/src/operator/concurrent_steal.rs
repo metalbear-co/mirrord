@@ -4,15 +4,11 @@
 
 use std::time::Duration;
 
-use k8s_openapi::api::apps::v1::Deployment;
 use kube::Client;
 use reqwest::header::HeaderMap;
 use rstest::*;
 
-use crate::utils::{
-    config_dir, get_instance_name, get_service_url, kube_client, send_request, service,
-    Application, KubeService,
-};
+use crate::utils::{config_dir, kube_client, send_request, service, Application, KubeService};
 
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -25,6 +21,8 @@ pub async fn two_clients_steal_same_target(
     kube_client: Client,
     #[values(Application::PythonFlaskHTTP)] application: Application,
 ) {
+    use crate::utils::service_addr::TestServiceAddr;
+
     let (service, client) = tokio::join!(service, kube_client);
 
     let flags = vec!["--steal", "--fs-mode=local"];
@@ -56,7 +54,8 @@ pub async fn two_clients_steal_same_target(
     assert!(!client_b.get_stderr().await.contains("daemon subscribed"));
 
     // check if client_a is stealing
-    let url = get_service_url(client, &service).await;
+    let addr = TestServiceAddr::fetch(client, &service.service).await;
+    let url = format!("http://{}", addr.addr);
     let client = reqwest::Client::new();
     let req_builder = client.delete(&url);
     let mut headers = HeaderMap::default();
@@ -83,6 +82,8 @@ pub async fn two_clients_steal_same_target_pod_deployment(
     kube_client: Client,
     #[values(Application::PythonFlaskHTTP)] application: Application,
 ) {
+    use crate::utils::service_addr::TestServiceAddr;
+
     let (service, client) = tokio::join!(service, kube_client);
 
     let flags = vec!["--steal", "--fs-mode=local"];
@@ -100,13 +101,11 @@ pub async fn two_clients_steal_same_target_pod_deployment(
         .wait_for_line(Duration::from_secs(40), "daemon subscribed")
         .await;
 
-    let target = get_instance_name::<Deployment>(client.clone(), &service.name, &service.namespace)
-        .await
-        .unwrap();
+    let deployment_name = service.deployment.metadata.name.as_deref().unwrap();
 
     let mut client_b = application
         .run(
-            &format!("deployment/{target}"),
+            &format!("deployment/{deployment_name}"),
             Some(&service.namespace),
             Some(flags.clone()),
             None,
@@ -118,7 +117,8 @@ pub async fn two_clients_steal_same_target_pod_deployment(
     assert!(!client_b.get_stderr().await.contains("daemon subscribed"));
 
     // check if client_a is stealing
-    let url = get_service_url(client, &service).await;
+    let addr = TestServiceAddr::fetch(client, &service.service).await;
+    let url = format!("http://{}", addr.addr);
     let client = reqwest::Client::new();
     let req_builder = client.delete(&url);
     let mut headers = HeaderMap::default();
@@ -142,9 +142,12 @@ pub async fn two_clients_steal_with_http_filter(
     #[future] kube_client: Client,
     #[values(Application::NodeHTTP)] application: Application,
 ) {
+    use crate::utils::service_addr::TestServiceAddr;
+
     let service = service.await;
     let kube_client = kube_client.await;
-    let url = get_service_url(kube_client.clone(), &service).await;
+    let addr = TestServiceAddr::fetch(kube_client, &service.service).await;
+    let url = format!("http://{}", addr.addr);
 
     let mut config_path = config_dir.to_path_buf();
     config_path.push("http_filter_header.json");

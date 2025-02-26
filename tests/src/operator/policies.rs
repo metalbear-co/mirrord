@@ -35,7 +35,8 @@ impl PolicyGuard {
         PolicyGuard {
             _inner: ResourceGuard::create(policy_api, policy, true)
                 .await
-                .expect("Could not create policy in E2E test."),
+                .expect("Could not create policy in E2E test.")
+                .0,
         }
     }
 
@@ -44,7 +45,8 @@ impl PolicyGuard {
         PolicyGuard {
             _inner: ResourceGuard::create(policy_api, policy, true)
                 .await
-                .expect("Could not create policy in E2E test."),
+                .expect("Could not create policy in E2E test.")
+                .0,
         }
     }
 }

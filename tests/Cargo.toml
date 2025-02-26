@@ -33,6 +33,7 @@ fancy-regex.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 http-body-util.workspace = true
+pem = { workspace = true, optional = true }
 rcgen = { workspace = true, optional = true }
 rustls.workspace = true
 rstest.workspace = true
@@ -44,9 +45,9 @@ tempfile.workspace = true
 tokio-tungstenite.workspace = true
 
 [features]
-default = ["ephemeral", "job", "cli", "targetless", "operator"]
+default = ["ephemeral", "job", "cli", "targetless"]
 ephemeral = []
 job = []
-operator = ["dep:aws-config", "dep:aws-sdk-sqs", "dep:rcgen", "dep:mirrord-agent-env"]
+operator = ["dep:aws-config", "dep:aws-sdk-sqs", "dep:rcgen", "dep:mirrord-agent-env", "dep:pem"]
 cli = []
 targetless = []

@@ -1,4 +1,4 @@
-from os import getpid, kill
+from os import getpid, kill, getenv
 from signal import SIGTERM
 import time
 from flask import Flask
@@ -11,7 +11,7 @@ log.disabled = True
 
 cli = sys.modules["flask.cli"]
 
-cli.show_server_banner = lambda *x: print("Server listening on port 80")
+cli.show_server_banner = lambda *x: print(f"Server listening on port {getenv('SERVER_PORT', '80')}")
 
 app = Flask(__name__)
 
@@ -50,4 +50,11 @@ def delete():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=80)
+    port = int(getenv('SERVER_PORT', '80'))
+    ssl_cert = getenv('SERVER_CERT')
+    ssl_key = getenv('SERVER_KEY')
+
+    if ssl_cert is None or ssl_key is None:
+        app.run(host="0.0.0.0", port=port)
+    else:
+        app.run(host="0.0.0.0", port=port, ssl_context=(ssl_cert, ssl_key))

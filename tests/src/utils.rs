@@ -4,7 +4,6 @@
 use std::{
     collections::HashMap,
     fmt::Debug,
-    net::IpAddr,
     ops::Not,
     os::unix::process::ExitStatusExt,
     path::PathBuf,
@@ -16,15 +15,13 @@ use std::{
 use chrono::{Timelike, Utc};
 use fancy_regex::Regex;
 use futures::FutureExt;
-use futures_util::{future::BoxFuture, stream::TryStreamExt};
+use futures_util::future::BoxFuture;
 use k8s_openapi::api::{
     apps::v1::Deployment,
-    core::v1::{Namespace, Pod, Service},
+    core::v1::{Namespace, Service},
 };
 use kube::{
-    api::{DeleteParams, ListParams, PostParams, WatchParams},
-    core::WatchEvent,
-    runtime::wait::{await_condition, conditions::is_pod_running},
+    api::{DeleteParams, PostParams},
     Api, Client, Config, Error, Resource,
 };
 use rand::distr::{Alphanumeric, SampleString};
@@ -41,7 +38,9 @@ use tokio::{
 };
 
 pub(crate) mod ipv6;
+pub(crate) mod service_addr;
 pub mod sqs_resources;
+pub(crate) mod watch;
 
 const TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 pub const CONTAINER_NAME: &str = "test";
@@ -53,23 +52,6 @@ pub const PRESERVE_FAILED_ENV_NAME: &str = "MIRRORD_E2E_PRESERVE_FAILED";
 
 /// All Kubernetes resources created for testing purposes share this label.
 pub const TEST_RESOURCE_LABEL: (&str, &str) = ("mirrord-e2e-test-resource", "true");
-
-pub async fn watch_resource_exists<K: Debug + Clone + DeserializeOwned>(api: &Api<K>, name: &str) {
-    let params = WatchParams::default()
-        .fields(&format!("metadata.name={name}"))
-        .timeout(10);
-    let stream = api.watch(&params, "0").await.unwrap();
-    tokio::pin!(stream);
-    while let Some(status) = stream.try_next().await.unwrap() {
-        match status {
-            WatchEvent::Modified(_) => break,
-            WatchEvent::Error(s) => {
-                panic!("Error watching namespaces: {s:?}");
-            }
-            _ => {}
-        }
-    }
-}
 
 /// Creates a random string of 7 alphanumeric lowercase characters.
 pub(crate) fn random_string() -> String {
@@ -87,6 +69,14 @@ fn format_time() -> String {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum Application {
+    /// Can run as both HTTP an HTTPS server.
+    ///
+    /// Env:
+    /// * `SERVER_PORT`: port to listen on (defaults to 80)
+    /// * `SERVER_CERT`: path to a PEM file with certificate chain to use
+    /// * `SERVER_KEY`: path to a PEM file with a private key matching the certificate
+    ///
+    /// Pass both `SERVER_CERT` and `SERVER_KEY` to enable HTTPS mode.
     PythonFlaskHTTP,
     PythonFastApiHTTP,
     PythonFastApiHTTPIPv6,
@@ -723,10 +713,10 @@ impl ResourceGuard {
         api: Api<K>,
         data: &K,
         delete_on_fail: bool,
-    ) -> Result<ResourceGuard, Error> {
+    ) -> Result<(ResourceGuard, K), Error> {
         let name = data.meta().name.clone().unwrap();
         println!("Creating {} `{name}`: {data:?}", K::kind(&()));
-        api.create(&PostParams::default(), data).await?;
+        let created = api.create(&PostParams::default(), data).await?;
         println!("Created {} `{name}`", K::kind(&()));
 
         let deleter = async move {
@@ -741,10 +731,13 @@ impl ResourceGuard {
             }
         };
 
-        Ok(Self {
-            delete_on_fail,
-            deleter: Some(deleter.boxed()),
-        })
+        Ok((
+            Self {
+                delete_on_fail,
+                deleter: Some(deleter.boxed()),
+            },
+            created,
+        ))
     }
 
     /// If the underlying resource should be deleted (e.g. current thread is not panicking or
@@ -787,6 +780,8 @@ impl Drop for ResourceGuard {
 pub struct KubeService {
     pub name: String,
     pub namespace: String,
+    pub service: Service,
+    pub deployment: Deployment,
     guards: Vec<ResourceGuard>,
     namespace_guard: Option<ResourceGuard>,
     pub pod_name: String,
@@ -1223,55 +1218,48 @@ async fn internal_service(
         format_time()
     );
 
-    let namespace_resource: Namespace = serde_json::from_value(json!({
-        "apiVersion": "v1",
-        "kind": "Namespace",
-        "metadata": {
-            "name": namespace,
-            "labels": {
-                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-            }
-        },
-    }))
-    .unwrap();
     // Create namespace and wrap it in ResourceGuard if it does not yet exist.
-    let namespace_guard = ResourceGuard::create(
+    let namespace_guard = ResourceGuard::create::<Namespace>(
         namespace_api.clone(),
-        &namespace_resource,
+        &serde_json::from_value(json!({
+            "apiVersion": "v1",
+            "kind": "Namespace",
+            "metadata": {
+                "name": namespace,
+                "labels": {
+                    TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                }
+            },
+        }))
+        .unwrap(),
         delete_after_fail,
     )
     .await
     .ok();
-    if namespace_guard.is_some() {
-        watch_resource_exists(&namespace_api, namespace).await;
-    }
 
     // `Deployment`
     let deployment = deployment_from_json(&name, image, env);
-    let pod_guard = ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
-        .await
-        .unwrap();
-    watch_resource_exists(&deployment_api, &name).await;
+    let (deployment_guard, deployment) =
+        ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
+            .await
+            .unwrap();
 
     // `Service`
     let mut service = service_from_json(&name, service_type);
     if ipv6_only {
         set_ipv6_only(&mut service);
     }
-    let service_guard = ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
-        .await
-        .unwrap();
-    watch_resource_exists(&service_api, "default").await;
+    let (service_guard, service) =
+        ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
+            .await
+            .unwrap();
 
-    let pod_name = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
+    let ready_pod = watch::wait_until_pods_ready(&service, 1, kube_client.clone())
         .await
+        .into_iter()
+        .next()
         .unwrap();
-
-    let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
-
-    await_condition(pod_api, &pod_name, is_pod_running())
-        .await
-        .unwrap();
+    let pod_name = ready_pod.metadata.name.unwrap();
 
     println!(
         "{} done creating service {name} in namespace {namespace}",
@@ -1281,9 +1269,11 @@ async fn internal_service(
     KubeService {
         name,
         namespace: namespace.to_string(),
+        service,
+        deployment,
         pod_name,
-        guards: vec![pod_guard, service_guard],
-        namespace_guard,
+        guards: vec![deployment_guard, service_guard],
+        namespace_guard: namespace_guard.map(|(guard, _)| guard),
     }
 }
 
@@ -1345,32 +1335,28 @@ pub async fn service_for_mirrord_ls(
     )
     .await
     .ok();
-    if namespace_guard.is_some() {
-        watch_resource_exists(&namespace_api, namespace).await;
-    }
 
     // `Deployment`
     let deployment = deployment_from_json(&name, image, default_env());
-    let pod_guard = ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
-        .await
-        .unwrap();
-    watch_resource_exists(&deployment_api, &name).await;
+    let (deployment_guard, deployment) =
+        ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
+            .await
+            .unwrap();
 
     // `Service`
     let service = service_from_json(&name, service_type);
-    let service_guard = ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
-        .await
-        .unwrap();
-    watch_resource_exists(&service_api, "default").await;
+    let (service_guard, service) =
+        ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
+            .await
+            .unwrap();
 
-    let pod_name = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
+    let pod_name = watch::wait_until_pods_ready(&service, 1, kube_client)
         .await
-        .unwrap();
-
-    let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
-
-    await_condition(pod_api, &pod_name, is_pod_running())
-        .await
+        .into_iter()
+        .next()
+        .unwrap()
+        .metadata
+        .name
         .unwrap();
 
     println!(
@@ -1381,9 +1367,11 @@ pub async fn service_for_mirrord_ls(
     KubeService {
         name,
         namespace: namespace.to_string(),
+        service,
+        deployment,
         pod_name,
-        guards: vec![pod_guard, service_guard],
-        namespace_guard,
+        guards: vec![deployment_guard, service_guard],
+        namespace_guard: namespace_guard.map(|(guard, _)| guard),
     }
 }
 
@@ -1456,72 +1444,68 @@ pub async fn service_for_mirrord_ls(
     )
     .await
     .ok();
-    if namespace_guard.is_some() {
-        watch_resource_exists(&namespace_api, namespace).await;
-    }
 
     // `Deployment`
     let deployment = deployment_from_json(&name, image, default_env());
-    let pod_guard = ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
-        .await
-        .unwrap();
-    watch_resource_exists(&deployment_api, &name).await;
+    let (deployment_guard, deployment) =
+        ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
+            .await
+            .unwrap();
 
     // `Service`
     let service = service_from_json(&name, service_type);
-    let service_guard = ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
-        .await
-        .unwrap();
-    watch_resource_exists(&service_api, "default").await;
+    let (service_guard, service) =
+        ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
+            .await
+            .unwrap();
 
     // `StatefulSet`
     let stateful_set = stateful_set_from_json(&name, image);
-    let stateful_set_guard =
+    let (stateful_set_guard, _) =
         ResourceGuard::create(stateful_set_api.clone(), &stateful_set, delete_after_fail)
             .await
             .unwrap();
-    watch_resource_exists(&stateful_set_api, &name).await;
 
     // `CronJob`
     let cron_job = cron_job_from_json(&name, image);
-    let cron_job_guard = ResourceGuard::create(cron_job_api.clone(), &cron_job, delete_after_fail)
-        .await
-        .unwrap();
-    watch_resource_exists(&cron_job_api, &name).await;
+    let (cron_job_guard, _) =
+        ResourceGuard::create(cron_job_api.clone(), &cron_job, delete_after_fail)
+            .await
+            .unwrap();
 
     // `Job`
     let job = job_from_json(&name, image);
-    let job_guard = ResourceGuard::create(job_api.clone(), &job, delete_after_fail)
-        .await
-        .unwrap();
-    watch_resource_exists(&job_api, &name).await;
-
-    let pod_name = get_instance_name::<Pod>(kube_client.clone(), &name, namespace)
+    let (job_guard, _) = ResourceGuard::create(job_api.clone(), &job, delete_after_fail)
         .await
         .unwrap();
 
-    let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
-
-    await_condition(pod_api, &pod_name, is_pod_running())
+    let pod_name = watch::wait_until_pods_ready(&service, 1, kube_client.clone())
         .await
+        .into_iter()
+        .next()
+        .unwrap()
+        .metadata
+        .name
         .unwrap();
 
     println!(
-        "{:?} done creating service {name:?} in namespace {namespace:?}",
+        "{:?} done creating service {name} in namespace {namespace}",
         Utc::now()
     );
 
     KubeService {
         name,
         namespace: namespace.to_string(),
+        service,
+        deployment,
         guards: vec![
-            pod_guard,
+            deployment_guard,
             service_guard,
             stateful_set_guard,
             cron_job_guard,
             job_guard,
         ],
-        namespace_guard,
+        namespace_guard: namespace_guard.map(|(guard, _)| guard),
         pod_name,
     }
 }
@@ -1626,93 +1610,6 @@ pub async fn go_statfs_service(#[future] kube_client: Client) -> KubeService {
         kube_client,
     )
     .await
-}
-
-pub fn resolve_node_host() -> String {
-    if (cfg!(target_os = "linux") && !wsl::is_wsl()) || std::env::var("USE_MINIKUBE").is_ok() {
-        let output = std::process::Command::new("minikube")
-            .arg("ip")
-            .output()
-            .unwrap()
-            .stdout;
-        String::from_utf8_lossy(&output).to_string()
-    } else {
-        // We assume it's either Docker for Mac or passed via wsl integration
-        "127.0.0.1".to_string()
-    }
-}
-pub async fn get_service_host_and_port(
-    kube_client: Client,
-    service: &KubeService,
-) -> (String, i32) {
-    get_pod_or_node_host_and_port(kube_client, &service.name, &service.namespace).await
-}
-
-async fn get_pod_or_node_host(kube_client: Client, name: &str, namespace: &str) -> String {
-    let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
-    let pods = pod_api
-        .list(&ListParams::default().labels(&format!("app={}", name)))
-        .await
-        .unwrap();
-    pods.into_iter()
-        .next()
-        .and_then(|pod| pod.status)
-        .and_then(|status| status.host_ip)
-        .filter(|ip| {
-            // use this IP only if it's a public one.
-            match ip.parse::<IpAddr>().unwrap() {
-                IpAddr::V4(ip4) => ip4.is_private(),
-                IpAddr::V6(ip6) => {
-                    ip6.is_unicast_link_local() || ip6.is_unique_local() || ip6.is_loopback()
-                }
-            }
-            .not()
-        })
-        .unwrap_or_else(resolve_node_host)
-}
-
-async fn get_pod_or_node_host_and_port(
-    kube_client: Client,
-    name: &str,
-    namespace: &str,
-) -> (String, i32) {
-    let host_ip = get_pod_or_node_host(kube_client.clone(), name, namespace).await;
-    let services_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
-    let services = services_api
-        .list(&ListParams::default().labels(&format!("app={}", name)))
-        .await
-        .unwrap();
-    let port = services
-        .into_iter()
-        .next()
-        .and_then(|service| service.spec)
-        .and_then(|spec| spec.ports)
-        .and_then(|mut ports| ports.pop())
-        .unwrap();
-    (host_ip, port.node_port.unwrap())
-}
-
-pub async fn get_service_url(kube_client: Client, service: &KubeService) -> String {
-    let (host_ip, port) = get_service_host_and_port(kube_client, service).await;
-    format!("http://{host_ip}:{port}")
-}
-
-/// Returns a name of any pod/deployment belonging to the given app.
-pub async fn get_instance_name<T>(client: Client, app_name: &str, namespace: &str) -> Option<String>
-where
-    T: kube::Resource<Scope = k8s_openapi::NamespaceResourceScope>
-        + k8s_openapi::Metadata
-        + Clone
-        + DeserializeOwned
-        + Debug,
-    <T as kube::Resource>::DynamicType: Default,
-{
-    let api: Api<T> = Api::namespaced(client, namespace);
-    api.list(&ListParams::default().labels(&format!("app={}", app_name)))
-        .await
-        .unwrap()
-        .into_iter()
-        .find_map(|item| item.meta().name.clone())
 }
 
 /// Take a request builder of any method, add headers, send the request, verify success, and
