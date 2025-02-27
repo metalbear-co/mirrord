@@ -10,7 +10,7 @@ use std::{
 use k8s_openapi::api::core::v1::{Pod, Service};
 use kube::{api::ListParams, Api, Client};
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     process::{Child, Command},
 };
 
@@ -59,7 +59,7 @@ impl TestServiceAddr {
             .arg(&service_name)
             .kill_on_drop(true)
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .stdin(Stdio::null())
             .spawn()
             .unwrap();
@@ -69,12 +69,38 @@ impl TestServiceAddr {
         let mut line = String::new();
         reader.read_line(&mut line).await.unwrap();
 
-        let addr = line.trim().parse::<SocketAddr>().unwrap_or_else(|error| {
-            panic!(
+        let addr = line.trim().parse::<SocketAddr>().inspect_err(|error| {
+            println!(
                 "invalid socket addr returned from `minikube service --url` ({}): {error}",
                 line.trim()
             )
         });
+
+        let addr = match addr {
+            Ok(addr) => addr,
+            Err(error) => {
+                println!(
+                    "invalid socket addr returned from `minikube service --url` ({}): {error}",
+                    line.trim()
+                );
+
+                let mut stderr = child.stderr.take().unwrap();
+                let mut buf = String::new();
+                stderr.read_to_string(&mut buf).await.unwrap();
+
+                let status = child.try_wait().unwrap();
+
+                panic!(
+                    "`minikube service --url` produed an invalid socket address, \
+                    error=({error}) \
+                    address=({}) \
+                    stderr=({}) \
+                    exit_status=({status:?})",
+                    line.trim(),
+                    buf,
+                );
+            }
+        };
 
         child.stdout.replace(reader.into_inner());
 
