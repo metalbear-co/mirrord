@@ -20,6 +20,7 @@ func main() {
 	r := gin.Default()
 	r.GET("/", func(c *gin.Context) {
 		fmt.Println("GET: Request completed")
+		c.Header("Content-Type", "text/plain")
 		c.String(http.StatusOK, "GET")
 	})
 
@@ -29,11 +30,13 @@ func main() {
 			fmt.Printf("POST: Error getting raw data: %v\n", err)
 		}
 		fmt.Println("POST: Request completed")
+		c.Header("Content-Type", "text/plain")
 		c.String(http.StatusOK, "POST")
 	})
 
 	r.PUT("/", func(c *gin.Context) {
 		fmt.Println("PUT: Request completed")
+		c.Header("Content-Type", "text/plain")
 		c.String(http.StatusOK, "PUT")
 	})
 
@@ -42,15 +45,16 @@ func main() {
 		defer func() {
 			os.Exit(0)
 		}()
+		c.Header("Content-Type", "text/plain")
 		c.String(http.StatusOK, "DELETE")
 	})
 
-	fmt.Println("Server listening on port 80")
-
 	var err error
 	if certPath != "" && keyPath != "" {
+		fmt.Println("Serving HTTPS on port 80")
 		err = r.RunTLS(":80", certPath, keyPath)
 	} else {
+		fmt.Println("Serving HTTP on port 80")
 		err = r.Run(":80")
 	}
 

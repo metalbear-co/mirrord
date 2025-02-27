@@ -36,6 +36,9 @@ use crate::utils::{
     PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
 };
 
+/// Test service deployed to the cluster.
+///
+/// Runs an HTTPS server from [this image](https://github.com/metalbear-co/test-images/tree/main/go-server).
 struct GoServService {
     _guard: ResourceGuard,
 
@@ -285,6 +288,7 @@ struct GoServTlsConfig {
 }
 
 impl GoServTlsConfig {
+    /// Path where the certs folder should be mounted in the test service container.
     const MOUNT_PATH: &str = "/certs";
 }
 
@@ -314,6 +318,10 @@ fn generate_cert(name: &str, issuer: Option<&CertifiedKey>, can_sign_others: boo
     CertifiedKey { cert, key_pair }
 }
 
+/// Generates:
+/// 1. Configuration for the [`GoServService`] in mTLS mode
+/// 2. [`StealPortTlsConfig`] to confige TLS stealing via the operator
+/// 3. Root certificate for [`GoServService`] clients
 fn generate_tls_configs() -> (GoServTlsConfig, StealPortTlsConfig, CertifiedKey) {
     let mut pem_files: BTreeMap<String, String> = Default::default();
     let mut env: HashMap<String, String> = Default::default();
@@ -378,7 +386,7 @@ fn generate_tls_configs() -> (GoServTlsConfig, StealPortTlsConfig, CertifiedKey)
     );
 
     let tls_steal_config = StealPortTlsConfig {
-        port: 443,
+        port: 80,
         agent_as_server: AgentServerConfig {
             authentication: TlsAuthentication {
                 cert_pem: env
@@ -419,7 +427,7 @@ fn generate_tls_configs() -> (GoServTlsConfig, StealPortTlsConfig, CertifiedKey)
     };
 
     let go_serv_config = GoServTlsConfig {
-        port: 443,
+        port: 80,
         pem_files,
         env,
     };
@@ -427,59 +435,86 @@ fn generate_tls_configs() -> (GoServTlsConfig, StealPortTlsConfig, CertifiedKey)
     (go_serv_config, tls_steal_config, root)
 }
 
-fn make_reqwest_client(
-    addr: SocketAddr,
-    trusted_root_pem: &str,
-    cert_and_key_pem: Option<&str>,
-) -> reqwest::Client {
-    let mut builder = reqwest::ClientBuilder::new()
-        .tls_built_in_root_certs(false)
-        .add_root_certificate(
-            reqwest::tls::Certificate::from_pem(trusted_root_pem.as_bytes()).unwrap(),
-        )
-        .resolve("go-serv", addr)
-        .https_only(true)
-        .http1_only();
-
-    if let Some(cert_and_key_pem) = cert_and_key_pem {
-        builder = builder
-            .identity(reqwest::tls::Identity::from_pem(cert_and_key_pem.as_bytes()).unwrap());
-    }
-
-    builder.build().unwrap()
+/// Test HTTPS client used in [`steal_tls_with_filter`].
+struct TestClient {
+    client: reqwest::Client,
+    http1: bool,
 }
 
-async fn make_request(client: &reqwest::Client, should_be_stolen: bool) {
-    println!("MAKING A REQUEST: should_be_stolen={should_be_stolen}");
+impl TestClient {
+    fn new(
+        addr: SocketAddr,
+        trusted_root_pem: &str,
+        cert_and_key_pem: Option<&str>,
+        http1: bool,
+    ) -> Self {
+        let mut builder = reqwest::ClientBuilder::new()
+            .tls_built_in_root_certs(false)
+            .add_root_certificate(
+                reqwest::tls::Certificate::from_pem(trusted_root_pem.as_bytes()).unwrap(),
+            )
+            .resolve("go-serv", addr)
+            .https_only(true);
 
-    let response = client
-        .get("https://go-serv/")
-        .header("x-steal", if should_be_stolen { "yes" } else { "no" })
-        .send()
-        .await
-        .unwrap();
-    let status = response.status();
-    println!("RESPONSE STATUS: {status}");
+        if let Some(cert_and_key_pem) = cert_and_key_pem {
+            builder = builder
+                .identity(reqwest::tls::Identity::from_pem(cert_and_key_pem.as_bytes()).unwrap());
+        }
 
-    let body = response.bytes().await.map(Vec::from).map(String::from_utf8);
+        if http1 {
+            // If we don't set this, reqwest will use HTTP/2.
+            // This is because the agent in the test is configured to prefer HTTP/2 in ALPN.
+            builder = builder.http1_only();
+        }
 
-    assert_eq!(
-        status,
-        reqwest::StatusCode::OK,
-        "REQUEST FAILED: body=({body:?})"
-    );
+        Self {
+            client: builder.build().unwrap(),
+            http1,
+        }
+    }
 
-    if should_be_stolen {
-        assert_eq!(body.unwrap().unwrap(), "GET");
-    } else {
-        assert_eq!(
-            body.unwrap().unwrap(),
-            GoServService::REMOTE_SERVER_RESPONSE
+    /// Makes a request to the test service and verifies that it is stolen/ignored.
+    async fn make_request(&self, should_be_stolen: bool) {
+        println!(
+            "MAKING A REQUEST: should_be_stolen={should_be_stolen} http1={}",
+            self.http1
         );
+
+        let response = self
+            .client
+            .get("https://go-serv/")
+            .header("x-steal", if should_be_stolen { "yes" } else { "no" })
+            .header("host", "go-serv")
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        println!("RESPONSE STATUS: {status}");
+
+        let body = response.bytes().await.map(Vec::from).map(String::from_utf8);
+
+        assert_eq!(
+            status,
+            reqwest::StatusCode::OK,
+            "REQUEST FAILED: body=({body:?})"
+        );
+
+        if should_be_stolen {
+            assert_eq!(body.unwrap().unwrap(), "GET");
+        } else {
+            assert_eq!(
+                body.unwrap().unwrap(),
+                GoServService::REMOTE_SERVER_RESPONSE
+            );
+        }
     }
 }
 
-/// Tests filtered TLS stealing in a scenario where remote clients are verified.
+/// Tests filtered TLS stealing.
+///
+/// Verifies:
+/// * both HTTP/1 and HTTP/2
+/// * both TLS and mTLS
 #[rstest]
 #[case::with_mtls(true)]
 #[case::without_mtls(false)]
@@ -516,7 +551,7 @@ async fn steal_tls_with_filter(#[future] kube_client: Client, #[case] mtls: bool
         .unwrap();
 
     let service_addr = service.address(client).await;
-    let test_client = {
+    let (test_client_http1, test_client_http2) = {
         let trusted_root_pem = pem::encode_config(
             &Pem::new("CERTIFICATE", root.cert.der().to_vec()),
             EncodeConfig::new().set_line_ending(LineEnding::LF),
@@ -534,10 +569,19 @@ async fn steal_tls_with_filter(#[future] kube_client: Client, #[case] mtls: bool
             )
         });
 
-        make_reqwest_client(
-            service_addr.addr,
-            &trusted_root_pem,
-            client_cert_and_key.as_deref(),
+        (
+            TestClient::new(
+                service_addr.addr,
+                &trusted_root_pem,
+                client_cert_and_key.as_deref(),
+                true,
+            ),
+            TestClient::new(
+                service_addr.addr,
+                &trusted_root_pem,
+                client_cert_and_key.as_deref(),
+                false,
+            ),
         )
     };
 
@@ -588,22 +632,14 @@ async fn steal_tls_with_filter(#[future] kube_client: Client, #[case] mtls: bool
         .await
         .unwrap();
 
-    let port_as_string = incluster_config
-        .spec
-        .ports
-        .first()
-        .unwrap()
-        .port
-        .to_string();
     let test_process_env = [
-        ("SERVER_PORT", port_as_string.as_str()),
-        ("SERVER_CERT", local_server_cert_path.to_str().unwrap()),
-        ("SERVER_KEY", local_server_key_path.to_str().unwrap()),
+        ("SERVER_TLS_CERT", local_server_cert_path.to_str().unwrap()),
+        ("SERVER_TLS_KEY", local_server_key_path.to_str().unwrap()),
     ]
     .into();
 
     println!("SPAWNING TEST PROCESS");
-    let test_process = Application::PythonFlaskHTTP
+    let test_process = Application::Go23HTTP
         .run(
             &service.target_path(),
             service.namespace.metadata.name.as_deref(),
@@ -617,8 +653,13 @@ async fn steal_tls_with_filter(#[future] kube_client: Client, #[case] mtls: bool
         .await;
     println!("TEST PROCESS MADE A PORT SUBSCRIPTION");
 
-    make_request(&test_client, false).await;
-    make_request(&test_client, true).await;
-    make_request(&test_client, false).await;
-    make_request(&test_client, true).await;
+    test_client_http1.make_request(false).await;
+    test_client_http1.make_request(true).await;
+    test_client_http1.make_request(false).await;
+    test_client_http1.make_request(true).await;
+
+    test_client_http2.make_request(false).await;
+    test_client_http2.make_request(true).await;
+    test_client_http2.make_request(false).await;
+    test_client_http2.make_request(true).await;
 }
