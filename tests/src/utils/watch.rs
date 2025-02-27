@@ -16,7 +16,7 @@ use serde::de::DeserializeOwned;
 
 type WatchCondition<R> = Box<dyn FnMut(&HashMap<String, R>) -> bool>;
 
-/// Utility struct for waiting until test Kubernetes resources reach a desired state.
+/// Utility struct for waiting until test Kubernetes resources reached a desired state.
 pub struct Watcher<R> {
     api: Api<R>,
     config: Config,
@@ -28,6 +28,8 @@ impl<R> Watcher<R>
 where
     R: 'static + Resource<DynamicType = ()> + Clone + fmt::Debug + Send + DeserializeOwned,
 {
+    /// Handles the given [`runtime::watcher()`] event and returns whether [`Self::condition`] is
+    /// now fulfilled.
     fn handle_event(&mut self, event: Event<R>) -> bool {
         match event {
             Event::Apply(resource) => {
@@ -57,8 +59,8 @@ where
     ///
     /// Given [`Api`] and [`Config`] will be used to to create the [`runtime::watcher()`] stream.
     ///
-    /// Given `condition` will be used to whether the set of observed resources has reached its
-    /// desired state.
+    /// Given `condition` will be used to determine whether the set of observed resources reached
+    /// its desired state.
     pub fn new<C>(api: Api<R>, config: Config, condition: C) -> Self
     where
         C: 'static + FnMut(&HashMap<String, R>) -> bool,
@@ -71,7 +73,7 @@ where
         }
     }
 
-    /// Runs this watches until the set of observed resources has reached its desired state.
+    /// Runs this watcher until the set of observed resources has reached its desired state.
     pub async fn run(&mut self) {
         let mut stream =
             Box::pin(runtime::watcher(self.api.clone(), self.config.clone()).default_backoff());
