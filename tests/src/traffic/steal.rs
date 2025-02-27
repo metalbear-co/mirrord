@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod steal_tests {
-    use std::{net::SocketAddr, path::Path, time::Duration};
+    use std::{path::Path, time::Duration};
 
     use futures_util::{SinkExt, StreamExt};
     use k8s_openapi::api::core::v1::Pod;
@@ -18,10 +18,11 @@ mod steal_tests {
     };
 
     use crate::utils::{
-        config_dir, get_service_host_and_port, get_service_url, http2_service,
+        config_dir, http2_service,
         ipv6::{ipv6_service, portforward_http_requests},
-        kube_client, send_request, send_requests, service, tcp_echo_service, websocket_service,
-        Application, KubeService,
+        kube_client, send_request, send_requests, service,
+        service_addr::TestServiceAddr,
+        tcp_echo_service, websocket_service, Application, KubeService,
     };
 
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
@@ -40,7 +41,8 @@ mod steal_tests {
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
-        let url = get_service_url(kube_client.clone(), &service).await;
+        let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
+        let url = format!("http://{}", addr.addr);
         let mut flags = vec!["--steal"];
 
         if cfg!(feature = "ephemeral") {
@@ -125,7 +127,8 @@ mod steal_tests {
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
-        let url = get_service_url(kube_client.clone(), &service).await;
+        let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
+        let url = format!("http://{}", addr.addr);
         let mut flags = vec!["--steal"];
 
         if cfg!(feature = "ephemeral") {
@@ -203,7 +206,8 @@ mod steal_tests {
         sleep(Duration::from_secs(3)).await;
 
         // Send HTTP request and verify it is handled by the REMOTE app - NOT STOLEN.
-        let url = get_service_url(kube_client.clone(), &service).await;
+        let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
+        let url = format!("http://{}", addr.addr);
         let client = reqwest::Client::new();
         let req_builder = client.get(url);
         eprintln!("Sending request to remote service");
@@ -269,14 +273,15 @@ mod steal_tests {
             )
             .await;
 
-        let (addr, port) = get_service_host_and_port(kube_client.clone(), &service).await;
+        let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
+        let url = format!("http://{}", addr.addr);
 
         // Wait for the app to start listening for stolen data before connecting.
         process
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
 
-        let mut tcp_stream = TcpStream::connect((addr, port as u16)).await.unwrap();
+        let mut tcp_stream = TcpStream::connect(addr.addr).await.unwrap();
 
         // Wait for the test app to close the socket and tell us about it.
         process
@@ -303,7 +308,6 @@ mod steal_tests {
         process.wait_assert_success().await;
 
         // Send HTTP request and verify it is handled by the REMOTE app - NOT STOLEN.
-        let url = get_service_url(kube_client.clone(), &service).await;
         let client = reqwest::Client::new();
         let req_builder = client.get(url);
         eprintln!("Sending request to remote service");
@@ -333,7 +337,8 @@ mod steal_tests {
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
-        let url = get_service_url(kube_client.clone(), &service).await;
+        let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
+        let url = format!("http://{}", addr.addr);
         let flags = vec!["--steal"];
 
         let mut client = application
@@ -372,7 +377,8 @@ mod steal_tests {
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
-        let url = get_service_url(kube_client.clone(), &service).await;
+        let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
+        let url = format!("http://{}", addr.addr);
 
         let mut config_path = config_dir.to_path_buf();
         config_path.push("http_filter_header.json");
@@ -413,7 +419,8 @@ mod steal_tests {
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
-        let url = get_service_url(kube_client.clone(), &service).await;
+        let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
+        let url = format!("http://{}", addr.addr);
 
         let mut config_path = config_dir.to_path_buf();
         config_path.push("http_filter_path.json");
@@ -468,7 +475,8 @@ mod steal_tests {
     ) {
         let service = http2_service.await;
         let kube_client = kube_client.await;
-        let url = get_service_url(kube_client.clone(), &service).await;
+        let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
+        let url = format!("http://{}", addr.addr);
         let flags = vec!["--steal", "--fs-mode=local"];
 
         let mut mirrored_process = application
@@ -538,7 +546,8 @@ mod steal_tests {
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
-        let url = get_service_url(kube_client.clone(), &service).await;
+        let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
+        let url = format!("http://{}", addr.addr);
 
         let flags = vec!["--steal"];
 
@@ -603,7 +612,8 @@ mod steal_tests {
     ) {
         let service = tcp_echo_service.await;
         let kube_client = kube_client.await;
-        let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
+        let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
+        let url = format!("http://{}", addr.addr);
 
         let flags = vec!["--steal"];
 
@@ -620,8 +630,7 @@ mod steal_tests {
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
 
-        let addr = SocketAddr::new(host.trim().parse().unwrap(), port as u16);
-        let mut stream = TcpStream::connect(addr).await.unwrap();
+        let mut stream = TcpStream::connect(addr.addr).await.unwrap();
         stream.write_all(tcp_data.as_bytes()).await.unwrap();
         let mut reader = BufReader::new(stream);
         let mut buf = String::new();
@@ -637,7 +646,6 @@ mod steal_tests {
         assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
 
         // Send a DELETE that should be matched and thus stolen, closing the app.
-        let url = get_service_url(kube_client.clone(), &service).await;
         let client = reqwest::Client::new();
         let req_builder = client.delete(&url);
         let mut headers = HeaderMap::default();
@@ -673,7 +681,8 @@ mod steal_tests {
     ) {
         let service = websocket_service.await;
         let kube_client = kube_client.await;
-        let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
+        let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
+        let url = format!("http://{}", addr.addr);
 
         let flags = vec!["--steal"];
 
@@ -691,8 +700,7 @@ mod steal_tests {
             .await;
 
         // Create a websocket connection to test the HTTP upgrade bypass.
-        let host = host.trim();
-        let (ws_stream, _) = connect_async(format!("ws://{host}:{port}"))
+        let (ws_stream, _) = connect_async(format!("ws://{}", addr.addr))
             .await
             .expect("Failed websocket connection!");
 
@@ -725,7 +733,6 @@ mod steal_tests {
         assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
 
         // Send a DELETE that should be matched and thus stolen, closing the app.
-        let url = get_service_url(kube_client.clone(), &service).await;
         let client = reqwest::Client::new();
         let req_builder = client.delete(&url);
         let mut headers = HeaderMap::default();
@@ -754,7 +761,7 @@ mod steal_tests {
     ) {
         let service = websocket_service.await;
         let kube_client = kube_client.await;
-        let (host, port) = get_service_host_and_port(kube_client.clone(), &service).await;
+        let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
 
         let mut mirrorded_process = application
             .run(
@@ -771,9 +778,7 @@ mod steal_tests {
 
         // Create a websocket connection to test the HTTP upgrade steal.
         // Add a header so that the request matches the filter.
-        let mut request = format!("ws://{}:{port}", host.trim())
-            .into_client_request()
-            .unwrap();
+        let mut request = format!("ws://{}", addr.addr).into_client_request().unwrap();
         request
             .headers_mut()
             .append("x-filter", "yes".try_into().unwrap());

@@ -80,7 +80,7 @@ rcgen.workspace = true
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 mockall = "0.13"
-pem = "3"
+pem.workspace = true
 rcgen.workspace = true
 reqwest.workspace = true
 rstest.workspace = true

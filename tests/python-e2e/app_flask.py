@@ -1,4 +1,4 @@
-from os import getpid, kill
+from os import getpid, kill, getenv
 from signal import SIGTERM
 import time
 from flask import Flask
