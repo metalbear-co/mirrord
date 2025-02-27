@@ -918,15 +918,15 @@ fn service_from_json(name: &str, service_type: &str) -> Service {
             "sessionAffinity": "None",
             "ports": [
                 {
-                    "name": "udp",
-                    "protocol": "UDP",
-                    "port": 31415,
-                },
-                {
                     "name": "http",
                     "protocol": "TCP",
                     "port": 80,
                     "targetPort": 80,
+                },
+                {
+                    "name": "udp",
+                    "protocol": "UDP",
+                    "port": 31415,
                 },
             ]
         }
