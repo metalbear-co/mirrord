@@ -31,12 +31,20 @@ pub struct TestServiceAddr {
 impl TestServiceAddr {
     /// Fetches an accessible address for the given [`Service`].
     ///
+    /// # Resolving [`Service`] IP
+    ///
+    /// * If `USE_MINIKUBE_PROXY` env variable is set, `minikube service --url` command will be used
+    ///   to setup a tunnel;
     /// * If one of the [`Pod`]s has a public IP, that IP will be used;
     /// * Otherwise, if we're on Linux (**not** WSL) or `USE_MINIKUBE` env variable is set,
-    ///   `minikube ip` and `minikube service --url ...` commands will be used;
+    ///   `minikube ip` command will be used;
     /// * Otherwise `127.0.0.1` will be used.
     pub async fn fetch(client: Client, service: &Service) -> Self {
-        let result = Self::fetch_inner(client, service).await;
+        let result = if std::env::var_os("USE_MINIKUBE_PROXY").is_some() {
+            Self::with_minikube_proxy(service).await
+        } else {
+            Self::with_host_ip(client, service).await
+        };
 
         println!("RESOLVED TEST SERVICE ADDRESS: {result:?}");
 
@@ -44,7 +52,6 @@ impl TestServiceAddr {
     }
 
     /// Spawns a `minikube service ...` child process that handles portforwarding to the service.
-    #[allow(unused)]
     async fn with_minikube_proxy(service: &Service) -> Self {
         let service_name = service.metadata.name.clone().unwrap();
         let service_namespace = service.metadata.namespace.clone().unwrap();
@@ -124,9 +131,7 @@ impl TestServiceAddr {
     }
 
     /// Finds a service address that is accessible from outside of the cluster.
-    ///
-    /// If that fails, falls back to [`Self::with_minikube_proxy`].
-    async fn fetch_inner(client: Client, service: &Service) -> Self {
+    async fn with_host_ip(client: Client, service: &Service) -> Self {
         let service_name = service.metadata.name.clone().unwrap();
         let service_namespace = service.metadata.namespace.clone().unwrap();
 
@@ -173,8 +178,19 @@ impl TestServiceAddr {
                 if (cfg!(target_os = "linux") && !wsl::is_wsl())
                     || std::env::var("USE_MINIKUBE").is_ok()
                 {
-                    println!("NO HOST WITH PUBLIC IP FOUND, TRYING `minikube service --url`");
-                    return Self::with_minikube_proxy(service).await;
+                    println!("NO HOST WITH PUBLIC IP FOUND, FALLING BACK TO `minikube ip`");
+
+                    let output = Command::new("minikube")
+                        .arg("ip")
+                        .output()
+                        .await
+                        .unwrap()
+                        .stdout;
+                    std::str::from_utf8(&output)
+                        .unwrap()
+                        .trim()
+                        .parse::<IpAddr>()
+                        .unwrap()
                 } else {
                     println!("ASSUMING NO MINIKUBE, USING LOCALHOST AS HOST IP");
                     // We assume it's either Docker for Mac or passed via wsl integration
