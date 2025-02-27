@@ -8,7 +8,10 @@ use kube::Client;
 use reqwest::header::HeaderMap;
 use rstest::*;
 
-use crate::utils::{config_dir, kube_client, send_request, service, Application, KubeService};
+use crate::utils::{
+    config_dir, kube_client, send_request, service, service_addr::TestServiceAddr, Application,
+    KubeService,
+};
 
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -21,8 +24,6 @@ pub async fn two_clients_steal_same_target(
     kube_client: Client,
     #[values(Application::PythonFlaskHTTP)] application: Application,
 ) {
-    use crate::utils::service_addr::TestServiceAddr;
-
     let (service, client) = tokio::join!(service, kube_client);
 
     let flags = vec!["--steal", "--fs-mode=local"];
@@ -82,8 +83,6 @@ pub async fn two_clients_steal_same_target_pod_deployment(
     kube_client: Client,
     #[values(Application::PythonFlaskHTTP)] application: Application,
 ) {
-    use crate::utils::service_addr::TestServiceAddr;
-
     let (service, client) = tokio::join!(service, kube_client);
 
     let flags = vec!["--steal", "--fs-mode=local"];
@@ -142,8 +141,6 @@ pub async fn two_clients_steal_with_http_filter(
     #[future] kube_client: Client,
     #[values(Application::NodeHTTP)] application: Application,
 ) {
-    use crate::utils::service_addr::TestServiceAddr;
-
     let service = service.await;
     let kube_client = kube_client.await;
     let addr = TestServiceAddr::fetch(kube_client, &service.service).await;
