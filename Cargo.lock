@@ -4316,6 +4316,7 @@ dependencies = [
  "mirrord-protocol",
  "mirrord-tls-util",
  "rand 0.9.0",
+ "rcgen",
  "rstest",
  "rustls 0.23.21",
  "rustls-pemfile 2.2.0",
