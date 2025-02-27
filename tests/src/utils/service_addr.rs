@@ -98,7 +98,7 @@ impl TestServiceAddr {
                 let status = child.try_wait().unwrap();
 
                 panic!(
-                    "`minikube service --url` produed an invalid socket address, \
+                    "`minikube service --url` produced an invalid socket address, \
                     error=({error}) \
                     address=({}) \
                     stderr=({}) \

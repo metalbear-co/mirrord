@@ -320,7 +320,7 @@ fn generate_cert(name: &str, issuer: Option<&CertifiedKey>, can_sign_others: boo
 
 /// Generates:
 /// 1. Configuration for the [`GoServService`] in mTLS mode
-/// 2. [`StealPortTlsConfig`] to confige TLS stealing via the operator
+/// 2. [`StealPortTlsConfig`] to configure TLS stealing via the operator
 /// 3. Root certificate for [`GoServService`] clients
 fn generate_tls_configs() -> (GoServTlsConfig, StealPortTlsConfig, CertifiedKey) {
     let mut pem_files: BTreeMap<String, String> = Default::default();
