@@ -3,6 +3,7 @@
 use std::{
     fmt,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    ops::Not,
     process::Stdio,
 };
 
@@ -30,17 +31,12 @@ pub struct TestServiceAddr {
 impl TestServiceAddr {
     /// Fetches an accessible address for the given [`Service`].
     ///
-    /// * If `USE_MINIKUBE_PROXY` env variable is set, `minikube service ...` command will be used;
-    /// * Otherwise, if one of the [`Pod`]s has a public IP, that IP will be used;
+    /// * If one of the [`Pod`]s has a public IP, that IP will be used;
     /// * Otherwise, if we're on Linux (**not** WSL) or `USE_MINIKUBE` env variable is set,
-    ///   `minikube ip` command will be used;
+    ///   `minikube ip` and `minikube service --url ...` commands will be used;
     /// * Otherwise `127.0.0.1` will be used.
     pub async fn fetch(client: Client, service: &Service) -> Self {
-        let result = if std::env::var_os("USE_MINIKUBE_PROXY").is_some() {
-            Self::with_minikube_proxy(service).await
-        } else {
-            Self::from_pod_or_node_ip(client, service).await
-        };
+        let result = Self::fetch_inner(client, service).await;
 
         println!("RESOLVED TEST SERVICE ADDRESS: {result:?}");
 
@@ -84,8 +80,21 @@ impl TestServiceAddr {
         }
     }
 
+    fn is_ip_public(ip: &IpAddr) -> bool {
+        match ip {
+            IpAddr::V4(ip) => ip.is_private().not(),
+            IpAddr::V6(ip) => {
+                ip.is_unicast_link_local().not()
+                    && ip.is_unique_local().not()
+                    && ip.is_loopback().not()
+            }
+        }
+    }
+
     /// Finds a service address that is accessible from outside of the cluster.
-    async fn from_pod_or_node_ip(client: Client, service: &Service) -> Self {
+    ///
+    /// If that fails, falls back to [`Self::with_minikube_proxy`].
+    async fn fetch_inner(client: Client, service: &Service) -> Self {
         let service_name = service.metadata.name.clone().unwrap();
         let service_namespace = service.metadata.namespace.clone().unwrap();
 
@@ -118,21 +127,8 @@ impl TestServiceAddr {
             .into_iter()
             .filter_map(|pod| pod.status)
             .filter_map(|status| status.host_ip)
-            .filter_map(|ip| {
-                let ip = ip.parse::<IpAddr>().ok()?;
-                // use this IP only if it's a public one.
-                match ip {
-                    IpAddr::V4(ip) if ip.is_private() => None,
-                    IpAddr::V6(ip)
-                        if ip.is_unicast_link_local()
-                            || ip.is_unique_local()
-                            || ip.is_loopback() =>
-                    {
-                        None
-                    }
-                    ip => Some(ip),
-                }
-            })
+            .filter_map(|ip| ip.parse::<IpAddr>().ok())
+            .filter(Self::is_ip_public)
             .next();
 
         let ip = match pod_ip {
@@ -144,11 +140,17 @@ impl TestServiceAddr {
                     let output = Command::new("minikube").arg("ip").output().await.unwrap();
                     assert!(output.status.success());
 
-                    String::from_utf8(output.stdout)
+                    let ip = String::from_utf8(output.stdout)
                         .unwrap()
                         .trim()
                         .parse::<IpAddr>()
-                        .unwrap()
+                        .unwrap();
+
+                    if Self::is_ip_public(&ip).not() {
+                        return Self::with_minikube_proxy(service).await;
+                    }
+
+                    ip
                 } else {
                     // We assume it's either Docker for Mac or passed via wsl integration
                     Ipv4Addr::LOCALHOST.into()
