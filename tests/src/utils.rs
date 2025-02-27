@@ -69,21 +69,34 @@ fn format_time() -> String {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum Application {
-    /// Can run as both HTTP an HTTPS server.
-    ///
-    /// Env:
-    /// * `SERVER_PORT`: port to listen on (defaults to 80)
-    /// * `SERVER_CERT`: path to a PEM file with certificate chain to use
-    /// * `SERVER_KEY`: path to a PEM file with a private key matching the certificate
-    ///
-    /// Pass both `SERVER_CERT` and `SERVER_KEY` to enable HTTPS mode.
     PythonFlaskHTTP,
     PythonFastApiHTTP,
     PythonFastApiHTTPIPv6,
     NodeHTTP,
     NodeHTTP2,
+    /// Can run as both HTTP an HTTPS server, listens on port 80.
+    ///
+    /// Env:
+    /// * `SERVER_TLS_CERT`: path to a PEM file with certificate chain to use
+    /// * `SERVER_TLS_KEY`: path to a PEM file with a private key matching the certificate
+    ///
+    /// Pass both `SERVER_CERT` and `SERVER_KEY` to enable HTTPS mode.
     Go21HTTP,
+    /// Can run as both HTTP an HTTPS server, listens on port 80.
+    ///
+    /// Env:
+    /// * `SERVER_TLS_CERT`: path to a PEM file with certificate chain to use
+    /// * `SERVER_TLS_KEY`: path to a PEM file with a private key matching the certificate
+    ///
+    /// Pass both `SERVER_CERT` and `SERVER_KEY` to enable HTTPS mode.
     Go22HTTP,
+    /// Can run as both HTTP an HTTPS server, listens on port 80.
+    ///
+    /// Env:
+    /// * `SERVER_TLS_CERT`: path to a PEM file with certificate chain to use
+    /// * `SERVER_TLS_KEY`: path to a PEM file with a private key matching the certificate
+    ///
+    /// Pass both `SERVER_CERT` and `SERVER_KEY` to enable HTTPS mode.
     Go23HTTP,
     CurlToKubeApi,
     CurlToKubeApiOverIpv6,
