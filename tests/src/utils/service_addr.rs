@@ -69,7 +69,12 @@ impl TestServiceAddr {
         let mut line = String::new();
         reader.read_line(&mut line).await.unwrap();
 
-        let addr = line.trim().parse::<SocketAddr>().unwrap();
+        let addr = line.trim().parse::<SocketAddr>().unwrap_or_else(|error| {
+            panic!(
+                "invalid socket addr returned from `minikube service --url` ({}): {error}",
+                line.trim()
+            )
+        });
 
         child.stdout.replace(reader.into_inner());
 
