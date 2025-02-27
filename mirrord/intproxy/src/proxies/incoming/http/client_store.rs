@@ -294,18 +294,26 @@ async fn cleanup_task(store: ClientStore, idle_client_timeout: Duration) {
 
 #[cfg(test)]
 mod test {
-    use std::{convert::Infallible, time::Duration};
+    use std::{convert::Infallible, net::SocketAddr, sync::Arc, time::Duration};
 
     use bytes::Bytes;
     use http_body_util::Empty;
     use hyper::{
-        body::Incoming, server::conn::http1, service::service_fn, Request, Response, Version,
+        body::Incoming, server::conn::http1, service::service_fn, Method, Request, Response,
+        Version,
     };
     use hyper_util::rt::TokioIo;
-    use mirrord_protocol::tcp::HttpRequestTransportType;
-    use tokio::{net::TcpListener, time};
+    use mirrord_protocol::tcp::{HttpRequest, HttpRequestTransportType, InternalHttpRequest};
+    use rcgen::{
+        BasicConstraints, CertificateParams, CertifiedKey, DnType, DnValue, IsCa, KeyPair,
+        KeyUsagePurpose,
+    };
+    use rustls::ServerConfig;
+    use tokio::{io::AsyncReadExt, net::TcpListener, time};
+    use tokio_rustls::TlsAcceptor;
 
     use super::ClientStore;
+    use crate::proxies::incoming::http::StreamingBody;
 
     /// Verifies that [`ClientStore`] cleans up unused connections.
     #[tokio::test]
@@ -342,5 +350,103 @@ mod test {
         time::sleep(Duration::from_millis(100)).await;
 
         assert!(client_store.clients.lock().unwrap().is_empty());
+    }
+
+    /// Generates a new [`CertifiedKey`] with a random [`KeyPair`].
+    fn generate_cert(
+        name: &str,
+        issuer: Option<&CertifiedKey>,
+        can_sign_others: bool,
+    ) -> CertifiedKey {
+        let key_pair = KeyPair::generate().unwrap();
+
+        let mut params = CertificateParams::new(vec![name.to_string()]).unwrap();
+        params
+            .distinguished_name
+            .push(DnType::CommonName, DnValue::Utf8String(name.into()));
+
+        if can_sign_others {
+            params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+            params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
+        }
+
+        let cert = match issuer {
+            Some(issuer) => params
+                .signed_by(&key_pair, &issuer.cert, &issuer.key_pair)
+                .unwrap(),
+            None => params.self_signed(&key_pair).unwrap(),
+        };
+
+        CertifiedKey { cert, key_pair }
+    }
+
+    /// Verifies that [`LocalHttpClient`](super::LocalHttpClient) created with the [`ClientStore`]
+    /// does not perform HTTP/1 upgrade to HTTP/2 when the connection is wrapped in TLS and ALPN
+    /// already handles the upgrade.
+    #[tokio::test]
+    async fn no_http1_upgrade_after_alpn_upgrade() {
+        let _ = rustls::crypto::CryptoProvider::install_default(
+            rustls::crypto::aws_lc_rs::default_provider(),
+        );
+
+        let acceptor = {
+            let issuer = generate_cert("issuer", None, true);
+            let server = generate_cert("server", Some(&issuer), false);
+
+            let mut config = ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(
+                    vec![server.cert.into(), issuer.cert.into()],
+                    server.key_pair.serialize_der().try_into().unwrap(),
+                )
+                .unwrap();
+            config.alpn_protocols = vec![b"h2".into()];
+            TlsAcceptor::from(Arc::new(config))
+        };
+
+        let request = HttpRequest {
+            request_id: 0,
+            connection_id: 0,
+            port: 443,
+            internal_request: InternalHttpRequest {
+                method: Method::GET,
+                uri: "https://well.com".parse().unwrap(),
+                headers: Default::default(),
+                version: Version::HTTP_2,
+                body: StreamingBody::default(),
+            },
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let client_store = ClientStore::new_with_timeout(Duration::ZERO, Default::default());
+
+            let mut client = client_store
+                .make_client(
+                    addr,
+                    request.internal_request.version,
+                    &HttpRequestTransportType::Tls {
+                        alpn_protocol: Some(b"h2".into()),
+                        server_name: None,
+                    },
+                    &request.internal_request.uri,
+                )
+                .await
+                .unwrap();
+
+            let _ = client.send_request(request).await;
+        });
+
+        let (conn, _) = listener.accept().await.unwrap();
+        let mut conn = acceptor.accept(conn).await.unwrap();
+        assert_eq!(conn.get_ref().1.alpn_protocol(), Some(b"h2".as_slice()));
+
+        let mut first_bytes = [0_u8; 14];
+        conn.read_exact(&mut first_bytes).await.unwrap();
+        assert_eq!(first_bytes.as_slice(), b"PRI * HTTP/2.0".as_slice());
     }
 }
