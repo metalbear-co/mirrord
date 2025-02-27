@@ -74,7 +74,7 @@ pub enum Application {
     PythonFastApiHTTPIPv6,
     NodeHTTP,
     NodeHTTP2,
-    /// Can run as both HTTP an HTTPS server, listens on port 80.
+    /// Can run as both HTTP and HTTPS server, listens on port 80.
     ///
     /// Env:
     /// * `SERVER_TLS_CERT`: path to a PEM file with certificate chain to use
@@ -82,7 +82,7 @@ pub enum Application {
     ///
     /// Pass both `SERVER_CERT` and `SERVER_KEY` to enable HTTPS mode.
     Go21HTTP,
-    /// Can run as both HTTP an HTTPS server, listens on port 80.
+    /// Can run as both HTTP and HTTPS server, listens on port 80.
     ///
     /// Env:
     /// * `SERVER_TLS_CERT`: path to a PEM file with certificate chain to use
@@ -90,7 +90,7 @@ pub enum Application {
     ///
     /// Pass both `SERVER_CERT` and `SERVER_KEY` to enable HTTPS mode.
     Go22HTTP,
-    /// Can run as both HTTP an HTTPS server, listens on port 80.
+    /// Can run as both HTTP and HTTPS server, listens on port 80.
     ///
     /// Env:
     /// * `SERVER_TLS_CERT`: path to a PEM file with certificate chain to use
