@@ -127,9 +127,13 @@ impl TestServiceAddr {
             .into_iter()
             .filter_map(|pod| pod.status)
             .filter_map(|status| status.host_ip)
-            .filter_map(|ip| ip.parse::<IpAddr>().ok())
-            .filter(Self::is_ip_public)
-            .next();
+            .filter_map(|ip| {
+                println!(
+                    "FOUND HOST IP OF A SERVICE `{service_namespace}/{service_name}` POD: {ip}"
+                );
+                ip.parse::<IpAddr>().ok()
+            })
+            .find(Self::is_ip_public);
 
         let ip = match pod_ip {
             Some(ip) => ip,
@@ -137,6 +141,8 @@ impl TestServiceAddr {
                 if (cfg!(target_os = "linux") && !wsl::is_wsl())
                     || std::env::var("USE_MINIKUBE").is_ok()
                 {
+                    println!("NO HOST WITH PUBLIC IP FOUND, TRYING `minikube ip`");
+
                     let output = Command::new("minikube").arg("ip").output().await.unwrap();
                     assert!(output.status.success());
 
@@ -147,11 +153,13 @@ impl TestServiceAddr {
                         .unwrap();
 
                     if Self::is_ip_public(&ip).not() {
+                        println!("MINIKUBE IP IS NOT PUBLIC, TRYING `minikube service --url`");
                         return Self::with_minikube_proxy(service).await;
                     }
 
                     ip
                 } else {
+                    println!("ASSUMING NO MINIKUBE, USING LOCALHOST AS HOST IP");
                     // We assume it's either Docker for Mac or passed via wsl integration
                     Ipv4Addr::LOCALHOST.into()
                 }
@@ -160,14 +168,10 @@ impl TestServiceAddr {
 
         let port = service
             .spec
-            .as_ref()
-            .unwrap()
-            .ports
-            .as_ref()
-            .unwrap()
             .iter()
-            .filter_map(|port| port.node_port)
-            .next()
+            .flat_map(|service| &service.ports)
+            .flatten()
+            .find_map(|port| port.node_port)
             .unwrap();
 
         let addr = SocketAddr::new(ip, port.try_into().unwrap());
