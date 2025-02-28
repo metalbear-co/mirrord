@@ -1,6 +1,7 @@
 #![feature(let_chains)]
 #![feature(try_blocks)]
 #![feature(iter_intersperse)]
+#![feature(iterator_try_reduce)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 

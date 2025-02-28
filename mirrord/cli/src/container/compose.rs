@@ -1,7 +1,6 @@
 use std::{
     fmt::Debug,
-    fs::File,
-    io::{BufReader, Write},
+    io::Write,
     net::SocketAddr,
     ops::Not,
     path::{Path, PathBuf},
@@ -23,7 +22,7 @@ use service::ServiceInfo;
 use steps::*;
 use tempfile::NamedTempFile;
 use tokio::process::Command;
-use tracing::{instrument::WithSubscriber, Level};
+use tracing::Level;
 
 use super::{create_temp_layer_config, prepare_tls_certs_for_container};
 use crate::{
@@ -468,7 +467,7 @@ impl ComposeRunner<PrepareCompose> {
     pub(super) async fn make_temp_compose_file(self) -> ComposeResult<ComposeRunner<RunCompose>> {
         use docker_compose_types::{Port, Ports, PublishedPort, Service, Volumes};
 
-        let mut compose = self.read_user_compose_file()?;
+        let mut compose = self.read_user_compose_file().await?;
         tracing::debug!(?compose, "User compose file.");
 
         let Self {
@@ -494,8 +493,8 @@ impl ComposeRunner<PrepareCompose> {
             .transpose()?
             .unwrap_or(8888);
 
-        // Ports::Short by default, so build it as `Ports::Long`.
-        let mut user_ports = Ports::Long(Default::default());
+        // `Ports::Short` by default, so build it as `Ports::Long`.
+        let mut sidecar_ports = Ports::Long(Default::default());
 
         // TODO(alex) [high] [#5]: Abstract this as a builder-like typestate-y thing, since there's
         // some finnickyness.
@@ -503,93 +502,60 @@ impl ComposeRunner<PrepareCompose> {
             .services
             .0
             .iter_mut()
-            .filter_map(|(n, s)| s.as_mut().zip(Some(n)))
+            .filter_map(|(name, service)| service.as_mut().zip(Some(name)))
         {
-            let ports = ServiceComposer::modify(service, &user_service_info).reset_conflicts();
+            let user_service_ports =
+                ServiceComposer::modify(service, &user_service_info).reset_conflicts();
 
-            match (ports, &mut user_ports) {
-                (Ports::Short(items), Ports::Long(user)) => {
-                    for (published, target) in items.into_iter().filter_map(|port| {
-                        // TODO(alex) [high] [#6]: Parsing ports is hell, we can't just default here
-                        // since there are more fields, need to improve parsing.
-                        let port = port.split_terminator(":").collect::<Vec<_>>();
-                        let published = port.first().map(|p| p.to_string())?;
-                        let target = port.last().map(|p| p.to_string())?;
+            match (&mut sidecar_ports, user_service_ports) {
+                (Ports::Long(ports), Ports::Long(current)) => ports.extend(current),
+                _ => {
+                    unreachable!("BUG! `compose config` converts ports to long syntax!")
+                }
+            };
+        }
 
-                        Some((published, target))
-                    }) {
-                        let long_port = Port {
-                            target: target.parse()?,
+        let mirrord_sidecar_service = Service {
+            image: Some("ghcr.io/metalbear-co/mirrord-cli:3.133.1".into()),
+            command: Some(docker_compose_types::Command::Simple(
+                "mirrord intproxy --port 8888".into(),
+            )),
+            ports: {
+                match &mut sidecar_ports {
+                    Ports::Long(ports) => {
+                        ports.push(Port {
+                            target: 5000,
                             host_ip: Some("0.0.0.0".to_owned()),
-                            published: Some(PublishedPort::Single(published.parse()?)),
+                            published: Some(PublishedPort::Single(8000)),
                             protocol: Some("tcp".to_owned()),
                             mode: Some("ingress".to_owned()),
-                        };
-
-                        user.push(long_port);
+                        });
                     }
+                    _ => unreachable!("BUG! `compose config` converts ports to long syntax!"),
                 }
-                (Ports::Long(items), Ports::Long(user)) => user.extend(items),
-                _ => {
-                    unreachable!("BUG! Our ports are always started as `Ports::Long`!");
-                }
-            }
-        }
 
-        let mut mirrord_sidecar_service: Service = serde_yaml::from_str(&format!(
-            r#"
-                image: ghcr.io/metalbear-co/mirrord-cli:3.133.1
-                command: mirrord intproxy --port 8888
-                ports:
-                  - "8000:5000"
-            "#
-        ))?;
-
-        match (&mut mirrord_sidecar_service.ports, user_ports) {
-            (Ports::Short(_), Ports::Long(user_ports)) => {
-                let long_sidecar_port = Port {
-                    target: 5000,
-                    host_ip: Some("0.0.0.0".to_owned()),
-                    published: Some(PublishedPort::Single(8000)),
-                    protocol: Some("tcp".to_owned()),
-                    mode: Some("ingress".to_owned()),
-                };
-
-                let mut ports = vec![long_sidecar_port];
-                ports.extend(user_ports);
-
-                mirrord_sidecar_service.ports = Ports::Long(ports);
-            }
-            _ => unreachable!(
-                "BUG! We set the `ports` using the short syntax,\
-                and user ports are converted to `Ports::Long`!"
-            ),
-        }
-
-        match &mut mirrord_sidecar_service.environment {
-            docker_compose_types::Environment::List(items) => items.extend(
+                sidecar_ports
+            },
+            environment: {
+                docker_compose_types::Environment::List(
+                    sidecar_info
+                        .env_vars
+                        .into_iter()
+                        // TODO(alex) [mid] [#4]: Remove this.
+                        .filter(|(k, _)| !k.contains("LOCALSTACK"))
+                        .map(|(k, v)| format!("{k}={v}"))
+                        .collect(),
+                )
+            },
+            volumes: {
                 sidecar_info
-                    .env_vars
+                    .volumes
                     .iter()
-                    // TODO(alex) [mid] [#4]: Remove this.
-                    .filter(|(k, _)| !k.contains("LOCALSTACK"))
-                    .map(|(k, v)| format!("{k}={v}")),
-            ),
-            _ => unreachable!("BUG! `environment` defaults to using the short syntax!"),
-        }
-
-        // TODO(alex) [high] [#5]: I think file ops/volumes are not working properly.
-        // `java.lang.Exception: Path /data/events.jsonl.gz does not exist, but these files do:`
-        // I'm not sure it's volume related, the volume is mounted relative path with `./data`.
-        //
-        // Also name resolution doesn't work properly.
-
-        mirrord_sidecar_service.volumes.extend(
-            sidecar_info
-                .volumes
-                .iter()
-                .map(|(k, v)| Volumes::Simple(format!("{k}:{v}"))),
-        );
+                    .map(|(k, v)| Volumes::Simple(format!("{k}:{v}")))
+                    .collect()
+            },
+            ..Default::default()
+        };
 
         compose.services.0.insert(
             MIRRORD_COMPOSE_SIDECAR_SERVICE.into(),
@@ -619,7 +585,7 @@ impl ComposeRunner<PrepareCompose> {
     }
 
     #[tracing::instrument(level = Level::DEBUG, skip(self), ret, err)]
-    fn read_user_compose_file(&self) -> ComposeResult<docker_compose_types::Compose> {
+    async fn read_user_compose_file(&self) -> ComposeResult<docker_compose_types::Compose> {
         self.progress.info("Preparing mirrord `compose.yaml`.");
 
         let compose_file_path = self
@@ -633,10 +599,17 @@ impl ComposeRunner<PrepareCompose> {
 
         tracing::debug!(?compose_file_path);
 
-        let user_compose_file = File::open(compose_file_path)?;
-        let reader = BufReader::new(user_compose_file);
+        let compose_config = Command::new(self.runtime.to_string())
+            .args(vec![
+                "compose",
+                "--file",
+                &compose_file_path.to_string_lossy(),
+                "config",
+            ])
+            .output()
+            .await?;
 
-        Ok(serde_yaml::from_reader(reader)?)
+        Ok(serde_yaml::from_slice(&compose_config.stdout)?)
     }
 }
 
