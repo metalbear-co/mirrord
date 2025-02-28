@@ -8,7 +8,7 @@ use crate::{error::ContainerError, CliError};
 #[derive(Debug, Error)]
 pub(crate) enum ComposeError {
     #[error(transparent)]
-    CLI(#[from] CliError),
+    Cli(#[from] CliError),
 
     #[error(transparent)]
     Container(#[from] ContainerError),

@@ -2,7 +2,6 @@ use std::{
     fmt::Debug,
     io::Write,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    ops::Not,
     path::{Path, PathBuf},
     process::Stdio,
 };
@@ -466,8 +465,7 @@ impl ComposeRunner<PrepareCompose> {
             .runtime_args
             .iter()
             .inspect(|arg| tracing::debug!(?arg))
-            .skip_while(|arg| arg.contains("--file").not() || arg.contains("-f").not())
-            .next()
+            .find(|arg| arg.contains("--file") || arg.contains("-f"))
             .map(|compose_file_path| PathBuf::from(&compose_file_path))
             .unwrap_or_else(|| PathBuf::from("./compose.yaml"));
 
