@@ -11,7 +11,7 @@ mod main {
     use std::{
         env,
         ffi::OsStr,
-        io::{self, BufRead, ErrorKind::AlreadyExists},
+        io::{self, BufRead},
         os::{macos::fs::MetadataExt, unix::fs::PermissionsExt},
         path::{Path, PathBuf},
         str::from_utf8,
@@ -304,18 +304,11 @@ mod main {
             // Not stopping the SIP-patching as most binaries don't need the rpath fix.
         }
 
+        codesign::sign(&temp_binary, &output)?;
+
         // Give the new file the same permissions as the old file.
         trace!("Setting permissions for {temp_binary:?}");
-        std::fs::set_permissions(&temp_binary, std::fs::metadata(path)?.permissions())?;
-        trace!("Signing {temp_binary:?}");
-        codesign::sign(&temp_binary)?;
-
-        // Move the temp binary into its final location if no other process/thread already did.
-        if let Err(err) = temp_binary.persist_noclobber(&output) {
-            if err.error.kind() != AlreadyExists {
-                return Err(SipError::BinaryMoveFailed(err.error));
-            }
-        }
+        std::fs::set_permissions(&output, std::fs::metadata(path)?.permissions())?;
         Ok(output)
     }
 

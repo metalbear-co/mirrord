@@ -17,12 +17,12 @@ edition.workspace = true
 workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# we don't like upstream apple-platform-rs because it depends on RSA which has an open CVE.
-apple-codesign = { git = "https://github.com/metalbear-co/apple-platform-rs-mini", version = "0.27", default-features = false }
+apple-codesign = { version = "0.29", default-features = false }
 object = "0.36"
 tempfile.workspace = true
 
 once_cell = "1"
+
 tracing.workspace = true
 thiserror.workspace = true
 which.workspace = true
