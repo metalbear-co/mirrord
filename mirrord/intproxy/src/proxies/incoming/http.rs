@@ -38,7 +38,7 @@ pub struct LocalHttpClient {
 
 impl LocalHttpClient {
     /// Send the given `request` to the user application's HTTP server.
-    #[tracing::instrument(level = Level::DEBUG, err(level = Level::WARN), ret)]
+    #[tracing::instrument(level = Level::TRACE, err(level = Level::TRACE), ret)]
     pub async fn send_request(
         &mut self,
         request: HttpRequest<StreamingBody>,

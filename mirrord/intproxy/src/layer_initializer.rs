@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, net::SocketAddr};
 
 use mirrord_intproxy_protocol::{
     codec::{AsyncDecoder, AsyncEncoder, CodecError},
@@ -6,7 +6,7 @@ use mirrord_intproxy_protocol::{
 };
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
-use tracing::{info, Level};
+use tracing::Level;
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
@@ -16,7 +16,7 @@ use crate::{
 
 #[derive(Error, Debug)]
 pub enum LayerInitializerError {
-    #[error("failed to accept layer connection: {0}")]
+    #[error("failed to accept a layer connection: {0}")]
     Accept(io::Error),
     #[error("{0}")]
     Codec(#[from] CodecError),
@@ -42,11 +42,12 @@ impl LayerInitializer {
         }
     }
 
-    /// Initialize connection with the new layer, assigning fresh [`LayerId`].
-    #[tracing::instrument(level = Level::TRACE, ret)]
+    /// Initialize connection with the new layer, assigning a fresh [`LayerId`].
+    #[tracing::instrument(level = Level::INFO, skip(stream), ret, err)]
     async fn handle_new_stream(
         &mut self,
         stream: TcpStream,
+        layer_address: SocketAddr,
     ) -> Result<NewLayer, LayerInitializerError> {
         let mut decoder: AsyncDecoder<LocalMessage<LayerToProxyMessage>, _> =
             AsyncDecoder::new(stream);
@@ -60,10 +61,13 @@ impl LayerInitializer {
 
         let parent_id = match msg.inner {
             LayerToProxyMessage::NewSession(NewSessionRequest::New(process_info)) => {
-                info!(?process_info, "new session");
+                tracing::info!(?process_info, "New session");
                 None
             }
-            LayerToProxyMessage::NewSession(NewSessionRequest::Forked(parent)) => Some(parent),
+            LayerToProxyMessage::NewSession(NewSessionRequest::Forked(parent)) => {
+                tracing::info!(?parent, "Forked session");
+                Some(parent)
+            }
             other => return Err(LayerInitializerError::UnexpectedMessage(other)),
         };
 
@@ -92,23 +96,19 @@ impl BackgroundTask for LayerInitializer {
     type MessageIn = ();
     type MessageOut = ProxyMessage;
 
+    #[tracing::instrument(level = Level::INFO, name = "layer_initializer_main_loop", skip_all, ret, err)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         loop {
             tokio::select! {
                 None = message_bus.recv() => {
-                    tracing::trace!("message bus closed, exiting");
+                    tracing::debug!("Message bus closed, exiting");
                     break Ok(())
                 },
 
                 res = self.listener.accept() => {
-                    let (stream, peer) = res.map_err(LayerInitializerError::Accept)?;
-                    match self.handle_new_stream(stream).await {
-                        Ok(new_layer) => message_bus.send(new_layer).await,
-                        Err(e) => {
-                            tracing::error!("failed to initialize connection with peer {peer}: {e}");
-                            break Err(e)
-                        }
-                    }
+                    let (stream, layer_address) = res.map_err(LayerInitializerError::Accept)?;
+                    let new_layer = self.handle_new_stream(stream, layer_address).await?;
+                    message_bus.send(new_layer).await;
                 },
             }
         }

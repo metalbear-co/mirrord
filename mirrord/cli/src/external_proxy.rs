@@ -47,7 +47,6 @@ use crate::{
     error::{CliResult, ExternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     internal_proxy::connect_and_ping,
-    logging::init_extproxy_tracing_registry,
     util::{create_listen_socket, detach_io},
 };
 
@@ -59,11 +58,14 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
     Ok(())
 }
 
-pub async fn proxy(listen_port: u16, watch: drain::Watch) -> CliResult<()> {
-    let config = LayerConfig::recalculate_from_env()?;
-
-    init_extproxy_tracing_registry(&config)?;
-    tracing::info!(?config, "external_proxy starting");
+#[tracing::instrument(level = Level::INFO, skip_all, err)]
+pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -> CliResult<()> {
+    tracing::info!(
+        ?config,
+        listen_port,
+        version = env!("CARGO_PKG_VERSION"),
+        "Starting mirrord-extproxy",
+    );
 
     let agent_connect_info = std::env::var(AGENT_CONNECT_INFO_ENV_KEY)
         .ok()

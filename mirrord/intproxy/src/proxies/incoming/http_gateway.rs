@@ -1,7 +1,6 @@
 use std::{
     collections::VecDeque,
     convert::Infallible,
-    error::Error,
     fmt,
     net::SocketAddr,
     ops::ControlFlow,
@@ -83,6 +82,7 @@ impl HttpGatewayTask {
     ///   [`MessageBus`] (we can still retry the request)
     /// * [`ControlFlow::Break`] if we failed after sending the [`ChunkedResponse::Start`] message
     /// * [`ControlFlow::Continue`] if we succeeded
+    #[tracing::instrument(level = Level::DEBUG, skip_all, ret, err(level = Level::WARN))]
     async fn handle_response_chunked(
         &self,
         parts: Parts,
@@ -100,7 +100,7 @@ impl HttpGatewayTask {
                 .map(InternalHttpBodyFrame::from)
                 .collect::<VecDeque<_>>();
 
-            tracing::trace!(
+            tracing::debug!(
                 ?ready_frames,
                 "All response body frames were instantly ready, sending full response"
             );
@@ -183,7 +183,7 @@ impl HttpGatewayTask {
                 // response. We already send the request head to the agent.
                 Err(error) => {
                     tracing::warn!(
-                        error = ?ErrorWithSources(&error),
+                        %error,
                         elapsed_ms = start.elapsed().as_millis(),
                         gateway = ?self,
                         "Failed to read next response body frames",
@@ -211,7 +211,7 @@ impl HttpGatewayTask {
     /// [`Err`] is handled in the caller and, if we run out of send attempts, converted to an error
     /// response. Because of this, this function should not return any error that happened after
     /// sending [`ChunkedResponse::Start`]. The agent would get a duplicated response.
-    #[tracing::instrument(level = Level::TRACE, skip_all, err(level = Level::WARN))]
+    #[tracing::instrument(level = Level::DEBUG, skip_all, err(level = Level::WARN))]
     async fn send_attempt(&self, message_bus: &mut MessageBus<Self>) -> Result<(), LocalHttpError> {
         let mut client = self
             .client_store
@@ -224,7 +224,7 @@ impl HttpGatewayTask {
             .await?;
         let mut response = client.send_request(self.request.clone()).await?;
         let on_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS).then(|| {
-            tracing::trace!("Detected an HTTP upgrade");
+            tracing::debug!("Detected an HTTP upgrade");
             hyper::upgrade::on(&mut response)
         });
         let (parts, body) = response.into_parts();
@@ -238,7 +238,7 @@ impl HttpGatewayTask {
                     .map_err(LocalHttpError::ReadBodyFailed)?
                     .to_bytes()
                     .into();
-                tracing::trace!(
+                tracing::debug!(
                     body_len = body.len(),
                     elapsed_ms = start.elapsed().as_millis(),
                     "Collected the whole response body",
@@ -264,7 +264,7 @@ impl HttpGatewayTask {
                 let body = InternalHttpBody::from_body(body)
                     .await
                     .map_err(LocalHttpError::ReadBodyFailed)?;
-                tracing::trace!(
+                tracing::debug!(
                     ?body,
                     elapsed_ms = start.elapsed().as_millis(),
                     "Collected the whole response body",
@@ -311,7 +311,11 @@ impl BackgroundTask for HttpGatewayTask {
     type MessageIn = Infallible;
     type MessageOut = InProxyTaskMessage;
 
-    #[tracing::instrument(level = Level::TRACE, name = "http_gateway_task_main_loop", skip(message_bus))]
+    #[tracing::instrument(
+        level = Level::INFO, name = "http_gateway_task_main_loop",
+        skip(message_bus),
+        ret, err(level = Level::WARN),
+    )]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         // Will return 9 backoffs: 50ms, 100ms, 200ms, 400ms, 500ms, 500ms, ...
         let mut backoffs = ExponentialBackoff::from_millis(2)
@@ -324,7 +328,7 @@ impl BackgroundTask for HttpGatewayTask {
         let mut attempt = 0;
         let error = loop {
             attempt += 1;
-            tracing::trace!(attempt, "Starting send attempt");
+            tracing::debug!(attempt, "Starting send attempt");
             match guard.cancel_on_close(self.send_attempt(message_bus)).await {
                 None | Some(Ok(())) => return Ok(()),
                 Some(Err(error)) => {
@@ -334,7 +338,7 @@ impl BackgroundTask for HttpGatewayTask {
                         tracing::warn!(
                             gateway = ?self,
                             failed_attempts = attempt,
-                            error = ?ErrorWithSources(&error),
+                            %error,
                             "Failed to send an HTTP request",
                         );
 
@@ -344,7 +348,7 @@ impl BackgroundTask for HttpGatewayTask {
                     tracing::trace!(
                         backoff_ms = backoff.as_millis(),
                         failed_attempts = attempt,
-                        error = ?ErrorWithSources(&error),
+                        %error,
                         "Trying again after backoff",
                     );
 
@@ -368,27 +372,6 @@ impl BackgroundTask for HttpGatewayTask {
     }
 }
 
-/// Helper struct for tracing an [`Error`] along with all its sources,
-/// down to the root cause.
-///
-/// Might help when inspecting [`hyper`] errors.
-struct ErrorWithSources<'a>(&'a dyn Error);
-
-impl fmt::Debug for ErrorWithSources<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut list = f.debug_list();
-        list.entry(&self.0);
-
-        let mut source = self.0.source();
-        while let Some(error) = source {
-            list.entry(&error);
-            source = error.source();
-        }
-
-        list.finish()
-    }
-}
-
 #[cfg(test)]
 mod test {
     use std::{io, sync::Arc};
@@ -404,7 +387,10 @@ mod test {
         Method, Request, Response, StatusCode, Version,
     };
     use hyper_util::rt::TokioIo;
-    use mirrord_protocol::tcp::{HttpRequest, InternalHttpRequest};
+    use mirrord_protocol::{
+        tcp::{HttpRequest, InternalHttpRequest},
+        ConnectionId,
+    };
     use rstest::rstest;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
@@ -524,7 +510,7 @@ mod test {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server_task = task::spawn(dummy_echo_server(listener, shutdown_rx));
 
-        let mut tasks: BackgroundTasks<u32, InProxyTaskMessage, InProxyTaskError> =
+        let mut tasks: BackgroundTasks<ConnectionId, InProxyTaskMessage, InProxyTaskError> =
             Default::default();
         let _gateway = {
             let request = HttpRequest {
@@ -593,14 +579,18 @@ mod test {
             InProxyTaskMessage::Http(HttpOut::Upgraded(on_upgrade)) => on_upgrade,
             other => panic!("unexpected task update: {other:?}"),
         };
-        let update = tasks.next().await.expect("no task result").1;
-        match update {
+        let update = tasks.next().await.expect("no task result");
+        match update.1 {
             TaskUpdate::Finished(Ok(())) => {}
             other => panic!("unexpected task update: {other:?}"),
         }
 
         let proxy = tasks.register(
-            TcpProxyTask::new(LocalTcpConnection::AfterUpgrade(on_upgrade), false),
+            TcpProxyTask::new(
+                update.0,
+                LocalTcpConnection::AfterUpgrade(on_upgrade),
+                false,
+            ),
             1,
             8,
         );

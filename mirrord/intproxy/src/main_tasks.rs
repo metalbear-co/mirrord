@@ -119,7 +119,7 @@ impl fmt::Display for MainTaskId {
             Self::OutgoingProxy => f.write_str("OUTGOING_PROXY"),
             Self::PingPong => f.write_str("PING_PONG"),
             Self::AgentConnection => f.write_str("AGENT_CONNECTION"),
-            Self::LayerConnection(id) => write!(f, "LAYER_CONNECTION {}", id.0),
+            Self::LayerConnection(id) => write!(f, "LAYER_CONNECTION_{}", id.0),
             Self::IncomingProxy => f.write_str("INCOMING_PROXY"),
             Self::FilesProxy => f.write_str("FILES_PROXY"),
         }

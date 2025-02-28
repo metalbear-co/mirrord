@@ -24,7 +24,6 @@ use proxies::{
 };
 use semver::Version;
 use tokio::{net::TcpListener, time};
-use tracing::Level;
 
 use crate::{
     agent_conn::AgentConnection,
@@ -165,29 +164,37 @@ impl IntProxy {
         loop {
             tokio::select! {
                 Some((task_id, task_update)) = self.background_tasks.next() => {
+                    tracing::trace!(
+                        %task_id,
+                        ?task_update,
+                        "Received a task update",
+                    );
+
                     self.handle_task_update(task_id, task_update).await?;
                 }
 
                 _ = time::sleep(first_timeout), if !self.any_connection_accepted => {
-                    if !self.any_connection_accepted {
-                        return Err(IntProxyError::ConnectionAcceptTimeout);
-                    }
+                    return Err(IntProxyError::ConnectionAcceptTimeout);
                 },
 
                 _ = time::sleep(idle_timeout), if self.any_connection_accepted && self.task_txs.layers.is_empty() => {
-                    if self.task_txs.layers.is_empty() {
-                        tracing::trace!("intproxy timeout, no active connections. Exiting.");
-                        break;
-                    }
+                    tracing::info!("Reached the timeout on no active layer connections");
+                    break;
                 },
             }
         }
 
         std::mem::drop(self.task_txs);
+
+        tracing::info!("Collecting background task results before exiting");
         let results = self.background_tasks.results().await;
 
-        for (task_id, res) in results {
-            tracing::trace!("{task_id} result: {res:?}");
+        for (task_id, result) in results {
+            tracing::trace!(
+                %task_id,
+                ?result,
+                "Collected a background task result",
+            );
         }
 
         Ok(())
@@ -203,7 +210,10 @@ impl IntProxy {
                 // We are in reconnect state so should queue this message.
                 self.reconnect_task_queue
                     .as_mut()
-                    .expect("reconnect_task_queue should contain value when in reconnect state")
+                    .unwrap_or_else(|| {
+                        tracing::error!("Unexpected state: reconnect_task_queue should contain a value when the proxy is in reconnect state");
+                        panic!("reconnect_task_queue should contain value when in reconnect state")
+                    })
                     .push_back(msg);
             }
             ProxyMessage::NewLayer(new_layer) => {
@@ -264,7 +274,7 @@ impl IntProxy {
     ) -> Result<(), IntProxyError> {
         match (task_id, update) {
             (MainTaskId::LayerConnection(LayerId(id)), TaskUpdate::Finished(Ok(()))) => {
-                tracing::trace!("layer connection {id} closed");
+                tracing::trace!(layer_id = id, "Layer connection closed");
 
                 let msg = LayerClosed { id: LayerId(id) };
 
@@ -279,20 +289,22 @@ impl IntProxy {
 
                 self.task_txs.layers.remove(&LayerId(id));
             }
+
             (task_id, TaskUpdate::Finished(res)) => match res {
                 Ok(()) => {
-                    tracing::error!("task {task_id} finished unexpectedly");
+                    tracing::error!(%task_id, "One of the main tasks finished unexpectedly");
                     return Err(IntProxyError::TaskExit(task_id));
                 }
-                Err(TaskError::Error(e)) => {
-                    tracing::error!("task {task_id} failed: {e}");
-                    return Err(e);
+                Err(TaskError::Error(error)) => {
+                    tracing::error!(%task_id, %error, "One of the main tasks failed");
+                    return Err(error);
                 }
                 Err(TaskError::Panic) => {
-                    tracing::error!("task {task_id} panicked");
+                    tracing::error!(%task_id, "One of the main tasks panicked");
                     return Err(IntProxyError::TaskPanic(task_id));
                 }
             },
+
             (_, TaskUpdate::Message(msg)) => self.handle(msg).await?,
         }
 
@@ -301,7 +313,6 @@ impl IntProxy {
 
     /// Routes most messages from the agent to the correct background task.
     /// Some messages are handled here.
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     async fn handle_agent_message(&mut self, message: DaemonMessage) -> Result<(), IntProxyError> {
         match message {
             DaemonMessage::Pong => {
@@ -372,9 +383,18 @@ impl IntProxy {
                     .await;
             }
             DaemonMessage::LogMessage(log) => match log.level {
-                LogLevel::Error => tracing::error!("agent log: {}", log.message),
-                LogLevel::Warn => tracing::warn!("agent log: {}", log.message),
-                LogLevel::Info => tracing::info!("agent log: {}", log.message),
+                LogLevel::Error => tracing::error!(
+                    message = log.message,
+                    "Received a log message from the agent"
+                ),
+                LogLevel::Warn => tracing::warn!(
+                    message = log.message,
+                    "Received a log message from the agent"
+                ),
+                LogLevel::Info => tracing::info!(
+                    message = log.message,
+                    "Received a log message from the agent"
+                ),
             },
             DaemonMessage::GetEnvVarsResponse(res) => {
                 self.task_txs
@@ -393,7 +413,6 @@ impl IntProxy {
     }
 
     /// Routes a message from the layer to the correct background task.
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     async fn handle_layer_message(&self, message: FromLayer) -> Result<(), IntProxyError> {
         let FromLayer {
             message_id,
@@ -442,7 +461,6 @@ impl IntProxy {
         Ok(())
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     async fn handle_connection_refresh(
         &mut self,
         kind: ConnectionRefresh,
@@ -468,12 +486,10 @@ impl IntProxy {
                     .await;
             }
             ConnectionRefresh::End => {
-                let Some(task_queue) = self.reconnect_task_queue.take() else {
-                    return Err(IntProxyError::AgentFailed(
-                        "unexpected state: agent reconnected finished without correctly initialzing a reconnect"
-                            .into(),
-                    ));
-                };
+                let task_queue = self.reconnect_task_queue.take().unwrap_or_else(|| {
+                    tracing::error!("Unexpected state: agent reconnect finished without correctly initializing a reconnect");
+                    panic!("agent reconnect finished without correctly initializing a reconnect");
+                });
 
                 self.task_txs
                     .agent
@@ -499,12 +515,12 @@ impl IntProxy {
                     for msg in task_queue {
                         tracing::debug!(?msg, "dequeueing message for reconnect");
 
-                        self.handle(msg).await?
+                        self.handle(msg).await?;
                     }
 
                     Ok::<(), IntProxyError>(())
                 })
-                .await?
+                .await?;
             }
         }
 

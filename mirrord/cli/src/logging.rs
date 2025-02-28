@@ -29,26 +29,22 @@ pub async fn init_tracing_registry(
         return Ok(());
     }
 
-    // Proxies initialize tracing independently.
-    if matches!(
-        command,
-        Commands::InternalProxy { .. } | Commands::ExternalProxy { .. }
-    ) {
-        return Ok(());
-    }
-
     let do_init = match command {
-        Commands::ListTargets(_) | Commands::ExtensionExec(_) => {
-            // `ls` and `ext` commands need the errors in json format.
+        // These commands are usually called from the plugins.
+        //
+        // They should log only when explicitly instructed.
+        Commands::ListTargets(_) | Commands::ExtensionExec(_) | Commands::ExtensionContainer(_) => {
+            // The final error has to be in the JSON format.
             let _ = miette::set_hook(Box::new(|_| Box::new(miette::JSONReportHandler::new())));
 
-            // There are situations where even if running "ext" commands that shouldn't log,
-            // we need the logs for debugging issues.
             std::env::var("MIRRORD_FORCE_LOG")
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(false)
         }
+
+        // Proxies initialize tracing independently, after log file setup.
+        Commands::InternalProxy { .. } | Commands::ExternalProxy { .. } => false,
 
         _ => true,
     };
@@ -77,9 +73,14 @@ fn default_logfile_path(prefix: &str) -> PathBuf {
         .expect("now must have some delta from UNIX_EPOCH, it isn't 1970 anymore")
         .as_secs();
 
-    PathBuf::from(format!("/tmp/{prefix}-{timestamp}-{random_name}.log"))
+    let mut path = std::env::temp_dir();
+    path.push(format!("/tmp/{prefix}-{timestamp}-{random_name}.log"));
+    path
 }
 
+/// Initializes mirrord intproxy/extproxy tracing registry.
+///
+/// Fails if the specified log file cannot be opened/created for writing.
 fn init_proxy_tracing_registry(
     log_destination: &Path,
     log_level: Option<&str>,
@@ -97,13 +98,16 @@ fn init_proxy_tracing_registry(
         .map(|log_level| EnvFilter::builder().parse_lossy(log_level))
         .unwrap_or_else(EnvFilter::from_default_env);
 
-    tracing_subscriber::fmt()
-        .with_writer(output_file)
-        .with_ansi(false)
-        .with_env_filter(env_filter)
-        .with_file(true)
-        .with_line_number(true)
-        .pretty()
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_file(true)
+                .with_line_number(true)
+                .with_writer(output_file)
+                .json(),
+        )
+        .with(env_filter)
         .init();
 
     Ok(())
@@ -111,7 +115,8 @@ fn init_proxy_tracing_registry(
 
 pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), InternalProxyError> {
     if !config.internal_proxy.container_mode {
-        // Setting up default logging for intproxy.
+        // When the intproxy does not run in a sidecar container, it logs to file.
+
         let log_destination = config
             .internal_proxy
             .log_destination
@@ -124,6 +129,9 @@ pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), Intern
                 InternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
             })
     } else {
+        // When the intproxy runs in a sidecar container, it logs directly to stderr.
+        // The logs are then piped to the log file on the host.
+
         let env_filter = config
             .internal_proxy
             .log_level
@@ -145,7 +153,6 @@ pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), Intern
 }
 
 pub fn init_extproxy_tracing_registry(config: &LayerConfig) -> Result<(), ExternalProxyError> {
-    // Setting up default logging for extproxy.
     let log_destination = config
         .external_proxy
         .log_destination
