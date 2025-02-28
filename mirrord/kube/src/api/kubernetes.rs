@@ -1,8 +1,7 @@
-use std::ops::Deref;
+use std::ops::{Deref, Not};
 
-use k8s_openapi::{api::core::v1::Namespace, NamespaceResourceScope};
+use k8s_openapi::NamespaceResourceScope;
 use kube::{
-    api::ListParams,
     config::{KubeConfigOptions, Kubeconfig},
     Api, Client, Config, Discovery,
 };
@@ -16,6 +15,7 @@ use mirrord_progress::Progress;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, Level};
 
+use super::container::ContainerConfig;
 use crate::{
     api::{
         container::{
@@ -105,19 +105,19 @@ impl KubernetesAPI {
         &self,
         AgentKubernetesConnectInfo {
             pod_name,
+            pod_namespace,
             agent_port,
-            namespace,
             ..
-        }: AgentKubernetesConnectInfo,
+        }: &AgentKubernetesConnectInfo,
     ) -> Result<tokio::net::TcpStream> {
         use std::{net::IpAddr, time::Duration};
 
         use k8s_openapi::api::core::v1::Pod;
         use tokio::net::TcpStream;
 
-        let pod_api: Api<Pod> = get_k8s_resource_api(&self.client, namespace.as_deref());
+        let pod_api: Api<Pod> = Api::namespaced(self.client.clone(), pod_namespace);
 
-        let pod = pod_api.get(&pod_name).await?;
+        let pod = pod_api.get(pod_name).await?;
 
         let pod_ip = pod
             .status
@@ -133,20 +133,17 @@ impl KubernetesAPI {
 
             tokio::time::timeout(
                 Duration::from_secs(self.agent.startup_timeout),
-                TcpStream::connect((ip, agent_port)),
+                TcpStream::connect((ip, *agent_port)),
             )
             .await
             .map_err(|_| KubeApiError::AgentReadyTimeout)??
         } else {
-            let hostname = match namespace {
-                Some(namespace) => format!("{pod_name}.{namespace}"),
-                None => pod_name,
-            };
+            let hostname = format!("{pod_name}.{pod_namespace}");
             tracing::trace!("connecting to pod {hostname}:{agent_port}");
 
             tokio::time::timeout(
                 Duration::from_secs(self.agent.startup_timeout),
-                TcpStream::connect((hostname.as_str(), agent_port)),
+                TcpStream::connect((hostname.as_str(), *agent_port)),
             )
             .await
             .map_err(|_| KubeApiError::AgentReadyTimeout)??
@@ -169,20 +166,15 @@ impl KubernetesAPI {
         Ok(stream)
     }
 
-    /// # Params
+    /// Prepares params to create an agent.
     ///
-    /// * `config` - if passed, will be checked against cluster setup
-    /// * `tls_cert` - value for [`OPERATOR_CERT`](mirrord_agent_env::envs::OPERATOR_CERT), for
-    ///   creating an agent from the operator. In usage from this repo this is always `None`.
-    /// * `agent_port` - port number on which the agent will listen for client connections. If
-    ///   [`None`] is given, a random high port will be user.
-    #[tracing::instrument(level = "trace", skip(self), ret, err)]
+    /// Unless targetless, fetches [`RuntimeData`] for the given target and fills
+    /// [`ContainerConfig::pod_ips`].
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     pub async fn create_agent_params(
         &self,
         target: &TargetConfig,
-        tls_cert: Option<String>,
-        support_ipv6: bool,
-        agent_port: Option<u16>,
+        mut config: ContainerConfig,
     ) -> Result<(ContainerParams, Option<RuntimeData>), KubeApiError> {
         let runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
             Target::Targetless => None,
@@ -197,36 +189,27 @@ impl KubernetesAPI {
             .map(|runtime_data| runtime_data.pod_ips.clone())
             .filter(|pod_ips| !pod_ips.is_empty());
 
-        let params = ContainerParams::new(tls_cert, pod_ips, support_ipv6, agent_port);
+        config.pod_ips = pod_ips;
 
-        Ok((params, runtime_data))
+        Ok((config.into(), runtime_data))
     }
 
-    /// # Params
+    /// Creates an agent.
     ///
-    /// * `config` - if passed, will be checked against cluster setup
-    /// * `tls_cert` - value for [`OPERATOR_CERT`](mirrord_agent_env::envs::OPERATOR_CERT), for
-    ///   creating an agent from the operator. In usage from this repo this is always `None`.
-    /// * `agent_port` - port number on which the agent will listen for client connections. If
-    ///   [`None`] is given, a random high port will be used.
-    #[tracing::instrument(level = Level::TRACE, skip(self, progress))]
+    /// Unless targetless, fetches [`RuntimeData`] for the given target and fills
+    /// [`ContainerConfig::pod_ips`].
+    #[tracing::instrument(level = "trace", skip(self, progress))]
     pub async fn create_agent<P>(
         &self,
         progress: &mut P,
         target: &TargetConfig,
-        config: Option<&LayerConfig>,
-        tls_cert: Option<String>,
-        agent_port: Option<u16>,
+        config: ContainerConfig,
     ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
     where
         P: Progress + Send + Sync,
     {
-        let support_ipv6 = config
-            .map(|layer_conf| layer_conf.feature.network.ipv6)
-            .unwrap_or_default();
-        let (params, runtime_data) = self
-            .create_agent_params(target, tls_cert, support_ipv6, agent_port)
-            .await?;
+        let (params, runtime_data) = self.create_agent_params(target, config).await?;
+
         if let Some(RuntimeData {
             guessed_container: true,
             container_name,
@@ -239,11 +222,7 @@ impl KubernetesAPI {
         if let Some(mesh) = runtime_data.as_ref().and_then(|data| data.mesh.as_ref()) {
             progress.info(&format!("service mesh detected: {mesh}"));
 
-            let privileged = config
-                .map(|config| config.agent.privileged)
-                .unwrap_or_default();
-
-            if matches!(mesh, MeshVendor::IstioAmbient) && !privileged {
+            if matches!(mesh, MeshVendor::IstioAmbient) && self.agent.privileged.not() {
                 progress.warning(
                     "mirrord detected an ambient Istio service mesh but\
                      the agent is not configured to run in a privileged SecurityContext.\
@@ -301,12 +280,15 @@ impl<T> UnpinStream for T where
 {
 }
 
+/// Provides information necessary to make a connection to a running mirrord agent.
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct AgentKubernetesConnectInfo {
+    /// Name of the pod that hosts the agent container.
     pub pod_name: String,
+    /// Namespace where the pod hosting the agent container lives.
+    pub pod_namespace: String,
+    /// Port on which the agent accepts connections.
     pub agent_port: u16,
-    pub namespace: Option<String>,
-    pub agent_version: Option<String>,
 }
 
 pub async fn create_kube_config<P>(
@@ -354,28 +336,4 @@ where
     } else {
         Api::default_namespaced(client.clone())
     }
-}
-
-/// Get a vector of namespaces from an optional namespace.
-///
-/// If the given namespace is Some, then
-/// fetch its Namespace object, and return a vector only with that.
-/// If the namespace is None - return all namespaces.
-pub async fn get_namespaces(
-    client: &Client,
-    namespace: Option<&str>,
-    lp: &ListParams,
-) -> Result<Vec<Namespace>> {
-    let api: Api<Namespace> = Api::all(client.clone());
-    Ok(if let Some(namespace) = namespace {
-        vec![api.get(namespace).await?]
-    } else {
-        api.list(lp).await?.items
-    })
-}
-
-/// Check if the client can see a given namespace.
-pub async fn namespace_exists_for_client(namespace: &str, client: &Client) -> bool {
-    let api: Api<Namespace> = Api::all(client.clone());
-    api.get(namespace).await.is_ok()
 }

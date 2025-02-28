@@ -5,7 +5,7 @@ use k8s_openapi::api::core::v1::{
 use kube::{
     api::PostParams,
     runtime::{watcher, WatchStreamExt},
-    Client,
+    Api, Client,
 };
 use mirrord_agent_env::{envs, mesh::MeshVendor};
 use mirrord_config::agent::AgentConfig;
@@ -20,7 +20,7 @@ use crate::{
             util::{base_command_line, get_capabilities, wait_for_agent_startup},
             ContainerParams, ContainerVariant,
         },
-        kubernetes::{get_k8s_resource_api, AgentKubernetesConnectInfo},
+        kubernetes::AgentKubernetesConnectInfo,
         runtime::RuntimeData,
     },
     error::{KubeApiError, Result},
@@ -61,7 +61,7 @@ where
     let mut ephemeral_container: KubeEphemeralContainer = variant.as_update();
     debug!("Requesting ephemeral_containers_subresource");
 
-    let pod_api = get_k8s_resource_api(client, runtime_data.pod_namespace.as_deref());
+    let pod_api = Api::namespaced(client.clone(), &runtime_data.pod_namespace);
     let pod: Pod = pod_api.get(&runtime_data.pod_name).await?;
     let container_spec = pod
         .spec
@@ -151,9 +151,8 @@ where
     debug!("container is ready");
     Ok(AgentKubernetesConnectInfo {
         pod_name: runtime_data.pod_name.to_string(),
+        pod_namespace: runtime_data.pod_namespace.clone(),
         agent_port: params.port,
-        namespace: runtime_data.pod_namespace.clone(),
-        agent_version: version,
     })
 }
 

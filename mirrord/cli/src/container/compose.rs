@@ -1,7 +1,7 @@
 use std::{
     fmt::Debug,
     io::Write,
-    net::SocketAddr,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     ops::Not,
     path::{Path, PathBuf},
     process::Stdio,
@@ -174,8 +174,11 @@ impl ComposeRunner<PrepareExternalProxy> {
 
         external_proxy_progress.success(None);
 
-        // TODO(alex) [high]: Prepare the sidecar command, the `compose.yaml` with `depends_on`
-        // added to the user's services, and then `docker compose run`?
+        let intproxy_address = config
+            .internal_proxy
+            .connect_tcp
+            .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8888));
+
         Ok(ComposeRunner {
             progress,
             runtime,
@@ -185,6 +188,7 @@ impl ComposeRunner<PrepareExternalProxy> {
                 external_proxy_tls_guards,
                 analytics,
                 layer_config_file,
+                intproxy_address,
                 external_proxy,
                 config,
             },
@@ -205,6 +209,7 @@ impl ComposeRunner<PrepareServices> {
                     external_proxy_tls_guards,
                     analytics,
                     config,
+                    intproxy_address,
                     layer_config_file,
                     external_proxy,
                 },
@@ -313,37 +318,15 @@ impl ComposeRunner<PrepareServices> {
                 .map(|(k, v)| (k.to_string(), v.to_string())),
         );
 
-        // TODO(alex) [high]: User service needs `LD_PRELOAD`, right?
-        // If so, then it fails with `missing internal proxy address`, even though the address
-        // is in the service's env vars.
-        //
-        // This is what we need? Somehow get the sidecar intproxy's address?
-        //
-        // runtime_command.add_env(
-        //     MIRRORD_CONNECT_TCP_ENV,
-        //     sidecar_intproxy_address.to_string(),
-        // );
-        //
-        //
-        // TODO(alex) [high]: This is hardcoded, but there's a config for this!
         user_service_info.env_vars.insert(
             MIRRORD_CONNECT_TCP_ENV.to_string(),
-            "127.0.0.1:8888".to_string(),
+            intproxy_address.to_string(),
         );
 
         user_service_info.env_vars.insert(
             LINUX_INJECTION_ENV_VAR.to_string(),
             config.container.cli_image_lib_path.to_string_lossy().into(),
         );
-
-        // TODO(alex) [high] [#2]: Now that we have the user compose file from the start,
-        // `user_service_info` is only really holding env vars, `volumes_from` is something
-        // we can insert at tmp compose file creation?
-        // user_service_info
-        //     .volumes_from
-        //     .insert("mirrord-sidecar".into());
-        // user_service_info.network_mode.replace("".to_string());
-        // user_service_info.depends_on.replace("".to_string());
 
         Ok(ComposeRunner {
             progress,
@@ -354,6 +337,7 @@ impl ComposeRunner<PrepareServices> {
                 external_proxy_tls_guards,
                 analytics,
                 layer_config_file,
+                intproxy_port: intproxy_address.port(),
                 sidecar_info,
                 user_service_info,
             },
@@ -363,11 +347,6 @@ impl ComposeRunner<PrepareServices> {
 
 const MIRRORD_COMPOSE_SIDECAR_SERVICE: &str = "mirrord-sidecar";
 
-// TODO(alex) [high] [#1]: This and `PrepareServices` are kinda intermixed, I want `ServiceInfo` to
-// have the user stuff, but we only read the user compose file here, AFTER `ServiceInfo` has been
-// created.
-//
-// I think it should be `read->service_info(user + remove obvious conflicts)->add our stuff`.
 impl ComposeRunner<PrepareCompose> {
     #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
     pub(super) async fn make_temp_compose_file(self) -> ComposeResult<ComposeRunner<RunCompose>> {
@@ -385,20 +364,13 @@ impl ComposeRunner<PrepareCompose> {
                     external_proxy_tls_guards,
                     analytics,
                     layer_config_file,
+                    intproxy_port,
                     sidecar_info,
                     user_service_info,
                 },
         } = self;
 
-        let intproxy_port = sidecar_info
-            .env_vars
-            .get("MIRRORD_CONNECT_TCP")
-            .and_then(|address| address.split_terminator(":").last())
-            .map(|port| port.parse())
-            .transpose()?
-            .unwrap_or(8888);
-
-        // `Ports::Short` by default, so build it as `Ports::Long`.
+        // `Ports::Short` by default, so build explicitly it as `Ports::Long`.
         let mut sidecar_ports = Ports::Long(Default::default());
 
         for (service, _) in compose
@@ -410,19 +382,20 @@ impl ComposeRunner<PrepareCompose> {
             let user_service_ports =
                 ServiceComposer::modify(service, &user_service_info).reset_conflicts();
 
-            match (&mut sidecar_ports, user_service_ports) {
-                (Ports::Long(ports), Ports::Long(current)) => ports.extend(current),
-                // When a service has no `ports`, it gets built by default as
-                // `Ports::Short`, so we just ignore it (ignore on empty).
-                _ => (),
-            };
+            // When a service has no `ports`, it gets built by default as `Ports::Short`,
+            // which we are ignoring here (ignore on empty).
+            if let (Ports::Long(ports), Ports::Long(current)) =
+                (&mut sidecar_ports, user_service_ports)
+            {
+                ports.extend(current);
+            }
         }
 
         let mirrord_sidecar_service = Service {
             image: Some("ghcr.io/metalbear-co/mirrord-cli:3.133.1".into()),
-            command: Some(docker_compose_types::Command::Simple(
-                "mirrord intproxy --port 8888".into(),
-            )),
+            command: Some(docker_compose_types::Command::Simple(format!(
+                "mirrord intproxy --port {intproxy_port}"
+            ))),
             ports: {
                 match &mut sidecar_ports {
                     Ports::Long(ports) => {

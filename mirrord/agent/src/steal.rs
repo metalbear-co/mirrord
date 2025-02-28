@@ -13,9 +13,11 @@ mod http;
 pub mod ip_tables;
 mod orig_dst;
 mod subscriptions;
+mod tls;
 
 pub(crate) use api::TcpStealerApi;
 pub(crate) use connection::TcpConnectionStealer;
+pub(crate) use tls::StealTlsHandlerStore;
 
 use self::http::HttpResponseFallback;
 
@@ -27,7 +29,7 @@ use self::http::HttpResponseFallback;
 enum Command {
     /// Contains the channel that's used by the stealer worker to respond back to the agent
     /// (stealer -> agent -> layer).
-    NewClient(Sender<DaemonTcp>, semver::Version),
+    NewClient(Sender<DaemonTcp>),
 
     /// A layer wants to subscribe to this [`Port`].
     ///

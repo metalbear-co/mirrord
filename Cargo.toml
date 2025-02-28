@@ -27,7 +27,7 @@ resolver = "2"
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.133.1"
+version = "3.134.1"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -172,6 +172,12 @@ miette = "7"
 
 # Used by `kube`, `intproxy`.
 tokio-retry = "0.3"
+
+# Used by `agent`, `tls-util`.
+x509-parser = "0.17"
+
+# Used by `agent`, `auth`, `tls-util`, `tests`
+pem = "3"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"

@@ -1,24 +1,19 @@
-use std::{os::unix::process::ExitStatusExt, path::Path, process::Command};
+use std::path::Path;
 
-use crate::error::{Result, SipError};
+use apple_codesign::{SigningSettings, UnifiedSigner};
 
-/// Sign the binary at the given path using the host's codesign binary.
-/// Consider using apple-codesign crate instead some day..
-pub(crate) fn sign<P: AsRef<Path>>(path: P) -> Result<()> {
-    let output = Command::new("codesign")
-        .arg("-s") // sign with identity
-        .arg("-") // adhoc identity
-        .arg("-f") // force (might have a signature already)
-        .arg(path.as_ref())
-        .env_remove("DYLD_INSERT_LIBRARIES") // don't load mirrord into the codesign binary
-        .output()?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        let code = output.status.into_raw(); // Returns wait status if there's no exit status.
-        Err(SipError::Sign(
-            code,
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        ))
-    }
+use crate::error::Result;
+
+pub(crate) fn sign<PI: AsRef<Path>, PO: AsRef<Path>>(input: PI, output: PO) -> Result<()> {
+    // in the past, we used the codesign binary
+    // but we had an issue where it received EBADF (bad file descriptor)
+    // probably since in some flows, like Go,
+    // it calls fork then execve, then we do the same from our code (to call codesign)
+    // we switched to use apple codesign crate to avoid this issue (of creating process)
+    // but if we sign in place we get permission error, probably because someone is holding the
+    // handle to the named temp file.
+    let settings = SigningSettings::default();
+    let signer = UnifiedSigner::new(settings);
+    signer.sign_path(input, output)?;
+    Ok(())
 }

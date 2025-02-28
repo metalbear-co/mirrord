@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, time::Instant};
 
 use futures::{stream, Stream, StreamExt, TryStreamExt};
 use k8s_openapi::{
@@ -13,16 +13,13 @@ use kube::{api::ListParams, Api, Resource};
 use serde::de::{self, DeserializeOwned};
 
 use crate::{
-    api::{
-        container::SKIP_NAMES,
-        kubernetes::{get_k8s_resource_api, rollout::Rollout},
-    },
+    api::{container::SKIP_NAMES, kubernetes::rollout::Rollout},
     error::{KubeApiError, Result},
 };
 
 pub struct KubeResourceSeeker<'a> {
     pub client: &'a kube::Client,
-    pub namespace: Option<&'a str>,
+    pub namespace: &'a str,
 }
 
 impl KubeResourceSeeker<'_> {
@@ -200,12 +197,25 @@ impl KubeResourceSeeker<'_> {
             + DeserializeOwned
             + Send,
     {
-        let api = get_k8s_resource_api(self.client, self.namespace);
+        let namespace = self.namespace.to_string();
+        let api = Api::namespaced(self.client.clone(), &namespace);
         let mut params = Self::make_list_params(field_selector);
 
         async_stream::stream! {
             loop {
+                let start = Instant::now();
                 let response = api.list(&params).await?;
+                let elapsed = start.elapsed();
+
+                tracing::debug!(
+                    resource_kind = %R::kind(&()),
+                    elapsed_s = elapsed.as_secs_f32(),
+                    fetched_resources = response.items.len(),
+                    continue_token = ?response.metadata.continue_,
+                    list_params = ?params,
+                    namespace,
+                    "Made a resource list request",
+                );
 
                 for resource in response.items {
                     yield Ok(resource);
@@ -241,7 +251,18 @@ impl KubeResourceSeeker<'_> {
 
         async_stream::stream! {
             loop {
+                let start = Instant::now();
                 let response = api.list(&params).await?;
+                let elapsed = start.elapsed();
+
+                tracing::debug!(
+                    resource_kind = %R::kind(&()),
+                    elapsed_s = elapsed.as_secs_f32(),
+                    fetched_resources = response.items.len(),
+                    continue_token = ?response.metadata.continue_,
+                    list_params = ?params,
+                    "Made a resource list request",
+                );
 
                 for resource in response.items {
                     yield Ok(resource);

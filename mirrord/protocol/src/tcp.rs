@@ -3,7 +3,7 @@ use std::{
     collections::VecDeque,
     convert::Infallible,
     fmt,
-    net::IpAddr,
+    net::{IpAddr, SocketAddr},
     pin::Pin,
     sync::LazyLock,
     task::{Context, Poll},
@@ -93,14 +93,18 @@ pub enum DaemonTcp {
 /// Contents of a chunked message from server.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ChunkedRequest {
-    Start(HttpRequest<Vec<InternalHttpBodyFrame>>),
-    Body(ChunkedHttpBody),
-    Error(ChunkedHttpError),
+    StartV1(ChunkedRequestStartV1),
+    Body(ChunkedRequestBodyV1),
+    ErrorV1(ChunkedRequestErrorV1),
+    StartV2(ChunkedRequestStartV2),
+    ErrorV2(ChunkedRequestErrorV2),
 }
+
+pub type ChunkedRequestStartV1 = HttpRequest<Vec<InternalHttpBodyFrame>>;
 
 /// Contents of a chunked message body frame from server.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ChunkedHttpBody {
+pub struct ChunkedRequestBodyV1 {
     #[bincode(with_serde)]
     pub frames: Vec<InternalHttpBodyFrame>,
     pub is_last: bool,
@@ -119,9 +123,43 @@ impl From<InternalHttpBodyFrame> for Frame<Bytes> {
 
 /// An error occurred while processing chunked data from server.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct ChunkedHttpError {
+pub struct ChunkedRequestErrorV1 {
     pub connection_id: ConnectionId,
     pub request_id: RequestId,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ChunkedRequestStartV2 {
+    pub connection_id: ConnectionId,
+    pub request_id: RequestId,
+    #[bincode(with_serde)]
+    pub request: InternalHttpRequest<InternalHttpBodyNew>,
+    pub metadata: HttpRequestMetadata,
+    pub transport: HttpRequestTransportType,
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum HttpRequestTransportType {
+    Tcp,
+    Tls {
+        alpn_protocol: Option<Vec<u8>>,
+        server_name: Option<String>,
+    },
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub enum HttpRequestMetadata {
+    V1 {
+        source: SocketAddr,
+        destination: SocketAddr,
+    },
+}
+
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct ChunkedRequestErrorV2 {
+    pub connection_id: ConnectionId,
+    pub request_id: RequestId,
+    pub error_message: String,
 }
 
 /// Wraps the string that will become a [`fancy_regex::Regex`], providing a nice API in
@@ -281,12 +319,12 @@ pub enum LayerTcpSteal {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub enum ChunkedResponse {
     Start(HttpResponse<Vec<InternalHttpBodyFrame>>),
-    Body(ChunkedHttpBody),
-    Error(ChunkedHttpError),
+    Body(ChunkedRequestBodyV1),
+    Error(ChunkedRequestErrorV1),
 }
 
 /// (De-)Serializable HTTP request.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct InternalHttpRequest<B> {
     #[serde(with = "http_serde::method")]
     pub method: Method,
@@ -346,6 +384,18 @@ impl<B> From<InternalHttpRequest<B>> for Request<B> {
     }
 }
 
+impl<B: fmt::Debug> fmt::Debug for InternalHttpRequest<B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InternalHttpRequest")
+            .field("method", &self.method)
+            .field("uri", &self.uri)
+            .field("headers", &self.headers.len())
+            .field("version", &self.version)
+            .field("body", &self.body)
+            .finish()
+    }
+}
+
 /// Minimal mirrord-protocol version that allows [`DaemonTcp::HttpRequestFramed`] and
 /// [`LayerTcpSteal::HttpResponseFramed`].
 pub static HTTP_FRAMED_VERSION: LazyLock<VersionReq> =
@@ -358,6 +408,10 @@ pub static HTTP_CHUNKED_REQUEST_VERSION: LazyLock<VersionReq> =
 /// Minimal mirrord-protocol version that allows [`LayerTcpSteal::HttpResponseChunked`].
 pub static HTTP_CHUNKED_RESPONSE_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.8.1".parse().expect("Bad Identifier"));
+
+/// Minimal mirrord-protocol version that allows for v2 variants of [`ChunkedRequest`].
+pub static HTTP_CHUNKED_REQUEST_V2_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.19.0".parse().expect("Bad Identifier"));
 
 /// Minimal mirrord-protocol version that allows [`DaemonTcp::Data`] to be sent in the same
 /// connection as
@@ -410,7 +464,7 @@ impl<B> HttpRequest<B> {
 }
 
 /// (De-)Serializable HTTP response.
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct InternalHttpResponse<Body> {
     #[serde(with = "http_serde::status_code")]
     pub status: StatusCode,
@@ -460,6 +514,17 @@ impl<B> From<InternalHttpResponse<B>> for Response<B> {
         *response.headers_mut() = headers;
 
         response
+    }
+}
+
+impl<B: fmt::Debug> fmt::Debug for InternalHttpResponse<B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InternalHttpResponse")
+            .field("status", &self.status)
+            .field("version", &self.version)
+            .field("headers", &self.headers.len())
+            .field("body", &self.body)
+            .finish()
     }
 }
 
@@ -526,6 +591,12 @@ impl fmt::Debug for InternalHttpBodyFrame {
             }
         }
     }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+pub struct InternalHttpBodyNew {
+    pub frames: Vec<InternalHttpBodyFrame>,
+    pub is_last: bool,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]

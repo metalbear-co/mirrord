@@ -68,7 +68,7 @@ tokio-stream = { workspace = true, features = ["io-util", "net"] }
 regex.workspace = true
 mid = "3.0.0"
 rand.workspace = true
-docker-compose-types = "0.16"
+docker-compose-types = { version = "0.16", default-features = false, features = ["indexmap", "yml"] }
 
 
 [target.'cfg(target_os = "macos")'.dependencies]

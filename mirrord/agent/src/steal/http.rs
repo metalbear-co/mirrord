@@ -11,4 +11,5 @@ pub(crate) use response_fallback::{HttpResponseFallback, ReceiverStreamBody};
 pub(crate) use reversible_stream::ReversibleStream;
 
 /// Handy alias due to [`ReversibleStream`] being generic, avoiding value mismatches.
-pub(crate) type DefaultReversibleStream = ReversibleStream<{ HttpVersion::MINIMAL_HEADER_SIZE }>;
+pub(crate) type DefaultReversibleStream<IO> =
+    ReversibleStream<{ HttpVersion::MINIMAL_HEADER_SIZE }, IO>;

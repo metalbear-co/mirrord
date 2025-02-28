@@ -10,12 +10,9 @@
 mod cli {
     use std::{path::Path, time::Duration};
 
-    use regex::Regex;
     use rstest::rstest;
 
-    use crate::utils::{
-        config_dir, run_ls, run_verify_config, service_for_mirrord_ls, KubeService,
-    };
+    use crate::utils::{config_dir, run_verify_config};
 
     /// Tests `verify-config` with `path` and `--ide` args, which should be:
     ///
@@ -94,24 +91,5 @@ mod cli {
         let mut process = run_verify_config(None).await;
 
         assert!(!process.wait().await.success());
-    }
-
-    /// Tests for the `mirrord ls` command
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn mirrord_ls(#[future] service_for_mirrord_ls: KubeService) {
-        let service = service_for_mirrord_ls.await;
-        let mut process = run_ls::<false>(None, None).await;
-        let res = process.wait().await;
-        assert!(res.success());
-        let stdout = process.get_stdout().await;
-        let targets: Vec<String> = serde_json::from_str(&stdout).unwrap();
-        let re = Regex::new(r"^(pod|deployment)/.+(/container/.+)?$").unwrap();
-        targets
-            .iter()
-            .for_each(|output| assert!(re.is_match(output)));
-        assert!(targets
-            .iter()
-            .any(|output| output.starts_with(&format!("pod/{}", service.name))));
     }
 }

@@ -23,7 +23,9 @@ regex.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "macros", "process"] }
 serde_json.workspace = true
 mirrord = { artifact = "bin", path = "../mirrord/cli" }
+mirrord-agent-env = { path = "../mirrord/agent/env", optional = true }
 mirrord-operator = { path = "../mirrord/operator", features = ["setup", "crd"] }
+mirrord-tls-util = { path = "../mirrord/tls-util", optional = true }
 serde.workspace = true
 futures.workspace = true
 rand.workspace = true
@@ -32,6 +34,8 @@ fancy-regex.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 http-body-util.workspace = true
+pem = { workspace = true, optional = true }
+rcgen = { workspace = true, optional = true }
 rustls.workspace = true
 rstest.workspace = true
 
@@ -45,6 +49,6 @@ tokio-tungstenite.workspace = true
 default = ["ephemeral", "job", "cli", "targetless"]
 ephemeral = []
 job = []
-operator = ["dep:aws-config", "dep:aws-sdk-sqs"]
+operator = ["dep:aws-config", "dep:aws-sdk-sqs", "dep:rcgen", "dep:mirrord-agent-env", "dep:pem", "dep:mirrord-tls-util"]
 cli = []
 targetless = []

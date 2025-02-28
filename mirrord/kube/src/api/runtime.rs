@@ -76,7 +76,7 @@ impl Display for ContainerRuntime {
 pub struct RuntimeData {
     pub pod_name: String,
     pub pod_ips: Vec<IpAddr>,
-    pub pod_namespace: Option<String>,
+    pub pod_namespace: String,
     pub node_name: String,
     pub container_id: String,
     pub container_runtime: ContainerRuntime,
@@ -103,6 +103,12 @@ impl RuntimeData {
             .name
             .as_ref()
             .ok_or_else(|| KubeApiError::missing_field(pod, ".metadata.name"))?
+            .to_owned();
+        let pod_namespace = pod
+            .metadata
+            .namespace
+            .as_ref()
+            .ok_or_else(|| KubeApiError::missing_field(pod, ".metadata.namespace"))?
             .to_owned();
 
         let phase = pod
@@ -203,7 +209,7 @@ impl RuntimeData {
         Ok(RuntimeData {
             pod_ips,
             pod_name,
-            pod_namespace: pod.metadata.namespace.clone(),
+            pod_namespace,
             node_name,
             container_id,
             container_runtime,

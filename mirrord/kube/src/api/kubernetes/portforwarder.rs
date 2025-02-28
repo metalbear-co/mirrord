@@ -14,7 +14,7 @@ use tokio_retry::{
 };
 
 use crate::{
-    api::kubernetes::{get_k8s_resource_api, AgentKubernetesConnectInfo, UnpinStream},
+    api::kubernetes::{AgentKubernetesConnectInfo, UnpinStream},
     error::{KubeApiError, Result},
 };
 
@@ -131,7 +131,7 @@ impl SinglePortForwarder {
     ) -> Result<Self> {
         let mut retry_strategy = Box::new(ExponentialBackoff::from_millis(10).map(jitter).take(5));
 
-        let pod_api: Api<Pod> = get_k8s_resource_api(client, connect_info.namespace.as_deref());
+        let pod_api: Api<Pod> = Api::namespaced(client.clone(), &connect_info.pod_namespace);
 
         let (stream, error_future) =
             create_portforward_streams(&pod_api, &connect_info, &mut retry_strategy).await?;

@@ -6,7 +6,7 @@
 ///    match [`generate_local_set`];
 ///
 /// 2. Using the overrides for `read_only`, `read_write` and `local`.
-use std::env;
+use std::{env, path::Path};
 
 use mirrord_config::{
     feature::fs::{FsConfig, FsModeConfig},
@@ -125,30 +125,26 @@ impl FileFilter {
         }
     }
 
-    /// Checks if `text` matches the regex held by the initialized variant of `FileFilter`,
-    /// and whether the path is queried for write converting the result a `Detour`.
-    ///
-    /// `op` is used to lazily initialize a `Bypass` case.
-    pub fn continue_or_bypass_with<F>(&self, text: &str, write: bool, op: F) -> Detour<()>
-    where
-        F: FnOnce() -> Bypass,
-    {
+    /// Checks whether the given [`Path`] should be accessed remotely.
+    pub fn ensure_remote(&self, path: &Path, write: bool) -> Detour<()> {
+        let text = path.to_str().unwrap_or_default();
+
         match self.mode {
-            FsModeConfig::Local => Detour::Bypass(op()),
+            FsModeConfig::Local => Detour::Bypass(Bypass::ignored_file(text)),
             _ if self.not_found.is_match(text) => Detour::Error(HookError::FileNotFound),
             _ if self.read_write.is_match(text) => Detour::Success(()),
             _ if self.read_only.is_match(text) => {
                 if write {
-                    Detour::Bypass(op())
+                    Detour::Bypass(Bypass::ignored_file(text))
                 } else {
                     Detour::Success(())
                 }
             }
-            _ if self.local.is_match(text) => Detour::Bypass(op()),
+            _ if self.local.is_match(text) => Detour::Bypass(Bypass::ignored_file(text)),
             _ if self.default_not_found.is_match(text) => Detour::Error(HookError::FileNotFound),
             _ if self.default_remote_ro.is_match(text) && !write => Detour::Success(()),
-            _ if self.default_local.is_match(text) => Detour::Bypass(op()),
-            FsModeConfig::LocalWithOverrides => Detour::Bypass(op()),
+            _ if self.default_local.is_match(text) => Detour::Bypass(Bypass::ignored_file(text)),
+            FsModeConfig::LocalWithOverrides => Detour::Bypass(Bypass::ignored_file(text)),
             FsModeConfig::Write => Detour::Success(()),
             FsModeConfig::Read if write => Detour::Bypass(Bypass::ReadOnly(text.into())),
             FsModeConfig::Read => Detour::Success(()),
@@ -168,7 +164,7 @@ mod tests {
     use rstest::*;
 
     use super::*;
-    use crate::detour::{Bypass, Detour};
+    use crate::detour::Detour;
 
     /// Helper type for testing [`FileFilter`] results.
     #[derive(PartialEq, Eq, Debug)]
@@ -405,7 +401,7 @@ mod tests {
 
         let file_filter = FileFilter::new(fs_config);
 
-        let res = file_filter.continue_or_bypass_with(path, write, || Bypass::ignored_file(""));
+        let res = file_filter.ensure_remote(Path::new(path), write);
         println!("filter result: {res:?}");
         assert_eq!(res.kind(), expected);
     }
@@ -440,7 +436,7 @@ mod tests {
 
         let file_filter = FileFilter::new(fs_config);
 
-        let res = file_filter.continue_or_bypass_with(path, write, || Bypass::ignored_file(""));
+        let res = file_filter.ensure_remote(Path::new(path), write);
         println!("filter result: {res:?}");
 
         assert_eq!(res.kind(), expected);
@@ -464,7 +460,7 @@ mod tests {
     #[case("/root/.nuget/packages/microsoft.azure.amqp", DetourKind::Success)]
     fn not_found_set(#[case] path: &str, #[case] expected: DetourKind) {
         let filter = FileFilter::new(Default::default());
-        let res = filter.continue_or_bypass_with(path, false, || Bypass::ignored_file(""));
+        let res = filter.ensure_remote(Path::new(path), false);
         println!("filter result: {res:?}");
 
         assert_eq!(res.kind(), expected);

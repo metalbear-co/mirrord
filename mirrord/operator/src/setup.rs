@@ -29,6 +29,7 @@ use thiserror::Error;
 use crate::crd::{
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     policy::{MirrordClusterPolicy, MirrordPolicy},
+    steal_tls::{MirrordClusterTlsStealConfig, MirrordTlsStealConfig},
     MirrordOperatorUser, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
 };
 
@@ -233,6 +234,12 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         MirrordClusterPolicy::crd().to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordTlsStealConfig::crd().to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordClusterTlsStealConfig::crd().to_writer(&mut writer)?;
 
         if self.sqs_splitting {
             writer.write_all(b"---\n")?;
@@ -605,6 +612,16 @@ impl OperatorClusterRole {
                 api_groups: Some(vec!["argoproj.io".to_owned()]),
                 resources: Some(vec!["rollouts".to_owned()]),
                 verbs: vec!["patch".to_owned()],
+                ..Default::default()
+            },
+            // Allow the operator to list+get TLS steal configurations.
+            PolicyRule {
+                api_groups: Some(vec![MirrordTlsStealConfig::group(&()).into_owned()]),
+                resources: Some(vec![
+                    MirrordTlsStealConfig::plural(&()).into_owned(),
+                    MirrordClusterTlsStealConfig::plural(&()).into_owned(),
+                ]),
+                verbs: vec!["list".to_owned(), "get".to_owned()],
                 ..Default::default()
             },
         ];

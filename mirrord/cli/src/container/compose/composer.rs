@@ -32,6 +32,18 @@ impl<'a> ServiceComposer<'a, New> {
 }
 
 impl<'a> ServiceComposer<'a, ResetConflicts> {
+    /// **Warning**: Minefield of options that are deserialized in a wonky manner, or must
+    /// be reset due to conflicts with other options that we set to run the services with
+    /// mirrord-sidecar.
+    ///
+    /// - `ports`: Conflicts with `network_mode: mirrord-sidecar`;
+    /// - `networks`: Conflicts with `network_mode: mirrord-sidecar`;
+    /// - `bind.propagation`: Has to be set, but `docker_compose_types` sets it to `null`, which is
+    ///   not a thing;
+    /// - `bind.selix`: Similar situation as `bind.propagation`;
+    ///
+    /// Returns the [`docker_compose_types::Ports`] from the user's service, before they were
+    /// reset. These must be added to the `mirrord-sidecar`
     #[must_use]
     pub(super) fn reset_conflicts(self) -> docker_compose_types::Ports {
         let Self {
@@ -41,6 +53,18 @@ impl<'a> ServiceComposer<'a, ResetConflicts> {
 
         service.ports = Default::default();
         service.networks = Default::default();
+
+        for volume in service.volumes.iter_mut() {
+            if let docker_compose_types::Volumes::Advanced(advanced_volumes) = volume {
+                if let Some(bind) = advanced_volumes.bind.as_mut() {
+                    // Default value for docker.
+                    bind.propagation.get_or_insert("rprivate".into());
+
+                    // Seems like an acceptable default.
+                    bind.selinux.get_or_insert("Z".into());
+                }
+            }
+        }
 
         ports
     }

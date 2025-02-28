@@ -4,7 +4,7 @@
 
 use std::net::{IpAddr, SocketAddr};
 
-use crate::checked_env::CheckedEnv;
+use crate::{checked_env::CheckedEnv, steal_tls::StealPortTlsConfig};
 
 /// Used to pass operator's x509 certificate to the agent.
 ///
@@ -51,6 +51,10 @@ pub const POD_IPS: CheckedEnv<Vec<IpAddr>> = CheckedEnv::new("MIRRORD_AGENT_POD_
 ///
 /// Should follow `tracing` format, e.g `mirrord=trace`.
 pub const LOG_LEVEL: CheckedEnv<String> = CheckedEnv::new("RUST_LOG");
+
+/// Provides the agent with a steal TLS configuration.
+pub const STEAL_TLS_CONFIG: CheckedEnv<Vec<StealPortTlsConfig>> =
+    CheckedEnv::new("MIRRORD_AGENT_STEAL_TLS_CONFIG");
 
 /// Container id of the target we're attaching to, e.g. `mirrord exec -t
 /// pod/glorious-cat/container/[cat-container]`, this is the id of `cat-container` that you

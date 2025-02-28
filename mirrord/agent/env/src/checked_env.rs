@@ -8,9 +8,12 @@ use std::{
     str::{FromStr, Utf8Error},
 };
 
+use base64::{engine::general_purpose, Engine};
 #[cfg(feature = "k8s-openapi")]
 use k8s_openapi::api::core::v1::EnvVar;
 use thiserror::Error;
+
+use crate::steal_tls::StealPortTlsConfig;
 
 /// Type of an environment variable value.
 pub trait EnvValue: Sized {
@@ -192,5 +195,36 @@ impl EnvValue for Vec<IpAddr> {
             .map(|item| item.parse::<IpAddr>())
             .collect::<Result<Vec<_>, _>>()
             .map_err(ParseEnvError::ParseError)
+    }
+}
+
+/// Errors that can occur when parsing [`STEAL_TLS_CONFIG`](crate::envs::STEAL_TLS_CONFIG) value.
+#[derive(Error, Debug)]
+pub enum ParseStealTlsConfigError {
+    #[error("failed to decode as base64: {0}")]
+    DecodeBase64Error(#[from] base64::DecodeError),
+    #[error("failed to deserialize as JSON: {0}")]
+    DeserializeError(#[from] serde_json::Error),
+}
+
+/// For [`STEAL_TLS_CONFIG`](crate::envs::STEAL_TLS_CONFIG) variable.
+///
+/// The value is stored as JSON encoded with base64.
+impl EnvValue for Vec<StealPortTlsConfig> {
+    type IntoReprError = Infallible;
+    type FromReprError = ParseStealTlsConfigError;
+
+    fn as_repr(&self) -> Result<String, Self::IntoReprError> {
+        let as_bytes = serde_json::to_vec(self).expect("serializing to memory should not fail");
+        let encoded = general_purpose::STANDARD_NO_PAD.encode(as_bytes);
+
+        Ok(encoded)
+    }
+
+    fn from_repr(repr: &[u8]) -> Result<Self, Self::FromReprError> {
+        let decoded = general_purpose::STANDARD_NO_PAD.decode(repr)?;
+        let deserialized = serde_json::from_slice(&decoded)?;
+
+        Ok(deserialized)
     }
 }
