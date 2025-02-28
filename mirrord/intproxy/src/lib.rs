@@ -178,7 +178,7 @@ impl IntProxy {
                 },
 
                 _ = time::sleep(idle_timeout), if self.any_connection_accepted && self.task_txs.layers.is_empty() => {
-                    tracing::info!("Reached the timeout on no active layer connections");
+                    tracing::info!("Reached the idle timeout with no active layer connections");
                     break;
                 },
             }
