@@ -304,11 +304,20 @@ mod main {
             // Not stopping the SIP-patching as most binaries don't need the rpath fix.
         }
 
-        codesign::sign(&temp_binary, &output)?;
+        let signed_temp_file = tempfile::NamedTempFile::new()?;
+        codesign::sign(&temp_binary, &signed_temp_file)?;
 
         // Give the new file the same permissions as the old file.
+        // This needs to happen after the sign because it might change the permissions.
         trace!("Setting permissions for {temp_binary:?}");
-        std::fs::set_permissions(&output, std::fs::metadata(path)?.permissions())?;
+        std::fs::set_permissions(&signed_temp_file, std::fs::metadata(path)?.permissions())?;
+
+        // Move the temp binary into its final location if no other process/thread already did.
+        if let Err(err) = signed_temp_file.persist_noclobber(&output) {
+            if err.error.kind() != std::io::ErrorKind::AlreadyExists {
+                return Err(SipError::BinaryMoveFailed(err.error));
+            }
+        }
         Ok(output)
     }
 
