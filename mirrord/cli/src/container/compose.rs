@@ -486,7 +486,8 @@ impl ComposeRunner<PrepareCompose> {
     /// (i.e. `docker compose --file compose.yaml config`) command to get a verified compose
     /// configuration, which is then deserialized into a [`docker_compose_types::Compose`].
     ///
-    /// - We do (2.) to let the `compose config` command handle cumbersome conversions for us, as it
+    /// - We do (2.) to let the `compose config` command handle cumbersome conversions for us (it's
+    ///   hell, cumbersome is putting it lightly, it's incredibly prone to errors), as it
     ///   automagically converts compose _short syntax_ into _long syntax_, with some caveats that
     ///   we have to handle when re-serializing it (so a deserialized output from `compose config`
     ///   that we serialize back to a `compose.yaml` may produce an invalid config).
