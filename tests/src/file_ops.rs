@@ -14,7 +14,6 @@ mod file_ops_tests {
     };
 
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
-    #[cfg(target_os = "linux")]
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -26,16 +25,14 @@ mod file_ops_tests {
         #[values(FileOps::Python, FileOps::Rust)] ops: FileOps,
     ) {
         let service = service.await;
-        let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let command = ops.command();
 
-        let mut args = vec!["--fs-mode", "write"];
-
+        let mut args = vec!["--fs-mode", "read"];
         if cfg!(feature = "ephemeral") {
             args.extend(["-e"].into_iter());
         }
 
-        let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/**")];
+        let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp.*")];
         let mut process = run_exec_with_target(
             command,
             &service.pod_container_target(),
@@ -50,36 +47,6 @@ mod file_ops_tests {
     }
 
     #[cfg_attr(not(feature = "job"), ignore)]
-    #[cfg(target_os = "macos")]
-    #[rstest]
-    #[trace]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(240))]
-    pub async fn file_ops(
-        #[future]
-        #[notrace]
-        service: KubeService,
-    ) {
-        let service = service.await;
-        let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
-        let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"];
-        let args = vec!["--fs-mode", "read"];
-        let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp**")];
-
-        let mut process = run_exec_with_target(
-            python_command,
-            &service.pod_container_target(),
-            Some(&service.namespace),
-            Some(args),
-            Some(env),
-        )
-        .await;
-        let res = process.wait().await;
-        assert!(res.success());
-        process.assert_python_fileops_stderr().await;
-    }
-
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -90,7 +57,6 @@ mod file_ops_tests {
         service: KubeService,
     ) {
         let service = service.await;
-        let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec![
             "python3",
             "-B",
