@@ -80,23 +80,6 @@
         "MIRRORD_REMOTE_DNS": "true",
         "RUST_BACKTRACE": "short"
       }
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "cli - container: Debug mirrord container",
-      "program": "${workspaceFolder}/target/debug/mirrord",
-      "args": ["container", "-t", "pod/sample-python-deployment-57886dffdd-2frff", "docker", "run", "nginx"],
-      "cwd": "${workspaceFolder}",
-      "sourceMap": {},
-      "sourceLanguages": [
-        "rust"
-      ],
-      "env": {
-        "RUST_LOG": "warn,mirrord=debug",
-        "MIRRORD_AGENT_RUST_LOG": "warn,mirrord=debug",
-        "RUST_BACKTRACE": "short"
-      }
     }
   ]
 }
