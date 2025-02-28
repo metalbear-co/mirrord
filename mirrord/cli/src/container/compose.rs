@@ -428,13 +428,13 @@ impl ComposeRunner<PrepareCompose> {
                     Ports::Long(ports) => {
                         ports.push(Port {
                             target: 5000,
-                            host_ip: Some("0.0.0.0".to_owned()),
+                            host_ip: Some("0.0.0.0".into()),
                             published: Some(PublishedPort::Single(8000)),
-                            protocol: Some("tcp".to_owned()),
-                            mode: Some("ingress".to_owned()),
+                            protocol: Some("tcp".into()),
+                            mode: Some("ingress".into()),
                         });
                     }
-                    _ => unreachable!("BUG! `compose config` converts ports to long syntax!"),
+                    _ => unreachable!("BUG! `sidecar_ports` was constructed as `Ports::Long`!"),
                 }
 
                 sidecar_ports
