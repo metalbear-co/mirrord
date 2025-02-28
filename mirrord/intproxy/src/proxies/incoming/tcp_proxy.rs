@@ -3,9 +3,9 @@ use std::{io::ErrorKind, net::SocketAddr, time::Duration};
 use bytes::BytesMut;
 use hyper::upgrade::OnUpgrade;
 use hyper_util::rt::TokioIo;
+use mirrord_tls_util::MaybeTls;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
     time,
 };
 use tracing::Level;
@@ -87,13 +87,13 @@ impl BackgroundTask for TcpProxyTask {
                     return Ok(());
                 };
 
-                stream?
+                MaybeTls::NoTls(stream?)
             }
 
             LocalTcpConnection::AfterUpgrade(on_upgrade) => {
                 let upgraded = on_upgrade.await.map_err(InProxyTaskError::UpgradeError)?;
                 let parts = upgraded
-                    .downcast::<TokioIo<TcpStream>>()
+                    .downcast::<TokioIo<MaybeTls>>()
                     .expect("IO type is known");
                 let stream = parts.io.into_inner();
                 let read_buf = parts.read_buf;
@@ -108,8 +108,8 @@ impl BackgroundTask for TcpProxyTask {
             }
         };
 
-        let peer_addr = stream.peer_addr()?;
-        let self_addr = stream.local_addr()?;
+        let peer_addr = stream.as_ref().peer_addr()?;
+        let self_addr = stream.as_ref().local_addr()?;
 
         let mut buf = BytesMut::with_capacity(64 * 1024);
         let mut reading_closed = false;

@@ -21,6 +21,7 @@ rustls.workspace = true
 rustls-pemfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
 tracing.workspace = true
 x509-parser.workspace = true
 

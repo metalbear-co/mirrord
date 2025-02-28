@@ -21,6 +21,7 @@ use mirrord_protocol::{
     },
     ConnectionId, RequestId,
 };
+use mirrord_tls_util::MaybeTls;
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
     sync::{
@@ -39,10 +40,7 @@ use super::{
 use crate::{
     http::HttpVersion,
     metrics::STEAL_FILTERED_CONNECTION_SUBSCRIPTION,
-    steal::{
-        connections::{original_destination::MaybeTls, unfiltered::UnfilteredStealTask},
-        subscriptions::Filters,
-    },
+    steal::{connections::unfiltered::UnfilteredStealTask, subscriptions::Filters},
     util::ClientId,
 };
 
