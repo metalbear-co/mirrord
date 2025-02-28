@@ -391,7 +391,7 @@ impl fmt::Debug for ErrorWithSources<'_> {
 
 #[cfg(test)]
 mod test {
-    use std::{io, sync::Arc};
+    use std::{io, pin::Pin, sync::Arc};
 
     use bytes::Bytes;
     use http_body_util::{Empty, StreamBody};
@@ -406,12 +406,14 @@ mod test {
     use hyper_util::rt::TokioIo;
     use mirrord_protocol::tcp::{HttpRequest, InternalHttpRequest};
     use rstest::rstest;
+    use rustls::ServerConfig;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
         sync::{mpsc, watch, Semaphore},
         task,
     };
+    use tokio_rustls::TlsAcceptor;
     use tokio_stream::wrappers::ReceiverStream;
 
     use super::*;
@@ -484,16 +486,30 @@ mod test {
     }
 
     /// Runs a [`hyper`] server that accepts only requests upgrading to the [`TEST_PROTO`] protocol.
-    async fn dummy_echo_server(listener: TcpListener, mut shutdown: watch::Receiver<bool>) {
+    async fn dummy_echo_server(
+        listener: TcpListener,
+        acceptor: Option<TlsAcceptor>,
+        mut shutdown: watch::Receiver<bool>,
+    ) {
         loop {
-            tokio::select! {
-                res = listener.accept() => {
-                    let (stream, _) = res.expect("dummy echo server failed to accept connection");
+            let (stream, _) = tokio::select! {
+                res = listener.accept() => res.expect("dummy echo server failed to accept a TCP connection"),
+                _ = shutdown.changed() => break,
+            };
 
-                    let mut shutdown = shutdown.clone();
+            let mut shutdown = shutdown.clone();
 
+            match acceptor.clone() {
+                Some(acceptor) => {
                     task::spawn(async move {
-                        let conn = http1::Builder::new().serve_connection(TokioIo::new(stream), service_fn(upgrade_req_handler));
+                        let stream = acceptor
+                            .accept(stream)
+                            .await
+                            .expect("dummy echo server failed to accept a TLS connection");
+                        let conn = http1::Builder::new().serve_connection(
+                            TokioIo::new(stream),
+                            service_fn(upgrade_req_handler),
+                        );
                         let mut conn = conn.with_upgrades();
                         let mut conn = Pin::new(&mut conn);
 
@@ -509,20 +525,60 @@ mod test {
                     });
                 }
 
-                _ = shutdown.changed() => break,
+                None => {
+                    task::spawn(async move {
+                        let conn = http1::Builder::new().serve_connection(
+                            TokioIo::new(stream),
+                            service_fn(upgrade_req_handler),
+                        );
+                        let mut conn = conn.with_upgrades();
+                        let mut conn = Pin::new(&mut conn);
+
+                        tokio::select! {
+                            res = &mut conn => {
+                                res.expect("dummy echo server failed to serve connection");
+                            }
+
+                            _ = shutdown.changed() => {
+                                conn.graceful_shutdown();
+                            }
+                        }
+                    });
+                }
             }
         }
     }
 
     /// Verifies that [`HttpGatewayTask`] and [`TcpProxyTask`] together correctly handle HTTP
     /// upgrades.
+    #[rstest]
+    #[case::with_tls(true)]
+    #[case::without_tls(false)]
     #[tokio::test]
-    async fn handles_http_upgrades() {
+    async fn handles_http_upgrades(#[case] use_tls: bool) {
+        let _ = rustls::crypto::CryptoProvider::install_default(
+            rustls::crypto::aws_lc_rs::default_provider(),
+        );
+
+        let acceptor = use_tls.then(|| {
+            let root = mirrord_tls_util::generate_cert("root", None, true).unwrap();
+            let server = mirrord_tls_util::generate_cert("server", None, false).unwrap();
+            let mut config = ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(
+                    vec![server.cert.into(), root.cert.into()],
+                    server.key_pair.serialize_der().try_into().unwrap(),
+                )
+                .unwrap();
+            config.alpn_protocols = vec![b"http/1.1".into()];
+            TlsAcceptor::from(Arc::new(config))
+        });
+
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_destination = listener.local_addr().unwrap();
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let server_task = task::spawn(dummy_echo_server(listener, shutdown_rx));
+        let server_task = task::spawn(dummy_echo_server(listener, acceptor, shutdown_rx));
 
         let mut tasks: BackgroundTasks<u32, InProxyTaskMessage, InProxyTaskError> =
             Default::default();
@@ -549,7 +605,14 @@ mod test {
                 ClientStore::new_with_timeout(Duration::from_secs(1), Default::default()),
                 ResponseMode::Basic,
                 local_destination,
-                HttpRequestTransportType::Tcp,
+                if use_tls {
+                    HttpRequestTransportType::Tls {
+                        alpn_protocol: Some(b"http/1.1".into()),
+                        server_name: None,
+                    }
+                } else {
+                    HttpRequestTransportType::Tcp
+                },
             );
             tasks.register(gateway, 0, 8)
         };

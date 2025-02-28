@@ -4,11 +4,9 @@ use mirrord_agent_env::steal_tls::{
     AgentClientConfig, AgentServerConfig, StealPortTlsConfig, TlsAuthentication,
     TlsClientVerification, TlsServerVerification,
 };
+use mirrord_tls_util::generate_cert;
 use pem::{EncodeConfig, LineEnding, Pem};
-use rcgen::{
-    BasicConstraints, CertificateParams, CertifiedKey, DnType, DnValue, IsCa, KeyPair,
-    KeyUsagePurpose,
-};
+use rcgen::CertifiedKey;
 use rustls::{
     crypto::CryptoProvider,
     pki_types::{CertificateDer, PrivateKeyDer, ServerName},
@@ -23,53 +21,25 @@ use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 use crate::{steal::StealTlsHandlerStore, util::path_resolver::InTargetPathResolver};
 
-/// Generates a new [`CertifiedKey`] with a random [`KeyPair`].
-pub fn generate_cert(
-    name: String,
-    issuer: Option<&CertifiedKey>,
-    can_sign_others: bool,
-) -> CertifiedKey {
-    let key_pair = KeyPair::generate().unwrap();
-
-    let mut params = CertificateParams::new(vec![name.clone()]).unwrap();
-    params
-        .distinguished_name
-        .push(DnType::CommonName, DnValue::Utf8String(name.clone()));
-
-    if can_sign_others {
-        params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-        params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
-    }
-
-    let cert = match issuer {
-        Some(issuer) => params
-            .signed_by(&key_pair, &issuer.cert, &issuer.key_pair)
-            .unwrap(),
-        None => params.self_signed(&key_pair).unwrap(),
-    };
-
-    CertifiedKey { cert, key_pair }
-}
-
 pub struct CertChainWithKey {
     pub key: PrivateKeyDer<'static>,
     pub certs: Vec<CertificateDer<'static>>,
 }
 
 impl CertChainWithKey {
-    pub fn new(end_entity_name: String, root_cert: Option<&CertifiedKey>) -> Self {
+    pub fn new(end_entity_name: &str, root_cert: Option<&CertifiedKey>) -> Self {
         let mut new_root = None;
 
         let root = match root_cert {
             Some(cert) => cert,
             None => {
-                new_root.replace(generate_cert("root".into(), None, true));
+                new_root.replace(generate_cert("root", None, true).unwrap());
                 new_root.as_ref().unwrap()
             }
         };
 
-        let issuer = generate_cert("issuer".into(), Some(root), true);
-        let cert = generate_cert(end_entity_name, Some(&issuer), false);
+        let issuer = generate_cert("issuer", Some(root), true).unwrap();
+        let cert = generate_cert(end_entity_name, Some(&issuer), false).unwrap();
 
         Self {
             key: cert.key_pair.serialize_der().try_into().unwrap(),
@@ -147,7 +117,7 @@ async fn server_authentication(
     let root_dir = tempfile::tempdir().unwrap();
     let server_pem = root_dir.path().join("auth.pem");
 
-    let chain = CertChainWithKey::new("mirrord-agent".into(), None);
+    let chain = CertChainWithKey::new("mirrord-agent", None);
     chain.to_file(&server_pem);
 
     let store = StealTlsHandlerStore::new(
@@ -179,7 +149,7 @@ async fn server_authentication(
         if client_trusts_agent_root {
             root_store.add(chain.certs.last().unwrap().clone()).unwrap();
         } else {
-            let cert = generate_cert("dummy root".into(), None, true);
+            let cert = generate_cert("dummy root", None, true).unwrap();
             root_store.add(cert.cert.into()).unwrap();
         }
 
@@ -215,11 +185,11 @@ async fn client_verification(
 
     let root_dir = tempfile::tempdir().unwrap();
 
-    let chain = CertChainWithKey::new("mirrord-agent".into(), None);
+    let chain = CertChainWithKey::new("mirrord-agent", None);
     let auth_pem = root_dir.path().join("auth.pem");
     chain.to_file(&auth_pem);
 
-    let trusted_root = generate_cert("root".into(), None, true);
+    let trusted_root = generate_cert("root", None, true).unwrap();
     let root_pem = root_dir.path().join("root.pem");
     fs::write(&root_pem, trusted_root.cert.pem()).unwrap();
 
@@ -257,12 +227,12 @@ async fn client_verification(
         let config = if anonymous_client {
             builder.with_no_client_auth()
         } else if good_client_root {
-            let cert_chain = CertChainWithKey::new("client".into(), Some(&trusted_root));
+            let cert_chain = CertChainWithKey::new("client", Some(&trusted_root));
             builder
                 .with_client_auth_cert(cert_chain.certs, cert_chain.key)
                 .unwrap()
         } else {
-            let cert_chain = CertChainWithKey::new("client".into(), None);
+            let cert_chain = CertChainWithKey::new("client", None);
             builder
                 .with_client_auth_cert(cert_chain.certs, cert_chain.key)
                 .unwrap()
@@ -291,7 +261,7 @@ async fn client_authentication(
 
     let root_dir = tempfile::tempdir().unwrap();
 
-    let agent_chain = CertChainWithKey::new("mirrord-agent".into(), None);
+    let agent_chain = CertChainWithKey::new("mirrord-agent", None);
     let auth_pem = root_dir.path().join("auth.pem");
     agent_chain.to_file(&auth_pem);
 
@@ -329,14 +299,14 @@ async fn client_authentication(
                 .add(agent_chain.certs.last().unwrap().clone())
                 .unwrap();
         } else {
-            let cert = generate_cert("dummy root".into(), None, true);
+            let cert = generate_cert("dummy root", None, true).unwrap();
             root_store.add(cert.cert.into()).unwrap();
         }
 
         let verifier = WebPkiClientVerifier::builder(root_store.into())
             .build()
             .unwrap();
-        let server_chain = CertChainWithKey::new("server".into(), None);
+        let server_chain = CertChainWithKey::new("server", None);
         let config = ServerConfig::builder()
             .with_client_cert_verifier(verifier)
             .with_single_cert(server_chain.certs, server_chain.key)
@@ -369,11 +339,11 @@ async fn server_verification(
 
     let root_dir = tempfile::tempdir().unwrap();
 
-    let agent_chain = CertChainWithKey::new("mirrord-agent".into(), None);
+    let agent_chain = CertChainWithKey::new("mirrord-agent", None);
     let auth_pem = root_dir.path().join("auth.pem");
     agent_chain.to_file(&auth_pem);
 
-    let trusted_root = generate_cert("root".into(), None, true);
+    let trusted_root = generate_cert("root", None, true).unwrap();
     let root_pem = root_dir.path().join("root.pem");
     fs::write(root_pem, trusted_root.cert.pem()).unwrap();
 
@@ -412,7 +382,7 @@ async fn server_verification(
             .build()
             .unwrap();
         let issuer = server_uses_trusted_root.then_some(&trusted_root);
-        let server_chain = CertChainWithKey::new("server".into(), issuer);
+        let server_chain = CertChainWithKey::new("server", issuer);
         let config = ServerConfig::builder()
             .with_client_cert_verifier(verifier)
             .with_single_cert(server_chain.certs, server_chain.key)
@@ -436,11 +406,11 @@ async fn agent_connects_with_original_params() {
 
     let root_dir = tempfile::tempdir().unwrap();
 
-    let trusted_root = generate_cert("root".into(), None, true);
+    let trusted_root = generate_cert("root", None, true).unwrap();
     let root_pem = root_dir.path().join("root.pem");
     fs::write(root_pem, trusted_root.cert.pem()).unwrap();
 
-    let agent_chain = CertChainWithKey::new("server".into(), Some(&trusted_root));
+    let agent_chain = CertChainWithKey::new("server", Some(&trusted_root));
     let auth_pem = root_dir.path().join("auth.pem");
     agent_chain.to_file(&auth_pem);
 
@@ -479,7 +449,7 @@ async fn agent_connects_with_original_params() {
     let root_store = Arc::new(root_store);
 
     let connector = {
-        let chain = CertChainWithKey::new("client".into(), Some(&trusted_root));
+        let chain = CertChainWithKey::new("client", Some(&trusted_root));
         let mut config = ClientConfig::builder()
             .with_root_certificates(root_store.clone())
             .with_client_auth_cert(chain.certs, chain.key)
@@ -490,7 +460,7 @@ async fn agent_connects_with_original_params() {
 
     let acceptor = {
         let verifier = WebPkiClientVerifier::builder(root_store).build().unwrap();
-        let server_chain = CertChainWithKey::new("server".into(), Some(&trusted_root));
+        let server_chain = CertChainWithKey::new("server", Some(&trusted_root));
         let mut config = ServerConfig::builder()
             .with_client_cert_verifier(verifier)
             .with_single_cert(server_chain.certs, server_chain.key)

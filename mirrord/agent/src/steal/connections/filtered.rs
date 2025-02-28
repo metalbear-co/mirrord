@@ -21,6 +21,7 @@ use mirrord_protocol::{
     },
     ConnectionId, RequestId,
 };
+use mirrord_tls_util::MaybeTls;
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
     sync::{
@@ -39,10 +40,7 @@ use super::{
 use crate::{
     http::HttpVersion,
     metrics::STEAL_FILTERED_CONNECTION_SUBSCRIPTION,
-    steal::{
-        connections::{original_destination::MaybeTls, unfiltered::UnfilteredStealTask},
-        subscriptions::Filters,
-    },
+    steal::{connections::unfiltered::UnfilteredStealTask, subscriptions::Filters},
     util::ClientId,
 };
 
@@ -1705,12 +1703,10 @@ mod test {
         let original_destination = original_listener.local_addr().unwrap();
 
         // Root certificate trusted by everyone.
-        let common_root = tls::test::generate_cert("root".into(), None, true);
-        let original_server_chain =
-            tls::test::CertChainWithKey::new("server".into(), Some(&common_root));
-        let agent_server_chain =
-            tls::test::CertChainWithKey::new("server".into(), Some(&common_root));
-        let client_chain = tls::test::CertChainWithKey::new("client".into(), Some(&common_root));
+        let common_root = mirrord_tls_util::generate_cert("root", None, true).unwrap();
+        let original_server_chain = tls::test::CertChainWithKey::new("server", Some(&common_root));
+        let agent_server_chain = tls::test::CertChainWithKey::new("server", Some(&common_root));
+        let client_chain = tls::test::CertChainWithKey::new("client", Some(&common_root));
         let root_store = {
             let mut store = RootCertStore::empty();
             store.add(common_root.cert.der().clone()).unwrap();

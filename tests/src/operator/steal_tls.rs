@@ -23,13 +23,10 @@ use mirrord_agent_env::steal_tls::{
     TlsClientVerification, TlsServerVerification,
 };
 use mirrord_operator::crd::steal_tls::{MirrordTlsStealConfig, MirrordTlsStealConfigSpec};
+use mirrord_tls_util::generate_cert;
 use pem::{EncodeConfig, LineEnding, Pem};
-use rcgen::{
-    BasicConstraints, CertificateParams, CertifiedKey, DnType, DnValue, IsCa, KeyPair,
-    KeyUsagePurpose,
-};
+use rcgen::CertifiedKey;
 use rstest::rstest;
-use rustls::pki_types::ServerName;
 
 use crate::utils::{
     kube_client, service_addr::TestServiceAddr, watch, Application, ResourceGuard,
@@ -292,32 +289,6 @@ impl GoServTlsConfig {
     const MOUNT_PATH: &str = "/certs";
 }
 
-/// Generates a new [`CertifiedKey`] with a random [`KeyPair`].
-fn generate_cert(name: &str, issuer: Option<&CertifiedKey>, can_sign_others: bool) -> CertifiedKey {
-    debug_assert!(ServerName::try_from(name).is_ok());
-
-    let key_pair = KeyPair::generate().unwrap();
-
-    let mut params = CertificateParams::new(vec![name.to_string()]).unwrap();
-    params
-        .distinguished_name
-        .push(DnType::CommonName, DnValue::Utf8String(name.to_string()));
-
-    if can_sign_others {
-        params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-        params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
-    }
-
-    let cert = match issuer {
-        Some(issuer) => params
-            .signed_by(&key_pair, &issuer.cert, &issuer.key_pair)
-            .unwrap(),
-        None => params.self_signed(&key_pair).unwrap(),
-    };
-
-    CertifiedKey { cert, key_pair }
-}
-
 /// Generates:
 /// 1. Configuration for the [`GoServService`] in mTLS mode
 /// 2. [`StealPortTlsConfig`] to configure TLS stealing via the operator
@@ -326,7 +297,7 @@ fn generate_tls_configs() -> (GoServTlsConfig, StealPortTlsConfig, CertifiedKey)
     let mut pem_files: BTreeMap<String, String> = Default::default();
     let mut env: HashMap<String, String> = Default::default();
 
-    let root = generate_cert("test.root", None, true);
+    let root = generate_cert("test.root", None, true).unwrap();
     pem_files.insert(
         "root.cert.pem".into(),
         pem::encode_config(
@@ -339,7 +310,7 @@ fn generate_tls_configs() -> (GoServTlsConfig, StealPortTlsConfig, CertifiedKey)
         format!("{}/root.cert.pem", GoServTlsConfig::MOUNT_PATH),
     );
 
-    let server_cert = generate_cert("go-serv", Some(&root), false);
+    let server_cert = generate_cert("go-serv", Some(&root), false).unwrap();
     pem_files.insert(
         "server.cert.pem".into(),
         pem::encode_many_config(
@@ -366,7 +337,7 @@ fn generate_tls_configs() -> (GoServTlsConfig, StealPortTlsConfig, CertifiedKey)
         format!("{}/server.key.pem", GoServTlsConfig::MOUNT_PATH),
     );
 
-    let agent_client_cert = generate_cert("mirrord-agent", Some(&root), false);
+    let agent_client_cert = generate_cert("mirrord-agent", Some(&root), false).unwrap();
     pem_files.insert(
         "agent.cert.pem".into(),
         pem::encode_many_config(
@@ -558,7 +529,7 @@ async fn steal_tls_with_filter(#[future] kube_client: Client, #[case] mtls: bool
         );
 
         let client_cert_and_key = mtls.then(|| {
-            let client_cert = generate_cert("test-client", Some(&root), false);
+            let client_cert = generate_cert("test-client", Some(&root), false).unwrap();
             pem::encode_many_config(
                 &[
                     Pem::new("CERTIFICATE", client_cert.cert.der().to_vec()),
@@ -587,7 +558,7 @@ async fn steal_tls_with_filter(#[future] kube_client: Client, #[case] mtls: bool
 
     let dir = tempfile::tempdir().unwrap();
 
-    let local_server_cert = generate_cert("local.server", None, false);
+    let local_server_cert = generate_cert("local.server", None, false).unwrap();
     let local_server_cert_path = dir.path().join("cert.pem");
     let local_server_cert_pem = pem::encode_config(
         &Pem::new("CERTIFICATE", local_server_cert.cert.der().to_vec()),
