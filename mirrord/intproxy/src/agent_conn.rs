@@ -2,9 +2,9 @@
 //! mirrord crates.
 
 use std::{
+    fmt,
     fs::File,
-    io,
-    io::BufReader,
+    io::{self, BufReader},
     net::{IpAddr, SocketAddr},
     ops::ControlFlow,
     path::{Path, PathBuf},
@@ -101,7 +101,7 @@ pub enum AgentConnectInfo {
     DirectKubernetes(AgentKubernetesConnectInfo),
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub enum ReconnectFlow {
     ConnectInfo {
         config: LayerConfig,
@@ -110,6 +110,17 @@ pub enum ReconnectFlow {
 
     #[default]
     Break,
+}
+
+impl fmt::Debug for ReconnectFlow {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ConnectInfo { connect_info, .. } => {
+                f.debug_tuple("ConnectInfo").field(connect_info).finish()
+            }
+            Self::Break => f.write_str("Break"),
+        }
+    }
 }
 
 /// Handles logic of the `proxy <-> agent` connection as a [`BackgroundTask`].
@@ -128,6 +139,7 @@ pub struct AgentConnection {
 impl AgentConnection {
     /// Creates a new agent connection based on the provided [`LayerConfig`] and optional
     /// [`AgentConnectInfo`].
+    #[tracing::instrument(level = Level::INFO, skip(config, analytics), ret, err)]
     pub async fn new<R: Reporter>(
         config: &LayerConfig,
         connect_info: Option<AgentConnectInfo>,
@@ -218,9 +230,17 @@ impl AgentConnection {
         })
     }
 
-    #[tracing::instrument(level = Level::TRACE, name = "send_agent_message", skip(self), ret)]
+    #[tracing::instrument(level = Level::TRACE, name = "send_message_to_agent", skip(self), ret, err(level = Level::TRACE))]
     async fn send(&self, msg: ClientMessage) -> Result<(), AgentChannelError> {
         self.agent_tx.send(msg).await.map_err(|_| AgentChannelError)
+    }
+}
+
+impl fmt::Debug for AgentConnection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AgentConnection")
+            .field("reconnect", &self.reconnect)
+            .finish()
     }
 }
 
@@ -235,6 +255,7 @@ impl BackgroundTask for AgentConnection {
     type MessageIn = ClientMessage;
     type MessageOut = ProxyMessage;
 
+    #[tracing::instrument(level = Level::INFO, name = "agent_connection_main_loop", skip_all, ret, err)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         loop {
             tokio::select! {
@@ -264,7 +285,7 @@ impl BackgroundTask for AgentConnection {
 }
 
 impl RestartableBackgroundTask for AgentConnection {
-    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus), ret)]
+    #[tracing::instrument(level = Level::INFO, skip(self, message_bus), ret)]
     async fn restart(
         &mut self,
         error: Self::Error,

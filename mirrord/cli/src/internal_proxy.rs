@@ -13,6 +13,7 @@
 use std::{
     env, io,
     net::{Ipv4Addr, SocketAddr},
+    os::unix::ffi::OsStrExt,
     time::Duration,
 };
 
@@ -32,7 +33,6 @@ use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
-    logging::init_intproxy_tracing_registry,
     util::{create_listen_socket, detach_io},
 };
 
@@ -46,29 +46,35 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
 
 /// Main entry point for the internal proxy.
 /// It listens for inbound layer connect and forwards to agent.
+#[tracing::instrument(level = Level::INFO, skip_all, err)]
 pub(crate) async fn proxy(
+    config: LayerConfig,
     listen_port: u16,
     watch: drain::Watch,
 ) -> CliResult<(), InternalProxyError> {
-    let config = LayerConfig::recalculate_from_env()?;
-
-    init_intproxy_tracing_registry(&config)?;
-    tracing::info!(?config, "internal_proxy starting");
+    tracing::info!(
+        ?config,
+        listen_port,
+        version = env!("CARGO_PKG_VERSION"),
+        "Starting mirrord-intproxy",
+    );
 
     // According to https://wilsonmar.github.io/maximum-limits/ this is the limit on macOS
     // so we assume Linux can be higher and set to that.
     if let Err(error) = setrlimit(Resource::RLIMIT_NOFILE, 12288, 12288) {
-        warn!(?error, "Failed to set the file descriptor limit");
+        warn!(%error, "Failed to set the file descriptor limit");
     }
 
-    let agent_connect_info = match env::var(AGENT_CONNECT_INFO_ENV_KEY) {
-        Ok(var) => {
-            let deserialized = serde_json::from_str(&var)
-                .map_err(|e| InternalProxyError::DeseralizeConnectInfo(var, e))?;
-            Some(deserialized)
-        }
-        Err(..) => None,
-    };
+    let agent_connect_info = env::var_os(AGENT_CONNECT_INFO_ENV_KEY)
+        .map(|var| {
+            serde_json::from_slice(var.as_bytes()).map_err(|error| {
+                InternalProxyError::DeseralizeConnectInfo(
+                    String::from_utf8_lossy(var.as_bytes()).into_owned(),
+                    error,
+                )
+            })
+        })
+        .transpose()?;
 
     let execution_kind = std::env::var(MIRRORD_EXECUTION_KIND_ENV)
         .ok()
@@ -111,14 +117,11 @@ pub(crate) async fn proxy(
     )
     .run(first_connection_timeout, consecutive_connection_timeout)
     .await
-    .map_err(InternalProxyError::from)
-    .inspect_err(|error| {
-        tracing::error!(%error, "Internal proxy encountered an error, exiting");
-    })
+    .map_err(From::from)
 }
 
 /// Creates a connection with the agent and handles one round of ping pong.
-#[tracing::instrument(level = Level::TRACE)]
+#[tracing::instrument(level = Level::TRACE, skip(config, analytics))]
 pub(crate) async fn connect_and_ping(
     config: &LayerConfig,
     connect_info: Option<AgentConnectInfo>,

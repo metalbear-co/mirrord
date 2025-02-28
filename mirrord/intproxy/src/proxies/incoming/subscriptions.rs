@@ -180,6 +180,7 @@ impl SubscriptionsManager {
     /// Subsequent subscriptions of the same port will take precedence over previous ones, meaning
     /// that new connections will be routed to the listener from the most recent [`PortSubscribe`]
     /// request.
+    #[tracing::instrument(level = Level::INFO, skip(self), ret)]
     pub fn layer_subscribed(
         &mut self,
         layer_id: LayerId,
@@ -210,6 +211,7 @@ impl SubscriptionsManager {
 
     /// Unregisters a subscription from this struct.
     /// Optionally returns a message to be sent to the agent.
+    #[tracing::instrument(level = Level::INFO, skip(self), ret)]
     pub fn layer_unsubscribed(
         &mut self,
         layer_id: LayerId,

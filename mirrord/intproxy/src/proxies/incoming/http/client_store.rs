@@ -105,7 +105,11 @@ impl ClientStore {
     }
 
     /// Reuses or creates a new [`LocalHttpClient`].
-    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::WARN))]
+    #[tracing::instrument(
+        level = Level::DEBUG,
+        skip(self),
+        ret, err(level = Level::DEBUG),
+    )]
     pub async fn get(
         &self,
         server_addr: SocketAddr,
@@ -120,7 +124,7 @@ impl ClientStore {
             .wait_for_ready(server_addr, version, uses_tls)
             .now_or_never()
         {
-            tracing::trace!(?ready, "Reused an idle client");
+            tracing::debug!(?ready, "Reused an idle client");
             return Ok(ready);
         }
 
@@ -128,11 +132,15 @@ impl ClientStore {
             biased;
 
             ready = self.wait_for_ready(server_addr, version, uses_tls) => {
-                tracing::trace!(?ready, "Reused an idle client");
+                tracing::debug!(?ready, "Reused an idle client");
                 Ok(ready)
             },
 
-            result = self.make_client(server_addr, version, transport, request_uri) => result,
+            result = self.make_client(server_addr, version, transport, request_uri) => {
+                let client = result?;
+                tracing::debug!(?client, "Made a new client");
+                Ok(client)
+            },
         }
     }
 
@@ -151,6 +159,7 @@ impl ClientStore {
     }
 
     /// Waits until there is a ready unused client.
+    #[tracing::instrument(level = Level::TRACE, skip_all, ret)]
     async fn wait_for_ready(
         &self,
         server_addr: SocketAddr,
@@ -180,7 +189,7 @@ impl ClientStore {
     }
 
     /// Makes an HTTP/HTTPS connection with the given server and creates a new client.
-    #[tracing::instrument(level = Level::TRACE, skip(self), err(level = Level::WARN), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip_all, ret, err(level = Level::TRACE))]
     async fn make_client(
         &self,
         local_server_address: SocketAddr,

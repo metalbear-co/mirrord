@@ -3,6 +3,7 @@ use std::{io::ErrorKind, net::SocketAddr, time::Duration};
 use bytes::BytesMut;
 use hyper::upgrade::OnUpgrade;
 use hyper_util::rt::TokioIo;
+use mirrord_protocol::ConnectionId;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -40,6 +41,10 @@ pub enum LocalTcpConnection {
 /// [`Self::MIRROR_MODE_LINGER_TIMEOUT`] of silence.
 #[derive(Debug)]
 pub struct TcpProxyTask {
+    /// ID of the remote connection this task handles.
+    ///
+    /// Saved for [`std::fmt::Debug`] implementation.
+    _connection_id: ConnectionId,
     /// The local connection between this task and the user application.
     connection: Option<LocalTcpConnection>,
     /// Whether this task should silently discard data coming from the user application.
@@ -58,8 +63,13 @@ impl TcpProxyTask {
     /// * This task will talk with the user application using the given [`LocalTcpConnection`].
     /// * If `discard_data` is set, this task will silently discard all data coming from the user
     ///   application.
-    pub fn new(connection: LocalTcpConnection, discard_data: bool) -> Self {
+    pub fn new(
+        connection_id: ConnectionId,
+        connection: LocalTcpConnection,
+        discard_data: bool,
+    ) -> Self {
         Self {
+            _connection_id: connection_id,
             connection: Some(connection),
             discard_data,
         }
@@ -71,7 +81,11 @@ impl BackgroundTask for TcpProxyTask {
     type MessageIn = Vec<u8>;
     type MessageOut = InProxyTaskMessage;
 
-    #[tracing::instrument(level = Level::TRACE, name = "tcp_proxy_task_main_loop", skip(message_bus), err(level = Level::WARN))]
+    #[tracing::instrument(
+        level = Level::DEBUG, name = "tcp_proxy_task_main_loop",
+        skip(message_bus),
+        ret, err(level = Level::WARN),
+    )]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         let mut stream = match self
             .connection

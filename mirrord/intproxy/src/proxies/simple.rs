@@ -10,6 +10,7 @@ use mirrord_protocol::{
 };
 use semver::Version;
 use thiserror::Error;
+use tracing::Level;
 
 use crate::{
     background_tasks::{BackgroundTask, MessageBus},
@@ -87,7 +88,6 @@ pub struct SimpleProxy {
 }
 
 impl SimpleProxy {
-    #[tracing::instrument(skip(self), level = tracing::Level::TRACE)]
     fn set_protocol_version(&mut self, version: Version) {
         self.protocol_version.replace(version);
     }
@@ -99,10 +99,15 @@ impl SimpleProxy {
             .is_some_and(|version| ADDRINFO_V2_VERSION.matches(version))
     }
 
+    #[tracing::instrument(level = Level::INFO, skip_all, ret, err)]
     async fn handle_connection_refresh(
         &mut self,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), SimpleProxyError> {
+        tracing::debug!(
+            num_responses = self.addr_info_reqs.len(),
+            "Flushing error responses to GetAddrInfoRequests"
+        );
         while let Some((message_id, layer_id)) = self.addr_info_reqs.pop_front() {
             message_bus
                 .send(ToLayer::from(AgentLostSimpleResponse::addr_info(
@@ -111,6 +116,10 @@ impl SimpleProxy {
                 .await;
         }
 
+        tracing::debug!(
+            num_responses = self.get_env_reqs.len(),
+            "Flushing error responses to GetEnvVarsRequests"
+        );
         while let Some((message_id, layer_id)) = self.get_env_reqs.pop_front() {
             message_bus
                 .send(ToLayer::from(AgentLostSimpleResponse::get_env(
@@ -128,10 +137,9 @@ impl BackgroundTask for SimpleProxy {
     type MessageIn = SimpleProxyMessage;
     type MessageOut = ProxyMessage;
 
+    #[tracing::instrument(level = Level::INFO, name = "simple_proxy_main_loop", skip_all, ret, err)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         while let Some(msg) = message_bus.recv().await {
-            tracing::trace!(?msg, "new message in message_bus");
-
             match msg {
                 SimpleProxyMessage::AddrInfoReq(message_id, session_id, req) => {
                     self.addr_info_reqs.push_back(message_id, session_id);
@@ -142,9 +150,9 @@ impl BackgroundTask for SimpleProxy {
                     } else {
                         if matches!(req.family, AddressFamily::Ipv6Only) {
                             tracing::warn!(
-                                "The agent version you're using does not support DNS\
-                                queries for IPv6 addresses. This version will only fetch IPv4\
-                                address. Please update to a newer agent image for better IPv6\
+                                "The agent version you're using does not support DNS \
+                                queries for IPv6 addresses. This version will only fetch IPv4 \
+                                address. Please update to a newer agent image for better IPv6 \
                                 support."
                             )
                         }
@@ -192,7 +200,7 @@ impl BackgroundTask for SimpleProxy {
             }
         }
 
-        tracing::trace!("message bus closed, exiting");
+        tracing::debug!("Message bus closed, exiting");
 
         Ok(())
     }

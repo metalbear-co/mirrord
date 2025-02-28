@@ -185,8 +185,9 @@ impl IncomingProxy {
     /// If we don't have a [`PortSubscription`] for the port, the task is not started.
     /// Instead, we respond immediately to the agent.
     #[tracing::instrument(
-        level = Level::TRACE,
+        level = Level::DEBUG,
         skip(self, message_bus),
+        ret,
     )]
     async fn start_http_gateway(
         &mut self,
@@ -195,7 +196,11 @@ impl IncomingProxy {
         transport: HttpRequestTransportType,
         message_bus: &MessageBus<Self>,
     ) {
-        tracing::trace!(full_headers = ?request.internal_request.headers);
+        tracing::info!(
+            full_headers = ?request.internal_request.headers,
+            ?request,
+            "Received an HTTP request from the agent",
+        );
 
         let subscription = self.subscriptions.get(request.port).filter(|subscription| {
             matches!(
@@ -207,7 +212,6 @@ impl IncomingProxy {
         });
         let Some(subscription) = subscription else {
             tracing::debug!(
-                ?request,
                 "Received a new HTTP request within a stale port subscription, \
                 sending an unsubscribe request or an error response."
             );
@@ -334,6 +338,7 @@ impl IncomingProxy {
         };
         let tx = self.tasks.register(
             TcpProxyTask::new(
+                connection_id,
                 LocalTcpConnection::FromTheStart {
                     socket,
                     peer: subscription.listening_on,
@@ -565,7 +570,7 @@ impl IncomingProxy {
     }
 
     /// Handles all messages from this task's [`MessageBus`].
-    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus), ret, err)]
     async fn handle_message(
         &mut self,
         message: IncomingProxyMessage,
@@ -633,7 +638,7 @@ impl IncomingProxy {
                 self.tasks.clear();
 
                 for subscription in self.subscriptions.iter_mut() {
-                    tracing::debug!(?subscription, "resubscribing");
+                    tracing::info!(?subscription, "Resubscribing after connection refresh");
 
                     message_bus
                         .send(ProxyMessage::ToAgent(subscription.resubscribe_message()))
@@ -646,7 +651,7 @@ impl IncomingProxy {
     }
 
     /// Handles all updates from [`TcpProxyTask`]s.
-    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
+    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus), ret)]
     async fn handle_tcp_proxy_update(
         &mut self,
         connection_id: ConnectionId,
@@ -707,7 +712,7 @@ impl IncomingProxy {
     }
 
     /// Handles all updates from [`HttpGatewayTask`]s.
-    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
+    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus), ret)]
     async fn handle_http_gateway_update(
         &mut self,
         id: HttpGatewayId,
@@ -764,7 +769,12 @@ impl IncomingProxy {
 
                 match message {
                     HttpOut::ResponseBasic(response) => {
-                        tracing::trace!(full_headers = ?response.internal_response.headers);
+                        tracing::info!(
+                            full_headers = ?response.internal_response.headers,
+                            ?response,
+                            "Received an HTTP response from an HttpGatewayTask",
+                        );
+
                         message_bus
                             .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponse(
                                 response,
@@ -772,7 +782,12 @@ impl IncomingProxy {
                             .await
                     }
                     HttpOut::ResponseFramed(response) => {
-                        tracing::trace!(full_headers = ?response.internal_response.headers);
+                        tracing::info!(
+                            full_headers = ?response.internal_response.headers,
+                            ?response,
+                            "Received an HTTP response from an HttpGatewayTask",
+                        );
+
                         message_bus
                             .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseFramed(
                                 response,
@@ -781,8 +796,13 @@ impl IncomingProxy {
                     }
                     HttpOut::ResponseChunked(response) => {
                         if let ChunkedResponse::Start(start) = &response {
-                            tracing::trace!(full_headers = ?start.internal_response.headers);
+                            tracing::info!(
+                                full_headers = ?start.internal_response.headers,
+                                response = ?start,
+                                "Received an HTTP response from an HttpGatewayTask",
+                            );
                         }
+
                         message_bus
                             .send(ClientMessage::TcpSteal(LayerTcpSteal::HttpResponseChunked(
                                 response,
@@ -791,7 +811,11 @@ impl IncomingProxy {
                     }
                     HttpOut::Upgraded(on_upgrade) => {
                         let proxy = self.tasks.register(
-                            TcpProxyTask::new(LocalTcpConnection::AfterUpgrade(on_upgrade), false),
+                            TcpProxyTask::new(
+                                id.connection_id,
+                                LocalTcpConnection::AfterUpgrade(on_upgrade),
+                                false,
+                            ),
                             InProxyTask::StealTcpProxy(id.connection_id),
                             Self::CHANNEL_SIZE,
                         );
@@ -812,13 +836,13 @@ impl BackgroundTask for IncomingProxy {
     type MessageIn = IncomingProxyMessage;
     type MessageOut = ProxyMessage;
 
-    #[tracing::instrument(level = Level::TRACE, name = "incoming_proxy_main_loop", skip_all, err)]
+    #[tracing::instrument(level = Level::INFO, name = "incoming_proxy_main_loop", skip_all, err)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         loop {
             tokio::select! {
                 msg = message_bus.recv() => match msg {
                     None => {
-                        tracing::trace!("message bus closed, exiting");
+                        tracing::debug!("Message bus closed, exiting");
                         break Ok(());
                     },
                     Some(message) => self.handle_message(message, message_bus).await?,
