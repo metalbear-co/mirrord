@@ -491,7 +491,7 @@ impl ComposeRunner<PrepareCompose> {
 
 impl ComposeRunner<RunCompose> {
     #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
-    pub(super) async fn debug_stuff(self) -> ComposeResult<ComposeRunner<()>> {
+    pub(super) async fn run(self) -> ComposeResult<ComposeRunner<i32>> {
         let Self {
             progress,
             runtime,
@@ -506,36 +506,17 @@ impl ComposeRunner<RunCompose> {
                 },
         } = self;
 
-        // TODO(alex) [low]: Don't keep the file forever here, it should be kept only during
-        // execution.
-        let (p, path) = compose_yaml.keep().unwrap();
+        // TODO(alex) [high]: Use proper args passed by the user, remember to take out the `--file`
+        // they have used, to use ours!
 
-        // TODO(alex) [high]: To connect to mirrord, we can add this address directly in the
-        // compose file, in `mirrord-sidecar` as an env, and the other services too.
-        // Is it random though? If it is, then maybe refactor it into a config so it stops being
-        // random.
-        //
-        // Must also start the external proxy!
-        //
-        // runtime_command.add_env(
-        //     MIRRORD_CONNECT_TCP_ENV,
-        //     sidecar_intproxy_address.to_string(),
-        // );
-        let mut args = vec![
+        let args = vec![
             "compose".to_string(),
             "--file".to_string(),
-            path.to_string_lossy().to_string(),
+            compose_yaml.path().to_string_lossy().into(),
             "up".to_string(),
-            // "run".to_string(),
-            // "interactive".to_string(),
-            // "/bin/bash".to_string(),
         ];
-        // runtime_args.remove(0);
-        // args.extend(runtime_args.clone());
-        // runtime_args.extend(args);
-        tracing::info!(?args, "We're running it");
 
-        let runtime_command_result = Command::new("docker")
+        let runtime_command_result = Command::new(runtime.to_string())
             .args(args.clone())
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
@@ -560,8 +541,10 @@ impl ComposeRunner<RunCompose> {
         match runtime_command_result {
             Err(err) => {
                 analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+
+                todo!()
             }
-            Ok(status) => (),
+            Ok(status) => Ok(status.code().unwrap_or_default()),
         };
 
         Ok(ComposeRunner {

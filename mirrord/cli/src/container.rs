@@ -436,7 +436,7 @@ pub(crate) async fn container_command(
     ) {
         container_run(runtime_args, exec_params, watch).await
     } else {
-        let wat = ComposeRunner::try_new(runtime_args, exec_params)
+        ComposeRunner::try_new(runtime_args, exec_params)
             .unwrap()
             .layer_config_and_analytics(watch)
             .unwrap()
@@ -448,7 +448,7 @@ pub(crate) async fn container_command(
             .make_temp_compose_file()
             .await
             .unwrap()
-            .debug_stuff()
+            .run()
             .await
             .unwrap();
 
