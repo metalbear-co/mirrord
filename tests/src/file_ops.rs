@@ -79,6 +79,43 @@ mod file_ops_tests {
         process.assert_python_fileops_stderr().await;
     }
 
+    #[cfg_attr(not(feature = "job"), ignore)]
+    #[rstest]
+    #[trace]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    pub async fn file_ops_unlink(
+        #[future]
+        #[notrace]
+        service: KubeService,
+    ) {
+        let service = service.await;
+        let python_command = vec![
+            "python3",
+            "-B",
+            "-m",
+            "unittest",
+            "-f",
+            "python-e2e/files_unlink.py",
+        ];
+
+        let mut args = vec!["--fs-mode", "read"];
+
+        let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp.*")];
+
+        let mut process = run_exec_with_target(
+            python_command,
+            &service.pod_container_target(),
+            Some(&service.namespace),
+            Some(args),
+            Some(env),
+        )
+        .await;
+        let res = process.wait().await;
+        assert!(res.success());
+        process.assert_python_fileops_stderr().await;
+    }
+
     // Currently fails due to Layer >> AddressConversion in ci for some reason
     #[ignore]
     #[cfg(target_os = "linux")]
