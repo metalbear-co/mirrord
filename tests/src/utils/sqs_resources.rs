@@ -4,6 +4,8 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
+    net::IpAddr,
+    ops::Not,
     time::Duration,
 };
 
@@ -18,10 +20,10 @@ use futures::StreamExt;
 use futures_util::{FutureExt, TryStreamExt};
 use k8s_openapi::api::{
     apps::v1::Deployment,
-    core::v1::{EnvVar, Service},
+    core::v1::{EnvVar, Pod, Service},
 };
 use kube::{
-    api::{Patch, PatchParams, PostParams, WatchEvent, WatchParams},
+    api::{ListParams, Patch, PatchParams, PostParams, WatchEvent, WatchParams},
     runtime::wait::await_condition,
     Api, Client, Resource, ResourceExt,
 };
@@ -36,9 +38,7 @@ use mirrord_operator::{
 use rstest::fixture;
 use tokio::task::JoinHandle;
 
-use crate::utils::{
-    kube_client, service_addr::TestServiceAddr, service_with_env, KubeService, ResourceGuard,
-};
+use crate::utils::{kube_client, service_with_env, KubeService, ResourceGuard};
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
 const QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_Q_NAME1";
@@ -498,6 +498,19 @@ fn get_patch_applied_check(generation: i64) -> impl Fn(Option<&Deployment>) -> b
     }
 }
 
+/// Get a URL for localstack that is reachable from outside the cluster.
+async fn localstack_endpoint_external_url(kube_client: &Client) -> String {
+    let localstack_host = get_pod_or_node_host(kube_client.clone(), "localstack", "default").await;
+    let localstack_host = localstack_host.trim();
+    format!("http://{localstack_host}:31566")
+}
+
+/// Is there a "localstack" service in the "default" namespace.
+async fn localstack_in_default_namespace(kube_client: &Client) -> bool {
+    let service_api = Api::<Service>::namespaced(kube_client.clone(), "default");
+    service_api.get("localstack").await.is_ok()
+}
+
 /// Watch `MirrordSqsSession` resources in this namespace (which is private to this test instance
 /// alone), and return once two unique sessions are ready.
 ///
@@ -572,24 +585,13 @@ async fn await_registry_status(kube_client: Client, namespace: String) {
 pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResources {
     let kube_client = kube_client.await;
     let mut guards = Vec::new();
-
-    let endpoint_addr = {
-        let localstack = Api::<Service>::namespaced(kube_client.clone(), "default")
-            .get("localstack")
-            .await
-            .ok();
-        if let Some(localstack) = localstack {
-            println!("localstack detected, using localstack for SQS");
-            patch_operator_for_localstack(&kube_client, &mut guards).await;
-            Some(TestServiceAddr::fetch(kube_client.clone(), &localstack).await)
-        } else {
-            None
-        }
+    let endpoint_url = if localstack_in_default_namespace(&kube_client).await {
+        println!("localstack detected, using localstack for SQS");
+        patch_operator_for_localstack(&kube_client, &mut guards).await;
+        Some(localstack_endpoint_external_url(&kube_client).await)
+    } else {
+        None
     };
-
-    let endpoint_url = endpoint_addr
-        .as_ref()
-        .map(|addr| format!("http://{}", addr.addr));
     let sqs_client = get_sqs_client(endpoint_url).await;
     let (queue1, echo_queue1) =
         random_name_sqs_queue_with_echo_queue(false, &sqs_client, &mut guards).await;
@@ -652,4 +654,41 @@ pub async fn write_sqs_messages(
             .await
             .expect("Sending SQS message failed.");
     }
+}
+
+async fn get_pod_or_node_host(kube_client: Client, name: &str, namespace: &str) -> String {
+    let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), namespace);
+    let pods = pod_api
+        .list(&ListParams::default().labels(&format!("app={}", name)))
+        .await
+        .unwrap();
+    pods.into_iter()
+        .next()
+        .and_then(|pod| pod.status)
+        .and_then(|status| status.host_ip)
+        .filter(|ip| {
+            // use this IP only if it's a public one.
+            match ip.parse::<IpAddr>().unwrap() {
+                IpAddr::V4(ip4) => ip4.is_private(),
+                IpAddr::V6(ip6) => {
+                    ip6.is_unicast_link_local() || ip6.is_unique_local() || ip6.is_loopback()
+                }
+            }
+            .not()
+        })
+        .unwrap_or_else(|| {
+            if (cfg!(target_os = "linux") && !wsl::is_wsl())
+                || std::env::var("USE_MINIKUBE").is_ok()
+            {
+                let output = std::process::Command::new("minikube")
+                    .arg("ip")
+                    .output()
+                    .unwrap()
+                    .stdout;
+                String::from_utf8_lossy(&output).to_string()
+            } else {
+                // We assume it's either Docker for Mac or passed via wsl integration
+                "127.0.0.1".to_string()
+            }
+        })
 }
