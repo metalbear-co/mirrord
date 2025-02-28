@@ -405,12 +405,8 @@ mod test {
     };
     use hyper_util::rt::TokioIo;
     use mirrord_protocol::tcp::{HttpRequest, InternalHttpRequest};
-    use rcgen::{
-        BasicConstraints, CertificateParams, CertifiedKey, DnType, DnValue, IsCa, KeyPair,
-        KeyUsagePurpose,
-    };
     use rstest::rstest;
-    use rustls::{pki_types::ServerName, ServerConfig};
+    use rustls::ServerConfig;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
@@ -553,36 +549,6 @@ mod test {
         }
     }
 
-    /// Generates a new [`CertifiedKey`] with a random [`KeyPair`].
-    fn generate_cert(
-        name: &str,
-        issuer: Option<&CertifiedKey>,
-        can_sign_others: bool,
-    ) -> CertifiedKey {
-        debug_assert!(ServerName::try_from(name).is_ok());
-
-        let key_pair = KeyPair::generate().unwrap();
-
-        let mut params = CertificateParams::new(vec![name.to_string()]).unwrap();
-        params
-            .distinguished_name
-            .push(DnType::CommonName, DnValue::Utf8String(name.to_string()));
-
-        if can_sign_others {
-            params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-            params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
-        }
-
-        let cert = match issuer {
-            Some(issuer) => params
-                .signed_by(&key_pair, &issuer.cert, &issuer.key_pair)
-                .unwrap(),
-            None => params.self_signed(&key_pair).unwrap(),
-        };
-
-        CertifiedKey { cert, key_pair }
-    }
-
     /// Verifies that [`HttpGatewayTask`] and [`TcpProxyTask`] together correctly handle HTTP
     /// upgrades.
     #[rstest]
@@ -595,8 +561,8 @@ mod test {
         );
 
         let acceptor = use_tls.then(|| {
-            let root = generate_cert("root", None, true);
-            let server = generate_cert("server", None, false);
+            let root = mirrord_tls_util::generate_cert("root", None, true).unwrap();
+            let server = mirrord_tls_util::generate_cert("server", None, false).unwrap();
             let mut config = ServerConfig::builder()
                 .with_no_client_auth()
                 .with_single_cert(

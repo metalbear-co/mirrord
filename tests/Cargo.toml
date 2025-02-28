@@ -25,6 +25,7 @@ serde_json.workspace = true
 mirrord = { artifact = "bin", path = "../mirrord/cli" }
 mirrord-agent-env = { path = "../mirrord/agent/env", optional = true }
 mirrord-operator = { path = "../mirrord/operator", features = ["setup", "crd"] }
+mirrord-tls-util = { path = "../mirrord/tls-util", optional = true }
 serde.workspace = true
 futures.workspace = true
 rand.workspace = true
@@ -48,6 +49,6 @@ tokio-tungstenite.workspace = true
 default = ["ephemeral", "job", "cli", "targetless"]
 ephemeral = []
 job = []
-operator = ["dep:aws-config", "dep:aws-sdk-sqs", "dep:rcgen", "dep:mirrord-agent-env", "dep:pem"]
+operator = ["dep:aws-config", "dep:aws-sdk-sqs", "dep:rcgen", "dep:mirrord-agent-env", "dep:pem", "dep:mirrord-tls-util"]
 cli = []
 targetless = []

@@ -7008,6 +7008,7 @@ dependencies = [
  "mirrord",
  "mirrord-agent-env",
  "mirrord-operator",
+ "mirrord-tls-util",
  "pem",
  "rand 0.9.0",
  "rcgen",

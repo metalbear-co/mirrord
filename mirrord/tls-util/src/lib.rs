@@ -13,6 +13,7 @@
 //! Using blocking tasks inside these functions makes this crate safe and easy to use in async code.
 
 mod error;
+mod generate;
 mod maybe_tls;
 mod no_verifier;
 mod read_pem;
@@ -21,6 +22,7 @@ mod san;
 mod uri_ext;
 
 pub use error::{FromPemError, GetSanError};
+pub use generate::generate_cert;
 pub use maybe_tls::MaybeTls;
 pub use no_verifier::{DangerousNoVerifierClient, DangerousNoVerifierServer};
 pub use read_pem::{read_cert_chain, read_key_der};
