@@ -137,8 +137,8 @@ impl ServiceExt for docker_compose_types::Service {
         }
 
         match &mut self.environment {
-            Environment::KvPair(index_map) => {
-                index_map.extend(
+            Environment::KvPair(list) => {
+                list.extend(
                     service_info
                         .env_vars
                         .iter()
@@ -162,8 +162,8 @@ impl ServiceExt for docker_compose_types::Service {
         }
 
         match &mut self.depends_on {
-            DependsOnOptions::Conditional(index_map) => {
-                index_map.insert(
+            DependsOnOptions::Conditional(list) => {
+                list.insert(
                     MIRRORD_COMPOSE_SIDECAR_SERVICE.into(),
                     DependsCondition {
                         condition: "service_started".to_owned(),
