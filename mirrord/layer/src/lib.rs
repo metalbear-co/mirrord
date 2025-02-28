@@ -490,7 +490,7 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
     let mut hook_manager = HookManager::default();
 
     unsafe { exec_utils::enable_macos_hooks(&mut hook_manager, patch_binaries) };
-
+    unsafe { exec_hooks::hooks::enable_exec_hooks(&mut hook_manager) };
     // we need to hook file access to patch path to our temp bin.
     config.feature.fs = FsConfig {
         mode: FsModeConfig::Local,
