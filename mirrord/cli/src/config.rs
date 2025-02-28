@@ -867,11 +867,6 @@ pub(super) enum ContainerRuntimeCommand {
 }
 
 impl ContainerRuntimeCommand {
-    // TODO(alex) [high]: I need my own image of mirrord-cli, otherwise it won't have `compose`
-    // command.
-    //
-    // [update]: Add somewhere that this is needed, with the docker command, so nobody trips
-    // on this.
     /// Creates the sidecar container that'll run `runtime_args`.
     ///
     /// `runtime_args` here should be something like:

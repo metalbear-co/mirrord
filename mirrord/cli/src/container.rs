@@ -1,5 +1,13 @@
 //! Debugging `mirrord container`:
 //!
+//! To see your `mirrord-container` chnages in effect, you might need to build your own `mirrord-cli
+//! image`, and change either `DEFAULT_CLI_IMAGE`, or pass it to the `ContainerConfig::cli_image`
+//! option.
+//!
+//! Due to `mirrord-cli` image mismatches, it's also possible that the branch you're using will
+//! fail when debugging due to some `mirrord-config` changes, some error like
+//! `Failed to infer mirrord config: mirrord-config: unknown field ...`.
+//!
 //! Use mirrord console, with:
 //!
 //! `cargo run --bin mirrord-console --features binary`, and when running the app in another
