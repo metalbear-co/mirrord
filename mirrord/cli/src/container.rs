@@ -360,7 +360,7 @@ async fn container_run(
     let layer_config_file = create_temp_layer_config(&config)?;
     std::env::set_var(MIRRORD_CONFIG_FILE_ENV, layer_config_file.path());
 
-    // TODO(alex) [low]: This is the `docker create mirrord-intproxy` part.
+    // `docker create mirrord-intproxy` step.
     let (mut runtime_command, sidecar, _execution_info) = create_runtime_command_with_sidecar(
         &mut analytics,
         &mut progress,
@@ -381,20 +381,10 @@ async fn container_run(
 
     progress.success(None);
 
-    // TODO(alex) [low]: And this should be the `docker run -it ubuntu` part.
-    //
-    // TODO(alex) [high] [#1]: `docker compose up` is being run here, right? So it should have
-    // access to the user files and stuff, we just need to modify the env vars in their compose
-    // containers.
-    //
-    // We should load an `--env-file` from the user, and append the mirrord stuff to it,
-    // this should be a tempfile, since we don't want to modify the actual user file.
-    // Then it would work for all containers in compose, I assume?
+    // `docker run` step.
     let (binary, binary_args) = runtime_command
         .with_command(runtime_args.command)
         .into_command_args();
-
-    tracing::debug!(binary, "What are we getting back ?");
 
     let runtime_command_result = Command::new(binary)
         .args(binary_args)
@@ -466,7 +456,6 @@ pub(crate) async fn container_command(
     }
 }
 
-// TODO(alex) [mid]: What's this? Do I need to worry about it while testing compose from the cli?
 /// Create sidecar and extproxy but return arguments for extension instead of executing run command
 #[tracing::instrument(level = Level::DEBUG, skip(watch), ret, err)]
 pub(crate) async fn container_ext_command(

@@ -71,16 +71,11 @@ async fn serve_connection(conn: TcpStream) {
 /// When debugging `mirrord container`, you should probably use this to see the logs.
 #[tokio::main]
 async fn main() {
-    std::env::set_var("RUST_LOG", "mirrord=debug,warn");
-
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
                 .with_thread_ids(true)
-                .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-                .with_file(true)
-                .with_line_number(true)
-                .pretty(),
+                .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE),
         )
         .with(
             tracing_subscriber::EnvFilter::builder()

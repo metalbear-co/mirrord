@@ -590,11 +590,7 @@ fn main() -> miette::Result<()> {
             Commands::Container(args) => {
                 let (runtime_args, exec_params) = args.into_parts();
 
-                // TODO(alex) [8]: Where do we match on variant of command? A bunch of stuff
-                // has to be set for all variants (create, run, compose), so where can I separate
-                // it?
                 let exit_code = container_command(runtime_args, exec_params, watch).await?;
-
                 if exit_code != 0 {
                     std::process::exit(exit_code);
                 }

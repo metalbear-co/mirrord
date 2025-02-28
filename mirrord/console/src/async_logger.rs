@@ -96,7 +96,7 @@ pub async fn init_async_logger(address: &str, watch: Watch, channel_size: usize)
     let (tx, rx) = mpsc::channel(channel_size);
 
     let logger = AsyncConsoleLogger { tx };
-    log::set_boxed_logger(Box::new(logger)).map(|()| log::set_max_level(LevelFilter::Debug))?;
+    log::set_boxed_logger(Box::new(logger)).map(|()| log::set_max_level(LevelFilter::Trace))?;
 
     let cancellation_token = CancellationToken::new();
     let task = LoggerTask::new(rx, cancellation_token.clone(), stream);
