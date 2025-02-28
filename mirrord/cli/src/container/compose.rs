@@ -194,6 +194,13 @@ impl ComposeRunner<PrepareExternalProxy> {
 }
 
 impl ComposeRunner<PrepareServices> {
+    /// Prepares a set of [`ServiceInfo`], one of which is for our `mirrord-sidecar` service, while
+    /// the rest are for user's services.
+    ///
+    /// Creates some temporary files that are mounted in the `mirrord-sidecar` volumes.
+    ///
+    /// - Next step: the temporary files created here are kept alive by passing them on to the next
+    ///   step.
     #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
     pub(super) fn services(self) -> ComposeResult<ComposeRunner<PrepareCompose>> {
         let Self {
@@ -252,6 +259,8 @@ impl ComposeRunner<PrepareServices> {
             "/tmp/mirrord-config.json".into(),
         );
 
+        // Helper that inserts the file path as an env var, and sets up a volume for it in
+        // `mirrord-sidecar`.
         let mut load_env_and_mount_pem = |env: &str, path: &Path| {
             let container_path = format!("/tmp/{}.pem", env.to_lowercase());
 
@@ -288,8 +297,12 @@ impl ComposeRunner<PrepareServices> {
             .env_vars
             .insert(MIRRORD_INTPROXY_CONTAINER_MODE_ENV.into(), "true".into());
 
+        // External proxy env vars that are for the `mirrord-sidecar` only.
         let mut connection_info = Vec::new();
+
+        // External proxy env vars that are set for the user's services.
         let mut execution_info_env_without_connection_info = Vec::new();
+
         for (key, value) in external_proxy.environment.iter() {
             if key == MIRRORD_CONNECT_TCP_ENV {
                 connection_info.push((key.as_str(), value.as_str()));
@@ -342,6 +355,10 @@ impl ComposeRunner<PrepareServices> {
     }
 }
 
+/// Name of the sidecar service.
+///
+/// Some `compose.yaml` fields want it as-is, while a couple require it to be speicifed as
+/// `service:{name}`.
 const MIRRORD_COMPOSE_SIDECAR_SERVICE: &str = "mirrord-sidecar";
 
 impl ComposeRunner<PrepareCompose> {
@@ -349,6 +366,9 @@ impl ComposeRunner<PrepareCompose> {
     pub(super) async fn make_temp_compose_file(self) -> ComposeResult<ComposeRunner<RunCompose>> {
         use docker_compose_types::{Port, Ports, PublishedPort, Service, Volumes};
 
+        // We've read a verified compose config, this doesn't mean that this config is valid though,
+        // since some fields might be mistakenly set to `null` when deserializing (we fix these
+        // later in `reset_conflicts`).
         let mut compose = self.read_user_compose_file().await?;
 
         let Self {
@@ -370,17 +390,18 @@ impl ComposeRunner<PrepareCompose> {
         // `Ports::Short` by default, so build explicitly it as `Ports::Long`.
         let mut sidecar_ports = Ports::Long(Default::default());
 
+        // Look into each of the user's services, and change them to run with mirrord.
         for (service, _) in compose
             .services
             .0
             .iter_mut()
+            // Skips over `None` services.
             .filter_map(|(name, service)| service.as_mut().zip(Some(name)))
         {
             let user_service_ports =
                 ServiceComposer::modify(service, &user_service_info).reset_conflicts();
 
-            // When a service has no `ports`, it gets built by default as `Ports::Short`,
-            // which we are ignoring here (ignore on empty).
+            // Pretty much guaranteed to always be the case by `ServiceCompose::modify`.
             if let (Ports::Long(ports), Ports::Long(current)) =
                 (&mut sidecar_ports, user_service_ports)
             {
@@ -457,6 +478,18 @@ impl ComposeRunner<PrepareCompose> {
         })
     }
 
+    /// 1. Reads the user `compose.yaml` file path that might've been speicifed in `self.runtime`,
+    ///    or
+    /// defaults to current dir `./compose.yaml`.
+    ///
+    /// 2. Executes the `{runtime} compose --file {compose-file} config`
+    /// (i.e. `docker compose --file compose.yaml config`) command to get a verified compose
+    /// configuration, which is then deserialized into a [`docker_compose_types::Compose`].
+    ///
+    /// - We do (2.) to let the `compose config` command handle cumbersome conversions for us, as it
+    ///   automagically converts compose _short syntax_ into _long syntax_, with some caveats that
+    ///   we have to handle when re-serializing it (so a deserialized output from `compose config`
+    ///   that we serialize back to a `compose.yaml` may produce an invalid config).
     #[tracing::instrument(level = Level::DEBUG, skip(self), ret, err)]
     async fn read_user_compose_file(&self) -> ComposeResult<docker_compose_types::Compose> {
         self.progress.info("Preparing mirrord `compose.yaml`.");
