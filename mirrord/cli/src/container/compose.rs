@@ -7,6 +7,7 @@ use std::{
     process::Stdio,
 };
 
+use composer::ServiceComposer;
 use error::ComposeError;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::{
@@ -37,105 +38,10 @@ use crate::{
 
 type ComposeResult<T> = Result<T, ComposeError>;
 
+mod composer;
 mod error;
 mod service;
 mod steps;
-
-struct ServiceComposer<'a, Step> {
-    step: Step,
-    service: &'a mut docker_compose_types::Service,
-}
-
-struct ResetConflicts {
-    ports: docker_compose_types::Ports,
-}
-
-impl<'a> ServiceComposer<'a, New> {
-    fn modify(
-        service: &'a mut docker_compose_types::Service,
-        service_info: &ServiceInfo,
-    ) -> ServiceComposer<'a, ResetConflicts> {
-        service.modify_environment(service_info);
-        service.modify_depends_on();
-
-        service
-            .volumes_from
-            .push(MIRRORD_COMPOSE_SIDECAR_SERVICE.into());
-        service.network_mode = Some(format!("service:{MIRRORD_COMPOSE_SIDECAR_SERVICE}"));
-
-        ServiceComposer {
-            step: ResetConflicts {
-                ports: service.ports.clone(),
-            },
-            service,
-        }
-    }
-}
-
-impl<'a> ServiceComposer<'a, ResetConflicts> {
-    #[must_use]
-    fn reset_conflicts(self) -> docker_compose_types::Ports {
-        let Self {
-            service,
-            step: ResetConflicts { ports },
-        } = self;
-
-        service.ports = Default::default();
-        service.networks = Default::default();
-
-        ports
-    }
-}
-
-trait ServiceExt {
-    fn modify_environment(&mut self, service_info: &ServiceInfo);
-    fn modify_depends_on(&mut self);
-}
-
-impl ServiceExt for docker_compose_types::Service {
-    fn modify_environment(&mut self, service_info: &ServiceInfo) {
-        match &mut self.environment {
-            docker_compose_types::Environment::List(items) => {
-                items.extend(
-                    service_info
-                        .env_vars
-                        .iter()
-                        // TODO(alex) [mid] [#4]: Remove this.
-                        .filter(|(k, _)| !k.contains("LOCALSTACK"))
-                        .map(|(k, v)| format!("{k}:{v}")),
-                );
-            }
-            docker_compose_types::Environment::KvPair(index_map) => {
-                index_map.extend(
-                    service_info
-                        .env_vars
-                        .iter()
-                        // TODO(alex) [mid] [#4]: Remove this.
-                        .filter(|(k, _)| !k.contains("LOCALSTACK"))
-                        .map(|(k, v)| (k.to_owned(), serde_yaml::from_str(&format!("{v}")).ok())),
-                );
-            }
-        }
-    }
-
-    fn modify_depends_on(&mut self) {
-        use docker_compose_types::DependsCondition;
-
-        match &mut self.depends_on {
-            docker_compose_types::DependsOnOptions::Simple(items) => {
-                items.push(MIRRORD_COMPOSE_SIDECAR_SERVICE.into())
-            }
-            docker_compose_types::DependsOnOptions::Conditional(index_map) => {
-                index_map.insert(
-                    MIRRORD_COMPOSE_SIDECAR_SERVICE.into(),
-                    DependsCondition {
-                        condition: "service_started".to_owned(),
-                    },
-                );
-            }
-        }
-    }
-}
 
 #[derive(Debug)]
 struct TlsFileGuard {
@@ -468,7 +374,6 @@ impl ComposeRunner<PrepareCompose> {
         use docker_compose_types::{Port, Ports, PublishedPort, Service, Volumes};
 
         let mut compose = self.read_user_compose_file().await?;
-        tracing::debug!(?compose, "User compose file.");
 
         let Self {
             progress,
@@ -496,8 +401,6 @@ impl ComposeRunner<PrepareCompose> {
         // `Ports::Short` by default, so build it as `Ports::Long`.
         let mut sidecar_ports = Ports::Long(Default::default());
 
-        // TODO(alex) [high] [#5]: Abstract this as a builder-like typestate-y thing, since there's
-        // some finnickyness.
         for (service, _) in compose
             .services
             .0
@@ -509,9 +412,9 @@ impl ComposeRunner<PrepareCompose> {
 
             match (&mut sidecar_ports, user_service_ports) {
                 (Ports::Long(ports), Ports::Long(current)) => ports.extend(current),
-                _ => {
-                    unreachable!("BUG! `compose config` converts ports to long syntax!")
-                }
+                // When a service has no `ports`, it gets built by default as
+                // `Ports::Short`, so we just ignore it (ignore on empty).
+                _ => (),
             };
         }
 
