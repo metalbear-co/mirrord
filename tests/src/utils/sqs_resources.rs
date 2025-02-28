@@ -37,7 +37,7 @@ use rstest::fixture;
 use tokio::task::JoinHandle;
 
 use crate::utils::{
-    get_pod_or_node_host, kube_client, service_with_env, KubeService, ResourceGuard,
+    kube_client, service_addr::TestServiceAddr, service_with_env, KubeService, ResourceGuard,
 };
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
@@ -498,19 +498,6 @@ fn get_patch_applied_check(generation: i64) -> impl Fn(Option<&Deployment>) -> b
     }
 }
 
-/// Get a URL for localstack that is reachable from outside the cluster.
-async fn localstack_endpoint_external_url(kube_client: &Client) -> String {
-    let localstack_host = get_pod_or_node_host(kube_client.clone(), "localstack", "default").await;
-    let localstack_host = localstack_host.trim();
-    format!("http://{localstack_host}:31566")
-}
-
-/// Is there a "localstack" service in the "default" namespace.
-async fn localstack_in_default_namespace(kube_client: &Client) -> bool {
-    let service_api = Api::<Service>::namespaced(kube_client.clone(), "default");
-    service_api.get("localstack").await.is_ok()
-}
-
 /// Watch `MirrordSqsSession` resources in this namespace (which is private to this test instance
 /// alone), and return once two unique sessions are ready.
 ///
@@ -585,13 +572,24 @@ async fn await_registry_status(kube_client: Client, namespace: String) {
 pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResources {
     let kube_client = kube_client.await;
     let mut guards = Vec::new();
-    let endpoint_url = if localstack_in_default_namespace(&kube_client).await {
-        println!("localstack detected, using localstack for SQS");
-        patch_operator_for_localstack(&kube_client, &mut guards).await;
-        Some(localstack_endpoint_external_url(&kube_client).await)
-    } else {
-        None
+
+    let endpoint_addr = {
+        let localstack = Api::<Service>::namespaced(kube_client.clone(), "default")
+            .get("localstack")
+            .await
+            .ok();
+        if let Some(localstack) = localstack {
+            println!("localstack detected, using localstack for SQS");
+            patch_operator_for_localstack(&kube_client, &mut guards).await;
+            Some(TestServiceAddr::fetch(kube_client.clone(), &localstack).await)
+        } else {
+            None
+        }
     };
+
+    let endpoint_url = endpoint_addr
+        .as_ref()
+        .map(|addr| format!("http://{}", addr.addr));
     let sqs_client = get_sqs_client(endpoint_url).await;
     let (queue1, echo_queue1) =
         random_name_sqs_queue_with_echo_queue(false, &sqs_client, &mut guards).await;

@@ -45,4 +45,5 @@ rustls-pemfile.workspace = true
 tokio-retry.workspace = true
 
 [dev-dependencies]
+rcgen.workspace = true
 rstest.workspace = true

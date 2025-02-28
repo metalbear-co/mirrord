@@ -2,33 +2,25 @@ package main
 
 import (
 	"fmt"
-	"math/rand"
+	"log"
 	"net/http"
 	"os"
 
 	"github.com/gin-gonic/gin"
 )
 
-const TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
-
-var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-var postPATH string
-
-func RandStringRunes(n int) string {
-	b := make([]rune, n)
-	for i := range b {
-		b[i] = letterRunes[rand.Intn(len(letterRunes))]
-	}
-	return string(b)
-}
-
 func main() {
 	fmt.Println(os.Environ())
+
+	certPath := os.Getenv("SERVER_TLS_CERT")
+	keyPath := os.Getenv("SERVER_TLS_KEY")
+
 	gin.SetMode(gin.ReleaseMode)
+
 	r := gin.Default()
 	r.GET("/", func(c *gin.Context) {
 		fmt.Println("GET: Request completed")
+		c.Header("Content-Type", "text/plain")
 		c.String(http.StatusOK, "GET")
 	})
 
@@ -38,11 +30,13 @@ func main() {
 			fmt.Printf("POST: Error getting raw data: %v\n", err)
 		}
 		fmt.Println("POST: Request completed")
+		c.Header("Content-Type", "text/plain")
 		c.String(http.StatusOK, "POST")
 	})
 
 	r.PUT("/", func(c *gin.Context) {
 		fmt.Println("PUT: Request completed")
+		c.Header("Content-Type", "text/plain")
 		c.String(http.StatusOK, "PUT")
 	})
 
@@ -51,9 +45,20 @@ func main() {
 		defer func() {
 			os.Exit(0)
 		}()
+		c.Header("Content-Type", "text/plain")
 		c.String(http.StatusOK, "DELETE")
 	})
 
-	fmt.Println("Server listening on port 80")
-	r.Run(":80")
+	var err error
+	if certPath != "" && keyPath != "" {
+		fmt.Println("Serving HTTPS on port 80")
+		err = r.RunTLS(":80", certPath, keyPath)
+	} else {
+		fmt.Println("Serving HTTP on port 80")
+		err = r.Run(":80")
+	}
+
+	if err != nil {
+		log.Fatalf("Error starting server: %v\n", err)
+	}
 }

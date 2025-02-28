@@ -7,9 +7,7 @@ mod http_tests {
     use rstest::*;
     use tokio::time::timeout;
 
-    use crate::utils::{
-        get_service_url, kube_client, send_requests, service, Application, KubeService,
-    };
+    use crate::utils::{kube_client, send_requests, service, Application, KubeService};
 
     /// ## Warning
     ///
@@ -37,9 +35,12 @@ mod http_tests {
         )]
         application: Application,
     ) {
+        use crate::utils::service_addr::TestServiceAddr;
+
         let service = service.await;
         let kube_client = kube_client.await;
-        let url = get_service_url(kube_client.clone(), &service).await;
+        let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
+        let url = format!("http://{}", addr.addr);
         let mut process = application
             .run(
                 &service.pod_container_target(),
@@ -83,7 +84,8 @@ mod http_tests {
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
-        let url = get_service_url(kube_client.clone(), &service).await;
+        let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
+        let url = format!("http://{}", addr.addr);
         let mut process = application
             .run(
                 &service.pod_container_target(),
