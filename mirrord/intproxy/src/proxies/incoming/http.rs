@@ -1,4 +1,10 @@
-use std::{fmt, io, net::SocketAddr, ops::Not};
+use std::{
+    error::Error,
+    fmt::{self, Write},
+    io,
+    net::SocketAddr,
+    ops::Not,
+};
 
 use hyper::{
     body::Incoming,
@@ -80,13 +86,13 @@ impl fmt::Debug for LocalHttpClient {
 #[derive(Error, Debug)]
 pub enum LocalHttpError {
     #[error("failed to make an HTTP handshake with the local application's HTTP server: {0}")]
-    HandshakeFailed(#[source] hyper::Error),
+    HandshakeFailed(#[source] HyperErrorWithSources),
 
     #[error("{0:?} is not supported in the local HTTP proxy")]
     UnsupportedHttpVersion(Version),
 
     #[error("failed to send the request to the local application's HTTP server: {0}")]
-    SendFailed(#[source] hyper::Error),
+    SendFailed(#[source] HyperErrorWithSources),
 
     #[error("failed to prepare a local TCP socket: {0}")]
     SocketSetupFailed(#[source] io::Error),
@@ -98,7 +104,7 @@ pub enum LocalHttpError {
     ConnectTlsFailed(#[source] io::Error),
 
     #[error("failed to read the body of the local application's HTTP server response: {0}")]
-    ReadBodyFailed(#[source] hyper::Error),
+    ReadBodyFailed(#[source] HyperErrorWithSources),
 
     #[error("failed to prepare TLS client configuration: {0}")]
     TlsSetupError(#[from] LocalTlsSetupError),
@@ -113,13 +119,50 @@ impl LocalHttpError {
             | Self::UnsupportedHttpVersion(..)
             | Self::TlsSetupError(..) => false,
             Self::ConnectTcpFailed(..) | Self::ConnectTlsFailed(..) => true,
-            Self::HandshakeFailed(err) | Self::SendFailed(err) | Self::ReadBodyFailed(err) => (err
-                .is_parse()
-                || err.is_parse_status()
-                || err.is_parse_too_large()
-                || err.is_user())
-            .not(),
+            Self::HandshakeFailed(err) | Self::SendFailed(err) | Self::ReadBodyFailed(err) => {
+                (err.0.is_parse()
+                    || err.0.is_parse_status()
+                    || err.0.is_parse_too_large()
+                    || err.0.is_user())
+                .not()
+            }
         }
+    }
+}
+
+#[derive(Error)]
+pub struct HyperErrorWithSources(pub hyper::Error);
+
+impl From<hyper::Error> for HyperErrorWithSources {
+    fn from(value: hyper::Error) -> Self {
+        Self(value)
+    }
+}
+
+impl fmt::Display for HyperErrorWithSources {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "`{}`, sources=[", self.0)?;
+
+        let mut error = self.0.source();
+        let mut first = true;
+        while let Some(source) = error {
+            if first {
+                first = false;
+                write!(f, "{source}")?;
+            } else {
+                write!(f, ", {source}")?;
+            }
+
+            error = source.source();
+        }
+
+        f.write_char(']')
+    }
+}
+
+impl fmt::Debug for HyperErrorWithSources {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
 }
 
@@ -161,6 +204,7 @@ impl HttpSender {
                 let (sender, connection) =
                     http2::handshake(TokioExecutor::default(), TokioIo::new(target_stream))
                         .await
+                        .map_err(From::from)
                         .map_err(LocalHttpError::HandshakeFailed)?;
 
                 tokio::spawn(async move {
@@ -182,6 +226,7 @@ impl HttpSender {
             _http_v1 => {
                 let (sender, connection) = http1::handshake(TokioIo::new(target_stream))
                     .await
+                    .map_err(From::from)
                     .map_err(LocalHttpError::HandshakeFailed)?;
 
                 tokio::spawn(async move {
@@ -209,11 +254,16 @@ impl HttpSender {
             Self::V1(sender) => {
                 // Solves a "connection was not ready" client error.
                 // https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/barbara_tries_unix_socket.html#the-single-magical-line
-                sender.ready().await.map_err(LocalHttpError::SendFailed)?;
+                sender
+                    .ready()
+                    .await
+                    .map_err(From::from)
+                    .map_err(LocalHttpError::SendFailed)?;
 
                 sender
                     .send_request(request.internal_request.into())
                     .await
+                    .map_err(From::from)
                     .map_err(LocalHttpError::SendFailed)
             }
             Self::V2(sender) => {
@@ -235,11 +285,16 @@ impl HttpSender {
 
                 // Solves a "connection was not ready" client error.
                 // https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/barbara_tries_unix_socket.html#the-single-magical-line
-                sender.ready().await.map_err(LocalHttpError::SendFailed)?;
+                sender
+                    .ready()
+                    .await
+                    .map_err(From::from)
+                    .map_err(LocalHttpError::SendFailed)?;
 
                 sender
                     .send_request(hyper_request)
                     .await
+                    .map_err(From::from)
                     .map_err(LocalHttpError::SendFailed)
             }
         }
