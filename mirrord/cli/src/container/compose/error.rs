@@ -19,12 +19,6 @@ pub(crate) enum ComposeError {
     #[error(transparent)]
     Yaml(#[from] serde_yaml::Error),
 
-    #[error("Compose file is missing the field `{0}`!")]
-    MissingField(String),
-
-    #[error("Compose value expected type `{0}`!")]
-    UnexpectedType(String),
-
     #[error(transparent)]
     LayerConfig(#[from] ConfigError),
 

@@ -7,7 +7,7 @@ use std::{
     process::Stdio,
 };
 
-use composer::ServiceComposer;
+use composer::{ServiceComposer, ServiceInfo};
 use error::ComposeError;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::{
@@ -19,7 +19,6 @@ use mirrord_config::{
     LayerConfig, MIRRORD_CONFIG_FILE_ENV,
 };
 use mirrord_progress::{Progress, ProgressTracker, MIRRORD_PROGRESS_ENV};
-use service::ServiceInfo;
 use steps::*;
 use tempfile::NamedTempFile;
 use tokio::process::Command;
@@ -40,7 +39,6 @@ type ComposeResult<T> = Result<T, ComposeError>;
 
 mod composer;
 mod error;
-mod service;
 mod steps;
 
 #[derive(Debug)]

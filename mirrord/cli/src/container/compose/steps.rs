@@ -4,8 +4,8 @@ use mirrord_analytics::AnalyticsReporter;
 use mirrord_config::LayerConfig;
 use tempfile::NamedTempFile;
 
-use super::{service::ServiceInfo, TlsFileGuard};
-use crate::MirrordExecution;
+use super::TlsFileGuard;
+use crate::{container::compose::ServiceInfo, MirrordExecution};
 
 #[derive(Debug)]
 pub(crate) struct New;
@@ -47,6 +47,7 @@ pub(crate) struct PrepareCompose {
 #[derive(Debug)]
 pub(crate) struct RunCompose {
     pub(super) internal_proxy_tls_guards: Option<TlsFileGuard>,
+    #[allow(unused)]
     pub(super) external_proxy_tls_guards: Option<TlsFileGuard>,
     pub(super) analytics: AnalyticsReporter,
     pub(super) layer_config_file: NamedTempFile,

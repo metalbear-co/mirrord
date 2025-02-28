@@ -1,4 +1,12 @@
-use super::{steps::New, ServiceInfo, MIRRORD_COMPOSE_SIDECAR_SERVICE};
+use std::collections::HashMap;
+
+use super::{steps::New, MIRRORD_COMPOSE_SIDECAR_SERVICE};
+
+#[derive(Debug, Default, Clone)]
+pub(super) struct ServiceInfo {
+    pub(super) env_vars: HashMap<String, String>,
+    pub(super) volumes: HashMap<String, String>,
+}
 
 pub(super) struct ServiceComposer<'a, Step> {
     step: Step,
