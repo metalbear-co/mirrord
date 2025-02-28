@@ -39,7 +39,7 @@ impl<'a> ServiceComposer<'a, New> {
     }
 }
 
-impl<'a> ServiceComposer<'a, ResetConflicts> {
+impl ServiceComposer<'_, ResetConflicts> {
     /// **Warning**: Minefield of options that are deserialized in a wonky manner, or must
     /// be reset due to conflicts with other options that we set to run the services with
     /// mirrord-sidecar.
@@ -93,7 +93,7 @@ impl ServiceExt for docker_compose_types::Service {
                         .iter()
                         // TODO(alex) [mid] [#4]: Remove this.
                         .filter(|(k, _)| !k.contains("LOCALSTACK"))
-                        .map(|(k, v)| (k.to_owned(), serde_yaml::from_str(&format!("{v}")).ok())),
+                        .map(|(k, v)| (k.to_owned(), serde_yaml::from_str(&v.to_string()).ok())),
                 );
             }
             // When a service has no `environment`, it gets built by default as

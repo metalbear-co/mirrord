@@ -92,7 +92,7 @@ impl ComposeRunner<New> {
             (CONTAINER_EXECUTION_KIND as u32).to_string(),
         );
 
-        let runtime_args = vec![vec!["compose".to_string()], command.into_parts().1].concat();
+        let runtime_args = [vec!["compose".to_string()], command.into_parts().1].concat();
 
         Ok(ComposeRunner {
             progress,
