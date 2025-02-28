@@ -81,6 +81,11 @@ fn default_logfile_path(prefix: &str) -> PathBuf {
 /// Initializes mirrord intproxy/extproxy tracing registry.
 ///
 /// Fails if the specified log file cannot be opened/created for writing.
+///
+/// # Log format
+///
+/// Proxies output logs in JSON, which is not really human-readable.
+/// However, it allows us to use some nice tools, like [hl](https://github.com/pamburus/hl).
 fn init_proxy_tracing_registry(
     log_destination: &Path,
     log_level: Option<&str>,
