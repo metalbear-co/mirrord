@@ -1,1 +1,0 @@
-Added a unit test to confirm that our local HTTPS client does not attemp an HTTP/1 upgrade to HTTP/2, if the upgrade is already handled by ALPN.
