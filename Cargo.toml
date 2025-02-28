@@ -173,9 +173,6 @@ miette = "7"
 # Used by `kube`, `intproxy`.
 tokio-retry = "0.3"
 
-# Used by `config`, `cli`.
-nom = "7.1"
-
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 

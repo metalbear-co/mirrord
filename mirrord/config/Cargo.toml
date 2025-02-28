@@ -28,7 +28,7 @@ serde_yaml.workspace = true
 toml = "0.8"
 schemars.workspace = true
 bimap = { version = "0.6" }
-nom.workspace = true
+nom = "7.1"
 ipnet.workspace = true
 bitflags = "2"
 k8s-openapi = { workspace = true, features = ["schemars", "earliest"] }
