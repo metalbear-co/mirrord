@@ -1,3 +1,23 @@
+//! Debugging `mirrord container`:
+//!
+//! To see your `mirrord-container` chnages in effect, you might need to build your own `mirrord-cli
+//! image`, and change either `DEFAULT_CLI_IMAGE`, or pass it to the `ContainerConfig::cli_image`
+//! option.
+//!
+//! Due to `mirrord-cli` image mismatches, it's also possible that the branch you're using will
+//! fail when debugging due to some `mirrord-config` changes, some error like
+//! `Failed to infer mirrord config: mirrord-config: unknown field ...`.
+//!
+//! Use mirrord console, with:
+//!
+//! `cargo run --bin mirrord-console --features binary`, and when running the app in another
+//! terminal split
+//! `MIRRORD_PROGRESS_MODE=off RUST_LOG=mirrord=debug,warn MIRRORD_CONSOLE_ADDR=127.0.0.1:11233
+//! mirrord container -- docker compose up`
+// TODO(alex) [mid]: Improve this:
+// - Say which ip to use with mirrord console for good logs;
+// - If you use the `eth0` (or whatever) ip, then the command always fails with the `--attach`
+//   error, console address might not be propagating to the `run/start` command?;
 use std::{
     collections::HashMap,
     io::Write,
@@ -8,6 +28,7 @@ use std::{
 };
 
 use clap::ValueEnum;
+use compose::ComposeRunner;
 use local_ip_address::local_ip;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, ExecutionKind, Reporter};
 use mirrord_config::{
@@ -36,11 +57,13 @@ use crate::{
     },
     logging::pipe_intproxy_sidecar_logs,
     util::MIRRORD_CONSOLE_ADDR_ENV,
+    ContainerRuntimeCommand,
 };
 
 static CONTAINER_EXECUTION_KIND: ExecutionKind = ExecutionKind::Container;
 
 mod command_builder;
+pub mod compose;
 mod sidecar;
 
 /// Format [`Command`] to look like the executated command (currently without env because we don't
@@ -56,7 +79,7 @@ fn format_command(command: &Command) -> String {
 }
 
 /// Execute a [`Command`] and read first line from stdout
-#[tracing::instrument(level = Level::TRACE, ret)]
+#[tracing::instrument(level = Level::DEBUG, skip(command), ret, err)]
 async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>, ContainerError> {
     let mut child = command
         .stdin(Stdio::null())
@@ -113,17 +136,18 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>
 
 /// Create a temp file with a json serialized [`LayerConfig`] to be loaded by container and external
 /// proxy
-#[tracing::instrument(level = Level::TRACE, ret)]
-fn create_composed_config(config: &LayerConfig) -> Result<NamedTempFile, ContainerError> {
-    let mut composed_config_file = tempfile::Builder::new()
+#[tracing::instrument(level = Level::DEBUG, skip(config), ret, err)]
+fn create_temp_layer_config(config: &LayerConfig) -> Result<NamedTempFile, ContainerError> {
+    let mut layer_config_file = tempfile::Builder::new()
+        .prefix("mirrord-config-")
         .suffix(".json")
         .tempfile()
         .map_err(ContainerError::ConfigWrite)?;
-    composed_config_file
+    layer_config_file
         .write_all(&serde_json::to_vec(config).map_err(ContainerError::ConfigSerialization)?)
         .map_err(ContainerError::ConfigWrite)?;
 
-    Ok(composed_config_file)
+    Ok(layer_config_file)
 }
 
 /// Create a tempfile and write to it a self-signed certificate with the provided subject alt names
@@ -131,19 +155,19 @@ fn create_composed_config(config: &LayerConfig) -> Result<NamedTempFile, Contain
 fn create_self_signed_certificate(
     subject_alt_names: Vec<String>,
 ) -> Result<(NamedTempFile, NamedTempFile), ContainerError> {
-    let geerated = rcgen::generate_simple_self_signed(subject_alt_names)
+    let generated = rcgen::generate_simple_self_signed(subject_alt_names)
         .map_err(ContainerError::SelfSignedCertificate)?;
 
     let mut certificate =
         tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
     certificate
-        .write_all(geerated.cert.pem().as_bytes())
+        .write_all(generated.cert.pem().as_bytes())
         .map_err(ContainerError::WriteSelfSignedCertificate)?;
 
     let mut private_key =
         tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
     private_key
-        .write_all(geerated.key_pair.serialize_pem().as_bytes())
+        .write_all(generated.key_pair.serialize_pem().as_bytes())
         .map_err(ContainerError::WriteSelfSignedCertificate)?;
 
     Ok((certificate, private_key))
@@ -151,6 +175,7 @@ fn create_self_signed_certificate(
 
 type TlsGuard = (NamedTempFile, NamedTempFile);
 
+/// Returns [`TlsGuard`] temporary files that must be kept alive, otherwise the file gets deleted.
 fn prepare_tls_certs_for_container(
     config: &mut LayerConfig,
 ) -> CliResult<(Option<TlsGuard>, Option<TlsGuard>)> {
@@ -225,6 +250,7 @@ fn create_config_and_analytics<P: Progress>(
 
 /// Create [`RuntimeCommandBuilder`] with the corresponding [`Sidecar`] connected to
 /// [`MirrordExecution`] as extproxy.
+#[tracing::instrument(level = Level::DEBUG, skip(analytics, progress, config), ret, err)]
 async fn create_runtime_command_with_sidecar<P: Progress + Send + Sync>(
     analytics: &mut AnalyticsReporter,
     progress: &mut P,
@@ -260,6 +286,7 @@ async fn create_runtime_command_with_sidecar<P: Progress + Send + Sync>(
         {
             runtime_command.add_env(MIRRORD_CONSOLE_ADDR_ENV, console_addr);
         } else {
+            // TODO(alex) [mid]: Use eth0 ip.
             tracing::warn!(
                 ?console_addr,
                 "{MIRRORD_CONSOLE_ADDR_ENV} needs to be a non loopback address when used with containers"
@@ -309,9 +336,8 @@ async fn create_runtime_command_with_sidecar<P: Progress + Send + Sync>(
     Ok((runtime_command, sidecar, execution_info))
 }
 
-/// Main entry point for the `mirrord container` command.
-/// This spawns: "agent" - "external proxy" - "intproxy sidecar" - "execution container"
-pub(crate) async fn container_command(
+#[tracing::instrument(level = Level::DEBUG, skip(watch), ret, err)]
+async fn container_run(
     runtime_args: RuntimeArgs,
     exec_params: ExecParams,
     watch: drain::Watch,
@@ -339,14 +365,15 @@ pub(crate) async fn container_command(
     let (_internal_proxy_tls_guards, _external_proxy_tls_guards) =
         prepare_tls_certs_for_container(&mut config)?;
 
-    let composed_config_file = create_composed_config(&config)?;
-    std::env::set_var(MIRRORD_CONFIG_FILE_ENV, composed_config_file.path());
+    let layer_config_file = create_temp_layer_config(&config)?;
+    std::env::set_var(MIRRORD_CONFIG_FILE_ENV, layer_config_file.path());
 
+    // `docker create mirrord-intproxy` step.
     let (mut runtime_command, sidecar, _execution_info) = create_runtime_command_with_sidecar(
         &mut analytics,
         &mut progress,
         &config,
-        composed_config_file.path(),
+        layer_config_file.path(),
         runtime_args.runtime,
     )
     .await?;
@@ -362,6 +389,7 @@ pub(crate) async fn container_command(
 
     progress.success(None);
 
+    // `docker run` step.
     let (binary, binary_args) = runtime_command
         .with_command(runtime_args.command)
         .into_command_args();
@@ -387,7 +415,7 @@ pub(crate) async fn container_command(
         }
     }
 
-    if let Err(err) = composed_config_file.keep() {
+    if let Err(err) = layer_config_file.keep() {
         tracing::warn!(?err, "failed to keep composed config file");
     }
 
@@ -401,7 +429,43 @@ pub(crate) async fn container_command(
     }
 }
 
+/// Main entry point for the `mirrord container` command.
+/// This spawns: "agent" - "external proxy" - "intproxy sidecar" - "execution container"
+#[tracing::instrument(level = Level::INFO, skip(watch), ret, err)]
+pub(crate) async fn container_command(
+    runtime_args: RuntimeArgs,
+    exec_params: ExecParams,
+    watch: drain::Watch,
+) -> CliResult<i32> {
+    // TODO(alex) [low]: Crappy check, improve this.
+    if matches!(
+        runtime_args.command,
+        ContainerRuntimeCommand::Create { .. } | ContainerRuntimeCommand::Run { .. }
+    ) {
+        container_run(runtime_args, exec_params, watch).await
+    } else {
+        ComposeRunner::try_new(runtime_args, exec_params)
+            .unwrap()
+            .layer_config_and_analytics(watch)
+            .unwrap()
+            .external_proxy()
+            .await
+            .unwrap()
+            .services()
+            .unwrap()
+            .make_temp_compose_file()
+            .await
+            .unwrap()
+            .run()
+            .await
+            .unwrap();
+
+        Ok(0)
+    }
+}
+
 /// Create sidecar and extproxy but return arguments for extension instead of executing run command
+#[tracing::instrument(level = Level::DEBUG, skip(watch), ret, err)]
 pub(crate) async fn container_ext_command(
     config_file: Option<PathBuf>,
     target: Option<String>,
@@ -434,7 +498,7 @@ pub(crate) async fn container_ext_command(
     let (_internal_proxy_tls_guards, _external_proxy_tls_guards) =
         prepare_tls_certs_for_container(&mut config)?;
 
-    let composed_config_file = create_composed_config(&config)?;
+    let composed_config_file = create_temp_layer_config(&config)?;
     std::env::set_var(MIRRORD_CONFIG_FILE_ENV, composed_config_file.path());
 
     let container_runtime = std::env::var("MIRRORD_CONTAINER_USE_RUNTIME")

@@ -589,7 +589,6 @@ fn main() -> miette::Result<()> {
                 let (runtime_args, exec_params) = args.into_parts();
 
                 let exit_code = container_command(runtime_args, exec_params, watch).await?;
-
                 if exit_code != 0 {
                     std::process::exit(exit_code);
                 }

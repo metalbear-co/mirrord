@@ -42,7 +42,7 @@ use crate::{
 /// Env variable mirrord-layer uses to connect to intproxy
 pub static MIRRORD_CONNECT_TCP_ENV: &str = "MIRRORD_CONNECT_TCP";
 
-/// Env variable for saving the exeution kind for analytics
+/// Env variable for saving the execution kind for analytics
 pub static MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
 
 /// Alias to "LD_PRELOAD" enviromnent variable used to mount mirrord-layer on linux targets and as
@@ -359,7 +359,7 @@ impl MirrordExecution {
     }
 
     /// Starts the external proxy (`extproxy`) so sidecar intproxy can connect via this to agent
-    #[tracing::instrument(level = Level::TRACE, skip_all)]
+    #[tracing::instrument(level = Level::DEBUG, skip_all, ret, err)]
     pub(crate) async fn start_external<P>(
         config: &LayerConfig,
         progress: &mut P,

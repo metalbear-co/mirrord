@@ -19,6 +19,7 @@ use mirrord_config::{
 };
 use mirrord_operator::setup::OperatorNamespace;
 use thiserror::Error;
+use tracing::Level;
 
 use crate::error::CliError;
 
@@ -830,14 +831,16 @@ pub struct ExtensionContainerArgs {
     pub target: Option<String>,
 }
 
+/// Args related to the `{runtime}` command, i.e. `docker run -e CATS=MEOW`.
 #[derive(Parser, Debug)]
 pub struct RuntimeArgs {
-    /// Which kind of container runtime to use.
+    /// Which kind of container runtime to use, this is the `docker|podman` part of the `{runtime}
+    /// run|compose` command.
     #[arg(value_enum)]
     pub runtime: ContainerRuntime,
 
+    /// Command to use with `mirrord container`, i.e. `run -e CATS=MEOW`.
     #[command(subcommand)]
-    /// Command to use with `mirrord container`.
     pub command: ContainerRuntimeCommand,
 }
 
@@ -857,9 +860,19 @@ pub(super) enum ContainerRuntimeCommand {
         #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
         runtime_args: Vec<String>,
     },
+    Compose {
+        /// Arguments that will be propogated to underlying `<RUNTIME> compose` command.
+        #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
+        runtime_args: Vec<String>,
+    },
 }
 
 impl ContainerRuntimeCommand {
+    /// Creates the sidecar container that'll run `runtime_args`.
+    ///
+    /// `runtime_args` here should be something like:
+    /// `["--rm", "ghcr.io/metalbear-co/mirrord-cli:latest", "mirrord", "intproxy"]`
+    #[tracing::instrument(level = Level::DEBUG, skip_all, ret)]
     pub fn create<T: Into<String>>(runtime_args: impl IntoIterator<Item = T>) -> Self {
         ContainerRuntimeCommand::Create {
             runtime_args: runtime_args.into_iter().map(T::into).collect(),
@@ -881,12 +894,18 @@ impl ContainerRuntimeCommand {
         })
     }
 
+    /// Returns the string version of the docker command, and the thing you want the command
+    /// to do, e.g. `["docker", "run"]`, or `["compose", "up"]`.
+    #[tracing::instrument(level = Level::INFO, ret)]
     pub fn into_parts(self) -> (Vec<String>, Vec<String>) {
         match self {
             ContainerRuntimeCommand::Create { runtime_args } => {
                 (vec!["create".to_owned()], runtime_args)
             }
             ContainerRuntimeCommand::Run { runtime_args } => (vec!["run".to_owned()], runtime_args),
+            ContainerRuntimeCommand::Compose { runtime_args } => {
+                (vec!["compose".to_owned()], runtime_args)
+            }
         }
     }
 }
