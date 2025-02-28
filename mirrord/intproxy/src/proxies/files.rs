@@ -1107,7 +1107,7 @@ impl FilesProxy {
 
         let responses = self.reconnect_tracker.agent_lost();
         tracing::debug!(
-            responses = responses.len(),
+            num_responses = responses.len(),
             "Flushing error responses to file requests"
         );
         for response in self.reconnect_tracker.agent_lost() {

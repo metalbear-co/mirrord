@@ -105,7 +105,7 @@ impl SimpleProxy {
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), SimpleProxyError> {
         tracing::debug!(
-            responses = self.addr_info_reqs.len(),
+            num_responses = self.addr_info_reqs.len(),
             "Flushing error responses to GetAddrInfoRequests"
         );
         while let Some((message_id, layer_id)) = self.addr_info_reqs.pop_front() {
@@ -117,7 +117,7 @@ impl SimpleProxy {
         }
 
         tracing::debug!(
-            responses = self.get_env_reqs.len(),
+            num_responses = self.get_env_reqs.len(),
             "Flushing error responses to GetEnvVarsRequests"
         );
         while let Some((message_id, layer_id)) = self.get_env_reqs.pop_front() {
