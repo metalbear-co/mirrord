@@ -834,7 +834,8 @@ pub struct ExtensionContainerArgs {
 /// Args related to the `{runtime}` command, i.e. `docker run -e CATS=MEOW`.
 #[derive(Parser, Debug)]
 pub struct RuntimeArgs {
-    /// Which kind of container runtime to use, this is the `docker` part of the command.
+    /// Which kind of container runtime to use, this is the `docker|podman` part of the `{runtime}
+    /// run|compose` command.
     #[arg(value_enum)]
     pub runtime: ContainerRuntime,
 

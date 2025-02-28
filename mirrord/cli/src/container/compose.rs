@@ -544,14 +544,12 @@ impl ComposeRunner<RunCompose> {
 
                 todo!()
             }
-            Ok(status) => Ok(status.code().unwrap_or_default()),
-        };
-
-        Ok(ComposeRunner {
-            progress,
-            runtime,
-            runtime_args,
-            step: (),
-        })
+            Ok(status) => Ok(ComposeRunner {
+                progress,
+                runtime,
+                runtime_args,
+                step: status.code().unwrap_or_default(),
+            }),
+        }
     }
 }

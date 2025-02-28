@@ -75,7 +75,8 @@ async fn main() {
         .with(
             tracing_subscriber::fmt::layer()
                 .with_thread_ids(true)
-                .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE),
+                .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+                .pretty(),
         )
         .with(
             tracing_subscriber::EnvFilter::builder()
