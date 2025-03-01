@@ -1,6 +1,9 @@
 use std::{
     net::SocketAddr,
-    sync::{atomic::AtomicI64, Arc},
+    sync::{
+        atomic::{AtomicI64, AtomicUsize},
+        Arc,
+    },
 };
 
 use axum::{extract::State, routing::get, Router};
@@ -16,9 +19,8 @@ use crate::error::AgentError;
 /// when this client is dropped.
 pub(crate) static CLIENT_COUNT: AtomicI64 = AtomicI64::new(0);
 
-/// Incremented whenever we handle a new `DnsCommand`, and decremented after the result of
-/// `do_lookup` has been sent back through the response channel.
-pub(crate) static DNS_REQUEST_COUNT: AtomicI64 = AtomicI64::new(0);
+/// How many DNS resolution client requests the agent is currently handling.
+pub(crate) static DNS_REQUEST_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 /// Incremented and decremented in _open-ish_/_close-ish_ file operations in `FileManager`,
 /// Also gets decremented when `FileManager` is dropped.
@@ -251,7 +253,12 @@ impl Metrics {
         } = self;
 
         client_count.set(CLIENT_COUNT.load(Ordering::Relaxed));
-        dns_request_count.set(DNS_REQUEST_COUNT.load(Ordering::Relaxed));
+        dns_request_count.set(
+            DNS_REQUEST_COUNT
+                .load(Ordering::Relaxed)
+                .try_into()
+                .unwrap_or(i64::MAX),
+        );
         open_fd_count.set(OPEN_FD_COUNT.load(Ordering::Relaxed));
         mirror_port_subscription.set(MIRROR_PORT_SUBSCRIPTION.load(Ordering::Relaxed));
         mirror_connection_subscription.set(MIRROR_CONNECTION_SUBSCRIPTION.load(Ordering::Relaxed));

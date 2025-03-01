@@ -363,10 +363,27 @@ impl From<ResolveErrorKind> for ResolveErrorKindInternal {
                 ProtoErrorKind::Io(e) if e.kind() == io::ErrorKind::PermissionDenied => {
                     ResolveErrorKindInternal::PermissionDenied
                 }
+                ProtoErrorKind::Io(e) if e.kind() == io::ErrorKind::TimedOut => {
+                    ResolveErrorKindInternal::Timeout
+                }
                 error => ResolveErrorKindInternal::Message(format!("proto error: {error}")),
             },
+            ResolveErrorKind::Timeout => ResolveErrorKindInternal::Timeout,
+            ResolveErrorKind::Io(e) if e.kind() == io::ErrorKind::NotFound => {
+                ResolveErrorKindInternal::NotFound
+            }
+            ResolveErrorKind::Io(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+                ResolveErrorKindInternal::PermissionDenied
+            }
+            ResolveErrorKind::Io(e) if e.kind() == io::ErrorKind::TimedOut => {
+                ResolveErrorKindInternal::Timeout
+            }
+            ResolveErrorKind::Io(e) => ResolveErrorKindInternal::Message(format!("io error: {e}")),
             _ => {
-                warn!(?error_kind, "unknown error kind");
+                warn!(
+                    ?error_kind,
+                    "Detected an unhandled ResolveErrorKind, this is a bug"
+                );
                 ResolveErrorKindInternal::Unknown
             }
         }
