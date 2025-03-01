@@ -4,11 +4,12 @@ mod steal;
 mod traffic_tests {
     use std::{
         net::UdpSocket,
+        ops::Not,
         path::{Path, PathBuf},
         time::Duration,
     };
 
-    use futures::Future;
+    use futures::{stream::FuturesUnordered, Future, StreamExt};
     use futures_util::{stream::TryStreamExt, AsyncBufReadExt};
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api, Client};
@@ -195,15 +196,14 @@ mod traffic_tests {
         assert!(res.success());
     }
 
+    /// Verifies that a local socket that has a port subscription can receive traffic
+    /// from within the application itself.
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn outgoing_traffic_make_request_localhost(#[future] service: KubeService) {
+    pub async fn outgoing_connection_to_self(#[future] service: KubeService) {
         let service = service.await;
-        let node_command = vec![
-            "node",
-            "node-e2e/outgoing/test_outgoing_traffic_make_request_localhost.mjs",
-        ];
+        let node_command = vec!["node", "node-e2e/outgoing/outgoing_connection_to_self.mjs"];
         let mut process = run_exec_with_target(
             node_command,
             &service.pod_container_target(),
@@ -627,45 +627,95 @@ mod traffic_tests {
         assert!(res.success());
     }
 
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// Verifies that the user application can make requests to some publicly available servers.
+    ///
+    /// Runs with both enabled and disabled outgoing feature.
+    ///
+    /// # Note on flakiness
+    ///
+    /// Because the outcome of this test depends on availability of the servers we
+    /// can't control, we first check in the test code whether they're actually available.
+    ///
+    /// We take the first 10 live servers and pass them to the app.
+    /// If we don't have at least 10, we fail.
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
-    pub async fn test_outgoing_traffic_many_requests_enabled(#[future] service: KubeService) {
+    #[rstest]
+    #[case::outgoing_enabled(true)]
+    #[case::outgoing_disabled(false)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn test_outgoing_traffic_many_requests(
+        #[future] service: KubeService,
+        #[case] outgoing_enabled: bool,
+    ) {
+        const HOSTS: &[&str] = &[
+            "www.rust-lang.org",
+            "www.github.com",
+            "www.google.com",
+            "www.bing.com",
+            "www.yahoo.com",
+            "www.twitter.com",
+            "www.microsoft.com",
+            "www.youtube.com",
+            "www.live.com",
+            "www.msn.com",
+            "www.google.com.br",
+            "www.yahoo.co.j",
+            "www.amazon.com",
+            "www.wikipedia.org",
+            "www.facebook.com",
+            "www.drive.google.com",
+            "www.gmail.com",
+            "www.twitch.tv",
+            "www.oracle.com",
+            "www.uber.com",
+        ];
+
+        let client = reqwest::Client::new();
+        let mut live_hosts = HOSTS
+            .iter()
+            .copied()
+            .map(|host| {
+                let client = client.clone();
+                async move {
+                    let response = client.get(format!("https://{host}")).send().await;
+                    (host, response)
+                }
+            })
+            .collect::<FuturesUnordered<_>>()
+            .filter_map(|(host, response)| match response {
+                Ok(..) => {
+                    println!("{host} is available");
+                    std::future::ready(Some(host))
+                }
+                Err(error) => {
+                    println!("{host} is not available: {error}");
+                    std::future::ready(None)
+                }
+            })
+            .collect::<Vec<_>>()
+            .await;
+        if live_hosts.len() < 10 {
+            panic!("Failed to gather 10 available hosts for the test app");
+        }
+        live_hosts.truncate(1);
+        let as_env = live_hosts.join(",");
+        println!("Running test app with AVAILABLE_HOSTS={as_env}");
+
         let service = service.await;
         let node_command = vec![
             "node",
             "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
         ];
-        let mut process = run_exec_with_target(
-            node_command,
-            &service.pod_container_target(),
-            None,
-            None,
-            None,
-        )
-        .await;
-
-        let res = process.child.wait().await.unwrap();
-        assert!(res.success());
-        process.assert_no_error_in_stderr().await;
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
-    pub async fn test_outgoing_traffic_many_requests_disabled(#[future] service: KubeService) {
-        let service = service.await;
-        let node_command = vec![
-            "node",
-            "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
-        ];
-        let mirrord_args = vec!["--no-outgoing"];
+        let mirrord_args = outgoing_enabled
+            .not()
+            .then(|| vec!["--no-outgoing"])
+            .unwrap_or_default();
         let mut process = run_exec_with_target(
             node_command,
             &service.pod_container_target(),
             None,
             Some(mirrord_args),
-            None,
+            Some(vec![("AVAILABLE_HOSTS", &as_env)]),
         )
         .await;
 
