@@ -302,6 +302,7 @@ impl DnsApi {
     }
 }
 
+/// Errors that can occur in [`DnsWorker::do_lookup`].
 #[derive(Error, Debug)]
 enum InternalLookupError {
     #[error("failed to read configuration from /etc: {0}")]
