@@ -1,4 +1,4 @@
-use std::{future, path::PathBuf, sync::atomic::Ordering, time::Duration, usize};
+use std::{future, path::PathBuf, sync::atomic::Ordering, time::Duration};
 
 use futures::{stream::FuturesOrdered, StreamExt};
 use hickory_resolver::{
