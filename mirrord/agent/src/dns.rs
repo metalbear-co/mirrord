@@ -43,6 +43,7 @@ impl ClientGetAddrInfoRequest {
     }
 }
 
+/// Sent from per-client [`DnsApi`] to the global [`DnsWorker`].
 #[derive(Debug)]
 pub(crate) struct DnsCommand {
     request: ClientGetAddrInfoRequest,
@@ -52,11 +53,26 @@ pub(crate) struct DnsCommand {
 /// Background task for resolving hostnames to IP addresses.
 /// Should be run in the same network namespace as the agent's target.
 pub(crate) struct DnsWorker {
+    /// Path to the `/etc` directory in the target container filesystem.
+    ///
+    /// This directory contains some configuration files we need
+    /// to prepare the [`TokioAsyncResolver`].
     etc_path: PathBuf,
+    /// For receiving [`DnsCommand`]s from [`DnsApi`]s.
     request_rx: Receiver<DnsCommand>,
+    /// Max request attempts per DNS query.
+    ///
+    /// Configured via [`envs::DNS_ATTEMPTS`].
     attempts: Option<usize>,
+    /// DNS query timeout.
+    ///
+    /// Configured via [`envs::DNS_TIMEOUT`].
     timeout: Option<Duration>,
+    /// Whether we want support querying for IPv6 addresses.
     support_ipv6: bool,
+    /// Background tasks that handle the DNS requests.
+    ///
+    /// Each of these builds a new [`TokioAsyncResolver`] and performs one lookup.
     tasks: JoinSet<()>,
 }
 
