@@ -3,7 +3,6 @@ use core::ops::Deref;
 use std::{net::IpAddr, sync::LazyLock};
 
 use bincode::{Decode, Encode};
-use hickory_resolver::lookup_ip::LookupIp;
 use semver::VersionReq;
 
 use crate::RemoteResult;
@@ -20,25 +19,6 @@ pub struct LookupRecord {
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct DnsLookup(pub Vec<LookupRecord>);
-
-impl From<LookupIp> for DnsLookup {
-    fn from(lookup_ip: LookupIp) -> Self {
-        let lookup_records = lookup_ip
-            .as_lookup()
-            .records()
-            .iter()
-            .filter_map(|record| {
-                let ip = record.data()?.ip_addr()?;
-                Some(LookupRecord {
-                    name: record.name().to_string(),
-                    ip,
-                })
-            })
-            .collect::<Vec<_>>();
-
-        Self(lookup_records)
-    }
-}
 
 impl Deref for DnsLookup {
     type Target = Vec<LookupRecord>;
@@ -103,22 +83,6 @@ pub enum AddressFamilyError {
         to this version of the agent."
     )]
     UnsupportedFamily,
-}
-
-impl TryFrom<AddressFamily> for hickory_resolver::config::LookupIpStrategy {
-    type Error = AddressFamilyError;
-
-    fn try_from(value: AddressFamily) -> Result<Self, Self::Error> {
-        match value {
-            AddressFamily::Ipv4Only => Ok(Self::Ipv4Only),
-            AddressFamily::Ipv6Only => Ok(Self::Ipv6Only),
-            AddressFamily::Both => Ok(Self::Ipv4AndIpv6),
-            AddressFamily::Any => Ok(Self::Ipv4thenIpv6),
-            AddressFamily::UnknownAddressFamilyFromNewerClient => {
-                Err(AddressFamilyError::UnsupportedFamily)
-            }
-        }
-    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Encode, Decode, Debug, PartialEq, Eq, Clone)]

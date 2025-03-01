@@ -4556,15 +4556,13 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.19.0"
+version = "1.19.1"
 dependencies = [
  "actix-codec",
  "bincode",
  "bytes",
  "fancy-regex",
  "futures",
- "hickory-proto",
- "hickory-resolver",
  "http-body-util",
  "http-serde",
  "hyper 1.5.2",
