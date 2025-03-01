@@ -4563,8 +4563,6 @@ dependencies = [
  "bytes",
  "fancy-regex",
  "futures",
- "hickory-proto",
- "hickory-resolver",
  "http-body-util",
  "http-serde",
  "hyper 1.5.2",

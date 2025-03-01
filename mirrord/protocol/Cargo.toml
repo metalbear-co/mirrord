@@ -22,8 +22,6 @@ bincode.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
 futures.workspace = true
-hickory-resolver.workspace = true
-hickory-proto.workspace = true
 serde.workspace = true
 tracing.workspace = true
 hyper = { workspace = true, features = ["client"] }
