@@ -319,6 +319,9 @@ impl From<InternalLookupError> for ResolveErrorKindInternal {
     }
 }
 
+/// Convenience trait for converting hickory types to [`mirrord_protocol`] types.
+///
+/// We can't implement [`From`] here, because both types are from other crates.
 trait ProtocolConversion<T> {
     fn convert(self) -> T;
 }
