@@ -19,7 +19,7 @@ use mirrord_protocol::{
         HttpRequestMetadata, HttpRequestTransportType, HTTP_CHUNKED_REQUEST_V2_VERSION,
         HTTP_FILTERED_UPGRADE_VERSION,
     },
-    ConnectionId, RequestId,
+    ConnectionId, LogMessage, RequestId,
 };
 use mirrord_tls_util::MaybeTls;
 use tokio::{
@@ -508,7 +508,7 @@ where
         )
         ret,
     )]
-    fn match_request<B>(&self, request: &mut Request<B>) -> Option<ClientId> {
+    fn match_request<B>(&self, request: &mut Request<B>) -> (Option<ClientId>, Vec<ClientId>) {
         let protocol_version_req = self
             .original_destination
             .connector()
@@ -521,7 +521,8 @@ where
                     .then_some(&*HTTP_FILTERED_UPGRADE_VERSION)
             });
 
-        self.filters
+        let mut iter = self
+            .filters
             .iter()
             // Check if the client can handle the request.
             .filter(|entry| {
@@ -533,8 +534,15 @@ where
             })
             // Check if the client's filter matches the request.
             .filter(|entry| entry.value().0.matches(request))
-            .map(|entry| *entry.key())
-            .find(|client_id| self.subscribed.get(client_id).copied().unwrap_or(true))
+            .map(|entry| *entry.key());
+
+        let first_match =
+            iter.find(|client_id| self.subscribed.get(client_id).copied().unwrap_or(true));
+        let other_matches = iter
+            .filter(|client_id| self.subscribed.get(client_id).copied().unwrap_or(true))
+            .collect();
+
+        (first_match, other_matches)
     }
 
     /// Sends the given [`Response`] to the [`FilteringService`] via [`oneshot::Sender`] from
@@ -628,7 +636,7 @@ where
         mut request: ExtractedRequest,
         tx: &Sender<ConnectionMessageOut>,
     ) -> Result<(), ConnectionTaskError> {
-        let Some(client_id) = self.match_request(&mut request.request) else {
+        let (Some(client_id), other_client_ids) = self.match_request(&mut request.request) else {
             let _ = request.response_tx.send(RequestHandling::LetThrough {
                 unchanged: request.request,
             });
@@ -671,6 +679,15 @@ where
 
         self.blocked_requests
             .insert((client_id, id), request.response_tx);
+
+        for client_id in other_client_ids {
+            tx.send(ConnectionMessageOut::LogMessage {
+                client_id,
+                connection_id: self.connection_id,
+                message: LogMessage::warn("Matching HTTP request stolen by another client".into()),
+            })
+            .await?;
+        }
 
         Ok(())
     }
@@ -900,6 +917,7 @@ mod test {
         AgentClientConfig, AgentServerConfig, StealPortTlsConfig, TlsAuthentication,
         TlsClientVerification, TlsServerVerification,
     };
+    use mirrord_protocol::LogLevel;
     use rustls::{
         crypto::CryptoProvider, pki_types::ServerName, server::WebPkiClientVerifier, ClientConfig,
         RootCertStore, ServerConfig,
@@ -1135,6 +1153,31 @@ mod test {
                 .unwrap()
         }
 
+        /// Prepares a new [`Request`] to be sent via [`Self::request_sender`]. Inserts the same
+        /// header filter for multiple clients.
+        ///
+        /// # Params
+        ///
+        /// 1. `client_ids` - For each client_id, insert a header filter. The request will contain a
+        ///    corresponding header such that the [`FilteredStealTask`] will steal it..
+        fn prepare_request_for_multiple(&self, client_ids: &[ClientId]) -> Request<DynamicBody> {
+            let filter = (
+                HttpFilter::Header("x-subscription: ABCD".parse().unwrap()),
+                Some("1.19.0".parse().unwrap()),
+            );
+
+            for client_id in client_ids {
+                self.filters.insert(*client_id, filter.clone());
+            }
+
+            Request::builder()
+                .method(Method::GET)
+                .uri("http://www.some-server.com")
+                .header("x-subscription", "ABCD".to_string())
+                .body(Empty::new().map_err(|_| unreachable!()).boxed())
+                .unwrap()
+        }
+
         /// 1. Closes the stolen connection and the original HTTP server.
         /// 2. Waits until [`FilteredStealTask`] finishes.
         /// 3. Checks results of the background tasks.
@@ -1238,6 +1281,92 @@ mod test {
 
         assert!(clients_closed.iter().all(|closed| *closed));
 
+        assert!(rx.recv().await.is_none());
+    }
+
+    /// Stolen connection receives a request that matches 3 filters. The first client receives the
+    /// request, the remanining two receive warnings.
+    #[tokio::test]
+    async fn multiple_clients_with_same_filter() {
+        let mut setup = TestSetup::new().await;
+
+        let request = setup.prepare_request_for_multiple(&[0, 1, 2]);
+        tokio::join!(
+            async {
+                let response = setup.request_sender.send_request(request).await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+            },
+            async {
+                // One of the clients is subscribed and receives the request
+                let subscribed_client_id = match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::SubscribedHttp {
+                        client_id: subscribed_client_id,
+                        connection_id: TestSetup::CONNECTION_ID,
+                    } => subscribed_client_id,
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+
+                let request_id = match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::Request {
+                        client_id: received_client_id,
+                        connection_id: TestSetup::CONNECTION_ID,
+                        id,
+                        metadata: HttpRequestMetadata::V1 { destination, .. },
+                        transport: HttpRequestTransportType::Tcp,
+                        ..
+                    } => {
+                        assert_eq!(received_client_id, subscribed_client_id);
+                        assert_eq!(destination, setup.original_address);
+                        id
+                    }
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+
+                // The remaining two cleints receive the warning
+                for _ in 0..2 {
+                    match setup.task_out_rx.recv().await.unwrap() {
+                        ConnectionMessageOut::LogMessage {
+                            client_id: received_client_id,
+                            connection_id: TestSetup::CONNECTION_ID,
+                            message:
+                                LogMessage {
+                                    message: _,
+                                    level: LogLevel::Warn,
+                                },
+                        } => {
+                            assert_ne!(received_client_id, subscribed_client_id);
+                        }
+                        other => unreachable!("unexpected message: {other:?}"),
+                    }
+                }
+
+                let response = Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Empty::new().map_err(|_| unreachable!()).boxed())
+                    .unwrap();
+
+                setup
+                    .task_in_tx
+                    .send(ConnectionMessageIn::Response {
+                        client_id: subscribed_client_id,
+                        request_id,
+                        response,
+                    })
+                    .await
+                    .unwrap();
+
+                setup
+                    .task_in_tx
+                    .send(ConnectionMessageIn::Unsubscribed {
+                        client_id: subscribed_client_id,
+                    })
+                    .await
+                    .unwrap();
+            }
+        );
+
+        let mut rx = setup.shutdown().await;
+        // The task should not produce the `Closed` message - the client has unsubscribed.
         assert!(rx.recv().await.is_none());
     }
 

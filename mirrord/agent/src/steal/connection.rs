@@ -30,7 +30,10 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
 
-use super::{http::HttpResponseFallback, subscriptions::PortRedirector, tls::StealTlsHandlerStore};
+use super::{
+    api::StealerMessage, http::HttpResponseFallback, subscriptions::PortRedirector,
+    tls::StealTlsHandlerStore,
+};
 use crate::{
     error::{AgentError, AgentResult},
     metrics::HTTP_REQUEST_IN_PROGRESS_COUNT,
@@ -91,11 +94,17 @@ impl From<SendError<DaemonTcp>> for PassRequestError {
     }
 }
 
+impl From<SendError<StealerMessage>> for PassRequestError {
+    fn from(_: SendError<StealerMessage>) -> Self {
+        Self::ClientDisconnected
+    }
+}
+
 /// A stealer client.
 struct Client {
     /// For sending messages to client's [`TcpStealerApi`](super::api::TcpStealerApi).
     /// Comes to [`TcpConnectionStealer`] in [`Command::NewClient`].
-    tx: Sender<DaemonTcp>,
+    tx: Sender<StealerMessage>,
     /// Client's [`mirrord_protocol`] version.
     ///
     /// Determines which variant of [`DaemonTcp`] we use to send stolen HTTP requests.
@@ -111,7 +120,7 @@ impl Client {
     #[tracing::instrument(level = Level::DEBUG, skip(tx), err(level = Level::DEBUG))]
     async fn send_legacy(
         request: MatchedHttpRequest,
-        tx: Sender<DaemonTcp>,
+        tx: Sender<StealerMessage>,
     ) -> Result<(), PassRequestError> {
         let (
             Parts {
@@ -143,7 +152,8 @@ impl Client {
             internal_request,
         };
 
-        tx.send(DaemonTcp::HttpRequest(request)).await?;
+        tx.send(StealerMessage::TcpSteal(DaemonTcp::HttpRequest(request)))
+            .await?;
 
         Ok(())
     }
@@ -151,7 +161,7 @@ impl Client {
     #[tracing::instrument(level = Level::DEBUG, skip(tx), err(level = Level::DEBUG))]
     async fn send_framed(
         request: MatchedHttpRequest,
-        tx: Sender<DaemonTcp>,
+        tx: Sender<StealerMessage>,
     ) -> Result<(), PassRequestError> {
         let (
             Parts {
@@ -183,7 +193,10 @@ impl Client {
             internal_request,
         };
 
-        tx.send(DaemonTcp::HttpRequestFramed(request)).await?;
+        tx.send(StealerMessage::TcpSteal(DaemonTcp::HttpRequestFramed(
+            request,
+        )))
+        .await?;
 
         Ok(())
     }
@@ -192,7 +205,7 @@ impl Client {
     async fn send_chunked(
         request: MatchedHttpRequest,
         use_v2: bool,
-        tx: Sender<DaemonTcp>,
+        tx: Sender<StealerMessage>,
     ) -> Result<(), PassRequestError> {
         let (
             Parts {
@@ -242,7 +255,10 @@ impl Client {
             })
         };
 
-        tx.send(DaemonTcp::HttpRequestChunked(message)).await?;
+        tx.send(StealerMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
+            message,
+        )))
+        .await?;
 
         if is_last {
             if use_v2 {
@@ -256,7 +272,7 @@ impl Client {
                     frames: Default::default(),
                     is_last: true,
                 }));
-            tx.send(message).await?;
+            tx.send(StealerMessage::TcpSteal(message)).await?;
             return Ok(());
         }
 
@@ -277,7 +293,11 @@ impl Client {
                         })
                     };
 
-                    let _ = tx.send(DaemonTcp::HttpRequestChunked(message)).await;
+                    let _ = tx
+                        .send(StealerMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
+                            message,
+                        )))
+                        .await;
 
                     break Err(error.into());
                 }
@@ -296,7 +316,7 @@ impl Client {
                     request_id: request.request_id,
                 }));
 
-            tx.send(message).await?;
+            tx.send(StealerMessage::TcpSteal(message)).await?;
 
             if is_last {
                 break Ok(());
@@ -559,7 +579,9 @@ where
 
                 let _ = client
                     .tx
-                    .send(DaemonTcp::Close(TcpClose { connection_id }))
+                    .send(StealerMessage::TcpSteal(DaemonTcp::Close(TcpClose {
+                        connection_id,
+                    })))
                     .await;
             }
 
@@ -586,7 +608,12 @@ where
                     .subscribed_connections
                     .insert(connection.connection_id);
 
-                let _ = client.tx.send(DaemonTcp::NewConnection(connection)).await;
+                let _ = client
+                    .tx
+                    .send(StealerMessage::TcpSteal(DaemonTcp::NewConnection(
+                        connection,
+                    )))
+                    .await;
             }
 
             ConnectionMessageOut::SubscribedHttp {
@@ -624,10 +651,10 @@ where
 
                 let _ = client
                     .tx
-                    .send(DaemonTcp::Data(TcpData {
+                    .send(StealerMessage::TcpSteal(DaemonTcp::Data(TcpData {
                         connection_id,
                         bytes: data,
-                    }))
+                    })))
                     .await;
             }
 
@@ -653,6 +680,24 @@ where
                     MatchedHttpRequest::new(connection_id, id, request, metadata, transport);
 
                 client.send_request_in_bg(matched_request);
+            }
+
+            ConnectionMessageOut::LogMessage {
+                client_id,
+                connection_id,
+                message,
+            } => {
+                let Some(client) = self.clients.get(&client_id) else {
+                    tracing::trace!(client_id, connection_id, "Client has already exited");
+                    return Ok(());
+                };
+
+                if !client.subscribed_connections.contains(&connection_id) {
+                    tracing::trace!(client_id, connection_id, "Client has already unsubscribed");
+                    return Ok(());
+                }
+
+                let _ = client.tx.send(StealerMessage::LogMessage(message)).await;
             }
         }
 
@@ -696,7 +741,10 @@ where
         };
 
         let client = self.clients.get(&client_id).expect("client not found");
-        let _ = client.tx.send(DaemonTcp::SubscribeResult(res)).await;
+        let _ = client
+            .tx
+            .send(StealerMessage::TcpSteal(DaemonTcp::SubscribeResult(res)))
+            .await;
 
         Ok(())
     }
@@ -841,6 +889,7 @@ mod test {
     use super::AgentError;
     use crate::{
         steal::{
+            api::StealerMessage,
             connection::{Client, MatchedHttpRequest},
             subscriptions::PortRedirector,
             TcpConnectionStealer, TcpStealerApi,
@@ -966,7 +1015,7 @@ mod test {
             ),
         );
 
-        let (client_tx, mut client_rx) = mpsc::channel::<DaemonTcp>(4);
+        let (client_tx, mut client_rx) = mpsc::channel::<StealerMessage>(4);
         let client = Client {
             tx: client_tx,
             protocol_version: Some("1.7.0".parse().unwrap()),
@@ -988,7 +1037,9 @@ mod test {
         // Verify that single-framed ChunkedRequest::Start requests are as expected, containing any
         // ready frames that were sent before Request was first sent
         let msg = client_rx.recv().await.unwrap();
-        let DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV1(x)) = msg else {
+        let StealerMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV1(x))) =
+            msg
+        else {
             panic!("unexpected type received: {msg:?}")
         };
         assert_eq!(
@@ -1004,7 +1055,8 @@ mod test {
             .await
             .unwrap();
         let msg = client_rx.recv().await.unwrap();
-        let DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(x)) = msg else {
+        let StealerMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(x))) = msg
+        else {
             panic!("unexpected type received: {msg:?}")
         };
         assert_eq!(
@@ -1039,7 +1091,7 @@ mod test {
             ),
         );
 
-        let (client_tx, mut client_rx) = mpsc::channel::<DaemonTcp>(4);
+        let (client_tx, mut client_rx) = mpsc::channel::<StealerMessage>(4);
         let client = Client {
             tx: client_tx,
             protocol_version: Some("1.7.0".parse().unwrap()),
@@ -1060,13 +1112,16 @@ mod test {
 
         // Verify that ChunkedRequest::Start request is as expected
         let msg = client_rx.recv().await.unwrap();
-        let DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV1(_)) = msg else {
+        let StealerMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV1(_))) =
+            msg
+        else {
             panic!("unexpected type received: {msg:?}")
         };
 
         // Verify that empty ChunkedRequest::Body request is as expected
         let msg = client_rx.recv().await.unwrap();
-        let DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(x)) = msg else {
+        let StealerMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(x))) = msg
+        else {
             panic!("unexpected type received: {msg:?}")
         };
         assert_eq!(x.frames, vec![]);
@@ -1108,7 +1163,10 @@ mod test {
         .unwrap();
 
         let response = api.recv().await.unwrap();
-        assert_eq!(response, DaemonTcp::SubscribeResult(Ok(80)));
+        assert_eq!(
+            response,
+            StealerMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(80)))
+        );
 
         let notification = redirect_rx.recv().await.unwrap();
         assert_eq!(notification, RedirectNotification::Added(80));
