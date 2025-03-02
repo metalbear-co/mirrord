@@ -163,7 +163,7 @@ pub enum ConnectionMessageOut {
     },
     /// The client recevied a log message from the connection.
     ///
-    /// This variant translates to [`DaemonMessage::LogMessage`].
+    /// This variant translates to [`LogMessage`].
     LogMessage {
         client_id: ClientId,
         connection_id: ConnectionId,
