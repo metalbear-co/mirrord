@@ -1163,7 +1163,7 @@ mod test {
         /// # Params
         ///
         /// 1. `client_ids` - For each client_id, insert a header filter. The request will contain a
-        ///    corresponding header such that the [`FilteredStealTask`] will steal it..
+        ///    corresponding header such that the [`FilteredStealTask`] will steal it.
         fn prepare_request_for_multiple(&self, client_ids: &[ClientId]) -> Request<DynamicBody> {
             let filter = (
                 HttpFilter::Header("x-subscription: ABCD".parse().unwrap()),
