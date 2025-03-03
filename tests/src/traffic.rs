@@ -9,7 +9,7 @@ mod traffic_tests {
         time::Duration,
     };
 
-    use futures::{stream::FuturesUnordered, Future, StreamExt};
+    use futures::{stream, Future, StreamExt};
     use futures_util::{stream::TryStreamExt, AsyncBufReadExt};
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api, Client};
@@ -670,18 +670,20 @@ mod traffic_tests {
             "www.uber.com",
         ];
 
-        let client = reqwest::Client::new();
-        let mut live_hosts = HOSTS
-            .iter()
-            .copied()
-            .map(|host| {
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .read_timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+
+        let live_hosts = stream::iter(HOSTS)
+            .then(|host| {
                 let client = client.clone();
                 async move {
                     let response = client.get(format!("https://{host}")).send().await;
-                    (host, response)
+                    (*host, response)
                 }
             })
-            .collect::<FuturesUnordered<_>>()
             .filter_map(|(host, response)| match response {
                 Ok(..) => {
                     println!("{host} is available");
@@ -692,12 +694,14 @@ mod traffic_tests {
                     std::future::ready(None)
                 }
             })
+            .take(10)
             .collect::<Vec<_>>()
             .await;
+
         if live_hosts.len() < 10 {
             panic!("Failed to gather 10 available hosts for the test app");
         }
-        live_hosts.truncate(1);
+
         let as_env = live_hosts.join(",");
         println!("Running test app with AVAILABLE_HOSTS={as_env}");
 
