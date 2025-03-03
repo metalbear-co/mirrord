@@ -1326,7 +1326,7 @@ mod test {
                     other => unreachable!("unexpected message: {other:?}"),
                 };
 
-                // The remaining two cleints receive the warning
+                // The remaining two clients receive the warning
                 for _ in 0..2 {
                     match setup.task_out_rx.recv().await.unwrap() {
                         ConnectionMessageOut::LogMessage {
