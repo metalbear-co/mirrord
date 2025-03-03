@@ -508,7 +508,7 @@ where
         )
         ret,
     )]
-    fn match_request<B>(&self, request: &mut Request<B>) -> (Option<ClientId>, Vec<ClientId>) {
+    fn match_request<B>(&self, request: &mut Request<B>) -> Vec<ClientId> {
         let protocol_version_req = self
             .original_destination
             .connector()
@@ -521,8 +521,7 @@ where
                     .then_some(&*HTTP_FILTERED_UPGRADE_VERSION)
             });
 
-        let mut iter = self
-            .filters
+        self.filters
             .iter()
             // Check if the client can handle the request.
             .filter(|entry| {
@@ -534,15 +533,9 @@ where
             })
             // Check if the client's filter matches the request.
             .filter(|entry| entry.value().0.matches(request))
-            .map(|entry| *entry.key());
-
-        let first_match =
-            iter.find(|client_id| self.subscribed.get(client_id).copied().unwrap_or(true));
-        let other_matches = iter
+            .map(|entry| *entry.key())
             .filter(|client_id| self.subscribed.get(client_id).copied().unwrap_or(true))
-            .collect();
-
-        (first_match, other_matches)
+            .collect()
     }
 
     /// Sends the given [`Response`] to the [`FilteringService`] via [`oneshot::Sender`] from
@@ -636,7 +629,8 @@ where
         mut request: ExtractedRequest,
         tx: &Sender<ConnectionMessageOut>,
     ) -> Result<(), ConnectionTaskError> {
-        let (Some(client_id), other_client_ids) = self.match_request(&mut request.request) else {
+        let matching_client_ids = self.match_request(&mut request.request);
+        let Some((&client_id, other_client_ids)) = matching_client_ids.split_first() else {
             let _ = request.response_tx.send(RequestHandling::LetThrough {
                 unchanged: request.request,
             });
@@ -683,7 +677,7 @@ where
         self.blocked_requests
             .insert((client_id, id), request.response_tx);
 
-        for client_id in other_client_ids {
+        for &client_id in other_client_ids {
             tx.send(ConnectionMessageOut::LogMessage {
                 client_id,
                 connection_id: self.connection_id,
