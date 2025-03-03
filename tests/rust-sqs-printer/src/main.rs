@@ -11,12 +11,15 @@ const QUEUE_NAME_ENV_VAR2: &str = "SQS_TEST_Q_NAME2";
 async fn read_from_queue(read_q_name: String, client: Client, queue_num: u8) {
     let read_q_url = client
         .get_queue_url()
-        .queue_name(read_q_name)
+        .queue_name(read_q_name.clone())
         .send()
         .await
         .unwrap()
         .queue_url
         .unwrap();
+
+    println!("Reading messages from queue {read_q_name}");
+
     let receive_message_request = client
         .receive_message()
         .message_attribute_names(".*")
@@ -28,6 +31,7 @@ async fn read_from_queue(read_q_name: String, client: Client, queue_num: u8) {
         // time before returning an empty response.
         .wait_time_seconds(5)
         .queue_url(&read_q_url);
+
     loop {
         let res = match receive_message_request.clone().send().await {
             Ok(res) => res,

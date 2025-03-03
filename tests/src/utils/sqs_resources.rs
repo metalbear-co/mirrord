@@ -4,85 +4,235 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
-    time::Duration,
+    ops::Not,
+    time::Instant,
 };
 
 use aws_credential_types::provider::{
     future::ProvideCredentials as ProvideCredentialsFuture, ProvideCredentials,
 };
-use aws_sdk_sqs::types::{
-    MessageAttributeValue,
-    QueueAttributeName::{FifoQueue, MessageRetentionPeriod},
+use aws_sdk_sqs::{
+    operation::receive_message::ReceiveMessageOutput,
+    types::{
+        Message, MessageAttributeValue,
+        QueueAttributeName::{FifoQueue, MessageRetentionPeriod},
+    },
 };
-use futures::StreamExt;
-use futures_util::{FutureExt, TryStreamExt};
+use futures_util::FutureExt;
+use json_patch::{PatchOperation, ReplaceOperation, TestOperation};
+use jsonptr::PointerBuf;
 use k8s_openapi::api::{
     apps::v1::Deployment,
-    core::v1::{EnvVar, Service},
+    core::v1::{EnvVar, Pod, Service},
 };
 use kube::{
-    api::{Patch, PatchParams, PostParams, WatchEvent, WatchParams},
-    runtime::wait::await_condition,
-    Api, Client, Resource, ResourceExt,
+    api::{Patch, PatchParams, PostParams},
+    runtime::watcher::Config,
+    Api, Client, Resource,
 };
 use mirrord_operator::{
     crd::{
-        is_session_ready, MirrordSqsSession, MirrordWorkloadQueueRegistry,
-        MirrordWorkloadQueueRegistrySpec, QueueConsumer, QueueConsumerType, QueueNameSource,
-        SplitQueue, SqsQueueDetails,
+        MirrordWorkloadQueueRegistry, MirrordWorkloadQueueRegistrySpec, QueueConsumer,
+        QueueConsumerType, QueueNameSource, SplitQueue, SqsQueueDetails,
     },
     setup::OPERATOR_NAME,
 };
 use rstest::fixture;
-use tokio::task::JoinHandle;
 
-use crate::utils::{
-    kube_client, service_addr::TestServiceAddr, service_with_env, KubeService, ResourceGuard,
-};
+use super::{port_forwarder::PortForwarder, watch::Watcher};
+use crate::utils::{kube_client, service_with_env, KubeService, ResourceGuard};
 
-/// Name of the environment variable that holds the name of the first SQS queue to read from.
+/// Name of an environment variable used by ghcr.io/metalbear-co/mirrord-sqs-forwarder.
+///
+/// The variable holds the name of the first SQS queue to read from.
 const QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_Q_NAME1";
 
-/// Name of the environment variable that holds the name of the second SQS queue to read from.
+/// Name of an environment variable used by ghcr.io/metalbear-co/mirrord-sqs-forwarder.
+///
+/// The variable holds the name of the second SQS queue to read from.
 const QUEUE_NAME_ENV_VAR2: &str = "SQS_TEST_Q_NAME2";
 
-/// Name of the environment variable that holds the name of the first SQS queue the deployed
-/// application will write to.
+/// Name of an environment variable used by ghcr.io/metalbear-co/mirrord-sqs-forwarder.
+///
+/// The variable holds the name of the SQS queue where the application sends messages read from
+/// [`QUEUE_NAME_ENV_VAR1`].
 const ECHO_QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_ECHO_Q_NAME1";
 
-/// Name of the environment variable that holds the name of the second SQS queue the deployed
-/// application will write to.
+/// Name of an environment variable used by ghcr.io/metalbear-co/mirrord-sqs-forwarder.
+///
+/// The variable holds the name of the SQS queue where the application sends messages read from
+/// [`QUEUE_NAME_ENV_VAR2`].
 const ECHO_QUEUE_NAME_ENV_VAR2: &str = "SQS_TEST_ECHO_Q_NAME2";
 
-/// Does not have to be dynamic because each test run creates its own namespace.
-const QUEUE_REGISTRY_RESOURCE_NAME: &str = "mirrord-e2e-test-queue-registry";
-
-/// To mark the operator deployment is currently patched to use localstack.
-const LOCALSTACK_PATCH_LABEL_NAME: &str = "sqs-e2e-tests-localstack-patch";
-
+/// Endpoint of localstack that should be accessible from within the cluster.
 const LOCALSTACK_ENDPOINT_URL: &str = "http://localstack.default.svc.cluster.local:4566";
 
-pub struct QueueInfo {
-    pub name: String,
-    pub url: String,
+/// An SQS queue created for E2E tests.
+pub struct SqsTestQueue {
+    name: String,
+    url: String,
+    is_fifo: bool,
+    client: aws_sdk_sqs::Client,
+    _guard: ResourceGuard,
 }
 
-/// K8s resources will be deleted when this is dropped.
+impl SqsTestQueue {
+    const FIFO_GROUP_ID: &str = "e2e-tests";
+
+    pub async fn new(name: String, fifo: bool, client: aws_sdk_sqs::Client) -> Self {
+        println!("Creating SQS queue: {name}");
+        let mut builder = client
+            .create_queue()
+            .queue_name(&name)
+            .attributes(MessageRetentionPeriod, "3600"); // delete messages after an hour.
+
+        // Cannot set FifoQueue to false: https://github.com/aws/aws-cdk/issues/8550
+        if fifo {
+            builder = builder.attributes(FifoQueue, "true")
+        }
+
+        let queue_url = builder.send().await.unwrap().queue_url.unwrap();
+        let url = queue_url.clone();
+        let queue_name = name.clone();
+        let client_cloned = client.clone();
+
+        let deleter = Some(
+            async move {
+                println!("Deleting SQS queue {queue_name}");
+                let result = client_cloned
+                    .delete_queue()
+                    .queue_url(queue_url)
+                    .send()
+                    .await;
+                if let Err(err) = result {
+                    eprintln!("Could not delete SQS queue {queue_name}: {err}");
+                }
+            }
+            .boxed(),
+        );
+        let guard = ResourceGuard {
+            delete_on_fail: true,
+            deleter,
+        };
+
+        Self {
+            name,
+            url,
+            is_fifo: fifo,
+            client,
+            _guard: guard,
+        }
+    }
+
+    /// Sends a message to this queue with the given body and attribute.
+    pub async fn send_message(&self, body: &str, attribute: &str, attribute_value: &str) {
+        println!(
+            "Sending messages `{body}` with `{attribute}={attribute_value}` to queue {}.",
+            self.name
+        );
+
+        let group_id = self.is_fifo.then(|| Self::FIFO_GROUP_ID.to_string());
+        let message_dedup_id = self.is_fifo.then(|| rand::random::<u32>().to_string());
+
+        self.client
+            .send_message()
+            .queue_url(&self.url)
+            .message_body(body)
+            .message_attributes(
+                attribute,
+                MessageAttributeValue::builder()
+                    .string_value(attribute_value)
+                    .data_type("String")
+                    .build()
+                    .unwrap(),
+            )
+            .set_message_group_id(group_id)
+            .set_message_deduplication_id(message_dedup_id)
+            .send()
+            .await
+            .expect("sending SQS message failed");
+    }
+
+    async fn delete_message(&self, receipt_handle: &str) {
+        self.client
+            .delete_message()
+            .queue_url(&self.url)
+            .receipt_handle(receipt_handle)
+            .send()
+            .await
+            .expect("failed to delete SQS message");
+    }
+
+    /// Reads n messages from this queue and compares their bodies to the given data.
+    ///
+    /// Does not verify the order of messages.
+    /// If you want to verify the order, call this function multiple times.
+    pub async fn expect_messages(&self, mut expected_messages: Vec<&str>) {
+        println!(
+            "Verifying that {} next message(s) in queue {} is/are: {:?}",
+            expected_messages.len(),
+            self.name,
+            expected_messages
+        );
+
+        while expected_messages.is_empty().not() {
+            let max_messages = expected_messages.len().clamp(1, 10) as i32; // 1..=10 is the valid range for max returned messages
+
+            let ReceiveMessageOutput { messages, .. } = self
+                .client
+                .receive_message()
+                .queue_url(&self.url)
+                .visibility_timeout(15)
+                .wait_time_seconds(0)
+                .max_number_of_messages(max_messages)
+                .send()
+                .await
+                .expect("failed to receive message");
+
+            let messages = messages.unwrap_or_default();
+            assert!(
+                messages.is_empty().not(),
+                "some expected messages where not found in the queue: {expected_messages:?}"
+            );
+
+            for message in messages {
+                let Message {
+                    receipt_handle,
+                    body,
+                    ..
+                } = message;
+                let message = body.unwrap_or_default();
+                println!("got message `{message}` from queue `{}`.", self.name);
+
+                let position = expected_messages
+                    .iter()
+                    .position(|expected| *expected == message)
+                    .expect("received an unexpected message");
+                expected_messages.remove(position);
+
+                self.delete_message(&receipt_handle.expect("no receipt handle"))
+                    .await;
+            }
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+/// K8s resources and SQS queues will be deleted when this is dropped.
 pub struct SqsTestResources {
     k8s_service: KubeService,
-    pub queue1: QueueInfo,
-    pub echo_queue1: QueueInfo,
-    pub queue2: QueueInfo,
-    pub echo_queue2: QueueInfo,
+
+    pub queue1: SqsTestQueue,
+    pub echo_queue1: SqsTestQueue,
+    pub queue2: SqsTestQueue,
+    pub echo_queue2: SqsTestQueue,
     pub sqs_client: aws_sdk_sqs::Client,
-    _guards: Vec<ResourceGuard>,
-    /// A future that completes once there are 2 ready SQS sessions.
-    /// Option, because it is moved when awaited.
-    sessions_ready_future: Option<JoinHandle<Result<(), ()>>>,
-    /// A future that completes once the queue registry resource has a status, meaning the first
-    /// user started a session. Needed because currently two users cannot start at the same time.
-    /// Option, because it is moved when awaited.
-    registry_has_status_future: Option<JoinHandle<()>>,
+
+    _localstack_portforwarder: Option<PortForwarder>,
+    _operator_patch_guard: Option<ResourceGuard>,
 }
 
 impl SqsTestResources {
@@ -92,36 +242,6 @@ impl SqsTestResources {
 
     pub fn deployment_target(&self) -> String {
         self.k8s_service.deployment_target()
-    }
-
-    /// Returns with `Ok(())` once there are 2 ready SQS Sessions.
-    /// Returns `Err(())` if a session was deleted before 2 were ready, or if there was an API
-    /// error.
-    ///
-    /// # Panics
-    /// If `timeout` has passed and stdout still does not contain `n` lines.
-    pub async fn wait_for_sqs_sessions(&mut self, timeout_secs: u64) -> Result<(), ()> {
-        tokio::time::timeout(
-            Duration::from_secs(timeout_secs),
-            self.sessions_ready_future.take().unwrap(),
-        )
-        .await
-        .unwrap()
-        .unwrap()
-    }
-
-    /// Returns once the queue registry has a status.
-    ///
-    /// # Panics
-    /// If `timeout` has passed and stdout still does not contain `n` lines.
-    pub async fn wait_for_registry_status(&mut self, timeout_secs: u64) {
-        tokio::time::timeout(
-            Duration::from_secs(timeout_secs),
-            self.registry_has_status_future.take().unwrap(),
-        )
-        .await
-        .unwrap()
-        .unwrap();
     }
 }
 
@@ -156,81 +276,22 @@ async fn get_sqs_client(localstack_url: Option<String>) -> aws_sdk_sqs::Client {
     aws_sdk_sqs::Client::new(&config)
 }
 
-/// Create a new SQS fifo queue with a randomized name, return queue name and url.
-/// Also create another SQS queue that has a name that is "Echo" + the name of the first queue.
-/// Create resource guards for both queues that delete the queue on drop, push into guards vec.
-async fn random_name_sqs_queue_with_echo_queue(
-    fifo: bool,
-    client: &aws_sdk_sqs::Client,
-    guards: &mut Vec<ResourceGuard>,
-) -> (QueueInfo, QueueInfo) {
-    let q_name = format!(
-        "MirrordE2ESplitterTests-{}{}",
-        crate::utils::random_string(),
-        if fifo { ".fifo" } else { "" }
-    );
-
-    let echo_q_name = format!("Echo{q_name}");
-    // Create queue and resource guard
-
-    (
-        sqs_queue(fifo, client, guards, q_name).await,
-        sqs_queue(fifo, client, guards, echo_q_name).await,
-    )
-}
-
-/// Create a new SQS fifo queue, return queue name and url.
-/// Create resource guard that deletes the queue on drop, push into guards vec.
-async fn sqs_queue(
-    fifo: bool,
-    client: &aws_sdk_sqs::Client,
-    guards: &mut Vec<ResourceGuard>,
-    name: String,
-) -> QueueInfo {
-    println!("Creating SQS queue: {name}");
-    let mut builder = client
-        .create_queue()
-        .queue_name(&name)
-        .attributes(MessageRetentionPeriod, "3600"); // delete messages after an hour.
-
-    // Cannot set FifoQueue to false: https://github.com/aws/aws-cdk/issues/8550
-    if fifo {
-        builder = builder.attributes(FifoQueue, "true")
-    }
-
-    let queue_url = builder.send().await.unwrap().queue_url.unwrap();
-    let url = queue_url.clone();
-    let queue_name = name.clone();
-    let client = client.clone();
-
-    let deleter = Some(
-        async move {
-            println!("deleting SQS queue {queue_name}");
-            if let Err(err) = client.delete_queue().queue_url(queue_url).send().await {
-                eprintln!("Could not delete SQS queue {queue_name}: {err:?}");
-            }
-        }
-        .boxed(),
-    );
-    guards.push(ResourceGuard {
-        delete_on_fail: true,
-        deleter,
-    });
-
-    QueueInfo { name, url }
-}
-
-/// Create the `MirrordWorkloadQueueRegistry` K8s resource.
-/// No ResourceGuard needed, the namespace is guarded.
-pub async fn create_queue_registry_resource(
+/// Create the [`MirrordWorkloadQueueRegistry`] resource.
+/// No [`ResourceGuard`] is needed here, because the whole namespace is guarded.
+async fn create_queue_registry_resource(
     kube_client: &Client,
     namespace: &str,
     deployment_name: &str,
 ) {
-    println!("Creating MirrordWorkloadQueueRegistry resource");
-    let qr_api: Api<MirrordWorkloadQueueRegistry> = Api::namespaced(kube_client.clone(), namespace);
-    let queue_registry = MirrordWorkloadQueueRegistry::new(
-        QUEUE_REGISTRY_RESOURCE_NAME,
+    let name = format!("e2e-workload-queue-registry-{:x}", rand::random::<u16>());
+    println!(
+        "Creating {} {namespace}/{name}",
+        MirrordWorkloadQueueRegistry::kind(&())
+    );
+
+    let api: Api<MirrordWorkloadQueueRegistry> = Api::namespaced(kube_client.clone(), namespace);
+    let resource = MirrordWorkloadQueueRegistry::new(
+        &name,
         MirrordWorkloadQueueRegistrySpec {
             queues: BTreeMap::from([
                 (
@@ -255,11 +316,15 @@ pub async fn create_queue_registry_resource(
             },
         },
     );
-    qr_api
-        .create(&PostParams::default(), &queue_registry)
+
+    api.create(&PostParams::default(), &resource)
         .await
-        .expect("Could not create queue splitter in E2E test.");
-    println!("MirrordWorkloadQueueRegistry resource created at namespace {namespace} with name {QUEUE_REGISTRY_RESOURCE_NAME}");
+        .expect("failed to create workload queue registry");
+
+    println!(
+        "Created {} {namespace}/{name}",
+        MirrordWorkloadQueueRegistry::kind(&())
+    );
 }
 
 /// Create a microservice for the sqs test application.
@@ -267,10 +332,10 @@ pub async fn create_queue_registry_resource(
 /// all AWS stuff.
 async fn sqs_consumer_service(
     kube_client: &Client,
-    queue1: &QueueInfo,
-    queue2: &QueueInfo,
-    echo_queue1: &QueueInfo,
-    echo_queue2: &QueueInfo,
+    queue1: &SqsTestQueue,
+    queue2: &SqsTestQueue,
+    echo_queue1: &SqsTestQueue,
+    echo_queue2: &SqsTestQueue,
 ) -> KubeService {
     let namespace = format!("e2e-tests-sqs-splitting-{}", crate::utils::random_string());
     service_with_env(
@@ -323,7 +388,7 @@ async fn sqs_consumer_service(
     .await
 }
 
-const AWS_ENV: [(&str, &str); 5] = [
+const LOCALSTACK_OPERATOR_ENV: [(&str, &str); 5] = [
     ("AWS_ENDPOINT_URL", LOCALSTACK_ENDPOINT_URL),
     ("AWS_REGION", "us-east-1"),
     ("AWS_SECRET_ACCESS_KEY", "test"),
@@ -344,37 +409,41 @@ fn take_env(deployment: Deployment) -> (usize, Vec<EnvVar>) {
         .enumerate()
         .find(|(_, container)| container.name == OPERATOR_NAME)
         .expect("could not find right operator container");
+
     (index, container.env.unwrap_or_default())
 }
 
 /// Patch the deployed operator to use localstack for all AWS API calls.
-/// Return a ResourceGuard that will restore the original env when dropped.
-async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<ResourceGuard>) {
-    let deploy_api = Api::<Deployment>::namespaced(client.clone(), "mirrord");
+///
+/// Return a [`ResourceGuard`] that will restore the original env when dropped.
+async fn patch_operator_for_localstack(client: &Client) -> ResourceGuard {
+    let api = Api::<Deployment>::namespaced(client.clone(), "mirrord");
 
-    let operator_deploy = deploy_api
+    let operator_deploy = api
         .get(OPERATOR_NAME)
         .await
-        .expect(r#"Did not find the operator's deployment in the "mirrord" namespace."#);
+        .expect("failed to find the operator deployment in the mirrord namespace");
+    let selector = operator_deploy
+        .spec
+        .as_ref()
+        .unwrap()
+        .selector
+        .match_labels
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join(",");
 
-    if let Some(label_map) = operator_deploy.meta().labels.as_ref() {
-        if label_map.contains_key(LOCALSTACK_PATCH_LABEL_NAME) {
-            println!("operator already patched for localstack, not patching.");
-            return;
-        }
-    };
+    let (container_index, original_env) = take_env(operator_deploy);
 
-    let (container_index, mut env) = take_env(operator_deploy);
+    let mut new_env = original_env.clone();
+    let aws_env = HashMap::from(LOCALSTACK_OPERATOR_ENV);
 
-    let mut aws_env = HashMap::from(AWS_ENV);
-    let original_env = env.clone();
-    for env_var in env.iter_mut() {
-        if let Some(aws_value) = aws_env.remove(env_var.name.as_str()) {
-            env_var.value = Some(aws_value.to_string())
-        }
-    }
+    new_env.retain(|env| aws_env.contains_key(env.name.as_str()).not());
     for (name, value) in aws_env {
-        env.push(EnvVar {
+        new_env.push(EnvVar {
             name: name.to_string(),
             value: Some(value.to_string()),
             value_from: None,
@@ -382,181 +451,102 @@ async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<Resourc
     }
 
     let container_index = container_index.to_string();
-    let path = jsonptr::PointerBuf::from_tokens([
-        "spec",
-        "template",
-        "spec",
-        "containers",
-        container_index.as_str(),
-        "env",
-    ]);
-    let env_path = path.clone();
-    let value = serde_json::to_value(env).unwrap();
+    let mut path = PointerBuf::from_tokens(["spec", "template", "spec", "containers"]);
+    path.push_back(container_index);
+    path.push_back("env");
+    let value = serde_json::to_value(&new_env).unwrap();
 
-    let label_path =
-        jsonptr::PointerBuf::from_tokens(["metadata", "labels", LOCALSTACK_PATCH_LABEL_NAME]);
+    api.patch(
+        OPERATOR_NAME,
+        &PatchParams::default(),
+        &Patch::<Deployment>::Json(json_patch::Patch(vec![PatchOperation::Replace(
+            ReplaceOperation {
+                path: path.clone(),
+                value: value.clone(),
+            },
+        )])),
+    )
+    .await
+    .unwrap();
 
-    let operator_deploy = deploy_api
-        .patch(
-            OPERATOR_NAME,
-            &PatchParams::default(),
-            &Patch::<Deployment>::Json(json_patch::Patch(vec![
-                json_patch::PatchOperation::Replace(json_patch::ReplaceOperation { path, value }),
-                json_patch::PatchOperation::Add(json_patch::AddOperation {
-                    path: label_path.clone(),
-                    value: serde_json::to_value("true").unwrap(),
-                }),
-            ])),
-        )
-        .await
-        .unwrap();
-
-    let container_name_path = jsonptr::PointerBuf::from_tokens([
-        "spec",
-        "template",
-        "spec",
-        "containers",
-        container_index.as_str(),
-        "name",
-    ]);
-
-    let api = deploy_api.clone();
-
+    let api = api.clone();
     let restore_env = async move {
-        println!("Restoring AWS env vars from before SQS tests");
-        if let Err(err) = deploy_api
+        println!("Restoring AWS env vars from before the SQS test");
+        let _ = api
             .patch(
                 OPERATOR_NAME,
                 &PatchParams::default(),
                 &Patch::<Deployment>::Json(json_patch::Patch(vec![
-                    json_patch::PatchOperation::Test(json_patch::TestOperation {
-                        path: container_name_path,
-                        value: serde_json::to_value(OPERATOR_NAME).unwrap(),
+                    PatchOperation::Test(TestOperation {
+                        path: path.clone(),
+                        value: value.clone(),
                     }),
-                    json_patch::PatchOperation::Replace(json_patch::ReplaceOperation {
-                        path: env_path,
+                    PatchOperation::Replace(json_patch::ReplaceOperation {
+                        path: path.clone(),
                         value: serde_json::to_value(&original_env).unwrap(),
-                    }),
-                    json_patch::PatchOperation::Remove(json_patch::RemoveOperation {
-                        path: label_path,
                     }),
                 ])),
             )
             .await
-        {
-            println!("Failed to patch operator deployment to restore AWS env: {err:?}");
-        }
+            .inspect_err(|error| {
+                println!("Failed to patch operator deployment to restore AWS env: {error}");
+            });
     };
 
-    guards.push(ResourceGuard {
+    let guard = ResourceGuard {
         delete_on_fail: true,
         deleter: Some(restore_env.boxed()),
-    });
+    };
 
-    tokio::time::timeout(
-        Duration::from_secs(30),
-        await_condition(
-            api,
-            OPERATOR_NAME,
-            get_patch_applied_check(operator_deploy.metadata.generation.unwrap()),
-        ),
-    )
-    .await
-    .expect("Operator patch did not complete in 30 secs.")
-    .expect("failed to await condition");
-    tokio::time::sleep(Duration::from_secs(20)).await // TODO: find better solution.
-}
-
-/// Get a function that checks if a deployment already reached an actual generation same as or later
-/// than the given one.
-///
-/// For example, if the passed `generation` is 3, this function will return a function that takes
-/// an optional deployment, and only returns `true` when the deployment is there (not `None`), and
-/// its observed generation is greater than or equals 3.
-///
-/// Note: it does not require for the `observedGeneration` to be greater or equal the current
-/// `generation`, just the given generation. So if the function returned from the example above
-/// gets a deployment with `observedGeneration` `3` and `generation` `4`, it returns `true`.
-fn get_patch_applied_check(generation: i64) -> impl Fn(Option<&Deployment>) -> bool {
-    move |opt| {
-        opt.and_then(|resource| {
-            resource
-                .status
-                .as_ref()
-                .and_then(|status| status.observed_generation)
-        })
-        .inspect(|observed_generation| {
-            println!(
-                "Checking if operator patch completed. observed generation: {observed_generation}."
-            )
-        })
-        .map(|observed_generation| observed_generation >= generation)
-        // If there is no deployment, if the deployment has no status, or if the status does not
-        // contain an observed generation, we take it to mean the deployment has not yet reached
-        // the wanted generation.
-        .unwrap_or_default()
-    }
-}
-
-/// Watch `MirrordSqsSession` resources in this namespace (which is private to this test instance
-/// alone), and return once two unique sessions are ready.
-///
-/// Return `Err(())` if there was an error while watching or if a session was deleted before 2 were
-/// ready.
-pub async fn watch_sqs_sessions(kube_client: Client, namespace: String) -> Result<(), ()> {
-    let sqs_sessions = Api::<MirrordSqsSession>::namespaced(kube_client, &namespace);
-    let wp = WatchParams::default().timeout(60);
-    println!("Waiting for 2 MirrordSqsSessions to be ready.");
-    let mut ready_session_name: Option<String> = None;
-    // Do in loop because stream can stop for no reason.
-    loop {
-        let mut stream = sqs_sessions.watch(&wp, "0").await.unwrap().boxed();
-        while let Some(session) = stream.try_next().await.unwrap() {
-            match session {
-                WatchEvent::Added(s) | WatchEvent::Modified(s) => {
-                    if is_session_ready(Some(&s)) {
-                        let session_name = s.name_any();
-                        if let Some(seen_name) = ready_session_name.as_ref() {
-                            if *seen_name != session_name {
-                                println!("second SQS session ready! {}", session_name);
-                                return Ok(());
-                            }
-                        } else {
-                            println!("first SQS session ready");
-                            ready_session_name = Some(session_name)
-                        }
+    let start = Instant::now();
+    // Wait until:
+    // 1. At least one operator pod is ready
+    // 2. All ready operator pods use the new env
+    Watcher::new(
+        Api::<Pod>::namespaced(client.clone(), "mirrord"),
+        Config {
+            label_selector: Some(selector),
+            ..Default::default()
+        },
+        move |pods| {
+            let patched_operator_pods = pods
+                .values()
+                .filter_map(|pod| {
+                    let status = pod.status.as_ref()?;
+                    if status.phase.as_deref()? != "Running" {
+                        return None;
                     }
-                }
-                WatchEvent::Deleted(s) => {
-                    println!(
-                        "SQS session was deleted before both were ready: {}",
-                        s.name_any()
-                    );
-                    return Err(());
-                }
-                WatchEvent::Bookmark(_) => {}
-                WatchEvent::Error(e) => {
-                    println!("SQS Session watch error: {}", e);
-                    return Err(());
-                }
-            }
-        }
-    }
-}
 
-fn queue_registry_has_status(queue_registry: Option<&MirrordWorkloadQueueRegistry>) -> bool {
-    queue_registry.and_then(|qr| qr.status.as_ref()).is_some()
-}
+                    let all_containers_ready = status
+                        .container_statuses
+                        .as_ref()?
+                        .iter()
+                        .all(|status| status.ready);
+                    if !all_containers_ready {
+                        return None;
+                    }
 
-async fn await_registry_status(kube_client: Client, namespace: String) {
-    let qr_api: Api<MirrordWorkloadQueueRegistry> = Api::namespaced(kube_client, &namespace);
-    await_condition(
-        qr_api,
-        QUEUE_REGISTRY_RESOURCE_NAME,
-        queue_registry_has_status,
-    )
-    .await
-    .unwrap();
+                    pod.spec
+                        .as_ref()?
+                        .containers
+                        .iter()
+                        .find(|c| c.name == OPERATOR_NAME)?
+                        .env
+                        .as_ref()
+                })
+                .filter(|env| *env == &new_env)
+                .count();
+
+            patched_operator_pods == pods.len() && patched_operator_pods > 0
+        },
+    );
+    let elapsed = start.elapsed();
+    println!(
+        "mirrord Operator was ready again after {}s",
+        elapsed.as_secs_f32()
+    );
+
+    guard
 }
 
 /// - Check if there is a localstack instance deployed in the default namespace and patch the
@@ -565,47 +555,52 @@ async fn await_registry_status(kube_client: Client, namespace: String) {
 /// - Create 4 guarded SQS queues with partially random names: 2 queues for the test applications to
 ///   consume from, and two "echo" queues from the deployed test application to forward messages to,
 ///   so that the test can verify it received them.
-/// - Start a task that waits for 2 SQS Sessions to be ready.
 /// - Deploy a consumer service in a new guarded namespace with a partially random name.
-/// - Create a `MirrordWorkloadQueueRegistry` resource in the test's namespace.
+/// - Create a [`MirrordWorkloadQueueRegistry`] resource in the test's namespace.
 #[fixture]
 pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResources {
     let kube_client = kube_client.await;
-    let mut guards = Vec::new();
 
-    let endpoint_addr = {
+    let localstack_setup = {
         let localstack = Api::<Service>::namespaced(kube_client.clone(), "default")
             .get("localstack")
             .await
             .ok();
+
         if let Some(localstack) = localstack {
             println!("localstack detected, using localstack for SQS");
-            patch_operator_for_localstack(&kube_client, &mut guards).await;
-            Some(TestServiceAddr::fetch(kube_client.clone(), &localstack).await)
+
+            let portforwarder =
+                PortForwarder::new_for_service(kube_client.clone(), &localstack, 4566).await;
+            let guard = patch_operator_for_localstack(&kube_client).await;
+
+            Some((portforwarder, guard))
         } else {
             None
         }
     };
+    let (localstack_portforwarder, operator_patch_guard) = localstack_setup.unzip();
 
-    let endpoint_url = endpoint_addr
+    let endpoint_url = localstack_portforwarder
         .as_ref()
-        .map(|addr| format!("http://{}", addr.addr));
+        .map(|addr| format!("http://{}", addr.address()));
     let sqs_client = get_sqs_client(endpoint_url).await;
-    let (queue1, echo_queue1) =
-        random_name_sqs_queue_with_echo_queue(false, &sqs_client, &mut guards).await;
-    let (queue2, echo_queue2) =
-        random_name_sqs_queue_with_echo_queue(true, &sqs_client, &mut guards).await;
+
+    let name1 = format!("test-queue-{:x}", rand::random::<u16>());
+    let echo_name1 = format!("echo-{name1}");
+    let queue1 = SqsTestQueue::new(name1, false, sqs_client.clone()).await;
+    let echo_queue1 = SqsTestQueue::new(echo_name1, false, sqs_client.clone()).await;
+
+    let name2 = format!("test-queue-{:x}.fifo", rand::random::<u16>());
+    let echo_name2 = format!("echo-{name2}");
+    let queue2 = SqsTestQueue::new(name2, true, sqs_client.clone()).await;
+    let echo_queue2 = SqsTestQueue::new(echo_name2, true, sqs_client.clone()).await;
+
     let k8s_service =
         sqs_consumer_service(&kube_client, &queue1, &queue2, &echo_queue1, &echo_queue2).await;
-    let sessions_ready_future = Some(tokio::spawn(watch_sqs_sessions(
-        kube_client.clone(),
-        k8s_service.namespace.clone(),
-    )));
-    let registry_has_status_future = Some(tokio::spawn(await_registry_status(
-        kube_client.clone(),
-        k8s_service.namespace.clone(),
-    )));
+
     create_queue_registry_resource(&kube_client, &k8s_service.namespace, &k8s_service.name).await;
+
     SqsTestResources {
         k8s_service,
         queue1,
@@ -613,43 +608,7 @@ pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResourc
         queue2,
         echo_queue2,
         sqs_client,
-        _guards: guards,
-        sessions_ready_future,
-        registry_has_status_future,
-    }
-}
-
-pub async fn write_sqs_messages(
-    sqs_client: &aws_sdk_sqs::Client,
-    queue: &QueueInfo,
-    message_attribute_name: &str,
-    message_attributes: &[&str],
-    messages: &[&str],
-) {
-    println!("Sending messages {messages:?} to queue {}.", queue.name);
-    let fifo = queue.name.ends_with(".fifo");
-    let group_id = fifo.then_some("e2e-tests".to_string());
-    for (i, (body, attr)) in messages.iter().zip(message_attributes).enumerate() {
-        println!(
-            r#"Sending message "{body}" with attribute "{message_attribute_name}: {attr}" to queue {}"#,
-            queue.name
-        );
-        sqs_client
-            .send_message()
-            .queue_url(&queue.url)
-            .message_body(*body)
-            .message_attributes(
-                message_attribute_name,
-                MessageAttributeValue::builder()
-                    .string_value(*attr)
-                    .data_type("String")
-                    .build()
-                    .unwrap(),
-            )
-            .set_message_group_id(group_id.clone())
-            .set_message_deduplication_id(fifo.then_some(i.to_string()))
-            .send()
-            .await
-            .expect("Sending SQS message failed.");
+        _localstack_portforwarder: localstack_portforwarder,
+        _operator_patch_guard: operator_patch_guard,
     }
 }

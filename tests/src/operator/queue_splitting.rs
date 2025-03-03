@@ -3,140 +3,96 @@
 //! Test queue splitting features with an operator.
 
 use core::time::Duration;
-use std::{collections::HashSet, path::Path};
 
-use aws_sdk_sqs::{operation::receive_message::ReceiveMessageOutput, types::Message};
+use fancy_regex::Regex;
 use rstest::*;
+use tempfile::{NamedTempFile, TempPath};
 
 use crate::utils::{
-    config_dir,
-    sqs_resources::{sqs_test_resources, write_sqs_messages, QueueInfo, SqsTestResources},
+    sqs_resources::{sqs_test_resources, SqsTestResources},
     Application, TestProcess,
 };
+
+fn sqs_splitting_config(filter: Regex) -> TempPath {
+    let mut file = NamedTempFile::with_suffix(".json").unwrap();
+    let config = serde_json::json!({
+        "operator": true,
+        "feature": {
+            "split_queues": {
+                "e2e-test-queue1": {
+                    "queue_type": "SQS",
+                    "message_filter": {
+                        "client": filter.as_str(),
+                    },
+                },
+                "e2e-test-queue2": {
+                    "queue_type": "SQS",
+                    "message_filter": {
+                        "client": filter.as_str(),
+                    },
+                },
+            },
+        },
+    });
+    serde_json::to_writer(file.as_file_mut(), &config).unwrap();
+    file.into_temp_path()
+}
 
 /// Verify that the test process printed all the expected messages, and none other.
 ///
 /// The expected lines should all be unique in both arrays together (a line should not appear in
 /// both arrays or in any array twice).
-async fn expect_output_lines<const N: usize, const M: usize>(
-    expected_lines: [&str; N],
-    expected_in_order_lines: [&str; M],
+async fn expect_output_lines(
+    expected_lines: &[&str],
+    expected_in_order_lines: &[&str],
     test_process: &TestProcess,
 ) {
     let lines = test_process
         .await_exactly_n_lines(
-            expected_lines.len() + expected_in_order_lines.len(),
+            expected_lines.len() + expected_in_order_lines.len() + 2,
             Duration::from_secs(20),
         )
         .await;
-    for expected_line in expected_lines.into_iter() {
+
+    for expected_line in expected_lines {
         assert!(
             lines.contains(&expected_line.to_string()),
             "User a was expected to print {expected_line} but did not"
         );
     }
+
     let mut last_location = 0;
-    for expected_line in expected_in_order_lines.into_iter() {
+    for expected_line in expected_in_order_lines {
         let location = lines
             .iter()
-            .position(|line| *line == expected_line)
+            .position(|line| *line == *expected_line)
             .expect("A fifo message did not reach the correct user.");
         assert!(last_location <= location, "Fifo messages out of order!");
         last_location = location;
     }
 }
 
-/// Call SQS API to delete a message by `queue_url` and message `receipt_handle`.
-async fn delete_message(client: &aws_sdk_sqs::Client, queue_url: &str, receipt_handle: &str) {
-    client
-        .delete_message()
-        .queue_url(queue_url)
-        .receipt_handle(receipt_handle)
-        .send()
-        .await
-        .inspect_err(|err| eprintln!("deleting received message failed: {err:?}"))
-        .expect("failed to delete SQS message");
-}
-
-/// Verify that the echo queue contains the expected messages, meaning the deployed application
-/// received all the messages no user filtered.
-/// messages don't have to arrive in any particular message.
-async fn expect_messages_in_queue<const N: usize>(
-    messages: [&str; N],
-    client: &aws_sdk_sqs::Client,
-    echo_queue: &QueueInfo,
-) {
-    tokio::time::timeout(Duration::from_secs(20), async {
-        println!("Verifying correct messages in echo queue {} (verifying the deployed application got the messages it was supposed to)", echo_queue.name);
-        let mut expected_messages = HashSet::from(messages);
+/// Waits until the test process prints to its stdout that it reads from 2 queues.
+async fn wait_until_reads_from_two_queues(test_process: &TestProcess, timeout: Duration) {
+    tokio::time::timeout(timeout, async move {
         loop {
-            if let Ok(ReceiveMessageOutput {
-                          messages: Some(received_messages),
-                          ..
-                      }) = client
-                .receive_message()
-                .queue_url(&echo_queue.url)
-                .visibility_timeout(15)
-                .wait_time_seconds(20)
-                .send()
+            let queues = test_process
+                .get_stdout()
                 .await
-            {
-                for Message {
-                    receipt_handle, body, ..
-                } in received_messages {
-                    let message = body.expect("Received empty bodied message from echo queue.");
-                    println!(r#"got message "{message}" in queue "{}"."#, echo_queue.name);
-                    assert!(expected_messages.remove(message.as_str()));
-                    delete_message(client, &echo_queue.url, &receipt_handle.expect("no receipt handle")).await;
-                    if expected_messages.is_empty() {
-                        return;
-                    }
+                .split('\n')
+                .filter(|line| line.starts_with("Reading messages from queue "))
+                .count();
+            match queues {
+                0..=1 => {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
+                2 => break,
+                n => panic!("test process reads from {n} queues, something is not right"),
             }
         }
-    }).await.unwrap();
-}
-
-/// Verify that the echo queue contains the expected messages, meaning the deployed application
-/// received all the messages no user filtered.
-/// Also verify the message order was preserved.
-async fn expect_messages_in_fifo_queue<const N: usize>(
-    messages: [&str; N],
-    client: &aws_sdk_sqs::Client,
-    echo_queue: &QueueInfo,
-) {
-    tokio::time::timeout(Duration::from_secs(20), async {
-        println!("Verifying correct messages in echo queue {} (verifying the deployed application got the messages it was supposed to)", echo_queue.name);
-        let mut expected_messages = messages.into_iter();
-        let mut expected_message = expected_messages.next().unwrap();
-        loop {
-            let ReceiveMessageOutput {
-                messages,
-                ..
-            } = client
-                .receive_message()
-                .queue_url(&echo_queue.url)
-                .visibility_timeout(15)
-                .wait_time_seconds(20)
-                .send()
-                .await
-                .expect("receiving messages from echo queue failed");
-            if let Some(received_messages) = messages {
-                for Message {
-                    body, receipt_handle, ..
-                } in received_messages {
-                    let message = body.expect("Received empty bodied message from echo queue.");
-                    println!(r#"got message "{message}" in queue "{}"."#, echo_queue.name);
-                    assert_eq!(message, expected_message,);
-                    delete_message(client, &echo_queue.url, &receipt_handle.expect("no receipt handle")).await;
-                    let Some(message) = expected_messages.next() else {
-                        return;
-                    };
-                    expected_message = message;
-                }
-            }
-        }
-    }).await.unwrap();
+    })
+    .await
+    .unwrap()
 }
 
 /// Run 2 local applications with mirrord that both consume messages from the same 2 queues.
@@ -150,93 +106,97 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(360))]
-pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_dir: &Path) {
-    let mut sqs_test_resources = sqs_test_resources.await;
+pub async fn two_users(#[future] sqs_test_resources: SqsTestResources) {
+    let sqs_test_resources = sqs_test_resources.await;
     let application = Application::RustSqs;
 
-    let mut config_path = config_dir.to_path_buf();
-    config_path.push("sqs_queue_splitting_a.json");
-
     println!("Starting first mirrord client");
-    let mut client_a = application
+    let client_a_config = sqs_splitting_config(Regex::new("^a$").unwrap());
+    let client_a = application
         .run(
             &sqs_test_resources.deployment_target(),
             Some(sqs_test_resources.namespace()),
             None,
-            Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
+            Some(vec![(
+                "MIRRORD_CONFIG_FILE",
+                client_a_config.to_str().unwrap(),
+            )]),
         )
         .await;
-
-    let mut config_path = config_dir.to_path_buf();
-    config_path.push("sqs_queue_splitting_b.json");
-    // Wait between client starts.
-    // Support starting at the same time and remove this (https://github.com/metalbear-co/operator/issues/637)
-    sqs_test_resources.wait_for_registry_status(30).await;
-    // TODO make this unnecessary.
-    tokio::time::sleep(Duration::from_secs(20)).await;
+    wait_until_reads_from_two_queues(&client_a, Duration::from_secs(30)).await;
+    println!("First mirrord client reads from 2 queues");
 
     println!("Starting second mirrord client");
-    let mut client_b = application
+    let client_b_config = sqs_splitting_config(Regex::new("^b$").unwrap());
+    let client_b = application
         .run(
             &sqs_test_resources.deployment_target(),
             Some(sqs_test_resources.namespace()),
             None,
-            Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
+            Some(vec![(
+                "MIRRORD_CONFIG_FILE",
+                client_b_config.to_str().unwrap(),
+            )]),
         )
         .await;
+    wait_until_reads_from_two_queues(&client_b, Duration::from_secs(30)).await;
+    println!("Second mirrord client reads from 2 queues");
 
-    println!("letting split time to start before writing messages");
-    sqs_test_resources
-        .wait_for_sqs_sessions(20)
-        .await
-        .expect("There was a problem with the SQS Session resources");
+    let non_fifo_messages = [
+        ("1", "a"),
+        ("2", "b"),
+        ("3", "c"),
+        ("4", "c"),
+        ("5", "b"),
+        ("6", "a"),
+    ];
+    for (body, attr_value) in non_fifo_messages {
+        sqs_test_resources
+            .queue1
+            .send_message(body, "client", attr_value)
+            .await;
+    }
 
-    // TODO: make this unnecessary.
-    tokio::time::sleep(Duration::from_secs(60)).await;
-
-    write_sqs_messages(
-        &sqs_test_resources.sqs_client,
-        &sqs_test_resources.queue1,
-        "client",
-        &["a", "b", "c", "c", "b", "a"],
-        &["1", "2", "3", "4", "5", "6"],
-    )
-    .await;
-
-    write_sqs_messages(
-        &sqs_test_resources.sqs_client,
-        &sqs_test_resources.queue2,
-        "client",
-        &["a", "b", "c", "c", "b", "a"],
-        &["10", "20", "30", "40", "50", "60"],
-    )
-    .await;
+    let fifo_messages = &[
+        ("10", "a"),
+        ("20", "b"),
+        ("30", "c"),
+        ("40", "c"),
+        ("50", "b"),
+        ("60", "a"),
+    ];
+    for (body, attr_value) in fifo_messages {
+        sqs_test_resources
+            .queue2
+            .send_message(body, "client", attr_value)
+            .await;
+    }
 
     // Test app prints 1: before messages from queue 1 and 2: before messages from queue 2.
-    expect_output_lines(["1:1", "1:6"], ["2:10", "2:60"], &client_a).await;
+    expect_output_lines(&["1:1", "1:6"], &["2:10", "2:60"], &client_a).await;
     println!("Client a received the correct messages.");
-    expect_output_lines(["1:2", "1:5"], ["2:20", "2:50"], &client_b).await;
+    expect_output_lines(&["1:2", "1:5"], &["2:20", "2:50"], &client_b).await;
     println!("Client b received the correct messages.");
 
-    expect_messages_in_queue(
-        ["3", "4"],
-        &sqs_test_resources.sqs_client,
-        &sqs_test_resources.echo_queue1,
-    )
-    .await;
+    sqs_test_resources
+        .echo_queue1
+        .expect_messages(vec!["3", "4"])
+        .await;
+    println!(
+        "Queue 1 ({}) was split correctly!",
+        sqs_test_resources.echo_queue1.name()
+    );
 
-    println!("Queue 1 was split correctly!");
-
-    expect_messages_in_fifo_queue(
-        ["30", "40"],
-        &sqs_test_resources.sqs_client,
-        &sqs_test_resources.echo_queue2,
-    )
-    .await;
-    println!("Queue 2 was split correctly!");
+    for message in ["30", "40"] {
+        sqs_test_resources
+            .echo_queue2
+            .expect_messages(vec![message])
+            .await;
+    }
+    println!(
+        "Queue 2 ({}) was split correctly!",
+        sqs_test_resources.echo_queue2.name()
+    );
 
     // TODO: verify queue tags.
-
-    client_a.child.kill().await.unwrap();
-    client_b.child.kill().await.unwrap();
 }
