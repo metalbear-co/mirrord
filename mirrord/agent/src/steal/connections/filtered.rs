@@ -684,7 +684,11 @@ where
             tx.send(ConnectionMessageOut::LogMessage {
                 client_id,
                 connection_id: self.connection_id,
-                message: LogMessage::warn("Matching HTTP request stolen by another client".into()),
+                message: LogMessage::warn(format!(
+                    "An HTTP request was stolen by another user. URI=({:?}), HEADERS=({:?})",
+                    request.request.uri(),
+                    request.request.headers(),
+                )),
             })
             .await?;
         }
