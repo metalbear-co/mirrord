@@ -1,6 +1,6 @@
 use core::fmt;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     vec,
 };
 
@@ -1091,18 +1091,24 @@ impl FilesProxy {
 
     #[tracing::instrument(level = Level::INFO, skip(message_bus), ret)]
     async fn handle_reconnect(&mut self, message_bus: &mut MessageBus<Self>) {
-        for (_, fds) in self.remote_files.drain() {
-            for fd in fds {
-                tracing::debug!(fd, "Dropping remote file");
-                self.buffered_files.remove(&fd);
-            }
+        let files_to_drop = self
+            .remote_files
+            .drain()
+            .flat_map(|(_, fds)| fds)
+            .collect::<HashSet<_>>();
+        tracing::debug!(?files_to_drop, "Dropping remote files");
+        for fd in files_to_drop {
+            self.buffered_files.remove(&fd);
         }
 
-        for (_, fds) in self.remote_dirs.drain() {
-            for fd in fds {
-                tracing::debug!(fd, "Dropping remote directory");
-                self.buffered_dirs.remove(&fd);
-            }
+        let directories_to_drop = self
+            .remote_dirs
+            .drain()
+            .flat_map(|(_, fds)| fds)
+            .collect::<HashSet<_>>();
+        tracing::debug!(?directories_to_drop, "Dropping remote directories");
+        for fd in directories_to_drop {
+            self.buffered_dirs.remove(&fd);
         }
 
         let responses = self.reconnect_tracker.agent_lost();
