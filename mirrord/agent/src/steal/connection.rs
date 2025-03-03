@@ -88,12 +88,6 @@ enum PassRequestError {
     ClientDisconnected,
 }
 
-impl From<SendError<DaemonTcp>> for PassRequestError {
-    fn from(_: SendError<DaemonTcp>) -> Self {
-        Self::ClientDisconnected
-    }
-}
-
 impl From<SendError<StealerMessage>> for PassRequestError {
     fn from(_: SendError<StealerMessage>) -> Self {
         Self::ClientDisconnected
