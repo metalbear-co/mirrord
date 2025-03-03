@@ -40,7 +40,6 @@ use tokio::{
 pub(crate) mod ipv6;
 #[cfg(test)]
 pub(crate) mod port_forwarder;
-pub(crate) mod service_addr;
 pub mod sqs_resources;
 pub(crate) mod watch;
 

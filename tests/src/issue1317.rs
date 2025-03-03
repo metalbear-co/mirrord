@@ -15,7 +15,7 @@ mod issue1317_tests {
     use tokio::net::TcpStream;
 
     use crate::utils::{
-        kube_client, run_exec_with_target, service, service_addr::TestServiceAddr, KubeService,
+        kube_client, port_forwarder::PortForwarder, run_exec_with_target, service, KubeService,
     };
 
     /// Creates a [`TcpStream`] that sends a request to `service` before mirrord is started (no
@@ -43,14 +43,20 @@ mod issue1317_tests {
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
-        let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
+        let portforwarder = PortForwarder::new(
+            kube_client.clone(),
+            &service.pod_name,
+            &service.namespace,
+            80,
+        )
+        .await;
 
         tokio::time::sleep(Duration::from_secs(10)).await;
 
         // Create a connection with the service before mirrord is started.
-        let connection = TcpStream::connect(addr.addr)
+        let connection = TcpStream::connect(portforwarder.address())
             .await
-            .unwrap_or_else(|_| panic!("Failed connecting to {}!", addr.addr));
+            .unwrap_or_else(|_| panic!("Failed connecting to {}!", portforwarder.address()));
 
         let (mut request_sender, connection) =
             http1::handshake(TokioIo::new(connection)).await.unwrap();
