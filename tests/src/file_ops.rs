@@ -2,12 +2,18 @@
 #[cfg(test)]
 mod file_ops_tests {
 
-    use std::time::Duration;
+    use std::{
+        fs::{create_dir, remove_dir, remove_dir_all},
+        io::Write,
+        path::Path,
+        time::Duration,
+    };
 
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api, Client};
     use rstest::*;
     use serde::Deserialize;
+    use tempfile::NamedTempFile;
 
     use crate::utils::{
         go_statfs_service, kube_client, run_exec_with_target, service, FileOps, KubeService,
@@ -99,19 +105,36 @@ mod file_ops_tests {
             "python-e2e/files_unlink.py",
         ];
 
-        let mut args = vec!["--fs-mode", "read"];
+        // use mirrord config file to specify remote and local directories, as well as mapping
+        let config = serde_json::json!({
+            "feature": {
+                "fs": {
+                    "mode": "local",
+                    "read_write": ".+/remote/.+",
+                    "local": ".+/local/.+",
+                    "mapping": {
+                        ".+/source": ".+/sink"
+                    }
+                }
+            }
+        })
+        .to_string();
+        let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+        config_file.write(config.as_bytes()).unwrap();
+        let file_name = config_file.path().to_string_lossy();
 
-        let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp.*")];
+        let mut args = vec!["-f", file_name.as_ref()];
 
         let mut process = run_exec_with_target(
             python_command,
             &service.pod_container_target(),
             Some(&service.namespace),
             Some(args),
-            Some(env),
+            None,
         )
         .await;
         let res = process.wait().await;
+
         assert!(res.success());
         process.assert_python_fileops_stderr().await;
     }
