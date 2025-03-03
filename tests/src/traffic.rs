@@ -13,6 +13,7 @@ mod traffic_tests {
     use futures_util::{stream::TryStreamExt, AsyncBufReadExt};
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api, Client};
+    use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
     use rstest::*;
     use tokio::{fs::File, io::AsyncWriteExt};
 
@@ -673,17 +674,26 @@ mod traffic_tests {
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .read_timeout(Duration::from_secs(5))
+            .default_headers(HeaderMap::from_iter([(
+                USER_AGENT,
+                HeaderValue::from_static(concat!(
+                    env!("CARGO_PKG_NAME"),
+                    "/",
+                    env!("CARGO_PKG_VERSION"),
+                )),
+            )]))
             .build()
             .unwrap();
 
         let live_hosts = stream::iter(HOSTS)
-            .then(|host| {
+            .map(|host| {
                 let client = client.clone();
                 async move {
                     let response = client.get(format!("https://{host}")).send().await;
                     (*host, response)
                 }
             })
+            .buffer_unordered(3)
             .filter_map(|(host, response)| match response {
                 Ok(..) => {
                     println!("{host} is available");
