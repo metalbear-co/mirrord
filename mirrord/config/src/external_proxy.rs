@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::source::MirrordConfigSource;
 
-pub static MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV: &str = "MIRRORD_EXTERNAL_TLS_CERTIFICATE";
-pub static MIRRORD_EXTERNAL_TLS_KEY_ENV: &str = "MIRRORD_EXTERNAL_TLS_KEY";
+pub const MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV: &str = "MIRRORD_EXTERNAL_TLS_CERTIFICATE";
+pub const MIRRORD_EXTERNAL_TLS_KEY_ENV: &str = "MIRRORD_EXTERNAL_TLS_KEY";
+pub const MIRRORD_EXTPROXY_LOG_DESTINATION_ENV: &str = "MIRRORD_EXTPROXY_LOG_DESTINATION";
 
 /// Configuration for the external proxy mirrord spawns when using the `mirrord container` command.
 /// This proxy is used to allow the internal proxy running in sidecar to connect to the mirrord
@@ -90,8 +91,7 @@ pub struct ExternalProxyConfig {
 
     /// ### external_proxy.log_destination {#external_proxy-log_destination}
     /// Set the log file destination for the external proxy.
-    #[config(default = crate::default_proxy_logfile_path("mirrord-extproxy"))]
-    pub log_destination: PathBuf,
+    pub log_destination: Option<PathBuf>,
 
     /// ### external_proxy.json_log {#external_proxy-json_log}
     ///

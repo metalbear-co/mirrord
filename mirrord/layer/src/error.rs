@@ -232,6 +232,8 @@ impl From<HookError> for i64 {
                         .layer_config()
                         .internal_proxy
                         .log_destination
+                        .clone()
+                        .unwrap_or_else(std::env::temp_dir)
                         .display()
                 )
             }

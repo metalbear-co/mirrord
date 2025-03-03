@@ -1,4 +1,4 @@
-use std::{fs::OpenOptions, future::Future, path::Path};
+use std::{borrow::Cow, fs::OpenOptions, future::Future, path::Path};
 
 use futures::StreamExt;
 use mirrord_config::LayerConfig;
@@ -108,10 +108,19 @@ pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), Intern
     if !config.internal_proxy.container_mode {
         // When the intproxy does not run in a sidecar container, it logs to file.
 
-        let log_destination = config.internal_proxy.log_destination.as_path();
+        let log_destination = config
+            .internal_proxy
+            .log_destination
+            .as_ref()
+            .map(Cow::Borrowed)
+            .unwrap_or_else(|| {
+                Cow::Owned(mirrord_config::default_proxy_logfile_path(
+                    "mirrord-intproxy",
+                ))
+            });
 
         init_proxy_tracing_registry(
-            log_destination,
+            log_destination.as_path(),
             config.internal_proxy.log_level.as_deref(),
             config.internal_proxy.json_log,
         )
@@ -143,10 +152,19 @@ pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), Intern
 }
 
 pub fn init_extproxy_tracing_registry(config: &LayerConfig) -> Result<(), ExternalProxyError> {
-    let log_destination = config.external_proxy.log_destination.as_path();
+    let log_destination = config
+        .external_proxy
+        .log_destination
+        .as_ref()
+        .map(Cow::Borrowed)
+        .unwrap_or_else(|| {
+            Cow::Owned(mirrord_config::default_proxy_logfile_path(
+                "mirrord-extproxy",
+            ))
+        });
 
     init_proxy_tracing_registry(
-        log_destination,
+        log_destination.as_path(),
         config.external_proxy.log_level.as_deref(),
         config.external_proxy.json_log,
     )
@@ -162,12 +180,21 @@ pub async fn pipe_intproxy_sidecar_logs<'s, S>(
 where
     S: Stream<Item = std::io::Result<String>> + 's,
 {
-    let log_destination = config.internal_proxy.log_destination.as_path();
+    let log_destination = config
+        .internal_proxy
+        .log_destination
+        .as_ref()
+        .map(Cow::Borrowed)
+        .unwrap_or_else(|| {
+            Cow::Owned(mirrord_config::default_proxy_logfile_path(
+                "mirrord-intproxy",
+            ))
+        });
 
     let mut output_file = tokio::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&log_destination)
+        .open(log_destination.as_path())
         .await
         .map_err(|fail| {
             InternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
