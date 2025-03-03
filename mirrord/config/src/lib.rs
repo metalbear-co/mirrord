@@ -22,7 +22,8 @@ pub mod util;
 use std::{
     collections::{HashMap, HashSet},
     ops::Not,
-    path::Path,
+    path::{Path, PathBuf},
+    time::SystemTime,
 };
 
 use base64::prelude::*;
@@ -31,6 +32,7 @@ use experimental::ExperimentalConfig;
 use feature::{env::mapper::EnvVarsRemapper, network::outgoing::OutgoingFilterConfig};
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
+use rand::distr::{Alphanumeric, SampleString};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use target::Target;
@@ -657,6 +659,19 @@ impl LayerFileConfig {
             _ => Err(ConfigError::UnsupportedFormat),
         }
     }
+}
+
+/// Returns a default randomized path for logs.
+fn default_proxy_logfile_path(prefix: &str) -> PathBuf {
+    let random_name: String = Alphanumeric.sample_string(&mut rand::rng(), 7);
+    let timestamp = SystemTime::UNIX_EPOCH
+        .elapsed()
+        .expect("system time should not be earlier than UNIX EPOCH")
+        .as_secs();
+
+    let mut path = std::env::temp_dir();
+    path.push(format!("{prefix}-{timestamp}-{random_name}.log"));
+    path
 }
 
 #[cfg(test)]

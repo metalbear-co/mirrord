@@ -1,13 +1,7 @@
-use std::{
-    fs::OpenOptions,
-    future::Future,
-    path::{Path, PathBuf},
-    time::SystemTime,
-};
+use std::{fs::OpenOptions, future::Future, path::Path};
 
 use futures::StreamExt;
 use mirrord_config::LayerConfig;
-use rand::distr::{Alphanumeric, SampleString};
 use tokio::io::AsyncWriteExt;
 use tokio_stream::Stream;
 use tracing_subscriber::{prelude::*, EnvFilter};
@@ -65,19 +59,6 @@ pub async fn init_tracing_registry(
     Ok(())
 }
 
-/// Returns a default randomized path for intproxy/extproxy logs.
-fn default_logfile_path(prefix: &str) -> PathBuf {
-    let random_name: String = Alphanumeric.sample_string(&mut rand::rng(), 7);
-    let timestamp = SystemTime::UNIX_EPOCH
-        .elapsed()
-        .expect("now must have some delta from UNIX_EPOCH, it isn't 1970 anymore")
-        .as_secs();
-
-    let mut path = std::env::temp_dir();
-    path.push(format!("/tmp/{prefix}-{timestamp}-{random_name}.log"));
-    path
-}
-
 /// Initializes mirrord intproxy/extproxy tracing registry.
 ///
 /// Fails if the specified log file cannot be opened/created for writing.
@@ -127,15 +108,10 @@ pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), Intern
     if !config.internal_proxy.container_mode {
         // When the intproxy does not run in a sidecar container, it logs to file.
 
-        let log_destination = config
-            .internal_proxy
-            .log_destination
-            .as_ref()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| default_logfile_path("mirrord-intproxy"));
+        let log_destination = config.internal_proxy.log_destination.as_path();
 
         init_proxy_tracing_registry(
-            &log_destination,
+            log_destination,
             config.internal_proxy.log_level.as_deref(),
             config.internal_proxy.json_log,
         )
@@ -167,15 +143,10 @@ pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), Intern
 }
 
 pub fn init_extproxy_tracing_registry(config: &LayerConfig) -> Result<(), ExternalProxyError> {
-    let log_destination = config
-        .external_proxy
-        .log_destination
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| default_logfile_path("mirrord-extproxy"));
+    let log_destination = config.external_proxy.log_destination.as_path();
 
     init_proxy_tracing_registry(
-        &log_destination,
+        log_destination,
         config.external_proxy.log_level.as_deref(),
         config.external_proxy.json_log,
     )
@@ -191,12 +162,7 @@ pub async fn pipe_intproxy_sidecar_logs<'s, S>(
 where
     S: Stream<Item = std::io::Result<String>> + 's,
 {
-    let log_destination = config
-        .internal_proxy
-        .log_destination
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| default_logfile_path("mirrord-intproxy"));
+    let log_destination = config.internal_proxy.log_destination.as_path();
 
     let mut output_file = tokio::fs::OpenOptions::new()
         .create(true)

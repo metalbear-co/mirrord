@@ -111,7 +111,8 @@ pub struct InternalProxyConfig {
     /// ### internal_proxy.log_destination {#internal_proxy-log_destination}
     ///
     /// Set the log file destination for the internal proxy.
-    pub log_destination: Option<String>,
+    #[config(default = crate::default_proxy_logfile_path("mirrord-intproxy"))]
+    pub log_destination: PathBuf,
 
     /// <!--${internal}-->
     ///

@@ -232,8 +232,7 @@ impl From<HookError> for i64 {
                         .layer_config()
                         .internal_proxy
                         .log_destination
-                        .clone()
-                        .unwrap_or("/tmp".to_string())
+                        .display()
                 )
             }
             _ => error!("Error occured in Layer >> {fail:?}"),

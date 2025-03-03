@@ -321,6 +321,10 @@ fn print_config<P>(
         } => "remotely with exceptions",
     };
     messages.push(format!("dns: DNS will be resolved {}", dns_info));
+    messages.push(format!(
+        "mirrord-intproxy logs will be written to {}",
+        config.internal_proxy.log_destination.display()
+    ));
 
     if single_msg {
         let long_message = messages.join(". \n");
