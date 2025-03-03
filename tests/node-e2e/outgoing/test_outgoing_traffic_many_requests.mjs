@@ -1,6 +1,6 @@
 import https from "node:https";
 
-const HOSTS = process.env.AVAILABLE_HOSTS;
+const AVAILABLE_HOSTS = process.env.AVAILABLE_HOSTS;
 
 function makeRequest(host) {
   const options = {
@@ -33,9 +33,9 @@ function makeRequest(host) {
   request.end();
 }
 
-if (HOSTS === undefined) {
+if (AVAILABLE_HOSTS === undefined) {
   console.error("`AVAILABLE_HOSTS` environment variable is missing");
   process.exit(1);
 }
 
-HOSTS.split(",").forEach(makeRequest);
+AVAILABLE_HOSTS.split(",").forEach(makeRequest);
