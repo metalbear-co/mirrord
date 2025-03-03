@@ -95,7 +95,8 @@ pub struct ExternalProxyConfig {
 
     /// ### external_proxy.json_log {#external_proxy-json_log}
     ///
-    /// Whether the proxy should output logs in JSON format. If false, logs are output in human-readable format.
+    /// Whether the proxy should output logs in JSON format. If false, logs are output in
+    /// human-readable format.
     #[config(default = true)]
     pub json_log: bool,
 }
