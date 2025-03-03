@@ -644,6 +644,9 @@ where
             return Ok(());
         };
 
+        let request_uri = request.request.uri().to_owned();
+        let request_headers = request.request.headers().to_owned();
+
         if self.subscribed.insert(client_id, true).is_none() {
             // First time this client will receive a request from this connection.
             tx.send(ConnectionMessageOut::SubscribedHttp {
@@ -686,8 +689,7 @@ where
                 connection_id: self.connection_id,
                 message: LogMessage::warn(format!(
                     "An HTTP request was stolen by another user. URI=({:?}), HEADERS=({:?})",
-                    request.request.uri(),
-                    request.request.headers(),
+                    request_uri, request_headers,
                 )),
             })
             .await?;
