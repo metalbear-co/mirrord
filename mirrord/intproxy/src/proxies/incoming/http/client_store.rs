@@ -11,7 +11,7 @@ use mirrord_config::feature::network::incoming::https_delivery::{
     HttpsDeliveryProtocol, LocalHttpsDelivery,
 };
 use mirrord_protocol::tcp::HttpRequestTransportType;
-use mirrord_tls_util::UriExt;
+use mirrord_tls_util::{MaybeTls, UriExt};
 use rustls::pki_types::ServerName;
 use tokio::{
     net::TcpStream,
@@ -232,16 +232,18 @@ impl ClientStore {
             .local_addr()
             .map_err(LocalHttpError::SocketSetupFailed)?;
 
-        let sender = match connector_and_name {
-            None => HttpSender::handshake(version, stream).await?,
+        let stream = match connector_and_name {
             Some((connector, name)) => {
                 let stream = connector
                     .connect(name, stream)
                     .await
                     .map_err(LocalHttpError::ConnectTlsFailed)?;
-                HttpSender::handshake(version, Box::new(stream)).await?
+                MaybeTls::Tls(Box::new(stream))
             }
+            None => MaybeTls::NoTls(stream),
         };
+
+        let sender = HttpSender::handshake(version, stream).await?;
 
         Ok(LocalHttpClient {
             sender,

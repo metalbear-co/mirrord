@@ -7,9 +7,6 @@ pub enum SipError {
     #[error("IO failed with `{0}`")]
     IO(#[from] std::io::Error),
 
-    #[error("Signing failed statuscode: `{0}`, output: `{1}`")]
-    Sign(i32, String),
-
     #[error("Adding Rpaths failed with statuscode: `{0}`, output: `{1}`")]
     AddingRpathsFailed(i32, String),
 
@@ -38,4 +35,7 @@ pub enum SipError {
 
     #[error("Could not move temporary SIP-patched binary into temp dir. IO error: `{0}`.")]
     BinaryMoveFailed(std::io::Error),
+
+    #[error("Code sign error: `{0}`")]
+    CodeSignError(#[from] apple_codesign::AppleCodesignError),
 }

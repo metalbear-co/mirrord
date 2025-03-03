@@ -618,8 +618,8 @@ impl OperatorClusterRole {
             PolicyRule {
                 api_groups: Some(vec![MirrordTlsStealConfig::group(&()).into_owned()]),
                 resources: Some(vec![
-                    MirrordTlsStealConfig::kind(&()).into_owned(),
-                    MirrordClusterTlsStealConfig::kind(&()).into_owned(),
+                    MirrordTlsStealConfig::plural(&()).into_owned(),
+                    MirrordClusterTlsStealConfig::plural(&()).into_owned(),
                 ]),
                 verbs: vec!["list".to_owned(), "get".to_owned()],
                 ..Default::default()
