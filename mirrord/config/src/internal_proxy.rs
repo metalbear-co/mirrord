@@ -122,7 +122,7 @@ pub struct InternalProxyConfig {
 
     /// ### internal_proxy.json_log {#internal_proxy-json_log}
     ///
-    /// Whether the proxy should output logs in JSON format.
+    /// Whether the proxy should output logs in JSON format. If false, logs are output in human-readable format.
     #[config(default = true)]
     pub json_log: bool,
 }
