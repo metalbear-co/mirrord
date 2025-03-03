@@ -6,12 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::source::MirrordConfigSource;
 
-// static DEFAULT_CLI_IMAGE: &str = concat!(
-//     "ghcr.io/metalbear-co/mirrord-cli:",
-//     env!("CARGO_PKG_VERSION")
-// );
-
-static DEFAULT_CLI_IMAGE: &str = concat!("ghcr.io/metalbear-co/mirrord-cli:", "3.133.1");
+static DEFAULT_CLI_IMAGE: &str = concat!(
+    "ghcr.io/metalbear-co/mirrord-cli:",
+    env!("CARGO_PKG_VERSION")
+);
 
 /// Unstable: `mirrord container` command specific config.
 #[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]

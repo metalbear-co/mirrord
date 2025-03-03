@@ -61,24 +61,13 @@ where
     Step: core::fmt::Debug,
 {
     progress: ProgressTracker,
-    runtime: ContainerRuntime,
-    runtime_args: Vec<String>,
     step: Step,
 }
 
 impl ComposeRunner<New> {
     #[tracing::instrument(level = Level::DEBUG, err)]
-    pub(super) fn try_new(
-        runtime_args: RuntimeArgs,
-        exec_params: ExecParams,
-    ) -> ComposeResult<ComposeRunner<PrepareConfig>> {
-        let RuntimeArgs { runtime, command } = runtime_args;
-
+    pub(super) fn try_new(exec_params: ExecParams) -> ComposeResult<ComposeRunner<PrepareConfig>> {
         let progress = ProgressTracker::from_env("mirrord container");
-
-        if command.has_publish() {
-            progress.warning("mirrord container may have problems with \"-p\" when used as part of container run command, please add the publish arguments to \"contanier.cli_extra_args\" in config if you are planning to publish ports");
-        }
 
         progress.warning("mirrord container is currently an unstable feature");
 
@@ -91,12 +80,8 @@ impl ComposeRunner<New> {
             (CONTAINER_EXECUTION_KIND as u32).to_string(),
         );
 
-        let runtime_args = [vec!["compose".to_string()], command.into_parts().1].concat();
-
         Ok(ComposeRunner {
             progress,
-            runtime,
-            runtime_args,
             step: PrepareConfig,
         })
     }
@@ -108,36 +93,29 @@ impl ComposeRunner<PrepareConfig> {
         self,
         watch: drain::Watch,
     ) -> ComposeResult<ComposeRunner<PrepareExternalProxy>> {
-        let Self {
-            progress,
-            runtime,
-            runtime_args,
-            step: _,
-        } = self;
+        let Self { progress, step: _ } = self;
 
-        let (mut config, mut context) = LayerConfig::from_env_with_warnings()?;
+        let (mut layer_config, mut context) = LayerConfig::from_env_with_warnings()?;
 
-        config.verify(&mut context)?;
+        layer_config.verify(&mut context)?;
         for warning in context.get_warnings() {
             progress.warning(warning);
         }
 
         let (internal_proxy_tls_guards, external_proxy_tls_guards) =
-            prepare_tls_certs_for_container(&mut config)?;
+            prepare_tls_certs_for_container(&mut layer_config)?;
 
-        let layer_config_file = create_temp_layer_config(&config)?;
+        let layer_config_file = create_temp_layer_config(&layer_config)?;
         std::env::set_var(MIRRORD_CONFIG_FILE_ENV, layer_config_file.path());
 
         // Initialize only error analytics, extproxy will be the full AnalyticsReporter.
         let analytics =
-            AnalyticsReporter::only_error(config.telemetry, CONTAINER_EXECUTION_KIND, watch);
+            AnalyticsReporter::only_error(layer_config.telemetry, CONTAINER_EXECUTION_KIND, watch);
 
         Ok(ComposeRunner {
-            runtime,
-            runtime_args,
             progress,
             step: PrepareExternalProxy {
-                config,
+                layer_config,
                 layer_config_file,
                 analytics,
                 internal_proxy_tls_guards: internal_proxy_tls_guards.map(From::from),
@@ -152,34 +130,33 @@ impl ComposeRunner<PrepareExternalProxy> {
     pub(super) async fn external_proxy(self) -> ComposeResult<ComposeRunner<PrepareServices>> {
         let Self {
             progress,
-            runtime,
-            runtime_args,
             step:
                 PrepareExternalProxy {
                     internal_proxy_tls_guards,
                     external_proxy_tls_guards,
                     mut analytics,
-                    config,
+                    layer_config,
                     layer_config_file,
                 },
         } = self;
 
         let mut external_proxy_progress = progress.subtask("preparing external proxy");
-        let external_proxy =
-            MirrordExecution::start_external(&config, &mut external_proxy_progress, &mut analytics)
-                .await?;
+        let external_proxy = MirrordExecution::start_external(
+            &layer_config,
+            &mut external_proxy_progress,
+            &mut analytics,
+        )
+        .await?;
 
         external_proxy_progress.success(None);
 
-        let intproxy_address = config
+        let intproxy_address = layer_config
             .internal_proxy
             .connect_tcp
             .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8888));
 
         Ok(ComposeRunner {
             progress,
-            runtime,
-            runtime_args,
             step: PrepareServices {
                 internal_proxy_tls_guards,
                 external_proxy_tls_guards,
@@ -187,7 +164,7 @@ impl ComposeRunner<PrepareExternalProxy> {
                 layer_config_file,
                 intproxy_address,
                 external_proxy,
-                config,
+                layer_config,
             },
         })
     }
@@ -205,14 +182,12 @@ impl ComposeRunner<PrepareServices> {
     pub(super) fn services(self) -> ComposeResult<ComposeRunner<PrepareCompose>> {
         let Self {
             progress,
-            runtime,
-            runtime_args,
             step:
                 PrepareServices {
                     internal_proxy_tls_guards,
                     external_proxy_tls_guards,
                     analytics,
-                    config,
+                    layer_config,
                     intproxy_address,
                     layer_config_file,
                     external_proxy,
@@ -277,19 +252,19 @@ impl ComposeRunner<PrepareServices> {
             );
         };
 
-        if let Some(path) = config.internal_proxy.client_tls_certificate.as_ref() {
+        if let Some(path) = layer_config.internal_proxy.client_tls_certificate.as_ref() {
             load_env_and_mount_pem(MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE_ENV, path)
         }
 
-        if let Some(path) = config.internal_proxy.client_tls_key.as_ref() {
+        if let Some(path) = layer_config.internal_proxy.client_tls_key.as_ref() {
             load_env_and_mount_pem(MIRRORD_INTPROXY_CLIENT_TLS_KEY_ENV, path)
         }
 
-        if let Some(path) = config.external_proxy.tls_certificate.as_ref() {
+        if let Some(path) = layer_config.external_proxy.tls_certificate.as_ref() {
             load_env_and_mount_pem(MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV, path)
         }
 
-        if let Some(path) = config.external_proxy.tls_key.as_ref() {
+        if let Some(path) = layer_config.external_proxy.tls_key.as_ref() {
             load_env_and_mount_pem(MIRRORD_EXTERNAL_TLS_KEY_ENV, path)
         }
 
@@ -335,18 +310,21 @@ impl ComposeRunner<PrepareServices> {
 
         user_service_info.env_vars.insert(
             LINUX_INJECTION_ENV_VAR.to_string(),
-            config.container.cli_image_lib_path.to_string_lossy().into(),
+            layer_config
+                .container
+                .cli_image_lib_path
+                .to_string_lossy()
+                .into(),
         );
 
         Ok(ComposeRunner {
             progress,
-            runtime,
-            runtime_args,
             step: PrepareCompose {
                 internal_proxy_tls_guards,
                 external_proxy_tls_guards,
                 analytics,
                 layer_config_file,
+                layer_config,
                 intproxy_port: intproxy_address.port(),
                 sidecar_info,
                 user_service_info,
@@ -363,24 +341,34 @@ const MIRRORD_COMPOSE_SIDECAR_SERVICE: &str = "mirrord-sidecar";
 
 impl ComposeRunner<PrepareCompose> {
     #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
-    pub(super) async fn make_temp_compose_file(self) -> ComposeResult<ComposeRunner<RunCompose>> {
+    pub(super) async fn make_temp_compose_file(
+        self,
+        runtime_args: RuntimeArgs,
+    ) -> ComposeResult<ComposeRunner<RunCompose>> {
         use docker_compose_types::{Port, Ports, PublishedPort, Service, Volumes};
+
+        let RuntimeArgs { runtime, command } = runtime_args;
+
+        if command.has_publish() {
+            self.progress.warning("mirrord container may have problems with \"-p\" when used as part of container run command, please add the publish arguments to \"contanier.cli_extra_args\" in config if you are planning to publish ports");
+        }
+
+        let runtime_args = [vec!["compose".to_string()], command.into_parts().1].concat();
 
         // We've read a verified compose config, this doesn't mean that this config is valid though,
         // since some fields might be mistakenly set to `null` when deserializing (we fix these
         // later in `reset_conflicts`).
-        let mut compose = self.read_user_compose_file().await?;
+        let mut compose = self.read_user_compose_file(runtime, &runtime_args).await?;
 
         let Self {
             progress,
-            runtime,
-            runtime_args,
             step:
                 PrepareCompose {
                     internal_proxy_tls_guards,
                     external_proxy_tls_guards,
                     analytics,
                     layer_config_file,
+                    layer_config,
                     intproxy_port,
                     sidecar_info,
                     user_service_info,
@@ -410,7 +398,7 @@ impl ComposeRunner<PrepareCompose> {
         }
 
         let mirrord_sidecar_service = Service {
-            image: Some("ghcr.io/metalbear-co/mirrord-cli:3.133.1".into()),
+            image: Some(layer_config.container.cli_image),
             command: Some(docker_compose_types::Command::Simple(format!(
                 "mirrord intproxy --port {intproxy_port}"
             ))),
@@ -466,14 +454,14 @@ impl ComposeRunner<PrepareCompose> {
 
         Ok(ComposeRunner {
             progress,
-            runtime,
-            runtime_args,
             step: RunCompose {
                 internal_proxy_tls_guards,
                 external_proxy_tls_guards,
                 analytics,
                 layer_config_file,
                 compose_yaml,
+                runtime,
+                runtime_args,
             },
         })
     }
@@ -486,17 +474,20 @@ impl ComposeRunner<PrepareCompose> {
     /// (i.e. `docker compose --file compose.yaml config`) command to get a verified compose
     /// configuration, which is then deserialized into a [`docker_compose_types::Compose`].
     ///
-    /// - We do (2.) to let the `compose config` command handle cumbersome conversions for us (it's
+    /// - We do (2) to let the `compose config` command handle cumbersome conversions for us (it's
     ///   hell, cumbersome is putting it lightly, it's incredibly prone to errors), as it
     ///   automagically converts compose _short syntax_ into _long syntax_, with some caveats that
     ///   we have to handle when re-serializing it (so a deserialized output from `compose config`
     ///   that we serialize back to a `compose.yaml` may produce an invalid config).
     #[tracing::instrument(level = Level::DEBUG, skip(self), ret, err)]
-    async fn read_user_compose_file(&self) -> ComposeResult<docker_compose_types::Compose> {
+    async fn read_user_compose_file(
+        &self,
+        runtime: ContainerRuntime,
+        runtime_args: &[String],
+    ) -> ComposeResult<docker_compose_types::Compose> {
         self.progress.info("Preparing mirrord `compose.yaml`.");
 
-        let compose_file_path = self
-            .runtime_args
+        let compose_file_path = runtime_args
             .iter()
             .inspect(|arg| tracing::debug!(?arg))
             .find(|arg| arg.contains("--file") || arg.contains("-f"))
@@ -505,7 +496,7 @@ impl ComposeRunner<PrepareCompose> {
 
         tracing::debug!(?compose_file_path);
 
-        let compose_config = Command::new(self.runtime.to_string())
+        let compose_config = Command::new(runtime.to_string())
             .args(vec![
                 "compose",
                 "--file",
@@ -524,8 +515,6 @@ impl ComposeRunner<RunCompose> {
     pub(super) async fn run(self) -> ComposeResult<ComposeRunner<i32>> {
         let Self {
             progress,
-            runtime,
-            runtime_args,
             step:
                 RunCompose {
                     internal_proxy_tls_guards,
@@ -533,6 +522,8 @@ impl ComposeRunner<RunCompose> {
                     mut analytics,
                     layer_config_file,
                     compose_yaml,
+                    runtime,
+                    runtime_args,
                 },
         } = self;
 
@@ -576,8 +567,6 @@ impl ComposeRunner<RunCompose> {
             }
             Ok(status) => Ok(ComposeRunner {
                 progress,
-                runtime,
-                runtime_args,
                 step: status.code().unwrap_or_default(),
             }),
         }
