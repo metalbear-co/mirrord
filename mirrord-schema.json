@@ -894,7 +894,7 @@
         },
         "json_log": {
           "title": "external_proxy.json_log {#external_proxy-json_log}",
-          "description": "Whether the proxy should output logs in JSON format.",
+          "description": "Whether the proxy should output logs in JSON format. If false, logs are output in human-readable format.",
           "type": [
             "boolean",
             "null"
@@ -1444,7 +1444,7 @@
         },
         "json_log": {
           "title": "internal_proxy.json_log {#internal_proxy-json_log}",
-          "description": "Whether the proxy should output logs in JSON format.",
+          "description": "Whether the proxy should output logs in JSON format. If false, logs are output in human-readable format.",
           "type": [
             "boolean",
             "null"
