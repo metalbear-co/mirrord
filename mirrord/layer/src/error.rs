@@ -233,7 +233,8 @@ impl From<HookError> for i64 {
                         .internal_proxy
                         .log_destination
                         .clone()
-                        .unwrap_or("/tmp".to_string())
+                        .unwrap_or_else(std::env::temp_dir)
+                        .display()
                 )
             }
             _ => error!("Error occured in Layer >> {fail:?}"),
