@@ -89,6 +89,7 @@ fn default_logfile_path(prefix: &str) -> PathBuf {
 fn init_proxy_tracing_registry(
     log_destination: &Path,
     log_level: Option<&str>,
+    json_log: bool,
 ) -> std::io::Result<()> {
     if std::env::var("MIRRORD_CONSOLE_ADDR").is_ok() {
         return Ok(());
@@ -103,15 +104,19 @@ fn init_proxy_tracing_registry(
         .map(|log_level| EnvFilter::builder().parse_lossy(log_level))
         .unwrap_or_else(EnvFilter::from_default_env);
 
+    let fmt_layer_base = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .with_file(true)
+        .with_line_number(true)
+        .with_writer(output_file);
+    let fmt_layer = if json_log {
+        fmt_layer_base.json().boxed()
+    } else {
+        fmt_layer_base.boxed()
+    };
+
     tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_ansi(false)
-                .with_file(true)
-                .with_line_number(true)
-                .with_writer(output_file)
-                .json(),
-        )
+        .with(fmt_layer)
         .with(env_filter)
         .init();
 
@@ -129,10 +134,14 @@ pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), Intern
             .map(PathBuf::from)
             .unwrap_or_else(|| default_logfile_path("mirrord-intproxy"));
 
-        init_proxy_tracing_registry(&log_destination, config.internal_proxy.log_level.as_deref())
-            .map_err(|fail| {
-                InternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
-            })
+        init_proxy_tracing_registry(
+            &log_destination,
+            config.internal_proxy.log_level.as_deref(),
+            config.internal_proxy.json_log,
+        )
+        .map_err(|fail| {
+            InternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
+        })
     } else {
         // When the intproxy runs in a sidecar container, it logs directly to stderr.
         // The logs are then piped to the log file on the host.
@@ -165,10 +174,14 @@ pub fn init_extproxy_tracing_registry(config: &LayerConfig) -> Result<(), Extern
         .map(PathBuf::from)
         .unwrap_or_else(|| default_logfile_path("mirrord-extproxy"));
 
-    init_proxy_tracing_registry(&log_destination, config.external_proxy.log_level.as_deref())
-        .map_err(|fail| {
-            ExternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
-        })
+    init_proxy_tracing_registry(
+        &log_destination,
+        config.external_proxy.log_level.as_deref(),
+        config.external_proxy.json_log,
+    )
+    .map_err(|fail| {
+        ExternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
+    })
 }
 
 pub async fn pipe_intproxy_sidecar_logs<'s, S>(

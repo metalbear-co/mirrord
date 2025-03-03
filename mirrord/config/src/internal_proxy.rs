@@ -118,4 +118,10 @@ pub struct InternalProxyConfig {
     /// This informs the intproxy that it's running inside a continer and should not detach io
     #[config(default = false, env = MIRRORD_INTPROXY_CONTAINER_MODE_ENV)]
     pub container_mode: bool,
+
+    /// ### internal_proxy.json_log {#internal_proxy-json_log}
+    ///
+    /// Whether the proxy should output logs in JSON format.
+    #[config(default = true)]
+    pub json_log: bool,
 }

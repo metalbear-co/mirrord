@@ -91,4 +91,10 @@ pub struct ExternalProxyConfig {
     /// ### external_proxy.log_destination {#external_proxy-log_destination}
     /// Set the log file destination for the external proxy.
     pub log_destination: Option<String>,
+
+    /// ### external_proxy.json_log {#external_proxy-json_log}
+    ///
+    /// Whether the proxy should output logs in JSON format.
+    #[config(default = true)]
+    pub json_log: bool,
 }

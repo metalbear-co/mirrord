@@ -892,6 +892,14 @@
           "format": "uint64",
           "minimum": 0.0
         },
+        "json_log": {
+          "title": "external_proxy.json_log {#external_proxy-json_log}",
+          "description": "Whether the proxy should output logs in JSON format.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "log_destination": {
           "title": "external_proxy.log_destination {#external_proxy-log_destination}",
           "description": "Set the log file destination for the external proxy.",
@@ -1433,6 +1441,14 @@
           ],
           "format": "uint64",
           "minimum": 0.0
+        },
+        "json_log": {
+          "title": "internal_proxy.json_log {#internal_proxy-json_log}",
+          "description": "Whether the proxy should output logs in JSON format.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "log_destination": {
           "title": "internal_proxy.log_destination {#internal_proxy-log_destination}",
