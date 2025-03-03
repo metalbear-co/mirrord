@@ -570,6 +570,11 @@ and don't connect to the proxy.
 }
 ```
 
+### external_proxy.json_log {#external_proxy-json_log}
+
+Whether the proxy should output logs in JSON format. If false, logs are output in
+human-readable format.
+
 ### external_proxy.log_destination {#external_proxy-log_destination}
 Set the log file destination for the external proxy.
 
@@ -1589,6 +1594,11 @@ and don't connect to the proxy.
   }
 }
 ```
+
+### internal_proxy.json_log {#internal_proxy-json_log}
+
+Whether the proxy should output logs in JSON format. If false, logs are output in
+human-readable format.
 
 ### internal_proxy.log_destination {#internal_proxy-log_destination}
 

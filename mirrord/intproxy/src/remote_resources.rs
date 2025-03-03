@@ -124,7 +124,7 @@ where
         }
     }
 
-    /// Removes all resources held all layers instances.
+    /// Removes all resources held by all layers instances.
     /// Returns an [`Iterator`] of layers and remote files/folders that were removed.
     ///
     /// Should be used for when the remote is lost and there is a need to restart.
