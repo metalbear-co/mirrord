@@ -120,9 +120,9 @@ mod issue1317_tests {
             .expect("3rd request ends the program!");
         assert!(response.status().is_success());
 
+        process.wait_assert_success().await;
+
         std::mem::drop(request_sender);
         conn_handle.await.unwrap().unwrap();
-
-        process.wait_assert_success().await;
     }
 }
