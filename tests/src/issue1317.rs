@@ -51,21 +51,13 @@ mod issue1317_tests {
         )
         .await;
 
-        tokio::time::sleep(Duration::from_secs(10)).await;
-
         // Create a connection with the service before mirrord is started.
-        let connection = TcpStream::connect(portforwarder.address())
-            .await
-            .unwrap_or_else(|_| panic!("Failed connecting to {}!", portforwarder.address()));
+        let connection = TcpStream::connect(portforwarder.address()).await.unwrap();
 
         let (mut request_sender, connection) =
             http1::handshake(TokioIo::new(connection)).await.unwrap();
 
-        tokio::spawn(async move {
-            if let Err(fail) = connection.await {
-                panic!("Handshake [hyper] failed with {fail:#?}");
-            }
-        });
+        let conn_handle = tokio::spawn(connection);
 
         // Test that we can reach the service, before mirrord is started.
         let request = Request::builder()
@@ -128,7 +120,9 @@ mod issue1317_tests {
             .expect("3rd request ends the program!");
         assert!(response.status().is_success());
 
-        drop(request_sender);
+        std::mem::drop(request_sender);
+        conn_handle.await.unwrap().unwrap();
+
         process.wait_assert_success().await;
     }
 }

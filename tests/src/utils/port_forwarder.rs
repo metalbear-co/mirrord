@@ -32,6 +32,8 @@ impl PortForwarder {
             port,
         ));
 
+        println!("Created a portforwarder for {pod_namespace}/{pod_name}:{port}. Local address is {address}");
+
         Self { address, handle }
     }
 
