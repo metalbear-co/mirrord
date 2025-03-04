@@ -39,6 +39,13 @@ pub(crate) static STEAL_FILTERED_CONNECTION_SUBSCRIPTION: AtomicI64 = AtomicI64:
 
 pub(crate) static STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION: AtomicI64 = AtomicI64::new(0);
 
+/// Follows `MatchedHttpRequest` that is being processed.
+///
+/// - incremented: `MatchedHttpRequest::new`;
+/// - decremented: In a few places, ideally it gets a `-1` count whenever we sent a
+///   `Command::HttpResponse`, which means that this request has been fulfilled, but we also reset
+///   it to the amount of response channels in `TcpStealerApi::handle_client_message` when a failure
+///   happens.
 pub(crate) static HTTP_REQUEST_IN_PROGRESS_COUNT: AtomicI64 = AtomicI64::new(0);
 
 pub(crate) static TCP_OUTGOING_CONNECTION: AtomicI64 = AtomicI64::new(0);
