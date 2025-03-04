@@ -1,7 +1,7 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt,
-    hash::{Hash, Hasher},
+    hash::Hash,
     net::Ipv4Addr,
 };
 
@@ -34,7 +34,7 @@ pub(crate) mod api;
 pub(crate) mod messages;
 pub(crate) mod tcp_capture;
 
-#[derive(Debug, Eq, Copy, Clone)]
+#[derive(Debug, Eq, Copy, Clone, PartialEq, Hash)]
 pub(crate) struct TcpSessionIdentifier {
     /// The remote address that is sending a packet to the impersonated pod.
     ///
@@ -58,39 +58,6 @@ pub(crate) struct TcpSessionIdentifier {
     pub(crate) dest_addr: Ipv4Addr,
     pub(crate) source_port: u16,
     pub(crate) dest_port: u16,
-}
-
-impl PartialEq for TcpSessionIdentifier {
-    /// It's the same session if 4 tuple is same/opposite.
-    fn eq(&self, other: &TcpSessionIdentifier) -> bool {
-        self.source_addr == other.source_addr
-            && self.dest_addr == other.dest_addr
-            && self.source_port == other.source_port
-            && self.dest_port == other.dest_port
-            || self.source_addr == other.dest_addr
-                && self.dest_addr == other.source_addr
-                && self.source_port == other.dest_port
-                && self.dest_port == other.source_port
-    }
-}
-
-impl Hash for TcpSessionIdentifier {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        if self.source_addr > self.dest_addr {
-            self.source_addr.hash(state);
-            self.dest_addr.hash(state);
-        } else {
-            self.dest_addr.hash(state);
-            self.source_addr.hash(state);
-        }
-        if self.source_port > self.dest_port {
-            self.source_port.hash(state);
-            self.dest_port.hash(state);
-        } else {
-            self.dest_port.hash(state);
-            self.source_port.hash(state);
-        }
-    }
 }
 
 type TCPSessionMap = HashMap<TcpSessionIdentifier, broadcast::Sender<Vec<u8>>>;
