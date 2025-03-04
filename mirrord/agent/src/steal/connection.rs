@@ -795,6 +795,7 @@ where
 
             Command::HttpResponse(response) => {
                 self.send_http_response(client_id, response).await;
+                HTTP_REQUEST_IN_PROGRESS_COUNT.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
             }
 
             Command::SwitchProtocolVersion(new_version) => {

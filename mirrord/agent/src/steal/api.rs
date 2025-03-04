@@ -102,7 +102,7 @@ impl TcpStealerApi {
     /// [`TcpConnectionStealer`] task, back to the agent.
     ///
     /// Called in the `ClientConnectionHandler`.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(crate) async fn recv(&mut self) -> AgentResult<DaemonTcp> {
         match self.daemon_rx.recv().await {
             Some(msg) => {
@@ -179,15 +179,15 @@ impl TcpStealerApi {
         &mut self,
         message: LayerTcpSteal,
     ) -> AgentResult<()> {
+        use std::sync::atomic::Ordering;
+
         match message {
             LayerTcpSteal::PortSubscribe(port_steal) => self.port_subscribe(port_steal).await,
             LayerTcpSteal::ConnectionUnsubscribe(connection_id) => {
                 self.response_body_txs
                     .retain(|(key_id, _), _| *key_id != connection_id);
-                HTTP_REQUEST_IN_PROGRESS_COUNT.store(
-                    self.response_body_txs.len() as i64,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
+                HTTP_REQUEST_IN_PROGRESS_COUNT
+                    .store(self.response_body_txs.len() as i64, Ordering::Relaxed);
 
                 self.connection_unsubscribe(connection_id).await
             }
@@ -230,10 +230,8 @@ impl TcpStealerApi {
                     for frame in response.internal_response.body {
                         if let Err(err) = tx.send(Ok(frame.into())).await {
                             self.response_body_txs.remove(&key);
-                            HTTP_REQUEST_IN_PROGRESS_COUNT.store(
-                                self.response_body_txs.len() as i64,
-                                std::sync::atomic::Ordering::Relaxed,
-                            );
+                            HTTP_REQUEST_IN_PROGRESS_COUNT
+                                .store(self.response_body_txs.len() as i64, Ordering::Relaxed);
                             tracing::trace!(?err, "error while sending streaming response frame");
                         }
                     }
@@ -256,20 +254,16 @@ impl TcpStealerApi {
                     }
                     if send_err || body.is_last {
                         self.response_body_txs.remove(key);
-                        HTTP_REQUEST_IN_PROGRESS_COUNT.store(
-                            self.response_body_txs.len() as i64,
-                            std::sync::atomic::Ordering::Relaxed,
-                        );
+                        HTTP_REQUEST_IN_PROGRESS_COUNT
+                            .store(self.response_body_txs.len() as i64, Ordering::Relaxed);
                     };
                     Ok(())
                 }
                 ChunkedResponse::Error(err) => {
                     self.response_body_txs
                         .remove(&(err.connection_id, err.request_id));
-                    HTTP_REQUEST_IN_PROGRESS_COUNT.store(
-                        self.response_body_txs.len() as i64,
-                        std::sync::atomic::Ordering::Relaxed,
-                    );
+                    HTTP_REQUEST_IN_PROGRESS_COUNT
+                        .store(self.response_body_txs.len() as i64, Ordering::Relaxed);
                     tracing::trace!(?err, "ChunkedResponse error received");
                     Ok(())
                 }
