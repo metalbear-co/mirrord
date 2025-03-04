@@ -1,7 +1,6 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt,
-    hash::{Hash, Hasher},
     net::Ipv4Addr,
 };
 
@@ -34,66 +33,27 @@ pub(crate) mod api;
 pub(crate) mod messages;
 pub(crate) mod tcp_capture;
 
-#[derive(Debug, Eq, Copy, Clone)]
-pub(crate) struct TcpSessionIdentifier {
+/// Identifies one side of a TCP connection.
+#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+pub(crate) struct TcpSessionSideId {
     /// The remote address that is sending a packet to the impersonated pod.
     ///
-    /// ## Details
+    /// # Details
     ///
     /// If you were to `curl {impersonated_pod_ip}:{port}`, this would be the address of whoever
     /// is making the request.
+    ///
+    /// Note that a service mesh would usually intercept the request and resend from
+    /// [`Ipv4Addr::LOCALHOST`].
     pub(crate) source_addr: Ipv4Addr,
-
-    /// Local address of the impersonated pod.
-    ///
-    /// ## Details
-    ///
-    /// You can get this IP by checking `kubectl get pod -o wide`.
-    ///
-    /// ```sh
-    /// $ kubectl get pod -o wide
-    /// NAME        READY   STATUS    IP
-    /// happy-pod   1/1     Running   1.2.3.4   
-    /// ```
+    /// This should be the address of the interface on which the [`TcpConnectionSniffer`] set up
+    /// its raw socket.
     pub(crate) dest_addr: Ipv4Addr,
     pub(crate) source_port: u16,
     pub(crate) dest_port: u16,
 }
 
-impl PartialEq for TcpSessionIdentifier {
-    /// It's the same session if 4 tuple is same/opposite.
-    fn eq(&self, other: &TcpSessionIdentifier) -> bool {
-        self.source_addr == other.source_addr
-            && self.dest_addr == other.dest_addr
-            && self.source_port == other.source_port
-            && self.dest_port == other.dest_port
-            || self.source_addr == other.dest_addr
-                && self.dest_addr == other.source_addr
-                && self.source_port == other.dest_port
-                && self.dest_port == other.source_port
-    }
-}
-
-impl Hash for TcpSessionIdentifier {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        if self.source_addr > self.dest_addr {
-            self.source_addr.hash(state);
-            self.dest_addr.hash(state);
-        } else {
-            self.dest_addr.hash(state);
-            self.source_addr.hash(state);
-        }
-        if self.source_port > self.dest_port {
-            self.source_port.hash(state);
-            self.dest_port.hash(state);
-        } else {
-            self.dest_port.hash(state);
-            self.source_port.hash(state);
-        }
-    }
-}
-
-type TCPSessionMap = HashMap<TcpSessionIdentifier, broadcast::Sender<Vec<u8>>>;
+type TCPSessionMap = HashMap<TcpSessionSideId, broadcast::Sender<Vec<u8>>>;
 
 const fn is_new_connection(flags: u8) -> bool {
     0 != (flags & TcpFlags::SYN) && 0 == (flags & (TcpFlags::ACK | TcpFlags::RST | TcpFlags::FIN))
@@ -332,7 +292,7 @@ where
     )]
     fn handle_packet(
         &mut self,
-        identifier: TcpSessionIdentifier,
+        identifier: TcpSessionSideId,
         tcp_packet: TcpPacketData,
     ) -> AgentResult<()> {
         let data_tx = match self.sessions.entry(identifier) {
@@ -450,7 +410,7 @@ mod test {
     struct TestSnifferSetup {
         command_tx: Sender<SnifferCommand>,
         task_status: TaskStatus,
-        packet_tx: Sender<(TcpSessionIdentifier, TcpPacketData)>,
+        packet_tx: Sender<(TcpSessionSideId, TcpPacketData)>,
         times_filter_changed: Arc<AtomicUsize>,
         next_client_id: ClientId,
     }
@@ -521,7 +481,7 @@ mod test {
             setup
                 .packet_tx
                 .send((
-                    TcpSessionIdentifier {
+                    TcpSessionSideId {
                         source_addr: "1.1.1.1".parse().unwrap(),
                         dest_addr: "127.0.0.1".parse().unwrap(),
                         source_port: 3133,
@@ -538,7 +498,7 @@ mod test {
             setup
                 .packet_tx
                 .send((
-                    TcpSessionIdentifier {
+                    TcpSessionSideId {
                         source_addr: "1.1.1.1".parse().unwrap(),
                         dest_addr: "127.0.0.1".parse().unwrap(),
                         source_port: 3133,
@@ -690,7 +650,7 @@ mod test {
             (DaemonTcp::SubscribeResult(Ok(80)), None),
         );
 
-        let session_id = TcpSessionIdentifier {
+        let session_id = TcpSessionSideId {
             source_addr: "1.1.1.1".parse().unwrap(),
             dest_addr: "127.0.0.1".parse().unwrap(),
             source_port: 3133,
@@ -781,7 +741,7 @@ mod test {
 
         // First send `TcpSnifferApi::CONNECTION_CHANNEL_SIZE` + 2 first connections.
         let session_ids =
-            (0..=TcpSnifferApi::CONNECTION_CHANNEL_SIZE).map(|idx| TcpSessionIdentifier {
+            (0..=TcpSnifferApi::CONNECTION_CHANNEL_SIZE).map(|idx| TcpSessionSideId {
                 source_addr,
                 dest_addr,
                 source_port: 3000 + idx as u16,
@@ -829,7 +789,7 @@ mod test {
         setup
             .packet_tx
             .send((
-                TcpSessionIdentifier {
+                TcpSessionSideId {
                     source_addr,
                     dest_addr,
                     source_port: 3222,

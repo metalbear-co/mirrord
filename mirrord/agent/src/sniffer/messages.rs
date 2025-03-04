@@ -1,7 +1,7 @@
 use mirrord_protocol::Port;
 use tokio::sync::{broadcast, mpsc::Sender, oneshot};
 
-use super::TcpSessionIdentifier;
+use super::TcpSessionSideId;
 use crate::util::ClientId;
 
 /// Commmand for [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
@@ -39,7 +39,7 @@ pub(crate) struct SnifferCommand {
 pub(crate) struct SniffedConnection {
     /// Parameters of this connection's TCP session.
     /// Can be used to create [`NewTcpConnection`](mirrord_protocol::tcp::NewTcpConnection).
-    pub session_id: TcpSessionIdentifier,
+    pub session_id: TcpSessionSideId,
     /// For receiving data from this connection.
     pub data: broadcast::Receiver<Vec<u8>>,
 }
