@@ -3,7 +3,7 @@
 use std::net::{Ipv4Addr, SocketAddr};
 
 use k8s_openapi::api::core::v1::{Pod, Service};
-use kube::{Api, Client, api::ListParams};
+use kube::{api::ListParams, Api, Client};
 use tokio::{
     net::TcpListener,
     task::{JoinHandle, JoinSet},
