@@ -46,7 +46,7 @@ tempfile.workspace = true
 tokio-tungstenite.workspace = true
 
 [features]
-default = ["ephemeral", "job", "cli", "targetless", "operator"]
+default = ["ephemeral", "job", "cli", "targetless"]
 ephemeral = []
 job = []
 operator = ["dep:aws-config", "dep:aws-sdk-sqs", "dep:rcgen", "dep:mirrord-agent-env", "dep:pem", "dep:mirrord-tls-util"]
