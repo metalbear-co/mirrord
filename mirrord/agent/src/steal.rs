@@ -1,5 +1,5 @@
 use mirrord_protocol::{
-    tcp::{DaemonTcp, StealType, TcpData},
+    tcp::{StealType, TcpData},
     ConnectionId, Port,
 };
 use tokio::sync::mpsc::Sender;
@@ -15,7 +15,7 @@ mod orig_dst;
 mod subscriptions;
 mod tls;
 
-pub(crate) use api::TcpStealerApi;
+pub(crate) use api::{StealerMessage, TcpStealerApi};
 pub(crate) use connection::TcpConnectionStealer;
 pub(crate) use tls::StealTlsHandlerStore;
 
@@ -29,7 +29,7 @@ use self::http::HttpResponseFallback;
 enum Command {
     /// Contains the channel that's used by the stealer worker to respond back to the agent
     /// (stealer -> agent -> layer).
-    NewClient(Sender<DaemonTcp>),
+    NewClient(Sender<StealerMessage>),
 
     /// A layer wants to subscribe to this [`Port`].
     ///
