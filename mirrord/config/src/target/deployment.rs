@@ -8,6 +8,10 @@ use crate::config::{ConfigError, Result};
 /// Mirror the deployment specified by [`DeploymentTarget::deployment`].
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(
+    feature = "namespaced-schemars",
+    schemars(rename = "co.metalbear.mirrord.v1.DeploymentTarget")
+)]
 pub struct DeploymentTarget {
     /// <!--${internal}-->
     /// Deployment to mirror.

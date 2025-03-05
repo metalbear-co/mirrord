@@ -39,3 +39,7 @@ rustls.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true
+
+[features]
+default = []
+namespaced-schemars = []
