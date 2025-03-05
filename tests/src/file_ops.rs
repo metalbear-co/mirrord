@@ -109,11 +109,10 @@ mod file_ops_tests {
         let config = serde_json::json!({
             "feature": {
                 "fs": {
-                    "mode": "local",
-                    "read_write": ".+/remote/.+",
-                    "local": ".+/local/.+",
+                    "mode": "localwithoverrides",
+                    "read_write": ".*remote_test.*",
                     "mapping": {
-                        ".+/source": ".+/sink"
+                        "source_test": "sink_test"
                     }
                 }
             }

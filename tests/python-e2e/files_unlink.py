@@ -10,39 +10,125 @@ TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod 
 class FileOpsTest(unittest.TestCase):
     def test_unlink_remote_readwrite(self):
         """
-        Creates a file and removes the link to it using unlink
+        Creates a file remotely and removes the link to it using unlink
         """
-        test_dir = "/tmp/remote/test_unlink"
+        # create test dir and temp file
+        test_dir = "/tmp/remote_test/test_unlink"
         os.makedirs(test_dir, exist_ok=True)
         temp_file = self._create_new_tmp_file(test_dir)[0]
+
+        # check file exists and open it, then call unlink
+        # if file is not opened, it will be deleted by unlink, but we want to just unlink it
+        self.assertTrue(os.path.isfile(temp_file))
+        file = open(temp_file, "r")
         os.unlink(temp_file)
 
-    def test_unlinkat_remote_readwrite(self):
+        # release our hold on file and check it has been removed
+        file.close()
+        self.assertFalse(os.path.isfile(temp_file))
+
+        # def test_unlinkat_remote_readwrite(self):
         """
-        Creates a file and removes the link to it using unlinkat
+        Creates a file remotely and removes the link to it using unlinkat
         """
-        test_dir = "/tmp/remote/test_unlinkat"
+        # create test dir
+        test_dir = "/tmp/remote_test/test_unlinkat"
         os.makedirs(test_dir, exist_ok=True)
-        temp_file = self._create_new_tmp_file(test_dir)[0]
-        os.unlink(temp_file, dir_fd=0)
+        self.assertTrue(os.path.isdir(test_dir))
+
+        # create test file
+        (test_file_abs_path, test_file_name) = self._create_new_tmp_file(test_dir)
+
+        # call unlink with dir_fd, which will call unlinkat under the hood
+        # get file descriptor for the parent directory (must be local)
+        dir_fd = os.open(test_dir, os.O_RDONLY | os.O_DIRECTORY)
+        os.unlink(test_file_name, dir_fd=dir_fd)
+
+        # manually close the directory after unlink
+        os.close(dir_fd)
+        self.assertFalse(os.path.isfile(test_file_abs_path))
 
     def test_unlink_local(self):
         """
-        Creates a file and removes the link to it using unlink
+        Creates a file locally and removes the link to it using unlink
         """
-        test_dir = "/tmp/local/test_unlink"
+        # create test dir and temp file
+        test_dir = "/tmp/local_test/test_unlink"
         os.makedirs(test_dir, exist_ok=True)
         temp_file = self._create_new_tmp_file(test_dir)[0]
+
+        # check file exists and open it, then call unlink
+        # if file is not opened, it will be deleted by unlink, but we want to just unlink it
+        self.assertTrue(os.path.isfile(temp_file))
+        file = open(temp_file, "r")
         os.unlink(temp_file)
+
+        # release our hold on file and check it has been removed
+        file.close()
+        self.assertFalse(os.path.isfile(temp_file))
 
     def test_unlinkat_local(self):
         """
-        Creates a file and removes the link to it using unlink
+        Creates a file locally and removes the link to it using unlinkat
         """
-        test_dir = "/tmp/local/test_unlinkat"
+        # create test dir
+        test_dir = "/tmp/local_test/test_unlinkat"
         os.makedirs(test_dir, exist_ok=True)
-        temp_file = self._create_new_tmp_file(test_dir)[0]
-        os.unlink(temp_file, dir_fd=0)
+        self.assertTrue(os.path.isdir(test_dir))
+
+        # create test file
+        (test_file_abs_path, test_file_name) = self._create_new_tmp_file(test_dir)
+
+        # call unlink with dir_fd, which will call unlinkat under the hood
+        # get file descriptor for the parent directory (must be local)
+        dir_fd = os.open(test_dir, os.O_RDONLY | os.O_DIRECTORY)
+        os.unlink(test_file_name, dir_fd=dir_fd)
+
+        # manually close the directory after unlink
+        os.close(dir_fd)
+        self.assertFalse(os.path.isfile(test_file_abs_path))
+
+    def test_unlink_mapped(self):
+        """
+        Creates a file on a mapped path and removes the link to it using unlink
+        """
+        # create test dir and temp file, ensure path containing source_test
+        # is mapped to path containing sink_test
+        test_dir = "/tmp/source_test/test_unlink"
+        os.makedirs(test_dir, exist_ok=True)
+        self.assertTrue(os.path.isdir("/tmp/sink_test/test_unlink"))
+        file_path = self._create_new_tmp_file(test_dir)[0]
+
+        # check file exists and open it, then call unlink
+        # if file is not opened, it will be deleted by unlink, but we want to just unlink it
+        self.assertTrue(os.path.isfile(file_path))
+        file = open(file_path, "r")
+        os.unlink(file_path)
+
+        # release our hold on file and check it has been removed
+        file.close()
+        self.assertFalse(os.path.isfile(file_path))
+
+    def test_unlinkat_mapped(self):
+        """
+        Creates a file on a mapped path and removes the link to it using unlinkat
+        """
+        # create test dir
+        test_dir = "/tmp/source_test/test_unlinkat"
+        os.makedirs(test_dir, exist_ok=True)
+        self.assertTrue(os.path.isdir("/tmp/sink_test/test_unlinkat"))
+
+        # create test file
+        (test_file_abs_path, test_file_name) = self._create_new_tmp_file(test_dir)
+
+        # call unlink with dir_fd, which will call unlinkat under the hood
+        # get file descriptor for the parent directory
+        dir_fd = os.open(test_dir, os.O_RDONLY | os.O_DIRECTORY)
+        os.unlink(test_file_name, dir_fd=dir_fd)
+
+        # manually close the directory after unlink
+        os.close(dir_fd)
+        self.assertFalse(os.path.isfile(test_file_abs_path))
 
     def _create_new_tmp_file(self, dir: str):
         """
