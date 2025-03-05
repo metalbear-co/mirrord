@@ -12,7 +12,7 @@ use rawsocket::{filter::SocketFilterProgram, RawCapture};
 use tokio::net::UdpSocket;
 use tracing::Level;
 
-use super::{AgentResult, TcpPacketData, TcpSessionSideId};
+use super::{AgentResult, TcpPacketData, TcpSessionDirectionId};
 use crate::error::AgentError;
 
 /// Trait for structs that are able to sniff incoming Ethernet packets and filter TCP packets.
@@ -21,7 +21,7 @@ pub trait TcpCapture {
     fn set_filter(&mut self, filter: SocketFilterProgram) -> io::Result<()>;
 
     /// Returns the next sniffed TCP packet.
-    async fn next(&mut self) -> io::Result<(TcpSessionSideId, TcpPacketData)>;
+    async fn next(&mut self) -> io::Result<(TcpSessionDirectionId, TcpPacketData)>;
 }
 
 /// Implementor of [`TcpCapture`] that uses a raw OS socket and a BPF filter.
@@ -86,7 +86,7 @@ impl RawSocketTcpCapture {
     /// Extracts TCP packet from the raw Ethernet packet given as bytes.
     /// If the given Ethernet packet is not TCP, returns [`None`].
     #[tracing::instrument(skip(eth_packet), level = Level::TRACE, fields(bytes = %eth_packet.len()))]
-    fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionSideId, TcpPacketData)> {
+    fn get_tcp_packet(eth_packet: Vec<u8>) -> Option<(TcpSessionDirectionId, TcpPacketData)> {
         let eth_packet = EthernetPacket::new(&eth_packet[..])?;
         let ip_packet = match eth_packet.get_ethertype() {
             EtherTypes::Ipv4 => Ipv4Packet::new(eth_packet.payload())?,
@@ -101,7 +101,7 @@ impl RawSocketTcpCapture {
         let dest_port = tcp_packet.get_destination();
         let source_port = tcp_packet.get_source();
 
-        let identifier = TcpSessionSideId {
+        let identifier = TcpSessionDirectionId {
             source_addr: ip_packet.get_source(),
             dest_addr: ip_packet.get_destination(),
             source_port,
@@ -128,7 +128,7 @@ impl TcpCapture for RawSocketTcpCapture {
         self.inner.set_filter(filter)
     }
 
-    async fn next(&mut self) -> io::Result<(TcpSessionSideId, TcpPacketData)> {
+    async fn next(&mut self) -> io::Result<(TcpSessionDirectionId, TcpPacketData)> {
         loop {
             let raw = self.inner.next().await?;
 
@@ -154,7 +154,7 @@ pub mod test {
     /// [`mpsc`](tokio::sync::mpsc) channel.
     pub struct TcpPacketsChannel {
         pub times_filter_changed: Arc<AtomicUsize>,
-        pub receiver: Receiver<(TcpSessionSideId, TcpPacketData)>,
+        pub receiver: Receiver<(TcpSessionDirectionId, TcpPacketData)>,
     }
 
     impl TcpCapture for TcpPacketsChannel {
@@ -165,7 +165,7 @@ pub mod test {
             Ok(())
         }
 
-        async fn next(&mut self) -> io::Result<(TcpSessionSideId, TcpPacketData)> {
+        async fn next(&mut self) -> io::Result<(TcpSessionDirectionId, TcpPacketData)> {
             Ok(self.receiver.recv().await.expect("channel closed"))
         }
     }
