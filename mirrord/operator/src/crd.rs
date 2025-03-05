@@ -27,15 +27,77 @@ pub mod steal_tls;
 
 pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
+macro_rules! crd_schemars_impl_with_prefix {
+    ($prefix:literal, $ident:ident, $spec:ident, $status:ident) => {
+        impl schemars::JsonSchema for $ident {
+            fn schema_name() -> String {
+                concat!($prefix, ".", stringify!($ident)).into()
+            }
+
+            fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+                let instance_type = schemars::schema::InstanceType::Object;
+
+                let spec = gen.subschema_for::<$spec>();
+                let status = gen.subschema_for::<$status>();
+
+                let fields = schemars::schema::ObjectValidation {
+                    required: schemars::Set::from(["spec".to_owned()]),
+                    properties: schemars::Map::from([
+                        ("spec".to_owned(), spec),
+                        ("status".to_owned(), status),
+                    ]),
+                    ..Default::default()
+                };
+
+                let schema_object = schemars::schema::SchemaObject {
+                    instance_type: Some(instance_type.into()),
+                    object: Some(fields.into()),
+                    ..Default::default()
+                };
+
+                schemars::schema::Schema::Object(schema_object)
+            }
+        }
+    };
+    ($prefix:literal, $ident:ident, $spec:ident) => {
+        impl schemars::JsonSchema for $ident {
+            fn schema_name() -> String {
+                concat!($prefix, ".", stringify!($ident)).into()
+            }
+
+            fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+                let instance_type = schemars::schema::InstanceType::Object;
+
+                let spec = gen.subschema_for::<$spec>();
+
+                let fields = schemars::schema::ObjectValidation {
+                    required: schemars::Set::from(["spec".to_owned()]),
+                    properties: schemars::Map::from([("spec".to_owned(), spec)]),
+                    ..Default::default()
+                };
+
+                let schema_object = schemars::schema::SchemaObject {
+                    instance_type: Some(instance_type.into()),
+                    object: Some(fields.into()),
+                    ..Default::default()
+                };
+
+                schemars::schema::Schema::Object(schema_object)
+            }
+        }
+    };
+}
+
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
     version = "v1",
     kind = "Target",
     root = "TargetCrd",
+    schema = "manual",
     namespaced
 )]
-#[schemars(rename = "co.metalbear.operator.v1.Target")]
+#[schemars(rename = "co.metalbear.operator.v1.TargetSpec")]
 pub struct TargetSpec {
     /// The kubernetes resource to target.
     pub target: KubeTarget,
@@ -98,6 +160,8 @@ impl TryFrom<TargetCrd> for TargetConfig {
     }
 }
 
+crd_schemars_impl_with_prefix!("co.metalbear.operator.v1", TargetCrd, TargetSpec);
+
 pub static OPERATOR_STATUS_NAME: &str = "operator";
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -106,9 +170,10 @@ pub static OPERATOR_STATUS_NAME: &str = "operator";
     version = "v1",
     kind = "MirrordOperator",
     root = "MirrordOperatorCrd",
-    status = "MirrordOperatorStatus"
+    status = "MirrordOperatorStatus",
+    schema = "manual"
 )]
-#[schemars(rename = "co.metalbear.operator.v1.MirrordOperator")]
+#[schemars(rename = "co.metalbear.operator.v1.MirrordOperatorSpec")]
 pub struct MirrordOperatorSpec {
     #[schemars(with = "String")]
     pub operator_version: Version,
@@ -209,6 +274,13 @@ impl MirrordOperatorSpec {
     }
 }
 
+crd_schemars_impl_with_prefix!(
+    "co.metalbear.operator.v1",
+    MirrordOperatorCrd,
+    MirrordOperatorSpec,
+    MirrordOperatorStatus
+);
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[schemars(rename = "co.metalbear.operator.v1.MirrordOperatorStatus")]
 pub struct MirrordOperatorStatus {
@@ -255,10 +327,13 @@ pub struct Session {
     group = "operator.metalbear.co",
     version = "v1",
     kind = "Session",
-    root = "SessionCrd"
+    root = "SessionCrd",
+    schema = "manual"
 )]
 #[schemars(rename = "co.metalbear.operator.v1.SessionSpec")]
 pub struct SessionSpec;
+
+crd_schemars_impl_with_prefix!("co.metalbear.operator.v1", SessionCrd, SessionSpec);
 
 /// Features supported by operator
 ///
@@ -322,9 +397,10 @@ impl From<&OperatorFeatures> for NewOperatorFeature {
     kind = "CopyTarget",
     root = "CopyTargetCrd",
     status = "CopyTargetStatus",
+    schema = "manual",
     namespaced
 )]
-#[schemars(rename = "co.metalbear.operator.v1.CopyTarget")]
+#[schemars(rename = "co.metalbear.operator.v1.CopyTargetSpec")]
 pub struct CopyTargetSpec {
     /// Original target. Only [`Target::Pod`] and [`Target::Deployment`] are accepted.
     pub target: Target,
@@ -361,6 +437,13 @@ impl CopyTargetCrd {
         }
     }
 }
+
+crd_schemars_impl_with_prefix!(
+    "co.metalbear.operator.v1",
+    CopyTargetCrd,
+    CopyTargetSpec,
+    CopyTargetStatus
+);
 
 /// This is the `status` field for [`CopyTargetCrd`].
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -528,9 +611,10 @@ pub struct WorkloadQueueRegistryStatus {
     kind = "MirrordWorkloadQueueRegistry",
     shortname = "qs",
     status = "WorkloadQueueRegistryStatus",
+    schema = "manual",
     namespaced
 )]
-#[schemars(rename = "co.metalbear.mirrord.queues.v1alpha.MirrordWorkloadQueueRegistry")]
+#[schemars(rename = "co.metalbear.mirrord.queues.v1alpha.MirrordWorkloadQueueRegistrySpec")]
 pub struct MirrordWorkloadQueueRegistrySpec {
     /// A map of the queues that should be split.
     /// The key is used by users to associate filters to the right queues.
@@ -539,6 +623,13 @@ pub struct MirrordWorkloadQueueRegistrySpec {
     /// The resource (deployment or Argo rollout) that reads from the queues.
     pub consumer: QueueConsumer,
 }
+
+crd_schemars_impl_with_prefix!(
+    "co.metalbear.mirrord.queues.v1alpha",
+    MirrordWorkloadQueueRegistry,
+    MirrordWorkloadQueueRegistrySpec,
+    WorkloadQueueRegistryStatus
+);
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[schemars(rename = "co.metalbear.mirrord.queues.v1alpha.SQSSplitDetails")]
@@ -636,9 +727,10 @@ pub fn is_session_ready(session: Option<&MirrordSqsSession>) -> bool {
     kind = "MirrordSQSSession",
     root = "MirrordSqsSession", // for Rust naming conventions (Sqs, not SQS)
     status = "SqsSessionStatus",
+    schema = "manual",
     namespaced
 )]
-#[schemars(rename = "co.metalbear.mirrord.queues.v1alpha.MirrordSQSSession")]
+#[schemars(rename = "co.metalbear.mirrord.queues.v1alpha.MirrordSqsSessionSpec")]
 #[serde(rename_all = "camelCase")] // queue_filters -> queueFilters
 pub struct MirrordSqsSessionSpec {
     /// For each queue_id, a mapping from attribute name, to attribute value regex.
@@ -655,15 +747,23 @@ pub struct MirrordSqsSessionSpec {
     pub session_id: String,
 }
 
+crd_schemars_impl_with_prefix!(
+    "co.metalbear.mirrord.queues.v1alpha",
+    MirrordSqsSession,
+    MirrordSqsSessionSpec,
+    SqsSessionStatus
+);
+
 /// Describes an operator user.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
     version = "v1",
     kind = "MirrordOperatorUser",
-    root = "MirrordOperatorUser"
+    root = "MirrordOperatorUser",
+    schema = "manual"
 )]
-#[schemars(rename = "co.metalbear.operator.v1.MirrordOperatorUser")]
+#[schemars(rename = "co.metalbear.operator.v1.MirrordOperatorUserSpec")]
 #[serde(rename_all = "camelCase")]
 pub struct MirrordOperatorUserSpec {
     /// Unique ID.
@@ -683,3 +783,9 @@ pub struct MirrordOperatorUserSpec {
     /// Last session's target.
     pub last_target: String,
 }
+
+crd_schemars_impl_with_prefix!(
+    "co.metalbear.operator.v1",
+    MirrordOperatorUser,
+    MirrordOperatorUserSpec
+);
