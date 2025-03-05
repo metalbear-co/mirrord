@@ -13,12 +13,16 @@ use tokio::{
     task::{JoinHandle, JoinSet},
 };
 
+/// Handles portforwarding from a local port to a pod in the cluster.
 pub struct PortForwarder {
+    /// Address of the local listener.
     address: SocketAddr,
+    /// Handle to the background [`tokio::task`] that handles connections.
     handle: JoinHandle<()>,
 }
 
 impl PortForwarder {
+    /// Creates a portforwarder for a specific port on a specific pod.
     pub async fn new(client: Client, pod_name: &str, pod_namespace: &str, port: u16) -> Self {
         let api = Api::namespaced(client, pod_namespace);
 
@@ -41,6 +45,7 @@ impl PortForwarder {
         Self { address, handle }
     }
 
+    /// Creates a portforwarder for a specific port on any pod from the given service.
     #[cfg(feature = "operator")]
     pub async fn new_for_service(client: Client, service: &Service, port: u16) -> Self {
         let selector = service
@@ -79,10 +84,12 @@ impl PortForwarder {
         .await
     }
 
+    /// Returns the local address on which this portforwarder accepts connections.
     pub fn address(&self) -> SocketAddr {
         self.address
     }
 
+    /// Logic of the background [`tokio::task`] that handles connections.
     async fn background_task(listener: TcpListener, api: Api<Pod>, pod_name: String, port: u16) {
         let mut tasks = JoinSet::new();
 
