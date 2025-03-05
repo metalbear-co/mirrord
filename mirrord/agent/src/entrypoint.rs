@@ -17,6 +17,7 @@ use metrics::{start_metrics, CLIENT_COUNT};
 use mirrord_agent_env::envs;
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use sniffer::tcp_capture::RawSocketTcpCapture;
+use steal::StealerMessage;
 use tokio::{
     net::{TcpListener, TcpStream},
     process::Command,
@@ -367,7 +368,8 @@ impl ClientConnectionHandler {
                         unreachable!()
                     }
                 }, if self.tcp_stealer_api.is_some() => match message {
-                    Ok(message) => self.respond(DaemonMessage::TcpSteal(message)).await?,
+                    Ok(StealerMessage::TcpSteal(message)) => self.respond(DaemonMessage::TcpSteal(message)).await?,
+                    Ok(StealerMessage::LogMessage(log)) => self.respond(DaemonMessage::LogMessage(log)).await?,
                     Err(e) => break e,
                 },
                 message = self.tcp_outgoing_api.recv_from_task() => match message {

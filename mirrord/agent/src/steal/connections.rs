@@ -6,7 +6,7 @@ use std::{collections::HashMap, fmt, io, net::SocketAddr, time::Duration};
 use hyper::{body::Incoming, Request, Response};
 use mirrord_protocol::{
     tcp::{HttpRequestMetadata, HttpRequestTransportType, NewTcpConnection},
-    ConnectionId, RequestId,
+    ConnectionId, LogMessage, RequestId,
 };
 use original_destination::OriginalDestination;
 use thiserror::Error;
@@ -161,6 +161,14 @@ pub enum ConnectionMessageOut {
         client_id: ClientId,
         connection_id: ConnectionId,
     },
+    /// The client recevied a log message from the connection.
+    ///
+    /// This variant translates to [`LogMessage`].
+    LogMessage {
+        client_id: ClientId,
+        connection_id: ConnectionId,
+        message: LogMessage,
+    },
     /// The connection was closed for the given client.
     ///
     /// This variant translates to [`DaemonTcp::Close`](mirrord_protocol::tcp::DaemonTcp::Close).
@@ -218,6 +226,16 @@ impl fmt::Debug for ConnectionMessageOut {
                 debug_struct.field("type", &"SubscribedHttp");
                 debug_struct.field("connection_id", connection_id);
                 debug_struct.field("client_id", client_id);
+            }
+            Self::LogMessage {
+                client_id,
+                connection_id,
+                message,
+            } => {
+                debug_struct.field("type", &"LogMessage");
+                debug_struct.field("connection_id", connection_id);
+                debug_struct.field("client_id", client_id);
+                debug_struct.field("message", message);
             }
             Self::Closed {
                 client_id,

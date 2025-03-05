@@ -4,7 +4,7 @@ use bytes::Bytes;
 use hyper::body::Frame;
 use mirrord_protocol::{
     tcp::{ChunkedResponse, DaemonTcp, HttpResponse, InternalHttpResponse, LayerTcpSteal, TcpData},
-    RequestId,
+    LogMessage, RequestId,
 };
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_stream::wrappers::ReceiverStream;
@@ -17,6 +17,12 @@ use crate::{
 };
 
 type ResponseBodyTx = Sender<Result<Frame<Bytes>, Infallible>>;
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum StealerMessage {
+    TcpSteal(DaemonTcp),
+    LogMessage(LogMessage),
+}
 
 /// Bridges the communication between the agent and the [`TcpConnectionStealer`] task.
 /// There is an API instance for each connected layer ("client"). All API instances send commands
@@ -34,7 +40,7 @@ pub(crate) struct TcpStealerApi {
     /// Channel that receives [`DaemonTcp`] messages from the stealer worker thread.
     ///
     /// This is where we get the messages that should be passed back to agent or layer.
-    daemon_rx: Receiver<DaemonTcp>,
+    daemon_rx: Receiver<StealerMessage>,
 
     /// View on the stealer task's status.
     task_status: TaskStatus,
@@ -103,10 +109,10 @@ impl TcpStealerApi {
     ///
     /// Called in the `ClientConnectionHandler`.
     #[tracing::instrument(level = "trace", skip(self))]
-    pub(crate) async fn recv(&mut self) -> AgentResult<DaemonTcp> {
+    pub(crate) async fn recv(&mut self) -> AgentResult<StealerMessage> {
         match self.daemon_rx.recv().await {
             Some(msg) => {
-                if let DaemonTcp::Close(close) = &msg {
+                if let StealerMessage::TcpSteal(DaemonTcp::Close(close)) = &msg {
                     self.response_body_txs
                         .retain(|(key_id, _), _| *key_id != close.connection_id);
                     HTTP_REQUEST_IN_PROGRESS_COUNT.store(
