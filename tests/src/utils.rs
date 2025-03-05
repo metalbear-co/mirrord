@@ -113,9 +113,7 @@ pub enum Application {
 
 #[derive(Debug)]
 pub enum FileOps {
-    #[cfg(target_os = "linux")]
     Python,
-    #[cfg(target_os = "linux")]
     Rust,
     GoDir21,
     GoDir22,
@@ -519,11 +517,9 @@ impl Application {
 impl FileOps {
     pub fn command(&self) -> Vec<&str> {
         match self {
-            #[cfg(target_os = "linux")]
             FileOps::Python => {
                 vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"]
             }
-            #[cfg(target_os = "linux")]
             FileOps::Rust => vec!["../target/debug/rust-e2e-fileops"],
             FileOps::GoDir21 => vec!["go-e2e-dir/21.go_test_app"],
             FileOps::GoDir22 => vec!["go-e2e-dir/22.go_test_app"],
@@ -532,7 +528,6 @@ impl FileOps {
         }
     }
 
-    #[cfg(target_os = "linux")]
     pub async fn assert(&self, process: TestProcess) {
         if let FileOps::Python = self {
             process.assert_python_fileops_stderr().await
