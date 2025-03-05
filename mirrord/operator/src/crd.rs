@@ -35,6 +35,7 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
     root = "TargetCrd",
     namespaced
 )]
+#[schemars(rename = "co.metalbear.operator.v1.Target")]
 pub struct TargetSpec {
     /// The kubernetes resource to target.
     pub target: KubeTarget,
@@ -107,6 +108,7 @@ pub static OPERATOR_STATUS_NAME: &str = "operator";
     root = "MirrordOperatorCrd",
     status = "MirrordOperatorStatus"
 )]
+#[schemars(rename = "co.metalbear.operator.v1.MirrordOperator")]
 pub struct MirrordOperatorSpec {
     #[schemars(with = "String")]
     pub operator_version: Version,
@@ -208,6 +210,7 @@ impl MirrordOperatorSpec {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[schemars(rename = "co.metalbear.operator.v1.MirrordOperatorStatus")]
 pub struct MirrordOperatorStatus {
     pub sessions: Vec<Session>,
     pub statistics: Option<MirrordOperatorStatusStatistics>,
@@ -218,12 +221,14 @@ pub struct MirrordOperatorStatus {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[schemars(rename = "co.metalbear.operator.v1.MirrordOperatorStatusStatistics")]
 pub struct MirrordOperatorStatusStatistics {
     pub dau: usize,
     pub mau: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[schemars(rename = "co.metalbear.operator.v1.Session")]
 pub struct Session {
     pub id: Option<String>,
     pub duration_secs: u64,
@@ -252,6 +257,7 @@ pub struct Session {
     kind = "Session",
     root = "SessionCrd"
 )]
+#[schemars(rename = "co.metalbear.operator.v1.SessionSpec")]
 pub struct SessionSpec;
 
 /// Features supported by operator
@@ -261,6 +267,7 @@ pub struct SessionSpec;
 /// operator can never send anything but the one existing variant, otherwise the client will error
 /// out.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[schemars(rename = "co.metalbear.operator.v1.DepricatedOperatorFeatures")]
 pub enum OperatorFeatures {
     ProxyApi,
     // DON'T ADD VARIANTS - old clients won't be able to deserialize them.
@@ -268,6 +275,7 @@ pub enum OperatorFeatures {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[schemars(rename = "co.metalbear.operator.v1.OperatorFeatures")]
 pub enum NewOperatorFeature {
     ProxyApi,
     CopyTarget,
@@ -316,6 +324,7 @@ impl From<&OperatorFeatures> for NewOperatorFeature {
     status = "CopyTargetStatus",
     namespaced
 )]
+#[schemars(rename = "co.metalbear.operator.v1.CopyTarget")]
 pub struct CopyTargetSpec {
     /// Original target. Only [`Target::Pod`] and [`Target::Deployment`] are accepted.
     pub target: Target,
@@ -355,6 +364,7 @@ impl CopyTargetCrd {
 
 /// This is the `status` field for [`CopyTargetCrd`].
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[schemars(rename = "co.metalbear.operator.v1.CopyTargetStatus")]
 pub struct CopyTargetStatus {
     /// The session object of the original session that created this CopyTarget
     pub creator_session: Session,
