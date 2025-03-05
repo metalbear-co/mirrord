@@ -501,7 +501,7 @@ fn get_patch_applied_check(generation: i64) -> impl Fn(Option<&Deployment>) -> b
     }
 }
 
-/// Is there a "localstack" service in the "default" namespace.
+/// Attempts to find the `localstack` service in the `default` namespace.
 async fn localstack_in_default_namespace(kube_client: &Client) -> Option<Service> {
     let service_api = Api::<Service>::namespaced(kube_client.clone(), "default");
     service_api.get("localstack").await.ok()
