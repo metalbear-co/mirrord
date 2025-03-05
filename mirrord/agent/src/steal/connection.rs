@@ -779,7 +779,7 @@ where
     }
 
     /// Handles [`Command`]s that were received by [`TcpConnectionStealer::command_rx`].
-    #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     async fn handle_command(&mut self, command: StealerCommand) -> AgentResult<()> {
         let StealerCommand { client_id, command } = command;
 
@@ -846,7 +846,6 @@ where
                 if is_last {
                     HTTP_REQUEST_IN_PROGRESS_COUNT
                         .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-                    tracing::debug!("YES IT IS LAST");
                 }
             }
 

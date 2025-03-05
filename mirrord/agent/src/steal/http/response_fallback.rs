@@ -23,6 +23,9 @@ pub enum HttpResponseFallback {
 
 impl HttpResponseFallback {
     /// Checks `http_body::Body::is_end_stream`, returning `true` if this response is done.
+    ///
+    /// Used by our metrics system to decrement the `HTTP_REQUEST_IN_PROGRESS_COUNT` counter
+    /// when an streamed HTTP request has finished.
     pub fn is_last(&self) -> bool {
         match self {
             HttpResponseFallback::Framed(http_response) => {

@@ -223,8 +223,6 @@ impl TcpStealerApi {
 
                     let key = (response.connection_id, response.request_id);
                     self.response_body_txs.insert(key, tx.clone());
-                    // HTTP_REQUEST_IN_PROGRESS_COUNT
-                    //     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                     self.http_response(HttpResponseFallback::Streamed(http_response))
                         .await?;
