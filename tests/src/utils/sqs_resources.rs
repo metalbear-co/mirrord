@@ -435,7 +435,7 @@ async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<Resourc
         env,
         namespace,
         selector,
-        Duration::from_secs(30),
+        Duration::from_secs(120),
     )
     .await;
 }
