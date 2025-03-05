@@ -56,12 +56,6 @@ pub(crate) struct TcpStealerApi {
     response_body_txs: HashMap<(ConnectionId, RequestId), ResponseBodyTx>,
 }
 
-impl Drop for TcpStealerApi {
-    fn drop(&mut self) {
-        HTTP_REQUEST_IN_PROGRESS_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
 impl TcpStealerApi {
     /// Initializes a [`TcpStealerApi`] and sends a message to [`TcpConnectionStealer`] signaling
     /// that we have a new client.
@@ -113,10 +107,11 @@ impl TcpStealerApi {
         match self.daemon_rx.recv().await {
             Some(msg) => {
                 if let StealerMessage::TcpSteal(DaemonTcp::Close(close)) = &msg {
+                    let all_in_progress = self.response_body_txs.len();
                     self.response_body_txs
                         .retain(|(key_id, _), _| *key_id != close.connection_id);
-                    HTTP_REQUEST_IN_PROGRESS_COUNT.store(
-                        self.response_body_txs.len() as i64,
+                    HTTP_REQUEST_IN_PROGRESS_COUNT.fetch_sub(
+                        (all_in_progress - self.response_body_txs.len()) as i64,
                         std::sync::atomic::Ordering::Relaxed,
                     );
                 }
@@ -190,10 +185,13 @@ impl TcpStealerApi {
         match message {
             LayerTcpSteal::PortSubscribe(port_steal) => self.port_subscribe(port_steal).await,
             LayerTcpSteal::ConnectionUnsubscribe(connection_id) => {
+                let all_in_progress = self.response_body_txs.len();
                 self.response_body_txs
                     .retain(|(key_id, _), _| *key_id != connection_id);
-                HTTP_REQUEST_IN_PROGRESS_COUNT
-                    .store(self.response_body_txs.len() as i64, Ordering::Relaxed);
+                HTTP_REQUEST_IN_PROGRESS_COUNT.fetch_sub(
+                    (all_in_progress - self.response_body_txs.len()) as i64,
+                    Ordering::Relaxed,
+                );
 
                 self.connection_unsubscribe(connection_id).await
             }
@@ -225,10 +223,8 @@ impl TcpStealerApi {
 
                     let key = (response.connection_id, response.request_id);
                     self.response_body_txs.insert(key, tx.clone());
-                    HTTP_REQUEST_IN_PROGRESS_COUNT.store(
-                        self.response_body_txs.len() as i64,
-                        std::sync::atomic::Ordering::Relaxed,
-                    );
+                    // HTTP_REQUEST_IN_PROGRESS_COUNT
+                    //     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                     self.http_response(HttpResponseFallback::Streamed(http_response))
                         .await?;
@@ -236,8 +232,7 @@ impl TcpStealerApi {
                     for frame in response.internal_response.body {
                         if let Err(err) = tx.send(Ok(frame.into())).await {
                             self.response_body_txs.remove(&key);
-                            HTTP_REQUEST_IN_PROGRESS_COUNT
-                                .store(self.response_body_txs.len() as i64, Ordering::Relaxed);
+                            HTTP_REQUEST_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
                             tracing::trace!(?err, "error while sending streaming response frame");
                         }
                     }
@@ -260,16 +255,14 @@ impl TcpStealerApi {
                     }
                     if send_err || body.is_last {
                         self.response_body_txs.remove(key);
-                        HTTP_REQUEST_IN_PROGRESS_COUNT
-                            .store(self.response_body_txs.len() as i64, Ordering::Relaxed);
+                        HTTP_REQUEST_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
                     };
                     Ok(())
                 }
                 ChunkedResponse::Error(err) => {
                     self.response_body_txs
                         .remove(&(err.connection_id, err.request_id));
-                    HTTP_REQUEST_IN_PROGRESS_COUNT
-                        .store(self.response_body_txs.len() as i64, Ordering::Relaxed);
+                    HTTP_REQUEST_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
                     tracing::trace!(?err, "ChunkedResponse error received");
                     Ok(())
                 }
