@@ -29,9 +29,12 @@ pub const TARGETLESS_TARGET_NAME: &str = "targetless";
 
 macro_rules! crd_schemars_impl_with_prefix {
     ($prefix:literal, $ident:ident, $spec:ident, $status:ident) => {
+        crd_schemars_impl_with_prefix!($prefix, $ident as $ident, $spec, $status);
+    };
+    ($prefix:literal, $ident:ident as $ident_name:ident, $spec:ident, $status:ident) => {
         impl schemars::JsonSchema for $ident {
             fn schema_name() -> String {
-                concat!($prefix, ".", stringify!($ident)).into()
+                concat!($prefix, ".", stringify!($ident_name)).into()
             }
 
             fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
@@ -60,9 +63,12 @@ macro_rules! crd_schemars_impl_with_prefix {
         }
     };
     ($prefix:literal, $ident:ident, $spec:ident) => {
+        crd_schemars_impl_with_prefix!($prefix, $ident as $ident, $spec);
+    };
+    ($prefix:literal, $ident:ident as $ident_name:ident, $spec:ident) => {
         impl schemars::JsonSchema for $ident {
             fn schema_name() -> String {
-                concat!($prefix, ".", stringify!($ident)).into()
+                concat!($prefix, ".", stringify!($ident_name)).into()
             }
 
             fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
@@ -160,7 +166,7 @@ impl TryFrom<TargetCrd> for TargetConfig {
     }
 }
 
-crd_schemars_impl_with_prefix!("co.metalbear.operator.v1", TargetCrd, TargetSpec);
+crd_schemars_impl_with_prefix!("co.metalbear.operator.v1", TargetCrd as Target, TargetSpec);
 
 pub static OPERATOR_STATUS_NAME: &str = "operator";
 
@@ -276,7 +282,7 @@ impl MirrordOperatorSpec {
 
 crd_schemars_impl_with_prefix!(
     "co.metalbear.operator.v1",
-    MirrordOperatorCrd,
+    MirrordOperatorCrd as MirrordOperator,
     MirrordOperatorSpec,
     MirrordOperatorStatus
 );
@@ -333,7 +339,11 @@ pub struct Session {
 #[schemars(rename = "co.metalbear.operator.v1.SessionSpec")]
 pub struct SessionSpec;
 
-crd_schemars_impl_with_prefix!("co.metalbear.operator.v1", SessionCrd, SessionSpec);
+crd_schemars_impl_with_prefix!(
+    "co.metalbear.operator.v1",
+    SessionCrd as Session,
+    SessionSpec
+);
 
 /// Features supported by operator
 ///
@@ -440,7 +450,7 @@ impl CopyTargetCrd {
 
 crd_schemars_impl_with_prefix!(
     "co.metalbear.operator.v1",
-    CopyTargetCrd,
+    CopyTargetCrd as CopyTarget,
     CopyTargetSpec,
     CopyTargetStatus
 );
@@ -730,7 +740,7 @@ pub fn is_session_ready(session: Option<&MirrordSqsSession>) -> bool {
     schema = "manual",
     namespaced
 )]
-#[schemars(rename = "co.metalbear.mirrord.queues.v1alpha.MirrordSqsSessionSpec")]
+#[schemars(rename = "co.metalbear.mirrord.queues.v1alpha.MirrordSQSSessionSpec")]
 #[serde(rename_all = "camelCase")] // queue_filters -> queueFilters
 pub struct MirrordSqsSessionSpec {
     /// For each queue_id, a mapping from attribute name, to attribute value regex.
@@ -749,7 +759,7 @@ pub struct MirrordSqsSessionSpec {
 
 crd_schemars_impl_with_prefix!(
     "co.metalbear.mirrord.queues.v1alpha",
-    MirrordSqsSession,
+    MirrordSqsSession as MirrordSQSSession,
     MirrordSqsSessionSpec,
     SqsSessionStatus
 );
