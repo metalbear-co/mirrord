@@ -1,8 +1,8 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt,
-    hash::{Hash, Hasher},
     net::Ipv4Addr,
+    ops::Not,
 };
 
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -34,79 +34,75 @@ pub(crate) mod api;
 pub(crate) mod messages;
 pub(crate) mod tcp_capture;
 
-#[derive(Debug, Eq, Copy, Clone)]
-pub(crate) struct TcpSessionIdentifier {
-    /// The remote address that is sending a packet to the impersonated pod.
+/// Identifies one direction of a TCP stream.
+///
+/// TCP stream are bidirectional. This struct identifies one of the directions.
+/// Its [`Eq`] and [`Hash`](std::hash::Hash) implementations
+/// make sure that we differentiate between the directions.
+#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+pub(crate) struct TcpSessionDirectionId {
+    /// The address of the peer that's sending data.
     ///
-    /// ## Details
+    /// # Details
     ///
     /// If you were to `curl {impersonated_pod_ip}:{port}`, this would be the address of whoever
     /// is making the request.
+    ///
+    /// Note that a service mesh would usually intercept the request and resend from
+    /// [`Ipv4Addr::LOCALHOST`].
     pub(crate) source_addr: Ipv4Addr,
-
-    /// Local address of the impersonated pod.
+    /// The address of the peer that's receiving data.
     ///
-    /// ## Details
-    ///
-    /// You can get this IP by checking `kubectl get pod -o wide`.
-    ///
-    /// ```sh
-    /// $ kubectl get pod -o wide
-    /// NAME        READY   STATUS    IP
-    /// happy-pod   1/1     Running   1.2.3.4   
-    /// ```
+    /// This should be the address of the interface on which the [`TcpConnectionSniffer`] set up
+    /// its raw socket.
     pub(crate) dest_addr: Ipv4Addr,
+    /// Port from which the data is sent.
     pub(crate) source_port: u16,
+    /// Port on which the data is received.
     pub(crate) dest_port: u16,
 }
 
-impl PartialEq for TcpSessionIdentifier {
-    /// It's the same session if 4 tuple is same/opposite.
-    fn eq(&self, other: &TcpSessionIdentifier) -> bool {
-        self.source_addr == other.source_addr
-            && self.dest_addr == other.dest_addr
-            && self.source_port == other.source_port
-            && self.dest_port == other.dest_port
-            || self.source_addr == other.dest_addr
-                && self.dest_addr == other.source_addr
-                && self.source_port == other.dest_port
-                && self.dest_port == other.source_port
-    }
-}
+type TCPSessionMap = HashMap<TcpSessionDirectionId, broadcast::Sender<Vec<u8>>>;
 
-impl Hash for TcpSessionIdentifier {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        if self.source_addr > self.dest_addr {
-            self.source_addr.hash(state);
-            self.dest_addr.hash(state);
-        } else {
-            self.dest_addr.hash(state);
-            self.source_addr.hash(state);
-        }
-        if self.source_port > self.dest_port {
-            self.source_port.hash(state);
-            self.dest_port.hash(state);
-        } else {
-            self.dest_port.hash(state);
-            self.source_port.hash(state);
-        }
-    }
-}
-
-type TCPSessionMap = HashMap<TcpSessionIdentifier, broadcast::Sender<Vec<u8>>>;
-
-const fn is_new_connection(flags: u8) -> bool {
-    0 != (flags & TcpFlags::SYN) && 0 == (flags & (TcpFlags::ACK | TcpFlags::RST | TcpFlags::FIN))
-}
-
-fn is_closed_connection(flags: u8) -> bool {
-    0 != (flags & (TcpFlags::FIN | TcpFlags::RST))
-}
-
-#[derive(Debug)]
 pub(crate) struct TcpPacketData {
     bytes: Vec<u8>,
     flags: u8,
+}
+
+impl TcpPacketData {
+    fn is_new_connection(&self) -> bool {
+        0 != (self.flags & TcpFlags::SYN)
+            && 0 == (self.flags & (TcpFlags::ACK | TcpFlags::RST | TcpFlags::FIN))
+    }
+
+    fn is_closed_connection(&self) -> bool {
+        0 != (self.flags & (TcpFlags::FIN | TcpFlags::RST))
+    }
+
+    /// Checks whether this packet starts a new mirrored connection in the sniffer.
+    ///
+    /// First it checks [`Self::is_new_connection`].
+    /// If that's not the case, meaning that the connection existed before the sniffer had started,
+    /// then it tries to see if [`Self::bytes`] contains an HTTP request of some sort. When an
+    /// HTTP request is detected, then the agent should start mirroring as if it was a new
+    /// connection.
+    #[tracing::instrument(level = Level::TRACE, ret)]
+    fn treat_as_new_session(&self) -> bool {
+        self.is_new_connection()
+            || matches!(
+                HttpVersion::new(&self.bytes),
+                Some(HttpVersion::V1 | HttpVersion::V2)
+            )
+    }
+}
+
+impl fmt::Debug for TcpPacketData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TcpPacketData")
+            .field("flags", &self.flags)
+            .field("bytes", &self.bytes.len())
+            .finish()
+    }
 }
 
 /// Main struct implementing incoming traffic mirroring feature.
@@ -303,36 +299,11 @@ where
         Ok(())
     }
 
-    /// First it checks the `tcp_flags` with [`is_new_connection`], if that's not the case, meaning
-    /// we have traffic from some existing connection from before mirrord started, then it tries to
-    /// see if `bytes` contains an HTTP request of some sort. When an HTTP request is
-    /// detected, then the agent should start mirroring as if it was a new connection.
-    ///
-    /// tl;dr: checks packet flags, or if it's an HTTP packet, then begins a new sniffing session.
-    #[tracing::instrument(level = Level::TRACE, ret, skip(bytes), fields(bytes = bytes.len()), ret)]
-    fn treat_as_new_session(tcp_flags: u8, bytes: &[u8]) -> bool {
-        is_new_connection(tcp_flags)
-            || matches!(
-                HttpVersion::new(bytes),
-                Some(HttpVersion::V1 | HttpVersion::V2)
-            )
-    }
-
     /// Handles TCP packet sniffed by [`Self::tcp_capture`].
-    #[tracing::instrument(
-        level = Level::TRACE,
-        ret,
-        skip(self),
-        fields(
-            destination_port = identifier.dest_port,
-            source_port = identifier.source_port,
-            tcp_flags = tcp_packet.flags,
-            bytes = tcp_packet.bytes.len(),
-        )
-    )]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     fn handle_packet(
         &mut self,
-        identifier: TcpSessionIdentifier,
+        identifier: TcpSessionDirectionId,
         tcp_packet: TcpPacketData,
     ) -> AgentResult<()> {
         let data_tx = match self.sessions.entry(identifier) {
@@ -340,7 +311,7 @@ where
             Entry::Vacant(e) => {
                 // Performs a check on the `tcp_flags` and on the packet contents to see if this
                 // should be treated as a new connection.
-                if !Self::treat_as_new_session(tcp_packet.flags, &tcp_packet.bytes) {
+                if tcp_packet.treat_as_new_session().not() {
                     // Either it's an existing session, or some sort of existing traffic we don't
                     // care to start mirroring.
                     return Ok(());
@@ -410,13 +381,15 @@ where
 
         tracing::trace!("Resolved data broadcast channel");
 
+        let closes_connection = tcp_packet.is_closed_connection();
+
         if !tcp_packet.bytes.is_empty() && data_tx.get().send(tcp_packet.bytes).is_err() {
             tracing::trace!("All data receivers are dead, dropping data broadcast sender");
             data_tx.remove();
             return Ok(());
         }
 
-        if is_closed_connection(tcp_packet.flags) {
+        if closes_connection {
             tracing::trace!("TCP packet closes connection, dropping data broadcast channel");
             data_tx.remove();
         }
@@ -450,7 +423,7 @@ mod test {
     struct TestSnifferSetup {
         command_tx: Sender<SnifferCommand>,
         task_status: TaskStatus,
-        packet_tx: Sender<(TcpSessionIdentifier, TcpPacketData)>,
+        packet_tx: Sender<(TcpSessionDirectionId, TcpPacketData)>,
         times_filter_changed: Arc<AtomicUsize>,
         next_client_id: ClientId,
     }
@@ -521,7 +494,7 @@ mod test {
             setup
                 .packet_tx
                 .send((
-                    TcpSessionIdentifier {
+                    TcpSessionDirectionId {
                         source_addr: "1.1.1.1".parse().unwrap(),
                         dest_addr: "127.0.0.1".parse().unwrap(),
                         source_port: 3133,
@@ -538,7 +511,7 @@ mod test {
             setup
                 .packet_tx
                 .send((
-                    TcpSessionIdentifier {
+                    TcpSessionDirectionId {
                         source_addr: "1.1.1.1".parse().unwrap(),
                         dest_addr: "127.0.0.1".parse().unwrap(),
                         source_port: 3133,
@@ -690,7 +663,7 @@ mod test {
             (DaemonTcp::SubscribeResult(Ok(80)), None),
         );
 
-        let session_id = TcpSessionIdentifier {
+        let session_id = TcpSessionDirectionId {
             source_addr: "1.1.1.1".parse().unwrap(),
             dest_addr: "127.0.0.1".parse().unwrap(),
             source_port: 3133,
@@ -781,7 +754,7 @@ mod test {
 
         // First send `TcpSnifferApi::CONNECTION_CHANNEL_SIZE` + 2 first connections.
         let session_ids =
-            (0..=TcpSnifferApi::CONNECTION_CHANNEL_SIZE).map(|idx| TcpSessionIdentifier {
+            (0..=TcpSnifferApi::CONNECTION_CHANNEL_SIZE).map(|idx| TcpSessionDirectionId {
                 source_addr,
                 dest_addr,
                 source_port: 3000 + idx as u16,
@@ -829,7 +802,7 @@ mod test {
         setup
             .packet_tx
             .send((
-                TcpSessionIdentifier {
+                TcpSessionDirectionId {
                     source_addr,
                     dest_addr,
                     source_port: 3222,
