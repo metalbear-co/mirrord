@@ -45,6 +45,10 @@ pub type QueueId = String;
 /// }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "namespaced-schemars",
+    schemars(rename = "co.metalbear.mirrord.queues.v1alpha.SplitQueuesConfig")
+)]
 pub struct SplitQueuesConfig(BTreeMap<QueueId, QueueFilter>);
 
 impl SplitQueuesConfig {
@@ -120,6 +124,10 @@ pub type QueueMessageFilter = BTreeMap<String, String>;
 /// More queue types might be added in the future.
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
 #[serde(tag = "queue_type")]
+#[cfg_attr(
+    feature = "namespaced-schemars",
+    schemars(rename = "co.metalbear.mirrord.queues.v1alpha.QueueFilter")
+)]
 pub enum QueueFilter {
     /// Amazon Simple Queue Service.
     #[serde(rename = "SQS")]
