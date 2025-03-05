@@ -119,7 +119,7 @@ mod file_ops_tests {
         })
         .to_string();
         let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
-        config_file.write(config.as_bytes()).unwrap();
+        config_file.write_all(config.as_bytes()).unwrap();
         let file_name = config_file.path().to_string_lossy();
 
         let mut args = vec!["-f", file_name.as_ref()];

@@ -547,7 +547,11 @@ impl FileManager {
         let flags = match flags as i32 {
             0 => UnlinkatFlags::NoRemoveDir,
             libc::AT_REMOVEDIR => UnlinkatFlags::RemoveDir,
-            _ => return Err(ResponseError::from(std::io::Error::from_raw_os_error(libc::EINVAL as i32))),
+            _ => {
+                return Err(ResponseError::from(std::io::Error::from_raw_os_error(
+                    libc::EINVAL,
+                )))
+            }
         };
 
         let fd: Option<RawFd> = dirfd.map(|fd| fd as RawFd);
