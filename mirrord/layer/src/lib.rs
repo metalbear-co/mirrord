@@ -382,7 +382,7 @@ fn layer_start(mut config: LayerConfig) {
         pid = std::process::id(),
         parent_pid = parent_id(),
         env_vars = ?env_vars_print_only,
-        "Loaded into executable",
+        "Loaded into executable (base64 config omitted)",
     );
 
     if trace_only {
