@@ -15,7 +15,9 @@ use tracing::Level;
 
 use self::interceptor::Interceptor;
 use crate::{
-    background_tasks::{BackgroundTask, BackgroundTasks, MessageBus, TaskSender, TaskUpdate},
+    background_tasks::{
+        BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
+    },
     error::{agent_lost_io_error, UnexpectedAgentMessage},
     main_tasks::ToLayer,
     proxies::outgoing::net_protocol_ext::NetProtocolExt,
@@ -153,7 +155,7 @@ impl OutgoingProxy {
     /// Handles agent's response to a connection request.
     /// Prepares a local socket and registers a new [`Interceptor`] task for this connection.
     /// Replies to the layer's request.
-    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
+    #[tracing::instrument(level = Level::DEBUG, skip(self, message_bus), ret, err)]
     async fn handle_connect_response(
         &mut self,
         connect: RemoteResult<DaemonConnect>,
@@ -201,8 +203,9 @@ impl OutgoingProxy {
             protocol,
         };
 
+        tracing::debug!(%id, "Starting interceptor task");
         let interceptor = self.background_tasks.register(
-            Interceptor::new(prepared_socket),
+            Interceptor::new(id, prepared_socket),
             id,
             Self::CHANNEL_SIZE,
         );
@@ -223,7 +226,7 @@ impl OutgoingProxy {
     }
 
     /// Saves the layer's request id and sends the connection request to the agent.
-    #[tracing::instrument(level = Level::TRACE, skip(self, message_bus))]
+    #[tracing::instrument(level = Level::DEBUG, skip(self, message_bus), ret)]
     async fn handle_connect_request(
         &mut self,
         message_id: MessageId,
@@ -238,9 +241,15 @@ impl OutgoingProxy {
         message_bus.send(ProxyMessage::ToAgent(msg)).await;
     }
 
+    #[tracing::instrument(level = Level::INFO, skip_all, ret)]
     async fn handle_connection_refresh(&mut self, message_bus: &mut MessageBus<Self>) {
+        tracing::debug!("Closing all local connections");
         self.txs.clear();
 
+        tracing::debug!(
+            responses = self.datagrams_reqs.len(),
+            "Flushing error responses to UDP connect requests"
+        );
         while let Some((message_id, layer_id)) = self.datagrams_reqs.pop_front() {
             message_bus
                 .send(ToLayer::from(AgentLostOutgoingResponse(
@@ -249,6 +258,10 @@ impl OutgoingProxy {
                 .await;
         }
 
+        tracing::debug!(
+            responses = self.stream_reqs.len(),
+            "Flushing error responses to TCP connect requests"
+        );
         while let Some((message_id, layer_id)) = self.stream_reqs.pop_front() {
             message_bus
                 .send(ToLayer::from(AgentLostOutgoingResponse(
@@ -272,12 +285,13 @@ impl BackgroundTask for OutgoingProxy {
     type MessageIn = OutgoingProxyMessage;
     type MessageOut = ProxyMessage;
 
+    #[tracing::instrument(level = Level::INFO, name = "outgoing_proxy_main_loop", skip_all, ret, err)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         loop {
             tokio::select! {
                 msg = message_bus.recv() => match msg {
                     None => {
-                        tracing::trace!("message bus closed, exiting");
+                        tracing::debug!("Message bus closed, exiting");
                         break Ok(());
                     },
                     Some(OutgoingProxyMessage::AgentStream(req)) => match req {
@@ -311,10 +325,18 @@ impl BackgroundTask for OutgoingProxy {
                         message_bus.send(ProxyMessage::ToAgent(msg)).await;
                     }
                     (id, TaskUpdate::Finished(res)) => {
-                        tracing::trace!("{id} finished: {res:?}");
+                        match res {
+                            Ok(()) => tracing::debug!(%id, "Interceptor finished"),
+                            Err(TaskError::Error(error)) => {
+                                tracing::warn!(%id, %error, "Interceptor failed");
+                            }
+                            Err(TaskError::Panic) => {
+                                tracing::error!(%id, "Interceptor panicked");
+                            }
+                        }
 
                         if self.txs.remove(&id).is_some() {
-                            tracing::trace!("local connection closed, notifying the agent");
+                            tracing::trace!(%id, "Local connection closed, notifying the agent");
                             let msg = id.protocol.wrap_agent_close(id.connection_id);
                             let _ = message_bus.send(ProxyMessage::ToAgent(msg)).await;
                             self.txs.remove(&id);

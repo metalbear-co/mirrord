@@ -111,11 +111,18 @@ pub struct InternalProxyConfig {
     /// ### internal_proxy.log_destination {#internal_proxy-log_destination}
     ///
     /// Set the log file destination for the internal proxy.
-    pub log_destination: Option<String>,
+    pub log_destination: Option<PathBuf>,
 
     /// <!--${internal}-->
     ///
     /// This informs the intproxy that it's running inside a continer and should not detach io
     #[config(default = false, env = MIRRORD_INTPROXY_CONTAINER_MODE_ENV)]
     pub container_mode: bool,
+
+    /// ### internal_proxy.json_log {#internal_proxy-json_log}
+    ///
+    /// Whether the proxy should output logs in JSON format. If false, logs are output in
+    /// human-readable format.
+    #[config(default = true)]
+    pub json_log: bool,
 }

@@ -20,8 +20,8 @@ use mirrord_protocol::{
     file::{
         MakeDirAtRequest, MakeDirRequest, OpenFileRequest, OpenFileResponse, OpenOptionsInternal,
         ReadFileResponse, ReadLinkFileRequest, ReadLinkFileResponse, RemoveDirRequest,
-        SeekFileResponse, StatFsRequestV2, UnlinkAtRequest, WriteFileResponse, XstatFsRequestV2,
-        XstatFsResponseV2, XstatResponse,
+        SeekFileResponse, StatFsRequestV2, UnlinkAtRequest, UnlinkRequest, WriteFileResponse,
+        XstatFsRequestV2, XstatFsResponseV2, XstatResponse,
     },
     ResponseError,
 };
@@ -407,7 +407,7 @@ pub(crate) fn rmdir(path: Detour<PathBuf>) -> Detour<()> {
 pub(crate) fn unlink(path: Detour<PathBuf>) -> Detour<()> {
     let path = common_path_check(path?, true)?;
 
-    let unlink = RemoveDirRequest { pathname: path };
+    let unlink = UnlinkRequest { pathname: path };
 
     // `NotImplemented` error here means that the protocol doesn't support it.
     match common::make_proxy_request_with_response(unlink)? {

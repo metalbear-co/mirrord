@@ -1,6 +1,6 @@
 use core::fmt;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     vec,
 };
 
@@ -371,13 +371,9 @@ impl RouterFileOps {
     /// Notify this manager that the agent was lost.
     /// Return messages to be sent to the user.
     #[tracing::instrument(level = Level::TRACE)]
-    pub fn agent_lost(&mut self) -> impl Iterator<Item = ProxyMessage> {
+    pub fn agent_lost(&mut self) -> VecDeque<AgentLostFileResponse> {
         self.current_fd_offset = self.highest_user_facing_fd.map(|fd| fd + 1).unwrap_or(0);
-
         std::mem::take(&mut self.queued_error_responses)
-            .into_iter()
-            .map(ToLayer::from)
-            .map(ProxyMessage::ToLayer)
     }
 }
 
@@ -517,6 +513,7 @@ impl FilesProxy {
     }
 
     /// Checks if the mirrord protocol version supports this [`FileRequest`].
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::WARN, Debug))]
     fn is_request_supported(&self, request: &FileRequest) -> Result<(), FileResponse> {
         let protocol_version = self.protocol_version.as_ref();
 
@@ -547,7 +544,7 @@ impl FilesProxy {
         }
     }
 
-    // #[tracing::instrument(level = Level::TRACE, skip(message_bus))]
+    #[tracing::instrument(level = Level::TRACE, skip(message_bus), ret)]
     async fn file_request(
         &mut self,
         request: FileRequest,
@@ -837,7 +834,7 @@ impl FilesProxy {
         }
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(message_bus))]
+    #[tracing::instrument(level = Level::TRACE, skip(message_bus), ret, err)]
     async fn file_response(
         &mut self,
         response: FileResponse,
@@ -1092,21 +1089,35 @@ impl FilesProxy {
         Ok(())
     }
 
+    #[tracing::instrument(level = Level::INFO, skip(message_bus), ret)]
     async fn handle_reconnect(&mut self, message_bus: &mut MessageBus<Self>) {
-        for (_, fds) in self.remote_files.drain() {
-            for fd in fds {
-                self.buffered_files.remove(&fd);
-            }
+        let files_to_drop = self
+            .remote_files
+            .drain()
+            .flat_map(|(_, fds)| fds)
+            .collect::<HashSet<_>>();
+        tracing::debug!(?files_to_drop, "Dropping remote files");
+        for fd in files_to_drop {
+            self.buffered_files.remove(&fd);
         }
 
-        for (_, fds) in self.remote_dirs.drain() {
-            for fd in fds {
-                self.buffered_dirs.remove(&fd);
-            }
+        let directories_to_drop = self
+            .remote_dirs
+            .drain()
+            .flat_map(|(_, fds)| fds)
+            .collect::<HashSet<_>>();
+        tracing::debug!(?directories_to_drop, "Dropping remote directories");
+        for fd in directories_to_drop {
+            self.buffered_dirs.remove(&fd);
         }
 
+        let responses = self.reconnect_tracker.agent_lost();
+        tracing::debug!(
+            num_responses = responses.len(),
+            "Flushing error responses to file requests"
+        );
         for response in self.reconnect_tracker.agent_lost() {
-            message_bus.send(response).await;
+            message_bus.send(ToLayer::from(response)).await;
         }
     }
 }
@@ -1116,10 +1127,9 @@ impl BackgroundTask for FilesProxy {
     type MessageOut = ProxyMessage;
     type Error = FilesProxyError;
 
+    #[tracing::instrument(level = Level::INFO, name = "files_proxy_main_loop", skip_all, ret, err)]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
         while let Some(message) = message_bus.recv().await {
-            tracing::trace!(?message, "new message in message_bus");
-
             match message {
                 FilesProxyMessage::FileReq(message_id, layer_id, request) => {
                     match self
@@ -1149,7 +1159,7 @@ impl BackgroundTask for FilesProxy {
             }
         }
 
-        tracing::trace!("message bus closed, exiting");
+        tracing::debug!("Message bus closed, exiting");
 
         Ok(())
     }

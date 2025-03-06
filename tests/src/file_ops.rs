@@ -2,19 +2,24 @@
 #[cfg(test)]
 mod file_ops_tests {
 
-    use std::time::Duration;
+    use std::{
+        fs::{create_dir, remove_dir, remove_dir_all},
+        io::Write,
+        path::Path,
+        time::Duration,
+    };
 
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api, Client};
     use rstest::*;
     use serde::Deserialize;
+    use tempfile::NamedTempFile;
 
     use crate::utils::{
         go_statfs_service, kube_client, run_exec_with_target, service, FileOps, KubeService,
     };
 
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
-    #[cfg(target_os = "linux")]
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -26,16 +31,14 @@ mod file_ops_tests {
         #[values(FileOps::Python, FileOps::Rust)] ops: FileOps,
     ) {
         let service = service.await;
-        let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let command = ops.command();
 
-        let mut args = vec!["--fs-mode", "write"];
-
+        let mut args = vec!["--fs-mode", "read"];
         if cfg!(feature = "ephemeral") {
             args.extend(["-e"].into_iter());
         }
 
-        let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp/**")];
+        let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp.*")];
         let mut process = run_exec_with_target(
             command,
             &service.pod_container_target(),
@@ -50,36 +53,6 @@ mod file_ops_tests {
     }
 
     #[cfg_attr(not(feature = "job"), ignore)]
-    #[cfg(target_os = "macos")]
-    #[rstest]
-    #[trace]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[timeout(Duration::from_secs(240))]
-    pub async fn file_ops(
-        #[future]
-        #[notrace]
-        service: KubeService,
-    ) {
-        let service = service.await;
-        let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
-        let python_command = vec!["python3", "-B", "-m", "unittest", "-f", "python-e2e/ops.py"];
-        let args = vec!["--fs-mode", "read"];
-        let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp**")];
-
-        let mut process = run_exec_with_target(
-            python_command,
-            &service.pod_container_target(),
-            Some(&service.namespace),
-            Some(args),
-            Some(env),
-        )
-        .await;
-        let res = process.wait().await;
-        assert!(res.success());
-        process.assert_python_fileops_stderr().await;
-    }
-
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[trace]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -90,7 +63,6 @@ mod file_ops_tests {
         service: KubeService,
     ) {
         let service = service.await;
-        let _ = std::fs::create_dir(std::path::Path::new("/tmp/fs"));
         let python_command = vec![
             "python3",
             "-B",
@@ -109,6 +81,59 @@ mod file_ops_tests {
         )
         .await;
         let res = process.wait().await;
+        assert!(res.success());
+        process.assert_python_fileops_stderr().await;
+    }
+
+    #[cfg_attr(not(feature = "job"), ignore)]
+    #[rstest]
+    #[trace]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[timeout(Duration::from_secs(240))]
+    pub async fn file_ops_unlink(
+        #[future]
+        #[notrace]
+        service: KubeService,
+    ) {
+        let service = service.await;
+        let python_command = vec![
+            "python3",
+            "-B",
+            "-m",
+            "unittest",
+            "-f",
+            "python-e2e/files_unlink.py",
+        ];
+
+        // use mirrord config file to specify remote and local directories, as well as mapping
+        let config = serde_json::json!({
+            "feature": {
+                "fs": {
+                    "mode": "localwithoverrides",
+                    "read_write": ".*remote_test.*",
+                    "mapping": {
+                        "source_test": "sink_test"
+                    }
+                }
+            }
+        })
+        .to_string();
+        let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+        config_file.write_all(config.as_bytes()).unwrap();
+        let file_name = config_file.path().to_string_lossy();
+
+        let mut args = vec!["-f", file_name.as_ref()];
+
+        let mut process = run_exec_with_target(
+            python_command,
+            &service.pod_container_target(),
+            Some(&service.namespace),
+            Some(args),
+            None,
+        )
+        .await;
+        let res = process.wait().await;
+
         assert!(res.success());
         process.assert_python_fileops_stderr().await;
     }

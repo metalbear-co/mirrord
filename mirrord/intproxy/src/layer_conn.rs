@@ -36,7 +36,7 @@ impl LayerConnection {
         }
     }
 
-    #[tracing::instrument(level = Level::TRACE, name = "send_layer_message", skip(self), fields(layer_id = self.layer_id.0), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err(level = Level::TRACE))]
     async fn send_and_flush(
         &mut self,
         msg: &LocalMessage<ProxyToLayerMessage>,
@@ -51,30 +51,29 @@ impl BackgroundTask for LayerConnection {
     type MessageIn = LocalMessage<ProxyToLayerMessage>;
     type MessageOut = ProxyMessage;
 
+    #[tracing::instrument(
+        level = Level::INFO, name = "layer_connection_main_loop",
+        skip_all, fields(layer_id = ?self.layer_id),
+        ret, err,
+    )]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), CodecError> {
         loop {
             tokio::select! {
                 res = self.layer_codec_rx.receive() => match res {
                     Err(e) => {
-                        tracing::error!("layer connection failed with {e:?} when receiving");
                         break Err(e);
                     },
                     Ok(None) => {
-                        tracing::trace!("message bus closed, exiting");
+                        tracing::debug!("Layer closed connection, exiting");
                         break Ok(());
                     }
                     Ok(Some(msg)) => message_bus.send(FromLayer { message: msg.inner, message_id: msg.message_id, layer_id: self.layer_id }).await,
                 },
 
                 msg = message_bus.recv() => match msg {
-                    Some(msg) => {
-                        if let Err(e) = self.send_and_flush(&msg).await {
-                            tracing::error!("layer connection failed with {e:?} when sending {msg:?}");
-                            break Err(e);
-                        }
-                    },
+                    Some(msg) => self.send_and_flush(&msg).await?,
                     None => {
-                        tracing::trace!("no more messages from the proxy, exiting");
+                        tracing::debug!("Message bus closed, exiting");
                         break Ok(());
                     },
                 },
