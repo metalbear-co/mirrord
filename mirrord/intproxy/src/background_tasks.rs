@@ -317,7 +317,7 @@ where
     }
 
     /// Temporarily suspends messages from the registered task with the given id.
-    /// 
+    ///
     /// [Self::next] will not return messages from this task,
     /// until you resume the messages with [`Self::resume_messages`].
     ///
