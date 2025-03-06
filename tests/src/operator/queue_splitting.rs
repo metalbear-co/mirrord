@@ -10,7 +10,10 @@ use rstest::*;
 
 use crate::utils::{
     config_dir,
-    sqs_resources::{sqs_test_resources, write_sqs_messages, QueueInfo, SqsTestResources},
+    sqs_resources::{
+        await_registry_status, sqs_test_resources, watch_sqs_sessions, write_sqs_messages,
+        QueueInfo, SqsTestResources,
+    },
     Application, TestProcess,
 };
 
@@ -151,7 +154,7 @@ async fn expect_messages_in_fifo_queue<const N: usize>(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(360))]
 pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_dir: &Path) {
-    let mut sqs_test_resources = sqs_test_resources.await;
+    let sqs_test_resources = sqs_test_resources.await;
     let application = Application::RustSqs;
 
     let mut config_path = config_dir.to_path_buf();
@@ -169,9 +172,17 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
 
     let mut config_path = config_dir.to_path_buf();
     config_path.push("sqs_queue_splitting_b.json");
-    // Wait between client starts.
-    // Support starting at the same time and remove this (https://github.com/metalbear-co/operator/issues/637)
-    sqs_test_resources.wait_for_registry_status(30).await;
+
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        await_registry_status(
+            sqs_test_resources.kube_client.clone(),
+            sqs_test_resources.namespace(),
+        ),
+    )
+    .await
+    .unwrap();
+
     // TODO make this unnecessary.
     tokio::time::sleep(Duration::from_secs(20)).await;
 
@@ -186,10 +197,15 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
         .await;
 
     println!("letting split time to start before writing messages");
-    sqs_test_resources
-        .wait_for_sqs_sessions(20)
-        .await
-        .expect("There was a problem with the SQS Session resources");
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        watch_sqs_sessions(
+            sqs_test_resources.kube_client.clone(),
+            sqs_test_resources.namespace(),
+        ),
+    )
+    .await
+    .unwrap();
 
     // TODO: make this unnecessary.
     tokio::time::sleep(Duration::from_secs(60)).await;

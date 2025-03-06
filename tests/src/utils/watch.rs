@@ -14,7 +14,7 @@ use kube::{
 };
 use serde::de::DeserializeOwned;
 
-type WatchCondition<R> = Box<dyn FnMut(&HashMap<String, R>) -> bool>;
+type WatchCondition<R> = Box<dyn FnMut(&HashMap<String, R>) -> bool + Send>;
 
 /// Utility struct for waiting until test Kubernetes resources reached a desired state.
 pub struct Watcher<R> {
@@ -63,7 +63,7 @@ where
     /// its desired state.
     pub fn new<C>(api: Api<R>, config: Config, condition: C) -> Self
     where
-        C: 'static + FnMut(&HashMap<String, R>) -> bool,
+        C: 'static + FnMut(&HashMap<String, R>) -> bool + Send,
     {
         Self {
             api,
