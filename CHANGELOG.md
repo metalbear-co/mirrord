@@ -8,6 +8,45 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.134.2](https://github.com/metalbear-co/mirrord/tree/3.134.2) - 2025-03-06
+
+
+### Added
+
+- If a stolen HTTP request matches filters of multiple users,
+  the users who don't get the request are now notified with a log message.
+  [#3120](https://github.com/metalbear-co/mirrord/issues/3120)
+
+
+### Changed
+
+- Improved the `mirrord_agent_http_request_in_progress_count` metric.
+  [#3092](https://github.com/metalbear-co/mirrord/issues/3092)
+
+
+### Fixed
+
+- Fixed `unlink` and `unlinkat` logic for files vs. directories.
+  [#3094](https://github.com/metalbear-co/mirrord/issues/3094)
+- Fixed an bug in TCP mirroring feature.
+- Fixed an error where mirrord would sometimes fail with `NotImplemented` error
+  due to latency on agent/operator connection.
+- Fixed an issue where mirrord was unable to perform an HTTP/1 upgrade over a
+  local TLS connection.
+- Improved remote DNS errors returned to the client application from the
+  mirrord-agent.
+
+
+### Internal
+
+- Add E2E tests for `unlink` and `unlinkat` hooks.
+  [#3094](https://github.com/metalbear-co/mirrord/issues/3094)
+- E2E tests now use k8s portforwarding to make requests to deployed test
+  applications.
+- Improved tracing in `mirrord-intproxy` and changed log format to JSON.
+- Improved two outgoing E2E tests.
+- Remove the encoded config from env vars when printing debug log on startup
+
 ## [3.134.1](https://github.com/metalbear-co/mirrord/tree/3.134.1) - 2025-02-28
 
 
