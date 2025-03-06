@@ -86,7 +86,7 @@ use load::ExecuteArgs;
 use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
     feature::{env::mapper::EnvVarsRemapper, fs::FsModeConfig, network::incoming::IncomingMode},
-    LayerConfig,
+    LayerConfig, MIRRORD_RESOLVED_CONFIG_ENV,
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
@@ -370,13 +370,18 @@ fn layer_start(mut config: LayerConfig) {
     enable_hooks(state);
 
     let _detour_guard = DetourGuard::new();
+
+    // remove resolved encoded config from env vars when logging them
+    let env_vars_print_only: Vec<_> = std::env::vars()
+        .filter(|(k, _v)| k != MIRRORD_RESOLVED_CONFIG_ENV)
+        .collect();
     tracing::info!("Initializing mirrord-layer!");
     tracing::debug!(
         executable = ?EXECUTABLE_PATH.get(),
         args = ?EXECUTABLE_ARGS.get(),
         pid = std::process::id(),
         parent_pid = parent_id(),
-        env_vars = ?std::env::vars(),
+        env_vars = ?env_vars_print_only,
         "Loaded into executable",
     );
 
