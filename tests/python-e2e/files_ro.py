@@ -1,4 +1,5 @@
-""" Files ready only feature test """
+""" Files read only feature test """
+
 import os
 import uuid
 import unittest
