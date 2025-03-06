@@ -562,8 +562,8 @@ mod test {
     ///
     /// # TODO
     ///
-    /// This test does a short [`tokio::time::sleep`].
-    /// Once intproxy exposes its state in some way, we can fix it.
+    /// This test does a short sleep.
+    /// Once intproxy exposes its state in some way, we can remove it.
     #[tokio::test]
     async fn intproxy_waits_for_protocol_version() {
         let (agent_tx, mut proxy_rx) = mpsc::channel(12);
