@@ -314,6 +314,7 @@ pub enum Target {
 
     /// <!--${internal}-->
     /// Spawn a new pod.
+    #[schemars(skip)]
     Targetless,
 }
 
