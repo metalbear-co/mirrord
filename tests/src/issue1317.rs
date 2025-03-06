@@ -15,7 +15,7 @@ mod issue1317_tests {
     use tokio::net::TcpStream;
 
     use crate::utils::{
-        kube_client, run_exec_with_target, service, service_addr::TestServiceAddr, KubeService,
+        kube_client, port_forwarder::PortForwarder, run_exec_with_target, service, KubeService,
     };
 
     /// Creates a [`TcpStream`] that sends a request to `service` before mirrord is started (no
@@ -43,23 +43,21 @@ mod issue1317_tests {
     ) {
         let service = service.await;
         let kube_client = kube_client.await;
-        let addr = TestServiceAddr::fetch(kube_client.clone(), &service.service).await;
-
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        let portforwarder = PortForwarder::new(
+            kube_client.clone(),
+            &service.pod_name,
+            &service.namespace,
+            80,
+        )
+        .await;
 
         // Create a connection with the service before mirrord is started.
-        let connection = TcpStream::connect(addr.addr)
-            .await
-            .unwrap_or_else(|_| panic!("Failed connecting to {}!", addr.addr));
+        let connection = TcpStream::connect(portforwarder.address()).await.unwrap();
 
         let (mut request_sender, connection) =
             http1::handshake(TokioIo::new(connection)).await.unwrap();
 
-        tokio::spawn(async move {
-            if let Err(fail) = connection.await {
-                panic!("Handshake [hyper] failed with {fail:#?}");
-            }
-        });
+        let conn_handle = tokio::spawn(connection);
 
         // Test that we can reach the service, before mirrord is started.
         let request = Request::builder()
@@ -122,7 +120,9 @@ mod issue1317_tests {
             .expect("3rd request ends the program!");
         assert!(response.status().is_success());
 
-        drop(request_sender);
         process.wait_assert_success().await;
+
+        std::mem::drop(request_sender);
+        conn_handle.await.unwrap().unwrap();
     }
 }

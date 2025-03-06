@@ -29,7 +29,7 @@ use rcgen::CertifiedKey;
 use rstest::rstest;
 
 use crate::utils::{
-    kube_client, service_addr::TestServiceAddr, watch, Application, ResourceGuard,
+    kube_client, port_forwarder::PortForwarder, watch, Application, ResourceGuard,
     PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
 };
 
@@ -263,10 +263,6 @@ impl GoServService {
                 .unwrap()
                 .name
         )
-    }
-
-    async fn address(&self, client: Client) -> TestServiceAddr {
-        TestServiceAddr::fetch(client, &self.service).await
     }
 }
 
@@ -521,7 +517,7 @@ async fn steal_tls_with_filter(#[future] kube_client: Client, #[case] mtls: bool
         .await
         .unwrap();
 
-    let service_addr = service.address(client).await;
+    let portforwarder = PortForwarder::new_for_service(client, &service.service, 80).await;
     let (test_client_http1, test_client_http2) = {
         let trusted_root_pem = pem::encode_config(
             &Pem::new("CERTIFICATE", root.cert.der().to_vec()),
@@ -542,13 +538,13 @@ async fn steal_tls_with_filter(#[future] kube_client: Client, #[case] mtls: bool
 
         (
             TestClient::new(
-                service_addr.addr,
+                portforwarder.address(),
                 &trusted_root_pem,
                 client_cert_and_key.as_deref(),
                 true,
             ),
             TestClient::new(
-                service_addr.addr,
+                portforwarder.address(),
                 &trusted_root_pem,
                 client_cert_and_key.as_deref(),
                 false,

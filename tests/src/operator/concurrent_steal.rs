@@ -9,7 +9,7 @@ use reqwest::header::HeaderMap;
 use rstest::*;
 
 use crate::utils::{
-    config_dir, kube_client, send_request, service, service_addr::TestServiceAddr, Application,
+    config_dir, kube_client, port_forwarder::PortForwarder, send_request, service, Application,
     KubeService,
 };
 
@@ -55,8 +55,9 @@ pub async fn two_clients_steal_same_target(
     assert!(!client_b.get_stderr().await.contains("daemon subscribed"));
 
     // check if client_a is stealing
-    let addr = TestServiceAddr::fetch(client, &service.service).await;
-    let url = format!("http://{}", addr.addr);
+    let portforwarder =
+        PortForwarder::new(client.clone(), &service.pod_name, &service.namespace, 80).await;
+    let url = format!("http://{}", portforwarder.address());
     let client = reqwest::Client::new();
     let req_builder = client.delete(&url);
     let mut headers = HeaderMap::default();
@@ -116,8 +117,9 @@ pub async fn two_clients_steal_same_target_pod_deployment(
     assert!(!client_b.get_stderr().await.contains("daemon subscribed"));
 
     // check if client_a is stealing
-    let addr = TestServiceAddr::fetch(client, &service.service).await;
-    let url = format!("http://{}", addr.addr);
+    let portforwarder =
+        PortForwarder::new(client.clone(), &service.pod_name, &service.namespace, 80).await;
+    let url = format!("http://{}", portforwarder.address());
     let client = reqwest::Client::new();
     let req_builder = client.delete(&url);
     let mut headers = HeaderMap::default();
@@ -143,8 +145,14 @@ pub async fn two_clients_steal_with_http_filter(
 ) {
     let service = service.await;
     let kube_client = kube_client.await;
-    let addr = TestServiceAddr::fetch(kube_client, &service.service).await;
-    let url = format!("http://{}", addr.addr);
+    let portforwarder = PortForwarder::new(
+        kube_client.clone(),
+        &service.pod_name,
+        &service.namespace,
+        80,
+    )
+    .await;
+    let url = format!("http://{}", portforwarder.address());
 
     let mut config_path = config_dir.to_path_buf();
     config_path.push("http_filter_header.json");
