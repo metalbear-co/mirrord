@@ -102,6 +102,9 @@ impl IntProxy {
             MainTaskId::LayerInitializer,
             Self::CHANNEL_SIZE,
         );
+        // We need to negotiate mirrord-protocol version
+        // before we can process layers' requests.
+        background_tasks.suspend_messages(MainTaskId::LayerInitializer);
         let ping_pong = background_tasks.register(
             PingPong::new(Self::PING_INTERVAL),
             MainTaskId::PingPong,
@@ -359,7 +362,12 @@ impl IntProxy {
                     .await
             }
             DaemonMessage::SwitchProtocolVersionResponse(protocol_version) => {
-                let _ = self.protocol_version.insert(protocol_version.clone());
+                let previous = self.protocol_version.replace(protocol_version.clone());
+                if previous.is_none() {
+                    // We can now process layers' requests.
+                    self.background_tasks
+                        .resume_messages(MainTaskId::LayerInitializer);
+                }
 
                 if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
                     self.task_txs.agent.send(ClientMessage::ReadyForLogs).await;
