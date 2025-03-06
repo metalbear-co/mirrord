@@ -7,11 +7,8 @@ use std::{
 };
 
 use bincode::{Decode, Encode};
-use hickory_proto::error::ProtoErrorKind;
-use hickory_resolver::error::{ResolveError, ResolveErrorKind};
 use semver::VersionReq;
 use thiserror::Error;
-use tracing::warn;
 
 use crate::{
     outgoing::SocketAddress,
@@ -203,13 +200,6 @@ impl From<io::Error> for ResponseError {
     }
 }
 
-impl From<ResolveError> for ResponseError {
-    fn from(fail: ResolveError) -> Self {
-        Self::DnsLookup(DnsLookupError {
-            kind: From::from(fail.kind().to_owned()),
-        })
-    }
-}
 /// Alternative to `std::io::ErrorKind`, used to implement `bincode::Encode` and `bincode::Decode`.
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Eq)]
 pub enum ErrorKindInternal {
@@ -340,45 +330,6 @@ impl From<io::ErrorKind> for ErrorKindInternal {
             io::ErrorKind::OutOfMemory => ErrorKindInternal::OutOfMemory,
             io::ErrorKind::Other => ErrorKindInternal::Other,
             _ => ErrorKindInternal::Unknown(error_kind.to_string()),
-        }
-    }
-}
-
-impl From<ResolveErrorKind> for ResolveErrorKindInternal {
-    fn from(error_kind: ResolveErrorKind) -> Self {
-        match error_kind {
-            ResolveErrorKind::Message(message) => {
-                ResolveErrorKindInternal::Message(message.to_string())
-            }
-            ResolveErrorKind::Msg(message) => ResolveErrorKindInternal::Message(message),
-            ResolveErrorKind::NoConnections => ResolveErrorKindInternal::NoConnections,
-            ResolveErrorKind::NoRecordsFound { response_code, .. } => {
-                ResolveErrorKindInternal::NoRecordsFound(response_code.into())
-            }
-            ResolveErrorKind::Proto(proto_error) => match *proto_error.kind {
-                ProtoErrorKind::Timeout => ResolveErrorKindInternal::Timeout,
-                ProtoErrorKind::Io(e) if e.kind() == io::ErrorKind::NotFound => {
-                    ResolveErrorKindInternal::NotFound
-                }
-                ProtoErrorKind::Io(e) if e.kind() == io::ErrorKind::PermissionDenied => {
-                    ResolveErrorKindInternal::PermissionDenied
-                }
-                error => ResolveErrorKindInternal::Message(format!("proto error: {error}")),
-            },
-            _ => {
-                warn!(?error_kind, "unknown error kind");
-                ResolveErrorKindInternal::Unknown
-            }
-        }
-    }
-}
-
-impl From<ErrorKindInternal> for ResolveErrorKindInternal {
-    fn from(kind: ErrorKindInternal) -> Self {
-        match kind {
-            ErrorKindInternal::NotFound => Self::NotFound,
-            ErrorKindInternal::PermissionDenied => Self::PermissionDenied,
-            _ => Self::Unknown,
         }
     }
 }
