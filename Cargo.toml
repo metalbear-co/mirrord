@@ -57,7 +57,7 @@ categories = ["development-tools", "backend", "devtool"]
 actix-codec = "0.5"
 
 # Used by `operator`, `layer`, `console`, `protocol`, `intproxy-protocol`.
-bincode = { version = "2.0.0-rc.3", features = ["serde"] }
+bincode = { version = "2", features = ["serde"] }
 bytes = "1"
 
 tokio = { version = "1" }

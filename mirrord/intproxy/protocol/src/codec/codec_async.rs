@@ -85,7 +85,7 @@ impl<T, R> AsyncDecoder<T, R> {
 
 impl<T, R> AsyncDecoder<T, R>
 where
-    T: Decode,
+    T: Decode<()>,
     R: AsyncRead + Unpin,
 {
     /// Decodes the next message from the underlying IO handler.
@@ -110,7 +110,7 @@ where
 
 /// Creates a new pair of [`AsyncEncoder`] and [`AsyncDecoder`], using the given asynchronous
 /// [`TcpStream`](tokio::net::TcpStream).
-pub fn make_async_framed<T1: Encode, T2: Decode>(
+pub fn make_async_framed<T1: Encode, T2: Decode<()>>(
     stream: tokio::net::TcpStream,
 ) -> (
     AsyncEncoder<T1, OwnedWriteHalf>,
