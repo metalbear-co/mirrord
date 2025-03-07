@@ -166,38 +166,34 @@ impl FilteringService {
     ///
     /// This method always creates a new TCP connection and preforms an HTTP handshake.
     /// Also, it does not retry the request upon failure.
+    #[tracing::instrument(
+        level = Level::DEBUG,
+        skip(self, request),
+        fields(
+            uri = %request.uri(),
+            version = ?request.version(),
+            method = %request.method(),
+        ),
+        err(Display)
+    )]
     async fn send_request(
         &self,
         mut request: Request<Incoming>,
     ) -> Result<Response<Incoming>, FilteringServiceError> {
-        let stream = self
-            .original_destination
-            .connect(request.uri())
-            .await
-            .inspect_err(|error| {
-                tracing::error!(
-                    %error,
-                    destination = ?self.original_destination,
-                    "Failed to connect to the request original destination HTTP server",
-                );
-            })?;
+        let stream = self.original_destination.connect(request.uri()).await?;
 
         match request.version() {
             Version::HTTP_2 => {
                 let (mut request_sender, connection) =
-                    http2::handshake(TokioExecutor::default(), TokioIo::new(stream))
-                        .await
-                        .inspect_err(|error| {
-                            tracing::error!(
-                                ?error,
-                                "HTTP2 handshake with the original destination failed"
-                            )
-                        })?;
+                    http2::handshake(TokioExecutor::default(), TokioIo::new(stream)).await?;
 
                 // We need this to progress the connection forward (hyper thing).
                 tokio::spawn(async move {
                     if let Err(error) = connection.await {
-                        tracing::error!(?error, "Connection with the original destination failed");
+                        tracing::error!(
+                            error = %FilteringServiceError::PassThroughSendError(error),
+                            "Connection with the original destination failed",
+                        );
                     }
                 });
 
@@ -214,19 +210,16 @@ impl FilteringService {
             }
 
             _ => {
-                let (mut request_sender, connection) = http1::handshake(TokioIo::new(stream))
-                    .await
-                    .inspect_err(|error| {
-                        tracing::error!(
-                            ?error,
-                            "HTTP1 handshake with the original destination failed"
-                        )
-                    })?;
+                let (mut request_sender, connection) =
+                    http1::handshake(TokioIo::new(stream)).await?;
 
                 // We need this to progress the connection forward (hyper thing).
                 tokio::spawn(async move {
                     if let Err(error) = connection.with_upgrades().await {
-                        tracing::error!(?error, "Connection with the original destination failed");
+                        tracing::error!(
+                            error = %FilteringServiceError::PassThroughSendError(error),
+                            "Connection with the original destination failed",
+                        );
                     }
                 });
 
