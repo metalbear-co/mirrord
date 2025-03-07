@@ -217,7 +217,7 @@ impl<I, O> Default for ProtocolCodec<I, O> {
     }
 }
 
-impl<I: bincode::Decode, O> Decoder for ProtocolCodec<I, O> {
+impl<I: bincode::Decode<()>, O> Decoder for ProtocolCodec<I, O> {
     type Item = I;
     type Error = io::Error;
 
