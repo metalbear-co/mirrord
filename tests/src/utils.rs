@@ -1630,11 +1630,29 @@ pub async fn send_request(
     expect_response: Option<&str>,
     headers: reqwest::header::HeaderMap,
 ) {
-    let res = request_builder.headers(headers).send().await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    let (client, request) = request_builder.headers(headers).build_split();
+    let request = request.unwrap();
+    println!(
+        "Sending an HTTP request with version={:?}, method=({}), url=({}), headers=({:?})",
+        request.version(),
+        request.method(),
+        request.url(),
+        request.headers(),
+    );
+
+    let response = client.execute(request).await.unwrap();
+
+    let status = response.status();
+    let body = String::from_utf8_lossy(response.bytes().await.unwrap().as_ref()).into_owned();
+
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "unexpected status, response body: {body}"
+    );
+
     if let Some(expected_response) = expect_response {
-        let resp = res.bytes().await.unwrap();
-        assert_eq!(resp, expected_response.as_bytes());
+        assert_eq!(body, expected_response);
     }
 }
 
