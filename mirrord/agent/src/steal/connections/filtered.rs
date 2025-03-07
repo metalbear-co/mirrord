@@ -89,6 +89,8 @@ pub struct UpgradedConnection {
 }
 
 /// Errors that can occur in the [`FilteringService`] when serving a stolen request.
+///
+/// Has a nice [`fmt::Display`] implementation that shows all sources of [`hyper::Error`]s.
 #[derive(Error, Debug)]
 enum FilteringServiceError {
     /// We failed to connect to the original destination
