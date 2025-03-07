@@ -464,7 +464,7 @@ impl Application {
                     "python-e2e/close_socket_keep_connection.py",
                 ]
             }
-            Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
+            Application::NodeHTTP => vec!["node", "node-e2e/app.mjs"],
             Application::NodeHTTP2 => {
                 vec!["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
             }

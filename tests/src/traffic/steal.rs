@@ -498,7 +498,7 @@ mod steal_tests {
         let mut match_url = Url::parse(&url).unwrap();
         match_url.set_path("/api/v1");
         let req_builder = req_client.delete(match_url);
-        send_request(req_builder, Some("DELETEV1"), headers.clone()).await;
+        send_request(req_builder, Some("DELETE"), headers.clone()).await;
 
         let _ = tokio::time::timeout(Duration::from_secs(40), client.child.wait())
             .await
