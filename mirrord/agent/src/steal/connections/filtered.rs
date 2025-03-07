@@ -1,5 +1,6 @@
 use std::{
-    collections::HashMap, future::Future, marker::PhantomData, net::SocketAddr, ops::Not, pin::Pin,
+    collections::HashMap, error::Error, fmt, future::Future, io, marker::PhantomData,
+    net::SocketAddr, ops::Not, pin::Pin,
 };
 
 use bytes::Bytes;
@@ -22,6 +23,7 @@ use mirrord_protocol::{
     ConnectionId, LogMessage, RequestId,
 };
 use mirrord_tls_util::MaybeTls;
+use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
     sync::{
@@ -86,6 +88,44 @@ pub struct UpgradedConnection {
     pub http_server_io: UpgradedServerSide,
 }
 
+/// Errors that can occur in the [`FilteringService`] when serving a stolen request.
+#[derive(Error, Debug)]
+enum FilteringServiceError {
+    /// We failed to connect to the original destination
+    /// when handling an unmatched request.
+    PassThroughConnectError(#[from] io::Error),
+    /// We made the connection to the original destination,
+    /// but failed to send the unmatched request.
+    PassThroughSendError(#[from] hyper::Error),
+    /// The client failed to provide the response to a matched request.
+    ClientResponseErorr,
+}
+
+impl fmt::Display for FilteringServiceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PassThroughConnectError(error) => {
+                write!(f, "failed to connect to the original destination: {error}")
+            }
+            Self::PassThroughSendError(error) => {
+                write!(
+                    f,
+                    "failed to pass the request to its original destination: {error}"
+                )?;
+                let mut source = error.source();
+                while let Some(error) = source {
+                    write!(f, "\n\t{error}")?;
+                    source = error.source();
+                }
+                Ok(())
+            }
+            Self::ClientResponseErorr => {
+                f.write_str("failed to receive a response from the connected mirrord session")
+            }
+        }
+    }
+}
+
 /// Simple [`Service`] implementor that uses [`mpsc`] channels to pass incoming [`Request`]s to a
 /// [`FilteredStealTask`].
 #[derive(Clone)]
@@ -110,7 +150,7 @@ struct FilteringService {
 impl FilteringService {
     /// Produces a new [`StatusCode::BAD_GATEWAY`] [`Response`] with the given [`Version`] and the
     /// given `error` in body.
-    fn bad_gateway(version: Version, error: &str) -> Response<DynamicBody> {
+    fn bad_gateway(version: Version, error: FilteringServiceError) -> Response<DynamicBody> {
         let body = format!("mirrord: {error}");
 
         Response::builder()
@@ -129,7 +169,7 @@ impl FilteringService {
     async fn send_request(
         &self,
         mut request: Request<Incoming>,
-    ) -> Result<Response<Incoming>, Box<dyn std::error::Error>> {
+    ) -> Result<Response<Incoming>, FilteringServiceError> {
         let stream = self
             .original_destination
             .connect(request.uri())
@@ -220,12 +260,7 @@ impl FilteringService {
             .send_request(request)
             .await
             .map(|response| response.map(BoxBody::new))
-            .unwrap_or_else(|_| {
-                Self::bad_gateway(
-                    version,
-                    "failed to pass the request to its original destination",
-                )
-            });
+            .unwrap_or_else(|error| Self::bad_gateway(version, error));
 
         if response.status() == StatusCode::SWITCHING_PROTOCOLS {
             let http_server_on_upgrade = hyper::upgrade::on(&mut response);
@@ -321,10 +356,7 @@ impl FilteringService {
                     .await;
                 response
             }
-            Err(..) => Self::bad_gateway(
-                version,
-                "failed to receive a response from the connected mirrord session",
-            ),
+            Err(..) => Self::bad_gateway(version, FilteringServiceError::ClientResponseErorr),
         };
 
         Ok(response)
