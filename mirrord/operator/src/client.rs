@@ -610,24 +610,6 @@ impl OperatorApi<PreparedClientCert> {
         } else {
             let target = target.assert_valid_mirrord_target(self.client()).await?;
 
-            if layer_config.feature.network.incoming.is_steal()
-                && !layer_config
-                    .feature
-                    .network
-                    .incoming
-                    .http_filter
-                    .is_filter_set()
-                && target
-                    .clone()
-                    .has_probes(self.client())
-                    .await
-                    // Default to `false` on error since this value is only used
-                    // for displaying a warning.
-                    .unwrap_or(false)
-            {
-                progress.warning("Your mirrord config may steal HTTP/gRPC health checks, causing Kubernetes to terminate the target container. Use an HTTP filter to prevent this.");
-            }
-
             // `targetless` has no `RuntimeData`!
             if matches!(target, ResolvedTarget::Targetless(_)).not() {
                 // Extracting runtime data asserts that the user can see at least one pod from the
@@ -645,6 +627,43 @@ impl OperatorApi<PreparedClientCert> {
                         )
                         .as_str(),
                     );
+                }
+
+                if layer_config.feature.network.incoming.is_steal() {
+                    let clashing_port_exists = layer_config
+                        .feature
+                        .network
+                        .incoming
+                        .port_mapping
+                        .iter()
+                        .any(|(_, mapped_port)| {
+                            let mapped_port = *mapped_port as i32;
+
+                            runtime_data.containers_probe_ports.contains(&mapped_port)
+                        })
+                        && !layer_config
+                            .feature
+                            .network
+                            .incoming
+                            .port_mapping
+                            .is_empty();
+
+                    if clashing_port_exists
+                        || (!layer_config
+                            .feature
+                            .network
+                            .incoming
+                            .http_filter
+                            .is_filter_set()
+                            && layer_config
+                                .feature
+                                .network
+                                .incoming
+                                .port_mapping
+                                .is_empty())
+                    {
+                        progress.warning("Your mirrord config may steal HTTP/gRPC health checks, causing Kubernetes to terminate the target container. Use an HTTP filter to prevent this.");
+                    }
                 }
             }
 

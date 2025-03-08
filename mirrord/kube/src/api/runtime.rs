@@ -10,7 +10,8 @@ use std::{
 };
 
 use k8s_openapi::{
-    api::core::v1::{Node, Pod},
+    api::core::v1::{Container, Node, Pod, Probe},
+    apimachinery::pkg::util::intstr::IntOrString,
     NamespaceResourceScope,
 };
 use kube::{api::ListParams, Api, Client, Resource};
@@ -89,6 +90,8 @@ pub struct RuntimeData {
     pub mesh: Option<MeshVendor>,
 
     pub share_process_namespace: bool,
+    // container name to probe ports
+    pub containers_probe_ports: Vec<i32>,
 }
 
 impl RuntimeData {
@@ -130,6 +133,15 @@ impl RuntimeData {
             .and_then(|spec| spec.node_name.as_ref())
             .ok_or_else(|| KubeApiError::missing_field(pod, ".spec.nodeName"))?
             .to_owned();
+
+        let containers_probe_ports: Vec<i32> = pod
+            .spec
+            .as_ref()
+            .ok_or_else(|| KubeApiError::missing_field(pod, ".spec"))?
+            .containers
+            .iter()
+            .flat_map(Self::probe_ports)
+            .collect();
 
         let pod_ips = pod
             .status
@@ -221,6 +233,7 @@ impl RuntimeData {
                 .as_ref()
                 .and_then(|spec| spec.share_process_namespace)
                 .unwrap_or_default(),
+            containers_probe_ports,
         })
     }
 
@@ -268,6 +281,43 @@ impl RuntimeData {
         } else {
             NodeCheck::Success
         }
+    }
+
+    fn probe_ports(container: &Container) -> Vec<i32> {
+        fn port_to_int(port: &IntOrString) -> Option<i32> {
+            match port {
+                IntOrString::Int(p) => Some(*p),
+                IntOrString::String(s) => match s.as_str() {
+                    "http" => Some(80),
+                    "https" => Some(443),
+                    "grpc" => Some(50051),
+                    _ => s.parse().ok(),
+                },
+            }
+        }
+
+        fn get_probe_ports(probe: &Option<Probe>) -> Vec<i32> {
+            probe
+                .as_ref()
+                .map(|p| {
+                    let mut ports = Vec::new();
+                    if let Some(http_get) = &p.http_get {
+                        if let Some(port) = port_to_int(&http_get.port) {
+                            ports.push(port);
+                        }
+                    }
+                    if let Some(grpc) = &p.grpc {
+                        ports.push(grpc.port);
+                    }
+                    ports
+                })
+                .unwrap_or_default()
+        }
+
+        let mut ports = Vec::new();
+        ports.extend(get_probe_ports(&container.liveness_probe));
+        ports.extend(get_probe_ports(&container.readiness_probe));
+        ports
     }
 }
 

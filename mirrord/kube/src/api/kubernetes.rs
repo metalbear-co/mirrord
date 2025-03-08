@@ -202,21 +202,63 @@ impl KubernetesAPI {
     pub async fn create_agent<P>(
         &self,
         progress: &mut P,
-        target: &TargetConfig,
+        layer_config: &LayerConfig,
         config: ContainerConfig,
     ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
     where
         P: Progress + Send + Sync,
     {
-        let (params, runtime_data) = self.create_agent_params(target, config).await?;
+        let (params, runtime_data) = self
+            .create_agent_params(&layer_config.target, config)
+            .await?;
 
         if let Some(RuntimeData {
-            guessed_container: true,
+            guessed_container,
             container_name,
+            containers_probe_ports,
             ..
         }) = runtime_data.as_ref()
         {
-            progress.warning(format!("Target has multiple containers, mirrord picked \"{container_name}\". To target a different one, include it in the target path.").as_str());
+            if *guessed_container {
+                progress.warning(format!("Target has multiple containers, mirrord picked \"{container_name}\". To target a different one, include it in the target path.").as_str());
+            }
+
+            if layer_config.feature.network.incoming.is_steal() {
+                let clashing_port_exists = layer_config
+                    .feature
+                    .network
+                    .incoming
+                    .port_mapping
+                    .iter()
+                    .any(|(_, mapped_port)| {
+                        let mapped_port = *mapped_port as i32;
+
+                        containers_probe_ports.contains(&mapped_port)
+                    })
+                    && !layer_config
+                        .feature
+                        .network
+                        .incoming
+                        .port_mapping
+                        .is_empty();
+
+                if clashing_port_exists
+                    || (!layer_config
+                        .feature
+                        .network
+                        .incoming
+                        .http_filter
+                        .is_filter_set()
+                        && layer_config
+                            .feature
+                            .network
+                            .incoming
+                            .port_mapping
+                            .is_empty())
+                {
+                    progress.warning("Your mirrord config may steal HTTP/gRPC health checks, causing Kubernetes to terminate the target container. Use an HTTP filter to prevent this.");
+                }
+            }
         }
 
         if let Some(mesh) = runtime_data.as_ref().and_then(|data| data.mesh.as_ref()) {
