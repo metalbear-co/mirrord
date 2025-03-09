@@ -629,38 +629,12 @@ impl OperatorApi<PreparedClientCert> {
                     );
                 }
 
-                if layer_config.feature.network.incoming.is_steal() {
-                    let clashing_port_exists = layer_config
-                        .feature
-                        .network
-                        .incoming
-                        .port_mapping
-                        .iter()
-                        .any(|(_, mapped_port)| {
-                            let mapped_port = *mapped_port as i32;
-
-                            runtime_data.containers_probe_ports.contains(&mapped_port)
-                        })
-                        && !layer_config
-                            .feature
-                            .network
-                            .incoming
-                            .port_mapping
-                            .is_empty();
-
-                    if clashing_port_exists
-                        || (!layer_config
-                            .feature
-                            .network
-                            .incoming
-                            .http_filter
-                            .is_filter_set()
-                            && layer_config
-                                .feature
-                                .network
-                                .incoming
-                                .port_mapping
-                                .is_empty())
+                if layer_config
+                    .feature
+                    .network
+                    .incoming
+                    .steals_port_without_filter(&runtime_data.containers_probe_ports)
+                {
                     {
                         progress.warning("Your mirrord config may steal HTTP/gRPC health checks, causing Kubernetes to terminate the target container. Use an HTTP filter to prevent this.");
                     }
