@@ -495,6 +495,33 @@ impl IncomingConfig {
     pub fn is_steal(&self) -> bool {
         matches!(self.mode, IncomingMode::Steal)
     }
+
+    /// <!--${internal}-->
+    /// Helper function
+    ///
+    /// Checks whether the given ports interfere with traffic stealing.
+    pub fn steals_port_without_filter(&self, ports: &Vec<u16>) -> bool {
+        if !self.is_steal() {
+            return false;
+        }
+
+        for port in ports {
+            if self.http_filter.is_filter_set() && self.http_filter.ports.contains(port) {
+                continue;
+            }
+            if self.ignore_ports.contains(port) {
+                continue;
+            }
+            if let Some(ports) = &self.ports {
+                if !ports.contains(port) {
+                    continue;
+                }
+            }
+            return true;
+        }
+
+        false
+    }
 }
 
 /// Allows selecting between mirrorring or stealing traffic.

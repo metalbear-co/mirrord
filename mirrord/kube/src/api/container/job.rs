@@ -361,6 +361,7 @@ mod test {
                 container_name: "foo".to_string(),
                 guessed_container: false,
                 share_process_namespace: false,
+                containers_probe_ports: vec![],
             },
         )
         .as_update();

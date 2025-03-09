@@ -396,9 +396,9 @@ impl ResolvedTarget<false> {
                     // verify that the container exists
                     pod_template.spec.as_ref().ok_or_else(|| KubeApiError::invalid_state(&resource, "specified pod template is missing field `.spec`"))?
                     .containers
-                                .iter()
-                                .find(|c| c.name == *container)
-                                .ok_or_else(|| KubeApiError::invalid_state(&resource, format_args!("specified pod template does not contain target container `{container}`")))?;
+                    .iter()
+                    .find(|c| c.name == *container)
+                    .ok_or_else(|| KubeApiError::invalid_state(&resource, format_args!("specified pod template does not contain target container `{container}`")))?;
                 }
 
                 Ok(ResolvedTarget::Rollout(ResolvedResource {
