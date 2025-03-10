@@ -2,7 +2,10 @@ use std::convert::Infallible;
 
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Full, StreamBody};
-use hyper::{body::Frame, Response};
+use hyper::{
+    body::{Body, Frame},
+    Response,
+};
 use mirrord_protocol::{
     tcp::{HttpResponse, InternalHttpBody},
     ConnectionId, RequestId,
@@ -19,6 +22,22 @@ pub enum HttpResponseFallback {
 }
 
 impl HttpResponseFallback {
+    /// Checks `http_body::Body::is_end_stream`, returning `true` if this response is done.
+    ///
+    /// Used by our metrics system to decrement the `HTTP_REQUEST_IN_PROGRESS_COUNT` counter
+    /// when an streamed HTTP request has finished.
+    pub fn is_last(&self) -> bool {
+        match self {
+            HttpResponseFallback::Framed(http_response) => {
+                http_response.internal_response.body.is_end_stream()
+            }
+            HttpResponseFallback::Fallback(_) => true,
+            HttpResponseFallback::Streamed(http_response) => {
+                http_response.internal_response.body.is_end_stream()
+            }
+        }
+    }
+
     pub fn connection_id(&self) -> ConnectionId {
         match self {
             HttpResponseFallback::Framed(req) => req.connection_id,

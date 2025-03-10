@@ -184,6 +184,7 @@ where
 /// Tasks managed with a single instance of this struct must produce messages of the same type
 /// `MOut` and return errors convertible to `Err`.
 pub struct BackgroundTasks<Id, MOut, Err> {
+    suspended_streams: HashMap<Id, StreamNotifyClose<ReceiverStream<MOut>>>,
     streams: StreamMap<Id, StreamNotifyClose<ReceiverStream<MOut>>>,
     handles: HashMap<Id, JoinHandle<Result<(), Err>>>,
 }
@@ -191,6 +192,7 @@ pub struct BackgroundTasks<Id, MOut, Err> {
 impl<Id, MOut, Err> Default for BackgroundTasks<Id, MOut, Err> {
     fn default() -> Self {
         Self {
+            suspended_streams: Default::default(),
             streams: Default::default(),
             handles: Default::default(),
         }
@@ -312,6 +314,29 @@ where
         }
 
         results
+    }
+
+    /// Temporarily suspends messages from the registered task with the given id.
+    ///
+    /// [Self::next] will not return messages from this task,
+    /// until you resume the messages with [`Self::resume_messages`].
+    ///
+    /// If the messages from this task are already suspended or the task is not registered, does
+    /// nothing.
+    pub fn suspend_messages(&mut self, id: Id) {
+        if let Some(stream) = self.streams.remove(&id) {
+            self.suspended_streams.insert(id, stream);
+        }
+    }
+
+    /// Resumes messages from the registered task with the given id.
+    ///
+    /// If the messages from this task are not suspended or the task is not registered, does
+    /// nothing.
+    pub fn resume_messages(&mut self, id: Id) {
+        if let Some(stream) = self.suspended_streams.remove(&id) {
+            self.streams.insert(id, stream);
+        }
     }
 }
 

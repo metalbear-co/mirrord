@@ -128,7 +128,7 @@ impl<T, R> SyncDecoder<T, R> {
 
 impl<T, R> SyncDecoder<T, R>
 where
-    T: Decode,
+    T: Decode<()>,
     R: Read,
 {
     /// Decodes the next message from the underlying IO handler.
@@ -153,7 +153,7 @@ where
 
 /// Creates a new pair of [`SyncEncoder`] and [`SyncDecoder`], using the given synchronous
 /// [`TcpStream`](std::net::TcpStream).
-pub fn make_sync_framed<T1: Encode, T2: Decode>(
+pub fn make_sync_framed<T1: Encode, T2: Decode<()>>(
     stream: std::net::TcpStream,
 ) -> Result<(
     SyncEncoder<T1, std::net::TcpStream>,

@@ -38,7 +38,7 @@ use tokio::{
 };
 
 pub(crate) mod ipv6;
-pub(crate) mod service_addr;
+pub(crate) mod port_forwarder;
 pub mod sqs_resources;
 pub(crate) mod watch;
 
@@ -464,7 +464,7 @@ impl Application {
                     "python-e2e/close_socket_keep_connection.py",
                 ]
             }
-            Application::NodeHTTP => vec!["node", "node-e2e/app.js"],
+            Application::NodeHTTP => vec!["node", "node-e2e/app.mjs"],
             Application::NodeHTTP2 => {
                 vec!["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
             }
@@ -648,6 +648,9 @@ pub async fn run_exec(
     base_env.insert("MIRRORD_CHECK_VERSION", "false");
     base_env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
     base_env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
+    // We're using k8s portforwarding for sending traffic to test services.
+    // The packets arrive to loopback interface.
+    base_env.insert("MIRRORD_AGENT_NETWORK_INTERFACE", "lo");
     base_env.insert("RUST_LOG", "warn,mirrord=debug");
 
     if let Some(env) = env {
@@ -1627,11 +1630,29 @@ pub async fn send_request(
     expect_response: Option<&str>,
     headers: reqwest::header::HeaderMap,
 ) {
-    let res = request_builder.headers(headers).send().await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    let (client, request) = request_builder.headers(headers).build_split();
+    let request = request.unwrap();
+    println!(
+        "Sending an HTTP request with version={:?}, method=({}), url=({}), headers=({:?})",
+        request.version(),
+        request.method(),
+        request.url(),
+        request.headers(),
+    );
+
+    let response = client.execute(request).await.unwrap();
+
+    let status = response.status();
+    let body = String::from_utf8_lossy(response.bytes().await.unwrap().as_ref()).into_owned();
+
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "unexpected status, response body: {body}"
+    );
+
     if let Some(expected_response) = expect_response {
-        let resp = res.bytes().await.unwrap();
-        assert_eq!(resp, expected_response.as_bytes());
+        assert_eq!(body, expected_response);
     }
 }
 

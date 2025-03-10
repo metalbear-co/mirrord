@@ -102,6 +102,12 @@ impl IntProxy {
             MainTaskId::LayerInitializer,
             Self::CHANNEL_SIZE,
         );
+        // We need to negotiate mirrord-protocol version
+        // before we can process layers' requests.
+        //
+        // If we don't do this, we risk responding with `NotImplemented`
+        // to requests that have a requirement on the mirrord-protocol version.
+        background_tasks.suspend_messages(MainTaskId::LayerInitializer);
         let ping_pong = background_tasks.register(
             PingPong::new(Self::PING_INTERVAL),
             MainTaskId::PingPong,
@@ -359,7 +365,12 @@ impl IntProxy {
                     .await
             }
             DaemonMessage::SwitchProtocolVersionResponse(protocol_version) => {
-                let _ = self.protocol_version.insert(protocol_version.clone());
+                let previous = self.protocol_version.replace(protocol_version.clone());
+                if previous.is_none() {
+                    // We can now process layers' requests.
+                    self.background_tasks
+                        .resume_messages(MainTaskId::LayerInitializer);
+                }
 
                 if CLIENT_READY_FOR_LOGS.matches(&protocol_version) {
                     self.task_txs.agent.send(ClientMessage::ReadyForLogs).await;
@@ -525,5 +536,143 @@ impl IntProxy {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{net::SocketAddr, path::PathBuf, time::Duration};
+
+    use mirrord_intproxy_protocol::{
+        LayerToProxyMessage, LocalMessage, NewSessionRequest, ProcessInfo, ProxyToLayerMessage,
+    };
+    use mirrord_protocol::{file::StatFsRequestV2, ClientMessage, DaemonMessage, FileRequest};
+    use tokio::{
+        net::{TcpListener, TcpStream},
+        sync::mpsc,
+    };
+
+    use crate::{
+        agent_conn::{AgentConnection, ReconnectFlow},
+        IntProxy,
+    };
+
+    /// Verifies that [`IntProxy`] waits with processing layers' requests
+    /// until [`mirrord_protocol`] version is negotiated.
+    ///
+    /// # TODO
+    ///
+    /// This test does a short sleep.
+    /// Once intproxy exposes its state in some way, we can remove it.
+    #[tokio::test]
+    async fn intproxy_waits_for_protocol_version() {
+        let (agent_tx, mut proxy_rx) = mpsc::channel(12);
+        let (proxy_tx, agent_rx) = mpsc::channel(12);
+
+        let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+            .await
+            .unwrap();
+        let proxy_addr = listener.local_addr().unwrap();
+
+        let agent_conn = AgentConnection {
+            agent_rx,
+            agent_tx,
+            reconnect: ReconnectFlow::Break,
+        };
+        let proxy = IntProxy::new_with_connection(
+            agent_conn,
+            listener,
+            4096,
+            Default::default(),
+            Default::default(),
+        );
+        let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
+
+        match proxy_rx.recv().await.unwrap() {
+            ClientMessage::SwitchProtocolVersion(version) => {
+                assert_eq!(version, *mirrord_protocol::VERSION)
+            }
+            other => panic!("unexpected client message from the proxy: {other:?}"),
+        }
+
+        let conn = TcpStream::connect(proxy_addr).await.unwrap();
+        let mut codec = mirrord_intproxy_protocol::codec::make_async_framed::<
+            LocalMessage<LayerToProxyMessage>,
+            LocalMessage<ProxyToLayerMessage>,
+        >(conn);
+        codec
+            .0
+            .send(&LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::NewSession(NewSessionRequest::New(ProcessInfo {
+                    pid: 1337,
+                    name: "hello there".into(),
+                    cmdline: vec!["hello there".into()],
+                    loaded: true,
+                })),
+            })
+            .await
+            .unwrap();
+        codec.0.flush().await.unwrap();
+        match codec.1.receive().await.unwrap().unwrap() {
+            LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::NewSession(..),
+            } => {}
+            other => panic!("unexpected local message from the proxy: {other:?}"),
+        }
+
+        codec
+            .0
+            .send(&LocalMessage {
+                message_id: 1,
+                inner: LayerToProxyMessage::File(FileRequest::StatFsV2(StatFsRequestV2 {
+                    path: PathBuf::from("/some/path"),
+                })),
+            })
+            .await
+            .unwrap();
+        codec.0.flush().await.unwrap();
+
+        // To make sure that the proxy has a chance to do progress.
+        // If the proxy was not waiting for agent protocol version,
+        // it would surely respond to our previous request here.
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                match proxy_rx.recv().await.unwrap() {
+                    ClientMessage::Ping => {
+                        proxy_tx.send(DaemonMessage::Pong).await.unwrap();
+                    }
+                    other => panic!("unexpected client message from the proxy: {other:?}"),
+                }
+            }
+        })
+        .await
+        .unwrap_err();
+
+        proxy_tx
+            .send(DaemonMessage::SwitchProtocolVersionResponse(
+                mirrord_protocol::VERSION.clone(),
+            ))
+            .await
+            .unwrap();
+
+        loop {
+            match proxy_rx.recv().await.unwrap() {
+                ClientMessage::Ping => {
+                    proxy_tx.send(DaemonMessage::Pong).await.unwrap();
+                }
+                ClientMessage::ReadyForLogs => {}
+                ClientMessage::FileRequest(FileRequest::StatFsV2(StatFsRequestV2 { path })) => {
+                    assert_eq!(path, PathBuf::from("/some/path"));
+                    break;
+                }
+                other => panic!("unexpected client message from the proxy: {other:?}"),
+            }
+        }
+
+        std::mem::drop(codec);
+
+        proxy_handle.await.unwrap().unwrap();
     }
 }

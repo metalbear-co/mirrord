@@ -836,7 +836,17 @@ where
             }
 
             Command::HttpResponse(response) => {
+                let is_last = response.is_last();
+
                 self.send_http_response(client_id, response).await;
+
+                // Checks if this is the last piece of the response, so we can properly update
+                // the `HTTP_REQUEST_IN_PROGRESS_COUNT` metric when dealing with streamed
+                // responses.
+                if is_last {
+                    HTTP_REQUEST_IN_PROGRESS_COUNT
+                        .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                }
             }
 
             Command::SwitchProtocolVersion(new_version) => {

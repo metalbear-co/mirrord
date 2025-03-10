@@ -21,7 +21,7 @@ impl ConnectionWrapper {
 
     async fn next_message<T>(&mut self) -> Option<T>
     where
-        T: Decode,
+        T: Decode<()>,
     {
         let mut decoder: AsyncDecoder<T, _> = AsyncDecoder::new(&mut self.conn);
         decoder

@@ -4,6 +4,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
+    ops::Not,
     time::Duration,
 };
 
@@ -14,16 +15,15 @@ use aws_sdk_sqs::types::{
     MessageAttributeValue,
     QueueAttributeName::{FifoQueue, MessageRetentionPeriod},
 };
-use futures::StreamExt;
-use futures_util::{FutureExt, TryStreamExt};
+use futures_util::FutureExt;
 use k8s_openapi::api::{
     apps::v1::Deployment,
-    core::v1::{EnvVar, Service},
+    core::v1::{EnvVar, Pod, Service},
 };
 use kube::{
-    api::{Patch, PatchParams, PostParams, WatchEvent, WatchParams},
-    runtime::wait::await_condition,
-    Api, Client, Resource, ResourceExt,
+    api::{Patch, PatchParams, PostParams},
+    runtime::{wait::await_condition, watcher},
+    Api, Client, Resource,
 };
 use mirrord_operator::{
     crd::{
@@ -34,11 +34,9 @@ use mirrord_operator::{
     setup::OPERATOR_NAME,
 };
 use rstest::fixture;
-use tokio::task::JoinHandle;
 
-use crate::utils::{
-    kube_client, service_addr::TestServiceAddr, service_with_env, KubeService, ResourceGuard,
-};
+use super::{port_forwarder::PortForwarder, watch::Watcher};
+use crate::utils::{kube_client, service_with_env, KubeService, ResourceGuard};
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
 const QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_Q_NAME1";
@@ -69,6 +67,7 @@ pub struct QueueInfo {
 
 /// K8s resources will be deleted when this is dropped.
 pub struct SqsTestResources {
+    pub kube_client: Client,
     k8s_service: KubeService,
     pub queue1: QueueInfo,
     pub echo_queue1: QueueInfo,
@@ -76,13 +75,10 @@ pub struct SqsTestResources {
     pub echo_queue2: QueueInfo,
     pub sqs_client: aws_sdk_sqs::Client,
     _guards: Vec<ResourceGuard>,
-    /// A future that completes once there are 2 ready SQS sessions.
-    /// Option, because it is moved when awaited.
-    sessions_ready_future: Option<JoinHandle<Result<(), ()>>>,
-    /// A future that completes once the queue registry resource has a status, meaning the first
-    /// user started a session. Needed because currently two users cannot start at the same time.
-    /// Option, because it is moved when awaited.
-    registry_has_status_future: Option<JoinHandle<()>>,
+    /// Keeps portforwarding to the localstack service alive.
+    ///
+    /// [`None`] if we're not using localstack.
+    _localstack_portforwarder: Option<PortForwarder>,
 }
 
 impl SqsTestResources {
@@ -92,36 +88,6 @@ impl SqsTestResources {
 
     pub fn deployment_target(&self) -> String {
         self.k8s_service.deployment_target()
-    }
-
-    /// Returns with `Ok(())` once there are 2 ready SQS Sessions.
-    /// Returns `Err(())` if a session was deleted before 2 were ready, or if there was an API
-    /// error.
-    ///
-    /// # Panics
-    /// If `timeout` has passed and stdout still does not contain `n` lines.
-    pub async fn wait_for_sqs_sessions(&mut self, timeout_secs: u64) -> Result<(), ()> {
-        tokio::time::timeout(
-            Duration::from_secs(timeout_secs),
-            self.sessions_ready_future.take().unwrap(),
-        )
-        .await
-        .unwrap()
-        .unwrap()
-    }
-
-    /// Returns once the queue registry has a status.
-    ///
-    /// # Panics
-    /// If `timeout` has passed and stdout still does not contain `n` lines.
-    pub async fn wait_for_registry_status(&mut self, timeout_secs: u64) {
-        tokio::time::timeout(
-            Duration::from_secs(timeout_secs),
-            self.registry_has_status_future.take().unwrap(),
-        )
-        .await
-        .unwrap()
-        .unwrap();
     }
 }
 
@@ -332,19 +298,22 @@ const AWS_ENV: [(&str, &str); 5] = [
 ];
 
 /// Take env from deployment, return container index and env
-fn take_env(deployment: Deployment) -> (usize, Vec<EnvVar>) {
+fn take_env(deployment: &mut Deployment) -> (usize, Vec<EnvVar>) {
     let (index, container) = deployment
         .spec
+        .as_mut()
         .unwrap()
         .template
         .spec
+        .as_mut()
         .unwrap()
         .containers
-        .into_iter()
+        .iter_mut()
         .enumerate()
         .find(|(_, container)| container.name == OPERATOR_NAME)
         .expect("could not find right operator container");
-    (index, container.env.unwrap_or_default())
+
+    (index, container.env.take().unwrap_or_default())
 }
 
 /// Patch the deployed operator to use localstack for all AWS API calls.
@@ -352,7 +321,7 @@ fn take_env(deployment: Deployment) -> (usize, Vec<EnvVar>) {
 async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<ResourceGuard>) {
     let deploy_api = Api::<Deployment>::namespaced(client.clone(), "mirrord");
 
-    let operator_deploy = deploy_api
+    let mut operator_deploy = deploy_api
         .get(OPERATOR_NAME)
         .await
         .expect(r#"Did not find the operator's deployment in the "mirrord" namespace."#);
@@ -364,7 +333,7 @@ async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<Resourc
         }
     };
 
-    let (container_index, mut env) = take_env(operator_deploy);
+    let (container_index, mut env) = take_env(&mut operator_deploy);
 
     let mut aws_env = HashMap::from(AWS_ENV);
     let original_env = env.clone();
@@ -391,7 +360,7 @@ async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<Resourc
         "env",
     ]);
     let env_path = path.clone();
-    let value = serde_json::to_value(env).unwrap();
+    let value = serde_json::to_value(&env).unwrap();
 
     let label_path =
         jsonptr::PointerBuf::from_tokens(["metadata", "labels", LOCALSTACK_PATCH_LABEL_NAME]);
@@ -419,8 +388,6 @@ async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<Resourc
         container_index.as_str(),
         "name",
     ]);
-
-    let api = deploy_api.clone();
 
     let restore_env = async move {
         println!("Restoring AWS env vars from before SQS tests");
@@ -453,110 +420,123 @@ async fn patch_operator_for_localstack(client: &Client, guards: &mut Vec<Resourc
         deleter: Some(restore_env.boxed()),
     });
 
-    tokio::time::timeout(
-        Duration::from_secs(30),
-        await_condition(
-            api,
-            OPERATOR_NAME,
-            get_patch_applied_check(operator_deploy.metadata.generation.unwrap()),
-        ),
+    let namespace = operator_deploy.metadata.namespace.as_deref().unwrap();
+    let selector = operator_deploy
+        .spec
+        .as_ref()
+        .unwrap()
+        .selector
+        .match_labels
+        .as_ref()
+        .unwrap();
+
+    wait_for_operator_patch(
+        client.clone(),
+        env,
+        namespace,
+        selector,
+        Duration::from_secs(120),
     )
-    .await
-    .expect("Operator patch did not complete in 30 secs.")
-    .expect("failed to await condition");
-    tokio::time::sleep(Duration::from_secs(20)).await // TODO: find better solution.
+    .await;
 }
 
-/// Get a function that checks if a deployment already reached an actual generation same as or later
-/// than the given one.
-///
-/// For example, if the passed `generation` is 3, this function will return a function that takes
-/// an optional deployment, and only returns `true` when the deployment is there (not `None`), and
-/// its observed generation is greater than or equals 3.
-///
-/// Note: it does not require for the `observedGeneration` to be greater or equal the current
-/// `generation`, just the given generation. So if the function returned from the example above
-/// gets a deployment with `observedGeneration` `3` and `generation` `4`, it returns `true`.
-fn get_patch_applied_check(generation: i64) -> impl Fn(Option<&Deployment>) -> bool {
-    move |opt| {
-        opt.and_then(|resource| {
-            resource
-                .status
-                .as_ref()
-                .and_then(|status| status.observed_generation)
-        })
-        .inspect(|observed_generation| {
-            println!(
-                "Checking if operator patch completed. observed generation: {observed_generation}."
-            )
-        })
-        .map(|observed_generation| observed_generation >= generation)
-        // If there is no deployment, if the deployment has no status, or if the status does not
-        // contain an observed generation, we take it to mean the deployment has not yet reached
-        // the wanted generation.
-        .unwrap_or_default()
-    }
+/// Waits until the operator container uses the expected env and is ready.
+async fn wait_for_operator_patch(
+    client: Client,
+    expected_env: Vec<EnvVar>,
+    namespace: &str,
+    selector: &BTreeMap<String, String>,
+    timeout: Duration,
+) {
+    let label_selector = selector
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let config = watcher::Config {
+        label_selector: Some(label_selector),
+        ..Default::default()
+    };
+
+    let condition = move |pods: &HashMap<String, Pod>| {
+        if pods.is_empty() {
+            return false;
+        }
+
+        let ready = pods
+            .values()
+            .filter_map(|pod| {
+                let status = pod.status.as_ref()?;
+                let phase = status.phase.as_deref()?;
+                if phase != "Running" {
+                    return None;
+                }
+
+                if status
+                    .container_statuses
+                    .as_ref()?
+                    .iter()
+                    .all(|c| c.ready)
+                    .not()
+                {
+                    return None;
+                }
+
+                let env = pod
+                    .spec
+                    .as_ref()?
+                    .containers
+                    .iter()
+                    .find(|c| c.name == OPERATOR_NAME)?
+                    .env
+                    .as_ref()?;
+                if *env != expected_env {
+                    return None;
+                }
+
+                Some(())
+            })
+            .count();
+
+        ready == pods.len()
+    };
+
+    let mut watcher = Watcher::new(Api::<Pod>::namespaced(client, namespace), config, condition);
+    tokio::time::timeout(timeout, watcher.run()).await.unwrap();
 }
 
-/// Watch `MirrordSqsSession` resources in this namespace (which is private to this test instance
-/// alone), and return once two unique sessions are ready.
+/// Attempts to find the `localstack` service in the `default` namespace.
+async fn localstack_in_default_namespace(kube_client: &Client) -> Option<Service> {
+    let service_api = Api::<Service>::namespaced(kube_client.clone(), "default");
+    service_api.get("localstack").await.ok()
+}
+
+/// Watch [`MirrordSqsSession`] resources in the given namespace and return once two unique sessions
+/// are ready.
 ///
 /// Return `Err(())` if there was an error while watching or if a session was deleted before 2 were
 /// ready.
-pub async fn watch_sqs_sessions(kube_client: Client, namespace: String) -> Result<(), ()> {
-    let sqs_sessions = Api::<MirrordSqsSession>::namespaced(kube_client, &namespace);
-    let wp = WatchParams::default().timeout(60);
-    println!("Waiting for 2 MirrordSqsSessions to be ready.");
-    let mut ready_session_name: Option<String> = None;
-    // Do in loop because stream can stop for no reason.
-    loop {
-        let mut stream = sqs_sessions.watch(&wp, "0").await.unwrap().boxed();
-        while let Some(session) = stream.try_next().await.unwrap() {
-            match session {
-                WatchEvent::Added(s) | WatchEvent::Modified(s) => {
-                    if is_session_ready(Some(&s)) {
-                        let session_name = s.name_any();
-                        if let Some(seen_name) = ready_session_name.as_ref() {
-                            if *seen_name != session_name {
-                                println!("second SQS session ready! {}", session_name);
-                                return Ok(());
-                            }
-                        } else {
-                            println!("first SQS session ready");
-                            ready_session_name = Some(session_name)
-                        }
-                    }
-                }
-                WatchEvent::Deleted(s) => {
-                    println!(
-                        "SQS session was deleted before both were ready: {}",
-                        s.name_any()
-                    );
-                    return Err(());
-                }
-                WatchEvent::Bookmark(_) => {}
-                WatchEvent::Error(e) => {
-                    println!("SQS Session watch error: {}", e);
-                    return Err(());
-                }
-            }
-        }
-    }
+pub async fn watch_sqs_sessions(kube_client: Client, namespace: &str) {
+    let api = Api::<MirrordSqsSession>::namespaced(kube_client, namespace);
+    Watcher::new(api, Default::default(), |sessions| {
+        sessions
+            .values()
+            .filter(|s| is_session_ready(Some(s)))
+            .count()
+            == 2
+    })
+    .run()
+    .await;
 }
 
-fn queue_registry_has_status(queue_registry: Option<&MirrordWorkloadQueueRegistry>) -> bool {
-    queue_registry.and_then(|qr| qr.status.as_ref()).is_some()
-}
+pub async fn await_registry_status(kube_client: Client, namespace: &str) {
+    let api: Api<MirrordWorkloadQueueRegistry> = Api::namespaced(kube_client, namespace);
+    let has_status =
+        |qr: Option<&MirrordWorkloadQueueRegistry>| qr.is_some_and(|qr| qr.status.is_some());
 
-async fn await_registry_status(kube_client: Client, namespace: String) {
-    let qr_api: Api<MirrordWorkloadQueueRegistry> = Api::namespaced(kube_client, &namespace);
-    await_condition(
-        qr_api,
-        QUEUE_REGISTRY_RESOURCE_NAME,
-        queue_registry_has_status,
-    )
-    .await
-    .unwrap();
+    await_condition(api, QUEUE_REGISTRY_RESOURCE_NAME, has_status)
+        .await
+        .unwrap();
 }
 
 /// - Check if there is a localstack instance deployed in the default namespace and patch the
@@ -572,41 +552,31 @@ async fn await_registry_status(kube_client: Client, namespace: String) {
 pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResources {
     let kube_client = kube_client.await;
     let mut guards = Vec::new();
-
-    let endpoint_addr = {
-        let localstack = Api::<Service>::namespaced(kube_client.clone(), "default")
-            .get("localstack")
-            .await
-            .ok();
-        if let Some(localstack) = localstack {
+    let localstack_portforwarder =
+        if let Some(localstack) = localstack_in_default_namespace(&kube_client).await {
             println!("localstack detected, using localstack for SQS");
             patch_operator_for_localstack(&kube_client, &mut guards).await;
-            Some(TestServiceAddr::fetch(kube_client.clone(), &localstack).await)
+            Some(PortForwarder::new_for_service(kube_client.clone(), &localstack, 4566).await)
         } else {
             None
-        }
-    };
+        };
 
-    let endpoint_url = endpoint_addr
+    let localstack_url = localstack_portforwarder
         .as_ref()
-        .map(|addr| format!("http://{}", addr.addr));
-    let sqs_client = get_sqs_client(endpoint_url).await;
+        .map(PortForwarder::address)
+        .map(|addr| format!("http://{addr}"));
+    let sqs_client = get_sqs_client(localstack_url).await;
     let (queue1, echo_queue1) =
         random_name_sqs_queue_with_echo_queue(false, &sqs_client, &mut guards).await;
     let (queue2, echo_queue2) =
         random_name_sqs_queue_with_echo_queue(true, &sqs_client, &mut guards).await;
     let k8s_service =
         sqs_consumer_service(&kube_client, &queue1, &queue2, &echo_queue1, &echo_queue2).await;
-    let sessions_ready_future = Some(tokio::spawn(watch_sqs_sessions(
-        kube_client.clone(),
-        k8s_service.namespace.clone(),
-    )));
-    let registry_has_status_future = Some(tokio::spawn(await_registry_status(
-        kube_client.clone(),
-        k8s_service.namespace.clone(),
-    )));
+
     create_queue_registry_resource(&kube_client, &k8s_service.namespace, &k8s_service.name).await;
+
     SqsTestResources {
+        kube_client,
         k8s_service,
         queue1,
         echo_queue1,
@@ -614,8 +584,7 @@ pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResourc
         echo_queue2,
         sqs_client,
         _guards: guards,
-        sessions_ready_future,
-        registry_has_status_future,
+        _localstack_portforwarder: localstack_portforwarder,
     }
 }
 
