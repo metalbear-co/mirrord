@@ -3,6 +3,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(rename = "co.metalbear.mirrord.v1.LicenseInfoOwned")]
 pub struct LicenseInfoOwned {
     pub name: String,
     pub organization: String,

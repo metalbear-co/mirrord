@@ -53,7 +53,7 @@ setup = ["crd", "dep:serde_yaml"]
 mirrord-agent-env = { path = "../agent/env", features = ["schema"], optional = true }
 mirrord-analytics = { path = "../analytics", optional = true }
 mirrord-auth = { path = "../auth", features = ["client"], optional = true }
-mirrord-config = { path = "../config", optional = true }
+mirrord-config = { path = "../config", features = ["namespaced-schemars"], optional = true }
 mirrord-kube = { path = "../kube", optional = true }
 mirrord-progress = { path = "../progress", optional = true }
 mirrord-protocol = { path = "../protocol", optional = true }
