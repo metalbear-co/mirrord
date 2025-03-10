@@ -391,7 +391,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.12",
  "tokio",
- "tungstenite",
+ "tungstenite 0.24.0",
  "uuid",
  "walkdir",
  "widestring",
@@ -1033,7 +1033,7 @@ dependencies = [
  "sha1",
  "sync_wrapper",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.24.0",
  "tower 0.5.2",
  "tower-layer",
  "tower-service",
@@ -3008,6 +3008,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hostname"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9c7c7c8ac16c798734b8a24560c1362120597c40d5e1459f09498f8f6c8f2ba"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "windows",
+]
+
+[[package]]
 name = "http"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3711,17 +3722,15 @@ dependencies = [
 
 [[package]]
 name = "jsonpath-rust"
-version = "0.5.1"
+version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19d8fe85bd70ff715f31ce8c739194b423d79811a19602115d611a3ec85d6200"
+checksum = "0c00ae348f9f8fd2d09f82a98ca381c60df9e0820d8d79fce43e649b4dc3128b"
 dependencies = [
- "lazy_static",
- "once_cell",
  "pest",
  "pest_derive",
  "regex",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -3748,9 +3757,9 @@ dependencies = [
 
 [[package]]
 name = "k8s-openapi"
-version = "0.23.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c8847402328d8301354c94d605481f25a6bdc1ed65471fd96af8eca71141b13"
+checksum = "2c75b990324f09bef15e791606b7b7a296d02fc88a344f6eba9390970a870ad5"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -3782,8 +3791,8 @@ dependencies = [
 
 [[package]]
 name = "kube"
-version = "0.96.0"
-source = "git+https://github.com/kube-rs/kube.git?rev=ecbdafc214538aadc78ec8447f2fa12d0057492b#ecbdafc214538aadc78ec8447f2fa12d0057492b"
+version = "0.98.0"
+source = "git+https://github.com/kube-rs/kube.git?tag=0.98.0#3f122f9c4650b33abca9d4f25db1aaf205e7a00c"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -3794,8 +3803,8 @@ dependencies = [
 
 [[package]]
 name = "kube-client"
-version = "0.96.0"
-source = "git+https://github.com/kube-rs/kube.git?rev=ecbdafc214538aadc78ec8447f2fa12d0057492b#ecbdafc214538aadc78ec8447f2fa12d0057492b"
+version = "0.98.0"
+source = "git+https://github.com/kube-rs/kube.git?tag=0.98.0#3f122f9c4650b33abca9d4f25db1aaf205e7a00c"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -3824,9 +3833,9 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.26.2",
  "tokio-util",
  "tower 0.5.2",
  "tower-http",
@@ -3835,8 +3844,8 @@ dependencies = [
 
 [[package]]
 name = "kube-core"
-version = "0.96.0"
-source = "git+https://github.com/kube-rs/kube.git?rev=ecbdafc214538aadc78ec8447f2fa12d0057492b#ecbdafc214538aadc78ec8447f2fa12d0057492b"
+version = "0.98.0"
+source = "git+https://github.com/kube-rs/kube.git?tag=0.98.0#3f122f9c4650b33abca9d4f25db1aaf205e7a00c"
 dependencies = [
  "chrono",
  "form_urlencoded",
@@ -3847,13 +3856,13 @@ dependencies = [
  "serde",
  "serde-value",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
 name = "kube-derive"
-version = "0.96.0"
-source = "git+https://github.com/kube-rs/kube.git?rev=ecbdafc214538aadc78ec8447f2fa12d0057492b#ecbdafc214538aadc78ec8447f2fa12d0057492b"
+version = "0.98.0"
+source = "git+https://github.com/kube-rs/kube.git?tag=0.98.0#3f122f9c4650b33abca9d4f25db1aaf205e7a00c"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3864,8 +3873,8 @@ dependencies = [
 
 [[package]]
 name = "kube-runtime"
-version = "0.96.0"
-source = "git+https://github.com/kube-rs/kube.git?rev=ecbdafc214538aadc78ec8447f2fa12d0057492b#ecbdafc214538aadc78ec8447f2fa12d0057492b"
+version = "0.98.0"
+source = "git+https://github.com/kube-rs/kube.git?tag=0.98.0#3f122f9c4650b33abca9d4f25db1aaf205e7a00c"
 dependencies = [
  "ahash",
  "async-broadcast",
@@ -3875,6 +3884,7 @@ dependencies = [
  "educe",
  "futures",
  "hashbrown 0.15.2",
+ "hostname 0.4.0",
  "json-patch",
  "jsonptr",
  "k8s-openapi",
@@ -3883,7 +3893,7 @@ dependencies = [
  "pin-project",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-util",
  "tracing",
@@ -4575,7 +4585,7 @@ dependencies = [
  "serde_yaml",
  "thiserror 2.0.12",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.24.0",
  "tracing",
 ]
 
@@ -6023,7 +6033,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52e44394d2086d010551b14b53b1f24e31647570cd1deb0379e2c21b329aba00"
 dependencies = [
- "hostname",
+ "hostname 0.3.1",
  "quick-error",
 ]
 
@@ -7064,7 +7074,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.24.0",
  "wsl",
 ]
 
@@ -7286,7 +7296,19 @@ dependencies = [
  "futures-util",
  "log",
  "tokio",
- "tungstenite",
+ "tungstenite 0.24.0",
+]
+
+[[package]]
+name = "tokio-tungstenite"
+version = "0.26.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a9daff607c6d2bf6c16fd681ccb7eecc83e4e2cdc1ca067ffaadfca5de7f084"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite 0.26.2",
 ]
 
 [[package]]
@@ -7577,6 +7599,23 @@ dependencies = [
  "rustls-pki-types",
  "sha1",
  "thiserror 1.0.69",
+ "utf-8",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.26.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4793cb5e56680ecbb1d843515b23b6de9a75eb04b66643e256a396d43be33c13"
+dependencies = [
+ "bytes",
+ "data-encoding",
+ "http 1.2.0",
+ "httparse",
+ "log",
+ "rand 0.9.0",
+ "sha1",
+ "thiserror 2.0.12",
  "utf-8",
 ]
 
@@ -8024,6 +8063,16 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[package]]
+name = "windows"
+version = "0.52.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e48a53791691ab099e5e2ad123536d0fff50652600abaf43bbf952894110d0be"
+dependencies = [
+ "windows-core",
+ "windows-targets 0.52.6",
+]
 
 [[package]]
 name = "windows-core"
