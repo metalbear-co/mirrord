@@ -85,8 +85,9 @@ use load::ExecuteArgs;
 #[cfg(target_os = "macos")]
 use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
+    config::ConfigError,
     feature::{env::mapper::EnvVarsRemapper, fs::FsModeConfig, network::incoming::IncomingMode},
-    LayerConfig, MIRRORD_RESOLVED_CONFIG_ENV,
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
@@ -187,7 +188,10 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     EXECUTABLE_PATH.get_or_try_init(|| {
         std::env::current_exe().map(|arg| arg.to_string_lossy().into_owned())
     })?;
-    let config = LayerConfig::from_env()?;
+
+    let resolved = std::env::var(LayerConfig::RESOLVED_CONFIG_ENV)
+        .map_err(|err| ConfigError::DecodeError(err.to_string()))?;
+    let config = LayerConfig::decode(&resolved)?;
 
     #[cfg(target_os = "macos")]
     let patch_binaries = config
@@ -239,12 +243,10 @@ fn load_only_layer_start(config: &LayerConfig) {
         return;
     }
 
-    let address: SocketAddr = config
-        .connect_tcp
-        .as_ref()
+    let address = std::env::var(MIRRORD_LAYER_INTPROXY_ADDR)
         .expect("missing internal proxy address")
-        .parse()
-        .expect("failed to parse internal proxy address");
+        .parse::<SocketAddr>()
+        .expect("malformed internal proxy address");
 
     let new_connection = ProxyConnection::new(
         address,
@@ -373,7 +375,7 @@ fn layer_start(mut config: LayerConfig) {
 
     // remove resolved encoded config from env vars when logging them
     let env_vars_print_only: Vec<_> = std::env::vars()
-        .filter(|(k, _v)| k != MIRRORD_RESOLVED_CONFIG_ENV)
+        .filter(|(k, _v)| k != LayerConfig::RESOLVED_CONFIG_ENV)
         .collect();
     tracing::info!("Initializing mirrord-layer!");
     tracing::debug!(

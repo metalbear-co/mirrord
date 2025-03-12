@@ -21,6 +21,7 @@ use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
 use mirrord_config::{
+    config::ConfigError,
     feature::{
         fs::FsModeConfig,
         network::{
@@ -28,7 +29,7 @@ use mirrord_config::{
             incoming::IncomingMode,
         },
     },
-    LayerConfig, LayerFileConfig, MIRRORD_CONFIG_FILE_ENV,
+    LayerConfig, LayerFileConfig,
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_progress::{messages::EXEC_CONTAINER_BINARY, Progress, ProgressTracker};
@@ -185,7 +186,7 @@ fn print_config<P>(
     } else {
         "mirrord will run without a target"
     };
-    let config_info = if let Ok(path) = std::env::var(MIRRORD_CONFIG_FILE_ENV) {
+    let config_info = if let Ok(path) = std::env::var(LayerConfig::FILE_PATH_ENV) {
         &format!("a configuration file was loaded from: {} ", path)[..]
     } else {
         "no configuration file was loaded"
@@ -358,7 +359,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
     }
 
     // LayerConfig must be created after setting relevant env vars
-    let (config, mut context) = LayerConfig::from_env_with_warnings()?;
+    let (config, mut context) = LayerConfig::resolve()?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
     (&config).collect_analytics(analytics.get_mut());
@@ -475,11 +476,11 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
     }
 
     if let Some(config_file) = &args.config_file {
-        std::env::set_var("MIRRORD_CONFIG_FILE", config_file);
+        std::env::set_var(LayerConfig::FILE_PATH_ENV, config_file);
     }
 
     // LayerConfig must be created after setting relevant env vars
-    let (config, mut context) = LayerConfig::from_env_with_warnings()?;
+    let (config, mut context) = LayerConfig::resolve()?;
 
     let mut analytics = AnalyticsReporter::new(config.telemetry, ExecutionKind::PortForward, watch);
     (&config).collect_analytics(analytics.get_mut());
@@ -493,7 +494,7 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
 
     // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
     // error print-outs
-    let agent_conn = AgentConnection::new(&config, Some(connection_info), &mut analytics)
+    let agent_conn = AgentConnection::new(&config, connection_info, &mut analytics)
         .await
         .map_err(|agent_con_error| match agent_con_error {
             AgentConnectionError::Io(error) => CliError::PortForwardingSetupError(error.into()),
@@ -503,7 +504,6 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
                 CliError::PortForwardingSetupError,
             ),
             AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
-            AgentConnectionError::NoConnectionMethod => CliError::PortForwardingNoConnectionMethod,
         })?;
     let connection_2 = connection::AgentConnection {
         sender: agent_conn.agent_tx,
@@ -578,7 +578,7 @@ fn main() -> miette::Result<()> {
                 extension_exec(*args, watch).await?;
             }
             Commands::InternalProxy { port } => {
-                let config = LayerConfig::recalculate_from_env()?;
+                let config = internal_proxy::read_config().await?;
                 logging::init_intproxy_tracing_registry(&config)?;
                 internal_proxy::proxy(config, port, watch).await?
             }
@@ -602,7 +602,12 @@ fn main() -> miette::Result<()> {
                 container_ext_command(args.config_file, args.target, watch).await?
             }
             Commands::ExternalProxy { port } => {
-                let config = LayerConfig::recalculate_from_env()?;
+                let config = {
+                    let encoded = std::env::var(LayerConfig::RESOLVED_CONFIG_ENV)
+                        .map_err(|err| ConfigError::DecodeError(err.to_string()))?;
+                    LayerConfig::decode(&encoded)?
+                };
+
                 logging::init_extproxy_tracing_registry(&config)?;
                 external_proxy::proxy(config, port, watch).await?
             }

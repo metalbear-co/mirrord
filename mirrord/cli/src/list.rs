@@ -213,7 +213,7 @@ pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> Cl
         let mut cfg_context = ConfigContext::default();
         LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?
     } else {
-        LayerConfig::from_env()?
+        LayerConfig::resolve()?.0
     };
 
     if let Some(namespace) = args.namespace {

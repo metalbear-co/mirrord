@@ -20,10 +20,10 @@
 //! ```
 
 use std::{
-    fs::File,
     io,
-    io::BufReader,
     net::{Ipv4Addr, SocketAddr},
+    os::unix::ffi::OsStrExt,
+    path::Path,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -34,8 +34,8 @@ use std::{
 use futures::{SinkExt, StreamExt};
 use local_ip_address::local_ip;
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
-use mirrord_config::LayerConfig;
-use mirrord_intproxy::agent_conn::{AgentConnection, ConnectionTlsError};
+use mirrord_config::{external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, LayerConfig};
+use mirrord_intproxy::agent_conn::{AgentConnectInfo, AgentConnection};
 use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage, LogLevel, LogMessage};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::server::TlsStream;
@@ -54,7 +54,7 @@ use crate::{
 /// back to the layer instances via env var.
 fn print_addr(listener: &TcpListener) -> io::Result<()> {
     let addr = listener.local_addr()?;
-    println!("{addr}\n");
+    println!("{addr}");
     Ok(())
 }
 
@@ -67,13 +67,14 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
         "Starting mirrord-extproxy",
     );
 
-    let agent_connect_info = std::env::var(AGENT_CONNECT_INFO_ENV_KEY)
-        .ok()
-        .map(|var| {
-            serde_json::from_str(&var)
-                .map_err(|e| ExternalProxyError::DeseralizeConnectInfo(var, e))
-        })
-        .transpose()?;
+    let agent_connect_info: AgentConnectInfo = std::env::var_os(AGENT_CONNECT_INFO_ENV_KEY)
+        .ok_or(ExternalProxyError::MissingConnectInfo)
+        .and_then(|var| {
+            serde_json::from_slice(var.as_bytes()).map_err(|error| {
+                let as_string = String::from_utf8_lossy(var.as_bytes()).into_owned();
+                ExternalProxyError::DeseralizeConnectInfo(as_string, error)
+            })
+        })?;
 
     let execution_kind = std::env::var(MIRRORD_EXECUTION_KIND_ENV)
         .ok()
@@ -87,7 +88,14 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
     let mut own_agent_conn =
         connect_and_ping(&config, agent_connect_info.clone(), &mut analytics).await?;
 
-    let tls_acceptor = create_external_proxy_tls_acceptor(&config).await?;
+    let tls_acceptor = match std::env::var_os(MIRRORD_EXTPROXY_TLS_SETUP_PEM) {
+        Some(path) => mirrord_tls_util::SecureChannelSetup::create_acceptor(Path::new(&path))
+            .await
+            .map_err(ExternalProxyError::Tls)?
+            .into(),
+        None => None,
+    };
+
     let listener = create_listen_socket(SocketAddr::new(
         local_ip().unwrap_or_else(|_| Ipv4Addr::UNSPECIFIED.into()),
         listen_port,
@@ -217,64 +225,6 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
     }
 
     Ok(())
-}
-
-async fn create_external_proxy_tls_acceptor(
-    config: &LayerConfig,
-) -> CliResult<Option<tokio_rustls::TlsAcceptor>, ExternalProxyError> {
-    if !config.external_proxy.tls_enable {
-        return Ok(None);
-    }
-
-    let (Some(client_tls_certificate), Some(tls_certificate), Some(tls_key)) = (
-        config.internal_proxy.client_tls_certificate.as_ref(),
-        config.external_proxy.tls_certificate.as_ref(),
-        config.external_proxy.tls_key.as_ref(),
-    ) else {
-        return Err(ExternalProxyError::MissingTlsInfo);
-    };
-
-    let tls_client_certificates = rustls_pemfile::certs(&mut BufReader::new(
-        File::open(client_tls_certificate)
-            .map_err(|error| {
-                ConnectionTlsError::MissingPem(client_tls_certificate.to_path_buf(), error)
-            })
-            .map_err(ExternalProxyError::Tls)?,
-    ))
-    .collect::<CliResult<Vec<_>, _>>()
-    .map_err(|error| ConnectionTlsError::ParsingPem(client_tls_certificate.to_path_buf(), error))
-    .map_err(ExternalProxyError::Tls)?;
-
-    let tls_certificate = rustls_pemfile::certs(&mut BufReader::new(
-        File::open(tls_certificate)
-            .map_err(|error| ConnectionTlsError::MissingPem(tls_certificate.to_path_buf(), error))
-            .map_err(ExternalProxyError::Tls)?,
-    ))
-    .collect::<CliResult<Vec<_>, _>>()
-    .map_err(|error| ConnectionTlsError::ParsingPem(tls_certificate.to_path_buf(), error))
-    .map_err(ExternalProxyError::Tls)?;
-
-    let tls_keys = rustls_pemfile::private_key(&mut BufReader::new(
-        File::open(tls_key)
-            .map_err(|error| ConnectionTlsError::MissingPem(tls_key.to_path_buf(), error))?,
-    ))
-    .map_err(|error| ConnectionTlsError::ParsingPem(tls_key.to_path_buf(), error))?
-    .ok_or_else(|| ConnectionTlsError::MissingPrivateKey(tls_key.to_path_buf()))?;
-
-    let mut roots = rustls::RootCertStore::empty();
-
-    roots.add_parsable_certificates(tls_client_certificates);
-
-    let client_verifier = rustls::server::WebPkiClientVerifier::builder(roots.into())
-        .build()
-        .map_err(ConnectionTlsError::ClientVerifier)?;
-
-    let tls_config = rustls::ServerConfig::builder()
-        .with_client_cert_verifier(client_verifier)
-        .with_single_cert(tls_certificate, tls_keys)
-        .map_err(ConnectionTlsError::ServerConfig)?;
-
-    Ok(Some(tokio_rustls::TlsAcceptor::from(Arc::new(tls_config))))
 }
 
 #[tracing::instrument(level = Level::TRACE, skip(agent_conn))]

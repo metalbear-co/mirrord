@@ -32,6 +32,7 @@ mirrord-protocol = { path = "../protocol" }
 mirrord-analytics = { path = "../analytics" }
 mirrord-intproxy = { path = "../intproxy" }
 mirrord-vpn = { path = "../vpn" }
+mirrord-tls-util = { path = "../tls-util" }
 
 actix-codec.workspace = true
 clap.workspace = true
@@ -60,8 +61,6 @@ clap_complete = "4.4.1"
 rustls.workspace = true
 local-ip-address = "0.6"
 tempfile.workspace = true
-rcgen.workspace = true
-rustls-pemfile.workspace = true
 tokio-rustls.workspace = true
 tokio-stream = { workspace = true, features = ["io-util", "net"] }
 regex.workspace = true
@@ -79,3 +78,5 @@ hyper.workspace = true
 hyper-util = { workspace = true, "features" = ["server"] }
 http-body-util.workspace = true
 kube.workspace = true
+rcgen.workspace = true
+

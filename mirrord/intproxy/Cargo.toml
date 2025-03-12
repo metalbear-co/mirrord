@@ -41,7 +41,6 @@ bytes.workspace = true
 rand.workspace = true
 tokio-rustls.workspace = true
 rustls.workspace = true
-rustls-pemfile.workspace = true
 tokio-retry.workspace = true
 
 [dev-dependencies]

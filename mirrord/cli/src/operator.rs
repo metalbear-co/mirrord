@@ -126,7 +126,7 @@ async fn get_status_api(config: Option<&Path>) -> CliResult<Api<MirrordOperatorC
         let mut cfg_context = ConfigContext::default();
         LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?
     } else {
-        LayerConfig::from_env()?
+        LayerConfig::resolve()?.0
     };
 
     if !layer_config.use_proxy {

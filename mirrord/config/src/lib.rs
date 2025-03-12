@@ -45,11 +45,8 @@ use crate::{
     internal_proxy::InternalProxyConfig, target::TargetConfig, util::VecOrSingle,
 };
 
-/// Env variable to load config from file (json, yaml and toml supported).
-pub static MIRRORD_CONFIG_FILE_ENV: &str = "MIRRORD_CONFIG_FILE";
-
-/// Env variable to load config from an already resolved base64 encoding.
-pub static MIRRORD_RESOLVED_CONFIG_ENV: &str = "MIRRORD_RESOLVED_CONFIG";
+/// Environment variable we use to pass internal proxy address to the layer.
+pub const MIRRORD_LAYER_INTPROXY_ADDR: &str = "MIRRORD_LAYER_INTPROXY_ADDR";
 
 /// mirrord allows for a high degree of customization when it comes to which features you want to
 /// enable, and how they should function.
@@ -223,18 +220,6 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_SKIP_BUILD_TOOLS", default = true)]
     pub skip_build_tools: bool,
 
-    /// ## connect_tcp {#root-connect_tcp}
-    ///
-    /// IP:PORT to connect to instead of using k8s api, for testing purposes.
-    ///
-    /// ```json
-    /// {
-    ///   "connect_tcp": "10.10.0.100:7777"
-    /// }
-    /// ```
-    #[config(env = "MIRRORD_CONNECT_TCP")]
-    pub connect_tcp: Option<String>,
-
     /// ## operator {#root-operator}
     ///
     /// Whether mirrord should use the operator.
@@ -334,75 +319,54 @@ pub struct LayerConfig {
 }
 
 impl LayerConfig {
-    /// Given an encoded complete config from the [`MIRRORD_RESOLVED_CONFIG_ENV`]
-    /// env var, attempt to decode it into [`LayerConfig`].
-    /// Intended to avoid re-resolving the config in every process mirrord is loaded into.
-    fn from_env_var(encoded_value: String) -> Result<Self, ConfigError> {
+    /// Env variable we use to store config file path.
+    pub const FILE_PATH_ENV: &str = "MIRRORD_CONFIG_FILE";
+
+    /// Env variable where we store encoded resolved config.
+    ///
+    /// Children processes should not resolve the configuration again,
+    /// instead they should use the resolved config.
+    ///
+    /// See [`LayerConfig::encode`] and [`LayerConfig::decode`].
+    pub const RESOLVED_CONFIG_ENV: &str = "MIRRORD_RESOLVED_CONFIG";
+
+    /// Decodes an encoded [`LayerConfig`].
+    ///
+    /// You can encode the config with [`LayerConfig::encode`].
+    pub fn decode(encoded_value: &str) -> Result<Self, ConfigError> {
         let decoded = BASE64_STANDARD
             .decode(encoded_value)
-            .map_err(|error| ConfigError::EnvVarDecodeError(error.to_string()))?;
-        let serialized = std::str::from_utf8(&decoded)
-            .map_err(|error| ConfigError::EnvVarDecodeError(error.to_string()))?;
-        Ok(serde_json::from_str::<Self>(serialized)?)
+            .map_err(|error| ConfigError::DecodeError(error.to_string()))?;
+        let deserialized = serde_json::from_slice(&decoded)
+            .map_err(|error| ConfigError::DecodeError(error.to_string()))?;
+
+        Ok(deserialized)
     }
 
-    /// Given a [`LayerConfig`], serialise it and convert to base 64 so it can be
-    /// set into [`MIRRORD_RESOLVED_CONFIG_ENV`].
-    pub fn to_env_var(&self) -> Result<String, ConfigError> {
+    /// Encodes this config to a string.
+    ///
+    /// You can decode the config with [`LayerConfig::decode`].
+    pub fn encode(&self) -> Result<String, ConfigError> {
         let serialized = serde_json::to_string(self)
-            .map_err(|error| ConfigError::EnvVarEncodeError(error.to_string()))?;
-        Ok(BASE64_STANDARD.encode(serialized))
+            .map_err(|error| ConfigError::EncodeError(error.to_string()))?;
+        let encoded = BASE64_STANDARD.encode(serialized);
+
+        Ok(encoded)
     }
 
-    /// Encode this config with [`Self::to_env_var`] and set it into
-    /// [`MIRRORD_RESOLVED_CONFIG_ENV`]. Must be used when updating [`LayerConfig`] after
-    /// creation in order for the config in env to reflect the change.
-    pub fn update_env_var(&self) -> Result<(), ConfigError> {
-        std::env::set_var(MIRRORD_RESOLVED_CONFIG_ENV, self.to_env_var()?);
-        Ok(())
-    }
-
-    /// Generate a config from the environment variables and/or a config file.
-    /// On success, returns the config and a vec of warnings.
-    /// To be used from CLI to verify config and print warnings
-    pub fn from_env_with_warnings() -> Result<(Self, ConfigContext), ConfigError> {
+    /// Resolves the config from the environment variables.
+    ///
+    /// On success, returns the config and a [`ConfigContext`] that holds warnings.
+    /// To be used from CLI to resolve user config and print warnings.
+    pub fn resolve() -> Result<(Self, ConfigContext), ConfigError> {
         let mut cfg_context = ConfigContext::default();
+        let config = if let Ok(path) = std::env::var(Self::FILE_PATH_ENV) {
+            LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
+        } else {
+            LayerFileConfig::default().generate_config(&mut cfg_context)
+        }?;
 
-        match std::env::var(MIRRORD_RESOLVED_CONFIG_ENV) {
-            Ok(value) if !value.is_empty() => LayerConfig::from_env_var(value),
-            _ => {
-                // the resolved config is not present in env, so resolve it and then set into env
-                // var
-                let config = if let Ok(path) = std::env::var(MIRRORD_CONFIG_FILE_ENV) {
-                    LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
-                } else {
-                    LayerFileConfig::default().generate_config(&mut cfg_context)
-                }?;
-
-                // serialise the config and encode as base64
-                config.update_env_var()?;
-                Ok(config)
-            }
-        }
-        .map(|config| (config, cfg_context))
-    }
-
-    /// Generate a config from the environment variables and/or a config file.
-    /// On success, returns the config.
-    /// To be used from parts that load configuration but aren't the first one to do so
-    pub fn from_env() -> Result<Self, ConfigError> {
-        Self::from_env_with_warnings().map(|(config, _)| config)
-    }
-
-    /// forcefully recalculate the config using [`Self::from_env_with_warnings()`]
-    pub fn recalculate_from_env_with_warnings() -> Result<(Self, ConfigContext), ConfigError> {
-        std::env::remove_var(MIRRORD_RESOLVED_CONFIG_ENV);
-        Self::from_env_with_warnings()
-    }
-
-    /// forcefully recalculate the config using [`Self::from_env_with_warnings()`] without warnings
-    pub fn recalculate_from_env() -> Result<Self, ConfigError> {
-        Self::recalculate_from_env_with_warnings().map(|(config, _)| config)
+        Ok((config, cfg_context))
     }
 
     /// Verify that there are no conflicting settings.
@@ -977,7 +941,6 @@ mod tests {
                 hostname: None,
                 split_queues: None,
             }),
-            connect_tcp: None,
             container: None,
             operator: None,
             sip_binaries: None,
@@ -1090,8 +1053,8 @@ mod tests {
             .generate_config(&mut cfg_context)
             .expect("Default config should be generated from default 'LayerFileConfig'");
 
-        let encoded = resolved_config.to_env_var().unwrap();
-        let decoded = LayerConfig::from_env_var(encoded).unwrap();
+        let encoded = resolved_config.encode().unwrap();
+        let decoded = LayerConfig::decode(&encoded).unwrap();
 
         assert_eq!(decoded, resolved_config);
     }
@@ -1103,7 +1066,7 @@ mod tests {
         // this config includes template variables, so it needs to be rendered first
         let mut template_engine = Tera::default();
         template_engine
-            .add_raw_template("main", get_advanced_config().as_str())
+            .add_raw_template("main", ADVANCED_CONFIG)
             .unwrap();
         let rendered = template_engine
             .render("main", &tera::Context::new())
@@ -1113,39 +1076,36 @@ mod tests {
             .generate_config(&mut cfg_context)
             .expect("Layer config should be generated from JSON config file contents");
 
-        let encoded = resolved_config.to_env_var().unwrap();
-        let decoded = LayerConfig::from_env_var(encoded).unwrap();
+        let encoded = resolved_config.encode().unwrap();
+        let decoded = LayerConfig::decode(&encoded).unwrap();
 
         assert_eq!(decoded, resolved_config);
     }
 
-    fn get_advanced_config() -> String {
-        r#"
-            {
-                "accept_invalid_certificates": false,
-                "target": {
-                    "path": "pod/test-service-abcdefg-abcd",
-                    "namespace": "default"
-                },
-                "feature": {
-                    "env": true,
-                    "fs": "write",
-                    "network": {
-                        "dns": false,
-                        "incoming": {
-                            "mode": "steal",
-                            "http_filter": {
-                                "header_filter": "x-intercept: {{ get_env(name="USER") }}"
-                            }
-                        },
-                        "outgoing": {
-                            "tcp": true,
-                            "udp": false
-                        }
+    const ADVANCED_CONFIG: &str = r#"
+    {
+        "accept_invalid_certificates": false,
+        "target": {
+            "path": "pod/test-service-abcdefg-abcd",
+            "namespace": "default"
+        },
+        "feature": {
+            "env": true,
+            "fs": "write",
+            "network": {
+                "dns": false,
+                "incoming": {
+                    "mode": "steal",
+                    "http_filter": {
+                        "header_filter": "x-intercept: {{ get_env(name="USER") }}"
                     }
+                },
+                "outgoing": {
+                    "tcp": true,
+                    "udp": false
                 }
             }
-        "#
-        .to_string()
+        }
     }
+"#;
 }

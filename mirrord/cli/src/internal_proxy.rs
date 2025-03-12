@@ -18,7 +18,9 @@ use std::{
 };
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
-use mirrord_config::LayerConfig;
+use mirrord_config::{
+    config::ConfigError, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV, LayerConfig,
+};
 use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
     error::IntProxyError,
@@ -35,6 +37,36 @@ use crate::{
     execution::MIRRORD_EXECUTION_KIND_ENV,
     util::{create_listen_socket, detach_io},
 };
+
+pub async fn read_config() -> Result<LayerConfig, ConfigError> {
+    let container_mode = std::env::var(MIRRORD_INTPROXY_CONTAINER_MODE_ENV)
+        .ok()
+        .and_then(|value| value.parse::<bool>().ok())
+        .unwrap_or_default();
+
+    let raw_config = if container_mode {
+        let path = std::env::var(LayerConfig::FILE_PATH_ENV).map_err(|error| {
+            ConfigError::DecodeError(format!(
+                "failed to get file path from {}: {error}",
+                LayerConfig::FILE_PATH_ENV
+            ))
+        })?;
+        tokio::fs::read_to_string(&path).await.map_err(|error| {
+            ConfigError::DecodeError(format!(
+                "failed to read encoded config from {path}: {error}"
+            ))
+        })?
+    } else {
+        std::env::var(LayerConfig::RESOLVED_CONFIG_ENV).map_err(|error| {
+            ConfigError::DecodeError(format!(
+                "failed to get encoded config from {}: {error}",
+                LayerConfig::FILE_PATH_ENV
+            ))
+        })?
+    };
+
+    LayerConfig::decode(&raw_config)
+}
 
 /// Print the address for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.
@@ -66,15 +98,15 @@ pub(crate) async fn proxy(
     }
 
     let agent_connect_info = env::var_os(AGENT_CONNECT_INFO_ENV_KEY)
-        .map(|var| {
+        .ok_or(InternalProxyError::MissingConnectInfo)
+        .and_then(|var| {
             serde_json::from_slice(var.as_bytes()).map_err(|error| {
                 InternalProxyError::DeseralizeConnectInfo(
                     String::from_utf8_lossy(var.as_bytes()).into_owned(),
                     error,
                 )
             })
-        })
-        .transpose()?;
+        })?;
 
     let execution_kind = std::env::var(MIRRORD_EXECUTION_KIND_ENV)
         .ok()
@@ -124,7 +156,7 @@ pub(crate) async fn proxy(
 #[tracing::instrument(level = Level::TRACE, skip(config, analytics))]
 pub(crate) async fn connect_and_ping(
     config: &LayerConfig,
-    connect_info: Option<AgentConnectInfo>,
+    connect_info: AgentConnectInfo,
     analytics: &mut AnalyticsReporter,
 ) -> CliResult<AgentConnection, InternalProxyError> {
     let mut agent_conn = AgentConnection::new(config, connect_info, analytics)
