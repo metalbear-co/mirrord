@@ -1,22 +1,11 @@
-use std::{
-    fmt,
-    io::{self, Write},
-    net::SocketAddr,
-    ops::Not,
-    path::PathBuf,
-    process::Stdio,
-    time::Duration,
-};
+use std::{fmt, io, net::SocketAddr, ops::Not, path::PathBuf, process::Stdio, time::Duration};
 
-use futures::Stream;
+use futures::{FutureExt, Stream};
 use mirrord_analytics::ExecutionKind;
-use mirrord_config::{
-    config::ConfigError, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV, LayerConfig,
-};
+use mirrord_config::{internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV, LayerConfig};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
 use mirrord_tls_util::SecureChannelSetup;
-use tempfile::NamedTempFile;
 use thiserror::Error;
 use tokio::{
     io::{AsyncBufReadExt, BufReader, Lines},
@@ -25,7 +14,10 @@ use tokio::{
 use tokio_stream::{wrappers::LinesStream, StreamExt};
 use tracing::Level;
 
-use super::command_display::CommandDisplay;
+use super::{
+    command_display::CommandDisplay,
+    resolved_config::{ResolvedConfigError, ResolvedConfigFile},
+};
 use crate::{
     config::ContainerRuntimeCommand,
     connection::AGENT_CONNECT_INFO_ENV_KEY,
@@ -39,10 +31,6 @@ use crate::{
 /// Errors that can occure when spawning a sidecar container with the internal proxy.
 #[derive(Error, Debug)]
 pub enum IntproxySidecarError {
-    #[error("failed to encode the mirrord config: {0}")]
-    EncodeConfigError(#[source] ConfigError),
-    #[error("failed to prepare a temporary file for the encoded mirrord config: {0}")]
-    ConfigFileError(#[source] io::Error),
     #[error("failed to serialize connect info: {0}")]
     SerializeConnectInfoError(#[source] serde_json::Error),
     #[error("failed to execute command [{command}]: {error}")]
@@ -62,6 +50,8 @@ pub enum IntproxySidecarError {
     FailedToReadIntproxyAddr(String),
     #[error("failed to process a non UTF-8 path: {0}")]
     NonUtf8Path(String),
+    #[error("failed to prepare resolved mirrord config: {0}")]
+    ConfigFileError(#[from] ResolvedConfigError),
 }
 
 impl From<IntproxySidecarError> for CliError {
@@ -76,7 +66,7 @@ pub struct IntproxySidecar {
     container_id: String,
     runtime_binary: String,
     // This keeps the config file alive until the intproxy reads it.
-    _config_file: NamedTempFile,
+    _config_file: ResolvedConfigFile,
 }
 
 impl IntproxySidecar {
@@ -96,12 +86,9 @@ impl IntproxySidecar {
     ) -> Result<Self, IntproxySidecarError> {
         let mut sidecar_command = RuntimeCommandBuilder::new(container_runtime);
 
-        let config_file = Self::encode_config_to_file(config)?;
-        let config_file_path = config_file.path().to_str().ok_or_else(|| {
-            IntproxySidecarError::NonUtf8Path(config_file.path().to_string_lossy().into_owned())
-        })?;
-        sidecar_command.add_volume(config_file_path, "/tmp/config", true);
-        sidecar_command.add_env(LayerConfig::FILE_PATH_ENV, "/tmp/config");
+        let config_file = ResolvedConfigFile::try_new(config)?;
+        sidecar_command.add_volume(config_file.path_str()?, "/tmp/mirrord-config", true);
+        sidecar_command.add_env(LayerConfig::FILE_PATH_ENV, "/tmp/mirrord-config");
 
         if let Some(console_addr) = super::get_mirrord_console_addr() {
             sidecar_command.add_env(MIRRORD_CONSOLE_ADDR_ENV, &console_addr);
@@ -117,7 +104,7 @@ impl IntproxySidecar {
             let client_pem_path = tls.client_pem().to_str().ok_or_else(|| {
                 IntproxySidecarError::NonUtf8Path(tls.client_pem().to_string_lossy().into_owned())
             })?;
-            let container_path = "/tmp/tls_cert.pem";
+            let container_path = "/tmp/mirrord-tls.pem";
             sidecar_command.add_volume(client_pem_path, container_path, true);
             AgentConnectInfo::ExternalProxy {
                 proxy_addr: extproxy_addr,
@@ -153,8 +140,7 @@ impl IntproxySidecar {
 
         let mut sidecar_container_spawn = Command::new(&runtime_binary);
         sidecar_container_spawn.args(sidecar_args);
-
-        let container_id = exec_and_get_first_line(&mut sidecar_container_spawn).await?;
+        let container_id = exec_and_get_first_line(sidecar_container_spawn).await?;
 
         Ok(IntproxySidecar {
             container_id,
@@ -186,43 +172,53 @@ impl IntproxySidecar {
             })?;
 
         let mut stdout = BufReader::new(child.stdout.take().expect("was piped")).lines();
-        let stderr = BufReader::new(child.stderr.take().expect("was piped")).lines();
+        let mut stderr = BufReader::new(child.stderr.take().expect("was piped")).lines();
 
-        let internal_proxy_addr = tokio::time::timeout(Duration::from_secs(30), stdout.next_line())
-            .await
-            .map_err(|_| {
-                IntproxySidecarError::FailedToReadIntproxyAddr(
-                    "timed out waiting for the first line of stdout".into(),
-                )
-            })?
-            .map_err(|error| {
+        let first_line = tokio::time::timeout(Duration::from_secs(30), stdout.next_line()).await;
+        let intproxy_addr = match first_line {
+            Err(..) => {
+                let stderr = Self::read_ready_lines(&mut stderr);
+                return Err(IntproxySidecarError::FailedToReadIntproxyAddr(format!(
+                    "timed out waiting for the first line of stdout, stderr: `{stderr}`",
+                )));
+            }
+            Ok(Err(error)) => {
+                let stderr = Self::read_ready_lines(&mut stderr);
+                return Err(IntproxySidecarError::FailedToReadIntproxyAddr(format!(
+                    "failed to read stdout with {error}, stderr: `{stderr}`",
+                )));
+            }
+            Ok(Ok(None)) => {
+                let stderr = Self::read_ready_lines(&mut stderr);
+                return Err(IntproxySidecarError::FailedToReadIntproxyAddr(format!(
+                    "unexpected EOF when reading stdout, stderr: `{stderr}`",
+                )));
+            }
+            Ok(Ok(Some(line))) => line.parse::<SocketAddr>().map_err(|error| {
                 IntproxySidecarError::FailedToReadIntproxyAddr(format!(
-                    "failed to read stdout: {error}"
+                    "failed to parse the address from the first stdout line `{line}`: {error}"
                 ))
-            })?
-            .ok_or_else(|| {
-                IntproxySidecarError::FailedToReadIntproxyAddr(format!(
-                    "unexpected EOF when reading stdout"
-                ))
-            })?
-            .parse::<SocketAddr>()
-            .map_err(|error| {
-                IntproxySidecarError::FailedToReadIntproxyAddr(format!(
-                    "failed to parse the address: {error}"
-                ))
-            })?;
+            })?,
+        };
 
-        Ok((internal_proxy_addr, SidecarLogs { stdout, stderr }))
+        Ok((intproxy_addr, SidecarLogs { stdout, stderr }))
     }
 
-    fn encode_config_to_file(config: &LayerConfig) -> Result<NamedTempFile, IntproxySidecarError> {
-        let mut file = NamedTempFile::new().map_err(IntproxySidecarError::ConfigFileError)?;
-        let encoded_config = config
-            .encode()
-            .map_err(IntproxySidecarError::EncodeConfigError)?;
-        file.write_all(encoded_config.as_bytes())
-            .map_err(IntproxySidecarError::ConfigFileError)?;
-        Ok(file)
+    /// Reads all ready lines from the given reader.
+    ///
+    /// Returns the lines concatenated with `\n` chars (to indicate line break).
+    fn read_ready_lines(stderr: &mut Lines<BufReader<ChildStderr>>) -> String {
+        let mut buf = vec![];
+
+        while let Some(result) = stderr.next_line().now_or_never() {
+            match result {
+                Err(..) => break,
+                Ok(None) => break,
+                Ok(Some(line)) => buf.push(line),
+            }
+        }
+
+        buf.join("\\n")
     }
 }
 
@@ -252,20 +248,19 @@ impl fmt::Debug for SidecarLogs {
 ///
 /// Respects a 30 second timeout when waiting the command's output.
 #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))]
-async fn exec_and_get_first_line(command: &mut Command) -> Result<String, IntproxySidecarError> {
-    let child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|error| IntproxySidecarError::CommandExecuteError {
-            command: command.display(),
-            error,
-        })?;
+async fn exec_and_get_first_line(mut command: Command) -> Result<String, IntproxySidecarError> {
+    let result = tokio::time::timeout(
+        Duration::from_secs(30),
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
 
-    let output = match tokio::time::timeout(Duration::from_secs(30), child.wait_with_output()).await
-    {
+    let output = match result {
         Err(..) => return Err(IntproxySidecarError::CommandTimedOut(command.display())),
         Ok(Err(error)) => {
             return Err(IntproxySidecarError::CommandExecuteError {
@@ -287,7 +282,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<String, Intpro
         });
     }
 
-    match output.stderr.lines().next_line().await {
+    match output.stdout.lines().next_line().await {
         Ok(Some(line)) if line.is_empty().not() => Ok(line),
         Ok(..) => Err(IntproxySidecarError::CommandFailed {
             command: command.display(),

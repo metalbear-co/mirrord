@@ -19,7 +19,7 @@ use std::{
 };
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
-use mirrord_config::{config::ConfigError, LayerConfig};
+use mirrord_config::LayerConfig;
 use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
     error::IntProxyError,
@@ -36,31 +36,6 @@ use crate::{
     execution::MIRRORD_EXECUTION_KIND_ENV,
     util::{create_listen_socket, detach_io},
 };
-
-pub async fn read_config() -> Result<LayerConfig, ConfigError> {
-    let raw_config = if crate::util::intproxy_container_mode() {
-        let path = std::env::var(LayerConfig::FILE_PATH_ENV).map_err(|error| {
-            ConfigError::DecodeError(format!(
-                "failed to get file path from {}: {error}",
-                LayerConfig::FILE_PATH_ENV
-            ))
-        })?;
-        tokio::fs::read_to_string(&path).await.map_err(|error| {
-            ConfigError::DecodeError(format!(
-                "failed to read encoded config from {path}: {error}"
-            ))
-        })?
-    } else {
-        std::env::var(LayerConfig::RESOLVED_CONFIG_ENV).map_err(|error| {
-            ConfigError::DecodeError(format!(
-                "failed to get encoded config from {}: {error}",
-                LayerConfig::FILE_PATH_ENV
-            ))
-        })?
-    };
-
-    LayerConfig::decode(&raw_config)
-}
 
 /// Print the address for the caller (mirrord cli execution flow) so it can pass it
 /// back to the layer instances via env var.

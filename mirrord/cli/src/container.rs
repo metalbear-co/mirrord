@@ -9,6 +9,8 @@ use mirrord_config::{
 };
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 use mirrord_tls_util::SecureChannelSetup;
+pub use resolved_config::ResolvedConfigError;
+use resolved_config::ResolvedConfigFile;
 pub use sidecar::IntproxySidecarError;
 use tokio::process::Command;
 
@@ -23,6 +25,7 @@ use crate::{
 
 mod command_builder;
 mod command_display;
+mod resolved_config;
 mod sidecar;
 
 /// Retrieves the value of [`MIRRORD_CONSOLE_ADDR_ENV`].
@@ -92,7 +95,9 @@ async fn prepare_proxies<P: Progress + Send + Sync>(
         .tls_enable
         .then(|| SecureChannelSetup::try_new(MIRRORD_EXTPROXY_TLS_SERVER_NAME, "intproxy"))
         .transpose()
-        .map_err(ContainerError::ProxyTlsSetupError)?;
+        .map_err(ContainerError::from)?;
+
+    let config_file = ResolvedConfigFile::try_new(config).map_err(ContainerError::from)?;
 
     let mut sub_progress = progress.subtask("preparing to launch process");
     let (execution_info, extproxy_addr) =
@@ -114,12 +119,18 @@ async fn prepare_proxies<P: Progress + Send + Sync>(
     // Allow the layer to connect with the internal proxy sidecar.
     runtime_command.add_network(format!("container:{}", sidecar.container_id()));
     // Add the layer file to the user application container.
-    runtime_command.add_volumes_from(&config.container.cli_image);
+    runtime_command.add_volumes_from(sidecar.container_id());
     // Inject the layer into the user application.
     runtime_command.add_env(
         LINUX_INJECTION_ENV_VAR,
         &config.container.cli_image_lib_path,
     );
+    runtime_command.add_volume(
+        config_file.path_str().map_err(ContainerError::from)?,
+        "/tmp/mirrord-config",
+        true,
+    );
+    runtime_command.add_env(LayerConfig::FILE_PATH_ENV, "/tmp/mirrord-config");
 
     let (sidecar_intproxy_address, sidecar_intproxy_logs) = sidecar.start().await?;
     let intproxy_logs_pipe =

@@ -85,7 +85,6 @@ use load::ExecuteArgs;
 #[cfg(target_os = "macos")]
 use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
-    config::ConfigError,
     feature::{env::mapper::EnvVarsRemapper, fs::FsModeConfig, network::incoming::IncomingMode},
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
 };
@@ -189,9 +188,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         std::env::current_exe().map(|arg| arg.to_string_lossy().into_owned())
     })?;
 
-    let resolved = std::env::var(LayerConfig::RESOLVED_CONFIG_ENV)
-        .map_err(|err| ConfigError::DecodeError(err.to_string()))?;
-    let config = LayerConfig::decode(&resolved)?;
+    let config = mirrord_config::util::read_resolved_config()?;
 
     #[cfg(target_os = "macos")]
     let patch_binaries = config

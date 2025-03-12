@@ -13,7 +13,7 @@ use reqwest::StatusCode;
 use thiserror::Error;
 
 use crate::{
-    container::{CommandDisplay, IntproxySidecarError},
+    container::{CommandDisplay, IntproxySidecarError, ResolvedConfigError},
     port_forward::PortForwardError,
 };
 
@@ -58,6 +58,9 @@ pub(crate) enum ContainerError {
         error: io::Error,
         command: CommandDisplay,
     },
+
+    #[error("Failed to prepare the resolved mirrord config: {0}")]
+    ResolvedConfigError(#[from] ResolvedConfigError),
 }
 
 /// Errors that can occur when executing the `mirrord extproxy` command.

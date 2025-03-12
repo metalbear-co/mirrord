@@ -21,7 +21,6 @@ use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
 use mirrord_config::{
-    config::ConfigError,
     feature::{
         fs::FsModeConfig,
         network::{
@@ -578,7 +577,7 @@ fn main() -> miette::Result<()> {
                 extension_exec(*args, watch).await?;
             }
             Commands::InternalProxy { port } => {
-                let config = internal_proxy::read_config().await?;
+                let config = mirrord_config::util::read_resolved_config()?;
                 logging::init_intproxy_tracing_registry(&config)?;
                 internal_proxy::proxy(config, port, watch).await?
             }
@@ -602,12 +601,7 @@ fn main() -> miette::Result<()> {
                 container_ext_command(args.config_file, args.target, watch).await?
             }
             Commands::ExternalProxy { port } => {
-                let config = {
-                    let encoded = std::env::var(LayerConfig::RESOLVED_CONFIG_ENV)
-                        .map_err(|err| ConfigError::DecodeError(err.to_string()))?;
-                    LayerConfig::decode(&encoded)?
-                };
-
+                let config = mirrord_config::util::read_resolved_config()?;
                 logging::init_extproxy_tracing_registry(&config)?;
                 external_proxy::proxy(config, port, watch).await?
             }

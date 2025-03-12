@@ -3,7 +3,10 @@ use std::{collections::HashSet, fmt, hash::Hash, marker::PhantomData, ops::Deref
 use schemars::JsonSchema;
 use serde::{de, Deserialize, Deserializer, Serialize};
 
-use crate::config::{ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result};
+use crate::{
+    config::{ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result},
+    LayerConfig,
+};
 
 pub trait MirrordToggleableConfig: MirrordConfig + Default {
     fn enabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
@@ -248,6 +251,29 @@ where
     }
 
     deserializer.deserialize_any(StringOrStruct(PhantomData))
+}
+
+/// Convenience function to be used in mirrord-intproxy, mirrord-extproxy and mirrord-layer.
+///
+/// Reads the resolved [`LayerConfig`] from known sources.
+pub fn read_resolved_config() -> Result<LayerConfig, ConfigError> {
+    if let Ok(raw) = std::env::var(LayerConfig::RESOLVED_CONFIG_ENV) {
+        return LayerConfig::decode(&raw);
+    }
+
+    if let Ok(path) = std::env::var(LayerConfig::FILE_PATH_ENV) {
+        let raw = std::fs::read_to_string(&path).map_err(|error| {
+            ConfigError::DecodeError(format!(
+                "failed to read encoded config from {path}: {error}"
+            ))
+        })?;
+
+        return LayerConfig::decode(&raw);
+    }
+
+    Err(ConfigError::DecodeError(
+        "no known environment variable was set".into(),
+    ))
 }
 
 #[cfg(test)]

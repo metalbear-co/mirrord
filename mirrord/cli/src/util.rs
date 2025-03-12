@@ -67,6 +67,8 @@ pub(crate) fn create_listen_socket(addr: SocketAddr) -> io::Result<TcpListener> 
 }
 
 /// Returns whether this internal proxy process runs in the container mode.
+///
+/// Uses the [`MIRRORD_INTPROXY_CONTAINER_MODE_ENV`] variable.
 pub fn intproxy_container_mode() -> bool {
     std::env::var(MIRRORD_INTPROXY_CONTAINER_MODE_ENV)
         .ok()
