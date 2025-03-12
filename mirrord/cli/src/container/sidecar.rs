@@ -226,12 +226,15 @@ impl IntproxySidecar {
     }
 }
 
+/// Logs from the internal proxy sidecar container.
 pub struct SidecarLogs {
     stdout: Lines<BufReader<ChildStdout>>,
     stderr: Lines<BufReader<ChildStderr>>,
 }
 
 impl SidecarLogs {
+    /// Returns the logs as a [`Stream`] of lines,
+    /// from both stdout and stderr.
     pub fn into_merged_lines(self) -> impl 'static + Stream<Item = io::Result<String>> {
         LinesStream::new(self.stdout).merge(LinesStream::new(self.stderr))
     }
@@ -277,7 +280,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<String, Intpro
         return Err(IntproxySidecarError::CommandFailed {
             command: command.display(),
             message: format!(
-                "{}, stderr: {}",
+                "{}, stderr: `{}`",
                 output.status,
                 String::from_utf8_lossy(&output.stderr),
             ),
@@ -289,7 +292,7 @@ async fn exec_and_get_first_line(command: &mut Command) -> Result<String, Intpro
         Ok(..) => Err(IntproxySidecarError::CommandFailed {
             command: command.display(),
             message: format!(
-                "stdout was empty, stderr: {}",
+                "stdout was empty, stderr: `{}`",
                 String::from_utf8_lossy(&output.stderr)
             ),
         }),

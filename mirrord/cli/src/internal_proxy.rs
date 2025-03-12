@@ -13,14 +13,13 @@
 use std::{
     env, io,
     net::{Ipv4Addr, SocketAddr},
+    ops::Not,
     os::unix::ffi::OsStrExt,
     time::Duration,
 };
 
 use mirrord_analytics::{AnalyticsReporter, CollectAnalytics, Reporter};
-use mirrord_config::{
-    config::ConfigError, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV, LayerConfig,
-};
+use mirrord_config::{config::ConfigError, LayerConfig};
 use mirrord_intproxy::{
     agent_conn::{AgentConnectInfo, AgentConnection},
     error::IntProxyError,
@@ -39,12 +38,7 @@ use crate::{
 };
 
 pub async fn read_config() -> Result<LayerConfig, ConfigError> {
-    let container_mode = std::env::var(MIRRORD_INTPROXY_CONTAINER_MODE_ENV)
-        .ok()
-        .and_then(|value| value.parse::<bool>().ok())
-        .unwrap_or_default();
-
-    let raw_config = if container_mode {
+    let raw_config = if crate::util::intproxy_container_mode() {
         let path = std::env::var(LayerConfig::FILE_PATH_ENV).map_err(|error| {
             ConfigError::DecodeError(format!(
                 "failed to get file path from {}: {error}",
@@ -112,8 +106,9 @@ pub(crate) async fn proxy(
         .ok()
         .and_then(|execution_kind| execution_kind.parse().ok())
         .unwrap_or_default();
+    let container_mode = crate::util::intproxy_container_mode();
 
-    let mut analytics = if config.internal_proxy.container_mode {
+    let mut analytics = if container_mode {
         AnalyticsReporter::only_error(config.telemetry, execution_kind, watch)
     } else {
         AnalyticsReporter::new(config.telemetry, execution_kind, watch)
@@ -133,7 +128,7 @@ pub(crate) async fn proxy(
         .map_err(InternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
 
-    if !config.internal_proxy.container_mode {
+    if container_mode.not() {
         unsafe { detach_io() }.map_err(InternalProxyError::SetSid)?;
     }
 

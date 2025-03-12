@@ -1,5 +1,6 @@
 use std::{io, io::Write, net::SocketAddr};
 
+use mirrord_config::internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV;
 use nix::libc;
 use tokio::net::TcpListener;
 use tracing::Level;
@@ -63,4 +64,12 @@ pub(crate) fn create_listen_socket(addr: SocketAddr) -> io::Result<TcpListener> 
 
     // socket2 -> std -> tokio
     TcpListener::from_std(socket.into())
+}
+
+/// Returns whether this internal proxy process runs in the container mode.
+pub fn intproxy_container_mode() -> bool {
+    std::env::var(MIRRORD_INTPROXY_CONTAINER_MODE_ENV)
+        .ok()
+        .and_then(|value| value.parse::<bool>().ok())
+        .unwrap_or_default()
 }

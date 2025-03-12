@@ -1,7 +1,7 @@
-use std::{borrow::Cow, fs::OpenOptions, future::Future, path::Path};
+use std::{borrow::Cow, fs::OpenOptions, future::Future, ops::Not, path::Path};
 
 use futures::StreamExt;
-use mirrord_config::LayerConfig;
+use mirrord_config::{internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV, LayerConfig};
 use tokio::io::AsyncWriteExt;
 use tokio_stream::Stream;
 use tracing_subscriber::{prelude::*, EnvFilter};
@@ -105,7 +105,12 @@ fn init_proxy_tracing_registry(
 }
 
 pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), InternalProxyError> {
-    if !config.internal_proxy.container_mode {
+    let container_mode = std::env::var(MIRRORD_INTPROXY_CONTAINER_MODE_ENV)
+        .ok()
+        .and_then(|value| value.parse::<bool>().ok())
+        .unwrap_or_default();
+
+    if container_mode.not() {
         // When the intproxy does not run in a sidecar container, it logs to file.
 
         let log_destination = config
