@@ -136,15 +136,6 @@ impl Rollout {
 
         match spec {
             RolloutSpec {
-                selector: Some(..),
-                workload_ref: Some(..),
-                ..
-            } => Err(KubeApiError::invalid_state(
-                self,
-                "both `.spec.selector` and `.spec.workladRef` fields are filled",
-            )),
-
-            RolloutSpec {
                 selector: None,
                 workload_ref: None,
                 ..
@@ -153,10 +144,13 @@ impl Rollout {
                 "both `.spec.selector` and `.spec.workloadRef` fields are empty",
             )),
 
+            // Selector from the rollout spec overwrites the selector from the referenced workload
+            // (if any).
             RolloutSpec {
                 selector: Some(selector),
                 ..
             } => Ok(Cow::Borrowed(selector)),
+
             RolloutSpec {
                 workload_ref: Some(workload_ref),
                 ..
