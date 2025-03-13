@@ -1348,8 +1348,9 @@ pub fn config_dir() -> PathBuf {
 /// 2. [`MIRRORD_LAYER_INTPROXY_ADDR`]
 /// 3. Layer injection variable
 /// 4. [`LayerConfig::RESOLVED_CONFIG_ENV`]
+/// 6. Given `extra_vars`
 ///
-/// The `extra_vars` param is used only to build the [`ConfigContext`] for [`LayerConfig::resolve`].
+/// `extra_vars` are also added to the [`ConfigContext`] for [`LayerConfig::resolve`].
 pub fn get_env(
     dylib_path: &Path,
     intproxy_addr: SocketAddr,
@@ -1360,7 +1361,7 @@ pub fn get_env(
     cfg_context = cfg_context.override_env("MIRRORD_IMPERSONATED_TARGET", Some("pod/mock-target"));
     cfg_context = cfg_context.override_env("MIRRORD_REMOTE_DNS", Some("false"));
 
-    for (key, value) in extra_vars {
+    for (key, value) in &extra_vars {
         cfg_context = cfg_context.override_env(key, Some(value));
     }
 
@@ -1389,5 +1390,11 @@ pub fn get_env(
             config.encode().unwrap(),
         ),
     ]
-    .into()
+    .into_iter()
+    .chain(
+        extra_vars
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value.to_string())),
+    )
+    .collect()
 }
