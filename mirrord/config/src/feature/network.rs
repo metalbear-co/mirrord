@@ -108,7 +108,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{config::MirrordConfig, util::testing::with_env_vars};
+    use crate::config::MirrordConfig;
 
     #[rstest]
     fn default(
@@ -129,20 +129,20 @@ mod tests {
         incoming: (Option<&str>, IncomingConfig),
         #[values((None, true), (Some("false"), false))] dns: (Option<&str>, bool),
     ) {
-        with_env_vars(
-            vec![
-                ("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", incoming.0),
-                ("MIRRORD_REMOTE_DNS", dns.0),
-            ],
-            || {
-                let mut cfg_context = ConfigContext::default();
-                let env = NetworkFileConfig::default()
-                    .generate_config(&mut cfg_context)
-                    .unwrap();
+        let env = [
+            ("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", incoming.0),
+            ("MIRRORD_REMOTE_DNS", dns.0),
+        ]
+        .into_iter()
+        .filter_map(|(name, value)| Some((name.to_string(), value?.to_string())))
+        .collect();
 
-                assert_eq!(env.incoming, incoming.1);
-                assert_eq!(env.dns.enabled, dns.1);
-            },
-        );
+        let mut cfg_context = ConfigContext::default().with_strict_env(env);
+        let env = NetworkFileConfig::default()
+            .generate_config(&mut cfg_context)
+            .unwrap();
+
+        assert_eq!(env.incoming, incoming.1);
+        assert_eq!(env.dns.enabled, dns.1);
     }
 }

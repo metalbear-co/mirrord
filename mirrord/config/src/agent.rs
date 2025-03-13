@@ -534,10 +534,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{
-        config::{ConfigContext, MirrordConfig},
-        util::testing::with_env_vars,
-    };
+    use crate::config::{ConfigContext, MirrordConfig};
 
     #[rstest]
     fn default(
@@ -562,35 +559,35 @@ mod tests {
         let agent_image = left_image.map(|i| i.0);
         let image_str = agent_image.as_deref();
 
-        with_env_vars(
-            vec![
-                ("MIRRORD_AGENT_RUST_LOG", log_level.0),
-                ("MIRRORD_AGENT_NAMESPACE", namespace.0),
-                ("MIRRORD_AGENT_IMAGE", image_str),
-                ("MIRRORD_AGENT_IMAGE_PULL_POLICY", image_pull_policy.0),
-                ("MIRRORD_AGENT_TTL", ttl.0),
-                ("MIRRORD_EPHEMERAL_CONTAINER", ephemeral.0),
-                (
-                    "MIRRORD_AGENT_COMMUNICATION_TIMEOUT",
-                    communication_timeout.0,
-                ),
-                ("MIRRORD_AGENT_STARTUP_TIMEOUT", startup_timeout.0),
-            ],
-            || {
-                let mut cfg_context = ConfigContext::default();
-                let agent = AgentFileConfig::default()
-                    .generate_config(&mut cfg_context)
-                    .unwrap();
+        let env = [
+            ("MIRRORD_AGENT_RUST_LOG", log_level.0),
+            ("MIRRORD_AGENT_NAMESPACE", namespace.0),
+            ("MIRRORD_AGENT_IMAGE", image_str),
+            ("MIRRORD_AGENT_IMAGE_PULL_POLICY", image_pull_policy.0),
+            ("MIRRORD_AGENT_TTL", ttl.0),
+            ("MIRRORD_EPHEMERAL_CONTAINER", ephemeral.0),
+            (
+                "MIRRORD_AGENT_COMMUNICATION_TIMEOUT",
+                communication_timeout.0,
+            ),
+            ("MIRRORD_AGENT_STARTUP_TIMEOUT", startup_timeout.0),
+        ]
+        .into_iter()
+        .filter_map(|(name, value)| Some((name.to_string(), value?.to_string())))
+        .collect();
 
-                assert_eq!(agent.log_level, log_level.1);
-                assert_eq!(agent.namespace.as_deref(), namespace.1);
-                assert_eq!(agent.image, right_image);
-                assert_eq!(agent.image_pull_policy, image_pull_policy.1);
-                assert_eq!(agent.ttl, ttl.1);
-                assert_eq!(agent.ephemeral, ephemeral.1);
-                assert_eq!(agent.communication_timeout, communication_timeout.1);
-                assert_eq!(agent.startup_timeout, startup_timeout.1);
-            },
-        );
+        let mut cfg_context = ConfigContext::default().with_strict_env(env);
+        let agent = AgentFileConfig::default()
+            .generate_config(&mut cfg_context)
+            .unwrap();
+
+        assert_eq!(agent.log_level, log_level.1);
+        assert_eq!(agent.namespace.as_deref(), namespace.1);
+        assert_eq!(agent.image, right_image);
+        assert_eq!(agent.image_pull_policy, image_pull_policy.1);
+        assert_eq!(agent.ttl, ttl.1);
+        assert_eq!(agent.ephemeral, ephemeral.1);
+        assert_eq!(agent.communication_timeout, communication_timeout.1);
+        assert_eq!(agent.startup_timeout, startup_timeout.1);
     }
 }

@@ -136,48 +136,43 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{
-        config::MirrordConfig,
-        util::{testing::with_env_vars, ToggleableConfig},
-    };
+    use crate::{config::MirrordConfig, util::ToggleableConfig};
 
-    #[allow(clippy::duplicated_attributes)]
     #[rstest]
     #[case(None, None, FsModeConfig::Read)]
     #[case(Some("true"), None, FsModeConfig::Write)]
     #[case(Some("true"), Some("true"), FsModeConfig::Write)]
     #[case(Some("false"), Some("true"), FsModeConfig::Read)]
     fn default(#[case] fs: Option<&str>, #[case] ro: Option<&str>, #[case] expect: FsModeConfig) {
-        with_env_vars(
-            vec![("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)],
-            || {
-                let mut cfg_context = ConfigContext::default();
-                let fs = FsModeConfig::default()
-                    .generate_config(&mut cfg_context)
-                    .unwrap();
+        let env = [("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)]
+            .into_iter()
+            .filter_map(|env| Some((env.0.to_string(), env.1?.to_string())))
+            .collect();
 
-                assert_eq!(fs, expect);
-            },
-        );
+        let mut cfg_context = ConfigContext::default().with_strict_env(env);
+        let fs = FsModeConfig::default()
+            .generate_config(&mut cfg_context)
+            .unwrap();
+
+        assert_eq!(fs, expect);
     }
 
-    #[allow(clippy::duplicated_attributes)]
     #[rstest]
     #[case(None, None, FsModeConfig::Local)]
     #[case(Some("true"), None, FsModeConfig::Write)]
     #[case(Some("true"), Some("true"), FsModeConfig::Write)]
     #[case(Some("false"), Some("true"), FsModeConfig::Read)]
     fn disabled(#[case] fs: Option<&str>, #[case] ro: Option<&str>, #[case] expect: FsModeConfig) {
-        with_env_vars(
-            vec![("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)],
-            || {
-                let mut cfg_context = ConfigContext::default();
-                let fs = ToggleableConfig::<FsModeConfig>::Enabled(false)
-                    .generate_config(&mut cfg_context)
-                    .unwrap();
+        let env = [("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)]
+            .into_iter()
+            .filter_map(|env| Some((env.0.to_string(), env.1?.to_string())))
+            .collect();
 
-                assert_eq!(fs, expect);
-            },
-        );
+        let mut cfg_context = ConfigContext::default().with_strict_env(env);
+        let fs = ToggleableConfig::<FsModeConfig>::Enabled(false)
+            .generate_config(&mut cfg_context)
+            .unwrap();
+
+        assert_eq!(fs, expect);
     }
 }

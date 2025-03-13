@@ -563,10 +563,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{
-        config::{ConfigContext, MirrordConfig},
-        util::testing::with_env_vars,
-    };
+    use crate::config::{ConfigContext, MirrordConfig};
 
     #[rstest]
     #[case(None, None,
@@ -626,31 +623,20 @@ mod tests {
         #[case] namespace_env: Option<&str>,
         #[case] expected_target_config: TargetConfig,
     ) {
-        with_env_vars(
-            vec![
-                ("MIRRORD_IMPERSONATED_TARGET", path_env),
-                ("MIRRORD_TARGET_NAMESPACE", namespace_env),
-            ],
-            || {
-                let mut cfg_context = ConfigContext::default();
-                let generated_target_config = TargetFileConfig::default()
-                    .generate_config(&mut cfg_context)
-                    .unwrap();
+        let env = [
+            ("MIRRORD_IMPERSONATED_TARGET", path_env),
+            ("MIRRORD_TARGET_NAMESPACE", namespace_env),
+        ]
+        .into_iter()
+        .filter_map(|(name, value)| Some((name.to_string(), value?.to_string())))
+        .collect();
 
-                assert_eq!(expected_target_config, generated_target_config);
-            },
-        );
-    }
-
-    /// Parse a json string, generate a `TargetConfig` out of it, and compare to expected config.
-    fn verify_config(config_json_string: &str, expected_target_config: &TargetConfig) {
-        let target_file_config: TargetFileConfig =
-            serde_json::from_str(config_json_string).unwrap();
-        let mut cfg_context = ConfigContext::default();
-        let target_config: TargetConfig = target_file_config
+        let mut cfg_context = ConfigContext::default().with_strict_env(env);
+        let generated_target_config = TargetFileConfig::default()
             .generate_config(&mut cfg_context)
             .unwrap();
-        assert_eq!(&target_config, expected_target_config);
+
+        assert_eq!(expected_target_config, generated_target_config);
     }
 
     /// Test parsing the configuration when the env vars are not set.
@@ -696,23 +682,29 @@ mod tests {
         #[case] mut expected_target_config: TargetConfig,
     ) {
         // First test without env vars.
-        with_env_vars(
-            vec![
-                ("MIRRORD_IMPERSONATED_TARGET", None),
-                ("MIRRORD_TARGET_NAMESPACE", None),
-            ],
-            || verify_config(config_json_string, &expected_target_config),
-        );
+        let mut cfg_context = ConfigContext::default().with_strict_env(Default::default());
+        let target_file_config: TargetFileConfig =
+            serde_json::from_str(config_json_string).unwrap();
+        let target_config: TargetConfig = target_file_config
+            .generate_config(&mut cfg_context)
+            .unwrap();
+        assert_eq!(target_config, expected_target_config);
 
         // Now test that the namespace is set (overridden) by the env var.
         let namespace = "override-namespace";
         expected_target_config.namespace = Some(namespace.to_string());
-        with_env_vars(
-            vec![
-                ("MIRRORD_IMPERSONATED_TARGET", None),
-                ("MIRRORD_TARGET_NAMESPACE", Some(namespace)),
-            ],
-            || verify_config(config_json_string, &expected_target_config),
+        let mut cfg_context = ConfigContext::default().with_strict_env(
+            [(
+                "MIRRORD_TARGET_NAMESPACE".to_string(),
+                namespace.to_string(),
+            )]
+            .into(),
         );
+        let target_file_config: TargetFileConfig =
+            serde_json::from_str(config_json_string).unwrap();
+        let target_config: TargetConfig = target_file_config
+            .generate_config(&mut cfg_context)
+            .unwrap();
+        assert_eq!(target_config, expected_target_config);
     }
 }

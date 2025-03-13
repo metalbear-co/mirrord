@@ -128,7 +128,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{config::MirrordConfig, util::testing::with_env_vars};
+    use crate::config::MirrordConfig;
 
     #[rstest]
     fn fs_config_default() {
@@ -137,14 +137,11 @@ mod tests {
             ..Default::default()
         };
 
-        with_env_vars(vec![], || {
-            let mut cfg_context = ConfigContext::default();
+        let mut cfg_context = ConfigContext::default().with_strict_env(Default::default());
+        let fs_config = FsUserConfig::default()
+            .generate_config(&mut cfg_context)
+            .unwrap();
 
-            let fs_config = FsUserConfig::default()
-                .generate_config(&mut cfg_context)
-                .unwrap();
-
-            assert_eq!(fs_config, expect);
-        });
+        assert_eq!(fs_config, expect);
     }
 }

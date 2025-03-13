@@ -61,21 +61,25 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{config::from_env::FromEnv, util::testing::with_env_vars};
+    use crate::config::from_env::FromEnv;
 
     #[rstest]
     #[case(None, 10)]
     #[case(Some("13"), 13)]
     fn basic(#[case] env: Option<&str>, #[case] outcome: i32) {
-        with_env_vars(vec![("TEST_VALUE", env), ("FALLBACK", Some("10"))], || {
-            let mut cfg_context = ConfigContext::default();
-            let val = FromEnv::<i32>::new("TEST_VALUE")
-                .or(None)
-                .or(FromEnv::new("FALLBACK"));
-            assert_eq!(
-                val.source_value(&mut cfg_context).unwrap().unwrap(),
-                outcome
-            );
-        });
+        let env = [("TEST_VALUE", env), ("FALLBACK", Some("10"))]
+            .into_iter()
+            .filter_map(|env| Some((env.0.to_string(), env.1?.to_string())))
+            .collect();
+
+        let mut cfg_context = ConfigContext::default().with_strict_env(env);
+        let val = FromEnv::<i32>::new("TEST_VALUE")
+            .or(None)
+            .or(FromEnv::new("FALLBACK"));
+
+        assert_eq!(
+            val.source_value(&mut cfg_context).unwrap().unwrap(),
+            outcome
+        );
     }
 }

@@ -13,12 +13,10 @@ pub use common::*;
 async fn mkdir_rmdir(dylib_path: &Path, config_dir: &Path) {
     let _tracing = init_tracing();
     let application = Application::MkdirRmdir;
-    let mut config_path = config_dir.to_path_buf();
-    config_path.push("fs.json");
-    let config_path = Some(config_path.to_str().unwrap());
+    let config_path = config_dir.join("fs.json");
 
     let (mut test_process, mut intproxy) = application
-        .start_process_with_layer(dylib_path, Default::default(), config_path)
+        .start_process_with_layer(dylib_path, Default::default(), Some(&config_path))
         .await;
 
     println!("waiting for MakeDirRequest.");
