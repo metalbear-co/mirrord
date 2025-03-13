@@ -34,7 +34,7 @@ impl CommandExt for tokio::process::Command {
     }
 }
 
-/// A human readable display of a [`Command`].
+/// A human readable display of a command.
 ///
 /// For example: `docker run container`.
 pub struct CommandDisplay(Vec<String>);
