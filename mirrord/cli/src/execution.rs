@@ -53,11 +53,7 @@ pub(crate) const INJECTION_ENV_VAR: &str = LINUX_INJECTION_ENV_VAR;
 #[cfg(target_os = "macos")]
 pub(crate) const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 
-/// Struct for holding the execution information.
-///
-/// 1. Environment to set in the user process,
-/// 2. Environment to unset in the user process,
-/// 3. Path to the patched binary to `exec` into (SIP, only on macOS).
+/// A handle to a running mirrord proxy (either internal proxy or external proxy).
 #[derive(Debug, Serialize)]
 pub(crate) struct MirrordExecution {
     /// Variables to set in the user application environment.
@@ -70,7 +66,7 @@ pub(crate) struct MirrordExecution {
     /// The path to the patched binary, if patched for SIP sidestepping.
     pub patched_path: Option<String>,
 
-    /// Variable to unset in the user application environment.
+    /// Variables to unset in the user application environment.
     pub env_to_unset: Vec<String>,
 
     /// Whether this run uses mirrord operator.
@@ -153,7 +149,7 @@ where
 }
 
 impl MirrordExecution {
-    /// Makes agent connection and starts the internal proxy child process.
+    /// Makes the agent connection and starts the internal proxy child process.
     ///
     /// # Internal proxy
     ///
@@ -176,8 +172,13 @@ impl MirrordExecution {
     ///
     /// tl;dr: In `exec_process`, you need to call and `await` either
     /// [`tokio::time::sleep`] or [`tokio::task::yield_now`] after calling this function.
+    ///
+    /// # Returns
+    ///
+    /// Returned [`MirrordExecution::environment`] contains everything that the user application
+    /// might need, including [`INJECTION_ENV_VAR`] and [`LayerConfig::RESOLVED_CONFIG_ENV`].
     #[tracing::instrument(level = Level::DEBUG, skip_all, ret, err(level = Level::DEBUG))]
-    pub(crate) async fn start<P>(
+    pub(crate) async fn start_internal<P>(
         config: &LayerConfig,
         // We only need the executable on macos, for SIP handling.
         #[cfg(target_os = "macos")] executable: Option<&str>,
@@ -359,8 +360,14 @@ impl MirrordExecution {
         }
     }
 
-    /// Starts the external proxy.
-    /// so that the sidecar intproxy can use it to talk to the agent/operator.
+    /// Makes the agent connection and starts the external proxy child process.
+    ///
+    /// The external proxy will be used by the internal proxy to talk to the agent.
+    ///
+    /// # Returns
+    ///
+    /// Apart from the proxy handle, returns external proxy address as well.
+    /// The address should be accessible from the internal proxy sidecar.
     ///
     /// Returned [`MirrordExecution::environment`] contains *only* remote environment.
     #[tracing::instrument(level = Level::TRACE, skip_all)]

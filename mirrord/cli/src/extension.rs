@@ -20,7 +20,8 @@ where
     let execution_info =
         MirrordExecution::start(&config, executable, &mut progress, analytics).await?;
     #[cfg(not(target_os = "macos"))]
-    let execution_info = MirrordExecution::start(&config, &mut progress, analytics).await?;
+    let execution_info =
+        MirrordExecution::start_internal(&config, &mut progress, analytics).await?;
 
     let output = serde_json::to_string(&execution_info)?;
     progress.success(Some(&output));

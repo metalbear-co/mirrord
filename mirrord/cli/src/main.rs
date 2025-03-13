@@ -79,7 +79,8 @@ where
     let execution_info =
         MirrordExecution::start(&config, Some(&args.binary), &mut sub_progress, analytics).await?;
     #[cfg(not(target_os = "macos"))]
-    let execution_info = MirrordExecution::start(&config, &mut sub_progress, analytics).await?;
+    let execution_info =
+        MirrordExecution::start_internal(&config, &mut sub_progress, analytics).await?;
 
     // This is not being yielded, as this is not proper async, something along those lines.
     // We need an `await` somewhere in this function to drive our socket IO that happens
