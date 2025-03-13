@@ -51,7 +51,7 @@ async fn test_issue2807_with_ipv6_ignore(
         .start_process_with_layer(
             dylib_path,
             Default::default(),
-            Some(config_path.to_str().unwrap()),
+            Some(&config_path),
         )
         .await;
 
