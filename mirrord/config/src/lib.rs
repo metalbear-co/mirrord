@@ -45,7 +45,7 @@ use crate::{
     internal_proxy::InternalProxyConfig, target::TargetConfig, util::VecOrSingle,
 };
 
-/// Environment variable we use to pass internal proxy address to the layer.
+/// Environment variable we use to pass the internal proxy address to the layer.
 pub const MIRRORD_LAYER_INTPROXY_ADDR: &str = "MIRRORD_LAYER_INTPROXY_ADDR";
 
 /// mirrord allows for a high degree of customization when it comes to which features you want to
@@ -319,13 +319,17 @@ pub struct LayerConfig {
 }
 
 impl LayerConfig {
-    /// Env variable we use to store config file path.
+    /// Env variable where we set the path to the [`LayerConfig`].
+    ///
+    /// Used by the extensions and when we transform CLI arguments into environment variables.
+    ///
+    /// Used in [`LayerConfig::resolve`].
     pub const FILE_PATH_ENV: &str = "MIRRORD_CONFIG_FILE";
 
     /// Env variable where we store encoded resolved config.
     ///
-    /// Children processes should not resolve the configuration again,
-    /// instead they should use the resolved config.
+    /// mirrord CLI children should not [`LayerConfig::resolve`] the configuration again,
+    /// instead they should use the already resolved config.
     ///
     /// See [`LayerConfig::encode`] and [`LayerConfig::decode`].
     pub const RESOLVED_CONFIG_ENV: &str = "MIRRORD_RESOLVED_CONFIG";
@@ -357,7 +361,10 @@ impl LayerConfig {
     /// Resolves the config from the environment variables.
     ///
     /// On success, returns the config and a [`ConfigContext`] that holds warnings.
-    /// To be used from CLI to resolve user config and print warnings.
+    /// To be used from CLI entry points to resolve user config and print warnings.
+    ///
+    /// This function **does not** use [`LayerConfig::RESOLVED_CONFIG_ENV`] nor
+    /// [`LayerConfig::decode`]. It resolves the config from scratch.
     pub fn resolve() -> Result<(Self, ConfigContext), ConfigError> {
         let mut cfg_context = ConfigContext::default();
         let config = if let Ok(path) = std::env::var(Self::FILE_PATH_ENV) {
@@ -369,15 +376,13 @@ impl LayerConfig {
         Ok((config, cfg_context))
     }
 
-    /// Verify that there are no conflicting settings.
+    /// Verifies that there are no conflicting settings in this config.
     ///
-    /// We don't call it from `from_env` since we want to verify it only once (from cli)
+    /// Fills the given [`ConfigContext`] with warnings.
     ///
-    /// Fills `context` with the warnings.
-    ///
-    /// - `ide`: Identifies if this is being called from an IDE context, when using `mirrord
-    ///   verify-config`. Turns some _target missing_ errors into warnings, as the target can be
-    ///   selected after `verify-config` is run.
+    /// If [`ConfigContext::ide`] indicates that this is being called from the IDE context,
+    /// some *target missing* errors are turned into warnings. This is because the target can
+    /// still be selected by the user later on.
     pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
         if self.agent.ephemeral && self.agent.namespace.is_some() {
             context.add_warning(

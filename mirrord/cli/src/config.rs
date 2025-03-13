@@ -38,64 +38,96 @@ pub(super) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(super) enum Commands {
-    /// Unstable: Create and run a new container from an image with mirrord loaded
+    /// Create and run a new container from an image with mirrord loaded (unstable).
     Container(Box<ContainerArgs>),
 
-    /// Execute a binary using mirrord, mirror remote traffic to it, provide it access to remote
+    /// Execute a binary using mirrord: intercept remote traffic, provide access to remote
     /// resources (network, files) and environment variables.
     Exec(Box<ExecArgs>),
 
-    /// Generates shell completions for the provided shell.
+    /// Generate shell completions for the provided shell.
     /// Supported shells: bash, elvish, fish, powershell, zsh
     Completions(CompletionsArgs),
 
+    /// Called from `mirrord exec`/`mirrord ext`.
+    ///
+    /// Extracts mirrord-layer lib (which is compiled into the mirrord CLI binary)
+    /// to a file, so that it can be used with
+    /// [`INJECTION_ENV_VAR`](crate::execution::INJECTION_ENV_VAR).
     #[command(hide = true)]
     Extract { path: String },
 
-    /// Operator commands eg. setup
+    /// Execute a command related to the mirrord Operator.
     Operator(Box<OperatorArgs>),
 
-    /// List targets/resources like pods/namespaces in json format
+    /// List available mirrord targets in the cluster.
     #[command(hide = true, name = "ls")]
     ListTargets(Box<ListTargetArgs>),
 
-    /// mirrord container extension integration.
+    /// Spawned by the IDE extensions.
+    ///
+    /// Works like [`Commands::Container`],
+    /// but doesn't run the command until completion.
+    ///
+    /// Instead, it prepares the agent and mirrord proxies,
+    /// prints data required by the extension,
+    /// and waits for the external proxy to finish.
     #[command(hide = true, name = "container-ext")]
     ExtensionContainer(Box<ExtensionContainerArgs>),
 
-    /// Extension execution - used by extension to execute binaries.
+    /// Spawned by the IDE extensions.
+    ///
+    /// Works like [`Commands::Exec`],
+    /// but doesn't exec into the user command.
+    ///
+    /// Instead, it prepares the agent and `mirrord intproxy`,
+    /// prints data required by the extension,
+    /// and waits for the internal proxy to finish.
     #[command(hide = true, name = "ext")]
     ExtensionExec(Box<ExtensionExecArgs>),
 
-    /// External Proxy - used for intproxy when it's running with `mirrord container` command.
+    /// Spawned by [`Commands::ExtensionContainer`] or [`Commands::Container`].
+    ///
+    /// Acts as a proxy between the [`Commands::InternalProxy`] sidecar container
+    /// and the agent/operator.
     #[command(hide = true, name = "extproxy")]
     ExternalProxy {
+        /// Port on which the extproxy will accept connections.
         #[arg(long, default_value_t = 0)]
         port: u16,
     },
 
-    /// Internal proxy - used to aggregate connections from multiple layers
+    /// Spawned:
+    /// 1. Natively by [`Commands::ExtensionExec`]/[`Commands::Exec`],
+    /// 2. In a container by [`Commands::ExtensionContainer`]/[`Commands::Container`].
+    ///
+    /// Acts as a proxy between multiple mirrord-layer instances
+    /// and the agent/operator.
     #[command(hide = true, name = "intproxy")]
     InternalProxy {
+        /// Port on which the intproxy will accept connections.
         #[arg(long, default_value_t = 0)]
         port: u16,
     },
 
-    /// Port forwarding - UNSTABLE FEATURE
+    /// Forward local ports to hosts available from the cluster
+    /// or intercept traffic and direct it to local ports (unstable).
     #[command(name = "port-forward")]
     PortForward(Box<PortForwardArgs>),
 
     /// Verify config file without starting mirrord.
+    ///
+    /// Called from the IDE extensions.
     #[command(hide = true)]
     VerifyConfig(VerifyConfigArgs),
 
     /// Try out mirrord for Teams.
     Teams,
 
-    /// Diagnostic commands
+    /// Diagnose mirrord setup.
     Diagnose(Box<DiagnoseArgs>),
 
-    /// Run mirrord vpn
+    /// Run mirrord vpn (alpha).
     #[command(hide = true)]
     Vpn(Box<VpnArgs>),
 }
@@ -378,70 +410,75 @@ impl TargetParams {
 #[derive(Args, Debug)]
 #[command(group(ArgGroup::new("port-forward").args(["port_mapping", "reverse_port_mapping"]).required(true)))]
 pub(super) struct PortForwardArgs {
-    /// Parameters for the target
+    /// Parameters for the target.
     #[clap(flatten)]
     pub target: TargetParams,
 
-    /// Namespace to place agent in
+    /// Agent pod namespace.
     #[arg(short = 'a', long)]
     pub agent_namespace: Option<String>,
 
-    /// Agent log level
+    /// Agent log level.
     #[arg(short = 'l', long)]
     pub agent_log_level: Option<String>,
 
-    /// Agent image
+    /// Agent container image.
     #[arg(short = 'i', long)]
     pub agent_image: Option<String>,
 
-    /// Agent TTL
+    /// TTL for the agent pod (in seconds).
     #[arg(long)]
     pub agent_ttl: Option<u16>,
 
-    /// Agent Startup Timeout seconds
+    /// Timeout for agent startup (in seconds).
     #[arg(long)]
     pub agent_startup_timeout: Option<u16>,
 
-    /// Accept/reject invalid certificates
+    /// Whether to accept/reject invalid certificates when connecting to the Kubernetes cluster.
     #[arg(short = 'c', long, default_missing_value="true", num_args=0..=1, require_equals=true)]
     pub accept_invalid_certificates: Option<bool>,
 
-    /// Use an Ephemeral Container to mirror traffic
+    /// Spawn the agent in an ephemeral container.
     #[arg(short, long)]
     pub ephemeral_container: bool,
 
-    /// Disable telemetry - see <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>
+    /// Disable telemetry - see <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>.
     #[arg(long)]
     pub no_telemetry: bool,
 
+    /// Disable version check on startup.
     #[arg(long)]
-    /// Disable version check on startup
     pub disable_version_check: bool,
 
-    /// Load config from config file
-    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    /// Load config from config file.
+    ///
+    /// When using this argument without a value, defaults to "./.mirrord/mirrord.json"
     #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
     pub config_file: Option<PathBuf>,
 
-    /// Kube context to use from Kubeconfig
+    /// Kube context to use from the Kubeconfig.
     #[arg(long)]
     pub context: Option<String>,
 
-    /// Mappings for port forwarding.
-    /// Expected format is: '-L \[local_port:\]remote_ip_or_hostname:remote_port'.
-    /// If the remote is given as an ip, this is parsed as soon as mirrord starts.
-    /// Otherwise, the remote is assumed to be a hostname and lookup is performed in the cluster
-    /// after a connection is made to the target.
-    /// Multiple forwarding mappings are each passed with -L.
+    /// Defines port forwarding for some local port.
+    ///
+    /// Expected format is: `-L [local_port:]remote_ip_or_hostname:remote_port`.
+    /// If the remote is given as a hostname, it is resolved lazily,
+    /// after a connection is made to the local port.
+    /// Local port number defaults to be the same as the remote port number.
+    ///
+    /// Can be used multiple times.
     #[arg(short = 'L', long, alias = "port-mappings")]
     pub port_mapping: Vec<AddrPortMapping>,
 
-    /// Mappings for reverse port forwarding.
-    /// Expected format is: '-R \[remote_port:\]local_port'.
-    /// In reverse port forwarding, traffic to the remote_port on the target pod is stolen or
-    /// mirrored to localhost:local_port. If stealing, the response is returned to be sent from
-    /// the target:remote_port.
-    /// Multiple reverse mappings are each passed with -R.
+    /// Defines reverse port forwarding for some local port.
+    ///
+    /// Expected format is: `-R [remote_port:]local_port`.
+    /// In reverse port forwarding, traffic to the remote port on the target is stolen or
+    /// mirrored to local port. Remote port number defaults to be the same as the local port
+    /// number.
+    ///
+    /// Can be used multiple times.
     #[arg(short = 'R', long)]
     pub reverse_port_mapping: Vec<PortOnlyMapping>,
 }
