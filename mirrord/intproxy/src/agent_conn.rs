@@ -63,13 +63,6 @@ pub enum AgentConnectInfo {
     DirectKubernetes(AgentKubernetesConnectInfo),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProxyTlsSettings {
-    intproxy_cert: PathBuf,
-    intproxy_key: PathBuf,
-    extproxy_cert: PathBuf,
-}
-
 #[derive(Default)]
 pub enum ReconnectFlow {
     ConnectInfo {
