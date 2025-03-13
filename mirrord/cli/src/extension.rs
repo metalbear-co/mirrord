@@ -17,7 +17,7 @@ where
     // extension needs more timeout since it might need to build
     // or run tasks before actually launching.
     #[cfg(target_os = "macos")]
-    let mut execution_info =
+    let execution_info =
         MirrordExecution::start(&config, executable, &mut progress, analytics).await?;
     #[cfg(not(target_os = "macos"))]
     let execution_info = MirrordExecution::start(&config, &mut progress, analytics).await?;
