@@ -365,10 +365,6 @@ impl LayerConfig {
     ///
     /// This function **does not** use [`LayerConfig::RESOLVED_CONFIG_ENV`] nor
     /// [`LayerConfig::decode`]. It resolves the config from scratch.
-    ///
-    /// # Params
-    ///
-    /// * `env_overrides`: will be used as a param to [`ConfigContext::with_env_override`]
     pub fn resolve(context: &mut ConfigContext) -> Result<Self, ConfigError> {
         let config = if let Ok(path) = context.get_env(Self::FILE_PATH_ENV) {
             LayerFileConfig::from_path(path)?.generate_config(context)
@@ -382,10 +378,6 @@ impl LayerConfig {
     /// Verifies that there are no conflicting settings in this config.
     ///
     /// Fills the given [`ConfigContext`] with warnings.
-    ///
-    /// If [`ConfigContext::ide`] indicates that this is being called from the IDE context,
-    /// some *target missing* errors are turned into warnings. This is because the target can
-    /// still be selected by the user later on.
     pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
         if self.agent.ephemeral && self.agent.namespace.is_some() {
             context.add_warning(

@@ -15,7 +15,7 @@ pub struct ConfigContext {
     empty_target_final: bool,
     /// Environment variables that override the process environment.
     env_override: HashMap<OsString, Option<OsString>>,
-    /// Whether we should not use [`std::env`] at all,
+    /// Whether we should not use [`mod@std::env`] at all,
     /// and use only [`Self::env_override`].
     strict_env: bool,
     /// Warnings collected during [`LayerConfig`](crate::LayerConfig) verification.
