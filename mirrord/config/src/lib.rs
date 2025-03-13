@@ -1048,9 +1048,10 @@ mod tests {
         assert_eq!(existing_content.replace("\r\n", "\n"), compare_content);
     }
 
-    /// related to issue #2936: https://github.com/metalbear-co/mirrord/issues/2936
-    /// checks that resolved config written to [`MIRRORD_RESOLVED_CONFIG_ENV`] can be
-    /// transformed back into a [`LayerConfig`]
+    /// Related to issue #2936: https://github.com/metalbear-co/mirrord/issues/2936.
+    ///
+    /// Verifies that [`LayerConfig`] encoded with [`LayerConfig::encode`]
+    /// can be decoded back into the same [`LayerConfig`] with [`LayerConfig::decode`].
     #[test]
     fn encode_and_decode_default_config() {
         let mut cfg_context = ConfigContext::default();
@@ -1064,6 +1065,7 @@ mod tests {
         assert_eq!(decoded, resolved_config);
     }
 
+    /// Same as [`encode_and_decode_default_config`], but uses a more advanced config example.
     #[test]
     fn encode_and_decode_advanced_config() {
         let mut cfg_context = ConfigContext::default();
