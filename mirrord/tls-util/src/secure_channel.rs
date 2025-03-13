@@ -10,11 +10,10 @@ use crate::error::SecureChannelError;
 
 /// Setup for secure TLS communication between two parties.
 ///
-/// The setup includes to temporary PEM files (for the server and for the client),
+/// The setup includes two temporary PEM files (for the server and for the client),
 /// containing certificate chains and private keys.
 ///
-/// The PEM files are deleted when this struct is dropped, unless [`SecureChannelSetup::persist`] is
-/// called.
+/// The PEM files are deleted when this struct is dropped.
 ///
 /// You can use the files with [`SecureChannelSetup::create_connector`] and
 /// [`SecureChannelSetup::create_acceptor`].
