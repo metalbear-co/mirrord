@@ -232,7 +232,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut cfg_context = ConfigContext::default().with_strict_env(Default::default());
+        let mut cfg_context = ConfigContext::default().strict_env(true);
 
         let fs_config = AdvancedFsUserConfig::default()
             .generate_config(&mut cfg_context)

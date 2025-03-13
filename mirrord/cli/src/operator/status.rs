@@ -7,10 +7,7 @@ use std::{
 };
 
 use mirrord_analytics::NullReporter;
-use mirrord_config::{
-    config::{ConfigContext, MirrordConfig},
-    LayerConfig, LayerFileConfig,
-};
+use mirrord_config::{config::ConfigContext, LayerConfig};
 use mirrord_operator::{
     client::{NoClientCert, OperatorApi},
     crd::{MirrordOperatorSpec, MirrordSqsSession, QueueConsumer, QueueNameUpdate},
@@ -33,12 +30,12 @@ impl StatusCommandHandler {
     pub(super) async fn new(config_file: Option<PathBuf>) -> CliResult<Self> {
         let mut progress = ProgressTracker::from_env("Operator Status");
 
-        let layer_config = if let Some(config) = config_file {
-            let mut cfg_context = ConfigContext::default();
-            LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?
-        } else {
-            LayerConfig::resolve()?.0
-        };
+        let mut cfg_context = ConfigContext::default();
+
+        if let Some(config) = config_file {
+            cfg_context = cfg_context.override_env(LayerConfig::FILE_PATH_ENV, Some(config));
+        }
+        let layer_config = LayerConfig::resolve(&mut cfg_context)?;
 
         if !layer_config.use_proxy {
             remove_proxy_env();

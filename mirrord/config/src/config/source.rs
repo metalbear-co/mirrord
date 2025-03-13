@@ -1,4 +1,4 @@
-use super::ConfigContext;
+use super::context::ConfigContext;
 use crate::config::Result;
 
 pub trait MirrordConfigSource: Sized {
@@ -67,12 +67,10 @@ mod tests {
     #[case(None, 10)]
     #[case(Some("13"), 13)]
     fn basic(#[case] env: Option<&str>, #[case] outcome: i32) {
-        let env = [("TEST_VALUE", env), ("FALLBACK", Some("10"))]
-            .into_iter()
-            .filter_map(|env| Some((env.0.to_string(), env.1?.to_string())))
-            .collect();
-
-        let mut cfg_context = ConfigContext::default().with_strict_env(env);
+        let mut cfg_context = ConfigContext::default()
+            .override_env("TEST_VALUE", env)
+            .override_env("FALLBACK", Some("10"))
+            .strict_env(true);
         let val = FromEnv::<i32>::new("TEST_VALUE")
             .or(None)
             .or(FromEnv::new("FALLBACK"));

@@ -4,10 +4,7 @@ use futures::TryStreamExt;
 use k8s_openapi::api::core::v1::Namespace;
 use kube::Client;
 use mirrord_analytics::NullReporter;
-use mirrord_config::{
-    config::{ConfigContext, MirrordConfig},
-    LayerConfig, LayerFileConfig,
-};
+use mirrord_config::{config::ConfigContext, LayerConfig};
 use mirrord_kube::{
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
@@ -209,12 +206,13 @@ static ALL_TARGETS_SUPPORTED_OPERATOR_VERSION: LazyLock<VersionReq> =
 /// 1. targets are printed as a plain JSON array of strings (backward compatibility);
 /// 2. all available target types are fetched.
 pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> CliResult<()> {
-    let mut layer_config = if let Some(config) = &args.config_file {
-        let mut cfg_context = ConfigContext::default();
-        LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?
-    } else {
-        LayerConfig::resolve()?.0
-    };
+    let mut cfg_config = ConfigContext::default();
+
+    if let Some(config_file) = args.config_file {
+        cfg_config = cfg_config.override_env(LayerConfig::FILE_PATH_ENV, Some(config_file));
+    }
+
+    let mut layer_config = LayerConfig::resolve(&mut cfg_config)?;
 
     if let Some(namespace) = args.namespace {
         layer_config.target.namespace.replace(namespace);

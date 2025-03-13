@@ -1,5 +1,5 @@
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
-use mirrord_config::LayerConfig;
+use mirrord_config::{config::ConfigContext, LayerConfig};
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 
 use crate::{config::ExtensionExecArgs, execution::MirrordExecution, CliResult};
@@ -34,21 +34,23 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch)
     let progress = ProgressTracker::try_from_env("mirrord preparing to launch")
         .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
 
-    // Set environment required for `LayerConfig::from_env_with_warnings`.
-    if let Some(config_file) = args.config_file.as_ref() {
-        std::env::set_var(LayerConfig::FILE_PATH_ENV, config_file);
-    }
-    if let Some(target) = args.target.as_ref() {
-        std::env::set_var("MIRRORD_IMPERSONATED_TARGET", target.clone());
+    let mut cfg_context = ConfigContext::default();
+
+    if let Some(config_file) = args.config_file {
+        cfg_context = cfg_context.override_env(LayerConfig::FILE_PATH_ENV, Some(config_file));
     }
 
-    let (config, mut context) = LayerConfig::resolve()?;
+    if let Some(target) = args.target.as_ref() {
+        cfg_context = cfg_context.override_env("MIRRORD_IMPERSONATED_TARGET", Some(target));
+    }
+
+    let config = LayerConfig::resolve(&mut cfg_context)?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
 
-    config.verify(&mut context)?;
-    for warning in context.get_warnings() {
-        progress.warning(warning);
+    config.verify(&mut cfg_context)?;
+    for warning in cfg_context.into_warnings() {
+        progress.warning(&warning);
     }
 
     #[cfg(target_os = "macos")]

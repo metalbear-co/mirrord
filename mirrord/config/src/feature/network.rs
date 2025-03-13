@@ -129,20 +129,15 @@ mod tests {
         incoming: (Option<&str>, IncomingConfig),
         #[values((None, true), (Some("false"), false))] dns: (Option<&str>, bool),
     ) {
-        let env = [
-            ("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", incoming.0),
-            ("MIRRORD_REMOTE_DNS", dns.0),
-        ]
-        .into_iter()
-        .filter_map(|(name, value)| Some((name.to_string(), value?.to_string())))
-        .collect();
-
-        let mut cfg_context = ConfigContext::default().with_strict_env(env);
-        let env = NetworkFileConfig::default()
+        let mut cfg_context = ConfigContext::default()
+            .override_env("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", incoming.0)
+            .override_env("MIRRORD_REMOTE_DNS", dns.0)
+            .strict_env(true);
+        let config = NetworkFileConfig::default()
             .generate_config(&mut cfg_context)
             .unwrap();
 
-        assert_eq!(env.incoming, incoming.1);
-        assert_eq!(env.dns.enabled, dns.1);
+        assert_eq!(config.incoming, incoming.1);
+        assert_eq!(config.dns.enabled, dns.1);
     }
 }

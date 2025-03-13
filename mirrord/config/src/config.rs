@@ -1,10 +1,12 @@
+pub mod context;
 pub mod deprecated;
 pub mod from_env;
 pub mod source;
 pub mod unstable;
 
-use std::{collections::HashMap, env::VarError, error::Error};
+use std::error::Error;
 
+pub use context::ConfigContext;
 use thiserror::Error;
 
 use crate::feature::split_queues::QueueSplittingVerificationError;
@@ -109,73 +111,6 @@ impl From<tera::Error> for ConfigError {
 }
 
 pub type Result<T, E = ConfigError> = std::result::Result<T, E>;
-
-/// Struct used for storing context of [`MirrordConfig`] generation and verification.
-///
-/// Default value of this context uses [`std::env::var`] to retrieve environment variables.
-pub struct ConfigContext {
-    /// Whether we're in the context of an IDE extension.
-    ///
-    /// Used by [`LayerConfig::verify`](crate::LayerConfig::verify) to change some errors into
-    /// warnings.
-    pub ide: bool,
-
-    /// Function used to fetch values of environment variables.
-    pub env: GetEnvFunction,
-
-    /// The warnings when a config value conflicts with another, but mirrord can keep going.
-    ///
-    /// Some target related errors become warnings when we're in the context of an IDE extension
-    /// (see [`ConfigContext::ide`]).
-    warnings: Vec<String>,
-}
-
-impl ConfigContext {
-    pub fn new(ide: bool) -> Self {
-        Self {
-            ide,
-            ..Default::default()
-        }
-    }
-
-    /// Replaces [`ConfigContext::env`] function with one that returns only variables defined in the
-    /// map given here as `env`.
-    pub fn with_strict_env(mut self, env: HashMap<String, String>) -> Self {
-        self.env = Box::new(move |name| env.get(name).cloned().ok_or(VarError::NotPresent));
-        self
-    }
-
-    /// Replaces [`ConfigContext::env`] function with one that first checks if the variable is
-    /// defined in the map given here as `env`. If the variable is defined in the map,
-    /// returns the value from the map. Otherwise, uses [`std::env::var`].
-    pub fn with_env_override(mut self, env: HashMap<String, String>) -> Self {
-        self.env = Box::new(move |name| match env.get(name) {
-            Some(value) => Ok(value.clone()),
-            None => std::env::var(name),
-        });
-        self
-    }
-
-    pub fn add_warning(&mut self, warning: String) {
-        self.warnings.push(warning);
-    }
-
-    pub fn get_warnings(&self) -> &Vec<String> {
-        &self.warnings
-    }
-}
-
-impl Default for ConfigContext {
-    fn default() -> Self {
-        Self {
-            ide: false,
-            env: Box::new(|name| std::env::var(name)),
-            warnings: Default::default(),
-        }
-    }
-}
-
-pub type GetEnvFunction = Box<dyn Fn(&str) -> Result<String, VarError>>;
 
 /// <!--${internal}-->
 /// Main configuration creation trait of mirrord-config

@@ -623,15 +623,10 @@ mod tests {
         #[case] namespace_env: Option<&str>,
         #[case] expected_target_config: TargetConfig,
     ) {
-        let env = [
-            ("MIRRORD_IMPERSONATED_TARGET", path_env),
-            ("MIRRORD_TARGET_NAMESPACE", namespace_env),
-        ]
-        .into_iter()
-        .filter_map(|(name, value)| Some((name.to_string(), value?.to_string())))
-        .collect();
-
-        let mut cfg_context = ConfigContext::default().with_strict_env(env);
+        let mut cfg_context = ConfigContext::default()
+            .override_env("MIRRORD_IMERSONATED_TARGET", path_env)
+            .override_env("MIRRORD_TARGET_NAMESPACE", namespace_env)
+            .strict_env(true);
         let generated_target_config = TargetFileConfig::default()
             .generate_config(&mut cfg_context)
             .unwrap();
@@ -682,7 +677,7 @@ mod tests {
         #[case] mut expected_target_config: TargetConfig,
     ) {
         // First test without env vars.
-        let mut cfg_context = ConfigContext::default().with_strict_env(Default::default());
+        let mut cfg_context = ConfigContext::default().strict_env(true);
         let target_file_config: TargetFileConfig =
             serde_json::from_str(config_json_string).unwrap();
         let target_config: TargetConfig = target_file_config
@@ -693,13 +688,9 @@ mod tests {
         // Now test that the namespace is set (overridden) by the env var.
         let namespace = "override-namespace";
         expected_target_config.namespace = Some(namespace.to_string());
-        let mut cfg_context = ConfigContext::default().with_strict_env(
-            [(
-                "MIRRORD_TARGET_NAMESPACE".to_string(),
-                namespace.to_string(),
-            )]
-            .into(),
-        );
+        let mut cfg_context = ConfigContext::default()
+            .override_env("MIRRORD_TARGET_NAMESPACE", Some(namespace))
+            .strict_env(true);
         let target_file_config: TargetFileConfig =
             serde_json::from_str(config_json_string).unwrap();
         let target_config: TargetConfig = target_file_config

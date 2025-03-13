@@ -7,7 +7,8 @@ pub use command_display::CommandDisplay;
 use command_display::CommandExt;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, ExecutionKind, Reporter};
 use mirrord_config::{
-    external_proxy::MIRRORD_EXTPROXY_TLS_SERVER_NAME, LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
+    config::ConfigContext, external_proxy::MIRRORD_EXTPROXY_TLS_SERVER_NAME, LayerConfig,
+    MIRRORD_LAYER_INTPROXY_ADDR,
 };
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 use mirrord_tls_util::SecureChannelSetup;
@@ -54,24 +55,25 @@ fn get_mirrord_console_addr() -> Option<String> {
     }
 }
 
-/// Loads [`LayerConfig`] from env and creates [`AnalyticsReporter`] whilst reporting any warnings.
+/// Resolves the [`LayerConfig`] and creates [`AnalyticsReporter`] whilst reporting any warnings.
 ///
 /// Uses [`ExecutionKind::Container`] to create the [`AnalyticsReporter`].
 ///
 /// Uses the given `progress` to pass warnings from [`LayerConfig`] verification.
 fn create_config_and_analytics<P: Progress>(
     progress: &mut P,
+    mut cfg_context: ConfigContext,
     watch: drain::Watch,
 ) -> CliResult<(LayerConfig, AnalyticsReporter)> {
-    let (config, mut context) = LayerConfig::resolve()?;
+    let config = LayerConfig::resolve(&mut cfg_context)?;
 
     // Initialize only error analytics, extproxy will be the full AnalyticsReporter.
     let analytics =
         AnalyticsReporter::only_error(config.telemetry, ExecutionKind::Container, watch);
 
-    config.verify(&mut context)?;
-    for warning in context.get_warnings() {
-        progress.warning(warning);
+    config.verify(&mut cfg_context)?;
+    for warning in cfg_context.into_warnings() {
+        progress.warning(&warning);
     }
 
     Ok((config, analytics))
@@ -167,11 +169,11 @@ pub async fn container_command(
 
     progress.warning("mirrord container is currently an unstable feature");
 
-    for (name, value) in exec_params.as_env_vars()? {
-        std::env::set_var(name, value);
+    let mut cfg_context = ConfigContext::default();
+    for (name, value) in exec_params.as_env_vars() {
+        cfg_context = cfg_context.override_env(name, Some(value));
     }
-    // LayerConfig must be created after setting relevant env vars
-    let (config, mut analytics) = create_config_and_analytics(&mut progress, watch)?;
+    let (config, mut analytics) = create_config_and_analytics(&mut progress, cfg_context, watch)?;
 
     let (runtime_command, _execution_info, _tls_setup) =
         prepare_proxies(&mut analytics, &progress, &config, runtime_args.runtime).await?;
@@ -222,14 +224,15 @@ pub async fn container_ext_command(
     let mut progress = ProgressTracker::try_from_env("mirrord preparing to launch")
         .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
 
+    let mut cfg_context = ConfigContext::default();
     if let Some(config_file) = config_file.as_ref() {
-        std::env::set_var(LayerConfig::FILE_PATH_ENV, config_file);
+        cfg_context = cfg_context.override_env(LayerConfig::FILE_PATH_ENV, Some(config_file));
     }
     if let Some(target) = target.as_ref() {
-        std::env::set_var("MIRRORD_IMPERSONATED_TARGET", target.clone());
+        cfg_context = cfg_context.override_env("MIRRORD_IMPERSONATED_TARGET", Some(target));
     }
     // LayerConfig must be created after setting relevant env vars
-    let (config, mut analytics) = create_config_and_analytics(&mut progress, watch)?;
+    let (config, mut analytics) = create_config_and_analytics(&mut progress, cfg_context, watch)?;
 
     let container_runtime = std::env::var("MIRRORD_CONTAINER_USE_RUNTIME")
         .ok()

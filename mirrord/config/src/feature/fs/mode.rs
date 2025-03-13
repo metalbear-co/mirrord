@@ -144,12 +144,10 @@ mod tests {
     #[case(Some("true"), Some("true"), FsModeConfig::Write)]
     #[case(Some("false"), Some("true"), FsModeConfig::Read)]
     fn default(#[case] fs: Option<&str>, #[case] ro: Option<&str>, #[case] expect: FsModeConfig) {
-        let env = [("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)]
-            .into_iter()
-            .filter_map(|env| Some((env.0.to_string(), env.1?.to_string())))
-            .collect();
-
-        let mut cfg_context = ConfigContext::default().with_strict_env(env);
+        let mut cfg_context = ConfigContext::default()
+            .override_env("MIRRORD_FILE_OPS", fs)
+            .override_env("MIRRORD_RO_OPS", ro)
+            .strict_env(true);
         let fs = FsModeConfig::default()
             .generate_config(&mut cfg_context)
             .unwrap();
@@ -163,12 +161,10 @@ mod tests {
     #[case(Some("true"), Some("true"), FsModeConfig::Write)]
     #[case(Some("false"), Some("true"), FsModeConfig::Read)]
     fn disabled(#[case] fs: Option<&str>, #[case] ro: Option<&str>, #[case] expect: FsModeConfig) {
-        let env = [("MIRRORD_FILE_OPS", fs), ("MIRRORD_FILE_RO_OPS", ro)]
-            .into_iter()
-            .filter_map(|env| Some((env.0.to_string(), env.1?.to_string())))
-            .collect();
-
-        let mut cfg_context = ConfigContext::default().with_strict_env(env);
+        let mut cfg_context = ConfigContext::default()
+            .override_env("MIRRORD_FILE_OPS", fs)
+            .override_env("MIRRORD_RO_OPS", ro)
+            .strict_env(true);
         let fs = ToggleableConfig::<FsModeConfig>::Enabled(false)
             .generate_config(&mut cfg_context)
             .unwrap();

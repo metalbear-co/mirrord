@@ -1,9 +1,11 @@
 #![deny(missing_docs)]
 
 use std::{
+    borrow::Cow,
     collections::HashMap,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    os::unix::ffi::OsStringExt,
     path::PathBuf,
     str::FromStr,
 };
@@ -19,8 +21,6 @@ use mirrord_config::{
 };
 use mirrord_operator::setup::OperatorNamespace;
 use thiserror::Error;
-
-use crate::error::CliError;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -163,17 +163,9 @@ pub(super) struct ExecParams {
     #[clap(flatten)]
     pub target: TargetParams,
 
-    /// Namespace to place agent in.
-    #[arg(short = 'a', long)]
-    pub agent_namespace: Option<String>,
-
-    /// Agent log level
-    #[arg(short = 'l', long)]
-    pub agent_log_level: Option<String>,
-
-    /// Agent image
-    #[arg(short = 'i', long)]
-    pub agent_image: Option<String>,
+    /// Parameters for the agent.
+    #[clap(flatten)]
+    pub agent: AgentParams,
 
     /// Default file system behavior: read, write, local
     #[arg(long)]
@@ -195,21 +187,9 @@ pub(super) struct ExecParams {
     #[arg(long)]
     pub skip_processes: Option<String>,
 
-    /// Agent TTL
-    #[arg(long)]
-    pub agent_ttl: Option<u16>,
-
-    /// Agent Startup Timeout seconds
-    #[arg(long)]
-    pub agent_startup_timeout: Option<u16>,
-
     /// Accept/reject invalid certificates.
     #[arg(short = 'c', long, default_missing_value="true", num_args=0..=1, require_equals=true)]
     pub accept_invalid_certificates: Option<bool>,
-
-    /// Use an Ephemeral Container to mirror traffic.
-    #[arg(short, long)]
-    pub ephemeral_container: bool,
 
     /// Steal TCP instead of mirroring
     #[arg(long = "steal")]
@@ -254,69 +234,55 @@ pub(super) struct ExecParams {
 }
 
 impl ExecParams {
-    pub fn as_env_vars(&self) -> Result<HashMap<String, OsString>, CliError> {
-        let mut envs: HashMap<String, OsString> = HashMap::new();
+    /// Returns these parameters as an environment variables map.
+    ///
+    /// The map can be used when resolving the config with [`LayerConfig::resolve`].
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, Cow<'_, OsStr>> {
+        let mut envs = self.agent.as_env_vars();
 
-        if let Some(target) = &self.target.target {
-            envs.insert("MIRRORD_IMPERSONATED_TARGET".into(), target.into());
-        }
+        envs.extend(
+            self.target
+                .as_env_vars()
+                .into_iter()
+                .map(|(key, value)| (key, Cow::Borrowed(value))),
+        );
 
         if self.no_telemetry {
-            envs.insert("MIRRORD_TELEMETRY".into(), "false".into());
-        }
-
-        if let Some(skip_processes) = &self.skip_processes {
-            envs.insert("MIRRORD_SKIP_PROCESSES".into(), skip_processes.into());
-        }
-
-        if let Some(namespace) = &self.target.target_namespace {
-            envs.insert("MIRRORD_TARGET_NAMESPACE".into(), namespace.into());
-        }
-
-        if let Some(namespace) = &self.agent_namespace {
-            envs.insert("MIRRORD_AGENT_NAMESPACE".into(), namespace.into());
-        }
-
-        if let Some(log_level) = &self.agent_log_level {
-            envs.insert("MIRRORD_AGENT_RUST_LOG".into(), log_level.into());
-        }
-
-        if let Some(image) = &self.agent_image {
-            envs.insert("MIRRORD_AGENT_IMAGE".into(), image.into());
-        }
-
-        if let Some(agent_ttl) = &self.agent_ttl {
-            envs.insert("MIRRORD_AGENT_TTL".into(), agent_ttl.to_string().into());
-        }
-        if let Some(agent_startup_timeout) = &self.agent_startup_timeout {
             envs.insert(
-                "MIRRORD_AGENT_STARTUP_TIMEOUT".into(),
-                agent_startup_timeout.to_string().into(),
+                "MIRRORD_TELEMETRY".as_ref(),
+                Cow::Borrowed("false".as_ref()),
             );
         }
-
-        if let Some(fs_mode) = self.fs_mode {
-            envs.insert("MIRRORD_FILE_MODE".into(), fs_mode.to_string().into());
+        if let Some(skip_processes) = &self.skip_processes {
+            envs.insert(
+                "MIRRORD_SKIP_PROCESSES".as_ref(),
+                Cow::Borrowed(skip_processes.as_ref()),
+            );
         }
-
+        if let Some(fs_mode) = self.fs_mode {
+            envs.insert(
+                "MIRRORD_FILE_MODE".as_ref(),
+                Cow::Owned(OsString::from_vec(fs_mode.to_string().into_bytes())),
+            );
+        }
         if let Some(override_env_vars_exclude) = &self.override_env_vars_exclude {
             envs.insert(
-                MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV.into(),
-                override_env_vars_exclude.into(),
+                MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV.as_ref(),
+                Cow::Borrowed(override_env_vars_exclude.as_ref()),
             );
         }
-
         if let Some(override_env_vars_include) = &self.override_env_vars_include {
             envs.insert(
-                MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV.into(),
-                override_env_vars_include.into(),
+                MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV.as_ref(),
+                Cow::Borrowed(override_env_vars_include.as_ref()),
             );
         }
-
         if self.no_remote_dns {
-            envs.insert("MIRRORD_REMOTE_DNS".into(), "false".into());
+            envs.insert(
+                "MIRRORD_REMOTE_DNS".as_ref(),
+                Cow::Borrowed("false".as_ref()),
+            );
         }
-
         if let Some(accept_invalid_certificates) = self.accept_invalid_certificates {
             let value = if accept_invalid_certificates {
                 tracing::warn!("Accepting invalid certificates");
@@ -325,44 +291,49 @@ impl ExecParams {
                 "false"
             };
 
-            envs.insert("MIRRORD_ACCEPT_INVALID_CERTIFICATES".into(), value.into());
+            envs.insert(
+                "MIRRORD_ACCEPT_INVALID_CERTIFICATES".as_ref(),
+                Cow::Borrowed(value.as_ref()),
+            );
         }
-
-        if self.ephemeral_container {
-            envs.insert("MIRRORD_EPHEMERAL_CONTAINER".into(), "true".into());
-        };
-
         if self.tcp_steal {
-            envs.insert("MIRRORD_AGENT_TCP_STEAL_TRAFFIC".into(), "true".into());
-        };
-
+            envs.insert(
+                "MIRRORD_AGENT_TCP_STEAL_TRAFFIC".as_ref(),
+                Cow::Borrowed("true".as_ref()),
+            );
+        }
         if self.no_outgoing || self.no_tcp_outgoing {
-            envs.insert("MIRRORD_TCP_OUTGOING".into(), "false".into());
+            envs.insert(
+                "MIRRORD_TCP_OUTGOING".as_ref(),
+                Cow::Borrowed("false".as_ref()),
+            );
         }
-
         if self.no_outgoing || self.no_udp_outgoing {
-            envs.insert("MIRRORD_UDP_OUTGOING".into(), "false".into());
+            envs.insert(
+                "MIRRORD_UDP_OUTGOING".as_ref(),
+                Cow::Borrowed("false".as_ref()),
+            );
         }
-
         if let Some(context) = &self.context {
-            envs.insert("MIRRORD_KUBE_CONTEXT".into(), context.into());
+            envs.insert(
+                "MIRRORD_KUBE_CONTEXT".as_ref(),
+                Cow::Borrowed(context.as_ref()),
+            );
         }
-
         if let Some(config_file) = &self.config_file {
             envs.insert(
-                LayerConfig::FILE_PATH_ENV.into(),
-                config_file.as_os_str().to_owned(),
+                LayerConfig::FILE_PATH_ENV.as_ref(),
+                Cow::Borrowed(config_file.as_ref()),
             );
         }
-
         if let Some(env_file) = &self.env_file {
             envs.insert(
-                MIRRORD_OVERRIDE_ENV_FILE_ENV.into(),
-                env_file.as_os_str().to_owned(),
+                MIRRORD_OVERRIDE_ENV_FILE_ENV.as_ref(),
+                Cow::Borrowed(env_file.as_ref()),
             );
         }
 
-        Ok(envs)
+        envs
     }
 }
 
@@ -379,41 +350,43 @@ pub(super) struct ExecArgs {
     pub(super) binary_args: Vec<String>,
 }
 
+/// Target-related parameters, present in more than one command.
 #[derive(Args, Debug)]
 pub(super) struct TargetParams {
-    /// Target name to mirror.    
-    /// Target can either be a deployment or a pod.
-    /// Valid formats: deployment/name, pod/name, pod/name/container/name
+    /// Name of the target to mirror.
+    ///
+    /// Valid formats: deployment/name, pod/name, pod/name/container/name, ...
     #[arg(short = 't', long)]
     pub target: Option<String>,
 
-    /// Namespace of the pod to mirror. Defaults to "default".
+    /// Namespace of the pod to mirror.
+    ///
+    /// Defaults to the user default namespace.
     #[arg(short = 'n', long)]
     pub target_namespace: Option<String>,
 }
 
 impl TargetParams {
-    pub fn as_env_vars(&self) -> Result<HashMap<String, OsString>, CliError> {
-        let mut envs: HashMap<String, OsString> = HashMap::new();
+    /// Returns these parameters as an environment variables map.
+    ///
+    /// The map can be used when resolving the config with [`LayerConfig::resolve`].
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, &OsStr> {
+        let mut envs: HashMap<&OsStr, &OsStr> = Default::default();
 
         if let Some(target) = &self.target {
-            envs.insert("MIRRORD_IMPERSONATED_TARGET".into(), target.into());
+            envs.insert("MIRRORD_IMPERSONATED_TARGET".as_ref(), target.as_ref());
         }
         if let Some(namespace) = &self.target_namespace {
-            envs.insert("MIRRORD_TARGET_NAMESPACE".into(), namespace.into());
+            envs.insert("MIRRORD_TARGET_NAMESPACE".as_ref(), namespace.as_ref());
         }
 
-        Ok(envs)
+        envs
     }
 }
 
+/// Agent-related parameters, present in more than one command.
 #[derive(Args, Debug)]
-#[command(group(ArgGroup::new("port-forward").args(["port_mapping", "reverse_port_mapping"]).required(true)))]
-pub(super) struct PortForwardArgs {
-    /// Parameters for the target.
-    #[clap(flatten)]
-    pub target: TargetParams,
-
+pub(super) struct AgentParams {
     /// Agent pod namespace.
     #[arg(short = 'a', long)]
     pub agent_namespace: Option<String>,
@@ -434,13 +407,75 @@ pub(super) struct PortForwardArgs {
     #[arg(long)]
     pub agent_startup_timeout: Option<u16>,
 
-    /// Whether to accept/reject invalid certificates when connecting to the Kubernetes cluster.
-    #[arg(short = 'c', long, default_missing_value="true", num_args=0..=1, require_equals=true)]
-    pub accept_invalid_certificates: Option<bool>,
-
     /// Spawn the agent in an ephemeral container.
     #[arg(short, long)]
     pub ephemeral_container: bool,
+}
+
+impl AgentParams {
+    /// Returns these parameters as an environment variables map.
+    ///
+    /// The map can be used when resolving the config with [`LayerConfig::resolve`].
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, Cow<'_, OsStr>> {
+        let mut envs: HashMap<&'static OsStr, Cow<'_, OsStr>> = Default::default();
+
+        if let Some(namespace) = &self.agent_namespace {
+            envs.insert(
+                "MIRRORD_AGENT_NAMESPACE".as_ref(),
+                Cow::Borrowed(namespace.as_ref()),
+            );
+        }
+        if let Some(log_level) = &self.agent_log_level {
+            envs.insert(
+                "MIRRORD_AGENT_RUST_LOG".as_ref(),
+                Cow::Borrowed(log_level.as_ref()),
+            );
+        }
+        if let Some(image) = &self.agent_image {
+            envs.insert(
+                "MIRRORD_AGENT_IMAGE".as_ref(),
+                Cow::Borrowed(image.as_ref()),
+            );
+        }
+        if let Some(agent_ttl) = &self.agent_ttl {
+            envs.insert(
+                "MIRRORD_AGENT_TTL".as_ref(),
+                Cow::Owned(OsString::from_vec(agent_ttl.to_string().into_bytes())),
+            );
+        }
+        if let Some(agent_startup_timeout) = &self.agent_startup_timeout {
+            envs.insert(
+                "MIRRORD_AGENT_STARTUP_TIMEOUT".as_ref(),
+                Cow::Owned(OsString::from_vec(
+                    agent_startup_timeout.to_string().into_bytes(),
+                )),
+            );
+        }
+        if self.ephemeral_container {
+            envs.insert(
+                "MIRRORD_EPHEMERAL_CONTAINER".as_ref(),
+                Cow::Borrowed("true".as_ref()),
+            );
+        }
+
+        envs
+    }
+}
+
+#[derive(Args, Debug)]
+#[command(group(ArgGroup::new("port-forward").args(["port_mapping", "reverse_port_mapping"]).required(true)))]
+pub(super) struct PortForwardArgs {
+    /// Parameters for the target.
+    #[clap(flatten)]
+    pub target: TargetParams,
+
+    /// Parameters for the agent.
+    #[clap(flatten)]
+    pub agent: AgentParams,
+
+    /// Whether to accept/reject invalid certificates when connecting to the Kubernetes cluster.
+    #[arg(short = 'c', long, default_missing_value="true", num_args=0..=1, require_equals=true)]
+    pub accept_invalid_certificates: Option<bool>,
 
     /// Disable telemetry - see <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>.
     #[arg(long)]

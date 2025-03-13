@@ -21,6 +21,7 @@ use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
 use mirrord_config::{
+    config::ConfigContext,
     feature::{
         fs::FsModeConfig,
         network::{
@@ -28,7 +29,7 @@ use mirrord_config::{
             incoming::IncomingMode,
         },
     },
-    LayerConfig, LayerFileConfig,
+    LayerConfig,
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_progress::{messages::EXEC_CONTAINER_BINARY, Progress, ProgressTracker};
@@ -347,20 +348,18 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
 
-    // set_var used here as mirrord needs these values
-    for (name, value) in args.params.as_env_vars()? {
-        std::env::set_var(name, value);
+    let mut cfg_context = ConfigContext::default();
+    for (key, value) in args.params.as_env_vars() {
+        cfg_context = cfg_context.override_env(key, Some(value));
     }
-
-    // LayerConfig must be created after setting relevant env vars
-    let (config, mut context) = LayerConfig::resolve()?;
+    let config = LayerConfig::resolve(&mut cfg_context)?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
     (&config).collect_analytics(analytics.get_mut());
 
-    config.verify(&mut context)?;
-    for warning in context.get_warnings() {
-        progress.warning(warning);
+    config.verify(&mut cfg_context)?;
+    for warning in cfg_context.into_warnings() {
+        progress.warning(&warning);
     }
 
     let execution_result = exec_process(config, args, &progress, &mut analytics).await;
@@ -420,36 +419,19 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
         prompt_outdated_version(&progress).await;
     }
 
-    for (name, value) in args.target.as_env_vars()? {
-        std::env::set_var(name, value);
+    let mut cfg_context = ConfigContext::default();
+
+    for (key, value) in args.target.as_env_vars() {
+        cfg_context = cfg_context.override_env(key, Some(value));
+    }
+
+    for (key, value) in args.agent.as_env_vars() {
+        cfg_context = cfg_context.override_env(key, Some(value));
     }
 
     if args.no_telemetry {
-        std::env::set_var("MIRRORD_TELEMETRY", "false");
+        cfg_context = cfg_context.override_env("MIRRORD_TELEMETRY", Some("false"));
     }
-
-    if let Some(namespace) = &args.agent_namespace {
-        std::env::set_var("MIRRORD_AGENT_NAMESPACE", namespace.clone());
-    }
-
-    if let Some(log_level) = &args.agent_log_level {
-        std::env::set_var("MIRRORD_AGENT_RUST_LOG", log_level.clone());
-    }
-
-    if let Some(image) = &args.agent_image {
-        std::env::set_var("MIRRORD_AGENT_IMAGE", image.clone());
-    }
-
-    if let Some(agent_ttl) = &args.agent_ttl {
-        std::env::set_var("MIRRORD_AGENT_TTL", agent_ttl.to_string());
-    }
-    if let Some(agent_startup_timeout) = &args.agent_startup_timeout {
-        std::env::set_var(
-            "MIRRORD_AGENT_STARTUP_TIMEOUT",
-            agent_startup_timeout.to_string(),
-        );
-    }
-
     if let Some(accept_invalid_certificates) = args.accept_invalid_certificates {
         let value = if accept_invalid_certificates {
             warn!("Accepting invalid certificates");
@@ -457,31 +439,24 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
         } else {
             "false"
         };
-
-        std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", value);
+        cfg_context = cfg_context.override_env("MIRRORD_ACCEPT_INVALID_CERTIFICATES", Some(value));
     }
-
-    if args.ephemeral_container {
-        std::env::set_var("MIRRORD_EPHEMERAL_CONTAINER", "true");
-    };
-
     if let Some(context) = &args.context {
-        std::env::set_var("MIRRORD_KUBE_CONTEXT", context);
+        cfg_context = cfg_context.override_env("MIRRORD_KUBE_CONTEXT", Some(context));
     }
-
     if let Some(config_file) = &args.config_file {
-        std::env::set_var(LayerConfig::FILE_PATH_ENV, config_file);
+        cfg_context = cfg_context.override_env(LayerConfig::FILE_PATH_ENV, Some(config_file));
     }
 
     // LayerConfig must be created after setting relevant env vars
-    let (config, mut context) = LayerConfig::resolve()?;
+    let config = LayerConfig::resolve(&mut cfg_context)?;
 
     let mut analytics = AnalyticsReporter::new(config.telemetry, ExecutionKind::PortForward, watch);
     (&config).collect_analytics(analytics.get_mut());
 
-    config.verify(&mut context)?;
-    for warning in context.get_warnings() {
-        progress.warning(warning);
+    config.verify(&mut cfg_context)?;
+    for warning in cfg_context.into_warnings() {
+        progress.warning(&warning);
     }
     let (connection_info, connection) =
         create_and_connect(&config, &mut progress, &mut analytics).await?;

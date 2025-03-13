@@ -1,7 +1,7 @@
 use core::fmt;
 use std::{marker::PhantomData, str::FromStr};
 
-use super::ConfigContext;
+use super::context::ConfigContext;
 use crate::config::{source::MirrordConfigSource, ConfigError, Result};
 
 #[derive(Clone)]
@@ -25,7 +25,7 @@ where
     /// - `Some(Err(ConfigError::InvalidValue{...}))` if the value of the env var cannot be parsed.
     /// - `Some(Ok(...))` if the env var exists and was parsed successfully.
     fn source_value(self, context: &mut ConfigContext) -> Option<Result<Self::Value>> {
-        (context.env)(self.0).ok().map(|var| {
+        context.get_env(self.0).ok().map(|var| {
             var.parse::<Self::Value>()
                 .map_err(|err| ConfigError::InvalidValue {
                     name: self.0,
@@ -57,7 +57,7 @@ where
     type Value = T;
 
     fn source_value(self, context: &mut ConfigContext) -> Option<Result<Self::Value>> {
-        (context.env)(self.0).ok().map(|var| var.parse())
+        context.get_env(self.0).ok().map(|var| var.parse())
     }
 }
 
@@ -69,12 +69,13 @@ mod tests {
 
     #[rstest]
     fn basic() {
-        let env = [("TEST_VALUE".to_string(), "13".to_string())].into();
-        let mut cfg_context = ConfigContext::default().with_strict_env(env);
+        let mut cfg_context = ConfigContext::default()
+            .override_env("TEST_VALUE", Some("13"))
+            .strict_env(true);
         let value = FromEnv::<i32>::new("TEST_VALUE");
         assert_eq!(value.source_value(&mut cfg_context).unwrap().unwrap(), 13);
 
-        let mut cfg_context = ConfigContext::default().with_strict_env(Default::default());
+        let mut cfg_context = ConfigContext::default().strict_env(true);
         let value = FromEnv::<i32>::new("TEST_VALUE");
         assert!(value.source_value(&mut cfg_context).is_none());
     }

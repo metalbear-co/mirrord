@@ -559,24 +559,19 @@ mod tests {
         let agent_image = left_image.map(|i| i.0);
         let image_str = agent_image.as_deref();
 
-        let env = [
-            ("MIRRORD_AGENT_RUST_LOG", log_level.0),
-            ("MIRRORD_AGENT_NAMESPACE", namespace.0),
-            ("MIRRORD_AGENT_IMAGE", image_str),
-            ("MIRRORD_AGENT_IMAGE_PULL_POLICY", image_pull_policy.0),
-            ("MIRRORD_AGENT_TTL", ttl.0),
-            ("MIRRORD_EPHEMERAL_CONTAINER", ephemeral.0),
-            (
+        let mut cfg_context = ConfigContext::default()
+            .override_env("MIRRORD_AGENT_RUST_LOG", log_level.0)
+            .override_env("MIRRORD_AGENT_NAMESPACE", namespace.0)
+            .override_env("MIRRORD_AGENT_IMAGE", image_str)
+            .override_env("MIRRORD_AGENT_IMAGE_PULL_POLICY", image_pull_policy.0)
+            .override_env("MIRRORD_AGENT_TTL", ttl.0)
+            .override_env("MIRRORD_EPHEMERAL_CONTAINER", ephemeral.0)
+            .override_env(
                 "MIRRORD_AGENT_COMMUNICATION_TIMEOUT",
                 communication_timeout.0,
-            ),
-            ("MIRRORD_AGENT_STARTUP_TIMEOUT", startup_timeout.0),
-        ]
-        .into_iter()
-        .filter_map(|(name, value)| Some((name.to_string(), value?.to_string())))
-        .collect();
-
-        let mut cfg_context = ConfigContext::default().with_strict_env(env);
+            )
+            .override_env("MIRRORD_AGENT_STARTUP_TIMEOUT", startup_timeout.0)
+            .strict_env(true);
         let agent = AgentFileConfig::default()
             .generate_config(&mut cfg_context)
             .unwrap();

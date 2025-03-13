@@ -223,15 +223,10 @@ mod tests {
             bool,
         ),
     ) {
-        let env = [
-            ("MIRRORD_TCP_OUTGOING", tcp.0),
-            ("MIRRORD_UDP_OUTGOING", udp.0),
-        ]
-        .into_iter()
-        .filter_map(|env| Some((env.0.to_string(), env.1?.to_string())))
-        .collect();
-
-        let mut cfg_context = ConfigContext::default().with_strict_env(env);
+        let mut cfg_context = ConfigContext::default()
+            .override_env("MIRRORD_TCP_OUTGOING", tcp.0)
+            .override_env("MIRRORD_UDP_OUTGOING", udp.0)
+            .strict_env(true);
         let outgoing = OutgoingFileConfig::default()
             .generate_config(&mut cfg_context)
             .unwrap();
@@ -251,15 +246,10 @@ mod tests {
             bool,
         ),
     ) {
-        let env = [
-            ("MIRRORD_TCP_OUTGOING", tcp.0),
-            ("MIRRORD_UDP_OUTGOING", udp.0),
-        ]
-        .into_iter()
-        .filter_map(|env| Some((env.0.to_string(), env.1?.to_string())))
-        .collect();
-
-        let mut cfg_context = ConfigContext::default().with_strict_env(env);
+        let mut cfg_context = ConfigContext::default()
+            .override_env("MIRRORD_TCP_OUTGOING", tcp.0)
+            .override_env("MIRRORD_UDP_OUTGOING", udp.0)
+            .strict_env(true);
         let outgoing = ToggleableConfig::<OutgoingFileConfig>::Enabled(false)
             .generate_config(&mut cfg_context)
             .unwrap();

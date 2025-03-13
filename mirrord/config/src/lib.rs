@@ -365,15 +365,18 @@ impl LayerConfig {
     ///
     /// This function **does not** use [`LayerConfig::RESOLVED_CONFIG_ENV`] nor
     /// [`LayerConfig::decode`]. It resolves the config from scratch.
-    pub fn resolve() -> Result<(Self, ConfigContext), ConfigError> {
-        let mut cfg_context = ConfigContext::default();
-        let config = if let Ok(path) = std::env::var(Self::FILE_PATH_ENV) {
-            LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
+    ///
+    /// # Params
+    ///
+    /// * `env_overrides`: will be used as a param to [`ConfigContext::with_env_override`]
+    pub fn resolve(context: &mut ConfigContext) -> Result<Self, ConfigError> {
+        let config = if let Ok(path) = context.get_env(Self::FILE_PATH_ENV) {
+            LayerFileConfig::from_path(path)?.generate_config(context)
         } else {
-            LayerFileConfig::default().generate_config(&mut cfg_context)
+            LayerFileConfig::default().generate_config(context)
         }?;
 
-        Ok((config, cfg_context))
+        Ok(config)
     }
 
     /// Verifies that there are no conflicting settings in this config.
@@ -479,7 +482,7 @@ impl LayerConfig {
 
         let is_targetless = match self.target.path.as_ref() {
             Some(Target::Targetless) => true,
-            None => !context.ide,
+            None => context.is_empty_target_final().not(),
             _ => false,
         };
 
