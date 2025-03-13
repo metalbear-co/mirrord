@@ -251,7 +251,7 @@ impl RestartableBackgroundTask for AgentConnection {
                 let connection = Retry::spawn(retry_strategy, || async move {
                     AgentConnection::new(
                         config,
-                        connect_info.clone().into(),
+                        connect_info.clone(),
                         &mut NullReporter::default(),
                     )
                     .await

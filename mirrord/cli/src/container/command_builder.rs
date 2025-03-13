@@ -122,7 +122,7 @@ impl RuntimeCommandBuilder {
 }
 
 impl RuntimeCommandBuilder<WithCommand> {
-    /// Return completed command command with updated arguments.
+    /// Return completed command with updated arguments.
     ///
     /// To be used when mirrord CLI executes the command.
     pub fn into_command_args(self) -> (String, impl Iterator<Item = String>) {

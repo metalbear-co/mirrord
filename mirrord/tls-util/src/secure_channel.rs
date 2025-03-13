@@ -71,14 +71,6 @@ impl SecureChannelSetup {
         self.client_pem.path()
     }
 
-    /// Persists the created PEM files.
-    pub fn persist(self) -> Result<(), SecureChannelError> {
-        self.server_pem.keep()?;
-        self.client_pem.keep()?;
-
-        Ok(())
-    }
-
     /// Creates a [`TlsAcceptor`] from the given PEM file.
     ///
     /// This PEM file should be generated with [`SecureChannelSetup::try_new`].

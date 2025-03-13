@@ -1,4 +1,6 @@
-use std::{net::SocketAddr, ops::Not, path::PathBuf, process::Stdio};
+use std::{
+    net::SocketAddr, ops::Not, os::unix::process::ExitStatusExt, path::PathBuf, process::Stdio,
+};
 
 use clap::ValueEnum;
 pub use command_display::CommandDisplay;
@@ -9,10 +11,9 @@ use mirrord_config::{
 };
 use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
 use mirrord_tls_util::SecureChannelSetup;
-pub use resolved_config::ResolvedConfigError;
-use resolved_config::ResolvedConfigFile;
 pub use sidecar::IntproxySidecarError;
 use tokio::process::Command;
+use tracing::Level;
 
 use crate::{
     config::{ContainerRuntime, ExecParams, RuntimeArgs},
@@ -25,7 +26,6 @@ use crate::{
 
 mod command_builder;
 mod command_display;
-mod resolved_config;
 mod sidecar;
 
 /// Retrieves the value of [`MIRRORD_CONSOLE_ADDR_ENV`].
@@ -84,20 +84,23 @@ fn create_config_and_analytics<P: Progress>(
 ///
 /// 1. Prepared command to run the user container.
 /// 2. Handle to the external proxy.
+/// 3. Handle to temporary files containing intproxy-extproxy TLS configs.
 async fn prepare_proxies<P: Progress + Send + Sync>(
     analytics: &mut AnalyticsReporter,
     progress: &P,
     config: &LayerConfig,
     runtime: ContainerRuntime,
-) -> CliResult<(RuntimeCommandBuilder, MirrordExecution)> {
+) -> CliResult<(
+    RuntimeCommandBuilder,
+    MirrordExecution,
+    Option<SecureChannelSetup>,
+)> {
     let tls_setup = config
         .external_proxy
         .tls_enable
         .then(|| SecureChannelSetup::try_new(MIRRORD_EXTPROXY_TLS_SERVER_NAME, "intproxy"))
         .transpose()
         .map_err(ContainerError::from)?;
-
-    let config_file = ResolvedConfigFile::try_new(config).map_err(ContainerError::from)?;
 
     let mut sub_progress = progress.subtask("preparing to launch process");
     let (execution_info, extproxy_addr) =
@@ -106,7 +109,7 @@ async fn prepare_proxies<P: Progress + Send + Sync>(
     sub_progress.success(None);
 
     let sidecar =
-        IntproxySidecar::try_new(config, runtime, extproxy_addr, tls_setup.as_ref()).await?;
+        IntproxySidecar::create(config, runtime, extproxy_addr, tls_setup.as_ref()).await?;
 
     let mut runtime_command = RuntimeCommandBuilder::new(runtime);
     // Provide remote environment to the user application.
@@ -125,16 +128,11 @@ async fn prepare_proxies<P: Progress + Send + Sync>(
         LINUX_INJECTION_ENV_VAR,
         &config.container.cli_image_lib_path,
     );
-    runtime_command.add_volume(
-        config_file.path_str().map_err(ContainerError::from)?,
-        "/tmp/mirrord-config",
-        true,
-    );
-    runtime_command.add_env(LayerConfig::FILE_PATH_ENV, "/tmp/mirrord-config");
+    runtime_command.add_env(LayerConfig::RESOLVED_CONFIG_ENV, &config.encode()?);
 
     let (sidecar_intproxy_address, sidecar_intproxy_logs) = sidecar.start().await?;
     let intproxy_logs_pipe =
-        pipe_intproxy_sidecar_logs(&config, sidecar_intproxy_logs.into_merged_lines()).await?;
+        pipe_intproxy_sidecar_logs(config, sidecar_intproxy_logs.into_merged_lines()).await?;
     tokio::spawn(intproxy_logs_pipe);
 
     // Provide internal proxy address to the layer.
@@ -143,18 +141,15 @@ async fn prepare_proxies<P: Progress + Send + Sync>(
         &sidecar_intproxy_address.to_string(),
     );
 
-    if let Some(setup) = tls_setup {
-        setup
-            .persist()
-            .map_err(ContainerError::ProxyTlsSetupError)?;
-    }
-
-    Ok((runtime_command, execution_info))
+    Ok((runtime_command, execution_info, tls_setup))
 }
 
 /// Main entry point for the `mirrord container` command.
 ///
-/// This spawns: "agent" - "external proxy" - "intproxy sidecar" - "execution container"
+/// 1. Spawns the agent (cluster), mirrord-extproxy (natively), and mirrord-intproxy (sidecar).
+/// 2. Adds additional env, volume, and network to the user container command.
+/// 3. Executes the user container command.
+#[tracing::instrument(level = Level::DEBUG, skip(watch), ret, err(level = Level::DEBUG, Debug))]
 pub async fn container_command(
     runtime_args: RuntimeArgs,
     exec_params: ExecParams,
@@ -163,7 +158,11 @@ pub async fn container_command(
     let mut progress = ProgressTracker::from_env("mirrord container");
 
     if runtime_args.command.has_publish() {
-        progress.warning("mirrord container may have problems with \"-p\" when used as part of container run command, please add the publish arguments to \"contanier.cli_extra_args\" in config if you are planning to publish ports");
+        progress.warning(
+            "mirrord container may have problems with \"-p\" when used as part of container run command. \
+            If you want to publish ports, please add the publish arguments to the
+            \"container.cli_extra_args\" list in your mirrord config.",
+        );
     }
 
     progress.warning("mirrord container is currently an unstable feature");
@@ -174,7 +173,7 @@ pub async fn container_command(
     // LayerConfig must be created after setting relevant env vars
     let (config, mut analytics) = create_config_and_analytics(&mut progress, watch)?;
 
-    let (runtime_command, _execution_info) =
+    let (runtime_command, _execution_info, _tls_setup) =
         prepare_proxies(&mut analytics, &progress, &config, runtime_args.runtime).await?;
 
     progress.success(None);
@@ -193,19 +192,28 @@ pub async fn container_command(
     let status = runtime_command.status().await.map_err(|error| {
         analytics.set_error(AnalyticsError::BinaryExecuteFailed);
 
-        ContainerError::CommandError {
+        ContainerError::CommandExec {
             error,
             command: runtime_command.display(),
         }
     })?;
 
-    Ok(status.code().unwrap_or_default())
+    if let Some(signal) = status.signal() {
+        tracing::warn!("Container command was terminated by signal {signal}");
+        Ok(-1)
+    } else {
+        Ok(status.code().unwrap_or_default())
+    }
 }
 
-/// Main entry point for the `mirrord container-ext` command.
+/// Main entry point for the `mirrord container` command.
 ///
-/// Spawns the intproxy sidecar and the extproxy,
-/// returns [`ExtensionRuntimeCommand`](command_builder::ExtensionRuntimeCommand) for the extension.
+/// 1. Spawns the agent (cluster), mirrord-extproxy (natively), and mirrord-intproxy (sidecar).
+/// 2. Adds additional env, volume, and network to the user container command.
+/// 3. Outputs the [`ExtensionRuntimeCommand`](command_builder::ExtensionRuntimeCommand) for the
+///    extension.
+/// 4. Waits for mirrord-extproxy exit.
+#[tracing::instrument(level = Level::DEBUG, skip(watch), ret, err(level = Level::DEBUG, Debug))]
 pub async fn container_ext_command(
     config_file: Option<PathBuf>,
     target: Option<String>,
@@ -228,8 +236,8 @@ pub async fn container_ext_command(
         .and_then(|value| ContainerRuntime::from_str(&value, true).ok())
         .unwrap_or(ContainerRuntime::Docker);
 
-    let (runtime_command, execution_info) =
-        prepare_proxies(&mut analytics, &mut progress, &config, container_runtime).await?;
+    let (runtime_command, execution_info, _tls_setup) =
+        prepare_proxies(&mut analytics, &progress, &config, container_runtime).await?;
 
     let output = serde_json::to_string(&runtime_command.into_command_extension_params())?;
     progress.success(Some(&output));

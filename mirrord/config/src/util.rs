@@ -255,25 +255,17 @@ where
 
 /// Convenience function to be used in mirrord-intproxy, mirrord-extproxy and mirrord-layer.
 ///
-/// Reads the resolved [`LayerConfig`] from known sources.
+/// Reads the resolved [`LayerConfig`] from the [`LayerConfig::RESOLVED_CONFIG_ENV`]
+/// environment variable.
 pub fn read_resolved_config() -> Result<LayerConfig, ConfigError> {
-    if let Ok(raw) = std::env::var(LayerConfig::RESOLVED_CONFIG_ENV) {
-        return LayerConfig::decode(&raw);
-    }
+    let encoded = std::env::var(LayerConfig::RESOLVED_CONFIG_ENV).map_err(|error| {
+        ConfigError::DecodeError(format!(
+            "failed to access the {} variable: {error}",
+            LayerConfig::RESOLVED_CONFIG_ENV
+        ))
+    })?;
 
-    if let Ok(path) = std::env::var(LayerConfig::FILE_PATH_ENV) {
-        let raw = std::fs::read_to_string(&path).map_err(|error| {
-            ConfigError::DecodeError(format!(
-                "failed to read encoded config from {path}: {error}"
-            ))
-        })?;
-
-        return LayerConfig::decode(&raw);
-    }
-
-    Err(ConfigError::DecodeError(
-        "no known environment variable was set".into(),
-    ))
+    LayerConfig::decode(&encoded)
 }
 
 #[cfg(test)]

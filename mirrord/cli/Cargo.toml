@@ -60,7 +60,6 @@ prettytable-rs = "0.10"
 clap_complete = "4.4.1"
 rustls.workspace = true
 local-ip-address = "0.6"
-tempfile.workspace = true
 tokio-rustls.workspace = true
 tokio-stream = { workspace = true, features = ["io-util", "net"] }
 regex.workspace = true

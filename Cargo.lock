@@ -4248,7 +4248,6 @@ dependencies = [
  "serde",
  "serde_json",
  "socket2",
- "tempfile",
  "thiserror 2.0.12",
  "tokio",
  "tokio-rustls 0.26.2",

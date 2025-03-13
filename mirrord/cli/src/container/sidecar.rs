@@ -2,7 +2,9 @@ use std::{fmt, io, net::SocketAddr, ops::Not, path::PathBuf, process::Stdio, tim
 
 use futures::{FutureExt, Stream};
 use mirrord_analytics::ExecutionKind;
-use mirrord_config::{internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV, LayerConfig};
+use mirrord_config::{
+    config::ConfigError, internal_proxy::MIRRORD_INTPROXY_CONTAINER_MODE_ENV, LayerConfig,
+};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
 use mirrord_tls_util::SecureChannelSetup;
@@ -14,10 +16,7 @@ use tokio::{
 use tokio_stream::{wrappers::LinesStream, StreamExt};
 use tracing::Level;
 
-use super::{
-    command_display::CommandDisplay,
-    resolved_config::{ResolvedConfigError, ResolvedConfigFile},
-};
+use super::command_display::CommandDisplay;
 use crate::{
     config::ContainerRuntimeCommand,
     connection::AGENT_CONNECT_INFO_ENV_KEY,
@@ -28,9 +27,11 @@ use crate::{
     CliError, ContainerRuntime,
 };
 
-/// Errors that can occure when spawning a sidecar container with the internal proxy.
+/// Errors that can occure when creating or starting the internal proxy sidecar container.
 #[derive(Error, Debug)]
 pub enum IntproxySidecarError {
+    #[error(transparent)]
+    EncodeConfigError(#[from] ConfigError),
     #[error("failed to serialize connect info: {0}")]
     SerializeConnectInfoError(#[source] serde_json::Error),
     #[error("failed to execute command [{command}]: {error}")]
@@ -47,38 +48,69 @@ pub enum IntproxySidecarError {
         message: String,
     },
     #[error("failed to read internal proxy address: {0}")]
-    FailedToReadIntproxyAddr(String),
+    FailedToReadIntproxyAddr(
+        /// Error message.
+        String,
+    ),
     #[error("failed to process a non UTF-8 path: {0}")]
-    NonUtf8Path(String),
-    #[error("failed to prepare resolved mirrord config: {0}")]
-    ConfigFileError(#[from] ResolvedConfigError),
+    NonUtf8Path(
+        /// The original path as lossy UTF-8.
+        String,
+    ),
 }
 
 impl From<IntproxySidecarError> for CliError {
     fn from(value: IntproxySidecarError) -> Self {
-        Self::ContainerError(ContainerError::IntproxySidecarError(value))
+        Self::ContainerError(ContainerError::IntproxySidecar(value))
     }
 }
 
 /// A sidecar container where the internal proxy runs.
+///
+/// The container is first created with [`IntproxySidecar::create`].
+/// Then, it can be started [`IntproxySidecar::start`].
+///
+/// # Why a sidecar?
+///
+/// The internal proxy needs to be accessible from the user application,
+/// which will run in its own container.
+///
+/// Using the `--network` runtime command arg and [`IntproxySidecar::container_id`],
+/// we can expose the proxy to that container.
+///
+/// # Image
+///
+/// This sidecar container runs the image specified in
+/// [`ContainerConfig::cli_image`](mirrord_config::container::ContainerConfig::cli_image),
+/// which contains the mirrord binary and extracted mirrord-layer.
+///
+/// Note that the mirrord-layer inside this image should sit inside a volume.
+/// This way you can use the `--volumes--from` runtime command arg and
+/// [`IntproxySidecar::container_id`] to add the mirrord-layer file to the user container.
 #[derive(Debug)]
 pub struct IntproxySidecar {
     container_id: String,
     runtime_binary: String,
-    // This keeps the config file alive until the intproxy reads it.
-    _config_file: ResolvedConfigFile,
 }
 
 impl IntproxySidecar {
-    /// Creates a sidecar container running `mirrord intproxy`.
-    ///
-    /// We run internal proxy in a sidecar container, because it has to be accessible from the
-    /// user application container.
+    /// Creates a sidecar container that will run `mirrord intproxy`.
     ///
     /// This function does not start the container, it only creates it.
     /// You can start the container with [`IntproxySidecar::start`].
-    #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))]
-    pub async fn try_new(
+    ///
+    /// # Environment
+    ///
+    /// All internal proxy configuration is passed to the sidecar
+    /// with environment variables, including:
+    /// 1. Fully resolved [`LayerConfig`] ([`LayerConfig::RESOLVED_CONFIG_ENV`]).
+    /// 2. Extproxy connect info ([`AGENT_CONNECT_INFO_ENV_KEY`])
+    #[tracing::instrument(
+        level = Level::DEBUG,
+        skip(config, tls), fields(uses_tls = tls.is_some()),
+        ret, err(level = Level::DEBUG),
+    )]
+    pub async fn create(
         config: &LayerConfig,
         container_runtime: ContainerRuntime,
         extproxy_addr: SocketAddr,
@@ -86,9 +118,7 @@ impl IntproxySidecar {
     ) -> Result<Self, IntproxySidecarError> {
         let mut sidecar_command = RuntimeCommandBuilder::new(container_runtime);
 
-        let config_file = ResolvedConfigFile::try_new(config)?;
-        sidecar_command.add_volume(config_file.path_str()?, "/tmp/mirrord-config", true);
-        sidecar_command.add_env(LayerConfig::FILE_PATH_ENV, "/tmp/mirrord-config");
+        sidecar_command.add_env(LayerConfig::RESOLVED_CONFIG_ENV, &config.encode()?);
 
         if let Some(console_addr) = super::get_mirrord_console_addr() {
             sidecar_command.add_env(MIRRORD_CONSOLE_ADDR_ENV, &console_addr);
@@ -145,17 +175,22 @@ impl IntproxySidecar {
         Ok(IntproxySidecar {
             container_id,
             runtime_binary,
-            _config_file: config_file,
         })
     }
 
+    /// Returns the id of the created container.
+    ///
+    /// You can use it to reference its volumes or network.
     pub fn container_id(&self) -> &str {
         &self.container_id
     }
 
     /// Starts the internal proxy sidecar container.
     ///
-    /// Returns the address of the internal proxy and sidecar's standard streams.
+    /// Returns:
+    ///
+    /// 1. The address of the internal proxy
+    /// 2. Internal proxy's standard streams
     #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))]
     pub async fn start(self) -> Result<(SocketAddr, SidecarLogs), IntproxySidecarError> {
         let mut command = Command::new(&self.runtime_binary);
@@ -206,7 +241,7 @@ impl IntproxySidecar {
 
     /// Reads all ready lines from the given reader.
     ///
-    /// Returns the lines concatenated with `\n` chars (to indicate line break).
+    /// Returns the lines concatenated with `\n` chars (to indicate line breaks).
     fn read_ready_lines(stderr: &mut Lines<BufReader<ChildStderr>>) -> String {
         let mut buf = vec![];
 
@@ -222,7 +257,7 @@ impl IntproxySidecar {
     }
 }
 
-/// Logs from the internal proxy sidecar container.
+/// Live logs from a started [`IntproxySidecar`].
 pub struct SidecarLogs {
     stdout: Lines<BufReader<ChildStdout>>,
     stderr: Lines<BufReader<ChildStderr>>,
@@ -242,7 +277,7 @@ impl fmt::Debug for SidecarLogs {
     }
 }
 
-/// Executes the given [`Command`] and reads the first line of its standard output.
+/// Executes the given [`Command`] to completion and reads the first line of its standard output.
 ///
 /// Ensures that the first line of output is not empty.
 ///

@@ -1,7 +1,6 @@
 use std::{io, path::PathBuf};
 
 use rustls::server::VerifierBuilderError;
-use tempfile::PersistError;
 use thiserror::Error;
 use tokio::task::JoinError;
 use x509_parser::{error::X509Error, nom};
@@ -56,8 +55,6 @@ pub enum SecureChannelError {
     GenerateError(#[from] rcgen::Error),
     #[error("failed to prepare a temporary PEM file: {0}")]
     TmpFileCreateError(#[from] io::Error),
-    #[error(transparent)]
-    PersistError(#[from] PersistError),
     #[error(transparent)]
     FromPemError(#[from] FromPemError),
     #[error("no root certificate was found in the PEM file")]

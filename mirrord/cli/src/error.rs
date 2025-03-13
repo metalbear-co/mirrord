@@ -13,7 +13,7 @@ use reqwest::StatusCode;
 use thiserror::Error;
 
 use crate::{
-    container::{CommandDisplay, IntproxySidecarError, ResolvedConfigError},
+    container::{CommandDisplay, IntproxySidecarError},
     port_forward::PortForwardError,
 };
 
@@ -46,21 +46,18 @@ const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Discord or G
 pub(crate) enum ContainerError {
     #[error("Failed to prepare TLS setup for mirrord proxies: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
-    ProxyTlsSetupError(#[from] SecureChannelError),
+    ProxyTlsSetup(#[from] SecureChannelError),
 
     #[error("Failed to start mirrord internal proxy sidecar container: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
-    IntproxySidecarError(#[from] IntproxySidecarError),
+    IntproxySidecar(#[from] IntproxySidecarError),
 
     #[error("Failed to execute command [{command}]: {error}")]
-    CommandError {
+    CommandExec {
         #[source]
         error: io::Error,
         command: CommandDisplay,
     },
-
-    #[error("Failed to prepare the resolved mirrord config: {0}")]
-    ResolvedConfigError(#[from] ResolvedConfigError),
 }
 
 /// Errors that can occur when executing the `mirrord extproxy` command.
