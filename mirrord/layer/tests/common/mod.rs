@@ -1,7 +1,6 @@
 use std::{
     assert_matches::assert_matches,
     collections::HashMap,
-    env::VarError,
     fmt::Debug,
     fs::File,
     io,
@@ -15,10 +14,7 @@ use std::{
 
 use actix_codec::Framed;
 use futures::{SinkExt, StreamExt};
-use mirrord_config::{
-    config::{ConfigContext, MirrordConfig},
-    LayerConfig, LayerFileConfig, MIRRORD_LAYER_INTPROXY_ADDR,
-};
+use mirrord_config::{config::ConfigContext, LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR};
 use mirrord_intproxy::{agent_conn::AgentConnection, IntProxy};
 use mirrord_protocol::{
     file::{
@@ -1345,40 +1341,34 @@ pub fn config_dir() -> PathBuf {
     config_path
 }
 
+/// Environment for the user application.
+///
+/// The environment includes:
+/// 1. `RUST_LOG=warn,mirrord=trace`
+/// 2. [`MIRRORD_LAYER_INTPROXY_ADDR`]
+/// 3. Layer injection variable
+/// 4. [`LayerConfig::RESOLVED_CONFIG_ENV`]
+///
+/// The `extra_vars` param is used only to build the [`ConfigContext`] for [`LayerConfig::resolve`].
 pub fn get_env(
     dylib_path: &Path,
     intproxy_addr: SocketAddr,
     extra_vars: Vec<(&str, &str)>,
     config_path: Option<&Path>,
 ) -> HashMap<String, String> {
-    let mut env = HashMap::new();
-    env.insert(
-        "MIRRORD_IMPERSONATED_TARGET".to_string(),
-        "pod/mock-target".to_string(),
-    );
-    env.insert("MIRRORD_REMOTE_DNS".to_string(), "false".to_string());
+    let mut cfg_context = ConfigContext::default();
+    cfg_context = cfg_context.override_env("MIRRORD_IMPERSONATED_TARGET", Some("pod/mock-target"));
+    cfg_context = cfg_context.override_env("MIRRORD_REMOTE_DNS", Some("false"));
 
     for (key, value) in extra_vars {
-        env.insert(key.to_string(), value.to_string());
+        cfg_context = cfg_context.override_env(key, Some(value));
     }
 
-    let file_config = if let Some(config) = config_path {
-        env.insert(
-            "MIRRORD_CONFIG_FILE".to_string(),
-            config.to_str().unwrap().to_string(),
-        );
-        LayerFileConfig::from_path(config).unwrap()
-    } else {
-        LayerFileConfig::default()
-    };
+    if let Some(config) = config_path {
+        cfg_context = cfg_context.override_env(LayerConfig::FILE_PATH_ENV, Some(config));
+    }
 
-    let mut context = ConfigContext::default();
-    context.env = Box::new(move |name| {
-        env.get(name)
-            .map(ToString::to_string)
-            .ok_or(VarError::NotPresent)
-    });
-    let config = file_config.generate_config(&mut context).unwrap();
+    let config = LayerConfig::resolve(&mut cfg_context).unwrap();
 
     [
         ("RUST_LOG".to_string(), "warn,mirrord=debug".to_string()),

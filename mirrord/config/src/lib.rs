@@ -20,7 +20,7 @@ pub mod target;
 pub mod util;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     ops::Not,
     path::{Path, PathBuf},
     time::SystemTime,
@@ -449,15 +449,18 @@ impl LayerConfig {
                 .http_filter
                 .get_filtered_ports(),
         ) {
-            if unfiltered_ports
-                .is_disjoint(&HashSet::from_iter(filtered_ports.iter().copied()))
-                .not()
-            {
+            let intersection = filtered_ports
+                .iter()
+                .copied()
+                .filter(|port| unfiltered_ports.contains(port))
+                .collect::<Vec<_>>();
+            if intersection.is_empty().not() {
                 Err(ConfigError::Conflict(format!(
-                    "`feature.network.incoming.ports` (set to {unfiltered_ports:?}) and \
-                    `feature.network.incoming.http_filter.ports` (set to {filtered_ports:?}) must \
-                    be disjoint. If you want traffic to a port ot be filtered, include it only in \
-                    the filter port. To steal all the traffic from that port without filtering, \
+                    "Ports {intersection:?} are present in both `feature.network.incoming.ports` and \
+                    `feature.network.incoming.http_filter.ports`. These lists must remain disjoint. \
+                    If you want traffic to a port to be filtered, \
+                    include it only in `feature.network.incoming.http_filter.ports`. \
+                    To steal all the traffic from that port without filtering, \
                     include it only in `feature.network.incoming.ports`."
                 )))?
             }
