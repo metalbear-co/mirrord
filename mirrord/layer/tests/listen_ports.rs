@@ -26,8 +26,7 @@ async fn listen_ports(
     dylib_path: &Path,
     config_dir: &Path,
 ) {
-    let mut config_path = config_dir.to_path_buf();
-    config_path.push("listen_ports.json");
+    let config_path = config_dir.join("listen_ports.json");
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
@@ -35,7 +34,7 @@ async fn listen_ports(
                 ("RUST_LOG", "mirrord=trace"),
                 ("MIRRORD_FILE_MODE", "local"),
             ],
-            Some(config_path.to_str().unwrap()),
+            Some(&config_path),
         )
         .await;
 

@@ -19,13 +19,15 @@ mod no_verifier;
 mod read_pem;
 mod root_store;
 mod san;
+mod secure_channel;
 mod uri_ext;
 
-pub use error::{FromPemError, GetSanError};
+pub use error::{FromPemError, GetSanError, SecureChannelError};
 pub use generate::generate_cert;
 pub use maybe_tls::MaybeTls;
 pub use no_verifier::{DangerousNoVerifierClient, DangerousNoVerifierServer};
 pub use read_pem::{read_cert_chain, read_key_der};
 pub use root_store::best_effort_root_store;
 pub use san::HasSubjectAlternateNames;
+pub use secure_channel::SecureChannelSetup;
 pub use uri_ext::UriExt;

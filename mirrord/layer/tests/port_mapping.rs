@@ -20,7 +20,7 @@ async fn port_mapping(
         .start_process_with_layer_and_port(
             dylib_path,
             vec![],
-            Some(config_dir.join("port_mapping.json").to_str().unwrap()),
+            Some(&config_dir.join("port_mapping.json")),
         )
         .await;
 

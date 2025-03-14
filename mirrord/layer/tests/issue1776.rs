@@ -27,10 +27,9 @@ async fn test_issue1776(
     dylib_path: &Path,
     config_dir: &Path,
 ) {
-    let mut config_path = config_dir.to_path_buf();
-    config_path.push("issue1776.json");
+    let config_path = config_dir.join("issue1776.json");
     let (mut test_process, mut intproxy) = application
-        .start_process_with_layer(dylib_path, vec![], Some(config_path.to_str().unwrap()))
+        .start_process_with_layer(dylib_path, vec![], Some(&config_path))
         .await;
 
     println!("Application started, preparing to resolve DNS with sendmsg/recvmsg.");
@@ -97,10 +96,9 @@ async fn test_issue1776_port_not_53(
     dylib_path: &Path,
     config_dir: &Path,
 ) {
-    let mut config_path = config_dir.to_path_buf();
-    config_path.push("issue1776.json");
+    let config_path = config_dir.join("issue1776.json");
     let (mut test_process, mut intproxy) = application
-        .start_process_with_layer(dylib_path, vec![], Some(config_path.to_str().unwrap()))
+        .start_process_with_layer(dylib_path, vec![], Some(&config_path))
         .await;
 
     println!("Application started, preparing to send UDP packet.");

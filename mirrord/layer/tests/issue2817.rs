@@ -118,11 +118,7 @@ async fn test_issue2817(
         .expect("failed to saving layer config to tmp file");
 
     let (mut test_process, mut intproxy) = application
-        .start_process_with_layer(
-            dylib_path,
-            Default::default(),
-            Some(config_path.to_str().unwrap()),
-        )
+        .start_process_with_layer(dylib_path, Default::default(), Some(&config_path))
         .await;
 
     let message = intproxy.recv().await;

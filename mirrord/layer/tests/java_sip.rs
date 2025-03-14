@@ -21,10 +21,10 @@ async fn java_temurin_sip(dylib_path: &Path) {
     let application = Application::JavaTemurinSip;
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
+    let addr = listener.local_addr().unwrap();
     println!("Listening for messages from the layer on {addr}");
 
-    let env = get_env_no_fs(dylib_path.to_str().unwrap(), &addr);
+    let env = get_env(dylib_path, addr, vec![("MIRRORD_FILE_MODE", "local")], None);
 
     let mut test_process = application.get_test_process(env).await;
     let _intproxy = TestIntProxy::new(listener).await;

@@ -14,7 +14,7 @@ use mirrord_config::{
         },
     },
     target::Target,
-    LayerConfig,
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
 };
 use mirrord_intproxy_protocol::PortSubscription;
 use mirrord_protocol::{
@@ -70,12 +70,10 @@ impl LayerSetup {
 
         let dns_selector = DnsSelector::from(&config.feature.network.dns);
 
-        let proxy_address = config
-            .connect_tcp
-            .as_ref()
+        let proxy_address = std::env::var(MIRRORD_LAYER_INTPROXY_ADDR)
             .expect("missing internal proxy address")
-            .parse()
-            .expect("failed to parse internal proxy address");
+            .parse::<SocketAddr>()
+            .expect("malformed internal proxy address");
 
         let incoming_mode = IncomingMode::new(&config.feature.network.incoming);
         #[cfg(target_os = "macos")]

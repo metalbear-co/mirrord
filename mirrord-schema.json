@@ -23,14 +23,6 @@
         }
       ]
     },
-    "connect_tcp": {
-      "title": "connect_tcp {#root-connect_tcp}",
-      "description": "IP:PORT to connect to instead of using k8s api, for testing purposes.\n\n```json { \"connect_tcp\": \"10.10.0.100:7777\" } ```",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "container": {
       "title": "container {#root-container}",
       "anyOf": [
@@ -926,24 +918,10 @@
           "format": "uint64",
           "minimum": 0.0
         },
-        "tls_certificate": {
-          "description": "<!--${internal}-->\n\nCertificate path to be used for wrapping external proxy tcp listener with a tcp acceptor (self-signed one will be generated automaticaly if not specified)",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "tls_enable": {
-          "description": "<!--${internal}-->\n\nWhether to use TLS or a plain TCP connection.",
+          "description": "<!--${internal}-->\n\nWhether to use TLS or a plain TCP when accepting a connection from the internal proxy sidecar.",
           "type": [
             "boolean",
-            "null"
-          ]
-        },
-        "tls_key": {
-          "description": "<!--${internal}-->\n\nPrivate Key path to be used for wrapping external proxy tcp listener with a tcp acceptor (self-signed one will be generated automaticaly if not specified)",
-          "type": [
-            "string",
             "null"
           ]
         }
@@ -1404,34 +1382,6 @@
       "description": "Configuration for the internal proxy mirrord spawns for each local mirrord session that local layers use to connect to the remote agent\n\nThis is seldom used, but if you get `ConnectionRefused` errors, you might want to increase the timeouts a bit.\n\n```json { \"internal_proxy\": { \"start_idle_timeout\": 30, \"idle_timeout\": 5 } } ```",
       "type": "object",
       "properties": {
-        "client_tls_certificate": {
-          "description": "<!--${internal}-->\n\nCertificate to use as tls client credentials for connection to `connect_tcp`. (self-signed one will be generated automaticaly if not specified)",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "client_tls_key": {
-          "description": "<!--${internal}-->\n\nPrivate Key to use as tls client credentials for connection to `connect_tcp`. (self-signed one will be generated automaticaly if not specified)",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "connect_tcp": {
-          "description": "<!--${internal}-->\n\nAddress of external proxy to be used in `mirrord container`",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "container_mode": {
-          "description": "<!--${internal}-->\n\nThis informs the intproxy that it's running inside a continer and should not detach io",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
         "idle_timeout": {
           "title": "internal_proxy.idle_timeout {#internal_proxy-idle_timeout}",
           "description": "How much time to wait while we don't have any active connections before exiting.\n\nCommon cases would be running a chain of processes that skip using the layer and don't connect to the proxy.\n\n```json { \"internal_proxy\": { \"idle_timeout\": 30 } } ```",
