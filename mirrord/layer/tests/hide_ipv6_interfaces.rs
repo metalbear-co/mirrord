@@ -42,11 +42,7 @@ async fn check_ipv6s_hidden_with_config(
         .expect("failed to save layer config to tmp file");
 
     let (mut test_process, _intproxy) = application
-        .start_process_with_layer(
-            dylib_path,
-            Default::default(),
-            Some(config_path.to_str().unwrap()),
-        )
+        .start_process_with_layer(dylib_path, Default::default(), Some(&config_path))
         .await;
 
     test_process.wait_assert_success().await;
