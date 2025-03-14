@@ -146,7 +146,7 @@ mod tests {
     fn default(#[case] fs: Option<&str>, #[case] ro: Option<&str>, #[case] expect: FsModeConfig) {
         let mut cfg_context = ConfigContext::default()
             .override_env("MIRRORD_FILE_OPS", fs)
-            .override_env("MIRRORD_RO_OPS", ro)
+            .override_env("MIRRORD_FILE_RO_OPS", ro)
             .strict_env(true);
         let fs = FsModeConfig::default()
             .generate_config(&mut cfg_context)
@@ -163,7 +163,7 @@ mod tests {
     fn disabled(#[case] fs: Option<&str>, #[case] ro: Option<&str>, #[case] expect: FsModeConfig) {
         let mut cfg_context = ConfigContext::default()
             .override_env("MIRRORD_FILE_OPS", fs)
-            .override_env("MIRRORD_RO_OPS", ro)
+            .override_env("MIRRORD_FILE_RO_OPS", ro)
             .strict_env(true);
         let fs = ToggleableConfig::<FsModeConfig>::Enabled(false)
             .generate_config(&mut cfg_context)
