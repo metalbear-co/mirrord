@@ -6,6 +6,10 @@ use crate::config::{self, ConfigError};
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(
+    feature = "namespaced-schemars",
+    schemars(rename = "co.metalbear.mirrord.v1.StatefulSetTarget")
+)]
 pub struct StatefulSetTarget {
     pub stateful_set: String,
     pub container: Option<String>,

@@ -8,6 +8,10 @@ use crate::config::{ConfigError, Result};
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(
+    feature = "namespaced-schemars",
+    schemars(rename = "co.metalbear.mirrord.v1.ServiceTarget")
+)]
 pub struct ServiceTarget {
     pub service: String,
     pub container: Option<String>,
