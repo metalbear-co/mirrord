@@ -14,14 +14,14 @@ async fn mirrord_exec<P>(
 where
     P: Progress + Send + Sync,
 {
-    // extension needs more timeout since it might need to build
-    // or run tasks before actually launching.
-    #[cfg(target_os = "macos")]
-    let execution_info =
-        MirrordExecution::start(&config, executable, &mut progress, analytics).await?;
-    #[cfg(not(target_os = "macos"))]
-    let execution_info =
-        MirrordExecution::start_internal(&config, &mut progress, analytics).await?;
+    let execution_info = MirrordExecution::start_internal(
+        &config,
+        #[cfg(target_os = "macos")]
+        executable,
+        &mut progress,
+        analytics,
+    )
+    .await?;
 
     let output = serde_json::to_string(&execution_info)?;
     progress.success(Some(&output));
