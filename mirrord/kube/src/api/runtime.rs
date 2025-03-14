@@ -10,7 +10,8 @@ use std::{
 };
 
 use k8s_openapi::{
-    api::core::v1::{Node, Pod},
+    api::core::v1::{Container, ContainerPort, Node, Pod, Probe},
+    apimachinery::pkg::util::intstr::IntOrString,
     NamespaceResourceScope,
 };
 use kube::{api::ListParams, Api, Client, Resource};
@@ -89,6 +90,8 @@ pub struct RuntimeData {
     pub mesh: Option<MeshVendor>,
 
     pub share_process_namespace: bool,
+    // container probe ports
+    pub containers_probe_ports: Vec<u16>,
 }
 
 impl RuntimeData {
@@ -130,6 +133,15 @@ impl RuntimeData {
             .and_then(|spec| spec.node_name.as_ref())
             .ok_or_else(|| KubeApiError::missing_field(pod, ".spec.nodeName"))?
             .to_owned();
+
+        let containers_probe_ports: Vec<u16> = pod
+            .spec
+            .as_ref()
+            .ok_or_else(|| KubeApiError::missing_field(pod, ".spec"))?
+            .containers
+            .iter()
+            .flat_map(Self::probe_ports)
+            .collect();
 
         let pod_ips = pod
             .status
@@ -221,6 +233,7 @@ impl RuntimeData {
                 .as_ref()
                 .and_then(|spec| spec.share_process_namespace)
                 .unwrap_or_default(),
+            containers_probe_ports,
         })
     }
 
@@ -268,6 +281,57 @@ impl RuntimeData {
         } else {
             NodeCheck::Success
         }
+    }
+
+    /// probe_ports returns list of ports that can interfere with the stealing
+    /// process.
+    /// - Ignoring startup probes: target needs to be ready to start a new session
+    /// - Ignoring tcp probes: the agent will accept the connection anyway
+    fn probe_ports(container: &Container) -> Vec<u16> {
+        fn port_to_int(
+            port: &IntOrString,
+            container_ports: &Option<Vec<ContainerPort>>,
+        ) -> Option<u16> {
+            match port {
+                IntOrString::Int(p) => Some(*p as u16),
+                IntOrString::String(port_name) => container_ports.as_ref().and_then(|ports| {
+                    ports
+                        .iter()
+                        .find(|p| p.name.as_ref() == Some(port_name))
+                        .map(|p| p.container_port as u16)
+                }),
+            }
+        }
+
+        fn get_probe_ports(
+            probe: &Option<Probe>,
+            container_ports: &Option<Vec<ContainerPort>>,
+        ) -> Vec<u16> {
+            probe
+                .as_ref()
+                .map(|p| {
+                    let mut ports = Vec::new();
+                    if let Some(http_get) = &p.http_get {
+                        if let Some(port) = port_to_int(&http_get.port, container_ports) {
+                            ports.push(port);
+                        }
+                    }
+                    if let Some(grpc) = &p.grpc {
+                        ports.push(grpc.port as u16);
+                    }
+                    ports
+                })
+                .unwrap_or_default()
+        }
+
+        let mut ports = Vec::new();
+        ports.extend(get_probe_ports(&container.liveness_probe, &container.ports));
+        ports.extend(get_probe_ports(
+            &container.readiness_probe,
+            &container.ports,
+        ));
+
+        ports
     }
 }
 

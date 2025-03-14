@@ -628,6 +628,17 @@ impl OperatorApi<PreparedClientCert> {
                         .as_str(),
                     );
                 }
+
+                if layer_config
+                    .feature
+                    .network
+                    .incoming
+                    .steals_port_without_filter(&runtime_data.containers_probe_ports)
+                {
+                    {
+                        progress.warning("Your mirrord config may steal HTTP/gRPC health checks, causing Kubernetes to terminate the target container. Use an HTTP filter to prevent this.");
+                    }
+                }
             }
 
             let use_proxy = self
