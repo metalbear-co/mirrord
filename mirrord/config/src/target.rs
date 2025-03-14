@@ -624,7 +624,7 @@ mod tests {
         #[case] expected_target_config: TargetConfig,
     ) {
         let mut cfg_context = ConfigContext::default()
-            .override_env("MIRRORD_IMERSONATED_TARGET", path_env)
+            .override_env("MIRRORD_IMPERSONATED_TARGET", path_env)
             .override_env("MIRRORD_TARGET_NAMESPACE", namespace_env)
             .strict_env(true);
         let generated_target_config = TargetFileConfig::default()
