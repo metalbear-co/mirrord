@@ -149,7 +149,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       # Otherwise the arguments to the setup-rust-toolchain action are ignored.
       - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           toolchain: nightly-2025-01-22
           components: rustfmt, clippy
