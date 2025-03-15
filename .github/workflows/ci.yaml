@@ -390,7 +390,7 @@ jobs:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
       - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-rust-toolchain@9399c7bb15d4c7d47b27263d024f0a4978346ba4
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
@@ -521,7 +521,7 @@ jobs:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
       - uses: actions/checkout@v4
-      - uses: metalbear-co/setup-rust-toolchain@9399c7bb15d4c7d47b27263d024f0a4978346ba4
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
       - uses: metalbear-co/ci/e2e-setup-action@main
         with:
           container-runtime: ${{matrix.container-runtime}}
@@ -574,7 +574,7 @@ jobs:
       - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: metalbear-co/setup-rust-toolchain@9399c7bb15d4c7d47b27263d024f0a4978346ba4
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
       - run: cargo build --manifest-path=./Cargo.toml -p mirrord
       - name: upload mirrord CLI
         uses: actions/upload-artifact@v4
