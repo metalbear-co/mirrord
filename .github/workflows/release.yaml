@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+      - uses: metalbear-co/setup-rust-toolchain@9399c7bb15d4c7d47b27263d024f0a4978346ba4
         with:
           rustflags: ""
       - uses: taiki-e/install-action@v2
@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+      - uses: metalbear-co/setup-rust-toolchain@9399c7bb15d4c7d47b27263d024f0a4978346ba4
         with:
           rustflags: ""
       - uses: taiki-e/install-action@v2
@@ -56,7 +56,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rm rust-toolchain.toml
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+      - uses: metalbear-co/setup-rust-toolchain@9399c7bb15d4c7d47b27263d024f0a4978346ba4
         with:
           target: x86_64-apple-darwin,aarch64-apple-darwin
           toolchain: nightly-2025-01-22

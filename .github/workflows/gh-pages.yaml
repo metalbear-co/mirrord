@@ -30,7 +30,7 @@ jobs:
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options"
     steps:
       - uses: actions/checkout@v4
-      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
+      - uses: metalbear-co/setup-rust-toolchain@9399c7bb15d4c7d47b27263d024f0a4978346ba4
         with:
           toolchain: nightly-2023-12-07
       - run: cargo doc --document-private-items
