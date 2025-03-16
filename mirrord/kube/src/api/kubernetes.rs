@@ -204,7 +204,7 @@ impl KubernetesAPI {
         &self,
         progress: &mut P,
         target_config: &TargetConfig,
-        network_config: &NetworkConfig,
+        network_config: Option<&NetworkConfig>,
         container_config: ContainerConfig,
     ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
     where
@@ -226,8 +226,12 @@ impl KubernetesAPI {
             }
 
             if network_config
-                .incoming
-                .steals_port_without_filter(containers_probe_ports)
+                .map(|network_config| {
+                    network_config
+                        .incoming
+                        .steals_port_without_filter(containers_probe_ports)
+                })
+                .unwrap_or(false)
             {
                 {
                     progress.warning("Your mirrord config may steal HTTP/gRPC health checks, causing Kubernetes to terminate the target container. Use an HTTP filter to prevent this.");

@@ -180,7 +180,7 @@ where
         k8s_api.create_agent(
             progress,
             &config.target,
-            &config.feature.network,
+            Some(&config.feature.network),
             agent_container_config,
         ),
     )
