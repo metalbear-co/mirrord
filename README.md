@@ -61,7 +61,7 @@ Get the extension [here](https://marketplace.visualstudio.com/items?itemName=Met
 - The debugged process will be plugged into the selected pod by mirrord
 
 <p align="center">
-  <img src="./images/vscode.gif">
+  <img alt="demo of mirrord VSCode extension" src="./images/vscode.gif">
 </p>
 
 ---
@@ -80,7 +80,7 @@ Get the plugin [here](https://plugins.jetbrains.com/plugin/19772-mirrord).
 - The debugged process will be plugged into the selected pod by mirrord
 
 <p align="center">
-  <img src="./intellij-ext/src/main/resources/META-INF/usage.gif">
+  <img alt="demo of mirrord IntelliJ plugin" src="./intellij-ext/src/main/resources/META-INF/usage.gif">
 </p>
 
 ---

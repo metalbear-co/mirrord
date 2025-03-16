@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           rustflags: ""
       - uses: taiki-e/install-action@v2
@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           rustflags: ""
       - uses: taiki-e/install-action@v2
@@ -56,7 +56,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rm rust-toolchain.toml
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           target: x86_64-apple-darwin,aarch64-apple-darwin
           toolchain: nightly-2025-01-22

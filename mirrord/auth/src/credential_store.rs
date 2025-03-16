@@ -219,6 +219,10 @@ impl CredentialStoreSync {
             .seek(SeekFrom::Start(0))
             .await
             .map_err(CredentialStoreError::FileAccess)?;
+        self.store_file
+            .set_len(0)
+            .await
+            .map_err(CredentialStoreError::FileAccess)?;
 
         store.save(&mut self.store_file).await?;
 
