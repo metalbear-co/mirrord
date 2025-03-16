@@ -71,7 +71,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 futures = "0.3"
 thiserror = "2"
-k8s-openapi = { version = "0.23", features = ["earliest"] }
+k8s-openapi = { version = "0.24", features = ["earliest"] }
 reqwest = { version = "0.12", default-features = false, features = [
     "blocking",
     "rustls-tls-native-roots",
@@ -79,7 +79,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "socks",
     "http2",
 ] }
-kube = { git = "https://github.com/kube-rs/kube.git", rev = "ecbdafc214538aadc78ec8447f2fa12d0057492b", default-features = false, features = [
+kube = { version = "0.98", default-features = false, features = [
     "runtime",
     "derive",
     "client",

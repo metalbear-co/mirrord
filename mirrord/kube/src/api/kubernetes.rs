@@ -8,6 +8,7 @@ use kube::{
 use mirrord_agent_env::mesh::MeshVendor;
 use mirrord_config::{
     agent::AgentConfig,
+    feature::network::NetworkConfig,
     target::{Target, TargetConfig},
     LayerConfig,
 };
@@ -202,14 +203,15 @@ impl KubernetesAPI {
     pub async fn create_agent<P>(
         &self,
         progress: &mut P,
-        layer_config: &LayerConfig,
-        config: ContainerConfig,
+        target_config: &TargetConfig,
+        network_config: Option<&NetworkConfig>,
+        container_config: ContainerConfig,
     ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
     where
         P: Progress + Send + Sync,
     {
         let (params, runtime_data) = self
-            .create_agent_params(&layer_config.target, config)
+            .create_agent_params(target_config, container_config)
             .await?;
 
         if let Some(RuntimeData {
@@ -223,11 +225,13 @@ impl KubernetesAPI {
                 progress.warning(format!("Target has multiple containers, mirrord picked \"{container_name}\". To target a different one, include it in the target path.").as_str());
             }
 
-            if layer_config
-                .feature
-                .network
-                .incoming
-                .steals_port_without_filter(containers_probe_ports)
+            if network_config
+                .map(|network_config| {
+                    network_config
+                        .incoming
+                        .steals_port_without_filter(containers_probe_ports)
+                })
+                .unwrap_or(false)
             {
                 {
                     progress.warning("Your mirrord config may steal HTTP/gRPC health checks, causing Kubernetes to terminate the target container. Use an HTTP filter to prevent this.");
