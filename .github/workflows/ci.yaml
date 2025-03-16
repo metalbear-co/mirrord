@@ -78,13 +78,13 @@ jobs:
           fetch-depth: 0
       - name: get CI changes
         id: changed-ci
-        uses: tj-actions/changed-files@v44
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
         with:
           files: |
             .github/workflows/ci.yaml
       - name: get changed rs files
         id: changed-rs
-        uses: tj-actions/changed-files@v44
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
         with:
           files: |
             **/*.rs
@@ -98,25 +98,25 @@ jobs:
             .cargo/**
       - name: get markdown changes
         id: changed-markdown
-        uses: tj-actions/changed-files@v44
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
         with:
           files: |
             README.md
       - name: get protocol changes
         id: changed-protocol
-        uses: tj-actions/changed-files@v44
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
         with:
           files: |
             mirrord/protocol/**
       - name: get protocol toml changes
         id: changed-protocol-toml
-        uses: tj-actions/changed-files@v44
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
         with:
           files: |
             mirrord/protocol/Cargo.toml
       - name: get dockerfile changes
         id: changed-dockerfile
-        uses: tj-actions/changed-files@v44
+        uses: metalbear-co/changed-files@9200e69727eb73eb060652b19946b8a2fdfb654b
         with:
           files: |
             mirrord/agent/Dockerfile
@@ -144,12 +144,12 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4
-      - uses: arduino/setup-protoc@v3
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       # Otherwise the arguments to the setup-rust-toolchain action are ignored.
       - run: rm rust-toolchain.toml
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           toolchain: nightly-2025-01-22
           components: rustfmt, clippy
@@ -188,10 +188,10 @@ jobs:
       RUSTDOCFLAGS: "--enable-index-page -Zunstable-options -Dwarnings"
     steps:
       - uses: actions/checkout@v4
-      - uses: arduino/setup-protoc@v3
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           toolchain: nightly-2025-01-22
       # TODO(alex): `no-deps` here due to an issue in `futures-util`.
@@ -205,7 +205,7 @@ jobs:
       image: ghcr.io/metalbear-co/ci-agent-build:193d12d5d8015c1ed60b9eda30c708cb9c4653e9
     steps:
       - uses: actions/checkout@v4
-      - uses: arduino/setup-protoc@v3
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       # the setup rust toolchain action ignores the input if file exists.. so remove it
@@ -259,7 +259,7 @@ jobs:
     if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
-      - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install rust.
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           target: x86_64-unknown-linux-gnu
       - run: |
@@ -281,7 +281,7 @@ jobs:
           cd mirrord/layer/tests/apps/issue2204
           rustc issue2204.rs --out-dir target
       # For the `java_temurin_sip` test.
-      - uses: sdkman/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
+      - uses: metalbear-co/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
         id: sdkman
         with:
           candidate: java
@@ -390,13 +390,13 @@ jobs:
       - uses: actions/checkout@v4 # Checkout the mirrord repo.
       # the setup rust toolchain action ignores the input if file exists.. so remove it
       - run: rm rust-toolchain.toml
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           components: rustfmt, clippy
           target: aarch64-apple-darwin
           toolchain: nightly-2025-01-22
       - name: Install Protoc
-        uses: arduino/setup-protoc@v3
+        uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       # this is required for clippy lint because the layer path variable is checked at compile time
@@ -484,7 +484,7 @@ jobs:
           cargo build
       - run: ./scripts/build_c_apps.sh
       # For the `java_temurin_sip` test.
-      - uses: sdkman/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
+      - uses: metalbear-co/sdkman-action@b1f9b696c79148b66d3d3a06f7ea801820318d0f
         id: sdkman
         with:
           candidate: java
@@ -521,7 +521,7 @@ jobs:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1 # Install Rust.
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
       - uses: metalbear-co/ci/e2e-setup-action@main
         with:
           container-runtime: ${{matrix.container-runtime}}
@@ -557,10 +557,10 @@ jobs:
     if: ${{needs.changed_files.outputs.markdown_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     steps:
       - uses: actions/checkout@v4
-      - uses: avto-dev/markdown-lint@v1
+      - uses: metalbear-co/markdownlint-cli2-action@0fb2cca662f67f99dfdb04fce7d81bb2904ee404
         with:
-          config: "markdownlint-config.json"
-          args: "README.md"
+          config: ".markdownlint.json"
+          globs: "README.md"
 
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
   # building concurrently can run faster the release ide tests
@@ -571,10 +571,10 @@ jobs:
     if: ${{ needs.check_if_release_branch.outputs.release_branch == 'true' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: arduino/setup-protoc@v3
+      - uses: metalbear-co/setup-protoc@3ea1d70ac22caff0b66ed6cb37d5b7aadebd4623
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
       - run: cargo build --manifest-path=./Cargo.toml -p mirrord
       - name: upload mirrord CLI
         uses: actions/upload-artifact@v4
