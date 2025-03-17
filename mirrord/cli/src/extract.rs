@@ -28,9 +28,11 @@ use std::env::temp_dir;
 #[cfg(target_os = "macos")]
 use mac::temp_dir;
 
-/// Extract to given directory, or tmp by default.
-/// If prefix is true, add a random prefix to the file name that identifies the specific build
-/// of the layer. This is useful for debug purposes usually.
+/// Extract the mirrord-layer to the given directory, or tmp by default.
+///
+/// If `prefix` is true, add a random prefix to the file name
+/// that identifies the specific build of the layer.
+/// This is useful for debugging usually.
 pub(crate) fn extract_library<P>(
     dest_dir: Option<String>,
     progress: &P,
