@@ -25,8 +25,8 @@ where
     #[cfg(not(target_os = "macos"))]
     let mut execution_info = MirrordExecution::start(&mut config, &mut progress, analytics).await?;
 
-    // We don't execute so set envs aren't passed, so we need to add config file and target to
-    // env.
+    // We don't execute so set envs aren't passed,
+    // so we need to add config file and target to env.
     execution_info.environment.extend(env);
 
     let output = serde_json::to_string(&execution_info)?;
