@@ -5,9 +5,9 @@ use k8s_openapi::{
         apps::v1::{Deployment, DeploymentSpec},
         core::v1::{
             Container, ContainerPort, EnvVar, HTTPGetAction, Namespace, PodSecurityContext,
-            PodSpec, PodTemplateSpec, Probe, ResourceRequirements, Secret, SecretVolumeSource,
-            SecurityContext, Service, ServiceAccount, ServicePort, ServiceSpec, Sysctl, Volume,
-            VolumeMount,
+            PodSpec, PodTemplate, PodTemplateSpec, Probe, ResourceRequirements, Secret,
+            SecretVolumeSource, SecurityContext, Service, ServiceAccount, ServicePort, ServiceSpec,
+            Sysctl, Volume, VolumeMount,
         },
         rbac::v1::{
             ClusterRole, ClusterRoleBinding, PolicyRule, Role, RoleBinding, RoleRef, Subject,
@@ -622,6 +622,13 @@ impl OperatorClusterRole {
                     MirrordClusterTlsStealConfig::plural(&()).into_owned(),
                 ]),
                 verbs: vec!["list".to_owned(), "get".to_owned()],
+                ..Default::default()
+            },
+            // `PodTemplate`s can be used as `workloadRef`s in Rollouts.
+            PolicyRule {
+                api_groups: Some(vec![PodTemplate::group(&()).into_owned()]),
+                resources: Some(vec![PodTemplate::plural(&()).into_owned()]),
+                verbs: vec!["get".to_owned(), "list".to_owned(), "watch".to_owned()],
                 ..Default::default()
             },
         ];
