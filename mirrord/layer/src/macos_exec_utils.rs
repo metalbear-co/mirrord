@@ -1,3 +1,5 @@
+pub(crate) mod applev_exec_path;
+
 use std::{
     env,
     ffi::{c_void, CStr, CString},

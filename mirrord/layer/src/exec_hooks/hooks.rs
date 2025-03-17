@@ -9,7 +9,7 @@ use super::*;
 #[cfg(not(target_os = "macos"))]
 use crate::common::CheckedInto;
 #[cfg(target_os = "macos")]
-use crate::exec_utils::*;
+use crate::macos_exec_utils::*;
 use crate::{
     detour::{Bypass, Detour},
     hooks::HookManager,

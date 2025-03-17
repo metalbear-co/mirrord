@@ -121,11 +121,11 @@ mod debugger_ports;
 mod detour;
 mod error;
 mod exec_hooks;
-#[cfg(target_os = "macos")]
-mod exec_utils;
 mod file;
 mod hooks;
 mod load;
+#[cfg(target_os = "macos")]
+mod macos_exec_utils;
 mod macros;
 mod proxy_connection;
 mod setup;
@@ -144,6 +144,8 @@ mod go;
     target_os = "linux"
 ))]
 use crate::go::go_hooks;
+#[cfg(target_os = "macos")]
+use crate::macos_exec_utils::applev_exec_path::strip_mirrord_sip_dir_from_exec_path_in_memory;
 
 const TRACE_ONLY_ENV: &str = "MIRRORD_LAYER_TRACE_ONLY";
 
@@ -223,6 +225,8 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         LoadType::SIPOnly => sip_only_layer_start(config, patch_binaries),
         LoadType::Skip => load_only_layer_start(&config),
     }
+
+    strip_mirrord_sip_dir_from_exec_path_in_memory();
 
     Ok(())
 }
@@ -494,7 +498,7 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
 
     let mut hook_manager = HookManager::default();
 
-    unsafe { exec_utils::enable_macos_hooks(&mut hook_manager, patch_binaries) };
+    unsafe { macos_exec_utils::enable_macos_hooks(&mut hook_manager, patch_binaries) };
     unsafe { exec_hooks::hooks::enable_exec_hooks(&mut hook_manager) };
     // we need to hook file access to patch path to our temp bin.
     config.feature.fs = FsConfig {
@@ -586,7 +590,7 @@ fn enable_hooks(state: &LayerSetup) {
 
     #[cfg(target_os = "macos")]
     {
-        use crate::exec_utils::enable_macos_hooks;
+        use crate::macos_exec_utils::enable_macos_hooks;
 
         let patch_binaries = state.sip_binaries();
         unsafe { enable_macos_hooks(&mut hook_manager, patch_binaries) };
