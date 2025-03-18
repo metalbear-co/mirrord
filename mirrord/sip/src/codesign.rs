@@ -13,6 +13,9 @@ pub(crate) fn sign<PI: AsRef<Path>, PO: AsRef<Path>>(input: PI, output: PO) -> R
     // but if we sign in place we get permission error, probably because someone is holding the
     // handle to the named temp file.
     let mut settings = SigningSettings::default();
+    // Replace any existing flags with just the adhoc flag.
+    // Important because some binaries (e.g. `go`), have the "runtime" flag set, which means,
+    // opting into the hardened runtime, which strips away DYLD_INSERT_LIBRARIES etc.
     settings.set_code_signature_flags(SettingsScope::Main, CodeSignatureFlags::ADHOC);
     let signer = UnifiedSigner::new(settings);
     signer.sign_path(input, output)?;
