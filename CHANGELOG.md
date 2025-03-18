@@ -41,7 +41,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 - Updated every JSON schema used our CRDs to use a k8s style
   namespacing for schema names for better compliance with openapi.
 - Updated some dependencies.
-- Switched to our own fork of changed-files GitHub Action.
+- Switched to our own forks of some GitHub Actions.
 
 ## [3.134.2](https://github.com/metalbear-co/mirrord/tree/3.134.2) - 2025-03-06
 
