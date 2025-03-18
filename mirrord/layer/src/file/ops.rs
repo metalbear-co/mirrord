@@ -694,8 +694,7 @@ pub(crate) fn statx_logic(
     /// Converts a device id from [`MetadataInternal`](mirrord_protocol::file::MetadataInternal) to
     /// format expected by [`statx`]: (major,minor) number.
     fn device_id_to_statx(id: u64) -> (u32, u32) {
-        // SAFETY: these functions only do operations on bits, nothing unsafe here
-        unsafe { (libc::major(id), libc::minor(id)) }
+        (libc::major(id), libc::minor(id))
     }
 
     // SAFETY: all-zero statx struct is valid
