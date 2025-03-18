@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use apple_codesign::{SigningSettings, UnifiedSigner};
+use apple_codesign::{CodeSignatureFlags, SettingsScope, SigningSettings, UnifiedSigner};
 
 use crate::error::Result;
 
@@ -12,7 +12,8 @@ pub(crate) fn sign<PI: AsRef<Path>, PO: AsRef<Path>>(input: PI, output: PO) -> R
     // we switched to use apple codesign crate to avoid this issue (of creating process)
     // but if we sign in place we get permission error, probably because someone is holding the
     // handle to the named temp file.
-    let settings = SigningSettings::default();
+    let mut settings = SigningSettings::default();
+    settings.set_code_signature_flags(SettingsScope::Main, CodeSignatureFlags::ADHOC);
     let signer = UnifiedSigner::new(settings);
     signer.sign_path(input, output)?;
     Ok(())
