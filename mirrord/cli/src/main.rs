@@ -66,6 +66,7 @@ use verify_config::verify_config;
 
 async fn exec_process<P>(
     config: LayerConfig,
+    config_file_path: Option<&str>,
     args: &ExecArgs,
     progress: &P,
     analytics: &mut AnalyticsReporter,
@@ -99,20 +100,18 @@ where
     #[cfg(not(target_os = "macos"))]
     let binary = args.binary.clone();
 
-    // Stop confusion with layer
-    std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
-
-    // Collect environment variables curretn local vars and add those from agent + layer settings.
     let mut env_vars: HashMap<String, String> = vars().collect();
     env_vars.extend(execution_info.environment.clone());
-
+    env_vars.insert(mirrord_progress::MIRRORD_PROGRESS_ENV.into(), "off".into());
     for key in &execution_info.env_to_unset {
         env_vars.remove(key);
     }
 
-    let mut binary_args = args.binary_args.clone();
     // Put original executable in argv[0] even if actually running patched version.
-    binary_args.insert(0, args.binary.clone());
+    let binary_args = std::iter::once(&args.binary)
+        .chain(args.binary_args.iter())
+        .map(Clone::clone)
+        .collect::<Vec<_>>();
 
     // since execvpe doesn't exist on macOS, resolve path with which and use execve
     let binary_path = match which(&binary) {
@@ -127,11 +126,13 @@ where
     let mut sub_progress_config = progress.subtask("config summary");
     print_config(
         &sub_progress_config,
-        Some(&binary),
-        Some(&args.binary_args),
+        &binary_args,
         &config,
-        false,
+        config_file_path,
+        execution_info.uses_operator,
     );
+    // Without the success message, the final progress displays the last info message
+    // as the subtask title.
     sub_progress_config.success(Some("config summary"));
 
     let args = binary_args
@@ -163,40 +164,40 @@ where
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
 }
 
+/// Prints config summary as multiple info messages, using the given [`Progress`].
 fn print_config<P>(
-    progress_subtask: &P,
-    binary: Option<&String>,
-    binary_args: Option<&Vec<String>>,
+    progress: &P,
+    command: &[String],
     config: &LayerConfig,
-    single_msg: bool,
+    config_file_path: Option<&str>,
+    operator_used: bool,
 ) where
     P: Progress + Send + Sync,
 {
-    let mut messages = vec![];
-    if let Some(b) = binary
-        && let Some(a) = binary_args
-    {
-        messages.push(format!("Running binary \"{}\" with arguments: {:?}.", b, a));
-    }
+    progress.info(&format!("Running command: {}", command.join(" ")));
 
-    let target_info = if let Some(target) = &config.target.path {
-        &format!("mirrord will target: {}", target)[..]
-    } else {
-        "mirrord will run without a target"
-    };
-    let config_info = if let Ok(path) = std::env::var(LayerConfig::FILE_PATH_ENV) {
-        &format!("a configuration file was loaded from: {} ", path)[..]
-    } else {
-        "no configuration file was loaded"
-    };
-    messages.push(format!("{}, {}", target_info, config_info));
+    let target_and_config_path_info = format!(
+        "{}, {}",
+        match &config.target.path {
+            Some(path) => {
+                format!("mirrord will target: {}", path)
+            }
+            None => "mirrord will run without a target".into(),
+        },
+        match config_file_path {
+            Some(path) => {
+                format!("the configuration file was loaded from {path}")
+            }
+            None => "no configuration file was loaded".into(),
+        }
+    );
+    progress.info(&target_and_config_path_info);
 
-    let operator_info = match config.operator {
-        Some(true) => "be used",
-        Some(false) => "not be used",
-        None => "be used if possible",
-    };
-    messages.push(format!("operator: the operator will {}", operator_info));
+    let operator_info = format!(
+        "mirrord will run {} the mirrord Operator",
+        if operator_used { "with" } else { "without" },
+    );
+    progress.info(&operator_info);
 
     let exclude = config.feature.env.exclude.as_ref();
     let include = config.feature.env.include.as_ref();
@@ -211,24 +212,24 @@ fn print_config<P>(
     } else {
         "all"
     };
-    messages.push(format!(
-        "env: {} environment variables will be fetched",
+    progress.info(&format!(
+        "env: {} remote environment variables will be fetched",
         env_info
     ));
 
     let fs_info = match config.feature.fs.mode {
-        FsModeConfig::Read => "read only from the remote",
-        FsModeConfig::Write => "read and write from the remote",
+        FsModeConfig::Read => "read from the remote",
+        FsModeConfig::Write => "read from and write to the remote",
         _ => "read and write locally",
     };
-    messages.push(format!("fs: file operations will default to {}", fs_info));
+    progress.info(&format!("fs: file operations will default to {}", fs_info));
 
     let incoming_info = match config.feature.network.incoming.mode {
-        IncomingMode::Mirror => "mirrored",
-        IncomingMode::Steal => "stolen",
+        IncomingMode::Mirror => "be mirrored",
+        IncomingMode::Steal => "be stolen",
         IncomingMode::Off => "ignored",
     };
-    messages.push(format!(
+    progress.info(&format!(
         "incoming: incoming traffic will be {}",
         incoming_info
     ));
@@ -282,7 +283,7 @@ fn print_config<P>(
         };
         let filtered_port_str = filtered_ports_str.unwrap_or_default();
         let unfiltered_ports_str = unfiltered_ports_str.unwrap_or_default();
-        messages.push(format!("incoming: traffic will only be stolen from {filtered_port_str}{and}{unfiltered_ports_str}"));
+        progress.info(&format!("incoming: traffic will only be stolen from {filtered_port_str}{and}{unfiltered_ports_str}"));
     }
 
     let outgoing_info = match (
@@ -294,7 +295,7 @@ fn print_config<P>(
         (false, true) => "enabled on UDP",
         (false, false) => "disabled on TCP and UDP",
     };
-    messages.push(format!("outgoing: forwarding is {}", outgoing_info));
+    progress.info(&format!("outgoing: forwarding is {}", outgoing_info));
 
     let dns_info = match &config.feature.network.dns {
         DnsConfig { enabled: false, .. } => "locally",
@@ -319,16 +320,11 @@ fn print_config<P>(
             filter: Some(DnsFilterConfig::Local(..)),
         } => "remotely with exceptions",
     };
-    messages.push(format!("dns: DNS will be resolved {}", dns_info));
-
-    if single_msg {
-        let long_message = messages.join(". \n");
-        progress_subtask.info(&long_message);
-    } else {
-        for m in messages {
-            progress_subtask.info(&m[..]);
-        }
-    }
+    progress.info(&format!("dns: DNS will be resolved {}", dns_info));
+    progress.info(&format!(
+        "internal proxy: logs will be written to {}",
+        config.internal_proxy.log_destination.display()
+    ));
 }
 
 async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
@@ -352,6 +348,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
     }
 
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
+    let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
     let config = LayerConfig::resolve(&mut cfg_context)?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
@@ -363,7 +360,14 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
     }
     result?;
 
-    let execution_result = exec_process(config, args, &progress, &mut analytics).await;
+    let execution_result = exec_process(
+        config,
+        config_file_path.as_deref(),
+        args,
+        &progress,
+        &mut analytics,
+    )
+    .await;
 
     if execution_result.is_err() && !analytics.has_error() {
         analytics.set_error(AnalyticsError::Unknown);

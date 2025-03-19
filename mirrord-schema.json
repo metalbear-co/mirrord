@@ -886,7 +886,7 @@
         },
         "json_log": {
           "title": "external_proxy.json_log {#external_proxy-json_log}",
-          "description": "Whether the proxy should output logs in JSON format. If false, logs are output in human-readable format.",
+          "description": "Whether the proxy should output logs in JSON format. If false, logs are output in human-readable format.\n\nDefaults to true.",
           "type": [
             "boolean",
             "null"
@@ -894,7 +894,7 @@
         },
         "log_destination": {
           "title": "external_proxy.log_destination {#external_proxy-log_destination}",
-          "description": "Set the log file destination for the external proxy.",
+          "description": "Set the log file destination for the external proxy.\n\nDefaults to a randomized path inside the temporary directory.",
           "type": [
             "string",
             "null"
@@ -902,7 +902,7 @@
         },
         "log_level": {
           "title": "external_proxy.log_level {#external_proxy-log_level}",
-          "description": "Sets the log level for the external proxy.\n\nFollows the `RUST_LOG` convention (i.e `mirrord=trace`), and will only be used if `external_proxy.log_destination` is set",
+          "description": "Set the log level for the external proxy.\n\nThe value should follow the RUST_LOG convention (i.e `mirrord=trace`).\n\nDefaults to `mirrord=info,warn`.",
           "type": [
             "string",
             "null"
@@ -1394,7 +1394,7 @@
         },
         "json_log": {
           "title": "internal_proxy.json_log {#internal_proxy-json_log}",
-          "description": "Whether the proxy should output logs in JSON format. If false, logs are output in human-readable format.",
+          "description": "Whether the proxy should output logs in JSON format. If false, logs are output in human-readable format.\n\nDefaults to true.",
           "type": [
             "boolean",
             "null"
@@ -1402,7 +1402,7 @@
         },
         "log_destination": {
           "title": "internal_proxy.log_destination {#internal_proxy-log_destination}",
-          "description": "Set the log file destination for the internal proxy.",
+          "description": "Set the log file destination for the internal proxy.\n\nDefaults to a randomized path inside the temporary directory.",
           "type": [
             "string",
             "null"
@@ -1410,7 +1410,7 @@
         },
         "log_level": {
           "title": "internal_proxy.log_level {#internal_proxy-log_level}",
-          "description": "Set the log level for the internal proxy. RUST_LOG convention (i.e `mirrord=trace`) will only be used if `log_destination` is set.",
+          "description": "Set the log level for the internal proxy.\n\nThe value should follow the RUST_LOG convention (i.e `mirrord=trace`).\n\nDefaults to `mirrord=info,warn`.",
           "type": [
             "string",
             "null"

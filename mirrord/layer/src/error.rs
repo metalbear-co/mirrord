@@ -224,16 +224,13 @@ impl From<HookError> for i64 {
             }
             HookError::ProxyError(ref err) => {
                 graceful_exit!(
-                    r"Proxy error, connectivity issue or a bug.
+                    r"Proxy error, connectivity issue or a bug: {err}.
                     Please report it to us on https://github.com/metalbear-co/mirrord/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml
-                    You can find the `mirrord-intproxy` logs in {}.
-                    {err}",
+                    You can find the `mirrord-intproxy` logs in {}.",
                     crate::setup()
                         .layer_config()
                         .internal_proxy
                         .log_destination
-                        .clone()
-                        .unwrap_or_else(std::env::temp_dir)
                         .display()
                 )
             }

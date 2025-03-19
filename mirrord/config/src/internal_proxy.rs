@@ -86,19 +86,27 @@ pub struct InternalProxyConfig {
     /// ### internal_proxy.log_level {#internal_proxy-log_level}
     ///
     /// Set the log level for the internal proxy.
-    /// RUST_LOG convention (i.e `mirrord=trace`) will only be used if `log_destination`
-    /// is set.
-    pub log_level: Option<String>,
+    ///
+    /// The value should follow the RUST_LOG convention (i.e `mirrord=trace`).
+    ///
+    /// Defaults to `mirrord=info,warn`.
+    #[config(default = "mirrord=info,warn")]
+    pub log_level: String,
 
     /// ### internal_proxy.log_destination {#internal_proxy-log_destination}
     ///
     /// Set the log file destination for the internal proxy.
-    pub log_destination: Option<PathBuf>,
+    ///
+    /// Defaults to a randomized path inside the temporary directory.
+    #[config(default = crate::default_proxy_logfile_path("mirrord-intproxy"))]
+    pub log_destination: PathBuf,
 
     /// ### internal_proxy.json_log {#internal_proxy-json_log}
     ///
     /// Whether the proxy should output logs in JSON format. If false, logs are output in
     /// human-readable format.
+    ///
+    /// Defaults to true.
     #[config(default = true)]
     pub json_log: bool,
 }

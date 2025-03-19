@@ -1,4 +1,4 @@
-use std::{borrow::Cow, fs::OpenOptions, future::Future, ops::Not, path::Path};
+use std::{fs::OpenOptions, future::Future, ops::Not, path::Path};
 
 use futures::StreamExt;
 use mirrord_config::LayerConfig;
@@ -69,7 +69,7 @@ pub async fn init_tracing_registry(
 /// However, it allows us to use some nice tools, like [hl](https://github.com/pamburus/hl).
 fn init_proxy_tracing_registry(
     log_destination: &Path,
-    log_level: Option<&str>,
+    log_level: &str,
     json_log: bool,
 ) -> std::io::Result<()> {
     if std::env::var("MIRRORD_CONSOLE_ADDR").is_ok() {
@@ -81,9 +81,7 @@ fn init_proxy_tracing_registry(
         .append(true)
         .open(log_destination)?;
 
-    let env_filter = log_level
-        .map(|log_level| EnvFilter::builder().parse_lossy(log_level))
-        .unwrap_or_else(EnvFilter::from_default_env);
+    let env_filter = EnvFilter::builder().parse_lossy(log_level);
 
     let fmt_layer_base = tracing_subscriber::fmt::layer()
         .with_ansi(false)
@@ -106,22 +104,11 @@ fn init_proxy_tracing_registry(
 
 pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), InternalProxyError> {
     if crate::util::intproxy_container_mode().not() {
-        // When the intproxy does not run in a sidecar container, it logs to file.
-
-        let log_destination = config
-            .internal_proxy
-            .log_destination
-            .as_ref()
-            .map(Cow::Borrowed)
-            .unwrap_or_else(|| {
-                Cow::Owned(mirrord_config::default_proxy_logfile_path(
-                    "mirrord-intproxy",
-                ))
-            });
-
+        // When the intproxy does not run in a sidecar container, it logs to a file.
+        let log_destination = &config.internal_proxy.log_destination;
         init_proxy_tracing_registry(
-            log_destination.as_path(),
-            config.internal_proxy.log_level.as_deref(),
+            log_destination,
+            &config.internal_proxy.log_level,
             config.internal_proxy.json_log,
         )
         .map_err(|fail| {
@@ -131,12 +118,7 @@ pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), Intern
         // When the intproxy runs in a sidecar container, it logs directly to stderr.
         // The logs are then piped to the log file on the host.
 
-        let env_filter = config
-            .internal_proxy
-            .log_level
-            .as_ref()
-            .map(|log_level| EnvFilter::builder().parse_lossy(log_level))
-            .unwrap_or_else(EnvFilter::from_default_env);
+        let env_filter = EnvFilter::builder().parse_lossy(&config.internal_proxy.log_level);
 
         let fmt_layer_base = tracing_subscriber::fmt::layer()
             .with_ansi(false)
@@ -159,20 +141,10 @@ pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), Intern
 }
 
 pub fn init_extproxy_tracing_registry(config: &LayerConfig) -> Result<(), ExternalProxyError> {
-    let log_destination = config
-        .external_proxy
-        .log_destination
-        .as_ref()
-        .map(Cow::Borrowed)
-        .unwrap_or_else(|| {
-            Cow::Owned(mirrord_config::default_proxy_logfile_path(
-                "mirrord-extproxy",
-            ))
-        });
-
+    let log_destination = &config.external_proxy.log_destination;
     init_proxy_tracing_registry(
-        log_destination.as_path(),
-        config.external_proxy.log_level.as_deref(),
+        log_destination,
+        &config.external_proxy.log_level,
         config.external_proxy.json_log,
     )
     .map_err(|fail| {
@@ -187,21 +159,11 @@ pub async fn pipe_intproxy_sidecar_logs<'s, S>(
 where
     S: Stream<Item = std::io::Result<String>> + 's,
 {
-    let log_destination = config
-        .internal_proxy
-        .log_destination
-        .as_ref()
-        .map(Cow::Borrowed)
-        .unwrap_or_else(|| {
-            Cow::Owned(mirrord_config::default_proxy_logfile_path(
-                "mirrord-intproxy",
-            ))
-        });
-
+    let log_destination = &config.internal_proxy.log_destination;
     let mut output_file = tokio::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(log_destination.as_path())
+        .open(log_destination)
         .await
         .map_err(|fail| {
             InternalProxyError::OpenLogFile(log_destination.to_string_lossy().to_string(), fail)
