@@ -1,15 +1,7 @@
-//! Implementation of `proxy <-> agent` connection through [`mpsc`] channels created in different
-//! mirrord crates.
+//! Implementation of `proxy <-> agent` connection through [`mpsc`](tokio::sync::mpsc) channels
+//! created in different mirrord crates.
 
-use std::{
-    fmt,
-    fs::File,
-    io::{self, BufReader},
-    net::{IpAddr, SocketAddr},
-    ops::ControlFlow,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{fmt, io, net::SocketAddr, ops::ControlFlow, path::PathBuf};
 
 use mirrord_analytics::{NullReporter, Reporter};
 use mirrord_config::LayerConfig;
@@ -21,18 +13,15 @@ use mirrord_operator::client::{error::OperatorApiError, OperatorApi, OperatorSes
 use mirrord_protocol::{ClientMessage, DaemonMessage};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+pub use tls::ConnectionTlsError;
 use tokio::{
     net::{TcpSocket, TcpStream},
-    sync::{
-        mpsc,
-        mpsc::{Receiver, Sender},
-    },
+    sync::mpsc::{Receiver, Sender},
 };
 use tokio_retry::{
     strategy::{jitter, ExponentialBackoff},
     Retry,
 };
-use tokio_rustls::TlsConnector;
 use tracing::Level;
 
 use crate::{
@@ -41,60 +30,33 @@ use crate::{
 };
 
 mod portforward;
+mod tls;
 
 /// Errors that can occur when the internal proxy tries to establish a connection with the agent.
 #[derive(Error, Debug)]
 pub enum AgentConnectionError {
     /// IO failed.
-    #[error("{0}")]
+    #[error(transparent)]
     Io(#[from] io::Error),
     /// mirrord operator API failed.
-    #[error("{0}")]
+    #[error(transparent)]
     Operator(#[from] OperatorApiError),
     /// mirrord kube API failed.
-    #[error("{0}")]
+    #[error(transparent)]
     Kube(#[from] KubeApiError),
-
-    #[error("{0}")]
+    /// Making a TLS connection to the mirrord-extproxy failed.
+    #[error("failed to prepare TLS communication with mirrord-extproxy: {0}")]
     Tls(#[from] ConnectionTlsError),
-
-    /// The proxy failed to find a connection method in the provided [LayerConfig].
-    #[error("invalid configuration, could not find method for connection")]
-    NoConnectionMethod,
-}
-
-#[derive(Error, Debug)]
-pub enum ConnectionTlsError {
-    #[error("could not open pem data from {0}, error: {1}")]
-    MissingPem(PathBuf, io::Error),
-
-    #[error("could not parse pem data from {0}, error: {1}")]
-    ParsingPem(PathBuf, io::Error),
-
-    #[error("could not find a private_key after successfuly parsing {0}")]
-    MissingPrivateKey(PathBuf),
-
-    #[error("could not setup rustls::ClientConfig with provided certificate values: {0}")]
-    ClientConfig(rustls::Error),
-
-    #[error("could not setup rustls::WebPkiClientVerifier with provided certificate values: {0}")]
-    ClientVerifier(rustls::client::VerifierBuilderError),
-
-    #[error("could not setup rustls::ServerConfig with provided certificate values: {0}")]
-    ServerConfig(rustls::Error),
-
-    #[error("got invalid proxy addr for tls connection: {0}")]
-    InvalidDnsName(IpAddr, rustls::pki_types::InvalidDnsNameError),
-
-    #[error("could not create connection with tls: {0}")]
-    Connection(io::Error),
 }
 
 /// Directive for the proxy on how to connect to the agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentConnectInfo {
     /// Connect to agent through `mirrord extproxy`.
-    ExternalProxy(SocketAddr),
+    ExternalProxy {
+        proxy_addr: SocketAddr,
+        tls_pem: Option<PathBuf>,
+    },
     /// Connect to the agent through the operator.
     Operator(OperatorSession),
     /// Connect directly to the agent by name and port using k8s port forward.
@@ -129,7 +91,8 @@ impl fmt::Debug for ReconnectFlow {
 /// The raw IO is managed in a separate [`tokio::task`] created in a different mirrord crate.
 /// This differs from the [`LayerConnection`](crate::layer_conn::LayerConnection) implementation,
 /// but this logic was already implemented elsewhere. This struct simply wraps the
-/// [`mpsc`] channels returned from other functions and implements the [`BackgroundTask`] trait.
+/// [`mpsc`](tokio::sync::mpsc) channels returned from other functions and implements the
+/// [`BackgroundTask`] trait.
 pub struct AgentConnection {
     pub agent_tx: Sender<ClientMessage>,
     pub agent_rx: Receiver<DaemonMessage>,
@@ -142,11 +105,11 @@ impl AgentConnection {
     #[tracing::instrument(level = Level::INFO, skip(config, analytics), ret, err)]
     pub async fn new<R: Reporter>(
         config: &LayerConfig,
-        connect_info: Option<AgentConnectInfo>,
+        connect_info: AgentConnectInfo,
         analytics: &mut R,
     ) -> Result<Self, AgentConnectionError> {
         let (agent_tx, agent_rx, reconnect) = match connect_info {
-            Some(AgentConnectInfo::Operator(session)) => {
+            AgentConnectInfo::Operator(session) => {
                 let connection =
                     OperatorApi::connect_in_existing_session(config, session.clone(), analytics)
                         .await?;
@@ -164,50 +127,26 @@ impl AgentConnection {
                 )
             }
 
-            Some(AgentConnectInfo::ExternalProxy(proxy_addr)) => {
+            AgentConnectInfo::ExternalProxy {
+                proxy_addr,
+                tls_pem,
+            } => {
                 let socket = TcpSocket::new_v4()?;
                 socket.set_keepalive(true)?;
                 socket.set_nodelay(true)?;
 
                 let stream = socket.connect(proxy_addr).await?;
 
-                let (tx, rx) = if config.external_proxy.tls_enable
-                    && let (
-                        Some(tls_certificate),
-                        Some(client_tls_certificate),
-                        Some(client_tls_key),
-                    ) = (
-                        config.external_proxy.tls_certificate.as_ref(),
-                        config.internal_proxy.client_tls_certificate.as_ref(),
-                        config.internal_proxy.client_tls_key.as_ref(),
-                    ) {
-                    wrap_connection_with_tls(
-                        stream,
-                        proxy_addr.ip(),
-                        tls_certificate,
-                        client_tls_certificate,
-                        client_tls_key,
-                    )
-                    .await?
-                } else {
-                    wrap_raw_connection(stream)
+                let (tx, rx) = match tls_pem {
+                    Some(tls_pem) => tls::wrap_raw_connection(stream, tls_pem.as_path()).await?,
+                    None => wrap_raw_connection(stream),
                 };
 
                 (tx, rx, ReconnectFlow::default())
             }
 
-            Some(AgentConnectInfo::DirectKubernetes(connect_info)) => {
+            AgentConnectInfo::DirectKubernetes(connect_info) => {
                 let (tx, rx) = portforward::create_connection(config, connect_info.clone()).await?;
-                (tx, rx, ReconnectFlow::default())
-            }
-
-            None => {
-                let address = config
-                    .connect_tcp
-                    .as_ref()
-                    .ok_or(AgentConnectionError::NoConnectionMethod)?;
-                let stream = TcpStream::connect(address).await?;
-                let (tx, rx) = wrap_raw_connection(stream);
                 (tx, rx, ReconnectFlow::default())
             }
         };
@@ -306,7 +245,7 @@ impl RestartableBackgroundTask for AgentConnection {
                 let connection = Retry::spawn(retry_strategy, || async move {
                     AgentConnection::new(
                         config,
-                        connect_info.clone().into(),
+                        connect_info.clone(),
                         &mut NullReporter::default(),
                     )
                     .await
@@ -334,55 +273,4 @@ impl RestartableBackgroundTask for AgentConnection {
             }
         }
     }
-}
-
-pub async fn wrap_connection_with_tls(
-    stream: TcpStream,
-    proxy_addr: IpAddr,
-    tls_certificate: &Path,
-    client_tls_certificate: &Path,
-    client_tls_key: &Path,
-) -> Result<(mpsc::Sender<ClientMessage>, mpsc::Receiver<DaemonMessage>), ConnectionTlsError> {
-    let mut root_cert_store = rustls::RootCertStore::empty();
-
-    root_cert_store.add_parsable_certificates(
-        rustls_pemfile::certs(&mut BufReader::new(File::open(tls_certificate).map_err(
-            |error| ConnectionTlsError::MissingPem(tls_certificate.to_path_buf(), error),
-        )?))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| ConnectionTlsError::ParsingPem(tls_certificate.to_path_buf(), error))?,
-    );
-
-    let client_tls_certificate = rustls_pemfile::certs(&mut BufReader::new(
-        File::open(client_tls_certificate).map_err(|error| {
-            ConnectionTlsError::MissingPem(client_tls_certificate.to_path_buf(), error)
-        })?,
-    ))
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|error| ConnectionTlsError::ParsingPem(client_tls_certificate.to_path_buf(), error))?;
-
-    let client_tls_keys = rustls_pemfile::private_key(&mut BufReader::new(
-        File::open(client_tls_key)
-            .map_err(|error| ConnectionTlsError::MissingPem(client_tls_key.to_path_buf(), error))?,
-    ))
-    .map_err(|error| ConnectionTlsError::ParsingPem(client_tls_key.to_path_buf(), error))?
-    .ok_or_else(|| ConnectionTlsError::MissingPrivateKey(client_tls_key.to_path_buf()))?;
-
-    let tls_config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_cert_store)
-        .with_client_auth_cert(client_tls_certificate, client_tls_keys)
-        .map_err(ConnectionTlsError::ClientConfig)?;
-
-    let connector = TlsConnector::from(Arc::new(tls_config));
-
-    let domain = rustls::pki_types::ServerName::try_from(proxy_addr.to_string())
-        .map_err(|error| ConnectionTlsError::InvalidDnsName(proxy_addr, error))?
-        .to_owned();
-
-    Ok(wrap_raw_connection(
-        connector
-            .connect(domain, stream)
-            .await
-            .map_err(ConnectionTlsError::Connection)?,
-    ))
 }

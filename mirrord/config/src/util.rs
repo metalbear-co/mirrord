@@ -3,7 +3,10 @@ use std::{collections::HashSet, fmt, hash::Hash, marker::PhantomData, ops::Deref
 use schemars::JsonSchema;
 use serde::{de, Deserialize, Deserializer, Serialize};
 
-use crate::config::{ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result};
+use crate::{
+    config::{ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result},
+    LayerConfig,
+};
 
 pub trait MirrordToggleableConfig: MirrordConfig + Default {
     fn enabled_config(context: &mut ConfigContext) -> Result<Self::Generated, ConfigError> {
@@ -250,59 +253,17 @@ where
     deserializer.deserialize_any(StringOrStruct(PhantomData))
 }
 
-#[cfg(test)]
-pub mod testing {
-    use std::{
-        env,
-        env::VarError,
-        panic,
-        panic::{RefUnwindSafe, UnwindSafe},
-        sync::{LazyLock, Mutex},
-    };
+/// Convenience function to be used in mirrord-intproxy, mirrord-extproxy and mirrord-layer.
+///
+/// Reads the resolved [`LayerConfig`] from the [`LayerConfig::RESOLVED_CONFIG_ENV`]
+/// environment variable.
+pub fn read_resolved_config() -> Result<LayerConfig, ConfigError> {
+    let encoded = std::env::var(LayerConfig::RESOLVED_CONFIG_ENV).map_err(|error| {
+        ConfigError::DecodeError(format!(
+            "failed to access the {} variable: {error}",
+            LayerConfig::RESOLVED_CONFIG_ENV
+        ))
+    })?;
 
-    static SERIAL_TEST: LazyLock<Mutex<()>> = LazyLock::new(Default::default);
-
-    /// <!--${internal}-->
-    /// Sets environment variables to the given value for the duration of the closure.
-    /// Restores the previous values when the closure completes or panics, before unwinding the
-    /// panic.
-    pub fn with_env_vars<F>(kvs: Vec<(&str, Option<&str>)>, closure: F)
-    where
-        F: Fn() + UnwindSafe + RefUnwindSafe,
-    {
-        let guard = SERIAL_TEST.lock().unwrap();
-        let mut old_kvs: Vec<(&str, Result<String, VarError>)> = Vec::new();
-        for (k, v) in kvs {
-            let old_v = env::var(k);
-            old_kvs.push((k, old_v));
-            match v {
-                None => env::remove_var(k),
-                Some(v) => env::set_var(k, v),
-            }
-        }
-
-        let result = panic::catch_unwind(closure);
-        match result {
-            Ok(_) => {
-                for (k, v) in old_kvs {
-                    reset_env(k, v);
-                }
-            }
-            Err(err) => {
-                for (k, v) in old_kvs {
-                    reset_env(k, v);
-                }
-                drop(guard);
-                panic::resume_unwind(err);
-            }
-        };
-    }
-
-    fn reset_env(k: &str, old: Result<String, VarError>) {
-        if let Ok(v) = old {
-            env::set_var(k, v);
-        } else {
-            env::remove_var(k);
-        }
-    }
+    LayerConfig::decode(&encoded)
 }

@@ -1,4 +1,4 @@
-use std::{ffi::NulError, net::SocketAddr, num::ParseIntError, path::PathBuf, str::FromStr};
+use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
 
 use kube::core::ErrorResponse;
 use miette::Diagnostic;
@@ -7,11 +7,15 @@ use mirrord_console::error::ConsoleError;
 use mirrord_intproxy::{agent_conn::ConnectionTlsError, error::IntProxyError};
 use mirrord_kube::error::KubeApiError;
 use mirrord_operator::client::error::{HttpError, OperatorApiError, OperatorOperation};
+use mirrord_tls_util::SecureChannelError;
 use mirrord_vpn::error::VpnError;
 use reqwest::StatusCode;
 use thiserror::Error;
 
-use crate::port_forward::PortForwardError;
+use crate::{
+    container::{CommandDisplay, IntproxySidecarError},
+    port_forward::PortForwardError,
+};
 
 pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;
 
@@ -40,51 +44,30 @@ const GENERAL_BUG: &str = r#"This is a bug. Please report it in our Discord or G
 /// Errors that can occur when executing the `mirrord container` command.
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum ContainerError {
-    #[error("Could not serialize config to pass into container: {0}")]
+    #[error("Failed to prepare TLS setup for mirrord proxies: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
-    ConfigSerialization(serde_json::Error),
+    ProxyTlsSetup(#[from] SecureChannelError),
 
-    #[error("Could not write serialized config file: {0}")]
+    #[error("Failed to start mirrord internal proxy sidecar container: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
-    ConfigWrite(std::io::Error),
+    IntproxySidecar(#[from] IntproxySidecarError),
 
-    #[error("Could not create a self sigend certificate for proxy: {0}")]
-    #[diagnostic(help("{GENERAL_BUG}"))]
-    SelfSignedCertificate(rcgen::Error),
-
-    #[error("Could not write self sigend certificate for proxy: {0}")]
-    #[diagnostic(help("{GENERAL_BUG}"))]
-    WriteSelfSignedCertificate(std::io::Error),
-
-    #[error("Failed to execute command: {0}")]
-    #[diagnostic(help("{GENERAL_BUG}"))]
-    UnableToExecuteCommand(std::io::Error),
-
-    #[error("Failed read command stdout: {0}")]
-    #[diagnostic(help("{GENERAL_BUG}"))]
-    UnableReadCommandStdout(String, std::io::Error),
-
-    #[error("Failed read command stderr: {0}")]
-    #[diagnostic(help("{GENERAL_BUG}"))]
-    UnableReadCommandStderr(String, std::io::Error),
-
-    #[error("Command failed to execute command [{0}]: {1}")]
-    #[diagnostic(help("{GENERAL_BUG}"))]
-    UnsuccesfulCommandExecute(String, String),
-
-    #[error("Command output indicates an error [{0}]: {1}")]
-    #[diagnostic(help("{GENERAL_BUG}"))]
-    UnsuccesfulCommandOutput(String, String),
-
-    #[error("Failed get running proxy socket addr: {0}")]
-    #[diagnostic(help("{GENERAL_BUG}"))]
-    UnableParseProxySocketAddr(<SocketAddr as FromStr>::Err),
+    #[error("Failed to execute command [{command}]: {error}")]
+    CommandExec {
+        #[source]
+        error: io::Error,
+        command: CommandDisplay,
+    },
 }
 
 /// Errors that can occur when executing the `mirrord extproxy` command.
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum ExternalProxyError {
-    #[error("Failed to deserialize connect info `{0}`: {1}")]
+    #[error("Missing connect info environment variable")]
+    #[diagnostic(help("{GENERAL_BUG}"))]
+    MissingConnectInfo,
+
+    #[error("Failed to deserialize connect info: {1}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     DeseralizeConnectInfo(String, serde_json::Error),
 
@@ -104,15 +87,9 @@ pub(crate) enum ExternalProxyError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     SetSid(nix::Error),
 
-    #[error(transparent)]
+    #[error("Failed to prepare mirrord-extproxy TLS acceptor: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
-    Tls(#[from] ConnectionTlsError),
-
-    #[error(
-        "there was no tls information provided, see `external_proxy` keys in config if specified"
-    )]
-    #[diagnostic(help("{GENERAL_BUG}"))]
-    MissingTlsInfo,
+    Tls(#[from] SecureChannelError),
 
     #[error("External proxy ping pong with the agent failed: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
@@ -141,6 +118,9 @@ pub(crate) enum InternalProxyError {
     #[error("Failed to open log file at `{0}`: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OpenLogFile(String, std::io::Error),
+
+    #[error("Missing connect info environment variable")]
+    MissingConnectInfo,
 
     #[error("Failed to deserialize connect info `{0}`: {1}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
@@ -243,10 +223,6 @@ pub(crate) enum CliError {
     #[error("Failed to verify mirrord config: {0}")]
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
     ConfigError(#[from] mirrord_config::config::ConfigError),
-
-    #[error("Failed to get canonical path to mirrord config at `{0}`: {1}")]
-    #[diagnostic(help("Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"))]
-    CanonicalizeConfigPathFailed(PathBuf, std::io::Error),
 
     #[error("Failed to access env file at `{0}`: {1}")]
     #[diagnostic(help("Please check that the path is correct and that you have permissions to read it.{GENERAL_HELP}"))]
@@ -379,9 +355,6 @@ pub(crate) enum CliError {
     #[error("Failed to make secondary agent connection: {0}")]
     #[diagnostic(help("Please check that Kubernetes is configured correctly and test your connection with `kubectl get pods`.{GENERAL_HELP}"))]
     PortForwardingSetupError(KubeApiError),
-
-    #[error("Failed to make secondary agent connection: invalid configuration, could not find method for connection")]
-    PortForwardingNoConnectionMethod,
 
     #[error("Failed to make secondary agent connection (TLS): {0}")]
     AgentConnTlsError(#[from] ConnectionTlsError),

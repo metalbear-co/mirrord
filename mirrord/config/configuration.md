@@ -429,16 +429,6 @@ Can be useful for collecting logs.
 
 Defaults to `1`.
 
-## connect_tcp {#root-connect_tcp}
-
-IP:PORT to connect to instead of using k8s api, for testing purposes.
-
-```json
-{
-  "connect_tcp": "10.10.0.100:7777"
-}
-```
-
 ## container {#root-container}
 
 Unstable: `mirrord container` command specific config.
@@ -575,14 +565,21 @@ and don't connect to the proxy.
 Whether the proxy should output logs in JSON format. If false, logs are output in
 human-readable format.
 
+Defaults to true.
+
 ### external_proxy.log_destination {#external_proxy-log_destination}
+
 Set the log file destination for the external proxy.
 
-### external_proxy.log_level {#external_proxy-log_level}
-Sets the log level for the external proxy.
+Defaults to a randomized path inside the temporary directory.
 
-Follows the `RUST_LOG` convention (i.e `mirrord=trace`), and will only be used if
-`external_proxy.log_destination` is set
+### external_proxy.log_level {#external_proxy-log_level}
+
+Set the log level for the external proxy.
+
+The value should follow the RUST_LOG convention (i.e `mirrord=trace`).
+
+Defaults to `mirrord=info,warn`.
 
 ### external_proxy.start_idle_timeout {#external_proxy-start_idle_timeout}
 
@@ -1600,15 +1597,21 @@ and don't connect to the proxy.
 Whether the proxy should output logs in JSON format. If false, logs are output in
 human-readable format.
 
+Defaults to true.
+
 ### internal_proxy.log_destination {#internal_proxy-log_destination}
 
 Set the log file destination for the internal proxy.
 
+Defaults to a randomized path inside the temporary directory.
+
 ### internal_proxy.log_level {#internal_proxy-log_level}
 
 Set the log level for the internal proxy.
-RUST_LOG convention (i.e `mirrord=trace`) will only be used if `log_destination`
-is set.
+
+The value should follow the RUST_LOG convention (i.e `mirrord=trace`).
+
+Defaults to `mirrord=info,warn`.
 
 ### internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}
 

@@ -94,10 +94,9 @@ async fn outgoing_tcp_logic(with_config: Option<&str>, dylib_path: &Path, config
         config_path.push(config);
         config_path
     });
-    let config = config.as_ref().map(|path_buf| path_buf.to_str().unwrap());
 
     let (mut test_process, mut intproxy) = Application::RustOutgoingTcp
-        .start_process_with_layer(dylib_path, vec![], config)
+        .start_process_with_layer(dylib_path, vec![], config.as_deref())
         .await;
 
     let peers = RUST_OUTGOING_PEERS

@@ -6,8 +6,8 @@ use std::{
 
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, Reporter};
 use mirrord_config::{
-    config::ConfigError, feature::env::mapper::EnvVarsRemapper,
-    internal_proxy::MIRRORD_INTPROXY_CONNECT_TCP_ENV, LayerConfig, MIRRORD_RESOLVED_CONFIG_ENV,
+    config::ConfigError, external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM,
+    feature::env::mapper::EnvVarsRemapper, LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR,
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_operator::client::OperatorSession;
@@ -18,6 +18,7 @@ use mirrord_protocol::{
 };
 #[cfg(target_os = "macos")]
 use mirrord_sip::sip_patch;
+use mirrord_tls_util::SecureChannelSetup;
 use semver::Version;
 use serde::Serialize;
 use tokio::{
@@ -39,11 +40,8 @@ use crate::{
     CliResult,
 };
 
-/// Env variable mirrord-layer uses to connect to intproxy
-pub static MIRRORD_CONNECT_TCP_ENV: &str = "MIRRORD_CONNECT_TCP";
-
-/// Env variable for saving the exeution kind for analytics
-pub static MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
+/// Environment variable for saving the execution kind for analytics.
+pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
 
 /// Alias to "LD_PRELOAD" enviromnent variable used to mount mirrord-layer on linux targets and as
 /// part of the `mirrord container` command.
@@ -55,21 +53,20 @@ pub(crate) const INJECTION_ENV_VAR: &str = LINUX_INJECTION_ENV_VAR;
 #[cfg(target_os = "macos")]
 pub(crate) const INJECTION_ENV_VAR: &str = "DYLD_INSERT_LIBRARIES";
 
-/// Struct for holding the execution information.
-///
-/// 1. Environment to set in the user process,
-/// 2. Environment to unset in the user process,
-/// 3. Path to the patched binary to `exec` into (SIP, only on macOS).
+/// A handle to a running mirrord proxy (either internal proxy or external proxy).
 #[derive(Debug, Serialize)]
 pub(crate) struct MirrordExecution {
+    /// Variables to set in the user application environment.
     pub environment: HashMap<String, String>,
 
+    /// Proxy process.
     #[serde(skip)]
     child: Child,
 
     /// The path to the patched binary, if patched for SIP sidestepping.
     pub patched_path: Option<String>,
 
+    /// Variables to unset in the user application environment.
     pub env_to_unset: Vec<String>,
 
     /// Whether this run uses mirrord operator.
@@ -152,7 +149,7 @@ where
 }
 
 impl MirrordExecution {
-    /// Makes agent connection and starts the internal proxy child process.
+    /// Makes the agent connection and starts the internal proxy child process.
     ///
     /// # Internal proxy
     ///
@@ -175,9 +172,14 @@ impl MirrordExecution {
     ///
     /// tl;dr: In `exec_process`, you need to call and `await` either
     /// [`tokio::time::sleep`] or [`tokio::task::yield_now`] after calling this function.
-    #[tracing::instrument(level = Level::TRACE, skip_all)]
-    pub(crate) async fn start<P>(
-        config: &mut LayerConfig,
+    ///
+    /// # Returns
+    ///
+    /// Returned [`MirrordExecution::environment`] contains everything that the user application
+    /// might need, including [`INJECTION_ENV_VAR`] and [`LayerConfig::RESOLVED_CONFIG_ENV`].
+    #[tracing::instrument(level = Level::DEBUG, skip_all, ret, err(level = Level::DEBUG))]
+    pub(crate) async fn start_internal<P>(
+        config: &LayerConfig,
         // We only need the executable on macos, for SIP handling.
         #[cfg(target_os = "macos")] executable: Option<&str>,
         progress: &mut P,
@@ -212,7 +214,8 @@ impl MirrordExecution {
                 .unwrap_or(false)
             {
                 Err(ConfigError::Conflict(format!(
-                    "Cannot use 'any_of' or 'all_of' HTTP filter types, protocol version used by mirrord-agent must match {}. Consider using a newer version of mirrord-agent",
+                    "Cannot use 'any_of' or 'all_of' HTTP filter types, protocol version used by mirrord-agent must match {}. \
+                    Consider using a newer version of mirrord-agent",
                     *HTTP_COMPOSITE_FILTER_VERSION
                 )))?
             }
@@ -227,12 +230,21 @@ impl MirrordExecution {
         };
 
         #[cfg(target_os = "macos")]
-        env_vars.insert(
-            "MIRRORD_MACOS_ARM64_LIBRARY".to_string(),
-            extract_arm64(progress, true)?.to_string_lossy().into(),
-        );
+        {
+            env_vars.insert(
+                "MIRRORD_MACOS_ARM64_LIBRARY".to_string(),
+                extract_arm64(progress, true)?.to_string_lossy().into(),
+            );
 
-        let lib_path: String = lib_path.to_string_lossy().into();
+            // Fixes <https://github.com/metalbear-co/mirrord/issues/1745>
+            // by disabling the fork safety check in the Objective-C runtime.
+            env_vars.insert(
+                "OBJC_DISABLE_INITIALIZE_FORK_SAFETY".to_string(),
+                "YES".to_string(),
+            );
+        }
+
+        let lib_path = lib_path.to_string_lossy().into_owned();
         // Set LD_PRELOAD/DYLD_INSERT_LIBRARIES
         // If already exists, we append.
         if let Ok(v) = std::env::var(INJECTION_ENV_VAR) {
@@ -241,24 +253,21 @@ impl MirrordExecution {
             env_vars.insert(INJECTION_ENV_VAR.to_string(), lib_path)
         };
 
-        // stderr is inherited so we can see logs/errors.
+        let encoded_config = config.encode()?;
+
         let mut proxy_command =
             Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
-
-        // Set timeout when running from extension to be 30 seconds
-        // since it might need to compile, build until it runs the actual process
-        // and layer connects
         proxy_command
             .arg("intproxy")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .stdin(std::process::Stdio::null())
-            .kill_on_drop(true);
-
-        proxy_command.env(
-            AGENT_CONNECT_INFO_ENV_KEY,
-            serde_json::to_string(&connect_info)?,
-        );
+            .kill_on_drop(true)
+            .env(
+                AGENT_CONNECT_INFO_ENV_KEY,
+                serde_json::to_string(&connect_info)?,
+            )
+            .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
 
         let mut proxy_process = proxy_command.spawn().map_err(|e| {
             CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
@@ -288,17 +297,10 @@ impl MirrordExecution {
                 ))
             })?;
 
-        config.connect_tcp.replace(intproxy_address.to_string());
-        config.update_env_var()?;
-        let config_as_env = config.to_env_var()?;
-        env_vars.insert(MIRRORD_RESOLVED_CONFIG_ENV.to_string(), config_as_env);
-
-        // Fixes <https://github.com/metalbear-co/mirrord/issues/1745>
-        // by disabling the fork safety check in the Objective-C runtime.
-        #[cfg(target_os = "macos")]
+        env_vars.insert(LayerConfig::RESOLVED_CONFIG_ENV.into(), encoded_config);
         env_vars.insert(
-            "OBJC_DISABLE_INITIALIZE_FORK_SAFETY".to_string(),
-            "YES".to_string(),
+            MIRRORD_LAYER_INTPROXY_ADDR.into(),
+            intproxy_address.to_string(),
         );
 
         #[cfg(target_os = "macos")]
@@ -358,13 +360,23 @@ impl MirrordExecution {
         }
     }
 
-    /// Starts the external proxy (`extproxy`) so sidecar intproxy can connect via this to agent
+    /// Makes the agent connection and starts the external proxy child process.
+    ///
+    /// The external proxy will be used by the internal proxy to talk to the agent.
+    ///
+    /// # Returns
+    ///
+    /// Returns the proxy handle as well as the external proxy address.
+    /// The address should be accessible from the internal proxy sidecar.
+    ///
+    /// Returned [`MirrordExecution::environment`] contains *only* remote environment.
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     pub(crate) async fn start_external<P>(
         config: &LayerConfig,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
-    ) -> CliResult<Self>
+        tls: Option<&SecureChannelSetup>,
+    ) -> CliResult<(Self, SocketAddr)>
     where
         P: Progress + Send + Sync,
     {
@@ -376,7 +388,7 @@ impl MirrordExecution {
             .await
             .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
-        let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
+        let env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
         } else {
             Self::fetch_env_vars(config, &mut connection)
@@ -384,20 +396,24 @@ impl MirrordExecution {
                 .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
         };
 
-        // stderr is inherited so we can see logs/errors.
+        let encoded_config = config.encode()?;
+
         let mut proxy_command =
             Command::new(std::env::current_exe().map_err(CliError::CliPathError)?);
-
         proxy_command
             .arg("extproxy")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .stdin(std::process::Stdio::null());
+            .stdin(std::process::Stdio::null())
+            .env(
+                AGENT_CONNECT_INFO_ENV_KEY,
+                serde_json::to_string(&connect_info)?,
+            )
+            .env(LayerConfig::RESOLVED_CONFIG_ENV, &encoded_config);
 
-        proxy_command.env(
-            AGENT_CONNECT_INFO_ENV_KEY,
-            serde_json::to_string(&connect_info)?,
-        );
+        if let Some(tls) = tls {
+            proxy_command.env(MIRRORD_EXTPROXY_TLS_SETUP_PEM, tls.server_pem());
+        }
 
         let mut proxy_process = proxy_command.spawn().map_err(|e| {
             CliError::InternalProxySpawnError(format!("failed to spawn child process: {e}"))
@@ -408,7 +424,7 @@ impl MirrordExecution {
 
         let stdout = proxy_process.stdout.take().expect("stdout was piped");
 
-        let address: SocketAddr = BufReader::new(stdout)
+        let proxy_addr: SocketAddr = BufReader::new(stdout)
             .lines()
             .next_line()
             .await
@@ -427,17 +443,7 @@ impl MirrordExecution {
                 ))
             })?;
 
-        // Provide details for layer to connect to agent via internal proxy
-        env_vars.insert(
-            MIRRORD_INTPROXY_CONNECT_TCP_ENV.to_string(),
-            address.to_string(),
-        );
-        env_vars.insert(
-            AGENT_CONNECT_INFO_ENV_KEY.to_string(),
-            serde_json::to_string(&AgentConnectInfo::ExternalProxy(address))?,
-        );
-
-        Ok(Self {
+        let execution = Self {
             environment: env_vars,
             child: proxy_process,
             patched_path: None,
@@ -449,7 +455,9 @@ impl MirrordExecution {
                 .map(|unset| unset.to_vec())
                 .unwrap_or_default(),
             uses_operator: matches!(connect_info, AgentConnectInfo::Operator(..)),
-        })
+        };
+
+        Ok((execution, proxy_addr))
     }
 
     /// Construct filter and retrieve remote environment from the connected agent using

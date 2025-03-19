@@ -6,9 +6,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::source::MirrordConfigSource;
 
-pub const MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV: &str = "MIRRORD_EXTERNAL_TLS_CERTIFICATE";
-pub const MIRRORD_EXTERNAL_TLS_KEY_ENV: &str = "MIRRORD_EXTERNAL_TLS_KEY";
-pub const MIRRORD_EXTPROXY_LOG_DESTINATION_ENV: &str = "MIRRORD_EXTPROXY_LOG_DESTINATION";
+/// Environment variable we use to pass the TLS PEM file path to the external proxy.
+pub const MIRRORD_EXTPROXY_TLS_SETUP_PEM: &str = "MIRRORD_EXTPROXY_TLS_PEM";
+
+/// [`ServerName`](rustls::pki_types::ServerName) for the external proxy server certificate.
+pub const MIRRORD_EXTPROXY_TLS_SERVER_NAME: &str = "extproxy";
 
 /// Configuration for the external proxy mirrord spawns when using the `mirrord container` command.
 /// This proxy is used to allow the internal proxy running in sidecar to connect to the mirrord
@@ -30,23 +32,10 @@ pub const MIRRORD_EXTPROXY_LOG_DESTINATION_ENV: &str = "MIRRORD_EXTPROXY_LOG_DES
 pub struct ExternalProxyConfig {
     /// <!--${internal}-->
     ///
-    /// Whether to use TLS or a plain TCP connection.
+    /// Whether to use TLS or a plain TCP when accepting a connection from the internal proxy
+    /// sidecar.
     #[config(default = true)]
     pub tls_enable: bool,
-
-    /// <!--${internal}-->
-    ///
-    /// Certificate path to be used for wrapping external proxy tcp listener with a tcp acceptor
-    /// (self-signed one will be generated automaticaly if not specified)
-    #[config(env = MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV)]
-    pub tls_certificate: Option<PathBuf>,
-
-    /// <!--${internal}-->
-    ///
-    /// Private Key path to be used for wrapping external proxy tcp listener with a tcp acceptor
-    /// (self-signed one will be generated automaticaly if not specified)
-    #[config(env = MIRRORD_EXTERNAL_TLS_KEY_ENV)]
-    pub tls_key: Option<PathBuf>,
 
     /// ### external_proxy.start_idle_timeout {#external_proxy-start_idle_timeout}
     ///
@@ -83,20 +72,29 @@ pub struct ExternalProxyConfig {
     pub idle_timeout: u64,
 
     /// ### external_proxy.log_level {#external_proxy-log_level}
-    /// Sets the log level for the external proxy.
     ///
-    /// Follows the `RUST_LOG` convention (i.e `mirrord=trace`), and will only be used if
-    /// `external_proxy.log_destination` is set
-    pub log_level: Option<String>,
+    /// Set the log level for the external proxy.
+    ///
+    /// The value should follow the RUST_LOG convention (i.e `mirrord=trace`).
+    ///
+    /// Defaults to `mirrord=info,warn`.
+    #[config(default = "mirrord=info,warn")]
+    pub log_level: String,
 
     /// ### external_proxy.log_destination {#external_proxy-log_destination}
+    ///
     /// Set the log file destination for the external proxy.
-    pub log_destination: Option<PathBuf>,
+    ///
+    /// Defaults to a randomized path inside the temporary directory.
+    #[config(default = crate::default_proxy_logfile_path("mirrord-extproxy"))]
+    pub log_destination: PathBuf,
 
     /// ### external_proxy.json_log {#external_proxy-json_log}
     ///
     /// Whether the proxy should output logs in JSON format. If false, logs are output in
     /// human-readable format.
+    ///
+    /// Defaults to true.
     #[config(default = true)]
     pub json_log: bool,
 }

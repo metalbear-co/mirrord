@@ -11,7 +11,7 @@ pub use common::*;
 /// 1. A port is bound successfully both times (the app does not panic).
 /// 2. No warning is displayed.
 ///
-/// Both of those things used to happen and, and this test verifies there is no regression to that.
+/// Both of those things used to happen, and this test verifies there is no regression to that.
 #[rstest]
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
@@ -24,7 +24,7 @@ async fn rebind0(dylib_path: &Path, config_dir: &Path) {
 
     let application = Application::RustRebind0;
     let (mut test_process, _intproxy) = application
-        .start_process_with_layer(dylib_path, vec![], Some(config_path.to_str().unwrap()))
+        .start_process_with_layer(dylib_path, vec![], Some(&config_path))
         .await;
 
     // Before https://github.com/metalbear-co/mirrord/pull/2811, this would panic.

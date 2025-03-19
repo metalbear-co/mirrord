@@ -35,7 +35,7 @@ impl SessionCommandHandler {
     pub(super) async fn new(command: SessionCommand) -> CliResult<Self> {
         let mut progress = ProgressTracker::from_env("Operator session action");
 
-        let config = LayerConfig::from_env().inspect_err(|error| {
+        let config = LayerConfig::resolve(&mut Default::default()).inspect_err(|error| {
             progress.failure(Some(&format!("failed to read config from env: {error}")));
         })?;
 

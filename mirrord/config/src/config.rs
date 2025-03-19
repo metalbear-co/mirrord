@@ -1,3 +1,4 @@
+pub mod context;
 pub mod deprecated;
 pub mod from_env;
 pub mod source;
@@ -5,6 +6,7 @@ pub mod unstable;
 
 use std::error::Error;
 
+pub use context::ConfigContext;
 use thiserror::Error;
 
 use crate::feature::split_queues::QueueSplittingVerificationError;
@@ -87,11 +89,11 @@ pub enum ConfigError {
         fail: Box<fancy_regex::Error>,
     },
 
-    #[error("mirrord-config: decoding resolved config from env var failed with `{0}`")]
-    EnvVarDecodeError(String),
+    #[error("Decoding resolved config failed: {0}")]
+    DecodeError(String),
 
-    #[error("mirrord-config: encoding resolved config failed with `{0}`")]
-    EnvVarEncodeError(String),
+    #[error("Encoding resolved config failed: {0}")]
+    EncodeError(String),
 }
 
 impl From<tera::Error> for ConfigError {
@@ -109,37 +111,6 @@ impl From<tera::Error> for ConfigError {
 }
 
 pub type Result<T, E = ConfigError> = std::result::Result<T, E>;
-
-/// Struct used for storing context during building of configuration.
-#[derive(Default)]
-pub struct ConfigContext {
-    /// Are we in an IDE context?
-    ///
-    /// Used by `Config::verify` to change some errors into warnings.
-    pub ide: bool,
-
-    /// The warnings when a config value conflicts with another, but mirrord can keep going.
-    ///
-    /// Some _target_ related errors become warning when `ide == true`.
-    warnings: Vec<String>,
-}
-
-impl ConfigContext {
-    pub fn new(ide: bool) -> Self {
-        Self {
-            ide,
-            ..Default::default()
-        }
-    }
-
-    pub fn add_warning(&mut self, warning: String) {
-        self.warnings.push(warning);
-    }
-
-    pub fn get_warnings(&self) -> &Vec<String> {
-        &self.warnings
-    }
-}
 
 /// <!--${internal}-->
 /// Main configuration creation trait of mirrord-config

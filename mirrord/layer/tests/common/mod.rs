@@ -4,6 +4,7 @@ use std::{
     fmt::Debug,
     fs::File,
     io,
+    net::SocketAddr,
     path::{Path, PathBuf},
     process::Stdio,
     str::FromStr,
@@ -13,6 +14,7 @@ use std::{
 
 use actix_codec::Framed;
 use futures::{SinkExt, StreamExt};
+use mirrord_config::{config::ConfigContext, LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR};
 use mirrord_intproxy::{agent_conn::AgentConnection, IntProxy};
 use mirrord_protocol::{
     file::{
@@ -1260,7 +1262,7 @@ impl Application {
     }
 
     /// Start the test process with the given env.
-    pub async fn get_test_process(&self, env: HashMap<&str, &str>) -> TestProcess {
+    pub async fn get_test_process(&self, env: HashMap<String, String>) -> TestProcess {
         let executable = self.get_executable().await;
         #[cfg(target_os = "macos")]
         let executable = sip_patch(&executable, &Vec::new())
@@ -1277,16 +1279,11 @@ impl Application {
         &self,
         dylib_path: &Path,
         extra_env_vars: Vec<(&str, &str)>,
-        configuration_file: Option<&str>,
+        configuration_file: Option<&Path>,
     ) -> (TestProcess, TestIntProxy) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap().to_string();
-        let env = get_env(
-            dylib_path.to_str().unwrap(),
-            &address,
-            extra_env_vars,
-            configuration_file,
-        );
+        let address = listener.local_addr().unwrap();
+        let env = get_env(dylib_path, address, extra_env_vars, configuration_file);
         let test_process = self.get_test_process(env).await;
 
         (test_process, TestIntProxy::new(listener).await)
@@ -1297,16 +1294,11 @@ impl Application {
         &self,
         dylib_path: &Path,
         extra_env_vars: Vec<(&str, &str)>,
-        configuration_file: Option<&str>,
+        configuration_file: Option<&Path>,
     ) -> (TestProcess, TestIntProxy) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap().to_string();
-        let env = get_env(
-            dylib_path.to_str().unwrap(),
-            &address,
-            extra_env_vars,
-            configuration_file,
-        );
+        let address = listener.local_addr().unwrap();
+        let env = get_env(dylib_path, address, extra_env_vars, configuration_file);
         let test_process = self.get_test_process(env).await;
 
         (
@@ -1349,37 +1341,55 @@ pub fn config_dir() -> PathBuf {
     config_path
 }
 
-pub fn get_env<'a>(
-    dylib_path_str: &'a str,
-    addr: &'a str,
-    extra_vars: Vec<(&'a str, &'a str)>,
-    config: Option<&'a str>,
-) -> HashMap<&'a str, &'a str> {
-    let mut env = HashMap::new();
-    env.insert("RUST_LOG", "warn,mirrord=debug");
-    env.insert("MIRRORD_IMPERSONATED_TARGET", "pod/mock-target"); // Just pass some value.
-    env.insert("MIRRORD_CONNECT_TCP", addr);
-    env.insert("MIRRORD_REMOTE_DNS", "false");
-    if let Some(config) = config {
-        println!("using config file: {config}");
-        env.insert("MIRRORD_CONFIG_FILE", config);
-    }
-    env.insert("DYLD_INSERT_LIBRARIES", dylib_path_str);
-    env.insert("LD_PRELOAD", dylib_path_str);
-    for (key, value) in extra_vars {
-        env.insert(key, value);
-    }
-    env
-}
+/// Environment for the user application.
+///
+/// The environment includes:
+/// 1. `RUST_LOG=warn,mirrord=trace`
+/// 2. [`MIRRORD_LAYER_INTPROXY_ADDR`]
+/// 3. Layer injection variable
+/// 4. [`LayerConfig::RESOLVED_CONFIG_ENV`]
+/// 6. Given `extra_vars`
+///
+/// `extra_vars` are also added to the [`ConfigContext`] for [`LayerConfig::resolve`].
+pub fn get_env(
+    dylib_path: &Path,
+    intproxy_addr: SocketAddr,
+    extra_vars: Vec<(&str, &str)>,
+    config_path: Option<&Path>,
+) -> HashMap<String, String> {
+    let extra_vars_owned = extra_vars
+        .iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect::<Vec<_>>();
 
-pub fn get_env_no_fs<'a>(dylib_path_str: &'a str, addr: &'a str) -> HashMap<&'a str, &'a str> {
-    let mut env = HashMap::new();
-    env.insert("RUST_LOG", "warn,mirrord=debug");
-    env.insert("MIRRORD_IMPERSONATED_TARGET", "pod/mock-target"); // Just pass some value.
-    env.insert("MIRRORD_CONNECT_TCP", addr);
-    env.insert("MIRRORD_REMOTE_DNS", "false");
-    env.insert("MIRRORD_FILE_MODE", "local");
-    env.insert("DYLD_INSERT_LIBRARIES", dylib_path_str);
-    env.insert("LD_PRELOAD", dylib_path_str);
-    env
+    let mut cfg_context = ConfigContext::default()
+        .override_env("MIRRORD_IMPERSONATED_TARGET", "pod/mock-target")
+        .override_env("MIRRORD_REMOTE_DNS", "false")
+        .override_envs(extra_vars)
+        .override_env_opt(LayerConfig::FILE_PATH_ENV, config_path)
+        .strict_env(true);
+    let config = LayerConfig::resolve(&mut cfg_context).unwrap();
+
+    [
+        ("RUST_LOG".to_string(), "warn,mirrord=debug".to_string()),
+        (
+            MIRRORD_LAYER_INTPROXY_ADDR.to_string(),
+            intproxy_addr.to_string(),
+        ),
+        (
+            "DYLD_INSERT_LIBRARIES".to_string(),
+            dylib_path.to_str().unwrap().to_string(),
+        ),
+        (
+            "LD_PRELOAD".to_string(),
+            dylib_path.to_str().unwrap().to_string(),
+        ),
+        (
+            LayerConfig::RESOLVED_CONFIG_ENV.to_string(),
+            config.encode().unwrap(),
+        ),
+    ]
+    .into_iter()
+    .chain(extra_vars_owned)
+    .collect()
 }

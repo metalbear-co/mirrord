@@ -21,6 +21,7 @@ use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
 use mirrord_config::{
+    config::ConfigContext,
     feature::{
         fs::FsModeConfig,
         network::{
@@ -28,7 +29,7 @@ use mirrord_config::{
             incoming::IncomingMode,
         },
     },
-    LayerConfig, LayerFileConfig, MIRRORD_CONFIG_FILE_ENV,
+    LayerConfig,
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_progress::{messages::EXEC_CONTAINER_BINARY, Progress, ProgressTracker};
@@ -64,7 +65,8 @@ pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
 async fn exec_process<P>(
-    mut config: LayerConfig,
+    config: LayerConfig,
+    config_file_path: Option<&str>,
     args: &ExecArgs,
     progress: &P,
     analytics: &mut AnalyticsReporter,
@@ -74,16 +76,14 @@ where
 {
     let mut sub_progress = progress.subtask("preparing to launch process");
 
-    #[cfg(target_os = "macos")]
-    let execution_info = MirrordExecution::start(
-        &mut config,
+    let execution_info = MirrordExecution::start_internal(
+        &config,
+        #[cfg(target_os = "macos")]
         Some(&args.binary),
         &mut sub_progress,
         analytics,
     )
     .await?;
-    #[cfg(not(target_os = "macos"))]
-    let execution_info = MirrordExecution::start(&mut config, &mut sub_progress, analytics).await?;
 
     // This is not being yielded, as this is not proper async, something along those lines.
     // We need an `await` somewhere in this function to drive our socket IO that happens
@@ -100,20 +100,18 @@ where
     #[cfg(not(target_os = "macos"))]
     let binary = args.binary.clone();
 
-    // Stop confusion with layer
-    std::env::set_var(mirrord_progress::MIRRORD_PROGRESS_ENV, "off");
-
-    // Collect environment variables curretn local vars and add those from agent + layer settings.
     let mut env_vars: HashMap<String, String> = vars().collect();
     env_vars.extend(execution_info.environment.clone());
-
+    env_vars.insert(mirrord_progress::MIRRORD_PROGRESS_ENV.into(), "off".into());
     for key in &execution_info.env_to_unset {
         env_vars.remove(key);
     }
 
-    let mut binary_args = args.binary_args.clone();
     // Put original executable in argv[0] even if actually running patched version.
-    binary_args.insert(0, args.binary.clone());
+    let binary_args = std::iter::once(&args.binary)
+        .chain(args.binary_args.iter())
+        .map(Clone::clone)
+        .collect::<Vec<_>>();
 
     // since execvpe doesn't exist on macOS, resolve path with which and use execve
     let binary_path = match which(&binary) {
@@ -128,11 +126,13 @@ where
     let mut sub_progress_config = progress.subtask("config summary");
     print_config(
         &sub_progress_config,
-        Some(&binary),
-        Some(&args.binary_args),
+        &binary_args,
         &config,
-        false,
+        config_file_path,
+        execution_info.uses_operator,
     );
+    // Without the success message, the final progress displays the last info message
+    // as the subtask title.
     sub_progress_config.success(Some("config summary"));
 
     let args = binary_args
@@ -164,40 +164,40 @@ where
     Err(CliError::BinaryExecuteFailed(binary, binary_args))
 }
 
+/// Prints config summary as multiple info messages, using the given [`Progress`].
 fn print_config<P>(
-    progress_subtask: &P,
-    binary: Option<&String>,
-    binary_args: Option<&Vec<String>>,
+    progress: &P,
+    command: &[String],
     config: &LayerConfig,
-    single_msg: bool,
+    config_file_path: Option<&str>,
+    operator_used: bool,
 ) where
     P: Progress + Send + Sync,
 {
-    let mut messages = vec![];
-    if let Some(b) = binary
-        && let Some(a) = binary_args
-    {
-        messages.push(format!("Running binary \"{}\" with arguments: {:?}.", b, a));
-    }
+    progress.info(&format!("Running command: {}", command.join(" ")));
 
-    let target_info = if let Some(target) = &config.target.path {
-        &format!("mirrord will target: {}", target)[..]
-    } else {
-        "mirrord will run without a target"
-    };
-    let config_info = if let Ok(path) = std::env::var(MIRRORD_CONFIG_FILE_ENV) {
-        &format!("a configuration file was loaded from: {} ", path)[..]
-    } else {
-        "no configuration file was loaded"
-    };
-    messages.push(format!("{}, {}", target_info, config_info));
+    let target_and_config_path_info = format!(
+        "{}, {}",
+        match &config.target.path {
+            Some(path) => {
+                format!("mirrord will target: {}", path)
+            }
+            None => "mirrord will run without a target".into(),
+        },
+        match config_file_path {
+            Some(path) => {
+                format!("the configuration file was loaded from {path}")
+            }
+            None => "no configuration file was loaded".into(),
+        }
+    );
+    progress.info(&target_and_config_path_info);
 
-    let operator_info = match config.operator {
-        Some(true) => "be used",
-        Some(false) => "not be used",
-        None => "be used if possible",
-    };
-    messages.push(format!("operator: the operator will {}", operator_info));
+    let operator_info = format!(
+        "mirrord will run {} the mirrord Operator",
+        if operator_used { "with" } else { "without" },
+    );
+    progress.info(&operator_info);
 
     let exclude = config.feature.env.exclude.as_ref();
     let include = config.feature.env.include.as_ref();
@@ -212,24 +212,24 @@ fn print_config<P>(
     } else {
         "all"
     };
-    messages.push(format!(
-        "env: {} environment variables will be fetched",
+    progress.info(&format!(
+        "env: {} remote environment variables will be fetched",
         env_info
     ));
 
     let fs_info = match config.feature.fs.mode {
-        FsModeConfig::Read => "read only from the remote",
-        FsModeConfig::Write => "read and write from the remote",
+        FsModeConfig::Read => "read from the remote",
+        FsModeConfig::Write => "read from and write to the remote",
         _ => "read and write locally",
     };
-    messages.push(format!("fs: file operations will default to {}", fs_info));
+    progress.info(&format!("fs: file operations will default to {}", fs_info));
 
     let incoming_info = match config.feature.network.incoming.mode {
-        IncomingMode::Mirror => "mirrored",
-        IncomingMode::Steal => "stolen",
+        IncomingMode::Mirror => "be mirrored",
+        IncomingMode::Steal => "be stolen",
         IncomingMode::Off => "ignored",
     };
-    messages.push(format!(
+    progress.info(&format!(
         "incoming: incoming traffic will be {}",
         incoming_info
     ));
@@ -283,7 +283,7 @@ fn print_config<P>(
         };
         let filtered_port_str = filtered_ports_str.unwrap_or_default();
         let unfiltered_ports_str = unfiltered_ports_str.unwrap_or_default();
-        messages.push(format!("incoming: traffic will only be stolen from {filtered_port_str}{and}{unfiltered_ports_str}"));
+        progress.info(&format!("incoming: traffic will only be stolen from {filtered_port_str}{and}{unfiltered_ports_str}"));
     }
 
     let outgoing_info = match (
@@ -295,7 +295,7 @@ fn print_config<P>(
         (false, true) => "enabled on UDP",
         (false, false) => "disabled on TCP and UDP",
     };
-    messages.push(format!("outgoing: forwarding is {}", outgoing_info));
+    progress.info(&format!("outgoing: forwarding is {}", outgoing_info));
 
     let dns_info = match &config.feature.network.dns {
         DnsConfig { enabled: false, .. } => "locally",
@@ -320,16 +320,11 @@ fn print_config<P>(
             filter: Some(DnsFilterConfig::Local(..)),
         } => "remotely with exceptions",
     };
-    messages.push(format!("dns: DNS will be resolved {}", dns_info));
-
-    if single_msg {
-        let long_message = messages.join(". \n");
-        progress_subtask.info(&long_message);
-    } else {
-        for m in messages {
-            progress_subtask.info(&m[..]);
-        }
-    }
+    progress.info(&format!("dns: DNS will be resolved {}", dns_info));
+    progress.info(&format!(
+        "internal proxy: logs will be written to {}",
+        config.internal_proxy.log_destination.display()
+    ));
 }
 
 async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
@@ -352,23 +347,27 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
 
-    // set_var used here as mirrord needs these values
-    for (name, value) in args.params.as_env_vars()? {
-        std::env::set_var(name, value);
-    }
-
-    // LayerConfig must be created after setting relevant env vars
-    let (config, mut context) = LayerConfig::from_env_with_warnings()?;
+    let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
+    let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
+    let config = LayerConfig::resolve(&mut cfg_context)?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
     (&config).collect_analytics(analytics.get_mut());
 
-    config.verify(&mut context)?;
-    for warning in context.get_warnings() {
-        progress.warning(warning);
+    let result = config.verify(&mut cfg_context);
+    for warning in cfg_context.into_warnings() {
+        progress.warning(&warning);
     }
+    result?;
 
-    let execution_result = exec_process(config, args, &progress, &mut analytics).await;
+    let execution_result = exec_process(
+        config,
+        config_file_path.as_deref(),
+        args,
+        &progress,
+        &mut analytics,
+    )
+    .await;
 
     if execution_result.is_err() && !analytics.has_error() {
         analytics.set_error(AnalyticsError::Unknown);
@@ -425,75 +424,40 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
         prompt_outdated_version(&progress).await;
     }
 
-    for (name, value) in args.target.as_env_vars()? {
-        std::env::set_var(name, value);
-    }
-
-    if args.no_telemetry {
-        std::env::set_var("MIRRORD_TELEMETRY", "false");
-    }
-
-    if let Some(namespace) = &args.agent_namespace {
-        std::env::set_var("MIRRORD_AGENT_NAMESPACE", namespace.clone());
-    }
-
-    if let Some(log_level) = &args.agent_log_level {
-        std::env::set_var("MIRRORD_AGENT_RUST_LOG", log_level.clone());
-    }
-
-    if let Some(image) = &args.agent_image {
-        std::env::set_var("MIRRORD_AGENT_IMAGE", image.clone());
-    }
-
-    if let Some(agent_ttl) = &args.agent_ttl {
-        std::env::set_var("MIRRORD_AGENT_TTL", agent_ttl.to_string());
-    }
-    if let Some(agent_startup_timeout) = &args.agent_startup_timeout {
-        std::env::set_var(
-            "MIRRORD_AGENT_STARTUP_TIMEOUT",
-            agent_startup_timeout.to_string(),
-        );
-    }
-
-    if let Some(accept_invalid_certificates) = args.accept_invalid_certificates {
-        let value = if accept_invalid_certificates {
-            warn!("Accepting invalid certificates");
-            "true"
-        } else {
-            "false"
-        };
-
-        std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", value);
-    }
-
-    if args.ephemeral_container {
-        std::env::set_var("MIRRORD_EPHEMERAL_CONTAINER", "true");
-    };
-
-    if let Some(context) = &args.context {
-        std::env::set_var("MIRRORD_KUBE_CONTEXT", context);
-    }
-
-    if let Some(config_file) = &args.config_file {
-        std::env::set_var("MIRRORD_CONFIG_FILE", config_file);
-    }
-
-    // LayerConfig must be created after setting relevant env vars
-    let (config, mut context) = LayerConfig::from_env_with_warnings()?;
+    let mut cfg_context = ConfigContext::default()
+        .override_envs(args.target.as_env_vars())
+        .override_envs(args.agent.as_env_vars())
+        .override_env_opt("MIRRORD_TELEMETRY", args.no_telemetry.then_some("false"))
+        .override_env_opt(
+            "MIRRORD_ACCEPT_INVALID_CERTIFICATES",
+            args.accept_invalid_certificates.map(|accept| {
+                if accept {
+                    warn!("Accepting invalid certificates");
+                    "true"
+                } else {
+                    "false"
+                }
+            }),
+        )
+        .override_env_opt("MIRRORD_KUBE_CONTEXT", args.context.as_ref())
+        .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.as_ref());
+    let config = LayerConfig::resolve(&mut cfg_context)?;
 
     let mut analytics = AnalyticsReporter::new(config.telemetry, ExecutionKind::PortForward, watch);
     (&config).collect_analytics(analytics.get_mut());
 
-    config.verify(&mut context)?;
-    for warning in context.get_warnings() {
-        progress.warning(warning);
+    let result = config.verify(&mut cfg_context);
+    for warning in cfg_context.into_warnings() {
+        progress.warning(&warning);
     }
+    result?;
+
     let (connection_info, connection) =
         create_and_connect(&config, &mut progress, &mut analytics).await?;
 
     // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
     // error print-outs
-    let agent_conn = AgentConnection::new(&config, Some(connection_info), &mut analytics)
+    let agent_conn = AgentConnection::new(&config, connection_info, &mut analytics)
         .await
         .map_err(|agent_con_error| match agent_con_error {
             AgentConnectionError::Io(error) => CliError::PortForwardingSetupError(error.into()),
@@ -503,7 +467,6 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
                 CliError::PortForwardingSetupError,
             ),
             AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
-            AgentConnectionError::NoConnectionMethod => CliError::PortForwardingNoConnectionMethod,
         })?;
     let connection_2 = connection::AgentConnection {
         sender: agent_conn.agent_tx,
@@ -578,7 +541,7 @@ fn main() -> miette::Result<()> {
                 extension_exec(*args, watch).await?;
             }
             Commands::InternalProxy { port } => {
-                let config = LayerConfig::recalculate_from_env()?;
+                let config = mirrord_config::util::read_resolved_config()?;
                 logging::init_intproxy_tracing_registry(&config)?;
                 internal_proxy::proxy(config, port, watch).await?
             }
@@ -602,7 +565,7 @@ fn main() -> miette::Result<()> {
                 container_ext_command(args.config_file, args.target, watch).await?
             }
             Commands::ExternalProxy { port } => {
-                let config = LayerConfig::recalculate_from_env()?;
+                let config = mirrord_config::util::read_resolved_config()?;
                 logging::init_extproxy_tracing_registry(&config)?;
                 external_proxy::proxy(config, port, watch).await?
             }

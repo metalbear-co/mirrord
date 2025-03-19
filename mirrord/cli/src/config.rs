@@ -1,9 +1,11 @@
 #![deny(missing_docs)]
 
 use std::{
+    borrow::Cow,
     collections::HashMap,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    os::unix::ffi::OsStringExt,
     path::PathBuf,
     str::FromStr,
 };
@@ -15,12 +17,10 @@ use mirrord_config::{
         MIRRORD_OVERRIDE_ENV_FILE_ENV, MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV,
         MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV,
     },
-    MIRRORD_CONFIG_FILE_ENV,
+    LayerConfig,
 };
 use mirrord_operator::setup::OperatorNamespace;
 use thiserror::Error;
-
-use crate::error::CliError;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -38,64 +38,96 @@ pub(super) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(super) enum Commands {
-    /// Unstable: Create and run a new container from an image with mirrord loaded
+    /// Create and run a new container from an image with mirrord loaded (unstable).
     Container(Box<ContainerArgs>),
 
-    /// Execute a binary using mirrord, mirror remote traffic to it, provide it access to remote
+    /// Execute a binary using mirrord: intercept remote traffic, provide access to remote
     /// resources (network, files) and environment variables.
     Exec(Box<ExecArgs>),
 
-    /// Generates shell completions for the provided shell.
+    /// Generate shell completions for the provided shell.
     /// Supported shells: bash, elvish, fish, powershell, zsh
     Completions(CompletionsArgs),
 
+    /// Called from `mirrord exec`/`mirrord ext`.
+    ///
+    /// Extracts mirrord-layer lib (which is compiled into the mirrord CLI binary)
+    /// to a file, so that it can be used with
+    /// [`INJECTION_ENV_VAR`](crate::execution::INJECTION_ENV_VAR).
     #[command(hide = true)]
     Extract { path: String },
 
-    /// Operator commands eg. setup
+    /// Execute a command related to the mirrord Operator.
     Operator(Box<OperatorArgs>),
 
-    /// List targets/resources like pods/namespaces in json format
+    /// List available mirrord targets in the cluster.
     #[command(hide = true, name = "ls")]
     ListTargets(Box<ListTargetArgs>),
 
-    /// mirrord container extension integration.
+    /// Spawned by the IDE extensions.
+    ///
+    /// Works like [`Commands::Container`],
+    /// but doesn't run the command until completion.
+    ///
+    /// Instead, it prepares the agent and mirrord proxies,
+    /// prints data required by the extension,
+    /// and waits for the external proxy to finish.
     #[command(hide = true, name = "container-ext")]
     ExtensionContainer(Box<ExtensionContainerArgs>),
 
-    /// Extension execution - used by extension to execute binaries.
+    /// Spawned by the IDE extensions.
+    ///
+    /// Works like [`Commands::Exec`],
+    /// but doesn't exec into the user command.
+    ///
+    /// Instead, it prepares the agent and `mirrord intproxy`,
+    /// prints data required by the extension,
+    /// and waits for the internal proxy to finish.
     #[command(hide = true, name = "ext")]
     ExtensionExec(Box<ExtensionExecArgs>),
 
-    /// External Proxy - used for intproxy when it's running with `mirrord container` command.
+    /// Spawned by [`Commands::ExtensionContainer`] or [`Commands::Container`].
+    ///
+    /// Acts as a proxy between the [`Commands::InternalProxy`] sidecar container
+    /// and the agent/operator.
     #[command(hide = true, name = "extproxy")]
     ExternalProxy {
+        /// Port on which the extproxy will accept connections.
         #[arg(long, default_value_t = 0)]
         port: u16,
     },
 
-    /// Internal proxy - used to aggregate connections from multiple layers
+    /// Spawned:
+    /// 1. Natively by [`Commands::ExtensionExec`]/[`Commands::Exec`],
+    /// 2. In a container by [`Commands::ExtensionContainer`]/[`Commands::Container`].
+    ///
+    /// Acts as a proxy between multiple mirrord-layer instances
+    /// and the agent/operator.
     #[command(hide = true, name = "intproxy")]
     InternalProxy {
+        /// Port on which the intproxy will accept connections.
         #[arg(long, default_value_t = 0)]
         port: u16,
     },
 
-    /// Port forwarding - UNSTABLE FEATURE
+    /// Forward local ports to hosts available from the cluster
+    /// or intercept traffic and direct it to local ports (unstable).
     #[command(name = "port-forward")]
     PortForward(Box<PortForwardArgs>),
 
     /// Verify config file without starting mirrord.
+    ///
+    /// Called from the IDE extensions.
     #[command(hide = true)]
     VerifyConfig(VerifyConfigArgs),
 
     /// Try out mirrord for Teams.
     Teams,
 
-    /// Diagnostic commands
+    /// Diagnose mirrord setup.
     Diagnose(Box<DiagnoseArgs>),
 
-    /// Run mirrord vpn
+    /// Run mirrord vpn (alpha).
     #[command(hide = true)]
     Vpn(Box<VpnArgs>),
 }
@@ -131,17 +163,9 @@ pub(super) struct ExecParams {
     #[clap(flatten)]
     pub target: TargetParams,
 
-    /// Namespace to place agent in.
-    #[arg(short = 'a', long)]
-    pub agent_namespace: Option<String>,
-
-    /// Agent log level
-    #[arg(short = 'l', long)]
-    pub agent_log_level: Option<String>,
-
-    /// Agent image
-    #[arg(short = 'i', long)]
-    pub agent_image: Option<String>,
+    /// Parameters for the agent.
+    #[clap(flatten)]
+    pub agent: AgentParams,
 
     /// Default file system behavior: read, write, local
     #[arg(long)]
@@ -163,21 +187,9 @@ pub(super) struct ExecParams {
     #[arg(long)]
     pub skip_processes: Option<String>,
 
-    /// Agent TTL
-    #[arg(long)]
-    pub agent_ttl: Option<u16>,
-
-    /// Agent Startup Timeout seconds
-    #[arg(long)]
-    pub agent_startup_timeout: Option<u16>,
-
     /// Accept/reject invalid certificates.
     #[arg(short = 'c', long, default_missing_value="true", num_args=0..=1, require_equals=true)]
     pub accept_invalid_certificates: Option<bool>,
-
-    /// Use an Ephemeral Container to mirror traffic.
-    #[arg(short, long)]
-    pub ephemeral_container: bool,
 
     /// Steal TCP instead of mirroring
     #[arg(long = "steal")]
@@ -222,69 +234,55 @@ pub(super) struct ExecParams {
 }
 
 impl ExecParams {
-    pub fn as_env_vars(&self) -> Result<HashMap<String, OsString>, CliError> {
-        let mut envs: HashMap<String, OsString> = HashMap::new();
+    /// Returns these parameters as an environment variables map.
+    ///
+    /// The map can be used when resolving the config with [`LayerConfig::resolve`].
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, Cow<'_, OsStr>> {
+        let mut envs = self.agent.as_env_vars();
 
-        if let Some(target) = &self.target.target {
-            envs.insert("MIRRORD_IMPERSONATED_TARGET".into(), target.into());
-        }
+        envs.extend(
+            self.target
+                .as_env_vars()
+                .into_iter()
+                .map(|(key, value)| (key, Cow::Borrowed(value))),
+        );
 
         if self.no_telemetry {
-            envs.insert("MIRRORD_TELEMETRY".into(), "false".into());
-        }
-
-        if let Some(skip_processes) = &self.skip_processes {
-            envs.insert("MIRRORD_SKIP_PROCESSES".into(), skip_processes.into());
-        }
-
-        if let Some(namespace) = &self.target.target_namespace {
-            envs.insert("MIRRORD_TARGET_NAMESPACE".into(), namespace.into());
-        }
-
-        if let Some(namespace) = &self.agent_namespace {
-            envs.insert("MIRRORD_AGENT_NAMESPACE".into(), namespace.into());
-        }
-
-        if let Some(log_level) = &self.agent_log_level {
-            envs.insert("MIRRORD_AGENT_RUST_LOG".into(), log_level.into());
-        }
-
-        if let Some(image) = &self.agent_image {
-            envs.insert("MIRRORD_AGENT_IMAGE".into(), image.into());
-        }
-
-        if let Some(agent_ttl) = &self.agent_ttl {
-            envs.insert("MIRRORD_AGENT_TTL".into(), agent_ttl.to_string().into());
-        }
-        if let Some(agent_startup_timeout) = &self.agent_startup_timeout {
             envs.insert(
-                "MIRRORD_AGENT_STARTUP_TIMEOUT".into(),
-                agent_startup_timeout.to_string().into(),
+                "MIRRORD_TELEMETRY".as_ref(),
+                Cow::Borrowed("false".as_ref()),
             );
         }
-
-        if let Some(fs_mode) = self.fs_mode {
-            envs.insert("MIRRORD_FILE_MODE".into(), fs_mode.to_string().into());
+        if let Some(skip_processes) = &self.skip_processes {
+            envs.insert(
+                "MIRRORD_SKIP_PROCESSES".as_ref(),
+                Cow::Borrowed(skip_processes.as_ref()),
+            );
         }
-
+        if let Some(fs_mode) = self.fs_mode {
+            envs.insert(
+                "MIRRORD_FILE_MODE".as_ref(),
+                Cow::Owned(OsString::from_vec(fs_mode.to_string().into_bytes())),
+            );
+        }
         if let Some(override_env_vars_exclude) = &self.override_env_vars_exclude {
             envs.insert(
-                MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV.into(),
-                override_env_vars_exclude.into(),
+                MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV.as_ref(),
+                Cow::Borrowed(override_env_vars_exclude.as_ref()),
             );
         }
-
         if let Some(override_env_vars_include) = &self.override_env_vars_include {
             envs.insert(
-                MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV.into(),
-                override_env_vars_include.into(),
+                MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV.as_ref(),
+                Cow::Borrowed(override_env_vars_include.as_ref()),
             );
         }
-
         if self.no_remote_dns {
-            envs.insert("MIRRORD_REMOTE_DNS".into(), "false".into());
+            envs.insert(
+                "MIRRORD_REMOTE_DNS".as_ref(),
+                Cow::Borrowed("false".as_ref()),
+            );
         }
-
         if let Some(accept_invalid_certificates) = self.accept_invalid_certificates {
             let value = if accept_invalid_certificates {
                 tracing::warn!("Accepting invalid certificates");
@@ -293,53 +291,49 @@ impl ExecParams {
                 "false"
             };
 
-            envs.insert("MIRRORD_ACCEPT_INVALID_CERTIFICATES".into(), value.into());
+            envs.insert(
+                "MIRRORD_ACCEPT_INVALID_CERTIFICATES".as_ref(),
+                Cow::Borrowed(value.as_ref()),
+            );
         }
-
-        if self.ephemeral_container {
-            envs.insert("MIRRORD_EPHEMERAL_CONTAINER".into(), "true".into());
-        };
-
         if self.tcp_steal {
-            envs.insert("MIRRORD_AGENT_TCP_STEAL_TRAFFIC".into(), "true".into());
-        };
-
+            envs.insert(
+                "MIRRORD_AGENT_TCP_STEAL_TRAFFIC".as_ref(),
+                Cow::Borrowed("true".as_ref()),
+            );
+        }
         if self.no_outgoing || self.no_tcp_outgoing {
-            envs.insert("MIRRORD_TCP_OUTGOING".into(), "false".into());
+            envs.insert(
+                "MIRRORD_TCP_OUTGOING".as_ref(),
+                Cow::Borrowed("false".as_ref()),
+            );
         }
-
         if self.no_outgoing || self.no_udp_outgoing {
-            envs.insert("MIRRORD_UDP_OUTGOING".into(), "false".into());
+            envs.insert(
+                "MIRRORD_UDP_OUTGOING".as_ref(),
+                Cow::Borrowed("false".as_ref()),
+            );
         }
-
         if let Some(context) = &self.context {
-            envs.insert("MIRRORD_KUBE_CONTEXT".into(), context.into());
+            envs.insert(
+                "MIRRORD_KUBE_CONTEXT".as_ref(),
+                Cow::Borrowed(context.as_ref()),
+            );
         }
-
         if let Some(config_file) = &self.config_file {
-            // Set canonicalized path to config file, in case forks/children are in different
-            // working directories.
-            let full_path = std::fs::canonicalize(config_file)
-                .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.clone(), e))?;
             envs.insert(
-                MIRRORD_CONFIG_FILE_ENV.into(),
-                full_path.as_os_str().to_owned(),
+                LayerConfig::FILE_PATH_ENV.as_ref(),
+                Cow::Borrowed(config_file.as_ref()),
             );
         }
-
         if let Some(env_file) = &self.env_file {
-            // Set canonicalized path to env file, in case forks/children are in different
-            // working directories.
-            let full_path = std::fs::canonicalize(env_file).map_err(|e| {
-                CliError::EnvFileAccessError(env_file.clone(), dotenvy::Error::Io(e))
-            })?;
             envs.insert(
-                MIRRORD_OVERRIDE_ENV_FILE_ENV.into(),
-                full_path.as_os_str().to_owned(),
+                MIRRORD_OVERRIDE_ENV_FILE_ENV.as_ref(),
+                Cow::Borrowed(env_file.as_ref()),
             );
         }
 
-        Ok(envs)
+        envs
     }
 }
 
@@ -356,101 +350,181 @@ pub(super) struct ExecArgs {
     pub(super) binary_args: Vec<String>,
 }
 
+/// Target-related parameters, present in more than one command.
 #[derive(Args, Debug)]
 pub(super) struct TargetParams {
-    /// Target name to mirror.    
-    /// Target can either be a deployment or a pod.
-    /// Valid formats: deployment/name, pod/name, pod/name/container/name
+    /// Name of the target to mirror.
+    ///
+    /// Valid formats:
+    /// - `targetless`
+    /// - `pod/{pod-name}[/container/{container-name}]`
+    /// - `deployment/{deployment-name}[/container/{container-name}]`
+    /// - `rollout/{rollout-name}[/container/{container-name}]`
+    /// - `job/{job-name}[/container/{container-name}]`
+    /// - `cronjob/{cronjob-name}[/container/{container-name}]`
+    /// - `statefulset/{statefulset-name}[/container/{container-name}]`
+    /// - `service/{service-name}[/container/{container-name}]`
+    /// - `replicaset/{replicaset-name}[/container/{container-name}]`
+    ///
+    /// E.g `pod/my-pod/container/my-container`.
     #[arg(short = 't', long)]
     pub target: Option<String>,
 
-    /// Namespace of the pod to mirror. Defaults to "default".
+    /// Namespace of the pod to mirror.
+    ///
+    /// Defaults to the user default namespace.
     #[arg(short = 'n', long)]
     pub target_namespace: Option<String>,
 }
 
 impl TargetParams {
-    pub fn as_env_vars(&self) -> Result<HashMap<String, OsString>, CliError> {
-        let mut envs: HashMap<String, OsString> = HashMap::new();
+    /// Returns these parameters as an environment variables map.
+    ///
+    /// The map can be used when resolving the config with [`LayerConfig::resolve`].
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, &OsStr> {
+        let mut envs: HashMap<&OsStr, &OsStr> = Default::default();
 
         if let Some(target) = &self.target {
-            envs.insert("MIRRORD_IMPERSONATED_TARGET".into(), target.into());
+            envs.insert("MIRRORD_IMPERSONATED_TARGET".as_ref(), target.as_ref());
         }
         if let Some(namespace) = &self.target_namespace {
-            envs.insert("MIRRORD_TARGET_NAMESPACE".into(), namespace.into());
+            envs.insert("MIRRORD_TARGET_NAMESPACE".as_ref(), namespace.as_ref());
         }
 
-        Ok(envs)
+        envs
+    }
+}
+
+/// Agent-related parameters, present in more than one command.
+#[derive(Args, Debug)]
+pub(super) struct AgentParams {
+    /// Agent pod namespace.
+    #[arg(short = 'a', long)]
+    pub agent_namespace: Option<String>,
+
+    /// Agent log level.
+    #[arg(short = 'l', long)]
+    pub agent_log_level: Option<String>,
+
+    /// Agent container image.
+    #[arg(short = 'i', long)]
+    pub agent_image: Option<String>,
+
+    /// TTL for the agent pod (in seconds).
+    #[arg(long)]
+    pub agent_ttl: Option<u16>,
+
+    /// Timeout for agent startup (in seconds).
+    #[arg(long)]
+    pub agent_startup_timeout: Option<u16>,
+
+    /// Spawn the agent in an ephemeral container.
+    #[arg(short, long)]
+    pub ephemeral_container: bool,
+}
+
+impl AgentParams {
+    /// Returns these parameters as an environment variables map.
+    ///
+    /// The map can be used when resolving the config with [`LayerConfig::resolve`].
+    pub fn as_env_vars(&self) -> HashMap<&'static OsStr, Cow<'_, OsStr>> {
+        let mut envs: HashMap<&'static OsStr, Cow<'_, OsStr>> = Default::default();
+
+        if let Some(namespace) = &self.agent_namespace {
+            envs.insert(
+                "MIRRORD_AGENT_NAMESPACE".as_ref(),
+                Cow::Borrowed(namespace.as_ref()),
+            );
+        }
+        if let Some(log_level) = &self.agent_log_level {
+            envs.insert(
+                "MIRRORD_AGENT_RUST_LOG".as_ref(),
+                Cow::Borrowed(log_level.as_ref()),
+            );
+        }
+        if let Some(image) = &self.agent_image {
+            envs.insert(
+                "MIRRORD_AGENT_IMAGE".as_ref(),
+                Cow::Borrowed(image.as_ref()),
+            );
+        }
+        if let Some(agent_ttl) = &self.agent_ttl {
+            envs.insert(
+                "MIRRORD_AGENT_TTL".as_ref(),
+                Cow::Owned(OsString::from_vec(agent_ttl.to_string().into_bytes())),
+            );
+        }
+        if let Some(agent_startup_timeout) = &self.agent_startup_timeout {
+            envs.insert(
+                "MIRRORD_AGENT_STARTUP_TIMEOUT".as_ref(),
+                Cow::Owned(OsString::from_vec(
+                    agent_startup_timeout.to_string().into_bytes(),
+                )),
+            );
+        }
+        if self.ephemeral_container {
+            envs.insert(
+                "MIRRORD_EPHEMERAL_CONTAINER".as_ref(),
+                Cow::Borrowed("true".as_ref()),
+            );
+        }
+
+        envs
     }
 }
 
 #[derive(Args, Debug)]
 #[command(group(ArgGroup::new("port-forward").args(["port_mapping", "reverse_port_mapping"]).required(true)))]
 pub(super) struct PortForwardArgs {
-    /// Parameters for the target
+    /// Parameters for the target.
     #[clap(flatten)]
     pub target: TargetParams,
 
-    /// Namespace to place agent in
-    #[arg(short = 'a', long)]
-    pub agent_namespace: Option<String>,
+    /// Parameters for the agent.
+    #[clap(flatten)]
+    pub agent: AgentParams,
 
-    /// Agent log level
-    #[arg(short = 'l', long)]
-    pub agent_log_level: Option<String>,
-
-    /// Agent image
-    #[arg(short = 'i', long)]
-    pub agent_image: Option<String>,
-
-    /// Agent TTL
-    #[arg(long)]
-    pub agent_ttl: Option<u16>,
-
-    /// Agent Startup Timeout seconds
-    #[arg(long)]
-    pub agent_startup_timeout: Option<u16>,
-
-    /// Accept/reject invalid certificates
+    /// Whether to accept/reject invalid certificates when connecting to the Kubernetes cluster.
     #[arg(short = 'c', long, default_missing_value="true", num_args=0..=1, require_equals=true)]
     pub accept_invalid_certificates: Option<bool>,
 
-    /// Use an Ephemeral Container to mirror traffic
-    #[arg(short, long)]
-    pub ephemeral_container: bool,
-
-    /// Disable telemetry - see <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>
+    /// Disable telemetry - see <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>.
     #[arg(long)]
     pub no_telemetry: bool,
 
+    /// Disable version check on startup.
     #[arg(long)]
-    /// Disable version check on startup
     pub disable_version_check: bool,
 
-    /// Load config from config file
-    /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+    /// Load config from config file.
+    ///
+    /// When using this argument without a value, defaults to "./.mirrord/mirrord.json"
     #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
     pub config_file: Option<PathBuf>,
 
-    /// Kube context to use from Kubeconfig
+    /// Kube context to use from the Kubeconfig.
     #[arg(long)]
     pub context: Option<String>,
 
-    /// Mappings for port forwarding.
-    /// Expected format is: '-L \[local_port:\]remote_ip_or_hostname:remote_port'.
-    /// If the remote is given as an ip, this is parsed as soon as mirrord starts.
-    /// Otherwise, the remote is assumed to be a hostname and lookup is performed in the cluster
-    /// after a connection is made to the target.
-    /// Multiple forwarding mappings are each passed with -L.
+    /// Defines port forwarding for some local port.
+    ///
+    /// Expected format is: `-L [local_port:]remote_ip_or_hostname:remote_port`.
+    /// If the remote is given as a hostname, it is resolved lazily,
+    /// after a connection is made to the local port.
+    /// Local port number defaults to be the same as the remote port number.
+    ///
+    /// Can be used multiple times.
     #[arg(short = 'L', long, alias = "port-mappings")]
     pub port_mapping: Vec<AddrPortMapping>,
 
-    /// Mappings for reverse port forwarding.
-    /// Expected format is: '-R \[remote_port:\]local_port'.
-    /// In reverse port forwarding, traffic to the remote_port on the target pod is stolen or
-    /// mirrored to localhost:local_port. If stealing, the response is returned to be sent from
-    /// the target:remote_port.
-    /// Multiple reverse mappings are each passed with -R.
+    /// Defines reverse port forwarding for some local port.
+    ///
+    /// Expected format is: `-R [remote_port:]local_port`.
+    /// In reverse port forwarding, traffic to the remote port on the target is stolen or
+    /// mirrored to local port. Remote port number defaults to be the same as the local port
+    /// number.
+    ///
+    /// Can be used multiple times.
     #[arg(short = 'R', long)]
     pub reverse_port_mapping: Vec<PortOnlyMapping>,
 }

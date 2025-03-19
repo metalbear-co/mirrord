@@ -415,7 +415,7 @@ impl TestProcess {
     pub async fn start_process(
         executable: String,
         args: Vec<String>,
-        env: HashMap<&str, &str>,
+        env: HashMap<String, String>,
     ) -> TestProcess {
         println!("EXECUTING: {executable}");
         let child = Command::new(executable)

@@ -1,4 +1,4 @@
-use super::ConfigContext;
+use super::context::ConfigContext;
 use crate::config::Result;
 
 pub trait MirrordConfigSource: Sized {
@@ -61,21 +61,23 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{config::from_env::FromEnv, util::testing::with_env_vars};
+    use crate::config::from_env::FromEnv;
 
     #[rstest]
     #[case(None, 10)]
     #[case(Some("13"), 13)]
     fn basic(#[case] env: Option<&str>, #[case] outcome: i32) {
-        with_env_vars(vec![("TEST_VALUE", env), ("FALLBACK", Some("10"))], || {
-            let mut cfg_context = ConfigContext::default();
-            let val = FromEnv::<i32>::new("TEST_VALUE")
-                .or(None)
-                .or(FromEnv::new("FALLBACK"));
-            assert_eq!(
-                val.source_value(&mut cfg_context).unwrap().unwrap(),
-                outcome
-            );
-        });
+        let mut cfg_context = ConfigContext::default()
+            .override_env_opt("TEST_VALUE", env)
+            .override_env("FALLBACK", "10")
+            .strict_env(true);
+        let val = FromEnv::<i32>::new("TEST_VALUE")
+            .or(None)
+            .or(FromEnv::new("FALLBACK"));
+
+        assert_eq!(
+            val.source_value(&mut cfg_context).unwrap().unwrap(),
+            outcome
+        );
     }
 }

@@ -17,8 +17,7 @@ async fn test_issue1054(
     dylib_path: &Path,
     config_dir: &Path,
 ) {
-    let mut config_path = config_dir.to_path_buf();
-    config_path.push("port_mapping.json");
+    let config_path = config_dir.join("port_mapping.json");
 
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer_and_port(
@@ -28,7 +27,7 @@ async fn test_issue1054(
                 ("MIRRORD_UDP_OUTGOING", "false"),
                 ("MIRRORD_REMOTE_DNS", "false"),
             ],
-            Some(config_path.to_str().unwrap()),
+            Some(&config_path),
         )
         .await;
 

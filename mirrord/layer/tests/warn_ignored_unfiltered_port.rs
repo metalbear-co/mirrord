@@ -16,15 +16,13 @@ use rstest::rstest;
 #[tokio::test]
 #[timeout(Duration::from_secs(20))]
 async fn warn_ignored_unfiltered_port(dylib_path: &Path, config_dir: &Path) {
-    let mut config_path = config_dir.to_path_buf();
-
-    config_path.push("http_filter_port_3000.json");
+    let config_path = config_dir.join("http_filter_port_3000.json");
 
     // reusing existing application for this test. This test is unrelated to issue 2058.
     let application = Application::RustIssue2058;
 
     let (mut test_process, _intproxy) = application
-        .start_process_with_layer(dylib_path, vec![], Some(config_path.to_str().unwrap()))
+        .start_process_with_layer(dylib_path, vec![], Some(&config_path))
         .await;
 
     test_process

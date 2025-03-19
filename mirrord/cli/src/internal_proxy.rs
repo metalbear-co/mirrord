@@ -13,6 +13,7 @@
 use std::{
     env, io,
     net::{Ipv4Addr, SocketAddr},
+    ops::Not,
     os::unix::ffi::OsStrExt,
     time::Duration,
 };
@@ -66,22 +67,23 @@ pub(crate) async fn proxy(
     }
 
     let agent_connect_info = env::var_os(AGENT_CONNECT_INFO_ENV_KEY)
-        .map(|var| {
+        .ok_or(InternalProxyError::MissingConnectInfo)
+        .and_then(|var| {
             serde_json::from_slice(var.as_bytes()).map_err(|error| {
                 InternalProxyError::DeseralizeConnectInfo(
                     String::from_utf8_lossy(var.as_bytes()).into_owned(),
                     error,
                 )
             })
-        })
-        .transpose()?;
+        })?;
 
     let execution_kind = std::env::var(MIRRORD_EXECUTION_KIND_ENV)
         .ok()
         .and_then(|execution_kind| execution_kind.parse().ok())
         .unwrap_or_default();
+    let container_mode = crate::util::intproxy_container_mode();
 
-    let mut analytics = if config.internal_proxy.container_mode {
+    let mut analytics = if container_mode {
         AnalyticsReporter::only_error(config.telemetry, execution_kind, watch)
     } else {
         AnalyticsReporter::new(config.telemetry, execution_kind, watch)
@@ -101,7 +103,7 @@ pub(crate) async fn proxy(
         .map_err(InternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
 
-    if !config.internal_proxy.container_mode {
+    if container_mode.not() {
         unsafe { detach_io() }.map_err(InternalProxyError::SetSid)?;
     }
 
@@ -124,7 +126,7 @@ pub(crate) async fn proxy(
 #[tracing::instrument(level = Level::TRACE, skip(config, analytics))]
 pub(crate) async fn connect_and_ping(
     config: &LayerConfig,
-    connect_info: Option<AgentConnectInfo>,
+    connect_info: AgentConnectInfo,
     analytics: &mut AnalyticsReporter,
 ) -> CliResult<AgentConnection, InternalProxyError> {
     let mut agent_conn = AgentConnection::new(config, connect_info, analytics)
