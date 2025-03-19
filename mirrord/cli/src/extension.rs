@@ -43,10 +43,11 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch)
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
 
-    config.verify(&mut cfg_context)?;
+    let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
         progress.warning(&warning);
     }
+    result?;
 
     #[cfg(target_os = "macos")]
     let execution_result =

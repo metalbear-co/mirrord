@@ -71,10 +71,11 @@ fn create_config_and_analytics<P: Progress>(
     let analytics =
         AnalyticsReporter::only_error(config.telemetry, ExecutionKind::Container, watch);
 
-    config.verify(&mut cfg_context)?;
+    let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
         progress.warning(&warning);
     }
+    result?;
 
     Ok((config, analytics))
 }

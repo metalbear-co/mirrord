@@ -357,10 +357,11 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
     (&config).collect_analytics(analytics.get_mut());
 
-    config.verify(&mut cfg_context)?;
+    let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
         progress.warning(&warning);
     }
+    result?;
 
     let execution_result = exec_process(config, args, &progress, &mut analytics).await;
 
@@ -436,10 +437,12 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
     let mut analytics = AnalyticsReporter::new(config.telemetry, ExecutionKind::PortForward, watch);
     (&config).collect_analytics(analytics.get_mut());
 
-    config.verify(&mut cfg_context)?;
+    let result = config.verify(&mut cfg_context);
     for warning in cfg_context.into_warnings() {
         progress.warning(&warning);
     }
+    result?;
+
     let (connection_info, connection) =
         create_and_connect(&config, &mut progress, &mut analytics).await?;
 
