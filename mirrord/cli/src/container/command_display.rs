@@ -24,7 +24,12 @@ impl CommandExt for std::process::Command {
             .map(OsStr::to_string_lossy)
             .map(Cow::into_owned);
 
-        CommandDisplay(envs.chain(program).chain(args).collect())
+        CommandDisplay(
+            envs.chain(program)
+                .chain(args)
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
     }
 }
 
@@ -37,21 +42,11 @@ impl CommandExt for tokio::process::Command {
 /// A human readable display of a command.
 ///
 /// For example: `docker run container`.
-pub struct CommandDisplay(Vec<String>);
+pub struct CommandDisplay(String);
 
 impl fmt::Display for CommandDisplay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut first = true;
-        for chunk in &self.0 {
-            if first {
-                f.write_str(chunk)?;
-                first = false;
-            } else {
-                write!(f, " {chunk}")?;
-            }
-        }
-
-        Ok(())
+        self.0.fmt(f)
     }
 }
 
