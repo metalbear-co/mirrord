@@ -130,8 +130,8 @@ mod tests {
         #[values((None, true), (Some("false"), false))] dns: (Option<&str>, bool),
     ) {
         let mut cfg_context = ConfigContext::default()
-            .override_env("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", incoming.0)
-            .override_env("MIRRORD_REMOTE_DNS", dns.0)
+            .override_env_opt("MIRRORD_AGENT_TCP_STEAL_TRAFFIC", incoming.0)
+            .override_env_opt("MIRRORD_REMOTE_DNS", dns.0)
             .strict_env(true);
         let config = NetworkFileConfig::default()
             .generate_config(&mut cfg_context)

@@ -30,11 +30,8 @@ impl StatusCommandHandler {
     pub(super) async fn new(config_file: Option<PathBuf>) -> CliResult<Self> {
         let mut progress = ProgressTracker::from_env("Operator Status");
 
-        let mut cfg_context = ConfigContext::default();
-
-        if let Some(config) = config_file {
-            cfg_context = cfg_context.override_env(LayerConfig::FILE_PATH_ENV, Some(config));
-        }
+        let mut cfg_context =
+            ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config_file);
         let layer_config = LayerConfig::resolve(&mut cfg_context)?;
 
         if !layer_config.use_proxy {

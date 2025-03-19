@@ -16,16 +16,9 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord vpn");
     let mut analytics = NullReporter::default();
 
-    let mut cfg_context = ConfigContext::default();
-
-    if let Some(config_path) = args.config_file {
-        cfg_context = cfg_context.override_env(LayerConfig::FILE_PATH_ENV, Some(config_path));
-    }
-
-    if let Some(namespace) = args.namespace {
-        cfg_context = cfg_context.override_env("MIRRORD_TARGET_NAMESPACE", Some(namespace));
-    }
-
+    let mut cfg_context = ConfigContext::default()
+        .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file)
+        .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace);
     let mut config = LayerConfig::resolve(&mut cfg_context)?;
     config.agent.privileged = true;
 

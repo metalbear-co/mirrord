@@ -68,8 +68,8 @@ mod tests {
     #[case(Some("13"), 13)]
     fn basic(#[case] env: Option<&str>, #[case] outcome: i32) {
         let mut cfg_context = ConfigContext::default()
-            .override_env("TEST_VALUE", env)
-            .override_env("FALLBACK", Some("10"))
+            .override_env_opt("TEST_VALUE", env)
+            .override_env("FALLBACK", "10")
             .strict_env(true);
         let val = FromEnv::<i32>::new("TEST_VALUE")
             .or(None)

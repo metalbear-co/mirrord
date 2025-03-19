@@ -225,7 +225,7 @@ pub(super) async fn verify_config(
 ) -> CliResult<()> {
     let mut config_context = ConfigContext::default()
         .empty_target_final(ide)
-        .override_env(LayerConfig::FILE_PATH_ENV, Some(path));
+        .override_env(LayerConfig::FILE_PATH_ENV, path);
 
     let layer_config = LayerConfig::resolve(&mut config_context).and_then(|config| {
         config.verify(&mut config_context)?;

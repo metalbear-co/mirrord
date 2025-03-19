@@ -70,7 +70,7 @@ mod tests {
     #[rstest]
     fn basic() {
         let mut cfg_context = ConfigContext::default()
-            .override_env("TEST_VALUE", Some("13"))
+            .override_env("TEST_VALUE", "13")
             .strict_env(true);
         let value = FromEnv::<i32>::new("TEST_VALUE");
         assert_eq!(value.source_value(&mut cfg_context).unwrap().unwrap(), 13);

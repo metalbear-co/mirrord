@@ -629,8 +629,8 @@ mod tests {
         #[case] expected_target_config: TargetConfig,
     ) {
         let mut cfg_context = ConfigContext::default()
-            .override_env("MIRRORD_IMPERSONATED_TARGET", path_env)
-            .override_env("MIRRORD_TARGET_NAMESPACE", namespace_env)
+            .override_env_opt("MIRRORD_IMPERSONATED_TARGET", path_env)
+            .override_env_opt("MIRRORD_TARGET_NAMESPACE", namespace_env)
             .strict_env(true);
         let generated_target_config = TargetFileConfig::default()
             .generate_config(&mut cfg_context)
@@ -694,7 +694,7 @@ mod tests {
         let namespace = "override-namespace";
         expected_target_config.namespace = Some(namespace.to_string());
         let mut cfg_context = ConfigContext::default()
-            .override_env("MIRRORD_TARGET_NAMESPACE", Some(namespace))
+            .override_env("MIRRORD_TARGET_NAMESPACE", namespace)
             .strict_env(true);
         let target_file_config: TargetFileConfig =
             serde_json::from_str(config_json_string).unwrap();

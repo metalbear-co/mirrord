@@ -169,10 +169,7 @@ pub async fn container_command(
 
     progress.warning("mirrord container is currently an unstable feature");
 
-    let mut cfg_context = ConfigContext::default();
-    for (name, value) in exec_params.as_env_vars() {
-        cfg_context = cfg_context.override_env(name, Some(value));
-    }
+    let cfg_context = ConfigContext::default().override_envs(exec_params.as_env_vars());
     let (config, mut analytics) = create_config_and_analytics(&mut progress, cfg_context, watch)?;
 
     let (runtime_command, _execution_info, _tls_setup) =
@@ -224,14 +221,9 @@ pub async fn container_ext_command(
     let mut progress = ProgressTracker::try_from_env("mirrord preparing to launch")
         .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
 
-    let mut cfg_context = ConfigContext::default();
-    if let Some(config_file) = config_file.as_ref() {
-        cfg_context = cfg_context.override_env(LayerConfig::FILE_PATH_ENV, Some(config_file));
-    }
-    if let Some(target) = target.as_ref() {
-        cfg_context = cfg_context.override_env("MIRRORD_IMPERSONATED_TARGET", Some(target));
-    }
-    // LayerConfig must be created after setting relevant env vars
+    let cfg_context = ConfigContext::default()
+        .override_env_opt(LayerConfig::FILE_PATH_ENV, config_file)
+        .override_env_opt("MIRRORD_IMPERSONATED_TARGET", target);
     let (config, mut analytics) = create_config_and_analytics(&mut progress, cfg_context, watch)?;
 
     let container_runtime = std::env::var("MIRRORD_CONTAINER_USE_RUNTIME")

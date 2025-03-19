@@ -351,10 +351,7 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
 
-    let mut cfg_context = ConfigContext::default();
-    for (key, value) in args.params.as_env_vars() {
-        cfg_context = cfg_context.override_env(key, Some(value));
-    }
+    let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
     let config = LayerConfig::resolve(&mut cfg_context)?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
@@ -422,36 +419,18 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
         prompt_outdated_version(&progress).await;
     }
 
-    let mut cfg_context = ConfigContext::default();
-
-    for (key, value) in args.target.as_env_vars() {
-        cfg_context = cfg_context.override_env(key, Some(value));
-    }
-
-    for (key, value) in args.agent.as_env_vars() {
-        cfg_context = cfg_context.override_env(key, Some(value));
-    }
-
-    if args.no_telemetry {
-        cfg_context = cfg_context.override_env("MIRRORD_TELEMETRY", Some("false"));
-    }
-    if let Some(accept_invalid_certificates) = args.accept_invalid_certificates {
-        let value = if accept_invalid_certificates {
-            warn!("Accepting invalid certificates");
-            "true"
-        } else {
-            "false"
-        };
-        cfg_context = cfg_context.override_env("MIRRORD_ACCEPT_INVALID_CERTIFICATES", Some(value));
-    }
-    if let Some(context) = &args.context {
-        cfg_context = cfg_context.override_env("MIRRORD_KUBE_CONTEXT", Some(context));
-    }
-    if let Some(config_file) = &args.config_file {
-        cfg_context = cfg_context.override_env(LayerConfig::FILE_PATH_ENV, Some(config_file));
-    }
-
-    // LayerConfig must be created after setting relevant env vars
+    let mut cfg_context = ConfigContext::default()
+        .override_envs(args.target.as_env_vars())
+        .override_envs(args.agent.as_env_vars())
+        .override_env_opt("MIRRORD_TELEMETRY", args.no_telemetry.then_some("false"))
+        .override_env_opt(
+            "MIRRORD_ACCEPT_INVALID_CERTIFICATES",
+            args.accept_invalid_certificates
+                .as_ref()
+                .map(ToString::to_string),
+        )
+        .override_env_opt("MIRRORD_KUBE_CONTEXT", args.context.as_ref())
+        .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.as_ref());
     let config = LayerConfig::resolve(&mut cfg_context)?;
 
     let mut analytics = AnalyticsReporter::new(config.telemetry, ExecutionKind::PortForward, watch);

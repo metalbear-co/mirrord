@@ -1357,18 +1357,17 @@ pub fn get_env(
     extra_vars: Vec<(&str, &str)>,
     config_path: Option<&Path>,
 ) -> HashMap<String, String> {
-    let mut cfg_context = ConfigContext::default();
-    cfg_context = cfg_context.override_env("MIRRORD_IMPERSONATED_TARGET", Some("pod/mock-target"));
-    cfg_context = cfg_context.override_env("MIRRORD_REMOTE_DNS", Some("false"));
+    let extra_vars_owned = extra_vars
+        .iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect::<Vec<_>>();
 
-    for (key, value) in &extra_vars {
-        cfg_context = cfg_context.override_env(key, Some(value));
-    }
-
-    if let Some(config) = config_path {
-        cfg_context = cfg_context.override_env(LayerConfig::FILE_PATH_ENV, Some(config));
-    }
-
+    let mut cfg_context = ConfigContext::default()
+        .override_env("MIRRORD_IMPERSONATED_TARGET", "pod/mock-target")
+        .override_env("MIRRORD_REMOTE_DNS", "false")
+        .override_envs(extra_vars)
+        .override_env_opt(LayerConfig::FILE_PATH_ENV, config_path)
+        .strict_env(true);
     let config = LayerConfig::resolve(&mut cfg_context).unwrap();
 
     [
@@ -1391,10 +1390,6 @@ pub fn get_env(
         ),
     ]
     .into_iter()
-    .chain(
-        extra_vars
-            .into_iter()
-            .map(|(key, value)| (key.to_string(), value.to_string())),
-    )
+    .chain(extra_vars_owned)
     .collect()
 }

@@ -221,8 +221,8 @@ mod tests {
         ),
     ) {
         let mut cfg_context = ConfigContext::default()
-            .override_env(MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV, include.0)
-            .override_env(MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV, exclude.0)
+            .override_env_opt(MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV, include.0)
+            .override_env_opt(MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV, exclude.0)
             .strict_env(true);
         let env = EnvFileConfig::default()
             .generate_config(&mut cfg_context)
@@ -244,8 +244,8 @@ mod tests {
         ),
     ) {
         let mut cfg_context = ConfigContext::default()
-            .override_env(MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV, include.0)
-            .override_env(MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV, exclude.0)
+            .override_env_opt(MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV, include.0)
+            .override_env_opt(MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV, exclude.0)
             .strict_env(true);
         let env = ToggleableConfig::<EnvFileConfig>::Enabled(false)
             .generate_config(&mut cfg_context)

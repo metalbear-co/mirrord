@@ -35,15 +35,9 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch)
     let progress = ProgressTracker::try_from_env("mirrord preparing to launch")
         .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
 
-    let mut cfg_context = ConfigContext::default();
-
-    if let Some(config_file) = args.config_file {
-        cfg_context = cfg_context.override_env(LayerConfig::FILE_PATH_ENV, Some(config_file));
-    }
-
-    if let Some(target) = args.target.as_ref() {
-        cfg_context = cfg_context.override_env("MIRRORD_IMPERSONATED_TARGET", Some(target));
-    }
+    let mut cfg_context = ConfigContext::default()
+        .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file)
+        .override_env_opt("MIRRORD_IMPERSONATED_TARGET", args.target);
 
     let config = LayerConfig::resolve(&mut cfg_context)?;
 
