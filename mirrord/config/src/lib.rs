@@ -629,7 +629,9 @@ impl LayerFileConfig {
 }
 
 /// Returns a default randomized path for proxy logs.
-pub fn default_proxy_logfile_path(prefix: &str) -> PathBuf {
+///
+/// `prefix` can be passed to distinguish between intproxy and extproxy logs.
+fn default_proxy_logfile_path(prefix: &str) -> PathBuf {
     let random_name: String = Alphanumeric.sample_string(&mut rand::rng(), 7);
     let timestamp = SystemTime::UNIX_EPOCH
         .elapsed()

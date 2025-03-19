@@ -80,7 +80,8 @@ pub struct ExternalProxyConfig {
 
     /// ### external_proxy.log_destination {#external_proxy-log_destination}
     /// Set the log file destination for the external proxy.
-    pub log_destination: Option<PathBuf>,
+    #[config(default = crate::default_proxy_logfile_path("mirrord-extproxy"))]
+    pub log_destination: PathBuf,
 
     /// ### external_proxy.json_log {#external_proxy-json_log}
     ///
