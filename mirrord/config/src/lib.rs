@@ -608,6 +608,7 @@ impl CollectAnalytics for &LayerConfig {
             analytics.add("accept_invalid_certificates", value);
         };
         analytics.add("use_kubeconfig", self.kubeconfig.is_some());
+        analytics.add("use_profile", self.profile.is_some());
         (&self.target).collect_analytics(analytics);
         (&self.agent).collect_analytics(analytics);
         (&self.feature).collect_analytics(analytics);

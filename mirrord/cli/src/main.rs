@@ -350,7 +350,8 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
 
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
     let config_file_path = cfg_context.get_env(LayerConfig::FILE_PATH_ENV).ok();
-    let config = LayerConfig::resolve(&mut cfg_context)?;
+    let mut config = LayerConfig::resolve(&mut cfg_context)?;
+    crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
     (&config).collect_analytics(analytics.get_mut());
@@ -442,7 +443,8 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
         )
         .override_env_opt("MIRRORD_KUBE_CONTEXT", args.context.as_ref())
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.as_ref());
-    let config = LayerConfig::resolve(&mut cfg_context)?;
+    let mut config = LayerConfig::resolve(&mut cfg_context)?;
+    crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
     let mut analytics = AnalyticsReporter::new(config.telemetry, ExecutionKind::PortForward, watch);
     (&config).collect_analytics(analytics.get_mut());

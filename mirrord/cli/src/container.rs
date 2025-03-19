@@ -60,12 +60,13 @@ fn get_mirrord_console_addr() -> Option<String> {
 /// Uses [`ExecutionKind::Container`] to create the [`AnalyticsReporter`].
 ///
 /// Uses the given `progress` to pass warnings from [`LayerConfig`] verification.
-fn create_config_and_analytics<P: Progress>(
+async fn create_config_and_analytics<P: Progress>(
     progress: &mut P,
     mut cfg_context: ConfigContext,
     watch: drain::Watch,
 ) -> CliResult<(LayerConfig, AnalyticsReporter)> {
-    let config = LayerConfig::resolve(&mut cfg_context)?;
+    let mut config = LayerConfig::resolve(&mut cfg_context)?;
+    crate::profile::apply_profile_if_configured(&mut config, progress).await?;
 
     // Initialize only error analytics, extproxy will be the full AnalyticsReporter.
     let analytics =
@@ -171,7 +172,8 @@ pub async fn container_command(
     progress.warning("mirrord container is currently an unstable feature");
 
     let cfg_context = ConfigContext::default().override_envs(exec_params.as_env_vars());
-    let (config, mut analytics) = create_config_and_analytics(&mut progress, cfg_context, watch)?;
+    let (config, mut analytics) =
+        create_config_and_analytics(&mut progress, cfg_context, watch).await?;
 
     let (runtime_command, _execution_info, _tls_setup) =
         prepare_proxies(&mut analytics, &progress, &config, runtime_args.runtime).await?;
@@ -225,7 +227,8 @@ pub async fn container_ext_command(
     let cfg_context = ConfigContext::default()
         .override_env_opt(LayerConfig::FILE_PATH_ENV, config_file)
         .override_env_opt("MIRRORD_IMPERSONATED_TARGET", target);
-    let (config, mut analytics) = create_config_and_analytics(&mut progress, cfg_context, watch)?;
+    let (config, mut analytics) =
+        create_config_and_analytics(&mut progress, cfg_context, watch).await?;
 
     let container_runtime = std::env::var("MIRRORD_CONTAINER_USE_RUNTIME")
         .ok()

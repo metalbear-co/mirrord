@@ -3,6 +3,7 @@
 //! `path`. It's used by the IDE plugins to display errors/warnings quickly, without having to start
 //! mirrord-layer.
 use error::CliResult;
+use futures::TryFutureExt;
 use mirrord_config::{
     config::ConfigContext,
     feature::FeatureConfig,
@@ -13,9 +14,10 @@ use mirrord_config::{
     },
     LayerConfig,
 };
+use mirrord_progress::NullProgress;
 use serde::Serialize;
 
-use crate::{config::VerifyConfigArgs, error};
+use crate::{config::VerifyConfigArgs, error, CliError};
 
 /// Practically the same as [`Target`], but differs in the way the `targetless` option is
 /// serialized. [`Target::Targetless`] serializes as `null`, [`VerifiedTarget::Targetless`]
@@ -227,10 +229,17 @@ pub(super) async fn verify_config(
         .empty_target_final(ide)
         .override_env(LayerConfig::FILE_PATH_ENV, path);
 
-    let layer_config = LayerConfig::resolve(&mut config_context).and_then(|config| {
-        config.verify(&mut config_context)?;
-        Ok(config)
-    });
+    let layer_config =
+        std::future::ready(LayerConfig::resolve(&mut config_context).map_err(CliError::from))
+            .and_then(|mut config| async {
+                crate::profile::apply_profile_if_configured(&mut config, &NullProgress).await?;
+                Ok(config)
+            })
+            .and_then(|config| async {
+                config.verify(&mut config_context)?;
+                Ok(config)
+            })
+            .await;
 
     let verified = match layer_config {
         Ok(config) => VerifiedConfig::Success {
