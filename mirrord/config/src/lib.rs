@@ -228,6 +228,11 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_OPERATOR_ENABLE")]
     pub operator: Option<bool>,
 
+    /// ## profile {#root-profile}
+    ///
+    /// Name of the mirrord profile to use.
+    pub profile: Option<String>,
+
     /// ## kubeconfig {#root-kubeconfig}
     ///
     /// Path to a kubeconfig file, if not specified, will use `KUBECONFIG`, or `~/.kube/config`, or
@@ -948,6 +953,7 @@ mod tests {
             }),
             container: None,
             operator: None,
+            profile: None,
             sip_binaries: None,
             kube_context: None,
             external_proxy: None,
