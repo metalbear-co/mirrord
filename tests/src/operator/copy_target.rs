@@ -12,7 +12,7 @@ pub async fn copy_target_starts_a_working_copy(
     #[future]
     #[notrace]
     service: KubeService,
-    #[values(Application::NodeHTTP)] application: Application,
+    #[values(Application::CopyTargetStartsAWorkingCopy)] application: Application,
     #[values("pod", "deployment")] target: &str,
 ) {
     let service = service.await;
@@ -39,9 +39,6 @@ pub async fn copy_target_starts_a_working_copy(
         .wait_for_line(Duration::from_secs(40), "daemon subscribed")
         .await;
 
-    test_proc.child.kill().await.unwrap();
-
     test_proc.assert_no_error_in_stdout().await;
-
-    println!("OUT: \n{}", test_proc.get_stdout().await);
+    test_proc.wait_assert_success().await;
 }

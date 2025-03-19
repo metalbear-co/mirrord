@@ -73,6 +73,7 @@ pub enum Application {
     PythonFastApiHTTP,
     PythonFastApiHTTPIPv6,
     NodeHTTP,
+    CopyTargetStartsAWorkingCopy,
     NodeHTTP2,
     /// Can run as both HTTP and HTTPS server, listens on port 80.
     ///
@@ -465,6 +466,9 @@ impl Application {
                 ]
             }
             Application::NodeHTTP => vec!["node", "node-e2e/app.mjs"],
+            Application::CopyTargetStartsAWorkingCopy => {
+                vec!["node", "node-e2e/copy_target_starts_a_working_copy.mjs"]
+            }
             Application::NodeHTTP2 => {
                 vec!["node", "node-e2e/http2/test_http2_traffic_steal.mjs"]
             }
