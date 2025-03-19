@@ -366,7 +366,7 @@ impl MirrordExecution {
     ///
     /// # Returns
     ///
-    /// Apart from the proxy handle, returns external proxy address as well.
+    /// Returns the proxy handle as well as the external proxy address.
     /// The address should be accessible from the internal proxy sidecar.
     ///
     /// Returned [`MirrordExecution::environment`] contains *only* remote environment.

@@ -281,7 +281,7 @@ impl fmt::Debug for SidecarLogs {
 ///
 /// Ensures that the first line of output is not empty.
 ///
-/// Respects a 30 second timeout when waiting the command's output.
+/// Respects a 30 second timeout when waiting for the command's output.
 #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))]
 async fn exec_and_get_first_line(mut command: Command) -> Result<String, IntproxySidecarError> {
     let result = tokio::time::timeout(
