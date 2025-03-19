@@ -1,4 +1,6 @@
 #![cfg(test)]
+#![cfg(feature = "operator")]
+//! Test the copy-target features with an operator.
 
 use std::time::Duration;
 
@@ -6,6 +8,9 @@ use rstest::*;
 
 use crate::utils::{config_dir, service, Application, KubeService};
 
+/// Starts mirrord with the `copy-target` feature just to validate that it can create a
+/// working copy-pod. Should work as a sanity check that the targets (see `target` parameter)
+/// don't create failed copy-pods due to some incorrect pod spec.
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub async fn copy_target_starts_a_working_copy(
