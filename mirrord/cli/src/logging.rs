@@ -69,7 +69,7 @@ pub async fn init_tracing_registry(
 /// However, it allows us to use some nice tools, like [hl](https://github.com/pamburus/hl).
 fn init_proxy_tracing_registry(
     log_destination: &Path,
-    log_level: Option<&str>,
+    log_level: &str,
     json_log: bool,
 ) -> std::io::Result<()> {
     if std::env::var("MIRRORD_CONSOLE_ADDR").is_ok() {
@@ -81,9 +81,7 @@ fn init_proxy_tracing_registry(
         .append(true)
         .open(log_destination)?;
 
-    let env_filter = log_level
-        .map(|log_level| EnvFilter::builder().parse_lossy(log_level))
-        .unwrap_or_else(EnvFilter::from_default_env);
+    let env_filter = EnvFilter::builder().parse_lossy(log_level);
 
     let fmt_layer_base = tracing_subscriber::fmt::layer()
         .with_ansi(false)
@@ -110,7 +108,7 @@ pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), Intern
         let log_destination = &config.internal_proxy.log_destination;
         init_proxy_tracing_registry(
             &log_destination,
-            config.internal_proxy.log_level.as_deref(),
+            &config.internal_proxy.log_level,
             config.internal_proxy.json_log,
         )
         .map_err(|fail| {
@@ -120,12 +118,7 @@ pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), Intern
         // When the intproxy runs in a sidecar container, it logs directly to stderr.
         // The logs are then piped to the log file on the host.
 
-        let env_filter = config
-            .internal_proxy
-            .log_level
-            .as_ref()
-            .map(|log_level| EnvFilter::builder().parse_lossy(log_level))
-            .unwrap_or_else(EnvFilter::from_default_env);
+        let env_filter = EnvFilter::builder().parse_lossy(&config.internal_proxy.log_level);
 
         let fmt_layer_base = tracing_subscriber::fmt::layer()
             .with_ansi(false)
@@ -151,7 +144,7 @@ pub fn init_extproxy_tracing_registry(config: &LayerConfig) -> Result<(), Extern
     let log_destination = &config.external_proxy.log_destination;
     init_proxy_tracing_registry(
         log_destination,
-        config.external_proxy.log_level.as_deref(),
+        &config.external_proxy.log_level,
         config.external_proxy.json_log,
     )
     .map_err(|fail| {

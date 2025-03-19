@@ -72,14 +72,20 @@ pub struct ExternalProxyConfig {
     pub idle_timeout: u64,
 
     /// ### external_proxy.log_level {#external_proxy-log_level}
-    /// Sets the log level for the external proxy.
     ///
-    /// Follows the `RUST_LOG` convention (i.e `mirrord=trace`), and will only be used if
-    /// `external_proxy.log_destination` is set
-    pub log_level: Option<String>,
+    /// Set the log level for the external proxy.
+    ///
+    /// The value should follow the RUST_LOG convention (i.e `mirrord=trace`).
+    ///
+    /// Defaults to `mirrord=info,warn`.
+    #[config(default = "mirrord=info,warn")]
+    pub log_level: String,
 
     /// ### external_proxy.log_destination {#external_proxy-log_destination}
+    ///
     /// Set the log file destination for the external proxy.
+    ///
+    /// Defaults to a randomized path inside the temporary directory.
     #[config(default = crate::default_proxy_logfile_path("mirrord-extproxy"))]
     pub log_destination: PathBuf,
 
@@ -87,6 +93,8 @@ pub struct ExternalProxyConfig {
     ///
     /// Whether the proxy should output logs in JSON format. If false, logs are output in
     /// human-readable format.
+    ///
+    /// Defaults to true.
     #[config(default = true)]
     pub json_log: bool,
 }
