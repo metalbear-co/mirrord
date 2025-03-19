@@ -8,6 +8,41 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.135.0](https://github.com/metalbear-co/mirrord/tree/3.135.0) - 2025-03-18
+
+
+### Added
+
+- mirrord now issues a warning when the user's config allows for
+  stealing health checks from the target.
+  [#3121](https://github.com/metalbear-co/mirrord/issues/3121)
+
+
+### Changed
+
+- `502 Bad Gateway` responses returned by the mirrord-agent now contain the
+  source error.
+
+
+### Fixed
+
+- Added missing `PodTemplate` permissions to the `ClusterRole` produced by
+  `mirrord operator setup`.
+- Fixed a bug where mirrord was producing a malformed `credentials` file.
+- Fixed a bug where mirrord was unable to target Argo Rollouts with both
+  `workloadRef`s and `selector`s.
+
+
+### Internal
+
+- Fixed one of the test applications used in the E2E tests.
+- Pinned `ziglang` version to `0.13.0.post1` in the CI due to compilation
+  failure.
+- Updated every JSON schema used our CRDs to use a k8s style
+  namespacing for schema names for better compliance with openapi.
+- Updated some dependencies.
+- Switched to our own forks of some GitHub Actions.
+
 ## [3.134.2](https://github.com/metalbear-co/mirrord/tree/3.134.2) - 2025-03-06
 
 
