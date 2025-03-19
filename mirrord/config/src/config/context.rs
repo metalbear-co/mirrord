@@ -23,8 +23,6 @@ pub struct ConfigContext {
     env_override: HashMap<OsString, OsString>,
 
     /// If true, use only [`Self::env_override`] strictly without [`mod@std::env`].
-    ///
-    /// Any variable not present in [`Self::env_override`] will be considered not present.
     strict_env: bool,
 
     /// Warnings collected during config verification.
