@@ -598,6 +598,15 @@ impl LayerConfig {
             );
         }
 
+        if let (Some(profile), true) = (&self.profile, context.has_warnings()) {
+            // It might be that the user config is fine,
+            // but the mirrord profile introduced changes that triggered the warnings.
+            context.add_warning(format!(
+                "Config verification was done after applying mirrord profile `{profile}`. \
+                You can inspect the profile with `kubectl get mirrordprofile {profile} -o yaml`.",
+            ));
+        }
+
         Ok(())
     }
 }
