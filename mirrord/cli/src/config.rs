@@ -355,7 +355,18 @@ pub(super) struct ExecArgs {
 pub(super) struct TargetParams {
     /// Name of the target to mirror.
     ///
-    /// Valid formats: deployment/name, pod/name, pod/name/container/name, ...
+    /// Valid formats:
+    /// - `targetless`
+    /// - `pod/{pod-name}[/container/{container-name}]`
+    /// - `deployment/{deployment-name}[/container/{container-name}]`
+    /// - `rollout/{rollout-name}[/container/{container-name}]`
+    /// - `job/{job-name}[/container/{container-name}]`
+    /// - `cronjob/{cronjob-name}[/container/{container-name}]`
+    /// - `statefulset/{statefulset-name}[/container/{container-name}]`
+    /// - `service/{service-name}[/container/{container-name}]`
+    /// - `replicaset/{replicaset-name}[/container/{container-name}]`
+    ///
+    /// E.g `pod/my-pod/container/my-container`.
     #[arg(short = 't', long)]
     pub target: Option<String>,
 
