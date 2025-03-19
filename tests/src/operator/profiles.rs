@@ -16,7 +16,7 @@ use crate::utils::{
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(120))]
-pub async fn create_cluster_policy_and_try_to_mirror(
+pub async fn mirrord_profile_enforces_stealing(
     #[future] kube_client: kube::Client,
     #[future] service: KubeService,
 ) {
@@ -30,7 +30,7 @@ pub async fn create_cluster_policy_and_try_to_mirror(
     let (_profile_guard, profile_name) = {
         let profile = MirrordProfile {
             metadata: ObjectMeta {
-                generate_name: Some("test-profile-".into()),
+                name: Some(format!("test-profile-{}", service.name)),
                 ..Default::default()
             },
             spec: MirrordProfileSpec {
