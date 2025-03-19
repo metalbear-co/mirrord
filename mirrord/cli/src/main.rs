@@ -56,6 +56,7 @@ mod list;
 mod logging;
 mod operator;
 mod port_forward;
+mod profile;
 mod teams;
 mod util;
 mod verify_config;
