@@ -426,9 +426,14 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
         .override_env_opt("MIRRORD_TELEMETRY", args.no_telemetry.then_some("false"))
         .override_env_opt(
             "MIRRORD_ACCEPT_INVALID_CERTIFICATES",
-            args.accept_invalid_certificates
-                .as_ref()
-                .map(ToString::to_string),
+            args.accept_invalid_certificates.map(|accept| {
+                if accept {
+                    warn!("Accepting invalid certificates");
+                    "true"
+                } else {
+                    "false"
+                }
+            }),
         )
         .override_env_opt("MIRRORD_KUBE_CONTEXT", args.context.as_ref())
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.as_ref());
