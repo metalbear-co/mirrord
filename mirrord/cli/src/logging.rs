@@ -1,4 +1,4 @@
-use std::{borrow::Cow, fs::OpenOptions, future::Future, path::Path};
+use std::{borrow::Cow, fs::OpenOptions, future::Future, ops::Not, path::Path};
 
 use futures::StreamExt;
 use mirrord_config::LayerConfig;
@@ -93,7 +93,7 @@ fn init_proxy_tracing_registry(
     let fmt_layer = if json_log {
         fmt_layer_base.json().boxed()
     } else {
-        fmt_layer_base.boxed()
+        fmt_layer_base.pretty().boxed()
     };
 
     tracing_subscriber::registry()
@@ -105,7 +105,7 @@ fn init_proxy_tracing_registry(
 }
 
 pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), InternalProxyError> {
-    if !config.internal_proxy.container_mode {
+    if crate::util::intproxy_container_mode().not() {
         // When the intproxy does not run in a sidecar container, it logs to file.
 
         let log_destination = config
@@ -138,13 +138,20 @@ pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), Intern
             .map(|log_level| EnvFilter::builder().parse_lossy(log_level))
             .unwrap_or_else(EnvFilter::from_default_env);
 
-        tracing_subscriber::fmt()
-            .with_writer(std::io::stderr)
+        let fmt_layer_base = tracing_subscriber::fmt::layer()
             .with_ansi(false)
-            .with_env_filter(env_filter)
             .with_file(true)
             .with_line_number(true)
-            .pretty()
+            .with_writer(std::io::stderr);
+        let fmt_layer = if config.internal_proxy.json_log {
+            fmt_layer_base.json().boxed()
+        } else {
+            fmt_layer_base.pretty().boxed()
+        };
+
+        tracing_subscriber::registry()
+            .with(fmt_layer)
+            .with(env_filter)
             .init();
 
         Ok(())

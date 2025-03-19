@@ -1,30 +1,20 @@
-use std::{fs::File, path::Path};
+use std::fs::File;
 
 use futures::TryFutureExt;
-use kube::{Api, Client};
-use mirrord_config::{
-    config::{ConfigContext, MirrordConfig},
-    LayerConfig, LayerFileConfig,
-};
-use mirrord_kube::api::kubernetes::create_kube_config;
-use mirrord_operator::{
-    crd::MirrordOperatorCrd,
-    setup::{LicenseType, Operator, OperatorSetup, SetupOptions},
-};
+use mirrord_operator::setup::{LicenseType, Operator, OperatorSetup, SetupOptions};
 use serde::Deserialize;
 use status::StatusCommandHandler;
 use tokio::fs;
-use tracing::{warn, Level};
 
 use self::session::SessionCommandHandler;
 use crate::{
     config::{OperatorArgs, OperatorCommand},
     error::{CliError, OperatorSetupError},
-    util::remove_proxy_env,
     CliResult, OperatorSetupParams,
 };
 
 mod session;
+pub(super) mod status;
 
 #[derive(Deserialize)]
 struct OperatorVersionResponse {
@@ -68,7 +58,7 @@ async fn operator_setup(
         (_, Some(license_path)) => fs::read_to_string(&license_path)
             .await
             .inspect_err(|err| {
-                warn!(
+                tracing::warn!(
                     "Unable to read license at path {}: {err}",
                     license_path.display()
                 )
@@ -119,33 +109,6 @@ async fn operator_setup(
 
     Ok(())
 }
-
-#[tracing::instrument(level = Level::TRACE, ret)]
-async fn get_status_api(config: Option<&Path>) -> CliResult<Api<MirrordOperatorCrd>> {
-    let layer_config = if let Some(config) = config {
-        let mut cfg_context = ConfigContext::default();
-        LayerFileConfig::from_path(config)?.generate_config(&mut cfg_context)?
-    } else {
-        LayerConfig::from_env()?
-    };
-
-    if !layer_config.use_proxy {
-        remove_proxy_env();
-    }
-
-    let client = create_kube_config(
-        layer_config.accept_invalid_certificates,
-        layer_config.kubeconfig,
-        layer_config.kube_context,
-    )
-    .await
-    .and_then(|config| Client::try_from(config).map_err(From::from))
-    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
-
-    Ok(Api::all(client))
-}
-
-pub(super) mod status;
 
 /// Handle commands related to the operator `mirrord operator ...`
 pub(crate) async fn operator_command(args: OperatorArgs) -> CliResult<()> {

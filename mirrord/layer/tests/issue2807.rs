@@ -48,11 +48,7 @@ async fn test_issue2807_with_ipv6_ignore(
         .expect("failed to saving layer config to tmp file");
 
     let (mut test_process, intproxy) = application
-        .start_process_with_layer(
-            dylib_path,
-            Default::default(),
-            Some(config_path.to_str().unwrap()),
-        )
+        .start_process_with_layer(dylib_path, Default::default(), Some(&config_path))
         .await;
 
     let handle = tokio::spawn(handle_port_subscriptions(intproxy));

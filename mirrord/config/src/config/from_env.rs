@@ -1,7 +1,7 @@
 use core::fmt;
 use std::{marker::PhantomData, str::FromStr};
 
-use super::ConfigContext;
+use super::context::ConfigContext;
 use crate::config::{source::MirrordConfigSource, ConfigError, Result};
 
 #[derive(Clone)]
@@ -24,8 +24,8 @@ where
     /// - `None` if there is no env var with that name.
     /// - `Some(Err(ConfigError::InvalidValue{...}))` if the value of the env var cannot be parsed.
     /// - `Some(Ok(...))` if the env var exists and was parsed successfully.
-    fn source_value(self, _context: &mut ConfigContext) -> Option<Result<Self::Value>> {
-        std::env::var(self.0).ok().map(|var| {
+    fn source_value(self, context: &mut ConfigContext) -> Option<Result<Self::Value>> {
+        context.get_env(self.0).ok().map(|var| {
             var.parse::<Self::Value>()
                 .map_err(|err| ConfigError::InvalidValue {
                     name: self.0,
@@ -56,8 +56,8 @@ where
 {
     type Value = T;
 
-    fn source_value(self, _context: &mut ConfigContext) -> Option<Result<Self::Value>> {
-        std::env::var(self.0).ok().map(|var| var.parse())
+    fn source_value(self, context: &mut ConfigContext) -> Option<Result<Self::Value>> {
+        context.get_env(self.0).ok().map(|var| var.parse())
     }
 }
 
@@ -66,17 +66,16 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::util::testing::with_env_vars;
 
     #[rstest]
     fn basic() {
-        with_env_vars(vec![("TEST_VALUE", Some("13"))], || {
-            let mut cfg_context = ConfigContext::default();
-            let value = FromEnv::<i32>::new("TEST_VALUE");
+        let mut cfg_context = ConfigContext::default()
+            .override_env("TEST_VALUE", "13")
+            .strict_env(true);
+        let value = FromEnv::<i32>::new("TEST_VALUE");
+        assert_eq!(value.source_value(&mut cfg_context).unwrap().unwrap(), 13);
 
-            assert_eq!(value.source_value(&mut cfg_context).unwrap().unwrap(), 13);
-        });
-        let mut cfg_context = ConfigContext::default();
+        let mut cfg_context = ConfigContext::default().strict_env(true);
         let value = FromEnv::<i32>::new("TEST_VALUE");
         assert!(value.source_value(&mut cfg_context).is_none());
     }

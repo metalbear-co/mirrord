@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf};
+use std::path::PathBuf;
 
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -6,11 +6,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::source::MirrordConfigSource;
 
-pub static MIRRORD_INTPROXY_CONNECT_TCP_ENV: &str = "MIRRORD_INTPROXY_CONNECT_TCP";
-pub static MIRRORD_INTPROXY_CONTAINER_MODE_ENV: &str = "MIRRORD_INTPROXY_CONTAINER_MODE";
-pub static MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE_ENV: &str =
-    "MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE";
-pub static MIRRORD_INTPROXY_CLIENT_TLS_KEY_ENV: &str = "MIRRORD_INTPROXY_CLIENT_TLS_KEY";
+/// Environment variable we use to notify the internal proxy that it runs in a sidecar container.
+///
+/// If the internal proxy runs as a sidecar container, this variable should be set to `true`.
+///
+/// This affects how the internal proxy reads the [`LayerConfig`](crate::LayerConfig)
+/// and handles logs.
+pub const MIRRORD_INTPROXY_CONTAINER_MODE_ENV: &str = "MIRRORD_INTPROXY_CONTAINER_MODE";
 
 /// Configuration for the internal proxy mirrord spawns for each local mirrord session
 /// that local layers use to connect to the remote agent
@@ -30,26 +32,6 @@ pub static MIRRORD_INTPROXY_CLIENT_TLS_KEY_ENV: &str = "MIRRORD_INTPROXY_CLIENT_
 #[config(map_to = "InternalProxyFileConfig", derive = "JsonSchema")]
 #[cfg_attr(test, config(derive = "PartialEq"))]
 pub struct InternalProxyConfig {
-    /// <!--${internal}-->
-    ///
-    /// Address of external proxy to be used in `mirrord container`
-    #[config(env = MIRRORD_INTPROXY_CONNECT_TCP_ENV)]
-    pub connect_tcp: Option<SocketAddr>,
-
-    /// <!--${internal}-->
-    ///
-    /// Certificate to use as tls client credentials for connection to `connect_tcp`.
-    /// (self-signed one will be generated automaticaly if not specified)
-    #[config(env = MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE_ENV)]
-    pub client_tls_certificate: Option<PathBuf>,
-
-    /// <!--${internal}-->
-    ///
-    /// Private Key to use as tls client credentials for connection to `connect_tcp`.
-    /// (self-signed one will be generated automaticaly if not specified)
-    #[config(env = MIRRORD_INTPROXY_CLIENT_TLS_KEY_ENV)]
-    pub client_tls_key: Option<PathBuf>,
-
     /// ### internal_proxy.start_idle_timeout {#internal_proxy-start_idle_timeout}
     ///
     /// How much time to wait for the first connection to the proxy in seconds.
@@ -112,12 +94,6 @@ pub struct InternalProxyConfig {
     ///
     /// Set the log file destination for the internal proxy.
     pub log_destination: Option<PathBuf>,
-
-    /// <!--${internal}-->
-    ///
-    /// This informs the intproxy that it's running inside a continer and should not detach io
-    #[config(default = false, env = MIRRORD_INTPROXY_CONTAINER_MODE_ENV)]
-    pub container_mode: bool,
 
     /// ### internal_proxy.json_log {#internal_proxy-json_log}
     ///

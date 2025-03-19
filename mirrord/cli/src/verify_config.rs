@@ -4,17 +4,18 @@
 //! mirrord-layer.
 use error::CliResult;
 use mirrord_config::{
-    config::{ConfigContext, MirrordConfig},
+    config::ConfigContext,
     feature::FeatureConfig,
     target::{
         cron_job::CronJobTarget, deployment::DeploymentTarget, job::JobTarget, pod::PodTarget,
         replica_set::ReplicaSetTarget, rollout::RolloutTarget, service::ServiceTarget,
         stateful_set::StatefulSetTarget, Target, TargetConfig,
     },
+    LayerConfig,
 };
 use serde::Serialize;
 
-use crate::{config::VerifyConfigArgs, error, LayerFileConfig};
+use crate::{config::VerifyConfigArgs, error};
 
 /// Practically the same as [`Target`], but differs in the way the `targetless` option is
 /// serialized. [`Target::Targetless`] serializes as `null`, [`VerifiedTarget::Targetless`]
@@ -222,19 +223,19 @@ enum VerifiedConfig {
 pub(super) async fn verify_config(
     VerifyConfigArgs { ide, path }: VerifyConfigArgs,
 ) -> CliResult<()> {
-    let mut config_context = ConfigContext::new(ide);
+    let mut config_context = ConfigContext::default()
+        .empty_target_final(ide)
+        .override_env(LayerConfig::FILE_PATH_ENV, path);
 
-    let layer_config = LayerFileConfig::from_path(path)
-        .and_then(|config| config.generate_config(&mut config_context))
-        .and_then(|config| {
-            config.verify(&mut config_context)?;
-            Ok(config)
-        });
+    let layer_config = LayerConfig::resolve(&mut config_context).and_then(|config| {
+        config.verify(&mut config_context)?;
+        Ok(config)
+    });
 
     let verified = match layer_config {
         Ok(config) => VerifiedConfig::Success {
             config: config.target.into(),
-            warnings: config_context.get_warnings().to_owned(),
+            warnings: config_context.into_warnings(),
             compatible_target_types: TargetType::all()
                 .filter(|tt| tt.compatible_with(&config.feature))
                 .collect(),

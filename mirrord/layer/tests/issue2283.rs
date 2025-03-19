@@ -25,14 +25,13 @@ async fn test_issue2283(
     dylib_path: &Path,
     config_dir: &Path,
 ) {
-    let mut config_path = config_dir.to_path_buf();
-    config_path.push("outgoing_filter_local_not_existing_host.json");
+    let config_path = config_dir.join("outgoing_filter_local_not_existing_host.json");
 
     let (mut test_process, mut intproxy) = application
         .start_process_with_layer(
             dylib_path,
             vec![("MIRRORD_REMOTE_DNS", "true")],
-            Some(config_path.to_str().unwrap()),
+            Some(&config_path),
         )
         .await;
 

@@ -209,10 +209,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::{
-        config::MirrordConfig,
-        util::{testing::with_env_vars, ToggleableConfig},
-    };
+    use crate::{config::MirrordConfig, util::ToggleableConfig};
 
     #[rstest]
     fn default(
@@ -223,21 +220,16 @@ mod tests {
             Option<&str>,
         ),
     ) {
-        with_env_vars(
-            vec![
-                (MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV, include.0),
-                (MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV, exclude.0),
-            ],
-            || {
-                let mut cfg_context = ConfigContext::default();
-                let env = EnvFileConfig::default()
-                    .generate_config(&mut cfg_context)
-                    .unwrap();
+        let mut cfg_context = ConfigContext::default()
+            .override_env_opt(MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV, include.0)
+            .override_env_opt(MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV, exclude.0)
+            .strict_env(true);
+        let env = EnvFileConfig::default()
+            .generate_config(&mut cfg_context)
+            .unwrap();
 
-                assert_eq!(env.include.map(|vec| vec.join(";")).as_deref(), include.1);
-                assert_eq!(env.exclude.map(|vec| vec.join(";")).as_deref(), exclude.1);
-            },
-        );
+        assert_eq!(env.include.map(|vec| vec.join(";")).as_deref(), include.1);
+        assert_eq!(env.exclude.map(|vec| vec.join(";")).as_deref(), exclude.1);
     }
 
     #[rstest]
@@ -251,20 +243,15 @@ mod tests {
             Option<&str>,
         ),
     ) {
-        with_env_vars(
-            vec![
-                (MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV, include.0),
-                (MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV, exclude.0),
-            ],
-            || {
-                let mut cfg_context = ConfigContext::default();
-                let env = ToggleableConfig::<EnvFileConfig>::Enabled(false)
-                    .generate_config(&mut cfg_context)
-                    .unwrap();
+        let mut cfg_context = ConfigContext::default()
+            .override_env_opt(MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV, include.0)
+            .override_env_opt(MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV, exclude.0)
+            .strict_env(true);
+        let env = ToggleableConfig::<EnvFileConfig>::Enabled(false)
+            .generate_config(&mut cfg_context)
+            .unwrap();
 
-                assert_eq!(env.include.map(|vec| vec.join(";")).as_deref(), include.1);
-                assert_eq!(env.exclude.map(|vec| vec.join(";")).as_deref(), exclude.1);
-            },
-        );
+        assert_eq!(env.include.map(|vec| vec.join(";")).as_deref(), include.1);
+        assert_eq!(env.exclude.map(|vec| vec.join(";")).as_deref(), exclude.1);
     }
 }

@@ -1,6 +1,6 @@
 use k8s_openapi::api::core::v1::ConfigMap;
 use mirrord_analytics::{AnalyticsError, NullReporter, Reporter};
-use mirrord_config::{LayerConfig, MIRRORD_CONFIG_FILE_ENV};
+use mirrord_config::{config::ConfigContext, LayerConfig};
 use mirrord_kube::api::kubernetes::create_kube_config;
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_vpn::{agent::VpnAgent, config::VpnConfig, tunnel::VpnTunnel};
@@ -12,21 +12,14 @@ use crate::{
     error::{CliError, CliResult},
 };
 
-#[allow(clippy::indexing_slicing)]
 pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord vpn");
-
     let mut analytics = NullReporter::default();
 
-    if let Some(config_path) = args.config_file {
-        std::env::set_var(MIRRORD_CONFIG_FILE_ENV, config_path);
-    }
-
-    if let Some(namespace) = args.namespace {
-        std::env::set_var(MIRRORD_CONFIG_FILE_ENV, namespace);
-    }
-
-    let mut config = LayerConfig::from_env()?;
+    let mut cfg_context = ConfigContext::default()
+        .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file)
+        .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace);
+    let mut config = LayerConfig::resolve(&mut cfg_context)?;
     config.agent.privileged = true;
 
     let client = create_kube_config(

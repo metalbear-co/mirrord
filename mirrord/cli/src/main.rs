@@ -21,6 +21,7 @@ use mirrord_analytics::{
     AnalyticsError, AnalyticsReporter, CollectAnalytics, ExecutionKind, Reporter,
 };
 use mirrord_config::{
+    config::ConfigContext,
     feature::{
         fs::FsModeConfig,
         network::{
@@ -28,7 +29,7 @@ use mirrord_config::{
             incoming::IncomingMode,
         },
     },
-    LayerConfig, LayerFileConfig, MIRRORD_CONFIG_FILE_ENV,
+    LayerConfig,
 };
 use mirrord_intproxy::agent_conn::{AgentConnection, AgentConnectionError};
 use mirrord_progress::{messages::EXEC_CONTAINER_BINARY, Progress, ProgressTracker};
@@ -64,7 +65,7 @@ pub(crate) use error::{CliError, CliResult};
 use verify_config::verify_config;
 
 async fn exec_process<P>(
-    mut config: LayerConfig,
+    config: LayerConfig,
     args: &ExecArgs,
     progress: &P,
     analytics: &mut AnalyticsReporter,
@@ -74,16 +75,14 @@ where
 {
     let mut sub_progress = progress.subtask("preparing to launch process");
 
-    #[cfg(target_os = "macos")]
-    let execution_info = MirrordExecution::start(
-        &mut config,
+    let execution_info = MirrordExecution::start_internal(
+        &config,
+        #[cfg(target_os = "macos")]
         Some(&args.binary),
         &mut sub_progress,
         analytics,
     )
     .await?;
-    #[cfg(not(target_os = "macos"))]
-    let execution_info = MirrordExecution::start(&mut config, &mut sub_progress, analytics).await?;
 
     // This is not being yielded, as this is not proper async, something along those lines.
     // We need an `await` somewhere in this function to drive our socket IO that happens
@@ -185,7 +184,7 @@ fn print_config<P>(
     } else {
         "mirrord will run without a target"
     };
-    let config_info = if let Ok(path) = std::env::var(MIRRORD_CONFIG_FILE_ENV) {
+    let config_info = if let Ok(path) = std::env::var(LayerConfig::FILE_PATH_ENV) {
         &format!("a configuration file was loaded from: {} ", path)[..]
     } else {
         "no configuration file was loaded"
@@ -352,21 +351,17 @@ async fn exec(args: &ExecArgs, watch: drain::Watch) -> CliResult<()> {
         warn!("TCP/UDP outgoing enabled without remote DNS might cause issues when local machine has IPv6 enabled but remote cluster doesn't")
     }
 
-    // set_var used here as mirrord needs these values
-    for (name, value) in args.params.as_env_vars()? {
-        std::env::set_var(name, value);
-    }
-
-    // LayerConfig must be created after setting relevant env vars
-    let (config, mut context) = LayerConfig::from_env_with_warnings()?;
+    let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
+    let config = LayerConfig::resolve(&mut cfg_context)?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
     (&config).collect_analytics(analytics.get_mut());
 
-    config.verify(&mut context)?;
-    for warning in context.get_warnings() {
-        progress.warning(warning);
+    let result = config.verify(&mut cfg_context);
+    for warning in cfg_context.into_warnings() {
+        progress.warning(&warning);
     }
+    result?;
 
     let execution_result = exec_process(config, args, &progress, &mut analytics).await;
 
@@ -425,75 +420,40 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
         prompt_outdated_version(&progress).await;
     }
 
-    for (name, value) in args.target.as_env_vars()? {
-        std::env::set_var(name, value);
-    }
-
-    if args.no_telemetry {
-        std::env::set_var("MIRRORD_TELEMETRY", "false");
-    }
-
-    if let Some(namespace) = &args.agent_namespace {
-        std::env::set_var("MIRRORD_AGENT_NAMESPACE", namespace.clone());
-    }
-
-    if let Some(log_level) = &args.agent_log_level {
-        std::env::set_var("MIRRORD_AGENT_RUST_LOG", log_level.clone());
-    }
-
-    if let Some(image) = &args.agent_image {
-        std::env::set_var("MIRRORD_AGENT_IMAGE", image.clone());
-    }
-
-    if let Some(agent_ttl) = &args.agent_ttl {
-        std::env::set_var("MIRRORD_AGENT_TTL", agent_ttl.to_string());
-    }
-    if let Some(agent_startup_timeout) = &args.agent_startup_timeout {
-        std::env::set_var(
-            "MIRRORD_AGENT_STARTUP_TIMEOUT",
-            agent_startup_timeout.to_string(),
-        );
-    }
-
-    if let Some(accept_invalid_certificates) = args.accept_invalid_certificates {
-        let value = if accept_invalid_certificates {
-            warn!("Accepting invalid certificates");
-            "true"
-        } else {
-            "false"
-        };
-
-        std::env::set_var("MIRRORD_ACCEPT_INVALID_CERTIFICATES", value);
-    }
-
-    if args.ephemeral_container {
-        std::env::set_var("MIRRORD_EPHEMERAL_CONTAINER", "true");
-    };
-
-    if let Some(context) = &args.context {
-        std::env::set_var("MIRRORD_KUBE_CONTEXT", context);
-    }
-
-    if let Some(config_file) = &args.config_file {
-        std::env::set_var("MIRRORD_CONFIG_FILE", config_file);
-    }
-
-    // LayerConfig must be created after setting relevant env vars
-    let (config, mut context) = LayerConfig::from_env_with_warnings()?;
+    let mut cfg_context = ConfigContext::default()
+        .override_envs(args.target.as_env_vars())
+        .override_envs(args.agent.as_env_vars())
+        .override_env_opt("MIRRORD_TELEMETRY", args.no_telemetry.then_some("false"))
+        .override_env_opt(
+            "MIRRORD_ACCEPT_INVALID_CERTIFICATES",
+            args.accept_invalid_certificates.map(|accept| {
+                if accept {
+                    warn!("Accepting invalid certificates");
+                    "true"
+                } else {
+                    "false"
+                }
+            }),
+        )
+        .override_env_opt("MIRRORD_KUBE_CONTEXT", args.context.as_ref())
+        .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.as_ref());
+    let config = LayerConfig::resolve(&mut cfg_context)?;
 
     let mut analytics = AnalyticsReporter::new(config.telemetry, ExecutionKind::PortForward, watch);
     (&config).collect_analytics(analytics.get_mut());
 
-    config.verify(&mut context)?;
-    for warning in context.get_warnings() {
-        progress.warning(warning);
+    let result = config.verify(&mut cfg_context);
+    for warning in cfg_context.into_warnings() {
+        progress.warning(&warning);
     }
+    result?;
+
     let (connection_info, connection) =
         create_and_connect(&config, &mut progress, &mut analytics).await?;
 
     // errors from AgentConnection::new get mapped to CliError manually to prevent unreadably long
     // error print-outs
-    let agent_conn = AgentConnection::new(&config, Some(connection_info), &mut analytics)
+    let agent_conn = AgentConnection::new(&config, connection_info, &mut analytics)
         .await
         .map_err(|agent_con_error| match agent_con_error {
             AgentConnectionError::Io(error) => CliError::PortForwardingSetupError(error.into()),
@@ -503,7 +463,6 @@ async fn port_forward(args: &PortForwardArgs, watch: drain::Watch) -> CliResult<
                 CliError::PortForwardingSetupError,
             ),
             AgentConnectionError::Tls(connection_tls_error) => connection_tls_error.into(),
-            AgentConnectionError::NoConnectionMethod => CliError::PortForwardingNoConnectionMethod,
         })?;
     let connection_2 = connection::AgentConnection {
         sender: agent_conn.agent_tx,
@@ -578,7 +537,7 @@ fn main() -> miette::Result<()> {
                 extension_exec(*args, watch).await?;
             }
             Commands::InternalProxy { port } => {
-                let config = LayerConfig::recalculate_from_env()?;
+                let config = mirrord_config::util::read_resolved_config()?;
                 logging::init_intproxy_tracing_registry(&config)?;
                 internal_proxy::proxy(config, port, watch).await?
             }
@@ -602,7 +561,7 @@ fn main() -> miette::Result<()> {
                 container_ext_command(args.config_file, args.target, watch).await?
             }
             Commands::ExternalProxy { port } => {
-                let config = LayerConfig::recalculate_from_env()?;
+                let config = mirrord_config::util::read_resolved_config()?;
                 logging::init_extproxy_tracing_registry(&config)?;
                 external_proxy::proxy(config, port, watch).await?
             }

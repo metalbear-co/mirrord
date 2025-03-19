@@ -1,317 +1,159 @@
 use std::{
-    collections::HashMap,
-    io::Write,
-    net::SocketAddr,
-    path::{Path, PathBuf},
-    process::Stdio,
-    time::Duration,
+    net::SocketAddr, ops::Not, os::unix::process::ExitStatusExt, path::PathBuf, process::Stdio,
 };
 
 use clap::ValueEnum;
-use local_ip_address::local_ip;
+pub use command_display::CommandDisplay;
+use command_display::CommandExt;
 use mirrord_analytics::{AnalyticsError, AnalyticsReporter, ExecutionKind, Reporter};
 use mirrord_config::{
-    external_proxy::{MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV, MIRRORD_EXTERNAL_TLS_KEY_ENV},
-    internal_proxy::{
-        MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE_ENV, MIRRORD_INTPROXY_CLIENT_TLS_KEY_ENV,
-    },
-    LayerConfig, MIRRORD_CONFIG_FILE_ENV,
+    config::ConfigContext, external_proxy::MIRRORD_EXTPROXY_TLS_SERVER_NAME, LayerConfig,
+    MIRRORD_LAYER_INTPROXY_ADDR,
 };
-use mirrord_progress::{JsonProgress, Progress, ProgressTracker, MIRRORD_PROGRESS_ENV};
-use tempfile::NamedTempFile;
-use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
-    process::Command,
-};
+use mirrord_progress::{JsonProgress, Progress, ProgressTracker};
+use mirrord_tls_util::SecureChannelSetup;
+pub use sidecar::IntproxySidecarError;
+use tokio::process::Command;
 use tracing::Level;
 
 use crate::{
     config::{ContainerRuntime, ExecParams, RuntimeArgs},
-    connection::AGENT_CONNECT_INFO_ENV_KEY,
-    container::{command_builder::RuntimeCommandBuilder, sidecar::Sidecar},
-    error::{CliError, CliResult, ContainerError},
-    execution::{
-        MirrordExecution, LINUX_INJECTION_ENV_VAR, MIRRORD_CONNECT_TCP_ENV,
-        MIRRORD_EXECUTION_KIND_ENV,
-    },
+    container::{command_builder::RuntimeCommandBuilder, sidecar::IntproxySidecar},
+    error::{CliResult, ContainerError},
+    execution::{MirrordExecution, LINUX_INJECTION_ENV_VAR},
     logging::pipe_intproxy_sidecar_logs,
     util::MIRRORD_CONSOLE_ADDR_ENV,
 };
 
-static CONTAINER_EXECUTION_KIND: ExecutionKind = ExecutionKind::Container;
-
 mod command_builder;
+mod command_display;
 mod sidecar;
 
-/// Format [`Command`] to look like the executated command (currently without env because we don't
-/// use it in these scenarios)
-fn format_command(command: &Command) -> String {
-    let command = command.as_std();
+/// Retrieves the value of [`MIRRORD_CONSOLE_ADDR_ENV`].
+///
+/// If the variable is not present, returns [`None`].
+///
+/// # Panic
+///
+/// This function panics when the variable value is not a non loopback [`SocketAddr`].
+///
+/// We require that the address is not a loopback,
+/// because it has to be accessible from the spawned docker containers.
+///
+/// It's ok to panic, because mirrord-console is our debugging tool.
+fn get_mirrord_console_addr() -> Option<String> {
+    let console_addr = std::env::var(MIRRORD_CONSOLE_ADDR_ENV).ok()?;
 
-    std::iter::once(command.get_program())
-        .chain(command.get_args())
-        .filter_map(|arg| arg.to_str())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Execute a [`Command`] and read first line from stdout
-#[tracing::instrument(level = Level::TRACE, ret)]
-async fn exec_and_get_first_line(command: &mut Command) -> Result<Option<String>, ContainerError> {
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(ContainerError::UnableToExecuteCommand)?;
-
-    let stdout = child.stdout.take().expect("stdout should be piped");
-    let stderr = child.stderr.take().expect("stderr should be piped");
-
-    let result = tokio::time::timeout(Duration::from_secs(30), async {
-        BufReader::new(stdout)
-            .lines()
-            .next_line()
-            .await
-            .map_err(|error| {
-                ContainerError::UnableReadCommandStdout(format_command(command), error)
-            })
-    })
-    .await;
-
-    let _ = child.kill().await;
-
-    match result {
-        Err(error) => Err(ContainerError::UnsuccesfulCommandExecute(
-            format_command(command),
-            error.to_string(),
-        )),
-        Ok(Err(_)) | Ok(Ok(None)) => {
-            let mut stderr_buffer = String::new();
-            let stderr_len = BufReader::new(stderr)
-                .read_to_string(&mut stderr_buffer)
-                .await
-                .map_err(|error| {
-                    ContainerError::UnableReadCommandStderr(format_command(command), error)
-                })?;
-
-            if stderr_len > 0 {
-                return Err(ContainerError::UnsuccesfulCommandOutput(
-                    format_command(command),
-                    stderr_buffer,
-                ));
-            } else {
-                return Err(ContainerError::UnsuccesfulCommandOutput(
-                    format_command(command),
-                    "stdout and stderr were empty".into(),
-                ));
-            }
-        }
-        Ok(result) => result,
+    let is_non_loopback = console_addr
+        .parse::<SocketAddr>()
+        .ok()
+        .is_some_and(|addr| addr.ip().is_loopback().not());
+    if is_non_loopback {
+        Some(console_addr)
+    } else {
+        panic!("{MIRRORD_CONSOLE_ADDR_ENV} needs to be a non loopback address when used with containers: {console_addr}")
     }
 }
 
-/// Create a temp file with a json serialized [`LayerConfig`] to be loaded by container and external
-/// proxy
-#[tracing::instrument(level = Level::TRACE, ret)]
-fn create_composed_config(config: &LayerConfig) -> Result<NamedTempFile, ContainerError> {
-    let mut composed_config_file = tempfile::Builder::new()
-        .suffix(".json")
-        .tempfile()
-        .map_err(ContainerError::ConfigWrite)?;
-    composed_config_file
-        .write_all(&serde_json::to_vec(config).map_err(ContainerError::ConfigSerialization)?)
-        .map_err(ContainerError::ConfigWrite)?;
-
-    Ok(composed_config_file)
-}
-
-/// Create a tempfile and write to it a self-signed certificate with the provided subject alt names
-#[tracing::instrument(level = Level::TRACE, ret)]
-fn create_self_signed_certificate(
-    subject_alt_names: Vec<String>,
-) -> Result<(NamedTempFile, NamedTempFile), ContainerError> {
-    let geerated = rcgen::generate_simple_self_signed(subject_alt_names)
-        .map_err(ContainerError::SelfSignedCertificate)?;
-
-    let mut certificate =
-        tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
-    certificate
-        .write_all(geerated.cert.pem().as_bytes())
-        .map_err(ContainerError::WriteSelfSignedCertificate)?;
-
-    let mut private_key =
-        tempfile::NamedTempFile::new().map_err(ContainerError::WriteSelfSignedCertificate)?;
-    private_key
-        .write_all(geerated.key_pair.serialize_pem().as_bytes())
-        .map_err(ContainerError::WriteSelfSignedCertificate)?;
-
-    Ok((certificate, private_key))
-}
-
-type TlsGuard = (NamedTempFile, NamedTempFile);
-
-fn prepare_tls_certs_for_container(
-    config: &mut LayerConfig,
-) -> CliResult<(Option<TlsGuard>, Option<TlsGuard>)> {
-    let internal_proxy_tls_guards = if config.external_proxy.tls_enable
-        && (config.internal_proxy.client_tls_certificate.is_none()
-            || config.internal_proxy.client_tls_key.is_none())
-    {
-        let (internal_proxy_cert, internal_proxy_key) =
-            create_self_signed_certificate(vec!["intproxy".to_owned()])?;
-
-        config
-            .internal_proxy
-            .client_tls_certificate
-            .replace(internal_proxy_cert.path().to_path_buf());
-        config
-            .internal_proxy
-            .client_tls_key
-            .replace(internal_proxy_key.path().to_path_buf());
-
-        Some((internal_proxy_cert, internal_proxy_key))
-    } else {
-        None
-    };
-
-    let external_proxy_tls_guards = if config.external_proxy.tls_enable
-        && (config.external_proxy.tls_certificate.is_none()
-            || config.external_proxy.tls_key.is_none())
-    {
-        let external_proxy_subject_alt_names = local_ip()
-            .map(|item| item.to_string())
-            .into_iter()
-            .collect();
-
-        let (external_proxy_cert, external_proxy_key) =
-            create_self_signed_certificate(external_proxy_subject_alt_names)?;
-
-        config
-            .external_proxy
-            .tls_certificate
-            .replace(external_proxy_cert.path().to_path_buf());
-        config
-            .external_proxy
-            .tls_key
-            .replace(external_proxy_key.path().to_path_buf());
-
-        Some((external_proxy_cert, external_proxy_key))
-    } else {
-        None
-    };
-
-    Ok((internal_proxy_tls_guards, external_proxy_tls_guards))
-}
-
-/// Load [`LayerConfig`] from env and create [`AnalyticsReporter`] whilst reporting any warnings.
+/// Resolves the [`LayerConfig`] and creates [`AnalyticsReporter`] whilst reporting any warnings.
+///
+/// Uses [`ExecutionKind::Container`] to create the [`AnalyticsReporter`].
+///
+/// Uses the given `progress` to pass warnings from [`LayerConfig`] verification.
 fn create_config_and_analytics<P: Progress>(
     progress: &mut P,
+    mut cfg_context: ConfigContext,
     watch: drain::Watch,
 ) -> CliResult<(LayerConfig, AnalyticsReporter)> {
-    let (config, mut context) = LayerConfig::from_env_with_warnings()?;
+    let config = LayerConfig::resolve(&mut cfg_context)?;
 
     // Initialize only error analytics, extproxy will be the full AnalyticsReporter.
     let analytics =
-        AnalyticsReporter::only_error(config.telemetry, CONTAINER_EXECUTION_KIND, watch);
+        AnalyticsReporter::only_error(config.telemetry, ExecutionKind::Container, watch);
 
-    config.verify(&mut context)?;
-    for warning in context.get_warnings() {
-        progress.warning(warning);
+    let result = config.verify(&mut cfg_context);
+    for warning in cfg_context.into_warnings() {
+        progress.warning(&warning);
     }
+    result?;
 
     Ok((config, analytics))
 }
 
-/// Create [`RuntimeCommandBuilder`] with the corresponding [`Sidecar`] connected to
-/// [`MirrordExecution`] as extproxy.
-async fn create_runtime_command_with_sidecar<P: Progress + Send + Sync>(
+/// Makes the agent connection, spawns the native `mirrord-extproxy` process,
+/// and starts the `mirrord-intproxy` sidecar container.
+///
+/// # Returns
+///
+/// 1. Prepared command to run the user container.
+/// 2. Handle to the external proxy.
+/// 3. Handle to temporary files containing intproxy-extproxy TLS configs.
+async fn prepare_proxies<P: Progress + Send + Sync>(
     analytics: &mut AnalyticsReporter,
-    progress: &mut P,
+    progress: &P,
     config: &LayerConfig,
-    composed_config_path: &Path,
     runtime: ContainerRuntime,
-) -> CliResult<(RuntimeCommandBuilder, Sidecar, MirrordExecution)> {
+) -> CliResult<(
+    RuntimeCommandBuilder,
+    MirrordExecution,
+    Option<SecureChannelSetup>,
+)> {
+    let tls_setup = config
+        .external_proxy
+        .tls_enable
+        .then(|| SecureChannelSetup::try_new(MIRRORD_EXTPROXY_TLS_SERVER_NAME, "intproxy"))
+        .transpose()
+        .map_err(ContainerError::from)?;
+
     let mut sub_progress = progress.subtask("preparing to launch process");
-
-    let execution_info =
-        MirrordExecution::start_external(config, &mut sub_progress, analytics).await?;
-
-    let mut connection_info = Vec::new();
-    let mut execution_info_env_without_connection_info = Vec::new();
-
-    for (key, value) in &execution_info.environment {
-        if key == MIRRORD_CONNECT_TCP_ENV || key == AGENT_CONNECT_INFO_ENV_KEY {
-            connection_info.push((key.as_str(), value.as_str()));
-        } else {
-            execution_info_env_without_connection_info.push((key.as_str(), value.as_str()))
-        }
-    }
-
+    let (execution_info, extproxy_addr) =
+        MirrordExecution::start_external(config, &mut sub_progress, analytics, tls_setup.as_ref())
+            .await?;
     sub_progress.success(None);
 
+    let sidecar =
+        IntproxySidecar::create(config, runtime, extproxy_addr, tls_setup.as_ref()).await?;
+
     let mut runtime_command = RuntimeCommandBuilder::new(runtime);
-
-    if let Ok(console_addr) = std::env::var(MIRRORD_CONSOLE_ADDR_ENV) {
-        if console_addr
-            .parse()
-            .map(|addr: SocketAddr| !addr.ip().is_loopback())
-            .unwrap_or_default()
-        {
-            runtime_command.add_env(MIRRORD_CONSOLE_ADDR_ENV, console_addr);
-        } else {
-            tracing::warn!(
-                ?console_addr,
-                "{MIRRORD_CONSOLE_ADDR_ENV} needs to be a non loopback address when used with containers"
-            );
-        }
-    }
-
-    runtime_command.add_env(MIRRORD_PROGRESS_ENV, "off");
+    // Provide remote environment to the user application.
+    runtime_command.add_envs(
+        execution_info
+            .environment
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    );
+    // Allow the layer to connect with the internal proxy sidecar.
+    runtime_command.add_network(format!("container:{}", sidecar.container_id()));
+    // Add the layer file to the user application container.
+    runtime_command.add_volumes_from(sidecar.container_id());
+    // Inject the layer into the user application.
     runtime_command.add_env(
-        MIRRORD_EXECUTION_KIND_ENV,
-        (CONTAINER_EXECUTION_KIND as u32).to_string(),
+        LINUX_INJECTION_ENV_VAR,
+        &config.container.cli_image_lib_path,
+    );
+    runtime_command.add_env(LayerConfig::RESOLVED_CONFIG_ENV, &config.encode()?);
+
+    let (sidecar_intproxy_address, sidecar_intproxy_logs) = sidecar.start().await?;
+    let intproxy_logs_pipe =
+        pipe_intproxy_sidecar_logs(config, sidecar_intproxy_logs.into_merged_lines()).await?;
+    tokio::spawn(intproxy_logs_pipe);
+
+    // Provide internal proxy address to the layer.
+    runtime_command.add_env(
+        MIRRORD_LAYER_INTPROXY_ADDR,
+        &sidecar_intproxy_address.to_string(),
     );
 
-    runtime_command.add_env(MIRRORD_CONFIG_FILE_ENV, "/tmp/mirrord-config.json");
-    runtime_command.add_volume::<true, _, _>(composed_config_path, "/tmp/mirrord-config.json");
-
-    let mut load_env_and_mount_pem = |env: &str, path: &Path| {
-        let container_path = format!("/tmp/{}.pem", env.to_lowercase());
-
-        runtime_command.add_env(env, &container_path);
-        runtime_command.add_volume::<true, _, _>(path, container_path);
-    };
-
-    if let Some(path) = config.internal_proxy.client_tls_certificate.as_ref() {
-        load_env_and_mount_pem(MIRRORD_INTPROXY_CLIENT_TLS_CERTIFICATE_ENV, path)
-    }
-
-    if let Some(path) = config.internal_proxy.client_tls_key.as_ref() {
-        load_env_and_mount_pem(MIRRORD_INTPROXY_CLIENT_TLS_KEY_ENV, path)
-    }
-
-    if let Some(path) = config.external_proxy.tls_certificate.as_ref() {
-        load_env_and_mount_pem(MIRRORD_EXTERNAL_TLS_CERTIFICATE_ENV, path)
-    }
-
-    if let Some(path) = config.external_proxy.tls_key.as_ref() {
-        load_env_and_mount_pem(MIRRORD_EXTERNAL_TLS_KEY_ENV, path)
-    }
-
-    runtime_command.add_envs(execution_info_env_without_connection_info);
-
-    let sidecar = Sidecar::create_intproxy(config, &runtime_command, connection_info).await?;
-
-    runtime_command.add_network(sidecar.as_network());
-    runtime_command.add_volumes_from(&sidecar.container_id);
-
-    Ok((runtime_command, sidecar, execution_info))
+    Ok((runtime_command, execution_info, tls_setup))
 }
 
 /// Main entry point for the `mirrord container` command.
-/// This spawns: "agent" - "external proxy" - "intproxy sidecar" - "execution container"
-pub(crate) async fn container_command(
+///
+/// 1. Spawns the agent (cluster), mirrord-extproxy (natively), and mirrord-intproxy (sidecar).
+/// 2. Adds additional env, volume, and network to the user container command.
+/// 3. Executes the user container command.
+#[tracing::instrument(level = Level::DEBUG, skip(watch), ret, err(level = Level::DEBUG, Debug))]
+pub async fn container_command(
     runtime_args: RuntimeArgs,
     exec_params: ExecParams,
     watch: drain::Watch,
@@ -319,46 +161,20 @@ pub(crate) async fn container_command(
     let mut progress = ProgressTracker::from_env("mirrord container");
 
     if runtime_args.command.has_publish() {
-        progress.warning("mirrord container may have problems with \"-p\" when used as part of container run command, please add the publish arguments to \"contanier.cli_extra_args\" in config if you are planning to publish ports");
+        progress.warning(
+            "mirrord container may have problems with \"-p\" when used as part of container run command. \
+            If you want to publish ports, please add the publish arguments to the
+            \"container.cli_extra_args\" list in your mirrord config.",
+        );
     }
 
     progress.warning("mirrord container is currently an unstable feature");
 
-    for (name, value) in exec_params.as_env_vars()? {
-        std::env::set_var(name, value);
-    }
+    let cfg_context = ConfigContext::default().override_envs(exec_params.as_env_vars());
+    let (config, mut analytics) = create_config_and_analytics(&mut progress, cfg_context, watch)?;
 
-    std::env::set_var(
-        MIRRORD_EXECUTION_KIND_ENV,
-        (CONTAINER_EXECUTION_KIND as u32).to_string(),
-    );
-
-    // LayerConfig must be created after setting relevant env vars
-    let (mut config, mut analytics) = create_config_and_analytics(&mut progress, watch)?;
-
-    let (_internal_proxy_tls_guards, _external_proxy_tls_guards) =
-        prepare_tls_certs_for_container(&mut config)?;
-
-    let composed_config_file = create_composed_config(&config)?;
-    std::env::set_var(MIRRORD_CONFIG_FILE_ENV, composed_config_file.path());
-
-    let (mut runtime_command, sidecar, _execution_info) = create_runtime_command_with_sidecar(
-        &mut analytics,
-        &mut progress,
-        &config,
-        composed_config_file.path(),
-        runtime_args.runtime,
-    )
-    .await?;
-
-    let (sidecar_intproxy_address, sidecar_intproxy_logs) = sidecar.start().await?;
-    tokio::spawn(pipe_intproxy_sidecar_logs(&config, sidecar_intproxy_logs).await?);
-
-    runtime_command.add_env(LINUX_INJECTION_ENV_VAR, config.container.cli_image_lib_path);
-    runtime_command.add_env(
-        MIRRORD_CONNECT_TCP_ENV,
-        sidecar_intproxy_address.to_string(),
-    );
+    let (runtime_command, _execution_info, _tls_setup) =
+        prepare_proxies(&mut analytics, &progress, &config, runtime_args.runtime).await?;
 
     progress.success(None);
 
@@ -366,43 +182,39 @@ pub(crate) async fn container_command(
         .with_command(runtime_args.command)
         .into_command_args();
 
-    let runtime_command_result = Command::new(binary)
+    let mut runtime_command = Command::new(binary);
+    runtime_command
         .args(binary_args)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .await;
+        .stderr(Stdio::inherit());
 
-    // Keep the files, since this process is going to exit before the new process is actually run
-    // and uses them perhaps find a way to clean up? (can't wait for container to boot
-    // successfuly since when it loads other processes it might need it too)
-    if let Some((cert, key)) = _internal_proxy_tls_guards {
-        if let Err(err) = cert.keep() {
-            tracing::warn!(?err, "failed to keep internal proxy certificate");
+    let status = runtime_command.status().await.map_err(|error| {
+        analytics.set_error(AnalyticsError::BinaryExecuteFailed);
+
+        ContainerError::CommandExec {
+            error,
+            command: runtime_command.display(),
         }
+    })?;
 
-        if let Err(err) = key.keep() {
-            tracing::warn!(?err, "failed to keep internal proxy key");
-        }
-    }
-
-    if let Err(err) = composed_config_file.keep() {
-        tracing::warn!(?err, "failed to keep composed config file");
-    }
-
-    match runtime_command_result {
-        Err(err) => {
-            analytics.set_error(AnalyticsError::BinaryExecuteFailed);
-
-            Err(ContainerError::UnableToExecuteCommand(err).into())
-        }
-        Ok(status) => Ok(status.code().unwrap_or_default()),
+    if let Some(signal) = status.signal() {
+        tracing::warn!("Container command was terminated by signal {signal}");
+        Ok(-1)
+    } else {
+        Ok(status.code().unwrap_or_default())
     }
 }
 
-/// Create sidecar and extproxy but return arguments for extension instead of executing run command
-pub(crate) async fn container_ext_command(
+/// Main entry point for the `mirrord container` command.
+///
+/// 1. Spawns the agent (cluster), mirrord-extproxy (natively), and mirrord-intproxy (sidecar).
+/// 2. Adds additional env, volume, and network to the user container command.
+/// 3. Outputs the [`ExtensionRuntimeCommand`](command_builder::ExtensionRuntimeCommand) for the
+///    extension.
+/// 4. Waits for mirrord-extproxy exit.
+#[tracing::instrument(level = Level::DEBUG, skip(watch), ret, err(level = Level::DEBUG, Debug))]
+pub async fn container_ext_command(
     config_file: Option<PathBuf>,
     target: Option<String>,
     watch: drain::Watch,
@@ -410,55 +222,18 @@ pub(crate) async fn container_ext_command(
     let mut progress = ProgressTracker::try_from_env("mirrord preparing to launch")
         .unwrap_or_else(|| JsonProgress::new("mirrord preparing to launch").into());
 
-    let mut env: HashMap<String, String> = HashMap::new();
-
-    if let Some(config_file) = config_file.as_ref() {
-        // Set canoncialized path to config file, in case forks/children processes are in different
-        // working directories.
-        let full_path = std::fs::canonicalize(config_file)
-            .map_err(|e| CliError::CanonicalizeConfigPathFailed(config_file.into(), e))?;
-        std::env::set_var(MIRRORD_CONFIG_FILE_ENV, full_path.clone());
-        env.insert(
-            MIRRORD_CONFIG_FILE_ENV.into(),
-            full_path.to_string_lossy().into(),
-        );
-    }
-    if let Some(target) = target.as_ref() {
-        std::env::set_var("MIRRORD_IMPERSONATED_TARGET", target.clone());
-        env.insert("MIRRORD_IMPERSONATED_TARGET".into(), target.to_string());
-    }
-
-    // LayerConfig must be created after setting relevant env vars
-    let (mut config, mut analytics) = create_config_and_analytics(&mut progress, watch)?;
-
-    let (_internal_proxy_tls_guards, _external_proxy_tls_guards) =
-        prepare_tls_certs_for_container(&mut config)?;
-
-    let composed_config_file = create_composed_config(&config)?;
-    std::env::set_var(MIRRORD_CONFIG_FILE_ENV, composed_config_file.path());
+    let cfg_context = ConfigContext::default()
+        .override_env_opt(LayerConfig::FILE_PATH_ENV, config_file)
+        .override_env_opt("MIRRORD_IMPERSONATED_TARGET", target);
+    let (config, mut analytics) = create_config_and_analytics(&mut progress, cfg_context, watch)?;
 
     let container_runtime = std::env::var("MIRRORD_CONTAINER_USE_RUNTIME")
         .ok()
         .and_then(|value| ContainerRuntime::from_str(&value, true).ok())
         .unwrap_or(ContainerRuntime::Docker);
 
-    let (mut runtime_command, sidecar, execution_info) = create_runtime_command_with_sidecar(
-        &mut analytics,
-        &mut progress,
-        &config,
-        composed_config_file.path(),
-        container_runtime,
-    )
-    .await?;
-
-    let (sidecar_intproxy_address, sidecar_intproxy_logs) = sidecar.start().await?;
-    tokio::spawn(pipe_intproxy_sidecar_logs(&config, sidecar_intproxy_logs).await?);
-
-    runtime_command.add_env(LINUX_INJECTION_ENV_VAR, config.container.cli_image_lib_path);
-    runtime_command.add_env(
-        MIRRORD_CONNECT_TCP_ENV,
-        sidecar_intproxy_address.to_string(),
-    );
+    let (runtime_command, execution_info, _tls_setup) =
+        prepare_proxies(&mut analytics, &progress, &config, container_runtime).await?;
 
     let output = serde_json::to_string(&runtime_command.into_command_extension_params())?;
     progress.success(Some(&output));
