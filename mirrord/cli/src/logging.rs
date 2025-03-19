@@ -107,7 +107,7 @@ pub fn init_intproxy_tracing_registry(config: &LayerConfig) -> Result<(), Intern
         // When the intproxy does not run in a sidecar container, it logs to a file.
         let log_destination = &config.internal_proxy.log_destination;
         init_proxy_tracing_registry(
-            &log_destination,
+            log_destination,
             &config.internal_proxy.log_level,
             config.internal_proxy.json_log,
         )
