@@ -95,7 +95,7 @@ pub enum FeatureChange {
     /// * `incoming` - no remote traffic will be intercepted
     /// * `outgoing` - all outgoing traffic will be fully local
     /// * `dns` - all DNS resolution will be fully local
-    Disabled,
+    Off,
     /// Outgoing traffic or DNS resolution will be fully remote.
     ///
     /// Applies only to the `outgoing` and `dns` feature kinds.
@@ -113,7 +113,7 @@ impl fmt::Display for FeatureChange {
         let as_str = match self {
             Self::Mirror => "mirror",
             Self::Steal => "steal",
-            Self::Disabled => "disabled",
+            Self::Off => "off",
             Self::Remote => "remote",
             Self::Unknown => "unknown",
         };

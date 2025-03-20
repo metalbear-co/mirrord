@@ -74,7 +74,7 @@ impl FeatureAdjustmentExt for FeatureAdjustment {
 
         match kind {
             FeatureKind::Incoming => match change {
-                FeatureChange::Disabled => {
+                FeatureChange::Off => {
                     config.network.incoming.mode = IncomingMode::Off;
                 }
                 FeatureChange::Mirror => {
@@ -88,7 +88,7 @@ impl FeatureAdjustmentExt for FeatureAdjustment {
             },
 
             FeatureKind::Outgoing => match change {
-                FeatureChange::Disabled => {
+                FeatureChange::Off => {
                     config.network.outgoing.tcp = false;
                     config.network.outgoing.udp = false;
                     config.network.outgoing.filter = None;
@@ -107,7 +107,7 @@ impl FeatureAdjustmentExt for FeatureAdjustment {
             },
 
             FeatureKind::Dns => match change {
-                FeatureChange::Disabled => {
+                FeatureChange::Off => {
                     config.network.dns.enabled = false;
                     config.network.dns.filter = None;
                 }
