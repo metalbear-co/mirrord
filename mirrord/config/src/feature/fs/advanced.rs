@@ -136,7 +136,7 @@ pub struct FsConfig {
     ///   `../dev`.
     pub mapping: Option<HashMap<String, String>>,
 
-    /// ### feature.fsreadonly_file_buffer {#feature-fs-readonly_file_buffer}
+    /// ### feature.fs.readonly_file_buffer {#feature-fs-readonly_file_buffer}
     ///
     /// Sets buffer size for read-only remote files in bytes. By default, the value is
     /// 128000 bytes, or 128 kB.
