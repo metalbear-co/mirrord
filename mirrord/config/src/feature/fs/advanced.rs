@@ -242,6 +242,7 @@ mod tests {
     fn advanced_fs_config_default() {
         let expect = FsConfig {
             mode: FsModeConfig::Read,
+            readonly_file_buffer: 128000,
             ..Default::default()
         };
 
