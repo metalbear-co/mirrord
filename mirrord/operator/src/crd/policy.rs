@@ -76,6 +76,9 @@ pub struct MirrordPolicySpec {
 
     /// A list of allowed mirrord profiles.
     ///
+    /// If multiple policies apply to a session,
+    /// user's mirrord profile must be present in all allowlists.
+    ///
     /// Defaults to an empty list.
     #[serde(default)]
     pub profile_allowlist: Vec<String>,
@@ -127,6 +130,9 @@ pub struct MirrordClusterPolicySpec {
     pub require_profile: bool,
 
     /// A list of allowed mirrord profiles.
+    ///
+    /// If multiple policies apply to a session,
+    /// user's mirrord profile must be present in all allowlists.
     ///
     /// Defaults to an empty list.
     #[serde(default)]
