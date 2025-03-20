@@ -503,6 +503,7 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
         local: None,
         not_found: None,
         mapping: None,
+        ..Default::default()
     };
     let debugger_ports = DebuggerPorts::from_env();
     let setup = LayerSetup::new(config, debugger_ports, true);

@@ -135,6 +135,16 @@ pub struct FsConfig {
     /// - Relative paths: this feature (currently) does not apply mappings to relative paths, e.g.
     ///   `../dev`.
     pub mapping: Option<HashMap<String, String>>,
+
+    /// ### feature.fsreadonly_file_buffer {#feature-fs-readonly_file_buffer}
+    ///
+    /// Sets buffer size for readonly remote files (in bytes, for example 4096).
+    /// If set, these files will be read in chunks and buffered locally.
+    /// This improves performace when the user application reads data in small portions.
+    ///
+    /// Setting to 0 disables file buffering.
+    #[config(default = 128000)]
+    pub readonly_file_buffer: u64,
 }
 
 impl MirrordToggleableConfig for AdvancedFsUserConfig {
@@ -157,6 +167,7 @@ impl MirrordToggleableConfig for AdvancedFsUserConfig {
             local,
             not_found: None,
             mapping: None,
+            ..Default::default()
         })
     }
 }
@@ -215,6 +226,7 @@ impl CollectAnalytics for &FsConfig {
                 .map(<[_]>::len)
                 .unwrap_or_default(),
         );
+        analytics.add("readonly_file_buffer", self.readonly_file_buffer);
     }
 }
 

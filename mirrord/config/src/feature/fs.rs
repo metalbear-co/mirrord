@@ -91,6 +91,7 @@ impl MirrordConfig for FsUserConfig {
                     .transpose()?,
                 not_found: None,
                 mapping: None,
+                ..Default::default()
             },
             FsUserConfig::Advanced(advanced) => advanced.generate_config(context)?,
         };
@@ -119,6 +120,7 @@ impl MirrordToggleableConfig for FsUserConfig {
             local,
             not_found: None,
             mapping: None,
+            ..Default::default()
         })
     }
 }
