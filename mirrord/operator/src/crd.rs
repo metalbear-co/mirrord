@@ -399,7 +399,7 @@ impl From<&OperatorFeatures> for NewOperatorFeature {
     }
 }
 
-/// This [`Resource`] represents a copy pod created from an existing [`Target`]
+/// This resource represents a copy pod created from an existing [`Target`]
 /// (operator's copy pod feature).
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[kube(
