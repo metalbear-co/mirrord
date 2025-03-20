@@ -24,12 +24,10 @@ pub async fn mirrord_profile_enforces_stealing(
     let service = service.await;
     let target_path = service.pod_container_target();
 
-    // The `KubeService` resources are created in a random namespace,
-    // which will be deleted after this test.
-    // However, mirrord profiles are clusterwide, so they need a separate guard.
     let (_profile_guard, profile_name) = {
         let profile = MirrordProfile {
             metadata: ObjectMeta {
+                // Service name is randomized, so there should be no conflict.
                 name: Some(format!("test-profile-{}", service.name)),
                 ..Default::default()
             },
@@ -64,28 +62,38 @@ pub async fn mirrord_profile_enforces_stealing(
         .bytes()
         .await
         .unwrap();
-    assert_eq!(response.as_ref(), b"OK - GET: Request completed\n");
+    assert_eq!(
+        response.as_ref(),
+        b"OK - GET: Request completed\n",
+        "expected a response from the remote app, got: {}",
+        String::from_utf8_lossy(response.as_ref())
+    );
 
+    // The local application should mirrord the traffic.
     let test_process = Application::PythonFlaskHTTP
         .run(&target_path, Some(&service.namespace), None, None)
         .await;
     test_process
         .wait_for_line(Duration::from_secs(40), "daemon subscribed")
         .await;
-
-    // The local application should mirror the traffic.
     let response = reqwest::get(&service_url)
         .await
         .unwrap()
         .bytes()
         .await
         .unwrap();
-    assert_eq!(response.as_ref(), b"OK - GET: Request completed\n"); // got response from remote
+    assert_eq!(
+        response.as_ref(),
+        b"OK - GET: Request completed\n",
+        "expected response from the remote app, got: {}",
+        String::from_utf8_lossy(response.as_ref())
+    );
     test_process
-        .wait_for_line(Duration::from_secs(20), "GET: Request completed")
-        .await; // local received the request
+        .wait_for_line_stdout(Duration::from_secs(40), "GET: Request completed")
+        .await; // verify that the local app received the request as well
     std::mem::drop(test_process); // kill the app
 
+    // With the profile, the local application should steal the traffic.
     let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
     let config = serde_json::json!({
         "profile": profile_name,
@@ -99,14 +107,19 @@ pub async fn mirrord_profile_enforces_stealing(
             None,
         )
         .await;
-
-    // The local application should steal the traffic.
+    test_process
+        .wait_for_line(Duration::from_secs(40), "daemon subscribed")
+        .await;
     let response = reqwest::get(&service_url)
         .await
         .unwrap()
         .bytes()
         .await
         .unwrap();
-    assert_eq!(response.as_ref(), b"GET"); // got response from local
-    std::mem::drop(test_process); // kill the app
+    assert_eq!(
+        response.as_ref(),
+        b"GET",
+        "expected response from the local app, got: {}",
+        String::from_utf8_lossy(response.as_ref())
+    );
 }
