@@ -33,6 +33,7 @@ client = [
   "dep:mirrord-progress",
   "dep:mirrord-protocol",
   "dep:rand",
+  "dep:serde_qs",
   "dep:tokio",
   "dep:tokio-tungstenite",
   "dep:tracing",
@@ -73,7 +74,7 @@ schemars = { workspace = true, features = ["chrono"] }
 semver = { workspace = true, features = ["serde"], optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
-serde_qs = "0.14"
+serde_qs = { version = "0.14", optional = true }
 serde_yaml = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
