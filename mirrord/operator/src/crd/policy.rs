@@ -79,9 +79,8 @@ pub struct MirrordPolicySpec {
     /// If multiple policies apply to a session,
     /// user's mirrord profile must be present in all allowlists.
     ///
-    /// Defaults to an empty list.
-    #[serde(default)]
-    pub profile_allowlist: Vec<String>,
+    /// Optional.
+    pub profile_allowlist: Option<Vec<String>>,
 }
 
 /// Custom cluster-wide resource for policies that limit what mirrord features users can use.
@@ -134,9 +133,8 @@ pub struct MirrordClusterPolicySpec {
     /// If multiple policies apply to a session,
     /// user's mirrord profile must be present in all allowlists.
     ///
-    /// Defaults to an empty list.
-    #[serde(default)]
-    pub profile_allowlist: Vec<String>,
+    /// Optional.
+    pub profile_allowlist: Option<Vec<String>>,
 }
 
 /// Policy for controlling environment variables access from mirrord instances.
