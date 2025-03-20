@@ -110,10 +110,12 @@ pub(crate) async fn proxy(
     let first_connection_timeout = Duration::from_secs(config.internal_proxy.start_idle_timeout);
     let consecutive_connection_timeout = Duration::from_secs(config.internal_proxy.idle_timeout);
 
+    // TODO: use config.fs
     IntProxy::new_with_connection(
         agent_conn,
         listener,
-        config.experimental.readonly_file_buffer,
+        0,
+        // config.experimental.readonly_file_buffer,
         Duration::from_millis(config.experimental.idle_local_http_connection_timeout),
         config.feature.network.incoming.https_delivery,
     )
