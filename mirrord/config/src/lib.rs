@@ -228,6 +228,11 @@ pub struct LayerConfig {
     #[config(env = "MIRRORD_OPERATOR_ENABLE")]
     pub operator: Option<bool>,
 
+    /// ## profile {#root-profile}
+    ///
+    /// Name of the mirrord profile to use.
+    pub profile: Option<String>,
+
     /// ## kubeconfig {#root-kubeconfig}
     ///
     /// Path to a kubeconfig file, if not specified, will use `KUBECONFIG`, or `~/.kube/config`, or
@@ -593,6 +598,15 @@ impl LayerConfig {
             );
         }
 
+        if let (Some(profile), true) = (&self.profile, context.has_warnings()) {
+            // It might be that the user config is fine,
+            // but the mirrord profile introduced changes that triggered the warnings.
+            context.add_warning(format!(
+                "Config verification was done after applying mirrord profile `{profile}`. \
+                You can inspect the profile with `kubectl get mirrordprofile {profile} -o yaml`.",
+            ));
+        }
+
         Ok(())
     }
 }
@@ -603,6 +617,7 @@ impl CollectAnalytics for &LayerConfig {
             analytics.add("accept_invalid_certificates", value);
         };
         analytics.add("use_kubeconfig", self.kubeconfig.is_some());
+        analytics.add("use_profile", self.profile.is_some());
         (&self.target).collect_analytics(analytics);
         (&self.agent).collect_analytics(analytics);
         (&self.feature).collect_analytics(analytics);
@@ -948,6 +963,7 @@ mod tests {
             }),
             container: None,
             operator: None,
+            profile: None,
             sip_binaries: None,
             kube_context: None,
             external_proxy: None,

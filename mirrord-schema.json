@@ -102,6 +102,14 @@
         "null"
       ]
     },
+    "profile": {
+      "title": "profile {#root-profile}",
+      "description": "Name of the mirrord profile to use.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "sip_binaries": {
       "title": "sip_binaries {#root-sip_binaries}",
       "description": "Binaries to patch (macOS SIP).\n\nUse this when mirrord isn't loaded to protected binaries that weren't automatically patched.\n\nRuns `endswith` on the binary path (so `bash` would apply to any binary ending with `bash` while `/usr/bin/bash` would apply only for that binary).\n\n```json { \"sip_binaries\": \"bash;python\" } ```",

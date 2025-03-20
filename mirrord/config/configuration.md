@@ -1656,6 +1656,10 @@ Whether mirrord should use the operator.
 If not set, mirrord will first attempt to use the operator, but continue without it in case
 of failure.
 
+## profile {#root-profile}
+
+Name of the mirrord profile to use.
+
 ## sip_binaries {#root-sip_binaries}
 
 Binaries to patch (macOS SIP).

@@ -29,6 +29,7 @@ use thiserror::Error;
 use crate::crd::{
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
     policy::{MirrordClusterPolicy, MirrordPolicy},
+    profile::MirrordProfile,
     steal_tls::{MirrordClusterTlsStealConfig, MirrordTlsStealConfig},
     MirrordOperatorUser, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
 };
@@ -240,6 +241,9 @@ impl OperatorSetup for Operator {
 
         writer.write_all(b"---\n")?;
         MirrordClusterTlsStealConfig::crd().to_writer(&mut writer)?;
+
+        writer.write_all(b"---\n")?;
+        MirrordProfile::crd().to_writer(&mut writer)?;
 
         if self.sqs_splitting {
             writer.write_all(b"---\n")?;
