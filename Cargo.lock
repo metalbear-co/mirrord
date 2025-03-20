@@ -4600,6 +4600,7 @@ dependencies = [
  "semver 1.0.26",
  "serde",
  "serde_json",
+ "serde_qs",
  "serde_yaml",
  "thiserror 2.0.12",
  "tokio",
@@ -6607,6 +6608,17 @@ checksum = "59fab13f937fa393d08645bf3a84bdfe86e296747b506ada67bb15f10f218b2a"
 dependencies = [
  "itoa",
  "serde",
+]
+
+[[package]]
+name = "serde_qs"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b417bedc008acbdf6d6b4bc482d29859924114bbe2650b7921fb68a261d0aa6"
+dependencies = [
+ "percent-encoding",
+ "serde",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
