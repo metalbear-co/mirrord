@@ -32,6 +32,7 @@ pub struct MirrordProfileSpec {
 
 /// A single adjustment to the mirrord config's `feature` section.
 #[derive(Deserialize, Serialize, JsonSchema, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct FeatureAdjustment {
     /// The kind of feature to which this adjustment applies.
     pub kind: FeatureKind,
@@ -48,7 +49,7 @@ pub struct FeatureAdjustment {
 
 /// A kind of mirrord feature that can be adjusted in a mirrord policy.
 #[derive(Deserialize, Serialize, JsonSchema, Debug, Clone, Copy)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "kebab-case")]
 pub enum FeatureKind {
     /// Incoming traffic.
     Incoming,
@@ -79,7 +80,7 @@ impl fmt::Display for FeatureKind {
 
 /// An adjustment to some mirrord feature.
 #[derive(Deserialize, Serialize, JsonSchema, Debug, Clone, Copy)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "kebab-case")]
 pub enum FeatureChange {
     /// Incoming traffic will be mirrored.
     ///
