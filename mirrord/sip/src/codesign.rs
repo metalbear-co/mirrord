@@ -1,24 +1,18 @@
-use std::{
-    fmt::{Display, Write},
-    path::Path,
-};
+use std::{fmt::Display, path::Path};
 
 use apple_codesign::{CodeSignatureFlags, SettingsScope, SigningSettings, UnifiedSigner};
-use rand::Rng;
+use rand::RngCore;
 
 use crate::error::Result;
 
 const EMPTY_ENTITLEMENTS_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict></dict></plist>"#;
 
-/// N is the length of the string to generate. If N is odd, the length will be N-1.
-fn generate_hex_string<const N: usize>() -> String {
+/// Hex string from random 20 bytes (results in 40 hexadecimal digits).
+fn generate_hex_string() -> String {
     let mut rng = rand::rng();
-    (0..N / 2) // N/2 bytes = N hexadecimal digits.
-        .fold(String::new(), |mut acc, _next_in_range| {
-            // ignoring result: writing to String can't fail.
-            let _ = write!(acc, "{:02x}", rng.random::<u8>());
-            acc
-        })
+    let mut bytes = [0u8; 20];
+    rng.fill_bytes(&mut bytes[..]);
+    hex::encode(bytes)
 }
 
 pub(crate) fn sign<PI: AsRef<Path>, PO: AsRef<Path>, PR: Display>(
@@ -45,8 +39,8 @@ pub(crate) fn sign<PI: AsRef<Path>, PO: AsRef<Path>, PR: Display>(
     settings.set_binary_identifier(
         SettingsScope::Main,
         bin_id_prefix.map_or_else(
-            || format!("mirrord-patched-bin-{}", generate_hex_string::<40>()),
-            |prefix| format!("{}-{}", prefix, generate_hex_string::<40>()),
+            || format!("mirrord-patched-bin-{}", generate_hex_string()),
+            |prefix| format!("{}-{}", prefix, generate_hex_string()),
         ),
     );
 

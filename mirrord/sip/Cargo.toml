@@ -18,6 +18,7 @@ workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-codesign = { version = "0.29", default-features = false }
+hex = "0.4"
 object = "0.36"
 rand = "0.9.0"
 tempfile.workspace = true

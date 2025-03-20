@@ -4644,6 +4644,7 @@ name = "mirrord-sip"
 version = "3.135.0"
 dependencies = [
  "apple-codesign",
+ "hex",
  "object",
  "once_cell",
  "rand 0.9.0",
