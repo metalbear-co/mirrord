@@ -305,11 +305,7 @@ mod main {
         }
 
         let signed_temp_file = tempfile::NamedTempFile::new()?;
-        codesign::sign(
-            &temp_binary,
-            &signed_temp_file,
-            path.file_name().map(OsStr::to_string_lossy).as_deref(),
-        )?;
+        codesign::sign(&temp_binary, &signed_temp_file)?;
 
         // Give the new file the same permissions as the old file.
         // This needs to happen after the sign because it might change the permissions.
