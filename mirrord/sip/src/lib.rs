@@ -1,3 +1,31 @@
+//! This crate concerns MacOS' SIP (System Integrity Protection) mechanism and how to sidestep it.
+//!
+//! ### Why?
+//!
+//! SIP makes it such that we are unable to load the `mirrord-layer` lib dynamically into the user's
+//! process onto MacOS machines. This is ostensibly a security measure to prevent the malicious or
+//! unintended modification of processes, but mirrord's dynamic library loading is neither. To get
+//! around this, we patch the user's process by creating a new unprotected version and signing it
+//! ourselves. Then we can load the layer dynamically into our unprotected copy and continue as
+//! usual. If the process is a script, the shebang must be pointed to the patched version of the
+//! interpreter.
+//!
+//! ### Usage
+//!
+//! This crate is used by `mirrord-cli` and `mirrord-layer` and is used before the user process is
+//! run, during setup on MacOS machines - for example, see mirrord_layer::exec_utils::patch_if_sip
+//! and mirrord::execution::MirrordExecution::start_internal.
+//!
+//! The entry point when calling this crate is [sip_patch](sip_patch).
+//!
+//! ### Gotchas and spike pits
+//!
+//! - The directory where patch files exist is not randomly named, but uses the const
+//!   [MIRRORD_PATCH_DIR] due to an issue with the temp dir changing between executions
+//! - We add a shebang to scripts without one in order to point it to the patched binary
+//! - When checking a script, we check only the first line of the file for a shebang incase the
+//!   script is encoded unusually
+
 #![feature(iter_intersperse)]
 #![warn(clippy::indexing_slicing)]
 #![cfg(target_os = "macos")]
