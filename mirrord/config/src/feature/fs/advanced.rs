@@ -138,11 +138,12 @@ pub struct FsConfig {
 
     /// ### feature.fsreadonly_file_buffer {#feature-fs-readonly_file_buffer}
     ///
-    /// Sets buffer size for readonly remote files (in bytes, for example 4096).
-    /// If set, these files will be read in chunks and buffered locally.
-    /// This improves performace when the user application reads data in small portions.
+    /// Sets buffer size for read-only remote files in bytes. By default, the value is
+    /// 128000 bytes, or 128 kB.
     ///
-    /// Setting to 0 disables file buffering.
+    /// Setting the value to 0 disables file buffering.
+    /// Otherwise, read-only remote files will be read in chunks and buffered locally.
+    /// This improves performance when the user application reads data in small portions.
     #[config(default = 128000)]
     pub readonly_file_buffer: u64,
 }

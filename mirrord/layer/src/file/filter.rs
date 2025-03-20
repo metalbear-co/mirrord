@@ -397,6 +397,7 @@ mod tests {
             not_found,
             mode,
             mapping: None,
+            ..Default::default()
         };
 
         let file_filter = FileFilter::new(fs_config);
