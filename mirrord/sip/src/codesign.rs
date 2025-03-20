@@ -1,4 +1,7 @@
-use std::{fmt::Display, path::Path};
+use std::{
+    fmt::{Display, Write},
+    path::Path,
+};
 
 use apple_codesign::{CodeSignatureFlags, SettingsScope, SigningSettings, UnifiedSigner};
 use rand::Rng;
@@ -11,8 +14,11 @@ const EMPTY_ENTITLEMENTS_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 fn generate_hex_string<const N: usize>() -> String {
     let mut rng = rand::rng();
     (0..N / 2) // N/2 bytes = N hexadecimal digits.
-        .map(|_| format!("{:02x}", rng.random::<u8>()))
-        .collect()
+        .fold(String::new(), |mut acc, _next_in_range| {
+            // ignoring result: writing to String can't fail.
+            let _ = write!(acc, "{:02x}", rng.random::<u8>());
+            acc
+        })
 }
 
 pub(crate) fn sign<PI: AsRef<Path>, PO: AsRef<Path>, PR: Display>(
