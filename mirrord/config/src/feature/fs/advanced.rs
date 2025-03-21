@@ -172,7 +172,7 @@ impl MirrordToggleableConfig for AdvancedFsUserConfig {
             local,
             not_found: None,
             mapping: None,
-            ..Default::default()
+            readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
         })
     }
 }

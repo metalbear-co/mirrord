@@ -91,7 +91,7 @@ impl MirrordConfig for FsUserConfig {
                     .transpose()?,
                 not_found: None,
                 mapping: None,
-                ..Default::default()
+                readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
             },
             FsUserConfig::Advanced(advanced) => advanced.generate_config(context)?,
         };
