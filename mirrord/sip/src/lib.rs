@@ -3,7 +3,7 @@
 //! ### Why?
 //!
 //! SIP makes it such that the `mirrord-layer` lib cannot be dynamically loaded into the user's
-//! process on MacOS machines, as it blocks the modification of processes ([Wikipedia page](https://en.wikipedia.org/wiki/System_Integrity_Protection)). It does this by removing the relevant environment variables (`LD_PRELOAD`) when the process starts.
+//! process on MacOS machines, as it blocks the modification of processes ([Wikipedia page](https://en.wikipedia.org/wiki/System_Integrity_Protection)). It does this by removing the relevant environment variables (`DYLD_INSERT_LIBRARIES`) when the process starts.
 //!
 //! Also see Apple's relevant docs: [Hardened Runtime](https://developer.apple.com/documentation/security/hardened-runtime), [Entitlements](https://developer.apple.com/documentation/bundleresources/entitlements) and [Code Signing](https://developer.apple.com/documentation/security/code-signing-services).
 //!
