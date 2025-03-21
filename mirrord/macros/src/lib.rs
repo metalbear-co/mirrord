@@ -1,7 +1,7 @@
-//! # proc macros for mirrord
+//! # Procedural macros for mirrord
 //!
-//! - Use [`protocol_break()`] to mark code that should be revised when the protocol major version
-//!   (SemVer) is bumped.
+//! - Use [`protocol_break()`] to mark code that should be revised when the crate major version is
+//!   bumped.
 #![deny(unused_crate_dependencies)]
 
 extern crate proc_macro;
@@ -14,8 +14,8 @@ use syn::{parse_macro_input, spanned::Spanned};
 
 /// Marks code that should be revised when the major version of `mirrord-protocol` is bumped.
 ///
-/// Will emit an error on items that have been marked as needing revision when the specified version
-/// is reached.
+/// Will emit a compilation error on items that have been marked as needing revision when the
+/// specified version is reached.
 ///
 ///  ### Example usage
 ///
