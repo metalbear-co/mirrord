@@ -397,7 +397,7 @@ mod tests {
             not_found,
             mode,
             mapping: None,
-            ..Default::default()
+            readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
         };
 
         let file_filter = FileFilter::new(fs_config);
@@ -432,6 +432,7 @@ mod tests {
     ) {
         let fs_config = FsConfig {
             mode,
+            readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
             ..Default::default()
         };
 

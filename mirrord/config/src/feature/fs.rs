@@ -120,7 +120,7 @@ impl MirrordToggleableConfig for FsUserConfig {
             local,
             not_found: None,
             mapping: None,
-            ..Default::default()
+            readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
         })
     }
 }
@@ -136,6 +136,7 @@ mod tests {
     fn fs_config_default() {
         let expect = FsConfig {
             mode: FsModeConfig::Read,
+            readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
             ..Default::default()
         };
 
