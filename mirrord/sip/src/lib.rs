@@ -17,11 +17,11 @@ mod rpath;
 /// Also see Apple's relevant docs: [Hardened Runtime](https://developer.apple.com/documentation/security/hardened-runtime), [Entitlements](https://developer.apple.com/documentation/bundleresources/entitlements) and [Code Signing](https://developer.apple.com/documentation/security/code-signing-services).
 ///
 /// To get around this, the user's process is patched by creating a new unprotected version and
-/// signing while mirrord is running. Then the layer is loaded dynmically into the copy without
+/// signing while mirrord is running. Then the layer is loaded dynamically into the copy without
 /// SIP and executes as usual.
 ///
-/// - If the process is a **script**, the shebang must be changed to point to the patched version
-/// of the interpreter.
+/// - If the process is a **script**, the shebang must be changed to point to the patched version of
+///   the interpreter.
 ///
 /// ### Usage
 ///
