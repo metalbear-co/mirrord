@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use kube::{api::ObjectMeta, Api};
 use mirrord_operator::crd::profile::{
-    FeatureAdjustment, FeatureChange, FeatureKind, MirrordProfile, MirrordProfileSpec,
+    FeatureAdjustment, FeatureChange, MirrordProfile, MirrordProfileSpec,
 };
 use rstest::rstest;
 use tempfile::NamedTempFile;
@@ -33,8 +33,7 @@ pub async fn mirrord_profile_enforces_stealing(
             },
             spec: MirrordProfileSpec {
                 feature_adjustments: vec![FeatureAdjustment {
-                    kind: FeatureKind::Incoming,
-                    change: FeatureChange::Steal,
+                    change: FeatureChange::IncomingSteal,
                     unknown_fields: Default::default(),
                 }],
                 unknown_fields: Default::default(),

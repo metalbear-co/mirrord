@@ -67,6 +67,32 @@ pub struct MirrordPolicySpec {
     /// Fine grained control over network features like specifying required HTTP filters.
     #[serde(default)]
     pub network: NetworkPolicy,
+
+    /// Enforces that the user selects a mirrord profile for their session.
+    ///
+    /// Mind that mirrord profiles are only a functional feature.
+    /// mirrord Operator is not able to enforce that the
+    /// application running on the user's machine follows the selected profile.
+    ///
+    /// This setting should not be used in order to prevent malicious actions.
+    ///
+    /// Defaults to `false`.
+    #[serde(default)]
+    pub require_profile: bool,
+
+    /// A list of allowed mirrord profiles.
+    ///
+    /// If multiple policies apply to a session,
+    /// user's mirrord profile must be present in all allowlists.
+    ///
+    /// Mind that mirrord profiles are only a functional feature.
+    /// mirrord Operator is not able to enforce that the
+    /// application running on the user's machine follows the selected profile.
+    ///
+    /// This setting should not be used in order to prevent malicious actions.
+    ///
+    /// Optional.
+    pub profile_allowlist: Option<Vec<String>>,
 }
 
 /// Custom cluster-wide resource for policies that limit what mirrord features users can use.
@@ -107,6 +133,20 @@ pub struct MirrordClusterPolicySpec {
 
     #[serde(default)]
     pub network: NetworkPolicy,
+
+    /// Enforces that the user selects a mirrord profile for their session.
+    ///
+    /// Defaults to `false`.
+    #[serde(default)]
+    pub require_profile: bool,
+
+    /// A list of allowed mirrord profiles.
+    ///
+    /// If multiple policies apply to a session,
+    /// user's mirrord profile must be present in all allowlists.
+    ///
+    /// Optional.
+    pub profile_allowlist: Option<Vec<String>>,
 }
 
 /// Policy for controlling environment variables access from mirrord instances.

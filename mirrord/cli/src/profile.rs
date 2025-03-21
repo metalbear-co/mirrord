@@ -9,7 +9,7 @@ use mirrord_config::{
 };
 use mirrord_kube::{api::kubernetes::create_kube_config, error::KubeApiError};
 use mirrord_operator::crd::profile::{
-    FeatureAdjustment, FeatureChange, FeatureKind, MirrordProfile, MirrordProfileSpec,
+    FeatureAdjustment, FeatureChange, MirrordProfile, MirrordProfileSpec,
 };
 use mirrord_progress::Progress;
 use thiserror::Error;
@@ -40,18 +40,6 @@ pub enum ProfileError {
         "Check if you have sufficient permissions to fetch the profile from the cluster."
     ))]
     ProfileFetchError(KubeApiError),
-
-    #[error("mirrord profile contains an invalid entry with change `{change}` that does not apply to feature kind `{kind}`")]
-    #[diagnostic(help(
-        // Some combinations might become valid in the future,
-        // so let's advice upgrading first.
-        "Consider upgrading your mirrord binary. \
-        If the error persists, contact your cluster admin."
-    ))]
-    FeatureChangeNotApplicable {
-        kind: FeatureKind,
-        change: FeatureChange,
-    },
 }
 
 /// Convenience trait for [`FeatureAdjustment`].
@@ -63,7 +51,6 @@ trait FeatureAdjustmentExt: Sized {
 impl FeatureAdjustmentExt for FeatureAdjustment {
     fn apply_to(self, config: &mut FeatureConfig) -> Result<(), ProfileError> {
         let Self {
-            kind,
             change,
             unknown_fields,
         } = self;
@@ -72,58 +59,35 @@ impl FeatureAdjustmentExt for FeatureAdjustment {
             return Err(ProfileError::UnknownField(field));
         }
 
-        match kind {
-            FeatureKind::Incoming => match change {
-                FeatureChange::Off => {
-                    config.network.incoming.mode = IncomingMode::Off;
-                }
-                FeatureChange::Mirror => {
-                    config.network.incoming.mode = IncomingMode::Mirror;
-                }
-                FeatureChange::Steal => config.network.incoming.mode = IncomingMode::Steal,
-                FeatureChange::Remote => {
-                    return Err(ProfileError::FeatureChangeNotApplicable { kind, change });
-                }
-                FeatureChange::Unknown => return Err(ProfileError::UnknownVariant),
-            },
-
-            FeatureKind::Outgoing => match change {
-                FeatureChange::Off => {
-                    config.network.outgoing.tcp = false;
-                    config.network.outgoing.udp = false;
-                    config.network.outgoing.filter = None;
-                    config.network.outgoing.unix_streams = None;
-                }
-                FeatureChange::Remote => {
-                    config.network.outgoing.tcp = true;
-                    config.network.outgoing.udp = true;
-                    config.network.outgoing.filter = None;
-                    config.network.outgoing.unix_streams = Some(VecOrSingle::Single(".*".into()));
-                }
-                FeatureChange::Mirror | FeatureChange::Steal => {
-                    return Err(ProfileError::FeatureChangeNotApplicable { kind, change });
-                }
-                FeatureChange::Unknown => return Err(ProfileError::UnknownVariant),
-            },
-
-            FeatureKind::Dns => match change {
-                FeatureChange::Off => {
-                    config.network.dns.enabled = false;
-                    config.network.dns.filter = None;
-                }
-                FeatureChange::Remote => {
-                    config.network.dns.enabled = true;
-                    config.network.dns.filter = None;
-                }
-                FeatureChange::Mirror | FeatureChange::Steal => {
-                    return Err(ProfileError::FeatureChangeNotApplicable { kind, change });
-                }
-                FeatureChange::Unknown => return Err(ProfileError::UnknownVariant),
-            },
-
-            FeatureKind::Unknown => {
-                return Err(ProfileError::UnknownVariant);
+        match change {
+            FeatureChange::IncomingOff => {
+                config.network.incoming.mode = IncomingMode::Off;
             }
+            FeatureChange::IncomingMirror => {
+                config.network.incoming.mode = IncomingMode::Mirror;
+            }
+            FeatureChange::IncomingSteal => config.network.incoming.mode = IncomingMode::Steal,
+            FeatureChange::DnsOff => {
+                config.network.dns.enabled = false;
+                config.network.dns.filter = None;
+            }
+            FeatureChange::DnsRemote => {
+                config.network.dns.enabled = true;
+                config.network.dns.filter = None;
+            }
+            FeatureChange::OutgoingOff => {
+                config.network.outgoing.tcp = false;
+                config.network.outgoing.udp = false;
+                config.network.outgoing.filter = None;
+                config.network.outgoing.unix_streams = None;
+            }
+            FeatureChange::OutgoingRemote => {
+                config.network.outgoing.tcp = true;
+                config.network.outgoing.udp = true;
+                config.network.outgoing.filter = None;
+                config.network.outgoing.unix_streams = Some(VecOrSingle::Single(".*".into()));
+            }
+            FeatureChange::Unknown => return Err(ProfileError::UnknownVariant),
         }
 
         Ok(())
