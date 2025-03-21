@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt};
+use std::collections::HashMap;
 
 use kube::CustomResource;
 use schemars::JsonSchema;
@@ -40,9 +40,7 @@ pub struct MirrordProfileSpec {
 #[derive(Deserialize, Serialize, JsonSchema, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FeatureAdjustment {
-    /// The kind of feature to which this adjustment applies.
-    pub kind: FeatureKind,
-    /// The change to be made.
+    /// The change to be made in the user's config.
     pub change: FeatureChange,
 
     /// For future compatibility.
@@ -53,78 +51,28 @@ pub struct FeatureAdjustment {
     pub unknown_fields: HashMap<String, Value>,
 }
 
-/// A kind of mirrord feature that can be adjusted in a mirrord policy.
-#[derive(Deserialize, Serialize, JsonSchema, Debug, Clone, Copy)]
-#[serde(rename_all = "kebab-case")]
-pub enum FeatureKind {
-    /// Incoming traffic.
-    Incoming,
-    /// Outgoing traffic.
-    Outgoing,
-    /// DNS resolution.
-    Dns,
-    /// For forward compatibility.
-    ///
-    /// We don't want a single deserialization failure to fail listing policies.
-    #[schemars(skip)]
-    #[serde(other)]
-    Unknown,
-}
-
-impl fmt::Display for FeatureKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let as_str = match self {
-            Self::Incoming => "incoming",
-            Self::Outgoing => "outgoing",
-            Self::Dns => "dns",
-            Self::Unknown => "unknown",
-        };
-
-        f.write_str(as_str)
-    }
-}
-
 /// An adjustment to some mirrord feature.
 #[derive(Deserialize, Serialize, JsonSchema, Debug, Clone, Copy)]
 #[serde(rename_all = "kebab-case")]
 pub enum FeatureChange {
     /// Incoming traffic will be mirrored.
-    ///
-    /// Applies only to the `incoming` feature kind.
-    Mirror,
+    IncomingMirror,
     /// Incoming traffic will be stolen.
-    ///
-    /// Applies only to the `incoming` feature kind.
-    Steal,
-    /// Disables the feature.
-    ///
-    /// When applied to:
-    /// * `incoming` - no remote traffic will be intercepted
-    /// * `outgoing` - all outgoing traffic will be fully local
-    /// * `dns` - all DNS resolution will be fully local
-    Off,
-    /// Outgoing traffic or DNS resolution will be fully remote.
-    ///
-    /// Applies only to the `outgoing` and `dns` feature kinds.
-    Remote,
+    IncomingSteal,
+    /// Incoming traffic will not be intercepted
+    IncomingOff,
+    /// All DNS resolution will be remote.
+    DnsRemote,
+    /// All DNS resolution will be local.
+    DnsOff,
+    /// All outgoing traffic will be remote.
+    OutgoingRemote,
+    /// All outgoing traffic will be local.
+    OutgoingOff,
     /// For forward compatibility.
     ///
     /// We don't want a single deserialization failure to fail listing policies.
     #[schemars(skip)]
     #[serde(other)]
     Unknown,
-}
-
-impl fmt::Display for FeatureChange {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let as_str = match self {
-            Self::Mirror => "mirror",
-            Self::Steal => "steal",
-            Self::Off => "off",
-            Self::Remote => "remote",
-            Self::Unknown => "unknown",
-        };
-
-        f.write_str(as_str)
-    }
 }
