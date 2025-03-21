@@ -496,7 +496,7 @@ where
 
                 accept = self.port_subscriptions.next_connection() => match accept {
                     Ok((stream, peer)) => {
-                        self.incoming_connection(stream, peer).await?;
+                        self.incoming_connection(stream, peer).await;
                     }
                     Err(error) => {
                         tracing::error!(?error, "Failed to accept a stolen connection");
@@ -514,13 +514,25 @@ where
     }
 
     /// Handles a new remote connection that was stolen by [`Self::port_subscriptions`].
-    #[tracing::instrument(level = "trace", skip(self))]
-    async fn incoming_connection(
-        &mut self,
-        stream: TcpStream,
-        peer: SocketAddr,
-    ) -> AgentResult<()> {
-        let mut real_address = orig_dst::orig_dst_addr(&stream)?;
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    async fn incoming_connection(&mut self, stream: TcpStream, peer: SocketAddr) {
+        let mut real_address = match orig_dst::orig_dst_addr(&stream) {
+            Ok(real_address) => real_address,
+            Err(error) => {
+                // We shouldn't exit here, as we might have both IPv4 and IPv6 redirectors.
+                // One of them might still be functional.
+
+                tracing::error!(
+                    %error,
+                    ?stream,
+                    "Failed to obtain the original destination address \
+                    of a redirected TCP connection. \
+                    This is a bug."
+                );
+                return;
+            }
+        };
+
         let localhost = if self.support_ipv6 && real_address.is_ipv6() {
             IpAddr::V6(Ipv6Addr::LOCALHOST)
         } else {
@@ -538,7 +550,7 @@ where
             // a connection queued)
             // Here we just drop the TcpStream between our stealer socket and the remote peer (one
             // that attempted to connect with our target) and the connection is closed.
-            return Ok(());
+            return;
         };
 
         let stolen_connection = StolenConnection {
@@ -549,8 +561,6 @@ where
         };
 
         self.connections.manage(stolen_connection);
-
-        Ok(())
     }
 
     /// Handles an update from one of the connections in [`Self::connections`].
