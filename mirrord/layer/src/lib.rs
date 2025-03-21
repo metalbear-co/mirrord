@@ -489,6 +489,8 @@ fn fetch_env_vars() -> HashMap<String, String> {
 /// mirrord-layer on a process where specified to skip with MIRRORD_SKIP_PROCESSES
 #[cfg(target_os = "macos")]
 fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
+    use mirrord_config::feature::fs::READONLY_FILE_BUFFER_DEFAULT;
+
     load_only_layer_start(&config);
 
     let mut hook_manager = HookManager::default();
@@ -503,6 +505,7 @@ fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
         local: None,
         not_found: None,
         mapping: None,
+        readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
     };
     let debugger_ports = DebuggerPorts::from_env();
     let setup = LayerSetup::new(config, debugger_ports, true);

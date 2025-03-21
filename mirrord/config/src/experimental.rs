@@ -61,15 +61,9 @@ pub struct ExperimentalConfig {
 
     /// ### _experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}
     ///
-    /// Sets buffer size for readonly remote files (in bytes, for example 4096).
-    /// If set, such files will be read in chunks and buffered locally.
-    /// This improves performace when the user application reads data in small portions.
-    ///
-    /// Setting to 0 disables file buffering.
-    ///
-    /// <https://github.com/metalbear-co/mirrord/issues/2069>
-    #[config(default = 128000)]
-    pub readonly_file_buffer: u64,
+    /// DEPRECATED, WILL BE REMOVED: moved to `feature.fs.readonly_file_buffer` as part of
+    /// stabilisation. See <https://github.com/metalbear-co/mirrord/issues/2069>.
+    pub readonly_file_buffer: Option<u64>,
 
     /// ### _experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}
     ///
@@ -98,7 +92,6 @@ impl CollectAnalytics for &ExperimentalConfig {
         analytics.add("enable_exec_hooks_linux", self.enable_exec_hooks_linux);
         analytics.add("hide_ipv6_interfaces", self.hide_ipv6_interfaces);
         analytics.add("disable_reuseaddr", self.disable_reuseaddr);
-        analytics.add("readonly_file_buffer", self.readonly_file_buffer);
         analytics.add(
             "idle_local_http_connection_timeout",
             self.idle_local_http_connection_timeout,
