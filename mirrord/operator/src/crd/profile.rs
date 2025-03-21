@@ -8,6 +8,12 @@ use serde_json::Value;
 /// Custom cluster-wide resource for storing a reusable mirrord config template.
 ///
 /// Can be selected from the user's mirrord config.
+///
+/// Mind that mirrord profiles are only a functional feature.
+/// mirrord Operator is not able to enforce that the
+/// application running on the user's machine follows the selected profile.
+///
+/// This feature should not be used in order to prevent malicious actions.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     // The operator group is handled by the operator, we want profiles to be handled by k8s.
