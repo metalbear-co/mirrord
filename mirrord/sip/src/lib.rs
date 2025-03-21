@@ -1,36 +1,3 @@
-//! Concerns MacOS' SIP (System Integrity Protection) mechanism and how to sidestep it.
-//!
-//! ### Why?
-//!
-//! SIP makes it such that the `mirrord-layer` lib cannot be dynamically loaded into the user's
-//! process on MacOS machines, as it blocks the modification of processes ([Wikipedia page](https://en.wikipedia.org/wiki/System_Integrity_Protection)). It does this by removing the relevant environment variables (`DYLD_INSERT_LIBRARIES`) when the process starts.
-//!
-//! Also see Apple's relevant docs: [Hardened Runtime](https://developer.apple.com/documentation/security/hardened-runtime), [Entitlements](https://developer.apple.com/documentation/bundleresources/entitlements) and [Code Signing](https://developer.apple.com/documentation/security/code-signing-services).
-//!
-//! To get around this, the user's process is patched by creating a new unprotected version and
-//! signing while mirrord is running. Then the layer is loaded dynmically into the copy without
-//! SIP and executes as usual.
-//!
-//! - If the process is a **script**, the shebang must be changed to point to the patched version
-//! of the interpreter.
-//!
-//! ### Usage
-//!
-//! Used by `mirrord-cli` and `mirrord-layer`. Called into before the user process is
-//! run, during setup on MacOS machines and in the exec hooks in case the program
-//! runs a protected binary - see mirrord::execution::MirrordExecution::start_internal,
-//! mirrord_layer::exec_hooks::hooks::execve_detour and mirrord_layer::exec_utils::patch_if_sip.
-//!
-//! The entry point when calling this crate is [`main::sip_patch`].
-//!
-//! ### Gotchas and spike pits
-//!
-//! - The directory where patched files exist is not randomly named, but uses the const
-//!   [`main::MIRRORD_PATCH_DIR`] due to an issue with the temp dir changing between executions.
-//! - A shebang is added to scripts without one in order to point it to the patched binary.
-//! - When checking a script, only the first line of the file is checked for a shebang, in case the
-//!   script is encoded unusually.
-
 #![feature(iter_intersperse)]
 #![warn(clippy::indexing_slicing)]
 #![cfg(target_os = "macos")]
@@ -40,6 +7,38 @@ mod codesign;
 mod error;
 mod rpath;
 
+/// Concerns MacOS' SIP (System Integrity Protection) mechanism and how to sidestep it.
+///
+/// ### Why?
+///
+/// SIP makes it such that the `mirrord-layer` lib cannot be dynamically loaded into the user's
+/// process on MacOS machines, as it blocks the modification of processes ([Wikipedia page](https://en.wikipedia.org/wiki/System_Integrity_Protection)). It does this by removing the relevant environment variables (`DYLD_INSERT_LIBRARIES`) when the process starts.
+///
+/// Also see Apple's relevant docs: [Hardened Runtime](https://developer.apple.com/documentation/security/hardened-runtime), [Entitlements](https://developer.apple.com/documentation/bundleresources/entitlements) and [Code Signing](https://developer.apple.com/documentation/security/code-signing-services).
+///
+/// To get around this, the user's process is patched by creating a new unprotected version and
+/// signing while mirrord is running. Then the layer is loaded dynmically into the copy without
+/// SIP and executes as usual.
+///
+/// - If the process is a **script**, the shebang must be changed to point to the patched version
+/// of the interpreter.
+///
+/// ### Usage
+///
+/// Used by `mirrord-cli` and `mirrord-layer`. Called into before the user process is
+/// run, during setup on MacOS machines and in the exec hooks in case the program
+/// runs a protected binary - see mirrord::execution::MirrordExecution::start_internal,
+/// mirrord_layer::exec_hooks::hooks::execve_detour and mirrord_layer::exec_utils::patch_if_sip.
+///
+/// The entry point when calling this crate is [`main::sip_patch`].
+///
+/// ### Gotchas and spike pits
+///
+/// - The directory where patched files exist is not randomly named, but uses the const
+///   [`main::MIRRORD_PATCH_DIR`] due to an issue with the temp dir changing between executions.
+/// - A shebang is added to scripts without one in order to point it to the patched binary.
+/// - When checking a script, only the first line of the file is checked for a shebang, in case the
+///   script is encoded unusually.
 mod main {
     use std::{
         env,
