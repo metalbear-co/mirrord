@@ -59,6 +59,12 @@ pub struct ExperimentalConfig {
     #[config(default = true)]
     pub use_dev_null: bool,
 
+    /// ### _experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}
+    ///
+    /// DEPRECATED, WILL BE REMOVED: moved to `feature.fs.readonly_file_buffer` as part of
+    /// stabilisation. See <https://github.com/metalbear-co/mirrord/issues/2069>.
+    pub readonly_file_buffer: Option<u64>,
+
     /// ### _experimental_ idle_local_http_connection_timeout {#experimental-idle_local_http_connection_timeout}
     ///
     /// Sets a timeout for idle local HTTP connections (in milliseconds).
