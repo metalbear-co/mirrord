@@ -8,7 +8,10 @@ use crate::config::{self, ConfigError};
 #[serde(deny_unknown_fields)]
 #[cfg_attr(
     feature = "namespaced-schemars",
-    schemars(rename = "co.metalbear.mirrord.v1.StatefulSetTarget")
+    schemars(
+        rename = "co.metalbear.mirrord.v1.StatefulSetTarget",
+        title = "StatefulSetTarget"
+    )
 )]
 pub struct StatefulSetTarget {
     pub stateful_set: String,

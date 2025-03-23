@@ -10,7 +10,10 @@ use crate::config::{ConfigError, Result};
 #[serde(deny_unknown_fields)]
 #[cfg_attr(
     feature = "namespaced-schemars",
-    schemars(rename = "co.metalbear.mirrord.v1.RolloutTarget")
+    schemars(
+        rename = "co.metalbear.mirrord.v1.RolloutTarget",
+        title = "RolloutTarget"
+    )
 )]
 pub struct RolloutTarget {
     /// <!--${internal}-->

@@ -10,7 +10,10 @@ use crate::config::{ConfigError, Result};
 #[serde(deny_unknown_fields)]
 #[cfg_attr(
     feature = "namespaced-schemars",
-    schemars(rename = "co.metalbear.mirrord.v1.ServiceTarget")
+    schemars(
+        rename = "co.metalbear.mirrord.v1.ServiceTarget",
+        title = "ServiceTarget"
+    )
 )]
 pub struct ServiceTarget {
     pub service: String,

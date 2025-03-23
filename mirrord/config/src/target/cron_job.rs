@@ -8,7 +8,10 @@ use crate::config::{self, ConfigError};
 #[serde(deny_unknown_fields)]
 #[cfg_attr(
     feature = "namespaced-schemars",
-    schemars(rename = "co.metalbear.mirrord.v1.CronJobTarget")
+    schemars(
+        rename = "co.metalbear.mirrord.v1.CronJobTarget",
+        title = "CronJobTarget"
+    )
 )]
 pub struct CronJobTarget {
     pub cron_job: String,

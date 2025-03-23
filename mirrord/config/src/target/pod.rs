@@ -10,7 +10,7 @@ use crate::config::{self, ConfigError};
 #[serde(deny_unknown_fields)]
 #[cfg_attr(
     feature = "namespaced-schemars",
-    schemars(rename = "co.metalbear.mirrord.v1.PodTarget")
+    schemars(rename = "co.metalbear.mirrord.v1.PodTarget", title = "PodTarget")
 )]
 pub struct PodTarget {
     /// <!--${internal}-->

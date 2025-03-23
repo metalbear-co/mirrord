@@ -273,7 +273,7 @@ mirrord-layer failed to parse the provided target!
 #[serde(untagged, deny_unknown_fields)]
 #[cfg_attr(
     feature = "namespaced-schemars",
-    schemars(rename = "co.metalbear.mirrord.v1.Target")
+    schemars(rename = "co.metalbear.mirrord.v1.Target", title = "Target")
 )]
 pub enum Target {
     /// <!--${internal}-->
