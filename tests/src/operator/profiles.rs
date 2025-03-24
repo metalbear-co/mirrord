@@ -1,6 +1,6 @@
 #![cfg(feature = "operator")]
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use kube::{api::ObjectMeta, Api};
 use mirrord_operator::crd::profile::{
@@ -22,6 +22,7 @@ pub async fn mirrord_profile_enforces_stealing(
 ) {
     let kube_client = kube_client.await;
     let service = service.await;
+    let deployed_at = Instant::now();
     let target_path = service.pod_container_target();
 
     let (_profile_guard, profile_name) = {
@@ -54,13 +55,26 @@ pub async fn mirrord_profile_enforces_stealing(
         PortForwarder::new(kube_client, &service.pod_name, &service.namespace, 80).await;
     let service_url = format!("http://{}", port_forwarder.address());
 
-    // Before we start the session, verify that the service responds.
-    let response = reqwest::get(&service_url)
-        .await
-        .unwrap()
-        .bytes()
-        .await
-        .unwrap();
+    // Before we start the session, wait until the service is responsive.
+    // TODO: remove when we add readiness probes to deployed containers.
+    let response = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            match reqwest::get(&service_url).await {
+                Ok(response) => break response,
+                Err(error) => {
+                    println!(
+                        "Failed to reach the remote service {}s after deployment: {error}",
+                        deployed_at.elapsed().as_secs_f32()
+                    );
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+    })
+    .await
+    .unwrap();
+    println!("Reached remote service, status code {}", response.status());
+    let response = response.bytes().await.unwrap();
     assert_eq!(
         response.as_ref(),
         b"OK - GET: Request completed\n",
