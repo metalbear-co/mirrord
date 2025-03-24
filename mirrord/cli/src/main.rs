@@ -119,6 +119,16 @@
 //! [`ContainerRuntimeCommand::create`] that is used to prepare the sidecar, and
 //! [`ContainerRuntimeCommand::Run`].
 //!
+//! ### `mirrord container-ext [OPTIONS]`
+//!
+//! - [`container_ext_command`]
+//!
+//! > It's to `mirrord container` what `mirrord ext` is to `mirrord exec`.
+//!
+//! Just as we have a special IDE favoured command in `mirrord ext`, we have an equivalent for
+//! `mirrord container`, so you can run something like `mirrord exec -- docker run {image}` from an
+//! IDE plugin.
+//!
 //! ### `mirrord extract <PATH>`
 //!
 //! - [`extract_library`]
