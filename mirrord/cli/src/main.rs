@@ -197,6 +197,14 @@
 //! - Tip: to kill a particular session when you don't have its `session_id`, you can run the
 //!   `mirrord operator status` command to see all the sessions.
 //!
+//! ### `mirrord diagnose <COMMAND>`
+//!
+//! - [`diagnose_command`]
+//!
+//! > Diagnostics for the operator.
+//!
+//! Currently only a network latency diagnostics check is supported.
+//!
 //! ### `mirrord ls [OPTIONS]`
 //!
 //! - [`list::print_targets`]
@@ -209,6 +217,23 @@
 //! user, when they started mirrrod and have not set a target in their [`LayerConfig`].
 //!
 //! The types of target fetched depend on the [`ListTargetArgs::RICH_OUTPUT_ENV`].
+//!
+//! ### `mirrord completions <SHELL>`
+//!
+//! - [`generate`]
+//!
+//! > Completions for your shell.
+//!
+//! Uses [`clap`] to generate completions for the mirrord CLI.
+//!
+//! ### `mirrord teams`
+//!
+//! - [`teams::navigate_to_intro`]
+//!
+//! > For users interested in getting mirrord for teams.
+//!
+//! Opens a browser window to our mirrord for teams intro page, if we fail to open it, then it
+//! prints a nice little message to stdout.
 #![feature(let_chains)]
 #![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
