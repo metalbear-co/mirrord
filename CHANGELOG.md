@@ -8,6 +8,32 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.136.0](https://github.com/metalbear-co/mirrord/tree/3.136.0) - 2025-03-21
+
+
+### Added
+
+- mirrord CLI now prints the path to the internal proxy logfile.
+  [#3137](https://github.com/metalbear-co/mirrord/issues/3137)
+- Added support for new CRD - MirrordProfile. mirrord profiles allow for
+  storing mirrord config templates in the cluster and applying them to the
+  mirrord config at runtime.
+
+
+### Fixed
+
+- Regression in running some SIP-protected binaries with mirrord.
+  [#3149](https://github.com/metalbear-co/mirrord/issues/3149)
+- Regression in running SIP-protected binaries that have entitelements.
+  [#3184](https://github.com/metalbear-co/mirrord/issues/3184)
+
+
+### Internal
+
+- mirrord CLI children no longer resolve the configuration themselves. Instead,
+  they used an encoded complete config provided by the parent.
+  [#3136](https://github.com/metalbear-co/mirrord/issues/3136)
+
 ## [3.135.0](https://github.com/metalbear-co/mirrord/tree/3.135.0) - 2025-03-18
 
 

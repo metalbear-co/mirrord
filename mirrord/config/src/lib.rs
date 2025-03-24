@@ -598,6 +598,13 @@ impl LayerConfig {
             );
         }
 
+        if self.experimental.readonly_file_buffer.is_some() {
+            return Err(ConfigError::Conflict(
+                "cannot use experimental.readonly_file_buffer, as it has been moved. Use feature.fs.readonly_file_buffer instead."
+                    .to_string(),
+            ));
+        }
+
         if let (Some(profile), true) = (&self.profile, context.has_warnings()) {
             // It might be that the user config is fine,
             // but the mirrord profile introduced changes that triggered the warnings.
