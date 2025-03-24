@@ -49,6 +49,8 @@ pub async fn create_namespaced_fs_policy_and_try_file_open(
                     not_found: HashSet::from_iter(vec!["file\\.not-found".to_string()]),
                 },
                 network: Default::default(),
+                require_profile: Default::default(),
+                profile_allowlist: Default::default(),
             },
         ),
         &service.namespace,
