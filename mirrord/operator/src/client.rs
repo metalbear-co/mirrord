@@ -725,16 +725,16 @@ impl OperatorApi<PreparedClientCert> {
             on_concurrent_steal: Some(concurrent_steal),
             profile,
         };
-        let query =
-            serde_qs::to_string(&connect_params).expect("serialization to memory should not fail");
 
         if use_proxy {
             let api_version = TargetCrd::api_version(&());
             let plural = TargetCrd::plural(&());
-            format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?{query}")
+            format!(
+                "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?{connect_params}"
+            )
         } else {
             let url_path = TargetCrd::url_path(&(), Some(namespace));
-            format!("{url_path}/{name}?{query}")
+            format!("{url_path}/{name}?{connect_params}")
         }
     }
 
@@ -763,13 +763,13 @@ impl OperatorApi<PreparedClientCert> {
             on_concurrent_steal: None,
             profile,
         };
-        let query =
-            serde_qs::to_string(&connect_params).expect("serialization to memory should not fail");
 
         if use_proxy {
-            format!("/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?{query}",)
+            format!(
+                "/apis/{api_version}/proxy/namespaces/{namespace}/{plural}/{name}?{connect_params}",
+            )
         } else {
-            format!("{url_path}/{name}?{query}",)
+            format!("{url_path}/{name}?{connect_params}",)
         }
     }
 
