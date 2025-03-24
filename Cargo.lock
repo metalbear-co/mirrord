@@ -4600,6 +4600,7 @@ dependencies = [
  "semver 1.0.26",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "serde_yaml",
  "thiserror 2.0.12",
  "tokio",
