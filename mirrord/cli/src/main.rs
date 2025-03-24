@@ -84,6 +84,41 @@
 //! intializes logging, either to a file in `/tmp`, or to stderr when it's being started from
 //! `mirrord container`.
 //!
+//! ### `mirrord container [OPTIONS] [EXEC]`
+//!
+//! - [`container_command`]
+//!
+//! > Runs an equivalent thing of `mirrord exec -- docker run {image}`.
+//!
+//! Running mirrord inside of a container (multiple runtimes are supported, not only docker, see
+//! [`ContainerRuntime`]) requires some extra preparation than simply running `mirrord exec`.
+//!
+//! As with the other `mirrord exec` style commands, it starts a [`Progress`] tracker, resolves
+//! [`LayerConfig`], performs target resolution and at the end starts mirrord. The big differential
+//! here is that we start more than just the mirrord-intproxy and the mirrord-agent, since we now
+//! also have the mirrord-extproxy.
+//!
+//! The mirrord-extproxy is used by the mirrord-intproxy to talk to the mirrord-agent, since the
+//! internal proxy won't be able to reach the agent from within the container runtime. What it does
+//! is a simplified version of the intproxy, see [`external_proxy::proxy`].
+//!
+//! With the external proxy running, we can get its address from stdout. We need this address when
+//! starting the mirrord sidecar, which runs the `mirrord intproxy` instance that our `mirrord exec`
+//! inside the user's container will connect to, something like
+//! `agent<->extproxy<->intproxy<->layer` (excluding the operator from here to simplify).
+//!
+//! Now that we have a sidecar with intproxy (it's not running yet though), we configure the
+//! `{runtime} container run` command to take into account the sidecar network, volumes, and a bunch
+//! of env vars (including the `LD_PRELOAD` used to hook libmirrord). After all this is done, we
+//! finally start the intproxy sidecar.
+//!
+//! Only then we can actually run the user's container command with mirrord, and have it working as
+//! expected.
+//!
+//! There are actually 2 subcommands that make the whole mirrord-container experience:
+//! [`ContainerRuntimeCommand::create`] that is used to prepare the sidecar, and
+//! [`ContainerRuntimeCommand::Run`].
+//!
 //! ### `mirrord extract <PATH>`
 //!
 //! - [`extract_library`]
