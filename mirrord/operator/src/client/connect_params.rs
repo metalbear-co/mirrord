@@ -18,7 +18,7 @@ pub struct ConnectParams<'a> {
     pub profile: Option<&'a str>,
 }
 
-impl<'a> fmt::Display for ConnectParams<'a> {
+impl fmt::Display for ConnectParams<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let as_string =
             serde_urlencoded::to_string(self).expect("serialization to memory should not fail");
