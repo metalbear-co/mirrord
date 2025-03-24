@@ -1,1 +1,1 @@
-mirrord profiles now allow for enforcing usage of mirrord policies.
+mirrord prolicies now allow for enforcing usage of mirrord profiles.
