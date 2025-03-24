@@ -33,39 +33,54 @@ macro_rules! crd_schemars_impl_with_prefix {
         crd_schemars_impl_with_prefix!($prefix, $ident as $ident, $spec, $status);
     };
     ($prefix:literal, $ident:ident as $ident_name:ident, $spec:ident, $status:ident) => {
+        #[automatically_derived]
         impl schemars::JsonSchema for $ident {
-            fn schema_name() -> String {
-                concat!($prefix, ".", stringify!($ident_name)).into()
+            fn schema_id() -> std::borrow::Cow<'static, str> {
+                std::borrow::Cow::Borrowed(concat!($prefix, ".", stringify!($ident_name)))
             }
 
-            fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-                let instance_type = schemars::schema::InstanceType::Object;
+            fn schema_name() -> String {
+                concat!($prefix, ".", stringify!($ident_name)).to_owned()
+            }
 
-                let spec = gen.subschema_for::<$spec>();
-                let status = gen.subschema_for::<$status>();
+            fn json_schema(
+                generator: &mut schemars::gen::SchemaGenerator,
+            ) -> schemars::schema::Schema {
+                schemars::_private::metadata::add_title(
+                    {
+                        let mut schema_object = schemars::schema::SchemaObject {
+                            instance_type: Some(schemars::schema::InstanceType::Object.into()),
+                            ..Default::default()
+                        };
 
-                let metadata = schemars::schema::Metadata {
-                    title: Some(stringify!($ident_name).into()),
-                    ..Default::default()
-                };
+                        let object_validation = schema_object.object();
 
-                let fields = schemars::schema::ObjectValidation {
-                    required: schemars::Set::from(["spec".to_owned()]),
-                    properties: schemars::Map::from([
-                        ("spec".to_owned(), spec),
-                        ("status".to_owned(), status),
-                    ]),
-                    ..Default::default()
-                };
+                        schemars::_private::insert_object_property::<$spec>(
+                            object_validation,
+                            "spec",
+                            false,
+                            false,
+                            schemars::_private::metadata::add_description(
+                                generator.subschema_for::<$spec>(),
+                                concat!(stringify!($ident_name), " \"spec\" field"),
+                            ),
+                        );
 
-                let schema_object = schemars::schema::SchemaObject {
-                    instance_type: Some(instance_type.into()),
-                    metadata: Some(metadata.into()),
-                    object: Some(fields.into()),
-                    ..Default::default()
-                };
+                        schemars::_private::insert_object_property::<Option<$status>>(
+                            object_validation,
+                            "status",
+                            false,
+                            false,
+                            schemars::_private::metadata::add_description(
+                                generator.subschema_for::<Option<$status>>(),
+                                concat!(stringify!($ident_name), " \"status\" field"),
+                            ),
+                        );
 
-                schemars::schema::Schema::Object(schema_object)
+                        schemars::schema::Schema::Object(schema_object)
+                    },
+                    stringify!($ident_name),
+                )
             }
         }
     };
@@ -73,35 +88,43 @@ macro_rules! crd_schemars_impl_with_prefix {
         crd_schemars_impl_with_prefix!($prefix, $ident as $ident, $spec);
     };
     ($prefix:literal, $ident:ident as $ident_name:ident, $spec:ident) => {
+        #[automatically_derived]
         impl schemars::JsonSchema for $ident {
-            fn schema_name() -> String {
-                concat!($prefix, ".", stringify!($ident_name)).into()
+            fn schema_id() -> std::borrow::Cow<'static, str> {
+                std::borrow::Cow::Borrowed(concat!($prefix, ".", stringify!($ident_name)))
             }
 
-            fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-                let instance_type = schemars::schema::InstanceType::Object;
+            fn schema_name() -> String {
+                concat!($prefix, ".", stringify!($ident_name)).to_owned()
+            }
 
-                let spec = gen.subschema_for::<$spec>();
+            fn json_schema(
+                generator: &mut schemars::gen::SchemaGenerator,
+            ) -> schemars::schema::Schema {
+                schemars::_private::metadata::add_title(
+                    {
+                        let mut schema_object = schemars::schema::SchemaObject {
+                            instance_type: Some(schemars::schema::InstanceType::Object.into()),
+                            ..Default::default()
+                        };
 
-                let metadata = schemars::schema::Metadata {
-                    title: Some(stringify!($ident_name).into()),
-                    ..Default::default()
-                };
+                        let object_validation = schema_object.object();
 
-                let fields = schemars::schema::ObjectValidation {
-                    required: schemars::Set::from(["spec".to_owned()]),
-                    properties: schemars::Map::from([("spec".to_owned(), spec)]),
-                    ..Default::default()
-                };
+                        schemars::_private::insert_object_property::<$spec>(
+                            object_validation,
+                            "spec",
+                            false,
+                            false,
+                            schemars::_private::metadata::add_description(
+                                generator.subschema_for::<$spec>(),
+                                concat!(stringify!($ident_name), " \"spec\" field"),
+                            ),
+                        );
 
-                let schema_object = schemars::schema::SchemaObject {
-                    instance_type: Some(instance_type.into()),
-                    metadata: Some(metadata.into()),
-                    object: Some(fields.into()),
-                    ..Default::default()
-                };
-
-                schemars::schema::Schema::Object(schema_object)
+                        schemars::schema::Schema::Object(schema_object)
+                    },
+                    stringify!($ident_name),
+                )
             }
         }
     };
