@@ -88,7 +88,7 @@
 //!
 //! - [`container_command`]
 //!
-//! > Runs an equivalent thing of `mirrord exec -- docker run {image}`.
+//! > Runs the equivalent of `mirrord exec -- docker run {image}`.
 //!
 //! Running mirrord inside of a container (multiple runtimes are supported, not only docker, see
 //! [`ContainerRuntime`]) requires some extra preparation than simply running `mirrord exec`.
@@ -141,7 +141,7 @@
 //!
 //! ### `mirrord verify-config [OPTIONS] <PATH>`
 //!
-//! - [`verify_config`]
+//! - [`verify_config()`]
 //!
 //! > Config validation.
 //!
