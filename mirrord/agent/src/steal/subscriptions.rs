@@ -93,9 +93,11 @@ impl PortRedirector for IptablesListener {
             .await?;
             self.iptables.insert(safe)
         };
-        iptables.add_redirect(from, self.redirect_to).await?;
 
-        Ok(())
+        iptables
+            .add_redirect(from, self.redirect_to)
+            .await
+            .map_err(From::from)
     }
 
     async fn remove_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
