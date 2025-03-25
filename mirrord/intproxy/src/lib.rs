@@ -76,8 +76,8 @@ pub struct IntProxy {
     /// during reconnection state.
     reconnect_task_queue: Option<VecDeque<ProxyMessage>>,
 
-    // Simple ping preset state-machine to debounce the resets to ping-pong due to agent activity
-    // every 10/th of `PING_INTERVAL`
+    // Simple ping preset state-machine to debounce ping-pong resets (from agent activity) to at
+    // most every 10/th of `PING_INTERVAL`
     ping_reset_debounce: Interval,
     ping_reset_allowed: bool,
 }
