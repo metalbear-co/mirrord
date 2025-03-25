@@ -230,7 +230,7 @@
 //!
 //! - [`teams::navigate_to_intro`]
 //!
-//! > For users interested in getting mirrord for teams.
+//! > For users interested in getting mirrord for teams, which is a paid feature.
 //!
 //! Opens a browser window to our mirrord for teams intro page, if we fail to open it, then it
 //! prints a nice little message to stdout.
