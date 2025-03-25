@@ -33,6 +33,7 @@ pub enum PingPongError {
 /// from the agent.
 pub enum PingPongMessage {
     AgentSentPong,
+    ResetTimeout,
     ConnectionRefresh(ConnectionRefresh),
 }
 
@@ -93,6 +94,10 @@ impl BackgroundTask for PingPong {
                         tracing::debug!("Message bus closed, exiting");
                         break Ok(())
                     },
+                    (Some(PingPongMessage::ResetTimeout), _) => {
+                        tracing::debug!("Reset ping interval");
+                        self.ticker.reset();
+                    }
                     (Some(PingPongMessage::AgentSentPong), true) => {
                         tracing::debug!("Agent responded to ping");
                         self.awaiting_pong = false;

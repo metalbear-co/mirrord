@@ -23,7 +23,11 @@ use proxies::{
     simple::{SimpleProxy, SimpleProxyMessage},
 };
 use semver::Version;
-use tokio::{net::TcpListener, time};
+use tokio::{
+    net::TcpListener,
+    time,
+    time::{Interval, MissedTickBehavior},
+};
 
 use crate::{
     agent_conn::AgentConnection,
@@ -71,6 +75,11 @@ pub struct IntProxy {
     /// Temporary message queue for any [`ProxyMessage`] from layer or to agent that are sent
     /// during reconnection state.
     reconnect_task_queue: Option<VecDeque<ProxyMessage>>,
+
+    // Simple ping preset state-machine to debounce the resets to ping-pong due to agent activity
+    // every 10/th of `PING_INTERVAL`
+    ping_reset_debounce: Interval,
+    ping_reset_allowed: bool,
 }
 
 impl IntProxy {
@@ -134,6 +143,9 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
 
+        let mut ping_reset_debounce = time::interval(Self::PING_INTERVAL / 10);
+        ping_reset_debounce.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
         Self {
             any_connection_accepted: false,
             background_tasks,
@@ -149,6 +161,8 @@ impl IntProxy {
             },
             protocol_version: None,
             reconnect_task_queue: Default::default(),
+            ping_reset_debounce,
+            ping_reset_allowed: false,
         }
     }
 
@@ -177,6 +191,10 @@ impl IntProxy {
                     );
 
                     self.handle_task_update(task_id, task_update).await?;
+                }
+
+                _ = self.ping_reset_debounce.tick() => {
+                    self.ping_reset_allowed = true;
                 }
 
                 _ = time::sleep(first_timeout), if !self.any_connection_accepted => {
@@ -320,6 +338,16 @@ impl IntProxy {
     /// Routes most messages from the agent to the correct background task.
     /// Some messages are handled here.
     async fn handle_agent_message(&mut self, message: DaemonMessage) -> Result<(), IntProxyError> {
+        if self.ping_reset_allowed
+            && !matches!(message, DaemonMessage::Pong | DaemonMessage::Close(_))
+        {
+            self.task_txs
+                .ping_pong
+                .send(PingPongMessage::ResetTimeout)
+                .await;
+            self.ping_reset_allowed = false;
+        }
+
         match message {
             DaemonMessage::Pong => {
                 self.task_txs
