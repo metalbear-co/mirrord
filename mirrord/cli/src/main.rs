@@ -214,7 +214,7 @@
 //! Fetches the list of supported targets from the cluster, using the `OperatorApi` if the
 //! mirrord-operator is available (and has **not** been disabled in the [`LayerConfig`]), and prints
 //! it back to the user. The output is used by the IDE plugins to show a nice selection box to the
-//! user, when they started mirrrod and have not set a target in their [`LayerConfig`].
+//! user, when they started mirrord and have not set a target in their [`LayerConfig`].
 //!
 //! The types of target fetched depend on the [`ListTargetArgs::RICH_OUTPUT_ENV`].
 //!
