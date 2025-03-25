@@ -36,7 +36,6 @@ pub struct UnknownTargetType(pub String);
 ///    [`KubeTarget::Unknown`].
 #[derive(Serialize, Clone, Debug, JsonSchema)]
 #[serde(untagged)]
-#[schemars(rename = "co.metalbear.operator.v1.KubeTarget", title = "KubeTarget")]
 pub enum KubeTarget {
     /// A target that we know of in both mirrord and the operator.
     #[serde(serialize_with = "Target::serialize")]

@@ -48,9 +48,6 @@ crd = [
   "dep:thiserror",
 ]
 setup = ["crd", "dep:serde_yaml"]
-namespaced-schemars = [
-  "mirrord-config/namespaced-schemars"
-]
 
 [dependencies]
 mirrord-agent-env = { path = "../agent/env", features = ["schema"], optional = true }
