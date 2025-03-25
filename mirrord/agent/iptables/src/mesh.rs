@@ -193,11 +193,15 @@ impl MeshVendorExt for MeshVendor {
 
 #[cfg(test)]
 mod tests {
-    use mockall::predicate::*;
+    use std::sync::Arc;
+
+    use mirrord_agent_env::mesh::MeshVendor;
+    use mockall::predicate::eq;
     use nix::unistd::getgid;
 
-    use super::*;
-    use crate::{MockIPTables, IPTABLE_PREROUTING};
+    use crate::{
+        mesh::MeshRedirect, redirect::Redirect, MockIPTables, IPTABLE_MESH, IPTABLE_PREROUTING,
+    };
 
     fn create_mesh_list_values(mock: &mut MockIPTables) {
         mock.expect_list_rules()

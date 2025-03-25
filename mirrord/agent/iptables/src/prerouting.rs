@@ -82,10 +82,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use mockall::predicate::*;
+    use std::sync::Arc;
 
-    use super::*;
-    use crate::MockIPTables;
+    use mockall::predicate::eq;
+
+    use crate::{
+        prerouting::PreroutingRedirect, redirect::Redirect, MockIPTables, IPTABLE_PREROUTING,
+    };
 
     #[tokio::test]
     async fn add_redirect() {

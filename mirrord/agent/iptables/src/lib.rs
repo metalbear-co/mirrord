@@ -302,9 +302,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use mockall::predicate::*;
+    use mockall::predicate::{eq, str};
 
-    use super::*;
+    use crate::{MockIPTables, SafeIpTables};
 
     #[tokio::test]
     async fn default() {

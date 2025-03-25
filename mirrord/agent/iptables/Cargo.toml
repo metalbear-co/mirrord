@@ -24,7 +24,7 @@ iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e
 fancy-regex.workspace = true
 nix = { workspace = true, features = ["user"] }
 rand.workspace = true
-tokio = { workspace = true, features = ["fs", "process"] }
+tokio = { workspace = true, features = ["fs", "macros", "process", "rt"] }
 tracing.workspace = true
 
 [dev-dependencies]
