@@ -5,28 +5,26 @@ use std::{
 
 use enum_dispatch::enum_dispatch;
 use mirrord_agent_env::{envs, mesh::MeshVendor};
-use mirrord_protocol::Port;
 use rand::distr::{Alphanumeric, SampleString};
-use tracing::warn;
+use tracing::{warn, Level};
 
 use crate::{
-    error::{AgentError, AgentResult},
-    steal::ip_tables::{
-        flush_connections::FlushConnections,
-        mesh::{istio::AmbientRedirect, MeshRedirect, MeshVendorExt},
-        prerouting::PreroutingRedirect,
-        redirect::Redirect,
-        standard::StandardRedirect,
-    },
+    error::IPTablesResult,
+    flush_connections::FlushConnections,
+    mesh::{istio::AmbientRedirect, MeshRedirect, MeshVendorExt},
+    prerouting::PreroutingRedirect,
+    redirect::Redirect,
+    standard::StandardRedirect,
 };
 
-pub(crate) mod chain;
-pub(crate) mod flush_connections;
-pub(crate) mod mesh;
-pub(crate) mod output;
-pub(crate) mod prerouting;
-pub(crate) mod redirect;
-pub(crate) mod standard;
+mod chain;
+pub mod error;
+mod flush_connections;
+mod mesh;
+mod output;
+mod prerouting;
+mod redirect;
+mod standard;
 
 pub static IPTABLE_PREROUTING_ENV: &str = "MIRRORD_IPTABLE_PREROUTING_NAME";
 pub static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
@@ -38,8 +36,8 @@ pub static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
     })
 });
 
-pub(crate) static IPTABLE_MESH_ENV: &str = "MIRRORD_IPTABLE_MESH_NAME";
-pub(crate) static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
+pub static IPTABLE_MESH_ENV: &str = "MIRRORD_IPTABLE_MESH_NAME";
+pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_MESH_ENV).unwrap_or_else(|_| {
         format!(
             "MIRRORD_OUTPUT_{}",
@@ -48,8 +46,8 @@ pub(crate) static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
     })
 });
 
-pub(crate) static IPTABLE_STANDARD_ENV: &str = "MIRRORD_IPTABLE_STANDARD_NAME";
-pub(crate) static IPTABLE_STANDARD: LazyLock<String> = LazyLock::new(|| {
+pub static IPTABLE_STANDARD_ENV: &str = "MIRRORD_IPTABLE_STANDARD_NAME";
+pub static IPTABLE_STANDARD: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_STANDARD_ENV).unwrap_or_else(|_| {
         format!(
             "MIRRORD_STANDARD_{}",
@@ -70,18 +68,18 @@ const IPTABLES_TABLE_NAME: &str = "nat";
 
 #[cfg_attr(test, allow(clippy::indexing_slicing))] // `mockall::automock` violates our clippy rules
 #[cfg_attr(test, mockall::automock)]
-pub(crate) trait IPTables {
+pub trait IPTables {
     fn with_table(&self, table_name: &'static str) -> Self
     where
         Self: Sized;
 
-    fn create_chain(&self, name: &str) -> AgentResult<()>;
-    fn remove_chain(&self, name: &str) -> AgentResult<()>;
+    fn create_chain(&self, name: &str) -> IPTablesResult<()>;
+    fn remove_chain(&self, name: &str) -> IPTablesResult<()>;
 
-    fn add_rule(&self, chain: &str, rule: &str) -> AgentResult<()>;
-    fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> AgentResult<()>;
-    fn list_rules(&self, chain: &str) -> AgentResult<Vec<String>>;
-    fn remove_rule(&self, chain: &str, rule: &str) -> AgentResult<()>;
+    fn add_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()>;
+    fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> IPTablesResult<()>;
+    fn list_rules(&self, chain: &str) -> IPTablesResult<Vec<String>>;
+    fn remove_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()>;
 }
 
 #[derive(Clone)]
@@ -145,55 +143,45 @@ impl IPTables for IPTablesWrapper {
         ret,
         fields(table_name=%self.table_name
     ))]
-    fn create_chain(&self, name: &str) -> AgentResult<()> {
-        self.tables
-            .new_chain(self.table_name, name)
-            .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
-        self.tables
-            .append(self.table_name, name, "-j RETURN")
-            .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
+    fn create_chain(&self, name: &str) -> IPTablesResult<()> {
+        self.tables.new_chain(self.table_name, name)?;
+        self.tables.append(self.table_name, name, "-j RETURN")?;
 
         Ok(())
     }
 
     #[tracing::instrument(level = "trace")]
-    fn remove_chain(&self, name: &str) -> AgentResult<()> {
-        self.tables
-            .flush_chain(self.table_name, name)
-            .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
-        self.tables
-            .delete_chain(self.table_name, name)
-            .map_err(|e| AgentError::IPTablesError(e.to_string()))?;
+    fn remove_chain(&self, name: &str) -> IPTablesResult<()> {
+        self.tables.flush_chain(self.table_name, name)?;
+        self.tables.delete_chain(self.table_name, name)?;
 
         Ok(())
     }
 
     #[tracing::instrument(level = "trace", ret)]
-    fn add_rule(&self, chain: &str, rule: &str) -> AgentResult<()> {
+    fn add_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()> {
         self.tables
             .append(self.table_name, chain, rule)
-            .map_err(|e| AgentError::IPTablesError(e.to_string()))
+            .map_err(From::from)
     }
 
     #[tracing::instrument(level = "trace", ret)]
-    fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> AgentResult<()> {
+    fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> IPTablesResult<()> {
         self.tables
             .insert(self.table_name, chain, rule, index)
-            .map_err(|e| AgentError::IPTablesError(e.to_string()))
+            .map_err(From::from)
     }
 
     #[tracing::instrument(level = "trace")]
-    fn list_rules(&self, chain: &str) -> AgentResult<Vec<String>> {
-        self.tables
-            .list(self.table_name, chain)
-            .map_err(|e| AgentError::IPTablesError(e.to_string()))
+    fn list_rules(&self, chain: &str) -> IPTablesResult<Vec<String>> {
+        self.tables.list(self.table_name, chain).map_err(From::from)
     }
 
     #[tracing::instrument(level = "trace")]
-    fn remove_rule(&self, chain: &str, rule: &str) -> AgentResult<()> {
+    fn remove_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()> {
         self.tables
             .delete(self.table_name, chain, rule)
-            .map_err(|e| AgentError::IPTablesError(e.to_string()))
+            .map_err(From::from)
     }
 }
 
@@ -207,7 +195,7 @@ pub(crate) enum Redirects<IPT: IPTables + Send + Sync> {
 }
 
 /// Wrapper struct for IPTables so it flushes on drop.
-pub(crate) struct SafeIpTables<IPT: IPTables + Send + Sync> {
+pub struct SafeIpTables<IPT: IPTables + Send + Sync> {
     redirect: Redirects<IPT>,
 }
 
@@ -220,12 +208,12 @@ impl<IPT> SafeIpTables<IPT>
 where
     IPT: IPTables + Send + Sync,
 {
-    pub(super) async fn create(
+    pub async fn create(
         ipt: IPT,
         flush_connections: bool,
         pod_ips: Option<&str>,
         ipv6: bool,
-    ) -> AgentResult<Self> {
+    ) -> IPTablesResult<Self> {
         let ipt = Arc::new(ipt);
 
         let mut redirect = if let Some(vendor) = MeshVendor::detect(ipt.as_ref())? {
@@ -256,7 +244,7 @@ where
         Ok(Self { redirect })
     }
 
-    pub(crate) async fn load(ipt: IPT, flush_connections: bool) -> AgentResult<Self> {
+    pub async fn load(ipt: IPT, flush_connections: bool) -> IPTablesResult<Self> {
         let ipt = Arc::new(ipt);
 
         let mut redirect = if let Some(vendor) = MeshVendor::detect(ipt.as_ref())? {
@@ -285,12 +273,8 @@ where
     /// Adds the redirect rule to iptables.
     ///
     /// Used to redirect packets when mirrord incoming feature is set to `steal`.
-    #[tracing::instrument(level = tracing::Level::DEBUG, skip(self))]
-    pub(super) async fn add_redirect(
-        &self,
-        redirected_port: Port,
-        target_port: Port,
-    ) -> AgentResult<()> {
+    #[tracing::instrument(level = Level::DEBUG, skip(self))]
+    pub async fn add_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
         self.redirect
             .add_redirect(redirected_port, target_port)
             .await
@@ -300,18 +284,18 @@ where
     ///
     /// Stops redirecting packets when mirrord incoming feature is set to `steal`, and there are no
     /// more subscribers on `target_port`.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub(super) async fn remove_redirect(
+    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    pub async fn remove_redirect(
         &self,
-        redirected_port: Port,
-        target_port: Port,
-    ) -> AgentResult<()> {
+        redirected_port: u16,
+        target_port: u16,
+    ) -> IPTablesResult<()> {
         self.redirect
             .remove_redirect(redirected_port, target_port)
             .await
     }
 
-    pub(crate) async fn cleanup(&self) -> AgentResult<()> {
+    pub async fn cleanup(&self) -> IPTablesResult<()> {
         self.redirect.unmount_entrypoint().await
     }
 }

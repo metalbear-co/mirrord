@@ -3,14 +3,10 @@ use std::sync::{Arc, LazyLock};
 use async_trait::async_trait;
 use fancy_regex::Regex;
 use mirrord_agent_env::{envs, mesh::MeshVendor};
-use mirrord_protocol::Port;
 
 use crate::{
-    error::AgentResult,
-    steal::ip_tables::{
-        output::OutputRedirect, prerouting::PreroutingRedirect, redirect::Redirect, IPTables,
-        IPTABLE_MESH,
-    },
+    error::IPTablesResult, output::OutputRedirect, prerouting::PreroutingRedirect,
+    redirect::Redirect, IPTables, IPTABLE_MESH,
 };
 pub mod istio;
 
@@ -30,7 +26,11 @@ impl<IPT> MeshRedirect<IPT>
 where
     IPT: IPTables,
 {
-    pub fn create(ipt: Arc<IPT>, vendor: MeshVendor, pod_ips: Option<&str>) -> AgentResult<Self> {
+    pub fn create(
+        ipt: Arc<IPT>,
+        vendor: MeshVendor,
+        pod_ips: Option<&str>,
+    ) -> IPTablesResult<Self> {
         let prerouting = PreroutingRedirect::create(ipt.clone())?;
 
         for port in Self::get_skip_ports(&ipt, &vendor)? {
@@ -46,7 +46,7 @@ where
         })
     }
 
-    pub fn load(ipt: Arc<IPT>, vendor: MeshVendor) -> AgentResult<Self> {
+    pub fn load(ipt: Arc<IPT>, vendor: MeshVendor) -> IPTablesResult<Self> {
         let prerouting = PreroutingRedirect::load(ipt.clone())?;
         let output = OutputRedirect::load(ipt, IPTABLE_MESH.to_string())?;
 
@@ -57,7 +57,7 @@ where
         })
     }
 
-    fn get_skip_ports(ipt: &IPT, vendor: &MeshVendor) -> AgentResult<Vec<String>> {
+    fn get_skip_ports(ipt: &IPT, vendor: &MeshVendor) -> IPTablesResult<Vec<String>> {
         let chain_name = vendor.input_chain();
         let lookup_regex = if let Some(regex) = vendor.skip_ports_regex() {
             regex
@@ -87,21 +87,21 @@ impl<IPT> Redirect for MeshRedirect<IPT>
 where
     IPT: IPTables + Send + Sync,
 {
-    async fn mount_entrypoint(&self) -> AgentResult<()> {
+    async fn mount_entrypoint(&self) -> IPTablesResult<()> {
         self.prerouting.mount_entrypoint().await?;
         self.output.mount_entrypoint().await?;
 
         Ok(())
     }
 
-    async fn unmount_entrypoint(&self) -> AgentResult<()> {
+    async fn unmount_entrypoint(&self) -> IPTablesResult<()> {
         self.prerouting.unmount_entrypoint().await?;
         self.output.unmount_entrypoint().await?;
 
         Ok(())
     }
 
-    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> AgentResult<()> {
+    async fn add_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
         if self.vendor != MeshVendor::IstioCni {
             self.prerouting
                 .add_redirect(redirected_port, target_port)
@@ -114,7 +114,7 @@ where
         Ok(())
     }
 
-    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> AgentResult<()> {
+    async fn remove_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
         if self.vendor != MeshVendor::IstioCni {
             self.prerouting
                 .remove_redirect(redirected_port, target_port)
@@ -130,13 +130,13 @@ where
 
 /// Extends the [`MeshVendor`] type with methods that are only relevant for the agent.
 pub(super) trait MeshVendorExt: Sized {
-    fn detect<IPT: IPTables>(ipt: &IPT) -> AgentResult<Option<Self>>;
+    fn detect<IPT: IPTables>(ipt: &IPT) -> IPTablesResult<Option<Self>>;
     fn input_chain(&self) -> &str;
     fn skip_ports_regex(&self) -> Option<&Regex>;
 }
 
 impl MeshVendorExt for MeshVendor {
-    fn detect<IPT: IPTables>(ipt: &IPT) -> AgentResult<Option<Self>> {
+    fn detect<IPT: IPTables>(ipt: &IPT) -> IPTablesResult<Option<Self>> {
         if envs::ISTIO_CNI.from_env_or_default() {
             return Ok(Some(MeshVendor::IstioCni));
         }
@@ -197,7 +197,7 @@ mod tests {
     use nix::unistd::getgid;
 
     use super::*;
-    use crate::steal::ip_tables::{MockIPTables, IPTABLE_PREROUTING};
+    use crate::{MockIPTables, IPTABLE_PREROUTING};
 
     fn create_mesh_list_values(mock: &mut MockIPTables) {
         mock.expect_list_rules()

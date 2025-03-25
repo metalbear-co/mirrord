@@ -7,11 +7,10 @@
 //! and adding a rule that marked connections will be rejected.
 
 use async_trait::async_trait;
-use mirrord_protocol::Port;
 use tokio::process::Command;
-use tracing::warn;
+use tracing::{warn, Level};
 
-use crate::{error::AgentResult, steal::ip_tables::redirect::Redirect};
+use crate::{error::IPTablesResult, redirect::Redirect};
 
 #[derive(Debug)]
 pub(crate) struct FlushConnections<T> {
@@ -22,13 +21,13 @@ impl<T> FlushConnections<T>
 where
     T: Redirect,
 {
-    #[tracing::instrument(level = "trace", skip(inner))]
-    pub fn create(inner: Box<T>) -> AgentResult<Self> {
+    #[tracing::instrument(level = Level::TRACE, skip(inner))]
+    pub fn create(inner: Box<T>) -> IPTablesResult<Self> {
         Ok(FlushConnections { inner })
     }
 
     #[tracing::instrument(level = "trace", skip(inner))]
-    pub fn load(inner: Box<T>) -> AgentResult<Self> {
+    pub fn load(inner: Box<T>) -> IPTablesResult<Self> {
         Ok(FlushConnections { inner })
     }
 }
@@ -38,18 +37,18 @@ impl<T> Redirect for FlushConnections<T>
 where
     T: Redirect + Send + Sync,
 {
-    #[tracing::instrument(level = "trace", skip(self), ret)]
-    async fn mount_entrypoint(&self) -> AgentResult<()> {
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
+    async fn mount_entrypoint(&self) -> IPTablesResult<()> {
         self.inner.mount_entrypoint().await
     }
 
-    #[tracing::instrument(level = "trace", skip(self), ret)]
-    async fn unmount_entrypoint(&self) -> AgentResult<()> {
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
+    async fn unmount_entrypoint(&self) -> IPTablesResult<()> {
         self.inner.unmount_entrypoint().await
     }
 
-    #[tracing::instrument(level = "trace", skip(self), ret)]
-    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> AgentResult<()> {
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
+    async fn add_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
         self.inner
             .add_redirect(redirected_port, target_port)
             .await?;
@@ -76,8 +75,8 @@ where
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(self), ret)]
-    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> AgentResult<()> {
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
+    async fn remove_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
         self.inner
             .remove_redirect(redirected_port, target_port)
             .await?;

@@ -4,8 +4,8 @@ use std::sync::{
 };
 
 use crate::{
-    error::{AgentError, AgentResult},
-    steal::ip_tables::IPTables,
+    error::{IPTablesError, IPTablesResult},
+    IPTables,
 };
 
 #[derive(Debug)]
@@ -19,7 +19,7 @@ impl<IPT> IPTableChain<IPT>
 where
     IPT: IPTables,
 {
-    pub fn create(inner: Arc<IPT>, chain_name: String) -> AgentResult<Self> {
+    pub fn create(inner: Arc<IPT>, chain_name: String) -> IPTablesResult<Self> {
         inner.create_chain(&chain_name)?;
 
         // Start with 1 because the chain will allways have atleast `-A <chain name>` as a rule
@@ -32,11 +32,11 @@ where
         })
     }
 
-    pub fn load(inner: Arc<IPT>, chain_name: String) -> AgentResult<Self> {
+    pub fn load(inner: Arc<IPT>, chain_name: String) -> IPTablesResult<Self> {
         let existing_rules = inner.list_rules(&chain_name)?.len();
 
         if existing_rules == 0 {
-            return Err(AgentError::IPTablesError(format!(
+            return Err(IPTablesError::from(format!(
                 "Unable to load rules for chain {chain_name}"
             )));
         }
@@ -59,7 +59,7 @@ where
         &self.inner
     }
 
-    pub fn add_rule(&self, rule: &str) -> AgentResult<i32> {
+    pub fn add_rule(&self, rule: &str) -> IPTablesResult<i32> {
         self.inner
             .insert_rule(
                 &self.chain_name,
@@ -72,7 +72,7 @@ where
             })
     }
 
-    pub fn remove_rule(&self, rule: &str) -> AgentResult<()> {
+    pub fn remove_rule(&self, rule: &str) -> IPTablesResult<()> {
         self.inner.remove_rule(&self.chain_name, rule)?;
 
         self.chain_size.fetch_sub(1, Ordering::Relaxed);

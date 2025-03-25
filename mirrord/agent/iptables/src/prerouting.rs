@@ -1,12 +1,8 @@
 use std::{ops::Deref, sync::Arc};
 
 use async_trait::async_trait;
-use mirrord_protocol::Port;
 
-use crate::{
-    error::AgentResult,
-    steal::ip_tables::{chain::IPTableChain, IPTables, Redirect, IPTABLE_PREROUTING},
-};
+use crate::{chain::IPTableChain, error::IPTablesResult, IPTables, Redirect, IPTABLE_PREROUTING};
 
 pub(crate) struct PreroutingRedirect<IPT: IPTables> {
     managed: IPTableChain<IPT>,
@@ -18,13 +14,13 @@ where
 {
     const ENTRYPOINT: &'static str = "PREROUTING";
 
-    pub fn create(ipt: Arc<IPT>) -> AgentResult<Self> {
+    pub fn create(ipt: Arc<IPT>) -> IPTablesResult<Self> {
         let managed = IPTableChain::create(ipt, IPTABLE_PREROUTING.to_string())?;
 
         Ok(PreroutingRedirect { managed })
     }
 
-    pub fn load(ipt: Arc<IPT>) -> AgentResult<Self> {
+    pub fn load(ipt: Arc<IPT>) -> IPTablesResult<Self> {
         let managed = IPTableChain::load(ipt, IPTABLE_PREROUTING.to_string())?;
 
         Ok(PreroutingRedirect { managed })
@@ -36,7 +32,7 @@ impl<IPT> Redirect for PreroutingRedirect<IPT>
 where
     IPT: IPTables + Send + Sync,
 {
-    async fn mount_entrypoint(&self) -> AgentResult<()> {
+    async fn mount_entrypoint(&self) -> IPTablesResult<()> {
         self.managed.inner().add_rule(
             Self::ENTRYPOINT,
             &format!("-j {}", self.managed.chain_name()),
@@ -45,7 +41,7 @@ where
         Ok(())
     }
 
-    async fn unmount_entrypoint(&self) -> AgentResult<()> {
+    async fn unmount_entrypoint(&self) -> IPTablesResult<()> {
         self.managed.inner().remove_rule(
             Self::ENTRYPOINT,
             &format!("-j {}", self.managed.chain_name()),
@@ -54,7 +50,7 @@ where
         Ok(())
     }
 
-    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> AgentResult<()> {
+    async fn add_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 
@@ -63,7 +59,7 @@ where
         Ok(())
     }
 
-    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> AgentResult<()> {
+    async fn remove_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
         let redirect_rule =
             format!("-m tcp -p tcp --dport {redirected_port} -j REDIRECT --to-ports {target_port}");
 
@@ -89,7 +85,7 @@ mod tests {
     use mockall::predicate::*;
 
     use super::*;
-    use crate::steal::ip_tables::MockIPTables;
+    use crate::MockIPTables;
 
     #[tokio::test]
     async fn add_redirect() {
