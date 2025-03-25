@@ -16,6 +16,7 @@ Make sure to take a look at the project's [style guide](STYLE.md).
 - [Compiling on MacOs](#compliling-on-macos)
 - [Adding new target types](#adding-new-target-types)
 - [Testing the release workflow](#testing-the-release-workflow)
+- [Architecture](#architecture)
 
 # Getting Started
 
@@ -53,7 +54,7 @@ minikube start --driver=docker
 ### Prepare a cluster
 
  Build mirrord-agent Docker Image.
- 
+
 Make sure you're [logged in to GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
 
 Then run:
@@ -88,9 +89,9 @@ kubectl config use-context minikube
 
 ## E2E Tests
 
-The E2E tests create Kubernetes resources in the cluster that kubectl is configured to use and then run sample apps 
-with the mirrord CLI. The mirrord CLI spawns an agent for the target on the cluster, and runs the test app, with the 
-layer injected into it. Some test apps need to be compiled before they can be used in the tests 
+The E2E tests create Kubernetes resources in the cluster that kubectl is configured to use and then run sample apps
+with the mirrord CLI. The mirrord CLI spawns an agent for the target on the cluster, and runs the test app, with the
+layer injected into it. Some test apps need to be compiled before they can be used in the tests
 ([this should be automated in the future](https://github.com/metalbear-co/mirrord/issues/982)).
 
 The basic command to run the E2E tests is:
@@ -165,11 +166,11 @@ kubectl delete namespaces,deployments,services -l mirrord-e2e-test-resource=true
 ## Integration Tests
 
 The layer's integration tests test the hooks and their logic without actually using a Kubernetes cluster and spawning
-an agent. The integration tests usually execute a test app and load the dynamic library of the layer into them. The 
-tests set the layer to connect to a TCP/IP address instead of spawning a new agent. The tests then have to simulate the 
+an agent. The integration tests usually execute a test app and load the dynamic library of the layer into them. The
+tests set the layer to connect to a TCP/IP address instead of spawning a new agent. The tests then have to simulate the
 agent - they accept the layer's connection, receive the layers messages and answer them as the agent would.
 
-Since they do not need to create Kubernetes resources and spawn agents, the integration tests complete much faster than 
+Since they do not need to create Kubernetes resources and spawn agents, the integration tests complete much faster than
 the E2E tests, especially on GitHub Actions.
 
 Therefore, whenever possible we create integration tests, and only resort to E2E tests when necessary.
@@ -474,7 +475,7 @@ file, for example:
 }
 ```
 
-By default, the agent's pod will complete and disappear shortly after the agent exits. In order to be able to retrieve 
+By default, the agent's pod will complete and disappear shortly after the agent exits. In order to be able to retrieve
 the agent's logs after it crashes, set the agent's pod's TTL to a comfortable number of seconds. This configuration can
 be specified either as a command line argument (`--agent-ttl`), environment variable (`MIRRORD_AGENT_TTL`), or in a
 configuration file:
@@ -504,19 +505,19 @@ where you would replace `<YOUR_POD_NAME>` with the name of the pod.
 
 # New Hook Guidelines
 
-Adding a feature to mirrord that introduces a new hook (file system, network) can be tricky and there are a lot of edge cases we might need to cover. 
+Adding a feature to mirrord that introduces a new hook (file system, network) can be tricky and there are a lot of edge cases we might need to cover.
 
-In order to have a more structured approach, here’s the flow you should follow when working on such a feature.
+In order to have a more structured approach, here's the flow you should follow when working on such a feature.
 
-1. Start with the use case. Write an example use case of the feature, for example “App needs to read credentials from a file”.
+1. Start with the use case. Write an example use case of the feature, for example "App needs to read credentials from a file".
 2. Write a minimal app that implements the use case - so in the case of our example, an app that reads credentials from a file. Start with either Node or Python as those are most common.
 3. Figure out what functions need to be hooked in order for the behavior to be run through the mirrord-agent instead of locally. We suggest using `strace`.
 4. Write a doc on how you would hook and handle the cases, for example:
-    1. To implement use case “App needs to read credentials from a file*”
+    1. To implement use case "App needs to read credentials from a file*"
     2. I will hook `open` and `read` handling calls only with flags O_RDONLY.
-    3. Once `open` is called, I’ll send a blocking request to the agent to open the remote file, returning the return code of the operation. 
-    4. Create an fd using `memfd`. The result will be returned to the local app, and if successful we’ll save that fd into a HashMap that matches between local fd and remote fd/identifier. 
-    5. When `read` is called, I will check if the fd being read was previously opened by us, and if it is we’ll send a blocking `read` request to the agent. The result will be sent back to the caller.
+    3. Once `open` is called, I'll send a blocking request to the agent to open the remote file, returning the return code of the operation.
+    4. Create an fd using `memfd`. The result will be returned to the local app, and if successful we'll save that fd into a HashMap that matches between local fd and remote fd/identifier.
+    5. When `read` is called, I will check if the fd being read was previously opened by us, and if it is we'll send a blocking `read` request to the agent. The result will be sent back to the caller.
     6. And so on.
 5. This doc should go later on to our mirrord docs for advanced developers so people can understand how stuff works
 6. After approval, you can start implementing. As part of the implementation you need to add E2E tests (in the `tests`
@@ -616,6 +617,100 @@ To test the release workflow:
 
 You can check the run as it progresses and download the completed artifacts from the "Summary" tab in the sidebar.
 
-### Changing the release on MacOS
+## Changing the release on MacOS
 
 If you're making changes to the release and/or CI workflows for MacOS specifically - for example changing how the universal binary is created, you need to ensure that [the script for building the universal binary](/scripts/build_fat_mac.sh) that is run manually when developing has also been updated if necessary.
+
+## Architecture
+
+A high level view of mirrord.
+
+```mermaid
+graph TB
+    ExternalTraffic["External Traffic"]
+
+    subgraph mirrord["mirrord"]
+        direction TB
+        CLI["CLI"]
+        Layer["Layer"]
+        Process["User Process"]
+        IntProxy["Internal Proxy"]
+
+        CLI --> Layer
+        Layer --> Process
+        CLI --> IntProxy
+        IntProxy <--> Layer
+    end
+
+    subgraph K8s["Kubernetes"]
+        Agent["mirrord Agent"]
+        Pod[Target Pod]
+        CRDs[Custom Resources]
+    end
+
+    subgraph Operator["mirrord Operator (Optional)"]
+        direction TB
+        Manager["Resource Manager"]
+    end
+
+    IntProxy <--> |"Traffic"| Agent
+    IntProxy <--> |"File Operations"| Agent
+    CLI -- "Creates/Deploys" --> Agent
+    CLI -- "Uses" --> Operator
+
+    Agent <--> |"Traffic"| Pod
+    Agent <--> |"File Operations"| Pod
+    ExternalTraffic <--> Pod
+
+    Operator -- "Manages" --> Agent
+    Operator -- "Manages" --> CRDs
+
+    classDef default fill:#f9f9f9,stroke:#333,stroke-width:2px
+    classDef mirrord fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+    classDef operator fill:#ffe6e6,stroke:#cc0000,stroke-width:2px
+    classDef k8s fill:#e6ffe6,stroke:#006600,stroke-width:2px
+    classDef agent fill:#fff2cc,stroke:#d6b656,stroke-width:2px
+
+    class mirrord mirrord
+    class Operator operator
+    class K8s k8s
+    class Agent agent
+```
+
+### Flow
+
+What a user executing their app with mirrord looks like.
+
+```mermaid
+flowchart LR
+    Start([User starts mirrord]) --> CLI[CLI parses config & args]
+    CLI --> Deploy[Deploy mirrord Agent]
+    Deploy --> WaitAgent[Wait for Agent to be ready]
+
+    WaitAgent --> StartProxy[Start Internal Proxy]
+    StartProxy --> InjectLayer[Inject Layer into binary]
+
+    InjectLayer --> StartBinary[Start user binary]
+
+    StartBinary --> |"Layer intercepts syscalls"| Layer
+    Layer --> |"Layer forwards intercepted calls"| IntProxy[Internal Proxy]
+    IntProxy --> |"Proxy sends requests to agent"| Agent
+
+    Agent --> |"Agent executes in pod context"| Pod[Target Pod]
+    Pod --> |"Pod returns execution results"| Agent
+    Agent --> |"Agent sends results back"| IntProxy
+    IntProxy --> |"Proxy forwards results"| Layer
+    Layer --> |"Layer returns to application"| Binary[User Binary]
+
+    style Start fill:#f9f9f9,stroke:#333,stroke-width:2px
+    style CLI fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+    style Deploy fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+    style WaitAgent fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+    style StartProxy fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+    style InjectLayer fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+    style Layer fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+    style IntProxy fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+    style Agent fill:#fff2cc,stroke:#d6b656,stroke-width:2px
+    style Pod fill:#e6ffe6,stroke:#006600,stroke-width:2px
+    style Binary fill:#f9f9f9,stroke:#333,stroke-width:2px
+```
