@@ -126,7 +126,6 @@ impl From<iptables::IPTables> for IPTablesWrapper {
 }
 
 impl IPTables for IPTablesWrapper {
-    #[tracing::instrument(level = "trace")]
     fn with_table(&self, table_name: &'static str) -> Self
     where
         Self: Sized,
@@ -137,12 +136,7 @@ impl IPTables for IPTablesWrapper {
         }
     }
 
-    #[tracing::instrument(
-        level = tracing::Level::TRACE,
-        skip(self),
-        ret,
-        fields(table_name=%self.table_name
-    ))]
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
     fn create_chain(&self, name: &str) -> IPTablesResult<()> {
         self.tables.new_chain(self.table_name, name)?;
         self.tables.append(self.table_name, name, "-j RETURN")?;
@@ -150,7 +144,7 @@ impl IPTables for IPTablesWrapper {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
     fn remove_chain(&self, name: &str) -> IPTablesResult<()> {
         self.tables.flush_chain(self.table_name, name)?;
         self.tables.delete_chain(self.table_name, name)?;
@@ -158,26 +152,26 @@ impl IPTables for IPTablesWrapper {
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", ret)]
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
     fn add_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()> {
         self.tables
             .append(self.table_name, chain, rule)
             .map_err(From::from)
     }
 
-    #[tracing::instrument(level = "trace", ret)]
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
     fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> IPTablesResult<()> {
         self.tables
             .insert(self.table_name, chain, rule, index)
             .map_err(From::from)
     }
 
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
     fn list_rules(&self, chain: &str) -> IPTablesResult<Vec<String>> {
         self.tables.list(self.table_name, chain).map_err(From::from)
     }
 
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
     fn remove_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()> {
         self.tables
             .delete(self.table_name, chain, rule)
