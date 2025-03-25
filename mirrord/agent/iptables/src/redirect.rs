@@ -5,7 +5,7 @@ use crate::error::IPTablesResult;
 
 #[async_trait]
 #[enum_dispatch]
-pub(crate) trait Redirect {
+pub trait Redirect {
     async fn mount_entrypoint(&self) -> IPTablesResult<()>;
 
     async fn unmount_entrypoint(&self) -> IPTablesResult<()>;

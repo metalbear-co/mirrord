@@ -7,7 +7,7 @@ use crate::{
     redirect::Redirect, IPTables, IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL, IPTABLE_MESH,
 };
 
-pub(crate) struct AmbientRedirect<IPT: IPTables> {
+pub struct AmbientRedirect<IPT: IPTables> {
     prerouting: PreroutingRedirect<IPT>,
     output: OutputRedirect<true, IPT>,
 }

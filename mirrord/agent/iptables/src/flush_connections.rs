@@ -13,7 +13,7 @@ use tracing::{warn, Level};
 use crate::{error::IPTablesResult, redirect::Redirect};
 
 #[derive(Debug)]
-pub(crate) struct FlushConnections<T> {
+pub struct FlushConnections<T> {
     inner: Box<T>,
 }
 

@@ -6,8 +6,8 @@ use tracing::warn;
 
 use crate::{chain::IPTableChain, error::IPTablesResult, IPTables, Redirect};
 
-pub(crate) struct OutputRedirect<const USE_INSERT: bool, IPT: IPTables> {
-    pub(crate) managed: IPTableChain<IPT>,
+pub struct OutputRedirect<const USE_INSERT: bool, IPT: IPTables> {
+    managed: IPTableChain<IPT>,
 }
 
 impl<const USE_INSERT: bool, IPT> OutputRedirect<USE_INSERT, IPT>

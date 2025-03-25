@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 use crate::{chain::IPTableChain, error::IPTablesResult, IPTables, Redirect, IPTABLE_PREROUTING};
 
-pub(crate) struct PreroutingRedirect<IPT: IPTables> {
+pub struct PreroutingRedirect<IPT: IPTables> {
     managed: IPTableChain<IPT>,
 }
 

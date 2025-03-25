@@ -7,7 +7,7 @@ use crate::{
     Redirect, IPTABLE_STANDARD,
 };
 
-pub(crate) struct StandardRedirect<IPT: IPTables> {
+pub struct StandardRedirect<IPT: IPTables> {
     prerouting: PreroutingRedirect<IPT>,
     output: OutputRedirect<false, IPT>,
 }

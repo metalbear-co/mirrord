@@ -186,7 +186,7 @@ impl IPTables for IPTablesWrapper {
 }
 
 #[enum_dispatch(Redirect)]
-pub(crate) enum Redirects<IPT: IPTables + Send + Sync> {
+enum Redirects<IPT: IPTables + Send + Sync> {
     Ambient(AmbientRedirect<IPT>),
     Standard(StandardRedirect<IPT>),
     Mesh(MeshRedirect<IPT>),
