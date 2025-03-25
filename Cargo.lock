@@ -4363,6 +4363,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-agent-iptables"
+version = "3.136.0"
+dependencies = [
+ "enum_dispatch",
+ "iptables",
+ "mirrord-agent-env",
+ "mockall",
+ "rand 0.9.0",
+ "tracing",
+]
+
+[[package]]
 name = "mirrord-analytics"
 version = "3.136.0"
 dependencies = [

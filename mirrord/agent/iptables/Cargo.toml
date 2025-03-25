@@ -1,0 +1,27 @@
+[package]
+name = "mirrord-agent-iptables"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[features]
+
+[dependencies]
+mirrord-agent-env.path = "../env"
+
+enum_dispatch.workspace = true
+iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624" }
+rand.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+mockall = "0.13"
