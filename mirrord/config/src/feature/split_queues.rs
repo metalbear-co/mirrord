@@ -124,22 +124,20 @@ pub enum QueueFilter {
     /// Amazon Simple Queue Service.
     #[serde(rename = "SQS")]
     Sqs {
-        /// A filter is a mapping between message attribute/header names and regexes they should
-        /// match. The local application will only receive messages that match **all** of
-        /// the given patterns. This means, only messages that have **all** of the
-        /// attributes/headers in the filter, with values of those attributes/headers matching the
-        /// respective patterns.
+        /// A filter is a mapping between message attribute names and regexes they should match.
+        /// The local application will only receive messages that match **all** of the given
+        /// patterns. This means, only messages that have **all** of the attributes in the
+        /// filter, with values of those attributes matching the respective patterns.
         message_filter: QueueMessageFilter,
     },
 
     /// Kafka.
     #[serde(rename = "Kafka")]
     Kafka {
-        /// A filter is a mapping between message attribute/header names and regexes they should
-        /// match. The local application will only receive messages that match **all** of
-        /// the given patterns. This means, only messages that have **all** of the
-        /// attributes/headers in the filter, with values of those attributes/headers matching the
-        /// respective patterns.
+        /// A filter is a mapping between message header names and regexes they should match.
+        /// The local application will only receive messages that match **all** of the given
+        /// patterns. This means, only messages that have **all** of the headers in the
+        /// filter, with values of those headers matching the respective patterns.
         message_filter: QueueMessageFilter,
     },
 
