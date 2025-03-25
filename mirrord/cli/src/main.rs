@@ -156,7 +156,7 @@
 //!
 //! - [`operator_command`]
 //!
-//! > Setup and management of the mirrord-operator.
+//! > Setup and management of the mirrord-operator, which forms mirrord's paid offering.
 //!
 //! A family of commands that help managing the mirrord-operator.
 //!
