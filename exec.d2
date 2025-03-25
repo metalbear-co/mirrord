@@ -1,0 +1,84 @@
+direction: right
+
+# Main components
+cli: mirrord CLI {
+  shape: rectangle
+  style.fill: "#f5f5f5"
+}
+
+intproxy: Internal Proxy {
+  shape: rectangle
+  style.fill: "#e6f3ff"
+}
+
+agent: mirrord Agent {
+  shape: rectangle
+  style.fill: "#e6ffe6"
+}
+
+operator: mirrord Operator {
+  shape: rectangle
+  style.fill: "#ffe6e6"
+  style.stroke-dash: 5
+}
+
+# Flow
+start: Start {
+  shape: circle
+}
+
+config: Parse & Verify Config {
+  shape: rectangle
+}
+
+target: Target Resolution {
+  shape: rectangle
+}
+
+init: Initialize {
+  shape: rectangle
+  style.multiple: true
+}
+
+create_agent: Create Agent {
+  shape: rectangle
+}
+
+connect: Create & Connect {
+  shape: rectangle
+}
+
+proxy_start: Start Internal Proxy {
+  shape: rectangle
+}
+
+patch: Patch Binary (macOS) {
+  shape: rectangle
+  style.stroke-dash: 5
+}
+
+exec: Execute User Binary {
+  shape: rectangle
+}
+
+# Connections
+start -> cli: mirrord exec
+cli -> config
+config -> target
+target -> operator: If operator enabled
+operator -> agent: Create agent
+target -> create_agent: If no operator
+create_agent -> agent: Create via k8s API
+target -> init: Extract library
+init -> connect
+connect -> proxy_start
+proxy_start -> patch: macOS only
+patch -> exec
+exec -> intproxy: Communicates via
+intproxy -> agent: Forwards messages
+
+# Styling
+cli.style.stroke: "#333333"
+intproxy.style.stroke: "#0066cc"
+agent.style.stroke: "#006600"
+operator.style.stroke: "#cc0000"
