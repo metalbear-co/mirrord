@@ -273,7 +273,7 @@ where
     /// Adds the redirect rule to iptables.
     ///
     /// Used to redirect packets when mirrord incoming feature is set to `steal`.
-    #[tracing::instrument(level = Level::DEBUG, skip(self))]
+    #[tracing::instrument(level = Level::DEBUG, skip(self), err)]
     pub async fn add_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
         self.redirect
             .add_redirect(redirected_port, target_port)
@@ -284,7 +284,7 @@ where
     ///
     /// Stops redirecting packets when mirrord incoming feature is set to `steal`, and there are no
     /// more subscribers on `target_port`.
-    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     pub async fn remove_redirect(
         &self,
         redirected_port: u16,
@@ -295,6 +295,7 @@ where
             .await
     }
 
+    #[tracing::instrument(level = Level::TRACE, skip(self), err)]
     pub async fn cleanup(&self) -> IPTablesResult<()> {
         self.redirect.unmount_entrypoint().await
     }

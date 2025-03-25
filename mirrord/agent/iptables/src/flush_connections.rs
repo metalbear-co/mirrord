@@ -26,7 +26,7 @@ where
         Ok(FlushConnections { inner })
     }
 
-    #[tracing::instrument(level = "trace", skip(inner))]
+    #[tracing::instrument(level = Level::TRACE, skip(inner))]
     pub fn load(inner: Box<T>) -> IPTablesResult<Self> {
         Ok(FlushConnections { inner })
     }
@@ -37,17 +37,17 @@ impl<T> Redirect for FlushConnections<T>
 where
     T: Redirect + Send + Sync,
 {
-    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     async fn mount_entrypoint(&self) -> IPTablesResult<()> {
         self.inner.mount_entrypoint().await
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     async fn unmount_entrypoint(&self) -> IPTablesResult<()> {
         self.inner.unmount_entrypoint().await
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     async fn add_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
         self.inner
             .add_redirect(redirected_port, target_port)
@@ -75,7 +75,7 @@ where
         Ok(())
     }
 
-    #[tracing::instrument(level = Level::TRACE, skip(self), ret)]
+    #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     async fn remove_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
         self.inner
             .remove_redirect(redirected_port, target_port)
