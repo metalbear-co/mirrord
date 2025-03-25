@@ -26,7 +26,7 @@ mod prerouting;
 mod redirect;
 mod standard;
 
-pub static IPTABLE_PREROUTING_ENV: &str = "MIRRORD_IPTABLE_PREROUTING_NAME";
+pub const IPTABLE_PREROUTING_ENV: &str = "MIRRORD_IPTABLE_PREROUTING_NAME";
 pub static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_PREROUTING_ENV).unwrap_or_else(|_| {
         format!(
@@ -36,7 +36,7 @@ pub static IPTABLE_PREROUTING: LazyLock<String> = LazyLock::new(|| {
     })
 });
 
-pub static IPTABLE_MESH_ENV: &str = "MIRRORD_IPTABLE_MESH_NAME";
+pub const IPTABLE_MESH_ENV: &str = "MIRRORD_IPTABLE_MESH_NAME";
 pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_MESH_ENV).unwrap_or_else(|_| {
         format!(
@@ -46,7 +46,7 @@ pub static IPTABLE_MESH: LazyLock<String> = LazyLock::new(|| {
     })
 });
 
-pub static IPTABLE_STANDARD_ENV: &str = "MIRRORD_IPTABLE_STANDARD_NAME";
+pub const IPTABLE_STANDARD_ENV: &str = "MIRRORD_IPTABLE_STANDARD_NAME";
 pub static IPTABLE_STANDARD: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_STANDARD_ENV).unwrap_or_else(|_| {
         format!(
@@ -56,7 +56,7 @@ pub static IPTABLE_STANDARD: LazyLock<String> = LazyLock::new(|| {
     })
 });
 
-pub static IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV: &str = "IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL";
+pub const IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV: &str = "IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL";
 pub static IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL: LazyLock<String> = LazyLock::new(|| {
     std::env::var(IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV).unwrap_or_else(|_| {
         std::fs::read_to_string("/proc/sys/net/ipv4/conf/all/route_localnet")
