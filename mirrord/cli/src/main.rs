@@ -20,8 +20,8 @@
 //! binary to it that you want to run in the target context (or just in the cluster context
 //! when running targetless) and it should work.
 //!
-//! - **Attention**: The IDEs use the `mirrord ext` command, which is very similar to `mirrord
-//!   exec`, but it's fine tuned to deal with the idiosyncrasies of running mirrord from an IDE.
+//! - **Notice**: The IDEs use the `mirrord ext` command, which is very similar to `mirrord exec`,
+//!   but it's fine tuned to deal with the idiosyncrasies of running mirrord from an IDE.
 //!
 //! - Tip: `mirrord exec -- sh` is a quick way of trying out changes.
 //!
