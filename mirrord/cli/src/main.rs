@@ -135,9 +135,8 @@
 //!
 //! > Makes a neat `libmirrord_layer.so` file.
 //!
-//! The command itself is not really used anywhere (and I -alex- think nobody uses this). Other
-//! commands that are related to starting a mirrord instance use the [`extract_library`]
-//! function directly
+//! The command itself is not really used anywhere. Other commands that are related to starting a
+//! mirrord instance use the [`extract_library`] function directly
 //!
 //! ### `mirrord verify-config [OPTIONS] <PATH>`
 //!
