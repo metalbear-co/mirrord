@@ -8,6 +8,27 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.137.0](https://github.com/metalbear-co/mirrord/tree/3.137.0) - 2025-03-25
+
+
+### Added
+
+- mirrord policies now allow for enforcing usage of mirrord profiles.
+
+
+### Changed
+
+- Moved the `readonly_file_buffer` configuration option from `experimental` to
+  `feature.fs`.
+  [#2984](https://github.com/metalbear-co/mirrord/issues/2984)
+
+
+### Internal
+
+- Added crate level docs to `mirrord-macros`.
+- Added crate level docs to `mirrord-sip`.
+- Fixed the E2E test for mirrord profiles used with mirrord policies.
+
 ## [3.136.0](https://github.com/metalbear-co/mirrord/tree/3.136.0) - 2025-03-21
 
 
