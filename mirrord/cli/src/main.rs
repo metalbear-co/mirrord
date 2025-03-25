@@ -141,7 +141,7 @@
 //!
 //! ### `mirrord verify-config [OPTIONS] <PATH>`
 //!
-//! - [`verify_config`]
+//! - [`verify_config()`]
 //!
 //! > Config validation.
 //!
