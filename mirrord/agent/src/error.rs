@@ -1,5 +1,6 @@
 use std::process::ExitStatus;
 
+use mirrord_agent_iptables::error::IPTablesError;
 use mirrord_protocol::outgoing::udp::DaemonUdpOutgoing;
 use thiserror::Error;
 use tokio::sync::mpsc::{self, error::SendError};
@@ -32,8 +33,11 @@ pub(crate) enum AgentError {
     #[error("Path failed with `{0}`")]
     StripPrefixError(#[from] std::path::StripPrefixError),
 
-    #[error("IPTables failed with `{0}`")]
-    IPTablesError(String),
+    #[error("iptables operation failed: {0}")]
+    IPTablesError(
+        /// Message from the original [`IPTablesError`], which is not [`Send`].
+        String,
+    ),
 
     #[error("Join task failed")]
     JoinTask,
@@ -93,6 +97,12 @@ pub(crate) enum AgentError {
 impl From<mpsc::error::SendError<StealerCommand>> for AgentError {
     fn from(_: mpsc::error::SendError<StealerCommand>) -> Self {
         Self::TcpStealerTaskDead
+    }
+}
+
+impl From<IPTablesError> for AgentError {
+    fn from(value: IPTablesError) -> Self {
+        Self::IPTablesError(value.to_string())
     }
 }
 

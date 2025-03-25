@@ -10,7 +10,6 @@ mod api;
 mod connection;
 mod connections;
 mod http;
-pub mod ip_tables;
 mod orig_dst;
 mod subscriptions;
 mod tls;

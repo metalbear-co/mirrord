@@ -1,17 +1,13 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use mirrord_protocol::Port;
 
 use crate::{
-    error::AgentResult,
-    steal::ip_tables::{
-        output::OutputRedirect, prerouting::PreroutingRedirect, IPTables, Redirect,
-        IPTABLE_STANDARD,
-    },
+    error::IPTablesResult, output::OutputRedirect, prerouting::PreroutingRedirect, IPTables,
+    Redirect, IPTABLE_STANDARD,
 };
 
-pub(crate) struct StandardRedirect<IPT: IPTables> {
+pub struct StandardRedirect<IPT: IPTables> {
     prerouting: PreroutingRedirect<IPT>,
     output: OutputRedirect<false, IPT>,
 }
@@ -20,14 +16,14 @@ impl<IPT> StandardRedirect<IPT>
 where
     IPT: IPTables,
 {
-    pub fn create(ipt: Arc<IPT>, pod_ips: Option<&str>) -> AgentResult<Self> {
+    pub fn create(ipt: Arc<IPT>, pod_ips: Option<&str>) -> IPTablesResult<Self> {
         let prerouting = PreroutingRedirect::create(ipt.clone())?;
         let output = OutputRedirect::create(ipt, IPTABLE_STANDARD.to_string(), pod_ips)?;
 
         Ok(StandardRedirect { prerouting, output })
     }
 
-    pub fn load(ipt: Arc<IPT>) -> AgentResult<Self> {
+    pub fn load(ipt: Arc<IPT>) -> IPTablesResult<Self> {
         let prerouting = PreroutingRedirect::load(ipt.clone())?;
         let output = OutputRedirect::load(ipt, IPTABLE_STANDARD.to_string())?;
 
@@ -42,21 +38,21 @@ impl<IPT> Redirect for StandardRedirect<IPT>
 where
     IPT: IPTables + Send + Sync,
 {
-    async fn mount_entrypoint(&self) -> AgentResult<()> {
+    async fn mount_entrypoint(&self) -> IPTablesResult<()> {
         self.prerouting.mount_entrypoint().await?;
         self.output.mount_entrypoint().await?;
 
         Ok(())
     }
 
-    async fn unmount_entrypoint(&self) -> AgentResult<()> {
+    async fn unmount_entrypoint(&self) -> IPTablesResult<()> {
         self.prerouting.unmount_entrypoint().await?;
         self.output.unmount_entrypoint().await?;
 
         Ok(())
     }
 
-    async fn add_redirect(&self, redirected_port: Port, target_port: Port) -> AgentResult<()> {
+    async fn add_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
         self.prerouting
             .add_redirect(redirected_port, target_port)
             .await?;
@@ -67,7 +63,7 @@ where
         Ok(())
     }
 
-    async fn remove_redirect(&self, redirected_port: Port, target_port: Port) -> AgentResult<()> {
+    async fn remove_redirect(&self, redirected_port: u16, target_port: u16) -> IPTablesResult<()> {
         self.prerouting
             .remove_redirect(redirected_port, target_port)
             .await?;

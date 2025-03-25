@@ -21,6 +21,7 @@ workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 mirrord-protocol = { path = "../protocol" }
 mirrord-agent-env = { path = "./env", default-features = false }
+mirrord-agent-iptables = { path = "./iptables" }
 mirrord-tls-util = { path = "../tls-util" }
 
 containerd-client = "0.6"
@@ -47,7 +48,6 @@ thiserror.workspace = true
 hickory-resolver.workspace = true
 bollard = "0.18"
 tokio-util.workspace = true
-rand.workspace = true
 streammap-ext.workspace = true
 libc.workspace = true
 faccess = "0.2"
@@ -73,13 +73,11 @@ rustls.workspace = true
 socket2.workspace = true
 prometheus = { version = "0.13", features = ["process"] }
 axum = { version = "0.7", features = ["macros"] }
-iptables = { git = "https://github.com/metalbear-co/rust-iptables.git", rev = "e66c7332e361df3c61a194f08eefe3f40763d624" }
 rawsocket = { git = "https://github.com/metalbear-co/rawsocket.git" }
 procfs = "0.17.0"
 rcgen.workspace = true
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-mockall = "0.13"
 pem.workspace = true
 rcgen.workspace = true
 reqwest.workspace = true
