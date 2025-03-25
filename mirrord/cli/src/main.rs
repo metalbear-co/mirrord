@@ -7,8 +7,8 @@
 //!
 //! ## Features overview
 //!
-//! The main command to be aware of is [`mirrord exec`](link), and a couple of notable ones
-//! are [`mirrord operator`](link), and [`mirrord container`](link).
+//! The main command to be aware of is `mirrord exec`, and a couple of notable ones
+//! are `mirrord operator`, and `mirrord container`.
 //!
 //! ### `mirrord exec [OPTIONS] <BINARY> [BINARY_ARGS]`
 //!
