@@ -686,20 +686,80 @@ mod main {
             assert!(err.to_string().contains("executable file not found"));
         }
 
-        #[test]
-        fn patch_binary_fat() {
-            let path = "/bin/ls";
-            let output = patch_binary(path.as_ref()).unwrap();
-            assert!(matches!(
-                get_sip_status(output.to_str().unwrap(), &[]).unwrap(),
-                NoSip
-            ));
-            // Check DYLD_* features work on it:
-            let output = std::process::Command::new(output)
+        fn run_and_verify_dyld_print(patched_bin_path: &Path) {
+            let output = std::process::Command::new(patched_bin_path)
                 .env("DYLD_PRINT_LIBRARIES", "1")
                 .output()
                 .unwrap();
             assert!(String::from_utf8_lossy(&output.stderr).contains("libsystem_kernel.dylib"));
+        }
+
+        /// Call `patch_binary` directly (it's a private function), verify the patched binary
+        /// is no longer protected, and DYLD_PRINT_LIBRARIES is respected when running with it.
+        fn patch_binary_and_verify_dyld_print(bin_path: &str) {
+            let patched_bin_path = patch_binary(bin_path.as_ref()).unwrap();
+            assert!(matches!(
+                get_sip_status(patched_bin_path.to_str().unwrap(), &[]).unwrap(),
+                NoSip
+            ));
+            // Check DYLD_* features work on patched binary:
+            run_and_verify_dyld_print(&patched_bin_path);
+        }
+
+        /// Call `sip_patch` (it's the public function this crate exposes), verify the patched
+        /// binary is no longer protected, and DYLD_PRINT_LIBRARIES is respected when running with
+        /// it.
+        fn patch_sip_and_verify_dyld_print(executable_path: &str) {
+            let patched_bin_path = sip_patch(executable_path, &[]).unwrap().unwrap();
+            assert!(matches!(
+                get_sip_status(&patched_bin_path, &[]).unwrap(),
+                NoSip
+            ));
+            // Check DYLD_* features work on patched binary:
+            run_and_verify_dyld_print(patched_bin_path.as_ref());
+        }
+
+        #[test]
+        fn patch_binary_fat() {
+            patch_binary_and_verify_dyld_print("/bin/ls");
+        }
+
+        #[test]
+        fn patch_entitled_binary() {
+            patch_sip_and_verify_dyld_print("/usr/bin/aa");
+        }
+
+        /// Test that after patching we can Successfully use DYLD features on a binary that had
+        /// the RUNTIME flag set before the patch.
+        /// No binary in `/bin/` has any flag set, so we first do a kind of an opposite patch to
+        /// create a binary with that flag, then we do our normal patch and test that it worked.
+        #[test]
+        fn patch_binary_with_runtime_flag() {
+            let signed_temp_file = tempfile::NamedTempFile::new().unwrap();
+
+            let mut settings = apple_codesign::SigningSettings::default();
+
+            settings.set_code_signature_flags(
+                apple_codesign::SettingsScope::Main,
+                CodeSignatureFlags::ADHOC | CodeSignatureFlags::RUNTIME,
+            );
+            settings.set_binary_identifier(
+                apple_codesign::SettingsScope::Main,
+                signed_temp_file
+                    .path()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy(),
+            );
+
+            let signer = apple_codesign::UnifiedSigner::new(settings);
+            // `wait4path` chosen because it's the lightest file in /bin/ that doesn't do anything
+            // when called without arguments.
+            signer
+                .sign_path("/bin/wait4path", signed_temp_file.path())
+                .unwrap();
+
+            patch_sip_and_verify_dyld_print(signed_temp_file.path().to_str().unwrap());
         }
 
         /// Test that when a fat binary contains an arm64 binary, that binary is used and patching
