@@ -686,6 +686,12 @@ mod main {
             assert!(err.to_string().contains("executable file not found"));
         }
 
+        /// Verify the SIP-patch worked.
+        ///
+        /// Run the given binary with `DYLD_PRINT_LIBRARIES=1`. This env var asks dyld to print all
+        /// the mach-o images loaded to the process. However, it is stripped away by SIP, so we can
+        /// use it to test the patch worked. If we're getting libsystem_kernel.dylib printed, it
+        /// means the binary is not SIP protected.
         fn run_and_verify_dyld_print(patched_bin_path: &Path) {
             let output = std::process::Command::new(patched_bin_path)
                 .env("DYLD_PRINT_LIBRARIES", "1")
