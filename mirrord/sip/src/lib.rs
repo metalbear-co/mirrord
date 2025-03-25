@@ -736,7 +736,8 @@ mod main {
         }
 
         /// Test that after patching we can Successfully use DYLD features on a binary that had
-        /// the RUNTIME flag set before the patch.
+        /// [the runtime flag](https://developer.apple.com/documentation/security/seccodesignatureflags/runtime)
+        /// set before the patch.
         /// No binary in `/bin/` has any flag set, so we first do a kind of an opposite patch to
         /// create a binary with that flag, then we do our normal patch and test that it worked.
         #[test]
