@@ -605,9 +605,9 @@ impl LayerConfig {
             ));
         }
 
-        if self.feature.fs.readonly_file_buffer > 1_000_000 {
+        if self.feature.fs.readonly_file_buffer > 1024 * 1024 {
             return Err(ConfigError::Conflict(
-                "the value of feature.fs.readonly_file_buffer must be 1 000 000 (1 MB) or less."
+                "the value of feature.fs.readonly_file_buffer must be 1 Megabyte or less."
                     .to_string(),
             ));
         }
