@@ -264,10 +264,6 @@ where
         self.register(RestartableBackgroundTaskWrapper { task }, id, channel_size)
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.streams.is_empty()
-    }
-
     pub fn clear(&mut self) {
         for (id, _) in self.handles.drain() {
             self.streams.remove(&id);

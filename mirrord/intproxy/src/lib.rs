@@ -193,7 +193,7 @@ impl IntProxy {
                     self.handle_task_update(task_id, task_update).await?;
                 }
 
-                _ = self.ping_reset_debounce.tick(), if !self.background_tasks.is_empty() => {
+                _ = self.ping_reset_debounce.tick(), if !self.task_txs.layers.is_empty() => {
                     self.ping_reset_allowed = true;
                 }
 
