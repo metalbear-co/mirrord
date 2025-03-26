@@ -606,10 +606,13 @@ impl LayerConfig {
         }
 
         if self.feature.fs.readonly_file_buffer > 1024 * 1024 {
-            return Err(ConfigError::Conflict(
-                "the value of feature.fs.readonly_file_buffer must be 1 Megabyte or less."
-                    .to_string(),
-            ));
+            return Err(ConfigError::InvalidValue {
+                name: "feature.fs.readonly_file_buffer",
+                provided: self.feature.fs.readonly_file_buffer.to_string(),
+                error: "the value of feature.fs.readonly_file_buffer must be 1 Megabyte or less."
+                    .to_string()
+                    .into(),
+            });
         }
 
         if let (Some(profile), true) = (&self.profile, context.has_warnings()) {
