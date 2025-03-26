@@ -4310,20 +4310,18 @@ dependencies = [
  "httparse",
  "hyper 1.6.0",
  "hyper-util",
- "iptables",
  "k8s-cri",
  "libc",
  "mirrord-agent-env",
+ "mirrord-agent-iptables",
  "mirrord-protocol",
  "mirrord-tls-util",
- "mockall",
  "nix 0.29.0",
  "oci-spec",
  "pem",
  "pnet",
  "procfs 0.17.0",
  "prometheus",
- "rand 0.9.0",
  "rawsocket",
  "rcgen",
  "reqwest",
@@ -4359,6 +4357,22 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.12",
+ "tracing",
+]
+
+[[package]]
+name = "mirrord-agent-iptables"
+version = "3.136.0"
+dependencies = [
+ "async-trait",
+ "enum_dispatch",
+ "fancy-regex",
+ "iptables",
+ "mirrord-agent-env",
+ "mockall",
+ "nix 0.29.0",
+ "rand 0.9.0",
+ "tokio",
  "tracing",
 ]
 

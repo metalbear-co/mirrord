@@ -15,6 +15,11 @@ use dns::{ClientGetAddrInfoRequest, DnsCommand, DnsWorker};
 use futures::TryFutureExt;
 use metrics::{start_metrics, CLIENT_COUNT};
 use mirrord_agent_env::envs;
+use mirrord_agent_iptables::{
+    new_iptables, IPTablesWrapper, SafeIpTables, IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL,
+    IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV, IPTABLE_MESH, IPTABLE_MESH_ENV, IPTABLE_PREROUTING,
+    IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD, IPTABLE_STANDARD_ENV,
+};
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use sniffer::tcp_capture::RawSocketTcpCapture;
 use steal::StealerMessage;
@@ -41,14 +46,7 @@ use crate::{
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     runtime::get_container,
     sniffer::{api::TcpSnifferApi, messages::SnifferCommand, TcpConnectionSniffer},
-    steal::{
-        ip_tables::{
-            new_iptables, IPTablesWrapper, SafeIpTables, IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL,
-            IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV, IPTABLE_MESH, IPTABLE_MESH_ENV,
-            IPTABLE_PREROUTING, IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD, IPTABLE_STANDARD_ENV,
-        },
-        StealTlsHandlerStore, StealerCommand, TcpConnectionStealer, TcpStealerApi,
-    },
+    steal::{StealTlsHandlerStore, StealerCommand, TcpConnectionStealer, TcpStealerApi},
     util::{path_resolver::InTargetPathResolver, run_thread_in_namespace, ClientId},
     watched_task::{TaskStatus, WatchedTask},
     *,
@@ -786,10 +784,8 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 async fn clear_iptable_chain() -> AgentResult<()> {
     let ipt = new_iptables();
 
-    SafeIpTables::load(IPTablesWrapper::from(ipt), false)
-        .await?
-        .cleanup()
-        .await?;
+    let tables = SafeIpTables::load(IPTablesWrapper::from(ipt), false).await?;
+    tables.cleanup().await?;
 
     Ok(())
 }

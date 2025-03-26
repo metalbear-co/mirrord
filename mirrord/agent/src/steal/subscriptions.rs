@@ -6,16 +6,14 @@ use std::{
 };
 
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
+use mirrord_agent_iptables::{new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables};
 use mirrord_protocol::{Port, RemoteResult, ResponseError};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
 };
 
-use super::{
-    http::HttpFilter,
-    ip_tables::{new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables},
-};
+use super::http::HttpFilter;
 use crate::{
     error::{AgentError, AgentResult},
     metrics::{STEAL_FILTERED_PORT_SUBSCRIPTION, STEAL_UNFILTERED_PORT_SUBSCRIPTION},
@@ -81,7 +79,7 @@ impl PortRedirector for IptablesListener {
         let iptables = if let Some(iptables) = self.iptables.as_ref() {
             iptables
         } else {
-            let safe = crate::steal::ip_tables::SafeIpTables::create(
+            let safe = SafeIpTables::create(
                 if self.ipv6 {
                     new_ip6tables()
                 } else {
@@ -95,7 +93,11 @@ impl PortRedirector for IptablesListener {
             .await?;
             self.iptables.insert(safe)
         };
-        iptables.add_redirect(from, self.redirect_to).await
+
+        iptables
+            .add_redirect(from, self.redirect_to)
+            .await
+            .map_err(From::from)
     }
 
     async fn remove_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
