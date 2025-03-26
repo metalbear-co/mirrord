@@ -271,10 +271,6 @@ mirrord-layer failed to parse the provided target!
 #[warn(clippy::wildcard_enum_match_arm)]
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
-#[cfg_attr(
-    feature = "namespaced-schemars",
-    schemars(rename = "co.metalbear.mirrord.v1.Target")
-)]
 pub enum Target {
     /// <!--${internal}-->
     /// [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/).

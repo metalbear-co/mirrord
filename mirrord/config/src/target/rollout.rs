@@ -8,10 +8,6 @@ use crate::config::{ConfigError, Result};
 /// Mirror the rollout specified by [`RolloutTarget::rollout`].
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(
-    feature = "namespaced-schemars",
-    schemars(rename = "co.metalbear.mirrord.v1.RolloutTarget")
-)]
 pub struct RolloutTarget {
     /// <!--${internal}-->
     /// Rollout to mirror.
