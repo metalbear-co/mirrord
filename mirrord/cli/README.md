@@ -70,5 +70,48 @@ flowchart LR
     Patch --> Exec
     Exec --> |Communicates via| IntProxy
     IntProxy --> |Forwards messages| Agent
+
+    %% Note: Create Agent, mirrord Operator, and Initialize steps happen in parallel
+    subgraph Parallel
+        direction LR
+        CreateAgent
+        Operator
+        Init
+    end
+```
+
+### `mirrord exec` (Sequence Diagram)
+
+```mermaid
+sequenceDiagram
+    participant CLI as mirrord CLI
+    participant Config as Config Parser
+    participant Target as Target Resolution
+    participant Operator as mirrord Operator
+    participant Agent as mirrord Agent
+    participant Init as Initializer
+    participant Proxy as Internal Proxy
+    participant Binary as User Binary
+
+    CLI->>Config: Parse & Verify Config
+    Config->>Target: Resolve Target
+
+    alt Operator Enabled
+        Target->>Operator: Request Agent
+        Operator->>Agent: Create Agent
+    else No Operator
+        Target->>Agent: Create via k8s API
+    end
+
+    Target->>Init: Extract Library
+    Init->>Proxy: Initialize & Connect
+    Proxy->>Agent: Establish Connection
+
+    Note over Binary: On macOS Only
+    Init->>Binary: Patch Binary
+
+    Binary->>Proxy: Execute & Communicate
+    Proxy->>Agent: Forward Messages
+    Agent->>Operator: Report Status (if enabled)
 ```
 
