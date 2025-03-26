@@ -1,12 +1,13 @@
 #![cfg(test)]
-#![cfg(feature = "operator")]
+// #![cfg(feature = "operator")]
 //! Test the copy-target features with an operator.
 
 use std::time::Duration;
 
 use rstest::*;
+use tempfile::NamedTempFile;
 
-use crate::utils::{config_dir, service, Application, KubeService};
+use crate::utils::{service, Application, KubeService};
 
 /// Starts mirrord with the `copy-target` feature just to validate that it can create a
 /// working copy-pod. Should work as a sanity check that the targets (see `target` parameter)
@@ -22,8 +23,20 @@ pub async fn copy_target_starts_a_working_copy(
 ) {
     let service = service.await;
 
-    let mut config_path = config_dir().clone();
-    config_path.push("copy_target_starts_a_working_copy.json");
+    // Create a temporary file for the config
+    let config_file = NamedTempFile::new().unwrap();
+
+    // Create the config JSON
+    let config = serde_json::json!({
+        "feature": {
+            "copy_target": {
+                "scale_down": false
+            }
+        }
+    });
+    // Write the config to the temporary file
+    let config_path = config_file.path();
+    std::fs::write(&config_path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
 
     let target = match target {
         "pod" => service.pod_container_target(),
