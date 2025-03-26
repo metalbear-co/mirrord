@@ -605,6 +605,13 @@ impl LayerConfig {
             ));
         }
 
+        if self.feature.fs.readonly_file_buffer > 1_000_000 {
+            return Err(ConfigError::Conflict(
+                "the value of feature.fs.readonly_file_buffer must be 1 000 000 (1 MB) or less."
+                    .to_string(),
+            ));
+        }
+
         if let (Some(profile), true) = (&self.profile, context.has_warnings()) {
             // It might be that the user config is fine,
             // but the mirrord profile introduced changes that triggered the warnings.
