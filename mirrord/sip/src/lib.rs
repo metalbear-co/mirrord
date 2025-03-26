@@ -7,6 +7,38 @@ mod codesign;
 mod error;
 mod rpath;
 
+/// Concerns MacOS' SIP (System Integrity Protection) mechanism and how to sidestep it.
+///
+/// ### Why?
+///
+/// SIP makes it such that the `mirrord-layer` lib cannot be dynamically loaded into the user's
+/// process on MacOS machines, as it blocks the modification of processes ([Wikipedia page](https://en.wikipedia.org/wiki/System_Integrity_Protection)). It does this by removing the relevant environment variables (`DYLD_INSERT_LIBRARIES`) when the process starts.
+///
+/// Also see Apple's relevant docs: [Hardened Runtime](https://developer.apple.com/documentation/security/hardened-runtime), [Entitlements](https://developer.apple.com/documentation/bundleresources/entitlements) and [Code Signing](https://developer.apple.com/documentation/security/code-signing-services).
+///
+/// To get around this, the user's process is patched by creating a new unprotected version and
+/// signing while mirrord is running. Then the layer is loaded dynamically into the copy without
+/// SIP and executes as usual.
+///
+/// - If the process is a **script**, the shebang must be changed to point to the patched version of
+///   the interpreter.
+///
+/// ### Usage
+///
+/// Used by `mirrord-cli` and `mirrord-layer`. Called into before the user process is
+/// run, during setup on MacOS machines and in the exec hooks in case the program
+/// runs a protected binary - see mirrord::execution::MirrordExecution::start_internal,
+/// mirrord_layer::exec_hooks::hooks::execve_detour and mirrord_layer::exec_utils::patch_if_sip.
+///
+/// The entry point when calling this crate is [`main::sip_patch`].
+///
+/// ### Gotchas and spike pits
+///
+/// - The directory where patched files exist is not randomly named, but uses the const
+///   [`main::MIRRORD_PATCH_DIR`] due to an issue with the temp dir changing between executions.
+/// - A shebang is added to scripts without one in order to point it to the patched binary.
+/// - When checking a script, only the first line of the file is checked for a shebang, in case the
+///   script is encoded unusually.
 mod main {
     use std::{
         env,
@@ -42,7 +74,7 @@ mod main {
     ///
     /// We added some random characaters to the end so we'll be able to identify dir better
     /// in situations where $TMPDIR changes between exec's, leading to strip not working
-    /// https://github.com/metalbear-co/mirrord/issues/2500#issuecomment-2160026642
+    /// <https://github.com/metalbear-co/mirrord/issues/2500#issuecomment-2160026642>
     pub const MIRRORD_PATCH_DIR: &str = "mirrord-bin-ghu3278mz";
 
     pub const FRAMEWORKS_ENV_VAR_NAME: &str = "DYLD_FALLBACK_FRAMEWORK_PATH";
@@ -654,20 +686,87 @@ mod main {
             assert!(err.to_string().contains("executable file not found"));
         }
 
-        #[test]
-        fn patch_binary_fat() {
-            let path = "/bin/ls";
-            let output = patch_binary(path.as_ref()).unwrap();
-            assert!(matches!(
-                get_sip_status(output.to_str().unwrap(), &[]).unwrap(),
-                NoSip
-            ));
-            // Check DYLD_* features work on it:
-            let output = std::process::Command::new(output)
+        /// Verify the SIP-patch worked.
+        ///
+        /// Run the given binary with `DYLD_PRINT_LIBRARIES=1`. This env var asks dyld to print all
+        /// the mach-o images loaded to the process. However, it is stripped away by SIP, so we can
+        /// use it to test the patch worked. If we're getting libsystem_kernel.dylib printed, it
+        /// means the binary is not SIP protected.
+        fn run_and_verify_dyld_print(patched_bin_path: &Path) {
+            let output = std::process::Command::new(patched_bin_path)
                 .env("DYLD_PRINT_LIBRARIES", "1")
                 .output()
                 .unwrap();
             assert!(String::from_utf8_lossy(&output.stderr).contains("libsystem_kernel.dylib"));
+        }
+
+        /// Call `patch_binary` directly (it's a private function), verify the patched binary
+        /// is no longer protected, and DYLD_PRINT_LIBRARIES is respected when running with it.
+        fn patch_binary_and_verify_dyld_print(bin_path: &str) {
+            let patched_bin_path = patch_binary(bin_path.as_ref()).unwrap();
+            assert!(matches!(
+                get_sip_status(patched_bin_path.to_str().unwrap(), &[]).unwrap(),
+                NoSip
+            ));
+            // Check DYLD_* features work on patched binary:
+            run_and_verify_dyld_print(&patched_bin_path);
+        }
+
+        /// Call `sip_patch` (it's the public function this crate exposes), verify the patched
+        /// binary is no longer protected, and DYLD_PRINT_LIBRARIES is respected when running with
+        /// it.
+        fn patch_sip_and_verify_dyld_print(executable_path: &str) {
+            let patched_bin_path = sip_patch(executable_path, &[]).unwrap().unwrap();
+            assert!(matches!(
+                get_sip_status(&patched_bin_path, &[]).unwrap(),
+                NoSip
+            ));
+            // Check DYLD_* features work on patched binary:
+            run_and_verify_dyld_print(patched_bin_path.as_ref());
+        }
+
+        #[test]
+        fn patch_binary_fat() {
+            patch_binary_and_verify_dyld_print("/bin/ls");
+        }
+
+        #[test]
+        fn patch_entitled_binary() {
+            patch_sip_and_verify_dyld_print("/usr/bin/aa");
+        }
+
+        /// Test that after patching we can Successfully use DYLD features on a binary that had
+        /// [the runtime flag](https://developer.apple.com/documentation/security/seccodesignatureflags/runtime)
+        /// set before the patch.
+        /// No binary in `/bin/` has any flag set, so we first do a kind of an opposite patch to
+        /// create a binary with that flag, then we do our normal patch and test that it worked.
+        #[test]
+        fn patch_binary_with_runtime_flag() {
+            let signed_temp_file = tempfile::NamedTempFile::new().unwrap();
+
+            let mut settings = apple_codesign::SigningSettings::default();
+
+            settings.set_code_signature_flags(
+                apple_codesign::SettingsScope::Main,
+                CodeSignatureFlags::ADHOC | CodeSignatureFlags::RUNTIME,
+            );
+            settings.set_binary_identifier(
+                apple_codesign::SettingsScope::Main,
+                signed_temp_file
+                    .path()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy(),
+            );
+
+            let signer = apple_codesign::UnifiedSigner::new(settings);
+            // `wait4path` chosen because it's the lightest file in /bin/ that doesn't do anything
+            // when called without arguments.
+            signer
+                .sign_path("/bin/wait4path", signed_temp_file.path())
+                .unwrap();
+
+            patch_sip_and_verify_dyld_print(signed_temp_file.path().to_str().unwrap());
         }
 
         /// Test that when a fat binary contains an arm64 binary, that binary is used and patching

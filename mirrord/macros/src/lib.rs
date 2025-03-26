@@ -1,3 +1,7 @@
+//! # Procedural macros for mirrord
+//!
+//! - Use [`protocol_break()`] to mark code that should be revised when the crate major version is
+//!   bumped.
 #![deny(unused_crate_dependencies)]
 
 extern crate proc_macro;
@@ -8,16 +12,25 @@ use proc_macro2_diagnostics::SpanDiagnosticExt;
 use semver::Version;
 use syn::{parse_macro_input, spanned::Spanned};
 
-/// Use [`protocol_break()`] to mark code that should be revised when the major version is bumped.
+/// Marks code that should be revised when the major version of `mirrord-protocol` is bumped.
 ///
-/// For example:
+/// Will emit a compilation error on items that have been marked as needing revision when the
+/// specified version is reached.
+///
+///  ### Example usage
+///
+/// ```
+/// // In the `mirrord-protocol` crate
 /// #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 /// pub enum StealType {
 ///     All(Port),
 ///     FilteredHttp(Port, Filter),
-///     #[protocol_break(2)] // We want that when we bump major into 2, we can remove this variant
-/// or merge it with the above.     FilteredHttpPath(Port, Filter),
+///     // When we bump the major version to 2, we can remove this variant
+///     // or merge it with the above.
+///     #[protocol_break(2)]
+///     FilteredHttpPath(Port, Filter),
 /// }
+/// ```
 #[proc_macro_attribute]
 pub fn protocol_break(attr: TokenStream, input: TokenStream) -> TokenStream {
     // Get the version to break on

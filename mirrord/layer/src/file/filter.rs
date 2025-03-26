@@ -382,6 +382,8 @@ mod tests {
         #[case] write: bool,
         #[case] expected: DetourKind,
     ) {
+        use mirrord_config::feature::fs::READONLY_FILE_BUFFER_DEFAULT;
+
         let read_write = Some(VecOrSingle::Multiple(vec![
             r"/pain/read_write.*\.a".to_string()
         ]));
@@ -397,6 +399,7 @@ mod tests {
             not_found,
             mode,
             mapping: None,
+            readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
         };
 
         let file_filter = FileFilter::new(fs_config);
@@ -429,8 +432,11 @@ mod tests {
         #[case] write: bool,
         #[case] expected: DetourKind,
     ) {
+        use mirrord_config::feature::fs::READONLY_FILE_BUFFER_DEFAULT;
+
         let fs_config = FsConfig {
             mode,
+            readonly_file_buffer: READONLY_FILE_BUFFER_DEFAULT,
             ..Default::default()
         };
 

@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     env::VarError,
     ffi::{OsStr, OsString},
+    ops::Not,
     os::unix::ffi::OsStrExt,
 };
 
@@ -119,6 +120,11 @@ impl ConfigContext {
     /// Returns all warnings previously stored with [`ConfigContext::add_warning`].
     pub fn into_warnings(self) -> Vec<String> {
         self.warnings
+    }
+
+    /// Returns whether this context stores any warnings.
+    pub fn has_warnings(&self) -> bool {
+        self.warnings.is_empty().not()
     }
 }
 

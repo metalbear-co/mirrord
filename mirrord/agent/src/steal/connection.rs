@@ -22,6 +22,10 @@ use mirrord_protocol::{
     RemoteError::{BadHttpFilterExRegex, BadHttpFilterRegex},
     RequestId,
 };
+use nix::sys::socket::{
+    sockopt::{Ip6tOriginalDst, OriginalDst},
+    SockaddrIn, SockaddrIn6,
+};
 use thiserror::Error;
 use tokio::{
     net::TcpStream,
@@ -42,7 +46,6 @@ use crate::{
             ConnectionMessageIn, ConnectionMessageOut, StolenConnection, StolenConnections,
         },
         http::HttpFilter,
-        orig_dst,
         subscriptions::{IpTablesRedirector, PortSubscriptions},
         Command, StealerCommand,
     },
@@ -520,7 +523,37 @@ where
         stream: TcpStream,
         peer: SocketAddr,
     ) -> AgentResult<()> {
-        let mut real_address = orig_dst::orig_dst_addr(&stream)?;
+        let real_address = if peer.is_ipv6() {
+            nix::sys::socket::getsockopt(&stream, Ip6tOriginalDst)
+                .map(SockaddrIn6::from)
+                .map(|addr| SocketAddr::new(addr.ip().into(), addr.port()))
+        } else {
+            nix::sys::socket::getsockopt(&stream, OriginalDst)
+                .map(SockaddrIn::from)
+                .map(|addr| SocketAddr::new(addr.ip().into(), addr.port()))
+        };
+
+        let mut real_address = match real_address {
+            Ok(addr) => {
+                tracing::trace!(
+                    ?stream, %peer, %addr,
+                    "Resolved the original destination address of an intercepted connection.",
+                );
+                addr
+            }
+            Err(error) => {
+                tracing::error!(
+                    %error, %peer,
+                    "Failed to resolve the original destination address for an intercepted connection. \
+                    Dropping this connection.",
+                );
+
+                // Resolving the original destination can fail,
+                // e.g if someone made connection directly to our socket.
+                return Ok(());
+            }
+        };
+
         let localhost = if self.support_ipv6 && real_address.is_ipv6() {
             IpAddr::V6(Ipv6Addr::LOCALHOST)
         } else {

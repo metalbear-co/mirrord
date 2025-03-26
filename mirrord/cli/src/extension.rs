@@ -39,7 +39,8 @@ pub(crate) async fn extension_exec(args: ExtensionExecArgs, watch: drain::Watch)
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file)
         .override_env_opt("MIRRORD_IMPERSONATED_TARGET", args.target);
 
-    let config = LayerConfig::resolve(&mut cfg_context)?;
+    let mut config = LayerConfig::resolve(&mut cfg_context)?;
+    crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
     let mut analytics = AnalyticsReporter::only_error(config.telemetry, Default::default(), watch);
 

@@ -15,6 +15,7 @@ use thiserror::Error;
 use crate::{
     container::{CommandDisplay, IntproxySidecarError},
     port_forward::PortForwardError,
+    profile::ProfileError,
 };
 
 pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;
@@ -391,6 +392,9 @@ pub(crate) enum CliError {
 
     #[error(transparent)]
     ParseInt(ParseIntError),
+
+    #[error(transparent)]
+    ProfileError(#[from] ProfileError),
 }
 
 impl CliError {

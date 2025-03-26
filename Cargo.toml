@@ -2,6 +2,8 @@
 
 members = [
     "mirrord/*",
+    "mirrord/agent/env",
+    "mirrord/agent/iptables",
     "mirrord/layer/tests/apps/fileops",
     "mirrord/layer/tests/apps/outgoing",
     "mirrord/layer/tests/apps/listen_ports",
@@ -27,7 +29,7 @@ resolver = "2"
 
 # latest commits on rustls suppress certificate verification
 [workspace.package]
-version = "3.135.0"
+version = "3.136.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"

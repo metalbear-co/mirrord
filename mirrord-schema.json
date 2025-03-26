@@ -102,6 +102,14 @@
         "null"
       ]
     },
+    "profile": {
+      "title": "profile {#root-profile}",
+      "description": "Name of the mirrord profile to use.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "sip_binaries": {
       "title": "sip_binaries {#root-sip_binaries}",
       "description": "Binaries to patch (macOS SIP).\n\nUse this when mirrord isn't loaded to protected binaries that weren't automatically patched.\n\nRuns `endswith` on the binary path (so `bash` would apply to any binary ending with `bash` while `/usr/bin/bash` would apply only for that binary).\n\n```json { \"sip_binaries\": \"bash;python\" } ```",
@@ -237,6 +245,16 @@
               "type": "null"
             }
           ]
+        },
+        "readonly_file_buffer": {
+          "title": "feature.fs.readonly_file_buffer {#feature-fs-readonly_file_buffer}",
+          "description": "Sets buffer size for read-only remote files in bytes. By default, the value is 128000 bytes, or 128 kB.\n\nSetting the value to 0 disables file buffering. Otherwise, read-only remote files will be read in chunks and buffered locally. This improves performance when the user application reads data in small portions.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
         }
       },
       "additionalProperties": false
@@ -835,7 +853,7 @@
         },
         "readonly_file_buffer": {
           "title": "_experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}",
-          "description": "Sets buffer size for readonly remote files (in bytes, for example 4096). If set, such files will be read in chunks and buffered locally. This improves performace when the user application reads data in small portions.\n\nSetting to 0 disables file buffering.\n\n<https://github.com/metalbear-co/mirrord/issues/2069>",
+          "description": "DEPRECATED, WILL BE REMOVED: moved to `feature.fs.readonly_file_buffer` as part of stabilisation. See <https://github.com/metalbear-co/mirrord/issues/2069>.",
           "type": [
             "integer",
             "null"

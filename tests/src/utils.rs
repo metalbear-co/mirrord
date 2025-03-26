@@ -277,6 +277,19 @@ impl TestProcess {
         panic!("Timeout waiting for line: {line}");
     }
 
+    pub async fn wait_for_line_stdout(&self, timeout: Duration, line: &str) {
+        let now = std::time::Instant::now();
+        while now.elapsed() < timeout {
+            let stdout = self.get_stdout().await;
+            if stdout.contains(line) {
+                return;
+            }
+            // avoid busyloop
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("Timeout waiting for line: {line}");
+    }
+
     /// Wait for the test app to output (at least) the given amount of lines.
     ///
     /// # Arguments
