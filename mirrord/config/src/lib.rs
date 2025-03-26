@@ -610,7 +610,6 @@ impl LayerConfig {
                 name: "feature.fs.readonly_file_buffer",
                 provided: self.feature.fs.readonly_file_buffer.to_string(),
                 error: "the value of feature.fs.readonly_file_buffer must be 1 Megabyte or less."
-                    .to_string()
                     .into(),
             });
         }
