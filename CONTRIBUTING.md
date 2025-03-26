@@ -648,11 +648,9 @@ graph TB
         CRDs[Custom Resources]
     end
 
-    subgraph Operator["mirrord Operator (Optional)"]
+    subgraph Operator["Operator (Optional)"]
         direction TB
-        P1[ ]
         Manager["Resource Manager"]
-        P2[ ]
     end
 
     IntProxy <--> |"Traffic"| Agent
@@ -672,13 +670,11 @@ graph TB
     classDef operator fill:#ffe6e6,stroke:#cc0000,stroke-width:2px
     classDef k8s fill:#e6ffe6,stroke:#006600,stroke-width:2px
     classDef agent fill:#fff2cc,stroke:#d6b656,stroke-width:2px
-    classDef padding fill:none,stroke:none
 
     class mirrord mirrord
     class Operator operator
     class K8s k8s
     class Agent agent
-    class P1,P2 padding
 ```
 
 ### Flow
