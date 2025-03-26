@@ -8,10 +8,6 @@ use crate::config::{self, ConfigError};
 /// Mirror the pod specified by [`PodTarget::pod`].
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[cfg_attr(
-    feature = "namespaced-schemars",
-    schemars(rename = "co.metalbear.mirrord.v1.PodTarget")
-)]
 pub struct PodTarget {
     /// <!--${internal}-->
     /// Pod to mirror.
