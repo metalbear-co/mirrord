@@ -28,7 +28,7 @@ jobs:
 
     steps:
       - name: Trigger operator E2E workflow
-        uses: metalbear-co/repository-dispatch@v3
+        uses: metalbear-co/repository-dispatch@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           repository: metalbear-co/operator
