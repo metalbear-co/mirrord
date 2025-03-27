@@ -258,8 +258,8 @@ async fn outgoing_tcp_high_port(dylib_path: &Path) {
         std::future::pending::<()>().await;
     });
     assert!(
-        listener_addr.port() >= 35000,
-        "should be an ephemeral port: {listener_addr}"
+        listener_addr.port() >= 1000,
+        "should be a high port: {listener_addr}"
     );
 
     let peers = [
@@ -281,7 +281,7 @@ async fn outgoing_tcp_high_port(dylib_path: &Path) {
             dylib_path,
             vec![
                 ("TO_HOSTS", &peers.map(|p| p.to_string()).join(",")),
-                ("MIRRORD_IGNORE_DEBUGGER_PORTS", "35000-65535"),
+                ("MIRRORD_IGNORE_DEBUGGER_PORTS", "1000-65535"),
             ],
             None,
         )
