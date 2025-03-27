@@ -2,7 +2,9 @@
 #![warn(clippy::indexing_slicing)]
 
 use std::{
-    net::{Ipv4Addr, SocketAddr}, path::Path, time::Duration
+    net::{Ipv4Addr, SocketAddr},
+    path::Path,
+    time::Duration,
 };
 
 use mirrord_protocol::{
