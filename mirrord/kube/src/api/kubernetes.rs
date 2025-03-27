@@ -225,17 +225,25 @@ impl KubernetesAPI {
                 progress.warning(format!("Target has multiple containers, mirrord picked \"{container_name}\". To target a different one, include it in the target path.").as_str());
             }
 
-            if network_config
-                .map(|network_config| {
-                    network_config
-                        .incoming
-                        .steals_port_without_filter(containers_probe_ports)
+            let stolen_probes = network_config
+                .into_iter()
+                .flat_map(|config| {
+                    containers_probe_ports
+                        .iter()
+                        .copied()
+                        .filter(|port| config.incoming.steals_port_without_filter(*port))
                 })
-                .unwrap_or(false)
-            {
-                {
-                    progress.warning("Your mirrord config may steal HTTP/gRPC health checks, causing Kubernetes to terminate the target container. Use an HTTP filter to prevent this.");
-                }
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>();
+
+            if stolen_probes.is_empty().not() {
+                progress.warning(&format!(
+                    "Your mirrord config may steal HTTP/gRPC health checks configured on port{} [{}], \
+                    causing Kubernetes to terminate the target container. \
+                    Use an HTTP filter to prevent this.",
+                    if stolen_probes.len() > 1 { "s" } else { "" },
+                    stolen_probes.join(", "),
+                ));
             }
         }
 
