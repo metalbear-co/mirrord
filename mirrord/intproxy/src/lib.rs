@@ -23,7 +23,11 @@ use proxies::{
     simple::{SimpleProxy, SimpleProxyMessage},
 };
 use semver::Version;
-use tokio::{net::TcpListener, time};
+use tokio::{
+    net::TcpListener,
+    time,
+    time::{Interval, MissedTickBehavior},
+};
 
 use crate::{
     agent_conn::AgentConnection,
@@ -71,6 +75,11 @@ pub struct IntProxy {
     /// Temporary message queue for any [`ProxyMessage`] from layer or to agent that are sent
     /// during reconnection state.
     reconnect_task_queue: Option<VecDeque<ProxyMessage>>,
+
+    // Simple ping preset state-machine to debounce ping-pong resets (from agent activity) to at
+    // most every 10/th of `PING_INTERVAL`
+    ping_pong_update_debounce: Interval,
+    ping_pong_update_allowed: bool,
 }
 
 impl IntProxy {
@@ -134,6 +143,9 @@ impl IntProxy {
             Self::CHANNEL_SIZE,
         );
 
+        let mut ping_pong_update_debounce = time::interval(Self::PING_INTERVAL / 10);
+        ping_pong_update_debounce.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
         Self {
             any_connection_accepted: false,
             background_tasks,
@@ -149,7 +161,14 @@ impl IntProxy {
             },
             protocol_version: None,
             reconnect_task_queue: Default::default(),
+            ping_pong_update_debounce,
+            ping_pong_update_allowed: false,
         }
+    }
+
+    /// Check if any layer connections are still alive
+    fn has_layer_connections(&self) -> bool {
+        !self.task_txs.layers.is_empty()
     }
 
     /// Runs main event loop of this proxy.
@@ -179,11 +198,15 @@ impl IntProxy {
                     self.handle_task_update(task_id, task_update).await?;
                 }
 
+                _ = self.ping_pong_update_debounce.tick(), if self.has_layer_connections() => {
+                    self.ping_pong_update_allowed = true;
+                }
+
                 _ = time::sleep(first_timeout), if !self.any_connection_accepted => {
                     return Err(IntProxyError::ConnectionAcceptTimeout);
                 },
 
-                _ = time::sleep(idle_timeout), if self.any_connection_accepted && self.task_txs.layers.is_empty() => {
+                _ = time::sleep(idle_timeout), if self.any_connection_accepted && !self.has_layer_connections() => {
                     tracing::info!("Reached the idle timeout with no active layer connections");
                     break;
                 },
@@ -320,6 +343,16 @@ impl IntProxy {
     /// Routes most messages from the agent to the correct background task.
     /// Some messages are handled here.
     async fn handle_agent_message(&mut self, message: DaemonMessage) -> Result<(), IntProxyError> {
+        if self.ping_pong_update_allowed
+            && !matches!(message, DaemonMessage::Pong | DaemonMessage::Close(_))
+        {
+            self.task_txs
+                .ping_pong
+                .send(PingPongMessage::AgentSentMessage)
+                .await;
+            self.ping_pong_update_allowed = false;
+        }
+
         match message {
             DaemonMessage::Pong => {
                 self.task_txs
