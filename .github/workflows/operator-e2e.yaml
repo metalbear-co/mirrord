@@ -6,6 +6,15 @@ on:
     types: [opened, synchronize]
   # Allow manual triggering
   workflow_dispatch:
+    inputs:
+      mirrord_commit:
+        description: 'Mirrord commit to use for E2E tests'
+        required: true
+        type: string
+      mirrord_branch:
+        description: 'Mirrord branch to use for E2E tests'
+        required: true
+        type: string
 
 jobs:
   trigger-operator-e2e:
@@ -14,26 +23,33 @@ jobs:
     # 1. PR is opened and not draft
     # 2. PR has new code and not draft
     # 3. Manually triggered
-    # 4. PR title contains a version number (e.g. "Release v3.132.0")
     if: |
       github.event_name == 'workflow_dispatch' ||
       (github.event.action == 'opened' && github.event.pull_request.draft == false) ||
-      (github.event.action == 'synchronize' &&
-       github.event.pull_request.draft == false)
+      (github.event.action == 'synchronize' && github.event.pull_request.draft == false)
 
     steps:
       - name: Trigger operator E2E workflow
         uses: actions/github-script@v7
         with:
           script: |
+            // Get the mirrord commit and branch based on the trigger type
+            const mirrord_commit = github.event_name === 'workflow_dispatch'
+              ? github.event.inputs.mirrord_commit
+              : context.sha;
+
+            const mirrord_branch = github.event_name === 'workflow_dispatch'
+              ? github.event.inputs.mirrord_branch
+              : github.event.pull_request.head.ref;
+
             const { data: workflow } = await github.rest.actions.createWorkflowDispatch({
               owner: 'metalbear-co',
               repo: 'operator',
               workflow_id: 'operator-e2e.yaml',
               ref: 'main', // Keep main as ref since we want to test against main operator
               inputs: {
-                mirrord_commit: context.sha,
-                mirrord_branch: github.event.pull_request.head.ref // Pass the PR's branch
+                mirrord_commit,
+                mirrord_branch
               }
             });
 
