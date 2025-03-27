@@ -665,31 +665,8 @@ pub(super) fn connect(
             return Detour::Bypass(Bypass::Port(ip_address.port()));
         }
 
-        // Before checking if it's a debugger port,
-        // first check if the outgoing.filter.remote contains this exact address.
-        //
-        // If the application talks to a gRPC server running in a sidecar container,
-        // it usually means that it needs to connect to 127.0.0.1:50001 remotely.
-        // When mirrord is executed from the IDE, this address is likely to be bypassed as a
-        // debugger socket.
-        let bypass_debugger_check =
-            if let OutgoingSelector::Remote(filters) = crate::setup().outgoing_selector() {
-                filters.iter().any(|filter| {
-                    match (filter.protocol, user_socket_info.kind) {
-                        (ProtocolFilter::Tcp, SocketKind::Udp(..)) => return false,
-                        (ProtocolFilter::Udp, SocketKind::Tcp(..)) => return false,
-                        _ => {}
-                    }
-
-                    match &filter.address {
-                        AddressFilter::Socket(addr) => *addr == ip_address,
-                        _ => false,
-                    }
-                })
-            } else {
-                false
-            };
-
+        // Ports 50000 and 50001 are commonly used to communicate with sidecar containers.
+        let bypass_debugger_check = ip_address.port() == 50000 || ip_address.port() == 50001;
         if bypass_debugger_check.not() && crate::setup().is_debugger_port(&ip_address) {
             return Detour::Bypass(Bypass::Port(ip_address.port()));
         }
