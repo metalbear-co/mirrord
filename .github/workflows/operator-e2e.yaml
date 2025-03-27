@@ -17,9 +17,10 @@ jobs:
     # 4. PR title contains a version number (e.g. "Release v3.132.0")
     if: |
       github.event_name == 'workflow_dispatch' ||
-      ((github.event.action == 'opened' && github.event.pull_request.draft == false) ||
-      (github.event.action == 'synchronize' && github.event.pull_request.draft == false)) &&
-       contains(github.event.pull_request.title, 'Release v')
+      (github.event.action == 'opened' && github.event.pull_request.draft == false) ||
+      (github.event.action == 'synchronize' &&
+       github.event.pull_request.draft == false &&
+       contains(github.event.pull_request.title, 'Release v'))
 
     steps:
       - name: Trigger operator E2E workflow
@@ -30,9 +31,10 @@ jobs:
               owner: 'metalbear-co',
               repo: 'operator',
               workflow_id: 'operator-e2e.yaml',
-              ref: 'main',
+              ref: 'main', // Keep main as ref since we want to test against main operator
               inputs: {
-                mirrord_commit: context.sha
+                mirrord_commit: context.sha,
+                mirrord_branch: github.event.pull_request.head.ref // Pass the PR's branch
               }
             });
 
