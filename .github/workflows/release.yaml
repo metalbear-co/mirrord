@@ -12,10 +12,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           rustflags: ""
-      - uses: taiki-e/install-action@v2
+      - uses: metalbear-co/install-action@62730e3d4f6bd81d824694e963e06d7153968c93
         with:
           tool: cross
       # building layer and cli together leads to weird situation where embedded layer is x64, so split.
@@ -36,10 +36,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           rustflags: ""
-      - uses: taiki-e/install-action@v2
+      - uses: metalbear-co/install-action@62730e3d4f6bd81d824694e963e06d7153968c93
         with:
           tool: cross
       - name: build mirrord-layer and cli
@@ -56,13 +56,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rm rust-toolchain.toml
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: metalbear-co/setup-rust-toolchain@009cda47e1b529982a00627a40eda87b4215035a
         with:
           target: x86_64-apple-darwin,aarch64-apple-darwin
           toolchain: nightly-2025-01-22
           rustflags: ""
       - name: Import Code-Signing Certificates
-        uses: Apple-Actions/import-codesign-certs@v3
+        uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
         with:
           # The certificates in a PKCS12 file encoded as a base64 string
           p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
@@ -72,7 +72,7 @@ jobs:
         run: |
           brew tap mitchellh/gon
           brew install mitchellh/gon/gon
-        # Instead of spoofing an arm64e by changing bits, we now use a code shim compiled as arm64e that loads the arm64 layer 
+        # Instead of spoofing an arm64e by changing bits, we now use a code shim compiled as arm64e that loads the arm64 layer
       - name: build mirrord-layer x86-64, arm and code shim
         run: |
           cargo +nightly-2025-01-22 build --release -p mirrord-layer --target=aarch64-apple-darwin
@@ -100,6 +100,7 @@ jobs:
       - name: build macOS x86-64 cli with universal dylib
         env:
           MIRRORD_LAYER_FILE: /tmp/target/universal-apple-darwin/release/libmirrord_layer.dylib
+          MIRRORD_LAYER_FILE_MACOS_ARM64: ../../../target/aarch64-apple-darwin/release/libmirrord_layer.dylib
         run: cargo +nightly-2025-01-22 build --release -p mirrord --target=x86_64-apple-darwin
       - name: Sign cli binaries
         env:
@@ -202,10 +203,8 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         uses: docker/build-push-action@v6
         with:
-          cache-from: |
-            type=registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache
-          cache-to: |
-            type=registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache,mode=max
+          cache-from: registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache
+          cache-to: registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache,mode=max
           context: .
           file: mirrord/cli/Dockerfile
           platforms: linux/amd64,linux/arm64
@@ -217,10 +216,8 @@ jobs:
         if: github.event_name != 'workflow_dispatch'
         uses: docker/build-push-action@v6
         with:
-          cache-from: |
-            type=registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache
-          cache-to: |
-            type=registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache,mode=max
+          cache-from: registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache
+          cache-to: registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache,mode=max
           context: .
           file: mirrord/cli/Dockerfile
           platforms: linux/amd64,linux/arm64
@@ -250,7 +247,7 @@ jobs:
         with:
           path: /tmp/artifacts
           pattern: +(*-unknown-linux-gnu|*-apple-darwin)
-      - uses: montudor/action-zip@v1
+      - uses: metalbear-co/action-zip@0852c26906e00f8a315c704958823928d8018b28
       - name: Create mirrord linux-x64 zip file
         run: |
           zip mirrord_linux_x86_64.zip mirrord
@@ -295,7 +292,7 @@ jobs:
 
       # Consider to add changelog generation..
       - name: Release
-        uses: softprops/action-gh-release@v1
+        uses: metalbear-co/action-gh-release@ab50eebb6488051c6788d97fa95232267c6a4e23
         with:
           files: /tmp/release/**
 
