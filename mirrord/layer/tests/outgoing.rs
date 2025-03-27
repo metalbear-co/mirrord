@@ -1,7 +1,12 @@
 #![feature(assert_matches)]
 #![warn(clippy::indexing_slicing)]
 
-use std::{net::SocketAddr, path::Path, time::Duration};
+use std::{
+    io::Write,
+    net::{Ipv4Addr, SocketAddr},
+    path::Path,
+    time::Duration,
+};
 
 use mirrord_protocol::{
     outgoing::{
@@ -16,6 +21,8 @@ use rstest::rstest;
 mod common;
 
 pub use common::*;
+use tempfile::NamedTempFile;
+use tokio::net::TcpListener;
 
 // TODO: add a test for when DNS lookup is unsuccessful, to make sure the layer returns a valid
 //      error to the user application.
@@ -235,6 +242,102 @@ async fn outgoing_tcp_bound_socket(dylib_path: &Path) {
 
         intproxy
             .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(0)))
+            .await;
+    }
+
+    test_process.wait_assert_success().await;
+}
+
+/// Verifies that issue <https://github.com/metalbear-co/mirrord/issues/3212> is fixed.
+#[rstest]
+#[tokio::test]
+#[timeout(Duration::from_secs(15))]
+async fn outgoing_tcp_high_port(dylib_path: &Path) {
+    let config_json = serde_json::json!({
+        "feature": {
+            "network": {
+                "outgoing": {
+                    "filter": {
+                        "remote": [
+                            "0.0.0.0:0",
+                            "127.0.0.1:50001",
+                        ]
+                    }
+                }
+            }
+        }
+    });
+    let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+    config_file
+        .as_file_mut()
+        .write_all(&serde_json::to_vec(&config_json).unwrap())
+        .unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener_addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _conn = listener.accept().await;
+        std::future::pending::<()>().await;
+    });
+    assert!(
+        listener_addr.port() >= 35000,
+        "should be an ephemeral port: {listener_addr}"
+    );
+
+    let peers = [
+        // Should be bypassed as a debugger port.
+        // The listener will accept the connection in the background task we spawn above.
+        listener_addr,
+        // This should be remote, even though it's localhost,
+        // and the port is in the debugger ports range.
+        // This is because the remote filter explicitly specifies
+        // that this exact (addr,port) should be handled remotely.
+        SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 50001),
+        // This should be remote, because the remote filter has the unspecified address and port.
+        SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 80),
+    ];
+
+    let (mut test_process, mut intproxy) = Application::NodeMakeConnections
+        .start_process_with_layer(
+            dylib_path,
+            vec![
+                ("TO_HOSTS", &peers.map(|p| p.to_string()).join(",")),
+                ("MIRRORD_IGNORE_DEBUGGER_PORTS", "35000-65535"),
+            ],
+            Some(config_file.path()),
+        )
+        .await;
+
+    let mut got_connect_requests = 0;
+
+    while got_connect_requests < 2 {
+        let addr = match intproxy.recv().await {
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(LayerConnect {
+                remote_address: SocketAddress::Ip(addr),
+            })) => addr,
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(..)) => continue,
+            ClientMessage::TcpOutgoing(LayerTcpOutgoing::Connect(..)) => continue,
+            other => panic!("Received an unexpected message from the test app: {other:?}"),
+        };
+
+        assert!(
+            addr == peers[1] || addr == peers[2],
+            "Receved a connect request for an unexpected host: {addr}"
+        );
+
+        got_connect_requests += 1;
+
+        intproxy
+            .send(DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Connect(Ok(
+                DaemonConnect {
+                    connection_id: got_connect_requests,
+                    remote_address: SocketAddress::Ip(addr),
+                    local_address: SocketAddress::Ip(SocketAddr::new(
+                        Ipv4Addr::LOCALHOST.into(),
+                        0,
+                    )),
+                },
+            ))))
             .await;
     }
 
