@@ -30,7 +30,7 @@ jobs:
       - name: Trigger operator E2E workflow
         uses: metalbear-co/repository-dispatch@main
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.OPERATOR_E2E_PAT }}
           repository: metalbear-co/operator
           event-type: operator-e2e-test-from-mirrord
           client-payload: |
