@@ -1,3 +1,238 @@
+//! # mirrord-cli
+//!
+//! CLI tool for everything mirrord!
+//!
+//! Most of the users interact with it through the mirrord IDE plugins (which mostly just runs
+//! `mirrord` commands behind the scenes).
+//!
+//! ## Features overview
+//!
+//! The main command to be aware of is `mirrord exec`, and a couple of notable ones
+//! are `mirrord operator`, and `mirrord container`.
+//!
+//! ### `mirrord exec [OPTIONS] <BINARY> [BINARY_ARGS]`
+//!
+//! - [`exec`]
+//!
+//! > The bread and butter of mirrord.
+//!
+//! The `exec` command runs the user application with mirrord. You can pass pretty much any
+//! binary to it that you want to run in the target context (or just in the cluster context
+//! when running targetless) and it should work.
+//!
+//! - **Notice**: The IDEs use the `mirrord ext` command, which is very similar to `mirrord exec`,
+//!   but it's fine tuned to deal with the idiosyncrasies of running mirrord from an IDE.
+//!
+//! - Tip: `mirrord exec -- sh` is a quick way of trying out changes.
+//!
+//! - Tip: You might want to use a `--` when invoking the command (e.g.`-- <BINARY> [BINARY_ARGS]`),
+//!   for some binaries the command will fail to get the proper args without it.
+//!
+//! An `exec` run starts the [`Progress`] logging and the [`AnalyticsReporter`], prepares
+//! the [`LayerConfig`], and checks it with [`LayerConfig::verify`] (which is similar to what's done
+//! in the `mirrord verify-config` command).
+//!
+//! - Tip: [`Progress`] logging might be incovenient sometimes when you want to see normal Rust
+//!   logs, you can disable it with the `MIRRORD_PROGRESS_MODE=off` env var.
+//!
+//! Next, we start the target resolution, and how the target is resolved depends if the
+//! mirrord-operator is available and enabled (see the section below). After [`create_and_connect`],
+//! we now have the mirrord-agent information that the mirrord-internal-proxy needs. We then run
+//! `mirrord intproxy` to start it, patch the user binary (macos only, see `sip_patch`),
+//! and finally run the user binary with the mirrord lib loaded, but this time we use `execve`,
+//! instead of [`tokio::process::Command`].
+//!
+//! #### operator vs no operator `exec`
+//!
+//! Target resolution is performed the same, regardless of operator usage, but
+//! `exec` starts an agent when there is **no** operator, or the operator was explicitly
+//! **disabled** in [`LayerConfig::operator`]. Otherwise, the agent creation is handled by the
+//! operator, so in this case the `AgentConnectInfo` we get comes from the
+//! `OperatorSessionConnection` that was assigned for this run.
+//!
+//! Some mirrord features and targets are only supported when the operator is being used. `exec`
+//! usually stops when one of these is detected, logging an error to the user, be it in the terminal
+//! or in the IDE. [`Progress`] will take care of logging using the appropriate mechanism (stderr
+//! or IDE notification box with nice little buttons). For targets that might have multiple pods
+//! (`deployment` and `rollout`), the user is just warned that mirrord won't impersonate all the
+//! pods without the operator.
+//!
+//! ### `mirrord ext [OPTIONS]`
+//!
+//! - [`extension_exec`]
+//!
+//! > IDE friendly version of `mirrord exec`.
+//!
+//! Does pretty much the same things as `mirrord exec`, with only a few differences. [`Progress`]
+//! defaults to `JsonProgress`, and it uses the `extension::mirrord_exec`, instead of [`exec`].
+//!
+//! You're not supposed to use this command directly from a terminal, as it might end up lacking
+//! some environment variables that are set by the IDE plugins.
+//!
+//! ### `mirrord intproxy [OPTIONS]`
+//!
+//! - [`internal_proxy::proxy`]
+//!
+//! > Communication between mirrord-layer and mirrord-agent.
+//!
+//! The mirrord-intproxy is a separate process that's spawned to handle the message exchange
+//! between a mirrord-layer and a mirrord-agent. The command is hidden from users, since we're the
+//! ones starting the intproxy from `mirrord exec`. See the `mirrord-intproxy` crate documentation
+//! for more details on the `intproxy` itself.
+//!
+//! It reads a previously resolved [`LayerConfig`] that has already been verified as valid, then
+//! intializes logging, either to a file in `/tmp`, or to stderr when it's being started from
+//! `mirrord container`.
+//!
+//! ### `mirrord container [OPTIONS] [EXEC]`
+//!
+//! - [`container_command`]
+//!
+//! > Runs the equivalent of `mirrord exec -- docker run {image}`.
+//!
+//! Running mirrord inside of a container (multiple runtimes are supported, not only docker, see
+//! [`ContainerRuntime`]) requires some extra preparation than simply running `mirrord exec`.
+//!
+//! As with the other `mirrord exec` style commands, it starts a [`Progress`] tracker, resolves
+//! [`LayerConfig`], performs target resolution and at the end starts mirrord. The big differential
+//! here is that we start more than just the mirrord-intproxy and the mirrord-agent, since we now
+//! also have the mirrord-extproxy.
+//!
+//! The mirrord-extproxy is used by the mirrord-intproxy to talk to the mirrord-agent, since the
+//! internal proxy won't be able to reach the agent from within the container runtime. What it does
+//! is a simplified version of the intproxy, see [`external_proxy::proxy`].
+//!
+//! With the external proxy running, we can get its address from stdout. We need this address when
+//! starting the mirrord sidecar, which runs the `mirrord intproxy` instance that our `mirrord exec`
+//! inside the user's container will connect to, something like
+//! `agent<->extproxy<->intproxy<->layer` (excluding the operator from here to simplify).
+//!
+//! Now that we have a sidecar with intproxy (it's not running yet though), we configure the
+//! `{runtime} container run` command to take into account the sidecar network, volumes, and a bunch
+//! of env vars (including the `LD_PRELOAD` used to hook libmirrord). After all this is done, we
+//! finally start the intproxy sidecar.
+//!
+//! Only then we can actually run the user's container command with mirrord, and have it working as
+//! expected.
+//!
+//! There are actually 2 subcommands that make the whole mirrord-container experience:
+//! [`ContainerRuntimeCommand::create`] that is used to prepare the sidecar, and
+//! [`ContainerRuntimeCommand::Run`].
+//!
+//! ### `mirrord container-ext [OPTIONS]`
+//!
+//! - [`container_ext_command`]
+//!
+//! > It's to `mirrord container` what `mirrord ext` is to `mirrord exec`.
+//!
+//! Just as we have a special IDE favoured command in `mirrord ext`, we have an equivalent for
+//! `mirrord container`, so you can run something like `mirrord exec -- docker run {image}` from an
+//! IDE plugin.
+//!
+//! ### `mirrord extract <PATH>`
+//!
+//! - [`extract_library`]
+//!
+//! > Makes a neat `libmirrord_layer.so` file.
+//!
+//! The command itself is not really used anywhere. Other commands that are related to starting a
+//! mirrord instance use the [`extract_library`] function directly
+//!
+//! ### `mirrord verify-config [OPTIONS] <PATH>`
+//!
+//! - [`verify_config()`]
+//!
+//! > Config validation.
+//!
+//! Performs a [`LayerConfig`] validation for the config file the user has passed, printing the
+//! validated config as json (if it succeeded).
+//!
+//! Can be used directly from the terminal, or from an IDE plugin, but in this case we have a
+//! special handling that allows the omission of a target, since in the IDE, a pop-up is shown
+//! for target selection if it was missing from the [`LayerConfig`].
+//!
+//! ### `mirrord operator <COMMAND>`
+//!
+//! - [`operator_command`]
+//!
+//! > Setup and management of the mirrord-operator, which forms mirrord's paid offering.
+//!
+//! A family of commands that help managing the mirrord-operator.
+//!
+//! #### `mirrord operator setup [OPTIONS]`
+//!
+//! - `operator_setup`
+//!
+//! Creates a kubernetes spec `yaml` file that can be used to install the mirrord-operator in the
+//! cluster. No validations are done here! The user may pass an invalid license, operator version
+//! that doesn't exist, whatever. The command will work as long as we can parse the args and produce
+//! a file from it.
+//!
+//! - Tip: The [operator helm chart](https://github.com/metalbear-co/charts/tree/main/mirrord-operator)
+//!   is an alternative way of setting up the mirrord-operator.
+//!
+//! #### `mirrord operator status [OPTIONS]`
+//!
+//! - `StatusCommandHandler`
+//!
+//! Uses the `OperatorApi` to access the `/status` route in the mirrord-operator and report it to
+//! the user.
+//!
+//! Prints a bunch of information about the mirrord operator `Session`s that are retrieved via the
+//! kubernetes API in the form of the `MirrordOperatorStatus` CRD(-ish, since most of this
+//! information is actually stored in the mirrord-operator itself, and not as a kubernetes
+//! resource).
+//!
+//! Does not interact with the IDE plugins, it's a terminal only command that pretty prints this
+//! information to stdout.
+//!
+//! #### `mirrord operator session <COMMAND>`
+//!
+//! - `SessionCommandHandler`
+//!
+//! Uses the `OperatorApi` to manage (kill) mirrord-operator sessions (`SessionSpec` CRD). It makes
+//! either an `Api::delete` or an `Api::delete_collection` request through the kubernetes API.
+//!
+//! - Tip: to kill a particular session when you don't have its `session_id`, you can run the
+//!   `mirrord operator status` command to see all the sessions.
+//!
+//! ### `mirrord diagnose <COMMAND>`
+//!
+//! - [`diagnose_command`]
+//!
+//! > Diagnostics for the operator.
+//!
+//! Currently only a network latency diagnostics check is supported.
+//!
+//! ### `mirrord ls [OPTIONS]`
+//!
+//! - [`list::print_targets`]
+//!
+//! > Like `ls`, but for mirrord kubernetes' targets.
+//!
+//! Fetches the list of supported targets from the cluster, using the `OperatorApi` if the
+//! mirrord-operator is available (and has **not** been disabled in the [`LayerConfig`]), and prints
+//! it back to the user. The output is used by the IDE plugins to show a nice selection box to the
+//! user, when they started mirrord and have not set a target in their [`LayerConfig`].
+//!
+//! The types of target fetched depend on the [`ListTargetArgs::RICH_OUTPUT_ENV`].
+//!
+//! ### `mirrord completions <SHELL>`
+//!
+//! - [`generate`]
+//!
+//! > Completions for your shell.
+//!
+//! Uses [`clap`] to generate completions for the mirrord CLI.
+//!
+//! ### `mirrord teams`
+//!
+//! - [`teams::navigate_to_intro`]
+//!
+//! > For users interested in getting mirrord for teams, which is a paid feature.
+//!
+//! Opens a browser window to our mirrord for teams intro page, if we fail to open it, then it
+//! prints a nice little message to stdout.
 #![feature(let_chains)]
 #![feature(try_blocks)]
 #![warn(clippy::indexing_slicing)]
