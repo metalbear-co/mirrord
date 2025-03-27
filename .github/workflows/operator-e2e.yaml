@@ -34,13 +34,18 @@ jobs:
         with:
           script: |
             // Get the mirrord commit and branch based on the trigger type
-            const mirrord_commit = github.event_name === 'workflow_dispatch'
-              ? github.event.inputs.mirrord_commit
-              : context.sha;
+            let mirrord_commit, mirrord_branch;
 
-            const mirrord_branch = github.event_name === 'workflow_dispatch'
-              ? github.event.inputs.mirrord_branch
-              : github.event.pull_request.head.ref;
+            if (github.event_name === 'workflow_dispatch') {
+              mirrord_commit = github.event.inputs.mirrord_commit;
+              mirrord_branch = github.event.inputs.mirrord_branch;
+            } else {
+              mirrord_commit = context.sha;
+              mirrord_branch = github.event.pull_request.head.ref;
+            }
+
+            console.log(`Using mirrord commit: ${mirrord_commit}`);
+            console.log(`Using mirrord branch: ${mirrord_branch}`);
 
             const { data: workflow } = await github.rest.actions.createWorkflowDispatch({
               owner: 'metalbear-co',
