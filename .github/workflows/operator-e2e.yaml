@@ -28,38 +28,13 @@ jobs:
 
     steps:
       - name: Trigger operator E2E workflow
-        uses: actions/github-script@v7
+        uses: peter-evans/repository-dispatch@v3
         with:
-          script: |
-            const { Octokit } = require("@octokit/core");
-            // Get the mirrord commit and branch based on the trigger type
-            let mirrord_commit, mirrord_branch;
-
-            if (github.event_name === 'workflow_dispatch') {
-              mirrord_commit = github.event.inputs.mirrord_commit;
-              mirrord_branch = github.event.inputs.mirrord_branch;
-            } else {
-              mirrord_commit = context.sha;
-              mirrord_branch = github.event.pull_request.head.ref;
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: metalbear-co/operator
+          event-type: operator-e2e-test-from-mirrord
+          client-payload: |
+            {
+              "mirrord_commit": "${{ github.event_name == 'workflow_dispatch' && inputs.mirrord_commit || github.sha }}",
+              "mirrord_branch": "${{ github.event_name == 'workflow_dispatch' && inputs.mirrord_branch || github.event.pull_request.head.ref }}"
             }
-            console.log(`Using mirrord commit: ${mirrord_commit}`);
-            console.log(`Using mirrord branch: ${mirrord_branch}`);
-
-            // Octokit.js
-            // https://github.com/octokit/core.js#readme
-            const octokit = new Octokit({
-              auth: process.env.GITHUB_TOKEN
-            })
-
-            await octokit.request('POST /repos/metalbear-co/operator/dispatches', {
-              owner: 'metalbear-co',
-              repo: 'operator',
-              event_type: 'operator-e2e-test-from-mirrord',
-              client_payload: {
-                mirrord_commit,
-                mirrord_branch
-              },
-              headers: {
-                'X-GitHub-Api-Version': '2022-11-28'
-              }
-            })
