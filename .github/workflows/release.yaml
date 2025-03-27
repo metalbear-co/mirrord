@@ -204,7 +204,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           cache-from: registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache
-          cache-to: registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache
+          cache-to: registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache,mode=max
           context: .
           file: mirrord/cli/Dockerfile
           platforms: linux/amd64,linux/arm64
@@ -217,7 +217,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           cache-from: registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache
-          cache-to: registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache
+          cache-to: registry,ref=ghcr.io/metalbear-co/mirrord-cli:buildcache,mode=max
           context: .
           file: mirrord/cli/Dockerfile
           platforms: linux/amd64,linux/arm64
