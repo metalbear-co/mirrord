@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt, str::FromStr};
+use std::{collections::HashSet, fmt, ops::Not, str::FromStr};
 
 use bimap::BiMap;
 use https_delivery::LocalHttpsDelivery;
@@ -499,28 +499,25 @@ impl IncomingConfig {
     /// <!--${internal}-->
     /// Helper function
     ///
-    /// Checks whether the given ports interfere with traffic stealing.
-    pub fn steals_port_without_filter(&self, ports: &Vec<u16>) -> bool {
-        if !self.is_steal() {
+    /// Checks whether the given port can be stolen without an HTTP filter.
+    pub fn steals_port_without_filter(&self, port: u16) -> bool {
+        if self.is_steal().not() {
             return false;
         }
 
-        for port in ports {
-            if self.http_filter.is_filter_set() && self.http_filter.ports.contains(port) {
-                continue;
+        if self.http_filter.is_filter_set() {
+            if self.http_filter.ports.contains(&port) {
+                false
+            } else {
+                self.ports.as_ref().is_some_and(|set| set.contains(&port))
             }
-            if self.ignore_ports.contains(port) {
-                continue;
-            }
-            if let Some(ports) = &self.ports {
-                if !ports.contains(port) {
-                    continue;
-                }
-            }
-            return true;
+        } else if self.ignore_ports.contains(&port) {
+            false
+        } else if let Some(ports) = &self.ports {
+            ports.contains(&port)
+        } else {
+            true
         }
-
-        false
     }
 }
 
@@ -676,5 +673,103 @@ impl CollectAnalytics for &IncomingConfig {
         analytics.add("ignore_localhost", self.ignore_localhost);
         analytics.add("ignore_ports_count", self.ignore_ports.len());
         analytics.add("http", &self.http_filter);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use rstest::rstest;
+
+    use super::IncomingConfig;
+    use crate::feature::network::incoming::{http_filter::HttpFilterConfig, IncomingMode};
+
+    #[rstest]
+    #[case(
+        IncomingConfig {
+            mode: IncomingMode::Steal,
+            http_filter: HttpFilterConfig {
+                header_filter: Some("x-user: me".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        80,
+        false,
+    )]
+    #[case(
+        IncomingConfig {
+            mode: IncomingMode::Steal,
+            http_filter: HttpFilterConfig {
+                header_filter: Some("x-user: me".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        81,
+        false,
+    )]
+    #[case(
+        IncomingConfig {
+            mode: IncomingMode::Steal,
+            http_filter: HttpFilterConfig {
+                header_filter: Some("x-user: me".into()),
+                ..Default::default()
+            },
+            ports: Some([81].into()),
+            ..Default::default()
+        },
+        81,
+        true,
+    )]
+    #[case(
+        IncomingConfig {
+            mode: IncomingMode::Mirror,
+            ..Default::default()
+        },
+        80,
+        false,
+    )]
+    #[case(
+        IncomingConfig {
+            mode: IncomingMode::Off,
+            ..Default::default()
+        },
+        80,
+        false,
+    )]
+    #[case(
+        IncomingConfig {
+            mode: IncomingMode::Steal,
+            ..Default::default()
+        },
+        80,
+        true,
+    )]
+    #[case(
+        IncomingConfig {
+            mode: IncomingMode::Steal,
+            ignore_ports: [80].into(),
+            ..Default::default()
+        },
+        80,
+        false,
+    )]
+    #[case(
+        IncomingConfig {
+            mode: IncomingMode::Steal,
+            ports: Some([80].into()),
+            ..Default::default()
+        },
+        81,
+        false,
+    )]
+    #[test]
+    fn steals_port_without_filter(
+        #[case] config: IncomingConfig,
+        #[case] port: u16,
+        #[case] expected: bool,
+    ) {
+        let result = config.steals_port_without_filter(port);
+        assert_eq!(result, expected);
     }
 }
