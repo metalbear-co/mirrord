@@ -14,11 +14,6 @@ use tokio::{
 /// A redirected TCP connection.
 ///
 /// Allows for reading and writing data (implements [`AsyncRead`] and [`AsyncWrite`]).
-///
-/// Reading data from this handle automatically broadcasts the data
-/// to all mirroring clients using a [`broadcast::Sender`]. This way the incoming data stream
-/// throughput is limited only by the "real" reader (original destination or a stealing client).
-/// Stalling mirroring clients do not affect the communication.
 #[derive(Debug)]
 pub struct RedirectedConnection {
     pub(super) source: SocketAddr,
@@ -27,14 +22,17 @@ pub struct RedirectedConnection {
 }
 
 impl RedirectedConnection {
+    /// Returns the source of this connection (address of the remote TCP client).
     pub fn source(&self) -> SocketAddr {
         self.source
     }
 
+    /// Returns the original destination of this connection.
     pub fn destination(&self) -> SocketAddr {
         self.destination
     }
 
+    /// Returns the address of the TCP socket that accepted this connection.
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.stream.local_addr()
     }

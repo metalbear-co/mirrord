@@ -16,15 +16,20 @@ use tracing::Level;
 use super::{PortRedirector, Redirected};
 
 /// A [`PortRedirector`] implementation that uses a [`TcpListener`]
-/// and an iptables wrapper to set rules that send traffic to that listener.
+/// and an iptables/ip6tables wrapper to set rules that send traffic to that listener.
 pub struct IpTablesRedirector {
-    /// For altering iptables rules.
+    /// For altering iptables/ip6tables rules.
     iptables: Option<SafeIpTables<IPTablesWrapper>>,
     /// Port of [`Self::listener`](Self::listener).
+    ///
+    /// Kept as a field, so that we don't have to call [`TcpListener::local_addr`]
+    /// each time we get a new connection.
     redirect_to: u16,
     /// Listener to which the connections are redirected.
     listener: TcpListener,
     /// Optional comma-seperated list of pod's IPs.
+    ///
+    /// Used in iptables/ip6tables rules.
     pod_ips: Option<String>,
     /// Whether existing connections should be flushed when adding new redirects.
     flush_connections: bool,
@@ -39,7 +44,7 @@ impl IpTablesRedirector {
     ///
     /// * `flush_connections` - when a new redirection is created, flush existing connections (based
     ///   on their destination port).
-    /// * `pod_ips` - list of pod IPs.
+    /// * `pod_ips` - list of pod IPs, will be used in iptables/ip6tables rules.
     /// * `ipv6` - whether to redirect IPv4 or IPv6 traffic.
     #[tracing::instrument(level = Level::DEBUG, ret, err)]
     pub async fn create(

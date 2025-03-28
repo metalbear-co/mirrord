@@ -7,6 +7,9 @@ use crate::{
     util::run_thread_in_namespace,
 };
 
+/// Starts a [`RedirectorTask`] in the target's network namespace.
+///
+/// Returns the [`StealHandle`] that can be used to steal incoming traffic.
 pub(crate) async fn start_traffic_redirector(target_pid: u64) -> AgentResult<StealHandle> {
     let flush_connections = envs::STEALER_FLUSH_CONNECTIONS.from_env_or_default();
     let pod_ips = envs::POD_IPS.from_env_or_default();
@@ -45,6 +48,6 @@ pub(crate) async fn start_traffic_redirector(target_pid: u64) -> AgentResult<Ste
 
     match handle_rx.await {
         Ok(result) => result.map_err(|error| AgentError::IPTablesSetupError(error.into())),
-        Err(..) => Err(AgentError::IPTablesError("task panicked".into())),
+        Err(..) => Err(AgentError::IPTablesSetupError("task panicked".into())),
     }
 }

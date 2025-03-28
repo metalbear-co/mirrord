@@ -16,9 +16,10 @@ use futures::TryFutureExt;
 use metrics::{start_metrics, CLIENT_COUNT};
 use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{
-    new_iptables, IPTablesWrapper, SafeIpTables, IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL,
-    IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV, IPTABLE_MESH, IPTABLE_MESH_ENV, IPTABLE_PREROUTING,
-    IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD, IPTABLE_STANDARD_ENV,
+    error::IPTablesError, new_iptables, IPTablesWrapper, SafeIpTables,
+    IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL, IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV, IPTABLE_MESH,
+    IPTABLE_MESH_ENV, IPTABLE_PREROUTING, IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD,
+    IPTABLE_STANDARD_ENV,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use sniffer::tcp_capture::RawSocketTcpCapture;
@@ -782,7 +783,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     Ok(())
 }
 
-async fn clear_iptable_chain() -> AgentResult<()> {
+async fn clear_iptable_chain() -> Result<(), IPTablesError> {
     let ipt = new_iptables();
 
     let tables = SafeIpTables::load(IPTablesWrapper::from(ipt), false).await?;

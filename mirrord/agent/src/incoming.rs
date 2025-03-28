@@ -1,3 +1,5 @@
+//! This module contains components that implement redirecting incoming traffic.
+
 mod composed;
 mod connection;
 mod error;
@@ -20,8 +22,6 @@ pub use task::RedirectorTask;
 use tokio::net::TcpStream;
 
 /// A component that implements redirecting incoming TCP connections.
-///
-/// Returning an error from any of the methods means that the redirector is no longer valid.
 pub trait PortRedirector {
     type Error: Sized;
 
@@ -126,11 +126,13 @@ pub mod test {
 
     use super::{PortRedirector, Redirected};
 
+    /// Implementation of [`PortRedirector`] that can be used in unit tests.
     pub struct DummyRedirector {
         state: watch::Sender<DummyRedirectorState>,
         conn_rx: mpsc::Receiver<Redirected>,
     }
 
+    /// State of [`DummyRedirector`].
     #[derive(Default)]
     pub struct DummyRedirectorState {
         pub dirty: bool,
@@ -149,6 +151,13 @@ pub mod test {
     }
 
     impl DummyRedirector {
+        /// Creates a new dummy redirector.
+        ///
+        /// Returns:
+        /// 1. the redirector,
+        /// 2. a [`watch::Receiver`] that can be used to inspect the redirector's state,
+        /// 3. an [`mpsc::Sender`] that can be used to send mocked [`Redirected`] connections
+        ///    through the redirector.
         pub fn new() -> (
             Self,
             watch::Receiver<DummyRedirectorState>,
