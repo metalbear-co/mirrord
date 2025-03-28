@@ -651,10 +651,9 @@ impl OperatorApi<PreparedClientCert> {
 
                 if stolen_probes.is_empty().not() {
                     progress.warning(&format!(
-                        "Your mirrord config may steal HTTP/gRPC health checks configured on port{} [{}], \
-                        causing Kubernetes to terminate the target container. \
+                        "Your mirrord config may steal HTTP/gRPC health checks configured on ports [{}], \
+                        causing Kubernetes to terminate containers on the targeted pods. \
                         Use an HTTP filter to prevent this.",
-                        if stolen_probes.len() > 1 { "s" } else { "" },
                         stolen_probes.join(", "),
                     ));
                 }
