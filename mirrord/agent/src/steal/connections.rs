@@ -450,7 +450,7 @@ struct ConnectionTask {
 }
 
 impl ConnectionTask {
-    /// Timeout for detemining if the owned [`StolenConnection::stream`] is an incoming HTTP
+    /// Timeout for detemining if the owned [`StolenConnection`] is an incoming HTTP
     /// connection. Used to pick between [`UnfilteredStealTask`] and [`FilteredStealTask`] when
     /// [`PortSubscription::Filtered`] is in use.
     const HTTP_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
