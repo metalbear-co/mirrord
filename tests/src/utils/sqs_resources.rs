@@ -58,7 +58,7 @@ const QUEUE_REGISTRY_RESOURCE_NAME: &str = "mirrord-e2e-test-queue-registry";
 /// To mark the operator deployment is currently patched to use localstack.
 const LOCALSTACK_PATCH_LABEL_NAME: &str = "sqs-e2e-tests-localstack-patch";
 
-const LOCALSTACK_ENDPOINT_URL: &str = "http://localstack.default.svc.cluster.local:4566";
+const LOCALSTACK_ENDPOINT_URL: &str = "http://localstack.localstack.svc.cluster.local:4566";
 
 pub struct QueueInfo {
     pub name: String,
@@ -116,7 +116,7 @@ async fn get_sqs_client(localstack_url: Option<String>) -> aws_sdk_sqs::Client {
         config = config
             .endpoint_url(endpoint_url)
             .credentials_provider(LocalstackTestCredentialsProvider)
-            .region(aws_types::region::Region::new("us-east-1"));
+            .region(aws_types::region::Region::new("eu-north-1"));
     }
     let config = config.load().await;
     aws_sdk_sqs::Client::new(&config)
@@ -269,7 +269,7 @@ async fn sqs_consumer_service(
             },
             {
               "name": "AWS_REGION",
-              "value": "us-east-1"
+              "value": "eu-north-1"
             },
             // All these auth variables must be set to something, but it doesn't matter to what.
             {
@@ -291,7 +291,7 @@ async fn sqs_consumer_service(
 
 const AWS_ENV: [(&str, &str); 5] = [
     ("AWS_ENDPOINT_URL", LOCALSTACK_ENDPOINT_URL),
-    ("AWS_REGION", "us-east-1"),
+    ("AWS_REGION", "eu-north-1"),
     ("AWS_SECRET_ACCESS_KEY", "test"),
     ("AWS_ACCESS_KEY_ID", "test"),
     ("AWS_SECRET_KEY", "test"),
@@ -507,7 +507,7 @@ async fn wait_for_operator_patch(
 
 /// Attempts to find the `localstack` service in the `default` namespace.
 async fn localstack_in_default_namespace(kube_client: &Client) -> Option<Service> {
-    let service_api = Api::<Service>::namespaced(kube_client.clone(), "default");
+    let service_api = Api::<Service>::namespaced(kube_client.clone(), "localstack");
     service_api.get("localstack").await.ok()
 }
 
