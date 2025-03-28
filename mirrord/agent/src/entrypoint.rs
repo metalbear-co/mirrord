@@ -16,9 +16,10 @@ use futures::TryFutureExt;
 use metrics::{start_metrics, CLIENT_COUNT};
 use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{
-    new_iptables, IPTablesWrapper, SafeIpTables, IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL,
-    IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV, IPTABLE_MESH, IPTABLE_MESH_ENV, IPTABLE_PREROUTING,
-    IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD, IPTABLE_STANDARD_ENV,
+    error::IPTablesError, new_iptables, IPTablesWrapper, SafeIpTables,
+    IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL, IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL_ENV, IPTABLE_MESH,
+    IPTABLE_MESH_ENV, IPTABLE_PREROUTING, IPTABLE_PREROUTING_ENV, IPTABLE_STANDARD,
+    IPTABLE_STANDARD_ENV,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use sniffer::tcp_capture::RawSocketTcpCapture;
@@ -51,6 +52,8 @@ use crate::{
     watched_task::{TaskStatus, WatchedTask},
     *,
 };
+
+mod setup;
 
 /// Size of [`mpsc`] channels connecting [`TcpStealerApi`] with the background task.
 const CHANNEL_SIZE: usize = 1024;
@@ -614,22 +617,21 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     let (stealer_task, stealer_status) = match state.container_pid() {
         None => (None, None),
         Some(pid) => {
+            let steal_handle = setup::start_traffic_redirector(pid).await?;
+
             let cancellation_token = cancellation_token.clone();
             let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
             let tls_handler_store = tls_steal_config.is_empty().not().then(|| {
                 StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(pid))
             });
-            let watched_task = WatchedTask::new(
-                TcpConnectionStealer::TASK_NAME,
-                TcpConnectionStealer::new(stealer_command_rx, args.ipv6, tls_handler_store)
-                    .and_then(|stealer| async move {
-                        let res = stealer.start(cancellation_token).await;
-                        if let Err(err) = res.as_ref() {
-                            error!("Stealer failed: {err}");
-                        }
-                        res
-                    }),
-            );
+            let watched_task = WatchedTask::new(TcpConnectionStealer::TASK_NAME, async move {
+                TcpConnectionStealer::new(stealer_command_rx, steal_handle, tls_handler_store)
+                    .start(cancellation_token)
+                    .await
+                    .inspect_err(|error| {
+                        error!(%error, "Stealer failed");
+                    })
+            });
             let status = watched_task.status();
             let task = run_thread_in_namespace(
                 watched_task.start(),
@@ -781,7 +783,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     Ok(())
 }
 
-async fn clear_iptable_chain() -> AgentResult<()> {
+async fn clear_iptable_chain() -> Result<(), IPTablesError> {
     let ipt = new_iptables();
 
     let tables = SafeIpTables::load(IPTablesWrapper::from(ipt), false).await?;

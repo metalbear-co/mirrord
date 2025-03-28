@@ -61,7 +61,6 @@ httparse = "1"
 fancy-regex = { workspace = true }
 dashmap = { version = "6" }
 oci-spec = "0.7.0"
-async-trait = "0.1"
 tonic = "0.12"
 tower.workspace = true
 http.workspace = true

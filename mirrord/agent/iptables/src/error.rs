@@ -1,10 +1,11 @@
-use std::{error::Error, fmt, io};
+use std::{error::Error, fmt, io, sync::Arc};
 
-pub struct IPTablesError(pub Box<dyn Error>);
+pub struct IPTablesError(pub Box<dyn Error + Send + Sync + 'static>);
 
+/// [`iptables`] produces errors that are not [`Send`].
 impl From<Box<dyn Error>> for IPTablesError {
     fn from(value: Box<dyn Error>) -> Self {
-        Self(value)
+        Self(value.to_string().into())
     }
 }
 
@@ -14,9 +15,9 @@ impl From<io::Error> for IPTablesError {
     }
 }
 
-impl From<String> for IPTablesError {
-    fn from(value: String) -> Self {
-        Self(value.into())
+impl From<IPTablesError> for Arc<dyn Error + Send + Sync + 'static> {
+    fn from(value: IPTablesError) -> Self {
+        value.0.into()
     }
 }
 
