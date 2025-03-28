@@ -52,6 +52,8 @@ use crate::{
     *,
 };
 
+mod setup;
+
 /// Size of [`mpsc`] channels connecting [`TcpStealerApi`] with the background task.
 const CHANNEL_SIZE: usize = 1024;
 
@@ -614,22 +616,21 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     let (stealer_task, stealer_status) = match state.container_pid() {
         None => (None, None),
         Some(pid) => {
+            let steal_handle = setup::start_traffic_redirector(pid).await?;
+
             let cancellation_token = cancellation_token.clone();
             let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
             let tls_handler_store = tls_steal_config.is_empty().not().then(|| {
                 StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(pid))
             });
-            let watched_task = WatchedTask::new(
-                TcpConnectionStealer::TASK_NAME,
-                TcpConnectionStealer::new(stealer_command_rx, args.ipv6, tls_handler_store)
-                    .and_then(|stealer| async move {
-                        let res = stealer.start(cancellation_token).await;
-                        if let Err(err) = res.as_ref() {
-                            error!("Stealer failed: {err}");
-                        }
-                        res
-                    }),
-            );
+            let watched_task = WatchedTask::new(TcpConnectionStealer::TASK_NAME, async move {
+                TcpConnectionStealer::new(stealer_command_rx, steal_handle, tls_handler_store)
+                    .start(cancellation_token)
+                    .await
+                    .inspect_err(|error| {
+                        error!(%error, "Stealer failed");
+                    })
+            });
             let status = watched_task.status();
             let task = run_thread_in_namespace(
                 watched_task.start(),

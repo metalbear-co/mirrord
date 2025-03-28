@@ -33,9 +33,9 @@ pub(crate) static MIRROR_PORT_SUBSCRIPTION: AtomicI64 = AtomicI64::new(0);
 
 pub(crate) static MIRROR_CONNECTION_SUBSCRIPTION: AtomicI64 = AtomicI64::new(0);
 
-pub(crate) static STEAL_FILTERED_PORT_SUBSCRIPTION: AtomicI64 = AtomicI64::new(0);
+pub(crate) static STEAL_FILTERED_PORT_SUBSCRIPTION: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) static STEAL_UNFILTERED_PORT_SUBSCRIPTION: AtomicI64 = AtomicI64::new(0);
+pub(crate) static STEAL_UNFILTERED_PORT_SUBSCRIPTION: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) static STEAL_FILTERED_CONNECTION_SUBSCRIPTION: AtomicI64 = AtomicI64::new(0);
 
@@ -269,10 +269,18 @@ impl Metrics {
         open_fd_count.set(OPEN_FD_COUNT.load(Ordering::Relaxed));
         mirror_port_subscription.set(MIRROR_PORT_SUBSCRIPTION.load(Ordering::Relaxed));
         mirror_connection_subscription.set(MIRROR_CONNECTION_SUBSCRIPTION.load(Ordering::Relaxed));
-        steal_filtered_port_subscription
-            .set(STEAL_FILTERED_PORT_SUBSCRIPTION.load(Ordering::Relaxed));
-        steal_unfiltered_port_subscription
-            .set(STEAL_UNFILTERED_PORT_SUBSCRIPTION.load(Ordering::Relaxed));
+        steal_filtered_port_subscription.set(
+            STEAL_FILTERED_PORT_SUBSCRIPTION
+                .load(Ordering::Relaxed)
+                .try_into()
+                .unwrap_or(i64::MAX),
+        );
+        steal_unfiltered_port_subscription.set(
+            STEAL_UNFILTERED_PORT_SUBSCRIPTION
+                .load(Ordering::Relaxed)
+                .try_into()
+                .unwrap_or(i64::MAX),
+        );
         steal_filtered_connection_subscription
             .set(STEAL_FILTERED_CONNECTION_SUBSCRIPTION.load(Ordering::Relaxed));
         steal_unfiltered_connection_subscription
