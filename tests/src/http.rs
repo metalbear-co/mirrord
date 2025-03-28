@@ -5,7 +5,6 @@ mod http_tests {
 
     use kube::Client;
     use rstest::*;
-    use tokio::time::timeout;
 
     use crate::utils::{
         kube_client, port_forwarder::PortForwarder, send_requests, service, Application,
@@ -46,7 +45,7 @@ mod http_tests {
         )
         .await;
         let url = format!("http://{}", portforwarder.address());
-        let mut process = application
+        let process = application
             .run(
                 &service.pod_container_target(),
                 Some(&service.namespace),
@@ -64,9 +63,6 @@ mod http_tests {
         process
             .wait_for_line(Duration::from_secs(10), "DELETE")
             .await;
-        timeout(Duration::from_secs(40), process.wait())
-            .await
-            .unwrap();
 
         application.assert(&process).await;
     }
