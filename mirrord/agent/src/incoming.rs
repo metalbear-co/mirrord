@@ -198,13 +198,9 @@ pub mod test {
         }
 
         async fn remove_redirection(&mut self, from_port: u16) -> Result<(), Self::Error> {
-            let changed = self.state.send_if_modified(|state| {
-                if state.redirections.remove(&from_port) {
-                    true
-                } else {
-                    false
-                }
-            });
+            let changed = self
+                .state
+                .send_if_modified(|state| state.redirections.remove(&from_port));
 
             if changed {
                 Ok(())
