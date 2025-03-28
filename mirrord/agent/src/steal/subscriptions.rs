@@ -147,15 +147,32 @@ impl PortSubscriptions {
     ///
     /// * `client_id` - identifier of the client that issued the subscriptions
     pub fn remove_all(&mut self, client_id: ClientId) {
-        let ports = self
-            .subscriptions
-            .iter()
-            .filter_map(|(k, v)| v.has_client(client_id).then_some(*k))
-            .collect::<Vec<_>>();
+        self.subscriptions
+            .retain(|port, subscription| match subscription {
+                PortSubscription::Unfiltered(subscribed_client)
+                    if *subscribed_client == client_id =>
+                {
+                    STEAL_UNFILTERED_PORT_SUBSCRIPTION
+                        .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
-        for port in ports {
-            self.remove(client_id, port);
-        }
+                    self.handle.stop_steal(*port);
+
+                    false
+                }
+                PortSubscription::Unfiltered(..) => true,
+                PortSubscription::Filtered(filters) => {
+                    if filters.remove(&client_id).is_some() {
+                        STEAL_FILTERED_PORT_SUBSCRIPTION
+                            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+
+                    if filters.is_empty() {
+                        self.handle.stop_steal(*port);
+                    }
+
+                    filters.is_empty().not()
+                }
+            });
     }
 
     /// Wait until there's a new redirected connection.
@@ -234,14 +251,6 @@ impl PortSubscription {
             },
         }
     }
-
-    /// Return whether this subscription belongs (possibly partially) to the given client.
-    fn has_client(&self, client_id: ClientId) -> bool {
-        match self {
-            Self::Filtered(filters) => filters.contains_key(&client_id),
-            Self::Unfiltered(subscribed_client) => *subscribed_client == client_id,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -254,7 +263,18 @@ mod test {
             http::HttpFilter,
             subscriptions::{PortSubscription, PortSubscriptions},
         },
+        util::ClientId,
     };
+
+    impl PortSubscription {
+        /// Return whether this subscription belongs (possibly partially) to the given client.
+        fn has_client(&self, client_id: ClientId) -> bool {
+            match self {
+                Self::Filtered(filters) => filters.contains_key(&client_id),
+                Self::Unfiltered(subscribed_client) => *subscribed_client == client_id,
+            }
+        }
+    }
 
     fn dummy_filter() -> HttpFilter {
         HttpFilter::Header(".*".parse().unwrap())
