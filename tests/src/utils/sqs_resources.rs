@@ -239,11 +239,6 @@ async fn sqs_consumer_service(
     echo_queue2: &QueueInfo,
 ) -> KubeService {
     let namespace = format!("e2e-tests-sqs-splitting-{}", crate::utils::random_string());
-    let queue2_url = format!(
-        "http://sqs.eu-north-1.localhost.localstack.cloud:4566/000000000000/{}",
-        queue2.name.as_str()
-    );
-    println!("queue 2 URL: {queue2_url}");
     service_with_env(
         &namespace,
         "ClusterIP",
@@ -259,7 +254,7 @@ async fn sqs_consumer_service(
             },
             {
               "name": QUEUE2_URL_ENV_VAR,
-              "value": queue2_url
+              "value": queue2.url.as_str()
             },
             {
               "name": ECHO_QUEUE_NAME_ENV_VAR1,
