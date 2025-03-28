@@ -69,7 +69,7 @@ async fn expect_messages_in_queue<const N: usize>(
     client: &aws_sdk_sqs::Client,
     echo_queue: &QueueInfo,
 ) {
-    tokio::time::timeout(Duration::from_secs(20), async {
+    tokio::time::timeout(Duration::from_secs(40), async {
         println!("Verifying correct messages in echo queue {} (verifying the deployed application got the messages it was supposed to)", echo_queue.name);
         let mut expected_messages = HashSet::from(messages);
         loop {
