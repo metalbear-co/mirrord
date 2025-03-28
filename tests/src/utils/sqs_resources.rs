@@ -511,8 +511,8 @@ async fn wait_for_operator_patch(
     tokio::time::timeout(timeout, watcher.run()).await.unwrap();
 }
 
-/// Attempts to find the `localstack` service in the `default` namespace.
-async fn localstack_in_default_namespace(kube_client: &Client) -> Option<Service> {
+/// Attempts to find the `localstack` service in the `localstack` namespace.
+async fn get_localstack_service(kube_client: &Client) -> Option<Service> {
     let service_api = Api::<Service>::namespaced(kube_client.clone(), "localstack");
     service_api.get("localstack").await.ok()
 }
@@ -559,7 +559,7 @@ pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResourc
     let kube_client = kube_client.await;
     let mut guards = Vec::new();
     let localstack_portforwarder =
-        if let Some(localstack) = localstack_in_default_namespace(&kube_client).await {
+        if let Some(localstack) = get_localstack_service(&kube_client).await {
             println!("localstack detected, using localstack for SQS");
             patch_operator_for_localstack(&kube_client, &mut guards).await;
             Some(PortForwarder::new_for_service(kube_client.clone(), &localstack, 4566).await)
