@@ -42,7 +42,7 @@ use crate::utils::{kube_client, service_with_env, KubeService, ResourceGuard};
 const QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_Q_NAME1";
 
 /// Name of the environment variable that holds the name of the second SQS queue to read from.
-const QUEUE_NAME_ENV_VAR2: &str = "SQS_TEST_Q_NAME2";
+const QUEUE2_URL_ENV_VAR: &str = "SQS_TEST_Q2_URL";
 
 /// Name of the environment variable that holds the name of the first SQS queue the deployed
 /// application will write to.
@@ -209,7 +209,7 @@ pub async fn create_queue_registry_resource(
                 (
                     "e2e-test-queue2".to_string(),
                     SplitQueue::Sqs(SqsQueueDetails {
-                        name_source: QueueNameSource::EnvVar(QUEUE_NAME_ENV_VAR2.to_string()),
+                        name_source: QueueNameSource::EnvVar(QUEUE2_URL_ENV_VAR.to_string()),
                         tags: None,
                     }),
                 ),
@@ -239,10 +239,16 @@ async fn sqs_consumer_service(
     echo_queue2: &QueueInfo,
 ) -> KubeService {
     let namespace = format!("e2e-tests-sqs-splitting-{}", crate::utils::random_string());
+    let queue2_url = format!(
+        "http://sqs.eu-north-1.localhost.localstack.cloud:4566/000000000000/{}",
+        queue2.name.as_str()
+    );
+    println!("queue 2 URL: {queue2_url}");
     service_with_env(
         &namespace,
         "ClusterIP",
-        "ghcr.io/metalbear-co/mirrord-sqs-forwarder:latest",
+        // "ghcr.io/metalbear-co/mirrord-sqs-forwarder:latest",
+        "docker.io/t4lz/sqs-forwarder:2025.03.28",
         "queue-forwarder",
         false,
         kube_client.clone(),
@@ -252,8 +258,8 @@ async fn sqs_consumer_service(
               "value": queue1.name.as_str()
             },
             {
-              "name": QUEUE_NAME_ENV_VAR2,
-              "value": queue2.name.as_str()
+              "name": QUEUE2_URL_ENV_VAR,
+              "value": queue2_url
             },
             {
               "name": ECHO_QUEUE_NAME_ENV_VAR1,
