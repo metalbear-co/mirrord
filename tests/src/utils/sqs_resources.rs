@@ -42,7 +42,7 @@ use crate::utils::{kube_client, service_with_env, KubeService, ResourceGuard};
 const QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_Q_NAME1";
 
 /// Name of the environment variable that holds the name of the second SQS queue to read from.
-const QUEUE_NAME_ENV_VAR2: &str = "SQS_TEST_Q_NAME2";
+const QUEUE2_URL_ENV_VAR: &str = "SQS_TEST_Q2_URL";
 
 /// Name of the environment variable that holds the name of the first SQS queue the deployed
 /// application will write to.
@@ -58,7 +58,7 @@ const QUEUE_REGISTRY_RESOURCE_NAME: &str = "mirrord-e2e-test-queue-registry";
 /// To mark the operator deployment is currently patched to use localstack.
 const LOCALSTACK_PATCH_LABEL_NAME: &str = "sqs-e2e-tests-localstack-patch";
 
-const LOCALSTACK_ENDPOINT_URL: &str = "http://localstack.default.svc.cluster.local:4566";
+const LOCALSTACK_ENDPOINT_URL: &str = "http://localstack.localstack.svc.cluster.local:4566";
 
 pub struct QueueInfo {
     pub name: String,
@@ -116,7 +116,7 @@ async fn get_sqs_client(localstack_url: Option<String>) -> aws_sdk_sqs::Client {
         config = config
             .endpoint_url(endpoint_url)
             .credentials_provider(LocalstackTestCredentialsProvider)
-            .region(aws_types::region::Region::new("us-east-1"));
+            .region(aws_types::region::Region::new("eu-north-1"));
     }
     let config = config.load().await;
     aws_sdk_sqs::Client::new(&config)
@@ -209,7 +209,7 @@ pub async fn create_queue_registry_resource(
                 (
                     "e2e-test-queue2".to_string(),
                     SplitQueue::Sqs(SqsQueueDetails {
-                        name_source: QueueNameSource::EnvVar(QUEUE_NAME_ENV_VAR2.to_string()),
+                        name_source: QueueNameSource::EnvVar(QUEUE2_URL_ENV_VAR.to_string()),
                         tags: None,
                     }),
                 ),
@@ -252,8 +252,8 @@ async fn sqs_consumer_service(
               "value": queue1.name.as_str()
             },
             {
-              "name": QUEUE_NAME_ENV_VAR2,
-              "value": queue2.name.as_str()
+              "name": QUEUE2_URL_ENV_VAR,
+              "value": queue2.url.as_str()
             },
             {
               "name": ECHO_QUEUE_NAME_ENV_VAR1,
@@ -269,7 +269,7 @@ async fn sqs_consumer_service(
             },
             {
               "name": "AWS_REGION",
-              "value": "us-east-1"
+              "value": "eu-north-1"
             },
             // All these auth variables must be set to something, but it doesn't matter to what.
             {
@@ -291,7 +291,7 @@ async fn sqs_consumer_service(
 
 const AWS_ENV: [(&str, &str); 5] = [
     ("AWS_ENDPOINT_URL", LOCALSTACK_ENDPOINT_URL),
-    ("AWS_REGION", "us-east-1"),
+    ("AWS_REGION", "eu-north-1"),
     ("AWS_SECRET_ACCESS_KEY", "test"),
     ("AWS_ACCESS_KEY_ID", "test"),
     ("AWS_SECRET_KEY", "test"),
@@ -505,9 +505,9 @@ async fn wait_for_operator_patch(
     tokio::time::timeout(timeout, watcher.run()).await.unwrap();
 }
 
-/// Attempts to find the `localstack` service in the `default` namespace.
-async fn localstack_in_default_namespace(kube_client: &Client) -> Option<Service> {
-    let service_api = Api::<Service>::namespaced(kube_client.clone(), "default");
+/// Attempts to find the `localstack` service in the `localstack` namespace.
+async fn get_localstack_service(kube_client: &Client) -> Option<Service> {
+    let service_api = Api::<Service>::namespaced(kube_client.clone(), "localstack");
     service_api.get("localstack").await.ok()
 }
 
@@ -553,7 +553,7 @@ pub async fn sqs_test_resources(#[future] kube_client: Client) -> SqsTestResourc
     let kube_client = kube_client.await;
     let mut guards = Vec::new();
     let localstack_portforwarder =
-        if let Some(localstack) = localstack_in_default_namespace(&kube_client).await {
+        if let Some(localstack) = get_localstack_service(&kube_client).await {
             println!("localstack detected, using localstack for SQS");
             patch_operator_for_localstack(&kube_client, &mut guards).await;
             Some(PortForwarder::new_for_service(kube_client.clone(), &localstack, 4566).await)
