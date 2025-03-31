@@ -467,6 +467,9 @@ impl ConnectionTask {
             port_subscription,
         } = self.connection;
 
+        let destination = connection.destination();
+        let source = connection.source();
+
         let filters = match port_subscription {
             PortSubscription::Unfiltered(client_id) => {
                 self.tx
@@ -474,9 +477,9 @@ impl ConnectionTask {
                         client_id,
                         connection: NewTcpConnection {
                             connection_id: self.connection_id,
-                            remote_address: connection.source().ip(),
-                            source_port: connection.source().port(),
-                            destination_port: connection.destination().port(),
+                            remote_address: source.ip(),
+                            source_port: source.port(),
+                            destination_port: destination.port(),
                             local_address: connection.local_addr()?.ip(),
                         },
                     })
@@ -491,7 +494,7 @@ impl ConnectionTask {
         };
 
         let tls_handler = match self.tls_handler_store {
-            Some(store) => store.get(connection.destination().port()).await?,
+            Some(store) => store.get(destination.port()).await?,
             None => None,
         };
 
@@ -503,7 +506,7 @@ impl ConnectionTask {
             let Some(http_version) = HttpVersion::new(stream.get_header()) else {
                 tracing::trace!("No HTTP version detected, proxying the connection transparently");
 
-                let mut outgoing_io = TcpStream::connect(stream.inner().destination()).await?;
+                let mut outgoing_io = TcpStream::connect(destination).await?;
                 tokio::io::copy_bidirectional(&mut stream, &mut outgoing_io).await?;
 
                 return Ok(());
@@ -514,8 +517,8 @@ impl ConnectionTask {
             let task = FilteredStealTask::new(
                 self.connection_id,
                 filters,
-                OriginalDestination::new(stream.inner().destination(), None),
-                stream.inner().source(),
+                OriginalDestination::new(destination, None),
+                source,
                 http_version,
                 stream,
             );
@@ -532,7 +535,7 @@ impl ConnectionTask {
         let http_version = match tls_stream.get_ref().1.alpn_protocol() {
             Some(tls::HTTP_2_ALPN_NAME) => {
                 tracing::debug!(
-                    original_destination = %tls_stream.get_ref().0.destination(),
+                    original_destination = %destination,
                     "Stolen TLS connection was upgraded to HTTP/2 with ALPN"
                 );
 
@@ -540,7 +543,7 @@ impl ConnectionTask {
             }
             Some(tls::HTTP_1_1_ALPN_NAME) => {
                 tracing::debug!(
-                    original_destination = %tls_stream.get_ref().0.destination(),
+                    original_destination = %destination,
                     "Stolen TLS connection was upgraded to HTTP/1.1 with ALPN"
                 );
 
@@ -548,7 +551,7 @@ impl ConnectionTask {
             }
             Some(tls::HTTP_1_0_ALPN_NAME) => {
                 tracing::debug!(
-                    original_destination = %tls_stream.get_ref().0.destination(),
+                    original_destination = %destination,
                     "Stolen TLS connection was upgraded to HTTP/1.0 with ALPN"
                 );
 
@@ -557,15 +560,15 @@ impl ConnectionTask {
             Some(other) => {
                 tracing::info!(
                     protocol = %String::from_utf8_lossy(other),
-                    original_destination = %tls_stream.get_ref().0.destination(),
+                    original_destination = %destination,
                     "Stolen TLS connection was upgraded with ALPN to a non-HTTP protocol. \
                     Proxying data to the original destination.",
                 );
 
-                let outgoing_io = TcpStream::connect(tls_stream.get_ref().0.destination()).await?;
+                let outgoing_io = TcpStream::connect(destination).await?;
                 let connector = tls_handler.connector(tls_stream.get_ref().1);
                 let mut outgoing_io = connector
-                    .connect(tls_stream.get_ref().0.destination().ip(), None, outgoing_io)
+                    .connect(destination.ip(), None, outgoing_io)
                     .await?;
 
                 tokio::io::copy_bidirectional(&mut tls_stream, &mut outgoing_io).await?;
@@ -582,15 +585,10 @@ impl ConnectionTask {
                         "No HTTP version detected, proxying the connection transparently"
                     );
 
-                    let outgoing_io =
-                        TcpStream::connect(stream.inner().get_ref().0.destination()).await?;
+                    let outgoing_io = TcpStream::connect(destination).await?;
                     let connector = tls_handler.connector(stream.inner().get_ref().1);
                     let mut outgoing_io = connector
-                        .connect(
-                            stream.inner().get_ref().0.destination().ip(),
-                            None,
-                            outgoing_io,
-                        )
+                        .connect(destination.ip(), None, outgoing_io)
                         .await?;
 
                     tokio::io::copy_bidirectional(&mut stream, &mut outgoing_io).await?;
@@ -602,11 +600,8 @@ impl ConnectionTask {
                 let task = FilteredStealTask::new(
                     self.connection_id,
                     filters,
-                    OriginalDestination::new(
-                        stream.inner().get_ref().0.destination(),
-                        Some(connector),
-                    ),
-                    stream.inner().get_ref().0.source(),
+                    OriginalDestination::new(destination, Some(connector)),
+                    source,
                     http_version,
                     stream,
                 );
@@ -619,8 +614,8 @@ impl ConnectionTask {
         let task = FilteredStealTask::new(
             self.connection_id,
             filters,
-            OriginalDestination::new(tls_stream.get_ref().0.destination(), Some(connector)),
-            tls_stream.get_ref().0.source(),
+            OriginalDestination::new(destination, Some(connector)),
+            source,
             http_version,
             tls_stream,
         );
