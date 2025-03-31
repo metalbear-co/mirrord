@@ -116,7 +116,7 @@ struct TcpOutgoingTask {
 impl Drop for TcpOutgoingTask {
     fn drop(&mut self) {
         let connections = self.readers.keys().chain(self.writers.keys()).count();
-        TCP_OUTGOING_CONNECTION.fetch_sub(connections as i64, std::sync::atomic::Ordering::Relaxed);
+        TCP_OUTGOING_CONNECTION.fetch_sub(connections, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

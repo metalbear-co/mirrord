@@ -1,7 +1,7 @@
 use std::{
     net::SocketAddr,
     sync::{
-        atomic::{AtomicI64, AtomicUsize},
+        atomic::{AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -17,29 +17,29 @@ use crate::error::AgentError;
 
 /// Incremented whenever we get a new client in `ClientConnectionHandler`, and decremented
 /// when this client is dropped.
-pub(crate) static CLIENT_COUNT: AtomicI64 = AtomicI64::new(0);
+pub(crate) static CLIENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 /// How many DNS resolution client requests the agent is currently handling.
 pub(crate) static DNS_REQUEST_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 /// Incremented and decremented in _open-ish_/_close-ish_ file operations in `FileManager`,
 /// Also gets decremented when `FileManager` is dropped.
-pub(crate) static OPEN_FD_COUNT: AtomicI64 = AtomicI64::new(0);
+pub(crate) static OPEN_FD_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 /// Follows the amount of subscribed ports in `update_packet_filter`. We don't really
 /// increment/decrement this one, and mostly `set` it to the latest amount of ports, zeroing it when
 /// the `TcpConnectionSniffer` gets dropped.
-pub(crate) static MIRROR_PORT_SUBSCRIPTION: AtomicI64 = AtomicI64::new(0);
+pub(crate) static MIRROR_PORT_SUBSCRIPTION: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) static MIRROR_CONNECTION_SUBSCRIPTION: AtomicI64 = AtomicI64::new(0);
+pub(crate) static MIRROR_CONNECTION_SUBSCRIPTION: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) static STEAL_FILTERED_PORT_SUBSCRIPTION: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) static STEAL_UNFILTERED_PORT_SUBSCRIPTION: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) static STEAL_FILTERED_CONNECTION_SUBSCRIPTION: AtomicI64 = AtomicI64::new(0);
+pub(crate) static STEAL_FILTERED_CONNECTION_SUBSCRIPTION: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) static STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION: AtomicI64 = AtomicI64::new(0);
+pub(crate) static STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION: AtomicUsize = AtomicUsize::new(0);
 
 /// Follows `MatchedHttpRequest` that is being processed.
 ///
@@ -48,11 +48,25 @@ pub(crate) static STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION: AtomicI64 = AtomicI6
 ///   `Command::HttpResponse`, which means that this request has been fulfilled, but we also reset
 ///   it to the amount of response channels in `TcpStealerApi::handle_client_message` when a failure
 ///   happens.
-pub(crate) static HTTP_REQUEST_IN_PROGRESS_COUNT: AtomicI64 = AtomicI64::new(0);
+pub(crate) static HTTP_REQUEST_IN_PROGRESS_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) static TCP_OUTGOING_CONNECTION: AtomicI64 = AtomicI64::new(0);
+pub(crate) static TCP_OUTGOING_CONNECTION: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) static UDP_OUTGOING_CONNECTION: AtomicI64 = AtomicI64::new(0);
+pub(crate) static UDP_OUTGOING_CONNECTION: AtomicUsize = AtomicUsize::new(0);
+
+/// Convenience trait for static metrics variables.
+///
+/// We store them as [`AtomicUsize`], which is the correct type (they're all counters).
+/// However, [`IntGauge`] operates on i64.
+trait AtomicUsizeExt {
+    fn load_as_i64(&self) -> i64;
+}
+
+impl AtomicUsizeExt for AtomicUsize {
+    fn load_as_i64(&self) -> i64 {
+        self.load(Ordering::Relaxed).try_into().unwrap_or(i64::MAX)
+    }
+}
 
 /// The state with all the metrics [`IntGauge`]s and the prometheus [`Registry`] where we keep them.
 ///
@@ -241,8 +255,6 @@ impl Metrics {
     /// Returns the list of [`MetricFamily`] registered in our [`Metrics::registry`], ready to be
     /// encoded and sent to prometheus.
     fn gather_metrics(&self) -> Vec<MetricFamily> {
-        use std::sync::atomic::Ordering;
-
         let Self {
             registry,
             client_count,
@@ -259,35 +271,20 @@ impl Metrics {
             udp_outgoing_connection,
         } = self;
 
-        client_count.set(CLIENT_COUNT.load(Ordering::Relaxed));
-        dns_request_count.set(
-            DNS_REQUEST_COUNT
-                .load(Ordering::Relaxed)
-                .try_into()
-                .unwrap_or(i64::MAX),
-        );
-        open_fd_count.set(OPEN_FD_COUNT.load(Ordering::Relaxed));
-        mirror_port_subscription.set(MIRROR_PORT_SUBSCRIPTION.load(Ordering::Relaxed));
-        mirror_connection_subscription.set(MIRROR_CONNECTION_SUBSCRIPTION.load(Ordering::Relaxed));
-        steal_filtered_port_subscription.set(
-            STEAL_FILTERED_PORT_SUBSCRIPTION
-                .load(Ordering::Relaxed)
-                .try_into()
-                .unwrap_or(i64::MAX),
-        );
-        steal_unfiltered_port_subscription.set(
-            STEAL_UNFILTERED_PORT_SUBSCRIPTION
-                .load(Ordering::Relaxed)
-                .try_into()
-                .unwrap_or(i64::MAX),
-        );
+        client_count.set(CLIENT_COUNT.load_as_i64());
+        dns_request_count.set(DNS_REQUEST_COUNT.load_as_i64());
+        open_fd_count.set(OPEN_FD_COUNT.load_as_i64());
+        mirror_port_subscription.set(MIRROR_PORT_SUBSCRIPTION.load_as_i64());
+        mirror_connection_subscription.set(MIRROR_CONNECTION_SUBSCRIPTION.load_as_i64());
+        steal_filtered_port_subscription.set(STEAL_FILTERED_PORT_SUBSCRIPTION.load_as_i64());
+        steal_unfiltered_port_subscription.set(STEAL_UNFILTERED_PORT_SUBSCRIPTION.load_as_i64());
         steal_filtered_connection_subscription
-            .set(STEAL_FILTERED_CONNECTION_SUBSCRIPTION.load(Ordering::Relaxed));
+            .set(STEAL_FILTERED_CONNECTION_SUBSCRIPTION.load_as_i64());
         steal_unfiltered_connection_subscription
-            .set(STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.load(Ordering::Relaxed));
-        http_request_in_progress_count.set(HTTP_REQUEST_IN_PROGRESS_COUNT.load(Ordering::Relaxed));
-        tcp_outgoing_connection.set(TCP_OUTGOING_CONNECTION.load(Ordering::Relaxed));
-        udp_outgoing_connection.set(UDP_OUTGOING_CONNECTION.load(Ordering::Relaxed));
+            .set(STEAL_UNFILTERED_CONNECTION_SUBSCRIPTION.load_as_i64());
+        http_request_in_progress_count.set(HTTP_REQUEST_IN_PROGRESS_COUNT.load_as_i64());
+        tcp_outgoing_connection.set(TCP_OUTGOING_CONNECTION.load_as_i64());
+        udp_outgoing_connection.set(UDP_OUTGOING_CONNECTION.load_as_i64());
 
         registry.gather()
     }
