@@ -72,7 +72,7 @@ impl AtomicUsizeExt for AtomicUsize {
 ///
 /// **Do not** modify the gauges directly!
 ///
-/// Instead rely on [`Metrics::gather_metrics`], as we actually use a bunch of [`AtomicI64`]s to
+/// Instead rely on [`Metrics::gather_metrics`], as we actually use a bunch of [`AtomicUsize`]s to
 /// keep track of the values, they are the ones being (de|in)cremented. These gauges are just set
 /// when it's time to send them via [`get_metrics`].
 #[derive(Debug)]
@@ -250,7 +250,7 @@ impl Metrics {
     }
 
     /// Calls [`IntGauge::set`] on every [`IntGauge`] of `Self`, setting it to the value of
-    /// the corresponding [`AtomicI64`] global (the uppercase named version of the gauge).
+    /// the corresponding [`AtomicUsize`] global (the uppercase named version of the gauge).
     ///
     /// Returns the list of [`MetricFamily`] registered in our [`Metrics::registry`], ready to be
     /// encoded and sent to prometheus.
