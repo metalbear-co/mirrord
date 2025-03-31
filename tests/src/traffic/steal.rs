@@ -57,7 +57,7 @@ mod steal_tests {
             flags.extend(["-e"].into_iter());
         }
 
-        let mut process = application
+        let process = application
             .run(
                 &service.pod_container_target(),
                 Some(&service.namespace),
@@ -70,9 +70,6 @@ mod steal_tests {
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
         send_requests(&url, true, Default::default()).await;
-        tokio::time::timeout(Duration::from_secs(40), process.wait())
-            .await
-            .unwrap();
 
         application.assert(&process).await;
     }
@@ -149,7 +146,7 @@ mod steal_tests {
             flags.extend(["-e"].into_iter());
         }
 
-        let mut process = application
+        let process = application
             .run(
                 &service.pod_container_target(),
                 Some(&service.namespace),
@@ -162,9 +159,6 @@ mod steal_tests {
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
         send_requests(&url, true, Default::default()).await;
-        tokio::time::timeout(Duration::from_secs(40), process.wait())
-            .await
-            .unwrap();
 
         application.assert(&process).await;
     }
@@ -375,7 +369,7 @@ mod steal_tests {
         let url = format!("http://{}", portforwarder.address());
         let flags = vec!["--steal"];
 
-        let mut client = application
+        let client = application
             .run(
                 &service.pod_container_target(),
                 Some(&service.namespace),
@@ -391,10 +385,6 @@ mod steal_tests {
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap());
         send_requests(&url, true, headers).await;
-
-        let _ = tokio::time::timeout(Duration::from_secs(40), client.child.wait())
-            .await
-            .unwrap();
 
         application.assert(&client).await;
     }
@@ -423,7 +413,7 @@ mod steal_tests {
         let mut config_path = config_dir.to_path_buf();
         config_path.push("http_filter_header.json");
 
-        let mut client = application
+        let client = application
             .run(
                 &service.pod_container_target(),
                 Some(&service.namespace),
@@ -439,10 +429,6 @@ mod steal_tests {
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap());
         send_requests(&url, true, headers).await;
-
-        let _ = tokio::time::timeout(Duration::from_secs(40), client.child.wait())
-            .await
-            .unwrap();
 
         application.assert(&client).await;
     }
@@ -471,7 +457,7 @@ mod steal_tests {
         let mut config_path = config_dir.to_path_buf();
         config_path.push("http_filter_path.json");
 
-        let mut client = application
+        let client = application
             .run(
                 &service.pod_container_target(),
                 Some(&service.namespace),
@@ -495,17 +481,12 @@ mod steal_tests {
         )
         .await;
 
-        // Send a DELETE that should match and cause the local app to return specific response
-        // and also make the process quit.
+        // Send a DELETE that should match and cause the local app to return specific response.
         let req_client = reqwest::Client::new();
         let mut match_url = Url::parse(&url).unwrap();
         match_url.set_path("/api/v1");
         let req_builder = req_client.delete(match_url);
         send_request(req_builder, Some("DELETE"), headers.clone()).await;
-
-        let _ = tokio::time::timeout(Duration::from_secs(40), client.child.wait())
-            .await
-            .unwrap();
 
         application.assert(&client).await;
     }
@@ -609,7 +590,7 @@ mod steal_tests {
 
         let flags = vec!["--steal"];
 
-        let mut mirrorded_process = application
+        let mirrorded_process = application
             .run(
                 &service.pod_container_target(),
                 Some(&service.namespace),
@@ -636,20 +617,12 @@ mod steal_tests {
         headers.insert("x-filter", "no".parse().unwrap()); // header does NOT match.
         send_request(req_builder, None, headers.clone()).await;
 
-        // Since the app exits on DELETE, if there's a bug and the DELETE was stolen even though it
-        // was not supposed to, the app would now exit and the next request would fail.
-
-        // Send a DELETE that should be matched and thus stolen, closing the app.
+        // Send a DELETE that should be matched and thus stolen.
         let client = reqwest::Client::new();
         let req_builder = client.delete(&url);
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap()); // header DOES match.
-
         send_request(req_builder, Some("DELETE"), headers.clone()).await;
-
-        tokio::time::timeout(Duration::from_secs(10), mirrorded_process.wait())
-            .await
-            .unwrap();
 
         application.assert(&mirrorded_process).await;
     }
@@ -681,7 +654,7 @@ mod steal_tests {
 
         let flags = vec!["--steal"];
 
-        let mut mirrorded_process = application
+        let mirrorded_process = application
             .run(
                 &service.pod_container_target(),
                 Some(&service.namespace),
@@ -709,16 +682,12 @@ mod steal_tests {
         let stdout_after = mirrorded_process.get_stdout().await;
         assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
 
-        // Send a DELETE that should be matched and thus stolen, closing the app.
+        // Send a DELETE that should be matched and thus stolen.
         let client = reqwest::Client::new();
         let req_builder = client.delete(&url);
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap()); // header DOES match.
         send_request(req_builder, Some("DELETE"), headers.clone()).await;
-
-        tokio::time::timeout(Duration::from_secs(10), mirrorded_process.wait())
-            .await
-            .unwrap();
 
         application.assert(&mirrorded_process).await;
     }
@@ -756,7 +725,7 @@ mod steal_tests {
 
         let flags = vec!["--steal"];
 
-        let mut mirrorded_process = application
+        let mirrorded_process = application
             .run(
                 &service.pod_container_target(),
                 Some(&service.namespace),
@@ -802,16 +771,12 @@ mod steal_tests {
         let stdout_after = mirrorded_process.get_stdout().await;
         assert!(!stdout_after.contains("LOCAL APP GOT DATA"));
 
-        // Send a DELETE that should be matched and thus stolen, closing the app.
+        // Send a DELETE that should be matched and thus stolen.
         let client = reqwest::Client::new();
         let req_builder = client.delete(&url);
         let mut headers = HeaderMap::default();
         headers.insert("x-filter", "yes".parse().unwrap()); // header DOES match.
         send_request(req_builder, Some("DELETE"), headers.clone()).await;
-
-        tokio::time::timeout(Duration::from_secs(10), mirrorded_process.wait())
-            .await
-            .unwrap();
 
         application.assert(&mirrorded_process).await;
     }

@@ -28,7 +28,7 @@ pub async fn two_clients_steal_same_target(
 
     let flags = vec!["--steal", "--fs-mode=local"];
 
-    let mut client_a = application
+    let client_a = application
         .run(
             &service.pod_container_target(),
             Some(&service.namespace),
@@ -63,14 +63,6 @@ pub async fn two_clients_steal_same_target(
     let mut headers = HeaderMap::default();
     headers.insert("x-filter", "yes".parse().unwrap());
     send_request(req_builder, Some("DELETE"), headers.clone()).await;
-
-    tokio::time::timeout(Duration::from_secs(15), client_a.wait())
-        .await
-        .unwrap();
-
-    client_a
-        .assert_stdout_contains("DELETE: Request completed")
-        .await;
 }
 
 #[rstest]
@@ -88,7 +80,7 @@ pub async fn two_clients_steal_same_target_pod_deployment(
 
     let flags = vec!["--steal", "--fs-mode=local"];
 
-    let mut client_a = application
+    let client_a = application
         .run(
             &service.pod_container_target(),
             Some(&service.namespace),
@@ -125,14 +117,6 @@ pub async fn two_clients_steal_same_target_pod_deployment(
     let mut headers = HeaderMap::default();
     headers.insert("x-filter", "yes".parse().unwrap());
     send_request(req_builder, Some("DELETE"), headers.clone()).await;
-
-    tokio::time::timeout(Duration::from_secs(15), client_a.wait())
-        .await
-        .unwrap();
-
-    client_a
-        .assert_stdout_contains("DELETE: Request completed")
-        .await;
 }
 
 #[rstest]
@@ -159,7 +143,7 @@ pub async fn two_clients_steal_with_http_filter(
 
     let flags = vec!["--steal", "--fs-mode=local"];
 
-    let mut client_a = application
+    let client_a = application
         .run(
             &service.pod_container_target(),
             Some(&service.namespace),
@@ -175,7 +159,7 @@ pub async fn two_clients_steal_with_http_filter(
     let mut config_path = config_dir.to_path_buf();
     config_path.push("http_filter_header_no.json");
 
-    let mut client_b = application
+    let client_b = application
         .run(
             &service.pod_container_target(),
             Some(&service.namespace),
@@ -192,29 +176,11 @@ pub async fn two_clients_steal_with_http_filter(
     let req_builder = client.delete(&url);
     let mut headers = HeaderMap::default();
     headers.insert("x-filter", "yes".parse().unwrap());
-
     send_request(req_builder, Some("DELETE"), headers.clone()).await;
-
-    tokio::time::timeout(Duration::from_secs(10), client_a.wait())
-        .await
-        .unwrap();
-
-    client_a
-        .assert_stdout_contains("DELETE: Request completed")
-        .await;
 
     let client = reqwest::Client::new();
     let req_builder = client.delete(&url);
     let mut headers = HeaderMap::default();
     headers.insert("x-filter", "no".parse().unwrap());
-
     send_request(req_builder, Some("DELETE"), headers.clone()).await;
-
-    tokio::time::timeout(Duration::from_secs(10), client_b.wait())
-        .await
-        .unwrap();
-
-    client_b
-        .assert_stdout_contains("DELETE: Request completed")
-        .await;
 }

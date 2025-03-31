@@ -635,15 +635,27 @@ impl OperatorApi<PreparedClientCert> {
                     );
                 }
 
-                if layer_config
-                    .feature
-                    .network
-                    .incoming
-                    .steals_port_without_filter(&runtime_data.containers_probe_ports)
-                {
-                    {
-                        progress.warning("Your mirrord config may steal HTTP/gRPC health checks, causing Kubernetes to terminate the target container. Use an HTTP filter to prevent this.");
-                    }
+                let stolen_probes = runtime_data
+                    .containers_probe_ports
+                    .iter()
+                    .copied()
+                    .filter(|port| {
+                        layer_config
+                            .feature
+                            .network
+                            .incoming
+                            .steals_port_without_filter(*port)
+                    })
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>();
+
+                if stolen_probes.is_empty().not() {
+                    progress.warning(&format!(
+                        "Your mirrord config may steal HTTP/gRPC health checks configured on ports [{}], \
+                        causing Kubernetes to terminate containers on the targeted pods. \
+                        Use an HTTP filter to prevent this.",
+                        stolen_probes.join(", "),
+                    ));
                 }
             }
 
