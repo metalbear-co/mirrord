@@ -64,8 +64,6 @@ where
     }
 
     async fn run_inner(&mut self) -> Result<(), R::Error> {
-        let mut dead_channels = FuturesUnordered::<DeadChannelFut>::new();
-
         loop {
             tokio::select! {
                 next_conn = self.redirector.next_connection() => {
@@ -76,13 +74,14 @@ where
                 next_message = self.message_rx.recv() => {
                     let Some(message) = next_message else {
                         // All handles dropped, we can exit.
+                        self.cleanup().await?;
                         break Ok(());
                     };
 
                     self.handle_message(message).await?;
                 },
 
-                Some(dead) = dead_channels.next() => {
+                Some(dead) = self.dead_channels.next() => {
                     self.handle_dead_channel(dead).await?;
                 }
             }
@@ -156,12 +155,25 @@ where
             return Ok(());
         }
 
+        e.remove();
+
         self.redirector.remove_redirection(port).await?;
         if self.steals.is_empty() {
             self.redirector.cleanup().await?;
         }
 
         Ok(())
+    }
+
+    /// Called the [`StealHandle`] is dropped and this is about to exit.
+    ///
+    /// Cleans the redirections in [`Self::redirector`].
+    async fn cleanup(&mut self) -> Result<(), R::Error> {
+        for port in std::mem::take(&mut self.steals).into_keys() {
+            self.redirector.remove_redirection(port).await?;
+        }
+
+        self.redirector.cleanup().await
     }
 
     /// Runs this task.
@@ -219,5 +231,41 @@ impl TaskError {
 impl fmt::Debug for TaskError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.get().now_or_never().fmt(f)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::time::Duration;
+
+    use rstest::rstest;
+
+    use crate::incoming::{test::DummyRedirector, RedirectorTask};
+
+    #[rstest]
+    #[timeout(Duration::from_secs(5))]
+    #[tokio::test]
+    async fn cleanup_on_dead_channel() {
+        let (redirector, mut state, _tx) = DummyRedirector::new();
+        let (task, mut handle) = RedirectorTask::new(redirector);
+        tokio::spawn(task.run());
+
+        handle.steal(80).await.unwrap();
+        assert!(state.borrow().has_redirections([80]));
+
+        handle.stop_steal(80);
+        state
+            .wait_for(|state| state.has_redirections([]))
+            .await
+            .unwrap();
+
+        handle.steal(81).await.unwrap();
+        assert!(state.borrow().has_redirections([81]));
+
+        std::mem::drop(handle);
+        state
+            .wait_for(|state| state.has_redirections([]))
+            .await
+            .unwrap();
     }
 }
