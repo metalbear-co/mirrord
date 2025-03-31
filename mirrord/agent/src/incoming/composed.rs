@@ -1,4 +1,4 @@
-use std::{fmt, future};
+use std::{fmt, ops::Not};
 
 use futures::{stream::FuturesUnordered, StreamExt};
 
@@ -11,7 +11,17 @@ pub struct ComposedRedirector<R> {
 }
 
 impl<R> ComposedRedirector<R> {
+    /// Created a new [`ComposedRedirector`] that will use the provided inner redirectors.
+    ///
+    /// # Panic
+    ///
+    /// Panics if the given redirectors vector is empty.
     pub fn new(redirectors: Vec<R>) -> Self {
+        assert!(
+            redirectors.is_empty().not(),
+            "cannot create a ComposedRedirector with no inner redirectors"
+        );
+
         Self { redirectors }
     }
 }
@@ -71,17 +81,12 @@ where
     ///
     /// Returns the first result.
     async fn next_connection(&mut self) -> Result<Redirected, Self::Error> {
-        let result = self
-            .redirectors
+        self.redirectors
             .iter_mut()
             .map(R::next_connection)
             .collect::<FuturesUnordered<_>>()
             .next()
-            .await;
-
-        match result {
-            Some(result) => result,
-            None => future::pending().await,
-        }
+            .await
+            .expect("ComposedRedirector cannot be created with no inner redirector")
     }
 }
