@@ -209,12 +209,25 @@ mod steal_tests {
         )
         .await;
         let url = format!("http://{}", portforwarder.address());
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
         loop {
+            println!("Sending a request to the target");
+
             let response = match client.get(&url).send().await {
-                Ok(response) => response,
+                Ok(response) if response.status() == StatusCode::BAD_GATEWAY => {
+                    println!("Got a BAD_GATEWAY response, probably meaning that the agent has just processed port unsubscribe");
+                    sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+                Ok(response) => {
+                    println!("Got response from the target");
+                    response
+                }
                 Err(error) => {
-                    println!("Failed to send the request, agent still didn't process port unsubsribe, error: {error}");
+                    println!("Failed to send the request, agent still didn't process port unsubscribe, error: {error}");
                     sleep(Duration::from_secs(1)).await;
                     continue;
                 }
