@@ -56,7 +56,7 @@ struct UdpOutgoingTask {
 impl Drop for UdpOutgoingTask {
     fn drop(&mut self) {
         let connections = self.readers.keys().chain(self.writers.keys()).count();
-        UDP_OUTGOING_CONNECTION.fetch_sub(connections as i64, std::sync::atomic::Ordering::Relaxed);
+        UDP_OUTGOING_CONNECTION.fetch_sub(connections, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

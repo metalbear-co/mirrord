@@ -84,7 +84,7 @@ impl Drop for FileManager {
     fn drop(&mut self) {
         let descriptors =
             self.open_files.len() + self.dir_streams.len() + self.getdents_streams.len();
-        OPEN_FD_COUNT.fetch_sub(descriptors as i64, std::sync::atomic::Ordering::Relaxed);
+        OPEN_FD_COUNT.fetch_sub(descriptors, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
