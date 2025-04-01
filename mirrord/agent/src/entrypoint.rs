@@ -123,7 +123,7 @@ impl State {
                 // If we are in an ephemeral container, we use pid 1.
                 (true, Some(container_handle))
             }
-            cli::Mode::Targetless | cli::Mode::BlackboxTest => (false, None),
+            cli::Mode::Targetless => (false, None),
         };
 
         let network_runtime = match container.as_ref().map(ContainerHandle::pid) {
