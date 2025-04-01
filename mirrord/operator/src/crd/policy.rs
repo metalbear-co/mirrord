@@ -93,6 +93,12 @@ pub struct MirrordPolicySpec {
     ///
     /// Optional.
     pub profile_allowlist: Option<Vec<String>>,
+
+    /// Determines if this policy should be applied to copied targets.
+    ///
+    /// Defaults to `false`.
+    #[serde(default)]
+    pub applies_to_copy_targets: bool,
 }
 
 /// Custom cluster-wide resource for policies that limit what mirrord features users can use.
@@ -147,6 +153,12 @@ pub struct MirrordClusterPolicySpec {
     ///
     /// Optional.
     pub profile_allowlist: Option<Vec<String>>,
+
+    /// Determines if this policy should be applied to copied targets.
+    ///
+    /// Defaults to `false`.
+    #[serde(default)]
+    pub applies_to_copy_targets: bool,
 }
 
 /// Policy for controlling environment variables access from mirrord instances.
