@@ -73,14 +73,18 @@ async fn sanity() {
         )))
         .await
         .expect("port subscribe failed");
-    assert!(matches!(
-        codec
-            .next()
-            .await
-            .expect("couldn't get next message")
-            .expect("got invalid message"),
-        DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(_)))
-    ));
+    let response = codec
+        .next()
+        .await
+        .expect("couldn't get next message")
+        .expect("got invalid message");
+    assert!(
+        matches!(
+            response,
+            DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(_)))
+        ),
+        "unexpected response: {response:?}"
+    );
     let mut test_conn = TcpStream::connect("127.0.0.1:1337")
         .await
         .expect("connection to dummy failed");
@@ -114,7 +118,8 @@ async fn sanity() {
             local_address: IpAddr::V4("127.0.0.1".parse().unwrap()),
             destination_port: 1337,
             source_port: port
-        }))
+        })),
+        "unexpected message: {new_conn_msg:?}",
     );
 
     assert_eq!(
@@ -122,12 +127,14 @@ async fn sanity() {
         DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
             connection_id: 0,
             bytes: test_data.to_vec()
-        }))
+        })),
+        "unexpected message: {data_msg:?}",
     );
 
     assert_eq!(
         close_msg,
-        DaemonMessage::Tcp(DaemonTcp::Close(TcpClose { connection_id: 0 }))
+        DaemonMessage::Tcp(DaemonTcp::Close(TcpClose { connection_id: 0 })),
+        "unexpected message: {close_msg:?}",
     );
 
     drop(codec);
