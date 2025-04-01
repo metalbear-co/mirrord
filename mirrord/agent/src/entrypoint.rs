@@ -578,17 +578,21 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         });
     }
 
-    let sniffer = match &state.network_runtime {
-        MaybeRemoteRuntime::Remote(runtime) => {
-            setup::start_sniffer(&args, runtime, cancellation_token.clone()).await
-        }
-        MaybeRemoteRuntime::Local => BackgroundTask::Disabled,
+    let sniffer = if state.container_pid().is_some() {
+        setup::start_sniffer(&args, &state.network_runtime, cancellation_token.clone()).await
+    } else {
+        BackgroundTask::Disabled
     };
-    let stealer = match &state.network_runtime {
-        MaybeRemoteRuntime::Local => BackgroundTask::Disabled,
-        MaybeRemoteRuntime::Remote(runtime) => {
-            let steal_handle = setup::start_traffic_redirector(runtime).await?;
-            setup::start_stealer(runtime, steal_handle, cancellation_token.clone())
+    let stealer = match state.container_pid() {
+        None => BackgroundTask::Disabled,
+        Some(pid) => {
+            let steal_handle = setup::start_traffic_redirector(&state.network_runtime).await?;
+            setup::start_stealer(
+                &state.network_runtime,
+                pid,
+                steal_handle,
+                cancellation_token.clone(),
+            )
         }
     };
     let dns = setup::start_dns(&args, &state.network_runtime, cancellation_token.clone());
