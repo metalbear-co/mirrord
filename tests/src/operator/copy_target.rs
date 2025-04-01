@@ -15,14 +15,7 @@ pub async fn copy_target_starts_a_working_copy(
     #[future]
     #[notrace]
     service: KubeService,
-    #[values(
-        EnvApp::Go21,
-        EnvApp::Go22,
-        EnvApp::Go23,
-        EnvApp::NodeInclude,
-        EnvApp::NodeExclude
-    )]
-    application: EnvApp,
+    #[values(EnvApp::NodeInclude)] application: EnvApp,
     #[values("pod", "deployment")] target: &str,
 ) {
     use crate::utils::run_exec_with_target;
