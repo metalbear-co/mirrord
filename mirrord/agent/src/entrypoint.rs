@@ -11,7 +11,7 @@ use std::{
 };
 
 use client_connection::AgentTlsConnector;
-use dns::{ClientGetAddrInfoRequest, DnsCommand, DnsWorker};
+use dns::{ClientGetAddrInfoRequest, DnsCommand};
 use futures::TryFutureExt;
 use metrics::{start_metrics, CLIENT_COUNT};
 use mirrord_agent_env::envs;
@@ -28,7 +28,7 @@ use tokio::{
     process::Command,
     select,
     signal::unix::SignalKind,
-    sync::mpsc::{self, Sender},
+    sync::mpsc::Sender,
     task::JoinSet,
     time::{timeout, Duration},
 };
@@ -48,11 +48,10 @@ use crate::{
     namespace::NamespaceType,
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     runtime::{self, get_container},
-    sniffer::{api::TcpSnifferApi, messages::SnifferCommand, TcpConnectionSniffer},
-    steal::{self, StealTlsHandlerStore, StealerCommand, TcpConnectionStealer, TcpStealerApi},
+    sniffer::{api::TcpSnifferApi, messages::SnifferCommand},
+    steal::{self, StealerCommand, TcpStealerApi},
     util::{
-        path_resolver::InTargetPathResolver,
-        remote_runtime::{BgTaskStatus, IntoStatus, MaybeRemoteRuntime, RemoteRuntime},
+        remote_runtime::{BgTaskStatus, MaybeRemoteRuntime, RemoteRuntime},
         ClientId,
     },
 };
@@ -580,81 +579,20 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         });
     }
 
-    let sniffer = if args.mode.is_targetless() {
-        BackgroundTask::Disabled
-    } else {
-        let cancellation_token = cancellation_token.clone();
-        let (command_tx, command_rx) = mpsc::channel::<SnifferCommand>(1000);
-
-        let is_mesh = args.is_mesh();
-        let sniffer = state
-            .network_runtime
-            .spawn(TcpConnectionSniffer::new(
-                command_rx,
-                args.network_interface,
-                is_mesh,
-            ))
-            .await;
-
-        match sniffer {
-            Ok(Ok(sniffer)) => {
-                let task_status = state
-                    .network_runtime
-                    .spawn(sniffer.start(cancellation_token.clone()))
-                    .into_status("TcpSnifferTask");
-
-                BackgroundTask::Running(task_status, command_tx)
-            }
-            Ok(Err(error)) => {
-                error!(%error, "Failed to create a TCP sniffer");
-                BackgroundTask::Disabled
-            }
-            Err(error) => {
-                error!(%error, "Failed to create a TCP sniffer");
-                BackgroundTask::Disabled
-            }
+    let sniffer = match &state.network_runtime {
+        MaybeRemoteRuntime::Remote(runtime) => {
+            setup::start_sniffer(&args, runtime, cancellation_token.clone()).await
         }
+        MaybeRemoteRuntime::Local => BackgroundTask::Disabled,
     };
-
     let stealer = match &state.network_runtime {
         MaybeRemoteRuntime::Local => BackgroundTask::Disabled,
         MaybeRemoteRuntime::Remote(runtime) => {
             let steal_handle = setup::start_traffic_redirector(runtime).await?;
-
-            let cancellation_token = cancellation_token.clone();
-            let (command_tx, command_rx) = mpsc::channel::<StealerCommand>(1000);
-
-            let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
-            let tls_handler_store = tls_steal_config.is_empty().not().then(|| {
-                StealTlsHandlerStore::new(
-                    tls_steal_config,
-                    InTargetPathResolver::new(runtime.target_pid()),
-                )
-            });
-            let task_status = state
-                .network_runtime
-                .spawn(
-                    TcpConnectionStealer::new(command_rx, steal_handle, tls_handler_store)
-                        .start(cancellation_token),
-                )
-                .into_status("TcpStealerTask");
-
-            BackgroundTask::Running(task_status, command_tx)
+            setup::start_stealer(runtime, steal_handle, cancellation_token.clone())
         }
     };
-
-    let dns = {
-        let (command_tx, command_rx) = mpsc::channel::<DnsCommand>(1000);
-        let task_status = state
-            .network_runtime
-            .spawn(
-                DnsWorker::new(state.container_pid(), command_rx, args.ipv6)
-                    .run(cancellation_token.clone()),
-            )
-            .into_status("DnsTask");
-        BackgroundTask::Running(task_status, command_tx)
-    };
-
+    let dns = setup::start_dns(&args, &state.network_runtime, cancellation_token.clone());
     let bg_tasks = BackgroundTasks {
         sniffer,
         stealer,
