@@ -25,7 +25,11 @@ pub async fn copy_target_starts_a_working_copy(
 
     let service = service.await;
 
-    let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+    let mut config_file = tempfile::Builder::new()
+        .prefix("copy_target_starts_a_working_copy")
+        .suffix(".json")
+        .tempfile()
+        .unwrap();
     let config = serde_json::json!({
         "feature": {
             "copy_target": {
