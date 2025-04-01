@@ -292,12 +292,12 @@ jobs:
           candidate: java
           version: 17.0.6-tem
       - run: java -version
-      - uses: actions/setup-node@v3 # For http mirroring test.
+      - uses: actions/setup-node@v3
         with:
           node-version: 14
-      - run: npm install express # For http mirroring test with node.
-      - uses: actions/setup-python@v5 # For http mirroring tests with Flask and FastAPI.
-      - run: pip3 install --break-system-packages flask fastapi uvicorn[standard] # For http mirroring test with Flask.
+      - run: npm install express@4.21.2
+      - uses: actions/setup-python@v5
+      - run: pip3 install --break-system-packages flask fastapi uvicorn[standard]
       # don't use "cache" for other Gos since it will try to overwrite and have bad results.
       - uses: actions/setup-go@v5
         with:

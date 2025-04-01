@@ -22,6 +22,7 @@ mod env;
 mod error;
 mod file;
 mod http;
+mod incoming;
 mod metrics;
 mod namespace;
 mod outgoing;

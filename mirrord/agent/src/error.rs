@@ -1,13 +1,12 @@
 use std::process::ExitStatus;
 
-use mirrord_agent_iptables::error::IPTablesError;
 use mirrord_protocol::outgoing::udp::DaemonUdpOutgoing;
 use thiserror::Error;
 use tokio::sync::mpsc::{self, error::SendError};
 
 use crate::{
-    client_connection::TlsSetupError, namespace::NamespaceError, runtime,
-    sniffer::messages::SnifferCommand, steal::StealerCommand,
+    client_connection::TlsSetupError, incoming::RedirectorTaskError, namespace::NamespaceError,
+    runtime, sniffer::messages::SnifferCommand, steal::StealerCommand,
 };
 
 #[derive(Debug, Error)]
@@ -32,12 +31,6 @@ pub(crate) enum AgentError {
 
     #[error("Path failed with `{0}`")]
     StripPrefixError(#[from] std::path::StripPrefixError),
-
-    #[error("iptables operation failed: {0}")]
-    IPTablesError(
-        /// Message from the original [`IPTablesError`], which is not [`Send`].
-        String,
-    ),
 
     #[error("Join task failed")]
     JoinTask,
@@ -89,20 +82,16 @@ pub(crate) enum AgentError {
     #[error("Generic error in vpn: {0}")]
     VpnError(String),
 
-    /// When we neither create a redirector for IPv4, nor for IPv6
-    #[error("Could not create a listener for stolen connections")]
-    CannotListenForStolenConnections,
+    #[error("Incoming traffic redirector failed: {0}")]
+    PortRedirectorError(#[from] RedirectorTaskError),
+
+    #[error("IP tables setup failed: {0}")]
+    IPTablesSetupError(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl From<mpsc::error::SendError<StealerCommand>> for AgentError {
     fn from(_: mpsc::error::SendError<StealerCommand>) -> Self {
         Self::TcpStealerTaskDead
-    }
-}
-
-impl From<IPTablesError> for AgentError {
-    fn from(value: IPTablesError) -> Self {
-        Self::IPTablesError(value.to_string())
     }
 }
 

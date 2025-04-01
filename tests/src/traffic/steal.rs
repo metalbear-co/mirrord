@@ -3,6 +3,7 @@ mod steal_tests {
     use std::{path::Path, time::Duration};
 
     use futures_util::{SinkExt, StreamExt};
+    use hyper::StatusCode;
     use k8s_openapi::api::core::v1::Pod;
     use kube::{Api, Client};
     use reqwest::{header::HeaderMap, Url};
@@ -198,21 +199,8 @@ mod steal_tests {
             .wait_for_line(Duration::from_secs(40), "Closed socket")
             .await;
 
-        // Flake-proofing the test:
-        // If we connect to the service between the time the test application had closed its socket
-        // and the agent was informed about it, our connection would still get stolen at first, but
-        // then reset without response data once the agent learns the socket was closed.
-        //
-        // To try to prevent this from happening in the test, we wait after the app closes the
-        // socket, to make sure mirrord has time to handle the close, before we send a request.
-        // Because things could go slow on GitHub Actions, we wait for 3 full seconds.
-        //
-        // In order to make this test deterministic, we could make the agent send a confirmation
-        // once it's done handling the `PortUnsubscribe`, but that would require adding a new
-        // message to the protocol, which we only do on major protocol version bumps.
-        sleep(Duration::from_secs(3)).await;
-
-        // Send HTTP request and verify it is handled by the REMOTE app - NOT STOLEN.
+        // Keep sending HTTP requests until we get a response from the remote app.
+        // Agent should eventually process the unsubscribe request.
         let portforwarder = PortForwarder::new(
             kube_client.clone(),
             &service.pod_name,
@@ -221,15 +209,43 @@ mod steal_tests {
         )
         .await;
         let url = format!("http://{}", portforwarder.address());
-        let client = reqwest::Client::new();
-        let req_builder = client.get(url);
-        eprintln!("Sending request to remote service");
-        send_request(
-            req_builder,
-            Some("OK - GET: Request completed\n"),
-            Default::default(),
-        )
-        .await;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
+        loop {
+            println!("Sending a request to the target");
+
+            let response = match client.get(&url).send().await {
+                Ok(response) if response.status() == StatusCode::BAD_GATEWAY => {
+                    println!("Got a BAD_GATEWAY response, probably meaning that the agent has just processed port unsubscribe");
+                    sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+                Ok(response) => {
+                    println!("Got response from the target");
+                    response
+                }
+                Err(error) => {
+                    println!("Failed to send the request, agent still didn't process port unsubscribe, error: {error}");
+                    sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+            };
+
+            let status = response.status();
+            let body =
+                String::from_utf8_lossy(response.bytes().await.unwrap().as_ref()).into_owned();
+
+            assert_eq!(
+                status,
+                StatusCode::OK,
+                "unexpected status, response body: {body}"
+            );
+
+            assert_eq!(body, "OK - GET: Request completed\n");
+            break;
+        }
 
         process
             .write_to_stdin(b"Hey test app, please stop running and just exit successfuly.\n")
