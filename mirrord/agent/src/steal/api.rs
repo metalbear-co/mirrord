@@ -111,7 +111,7 @@ impl TcpStealerApi {
                     self.response_body_txs
                         .retain(|(key_id, _), _| *key_id != close.connection_id);
                     HTTP_REQUEST_IN_PROGRESS_COUNT.fetch_sub(
-                        (all_in_progress - self.response_body_txs.len()) as i64,
+                        all_in_progress - self.response_body_txs.len(),
                         std::sync::atomic::Ordering::Relaxed,
                     );
                 }
@@ -189,7 +189,7 @@ impl TcpStealerApi {
                 self.response_body_txs
                     .retain(|(key_id, _), _| *key_id != connection_id);
                 HTTP_REQUEST_IN_PROGRESS_COUNT.fetch_sub(
-                    (all_in_progress - self.response_body_txs.len()) as i64,
+                    all_in_progress - self.response_body_txs.len(),
                     Ordering::Relaxed,
                 );
 

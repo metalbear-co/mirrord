@@ -1,335 +1,55 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
-    sync::Arc,
+    sync::{atomic::Ordering, Arc},
 };
 
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
-use mirrord_agent_iptables::{new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables};
 use mirrord_protocol::{Port, RemoteResult, ResponseError};
-use tokio::{
-    net::{TcpListener, TcpStream},
-    select,
-};
 
 use super::http::HttpFilter;
 use crate::{
-    error::{AgentError, AgentResult},
+    incoming::{RedirectedConnection, RedirectorTaskError, StealHandle},
     metrics::{STEAL_FILTERED_PORT_SUBSCRIPTION, STEAL_UNFILTERED_PORT_SUBSCRIPTION},
     util::ClientId,
 };
 
-/// For stealing incoming TCP connections.
-#[async_trait::async_trait]
-pub trait PortRedirector {
-    type Error;
-
-    /// Start stealing connections from the given port.
-    ///
-    /// # Note
-    ///
-    /// If a redirection from the given port already exists, implementations are free to do nothing
-    /// or return an [`Err`].
-    async fn add_redirection(&mut self, from: Port) -> Result<(), Self::Error>;
-
-    /// Stop stealing connections from the given port.
-    ///
-    /// # Note
-    ///
-    /// If the redirection does no exist, implementations are free to do nothing or return an
-    /// [`Err`].
-    async fn remove_redirection(&mut self, from: Port) -> Result<(), Self::Error>;
-
-    /// Clean any external state.
-    async fn cleanup(&mut self) -> Result<(), Self::Error>;
-
-    /// Accept an incoming redirected connection.
-    ///
-    /// # Returns
-    ///
-    /// * [`TcpStream`] - redirected connection
-    /// * [`SocketAddr`] - peer address
-    async fn next_connection(&mut self) -> Result<(TcpStream, SocketAddr), Self::Error>;
-}
-
-/// A TCP listener, together with an iptables wrapper to set rules that send traffic to the
-/// listener.
-pub(crate) struct IptablesListener {
-    /// For altering iptables rules.
-    iptables: Option<SafeIpTables<IPTablesWrapper>>,
-    /// Port of [`listener`](Self::listener).
-    redirect_to: Port,
-    /// Listener to which redirect all connections.
-    listener: TcpListener,
-    /// Optional comma-seperated list of IPs of the pod, originating in the pod's `Status.PodIps`
-    pod_ips: Option<String>,
-    /// Whether existing connections should be flushed when adding new redirects.
-    flush_connections: bool,
-    /// Is this for connections incoming over IPv6
-    ipv6: bool,
-}
-
-#[async_trait::async_trait]
-impl PortRedirector for IptablesListener {
-    type Error = AgentError;
-
-    #[tracing::instrument(skip(self), err, ret, level=tracing::Level::DEBUG, fields(self.ipv6 = %self.ipv6))]
-    async fn add_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
-        let iptables = if let Some(iptables) = self.iptables.as_ref() {
-            iptables
-        } else {
-            let safe = SafeIpTables::create(
-                if self.ipv6 {
-                    new_ip6tables()
-                } else {
-                    new_iptables()
-                }
-                .into(),
-                self.flush_connections,
-                self.pod_ips.as_deref(),
-                self.ipv6,
-            )
-            .await?;
-            self.iptables.insert(safe)
-        };
-
-        iptables
-            .add_redirect(from, self.redirect_to)
-            .await
-            .map_err(From::from)
-    }
-
-    async fn remove_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
-        if let Some(iptables) = self.iptables.as_ref() {
-            iptables.remove_redirect(from, self.redirect_to).await?;
-        }
-
-        Ok(())
-    }
-
-    async fn cleanup(&mut self) -> Result<(), Self::Error> {
-        if let Some(iptables) = self.iptables.take() {
-            iptables.cleanup().await?;
-        }
-
-        Ok(())
-    }
-
-    async fn next_connection(&mut self) -> Result<(TcpStream, SocketAddr), Self::Error> {
-        self.listener.accept().await.map_err(Into::into)
-    }
-}
-
-/// Implementation of [`PortRedirector`] that manipulates iptables to steal connections by
-/// redirecting TCP packets to inner [`TcpListener`].
-///
-/// Holds TCP listeners + iptables, for redirecting IPv4 and/or IPv6 connections.
-pub(crate) enum IpTablesRedirector {
-    Ipv4Only(IptablesListener),
-    /// Could be used if IPv6 support is enabled, and we cannot bind an IPv4 address.
-    Ipv6Only(IptablesListener),
-    Dual {
-        ipv4_listener: IptablesListener,
-        ipv6_listener: IptablesListener,
-    },
-}
-
-impl IpTablesRedirector {
-    /// Create a new instance of this struct. Open an IPv4 TCP listener on an
-    /// [`Ipv4Addr::UNSPECIFIED`] address and a random port. This listener will be used to accept
-    /// redirected connections.
-    ///
-    /// If `support_ipv6` is set, will also listen on IPv6, and a fail to listen over IPv4 will be
-    /// accepted.
-    ///
-    /// # Note
-    ///
-    /// Does not yet alter iptables.
-    ///
-    /// # Params
-    ///
-    /// * `flush_connections` - whether existing connections should be flushed when adding new
-    ///   redirects
-    pub(crate) async fn new(
-        flush_connections: bool,
-        pod_ips: Vec<IpAddr>,
-        support_ipv6: bool,
-    ) -> AgentResult<Self> {
-        let (pod_ips4, pod_ips6) = pod_ips
-            .into_iter()
-            .partition::<Vec<IpAddr>, _>(IpAddr::is_ipv4);
-        tracing::debug!(?pod_ips4, ?pod_ips6, "Resolved pod IP addresses from env",);
-
-        tracing::debug!("Creating IPv4 iptables redirection listener");
-        let listener4 = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await
-            .inspect_err(
-                |error| tracing::debug!(%error, "Failed to bind the IPv4 listener."),
-            )
-            .ok()
-            .and_then(|listener| {
-                let redirect_to = listener
-                    .local_addr()
-                    .inspect_err(
-                        |error| tracing::debug!(%error, "Failed to obtain the IPv4 listener local address."),
-                    )
-                    .ok()?
-                    .port();
-                let pod_ips = pod_ips4.is_empty().not().then(|| pod_ips4.iter().map(ToString::to_string).collect::<Vec<_>>().join(","));
-                Some(IptablesListener {
-                    iptables: None,
-                    redirect_to,
-                    listener,
-                    pod_ips,
-                    flush_connections,
-                    ipv6: false,
-                })
-            });
-
-        tracing::debug!("Creating IPv6 iptables redirection listener");
-        let listener6 = if support_ipv6 {
-            TcpListener::bind((Ipv6Addr::UNSPECIFIED, 0)).await
-                .inspect_err(
-                    |error| tracing::debug!(%error, "Failed to bind the IPv6 listener."),
-                )
-                .ok()
-                .and_then(|listener| {
-                    let redirect_to = listener
-                        .local_addr()
-                        .inspect_err(
-                            |error| tracing::debug!(%error, "Failed to obtain the IPv6 listener local address."),
-                        )
-                        .ok()?
-                        .port();
-                    let pod_ips = pod_ips6.is_empty().not().then(|| pod_ips6.iter().map(ToString::to_string).collect::<Vec<_>>().join(","));
-                    Some(IptablesListener {
-                        iptables: None,
-                        redirect_to,
-                        listener,
-                        pod_ips,
-                        flush_connections,
-                        ipv6: true,
-                    })
-                })
-        } else {
-            None
-        };
-
-        match (listener4, listener6) {
-            (None, None) => Err(AgentError::CannotListenForStolenConnections),
-            (Some(ipv4_listener), None) => {
-                tracing::debug!("Continuing with only the IPv4 steal listener.");
-                Ok(Self::Ipv4Only(ipv4_listener))
-            }
-            (None, Some(ipv6_listener)) => {
-                tracing::debug!("Continuing with only the IPv6 steal listener.");
-                Ok(Self::Ipv6Only(ipv6_listener))
-            }
-            (Some(ipv4_listener), Some(ipv6_listener)) => {
-                tracing::debug!("Continuing with both the IPv4 and the IPv6 steal listeners.");
-                Ok(Self::Dual {
-                    ipv4_listener,
-                    ipv6_listener,
-                })
-            }
-        }
-    }
-
-    pub(crate) fn get_listeners_mut(
-        &mut self,
-    ) -> (Option<&mut IptablesListener>, Option<&mut IptablesListener>) {
-        match self {
-            IpTablesRedirector::Ipv4Only(ipv4_listener) => (Some(ipv4_listener), None),
-            IpTablesRedirector::Ipv6Only(ipv6_listener) => (None, Some(ipv6_listener)),
-            IpTablesRedirector::Dual {
-                ipv4_listener,
-                ipv6_listener,
-            } => (Some(ipv4_listener), Some(ipv6_listener)),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl PortRedirector for IpTablesRedirector {
-    type Error = AgentError;
-
-    async fn add_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
-        let (ipv4_listener, ipv6_listener) = self.get_listeners_mut();
-        if let Some(ip4_listener) = ipv4_listener {
-            tracing::debug!("Adding IPv4 redirection from port {from}");
-            ip4_listener.add_redirection(from).await?;
-        }
-        if let Some(ip6_listener) = ipv6_listener {
-            tracing::debug!("Adding IPv6 redirection from port {from}");
-            ip6_listener.add_redirection(from).await?;
-        }
-        Ok(())
-    }
-
-    async fn remove_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
-        let (ipv4_listener, ipv6_listener) = self.get_listeners_mut();
-        if let Some(ip4_listener) = ipv4_listener {
-            ip4_listener.remove_redirection(from).await?;
-        }
-        if let Some(ip6_listener) = ipv6_listener {
-            ip6_listener.remove_redirection(from).await?;
-        }
-        Ok(())
-    }
-
-    async fn cleanup(&mut self) -> Result<(), Self::Error> {
-        let (ipv4_listener, ipv6_listener) = self.get_listeners_mut();
-        if let Some(ip4_listener) = ipv4_listener {
-            ip4_listener.cleanup().await?;
-        }
-        if let Some(ip6_listener) = ipv6_listener {
-            ip6_listener.cleanup().await?;
-        }
-        Ok(())
-    }
-
-    async fn next_connection(&mut self) -> Result<(TcpStream, SocketAddr), Self::Error> {
-        match self {
-            Self::Dual {
-                ipv4_listener,
-                ipv6_listener,
-            } => {
-                select! {
-                    con = ipv4_listener.next_connection() => con,
-                    con = ipv6_listener.next_connection() => con,
-                }
-            }
-            Self::Ipv4Only(listener) | Self::Ipv6Only(listener) => listener.next_connection().await,
-        }
-    }
-}
-
 /// Set of active port subscriptions.
-pub struct PortSubscriptions<R: PortRedirector> {
-    /// Used to implement stealing connections.
-    redirector: R,
+pub struct PortSubscriptions {
+    /// Used to request port redirections and fetch redirected connections.
+    handle: StealHandle,
     /// Maps ports to active subscriptions.
     subscriptions: HashMap<Port, PortSubscription>,
 }
 
-impl<R: PortRedirector> Drop for PortSubscriptions<R> {
+impl Drop for PortSubscriptions {
     fn drop(&mut self) {
-        STEAL_FILTERED_PORT_SUBSCRIPTION.store(0, std::sync::atomic::Ordering::Relaxed);
-        STEAL_UNFILTERED_PORT_SUBSCRIPTION.store(0, std::sync::atomic::Ordering::Relaxed);
+        let (filtered, unfiltered) =
+            self.subscriptions
+                .values()
+                .fold(
+                    (0, 0),
+                    |(unfiltered, filtered), subscription| match subscription {
+                        PortSubscription::Filtered(..) => (unfiltered, filtered + 1),
+                        PortSubscription::Unfiltered(..) => (unfiltered + 1, filtered),
+                    },
+                );
+
+        STEAL_UNFILTERED_PORT_SUBSCRIPTION.fetch_sub(unfiltered, Ordering::Relaxed);
+        STEAL_FILTERED_PORT_SUBSCRIPTION.fetch_sub(filtered, Ordering::Relaxed);
     }
 }
 
-impl<R: PortRedirector> PortSubscriptions<R> {
+impl PortSubscriptions {
     /// Create an empty instance of this struct.
     ///
     /// # Params
     ///
-    /// * `redirector` - will be used to enforce connection stealing according to the state of this
-    ///   set
-    /// * `initial_capacity` - initial capacity for the inner (port -> subscription) mapping
-    pub fn new(redirector: R, initial_capacity: usize) -> Self {
+    /// * `handle` - will be used to enforce connection stealing according to the state of this set.
+    /// * `initial_capacity` - initial capacity for the inner (port -> subscription) mapping.
+    pub fn new(handle: StealHandle, initial_capacity: usize) -> Self {
         Self {
-            redirector,
+            handle,
             subscriptions: HashMap::with_capacity(initial_capacity),
         }
     }
@@ -348,66 +68,43 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     /// * `client_protocol_version` - version of client's [`mirrord_protocol`], [`None`] if the
     ///   version has not been negotiated yet
     /// * `filter` - optional [`HttpFilter`]
-    ///
-    /// # Warning
-    ///
-    /// If this method returns an [`Err`], it means that this set is out of sync with the inner
-    /// [`PortRedirector`] and it is no longer usable. It is a caller's responsibility to clean
-    /// up any external state.
     pub async fn add(
         &mut self,
         client_id: ClientId,
         port: Port,
         client_protocol_version: Option<semver::Version>,
         filter: Option<HttpFilter>,
-    ) -> Result<RemoteResult<Port>, R::Error> {
-        let add_redirect = match self.subscriptions.entry(port) {
+    ) -> Result<RemoteResult<Port>, RedirectorTaskError> {
+        let filtered = filter.is_some();
+
+        match self.subscriptions.entry(port) {
             Entry::Occupied(mut e) => {
-                let filtered = filter.is_some();
                 if e.get_mut()
                     .try_extend(client_id, client_protocol_version, filter)
+                    .not()
                 {
-                    if filtered {
-                        STEAL_FILTERED_PORT_SUBSCRIPTION
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    } else {
-                        STEAL_UNFILTERED_PORT_SUBSCRIPTION
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    }
-
-                    Ok(false)
-                } else {
-                    Err(ResponseError::PortAlreadyStolen(port))
+                    return Ok(Err(ResponseError::PortAlreadyStolen(port)));
                 }
             }
 
             Entry::Vacant(e) => {
-                if filter.is_some() {
-                    STEAL_FILTERED_PORT_SUBSCRIPTION
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                } else {
-                    STEAL_UNFILTERED_PORT_SUBSCRIPTION
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
+                self.handle.steal(port).await?;
 
                 e.insert(PortSubscription::new(
                     client_id,
                     client_protocol_version,
                     filter,
                 ));
-                Ok(true)
             }
         };
 
-        match add_redirect {
-            Ok(true) => {
-                self.redirector.add_redirection(port).await?;
-
-                Ok(Ok(port))
-            }
-            Ok(false) => Ok(Ok(port)),
-            Err(e) => Ok(Err(e)),
+        if filtered {
+            STEAL_FILTERED_PORT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
+        } else {
+            STEAL_UNFILTERED_PORT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
         }
+
+        Ok(Ok(port))
     }
 
     /// Remove a subscription from this set, if it exists.
@@ -416,26 +113,20 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     ///
     /// * `client_id` - identifier of the client that issued the subscription
     /// * `port` - number of the subscription port
-    ///
-    /// # Warning
-    ///
-    /// If this method returns an [`Err`], it means that this set is out of sync with the inner
-    /// [`PortRedirector`] and it is no longer usable. It is a caller's responsibility to clean
-    /// up any external state.
-    pub async fn remove(&mut self, client_id: ClientId, port: Port) -> Result<(), R::Error> {
+    pub fn remove(&mut self, client_id: ClientId, port: Port) {
         let Entry::Occupied(mut e) = self.subscriptions.entry(port) else {
-            return Ok(());
+            return;
         };
 
-        let remove_redirect = match e.get_mut() {
+        match e.get_mut() {
             PortSubscription::Unfiltered(subscribed_client) if *subscribed_client == client_id => {
                 e.remove();
                 STEAL_UNFILTERED_PORT_SUBSCRIPTION
                     .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
-                true
+                self.handle.stop_steal(port);
             }
-            PortSubscription::Unfiltered(..) => false,
+            PortSubscription::Unfiltered(..) => {}
             PortSubscription::Filtered(filters) => {
                 if filters.remove(&client_id).is_some() {
                     STEAL_FILTERED_PORT_SUBSCRIPTION
@@ -444,22 +135,10 @@ impl<R: PortRedirector> PortSubscriptions<R> {
 
                 if filters.is_empty() {
                     e.remove();
-                    true
-                } else {
-                    false
+                    self.handle.stop_steal(port);
                 }
             }
-        };
-
-        if remove_redirect {
-            self.redirector.remove_redirection(port).await?;
-
-            if self.subscriptions.is_empty() {
-                self.redirector.cleanup().await?;
-            }
         }
-
-        Ok(())
     }
 
     /// Remove all client subscriptions from this set.
@@ -467,34 +146,50 @@ impl<R: PortRedirector> PortSubscriptions<R> {
     /// # Params
     ///
     /// * `client_id` - identifier of the client that issued the subscriptions
-    ///
-    /// # Warning
-    ///
-    /// If this method returns an [`Err`], it means that this set is out of sync with the inner
-    /// [`PortRedirector`] and it is no longer usable. It is a caller's responsibility to clean
-    /// up any external state.
-    pub async fn remove_all(&mut self, client_id: ClientId) -> Result<(), R::Error> {
-        let ports = self
-            .subscriptions
-            .iter()
-            .filter_map(|(k, v)| v.has_client(client_id).then_some(*k))
-            .collect::<Vec<_>>();
+    pub fn remove_all(&mut self, client_id: ClientId) {
+        self.subscriptions
+            .retain(|port, subscription| match subscription {
+                PortSubscription::Unfiltered(subscribed_client)
+                    if *subscribed_client == client_id =>
+                {
+                    STEAL_UNFILTERED_PORT_SUBSCRIPTION
+                        .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
-        for port in ports {
-            self.remove(client_id, port).await?;
+                    self.handle.stop_steal(*port);
+
+                    false
+                }
+                PortSubscription::Unfiltered(..) => true,
+                PortSubscription::Filtered(filters) => {
+                    if filters.remove(&client_id).is_some() {
+                        STEAL_FILTERED_PORT_SUBSCRIPTION
+                            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+
+                    if filters.is_empty() {
+                        self.handle.stop_steal(*port);
+                    }
+
+                    filters.is_empty().not()
+                }
+            });
+    }
+
+    /// Wait until there's a new redirected connection.
+    pub async fn next_connection(
+        &mut self,
+    ) -> Result<(RedirectedConnection, PortSubscription), RedirectorTaskError> {
+        loop {
+            let conn = self.handle.next().await.transpose()?;
+
+            let Some(conn) = conn else {
+                break std::future::pending().await;
+            };
+
+            if let Some(subscription) = self.subscriptions.get(&conn.destination().port()) {
+                break Ok((conn, subscription.clone()));
+            }
         }
-
-        Ok(())
-    }
-
-    /// Return a subscription for the given `port`.
-    pub fn get(&self, port: Port) -> Option<&PortSubscription> {
-        self.subscriptions.get(&port)
-    }
-
-    /// Call [`PortRedirector::next_connection`] on the inner [`PortRedirector`].
-    pub async fn next_connection(&mut self) -> Result<(TcpStream, SocketAddr), R::Error> {
-        self.redirector.next_connection().await
     }
 }
 
@@ -556,84 +251,28 @@ impl PortSubscription {
             },
         }
     }
-
-    /// Return whether this subscription belongs (possibly partially) to the given client.
-    fn has_client(&self, client_id: ClientId) -> bool {
-        match self {
-            Self::Filtered(filters) => filters.contains_key(&client_id),
-            Self::Unfiltered(subscribed_client) => *subscribed_client == client_id,
-        }
-    }
 }
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashSet;
+    use mirrord_protocol::ResponseError;
 
-    use super::*;
+    use crate::{
+        incoming::{test::DummyRedirector, RedirectorTask},
+        steal::{
+            http::HttpFilter,
+            subscriptions::{PortSubscription, PortSubscriptions},
+        },
+        util::ClientId,
+    };
 
-    /// Implementation of [`PortRedirector`] that stores redirections in memory.
-    /// Disallows duplicate redirections or removing a non-existent redirection.
-    #[derive(Default)]
-    struct DummyRedirector {
-        redirections: HashSet<Port>,
-        dirty: bool,
-    }
-
-    /// Checks the redirections in the given [`DummyRedirector`] against a sequence of ports.
-    ///
-    /// # Usage
-    ///
-    /// * To assert exact set of redirections: `check_redirector!(redirector, 80, 81, 3000)`
-    /// * To assert no redirections: `check_redirector!(redirector)`
-    ///
-    /// # Note
-    ///
-    /// It's implemented as a macro only to preserve the original line number should the test fail.
-    macro_rules! check_redirector {
-        ( $redirector: expr $(, $x:expr )* ) => {
-            {
-                let mut temp_vec: Vec<u16> = vec![$($x,)*];
-                temp_vec.sort();
-
-                let mut redirections = $redirector.redirections.iter().copied().collect::<Vec<_>>();
-                redirections.sort();
-
-                assert_eq!(redirections, temp_vec, "redirector in bad state");
+    impl PortSubscription {
+        /// Return whether this subscription belongs (possibly partially) to the given client.
+        fn has_client(&self, client_id: ClientId) -> bool {
+            match self {
+                Self::Filtered(filters) => filters.contains_key(&client_id),
+                Self::Unfiltered(subscribed_client) => *subscribed_client == client_id,
             }
-        };
-    }
-
-    #[async_trait::async_trait]
-    impl PortRedirector for DummyRedirector {
-        type Error = Port;
-
-        async fn add_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
-            if self.redirections.insert(from) {
-                self.dirty = true;
-                Ok(())
-            } else {
-                Err(from)
-            }
-        }
-
-        async fn remove_redirection(&mut self, from: Port) -> Result<(), Self::Error> {
-            if self.redirections.remove(&from) {
-                Ok(())
-            } else {
-                Err(from)
-            }
-        }
-
-        async fn cleanup(&mut self) -> Result<(), Self::Error> {
-            self.redirections.clear();
-            self.dirty = false;
-
-            Ok(())
-        }
-
-        async fn next_connection(&mut self) -> Result<(TcpStream, SocketAddr), Self::Error> {
-            unimplemented!()
         }
     }
 
@@ -643,14 +282,15 @@ mod test {
 
     #[tokio::test]
     async fn multiple_subscriptions_one_port() {
-        let redirector = DummyRedirector::default();
-        let mut subscriptions = PortSubscriptions::new(redirector, 8);
-        check_redirector!(subscriptions.redirector);
+        let (redirector, mut state, _tx) = DummyRedirector::new();
+        let (redirector_task, steal_handle) = RedirectorTask::new(redirector);
+        tokio::spawn(redirector_task.run());
+        let mut subscriptions = PortSubscriptions::new(steal_handle, 8);
 
         // Adding unfiltered subscription.
         subscriptions.add(0, 80, None, None).await.unwrap().unwrap();
-        check_redirector!(subscriptions.redirector, 80);
-        let sub = subscriptions.get(80).unwrap();
+        assert!(state.borrow().has_redirections([80]));
+        let sub = subscriptions.subscriptions.get(&80).unwrap();
         assert!(matches!(sub, PortSubscription::Unfiltered(0)), "{sub:?}");
 
         // Same client cannot subscribe again (unfiltered).
@@ -658,8 +298,8 @@ mod test {
             subscriptions.add(0, 80, None, None).await.unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
         );
-        check_redirector!(subscriptions.redirector, 80);
-        let sub = subscriptions.get(80).unwrap();
+        assert!(state.borrow().has_redirections([80]));
+        let sub = subscriptions.subscriptions.get(&80).unwrap();
         assert!(matches!(sub, PortSubscription::Unfiltered(0)), "{sub:?}");
 
         // Same client cannot subscribe again (filtered).
@@ -670,8 +310,8 @@ mod test {
                 .unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
         );
-        check_redirector!(subscriptions.redirector, 80);
-        let sub = subscriptions.get(80).unwrap();
+        assert!(state.borrow().has_redirections([80]));
+        let sub = subscriptions.subscriptions.get(&80).unwrap();
         assert!(matches!(sub, PortSubscription::Unfiltered(0)), "{sub:?}");
 
         // Another client cannot subscribe (unfiltered).
@@ -679,8 +319,8 @@ mod test {
             subscriptions.add(1, 80, None, None).await.unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
         );
-        check_redirector!(subscriptions.redirector, 80);
-        let sub = subscriptions.get(80).unwrap();
+        assert!(state.borrow().has_redirections([80]));
+        let sub = subscriptions.subscriptions.get(&80).unwrap();
         assert!(matches!(sub, PortSubscription::Unfiltered(0)), "{sub:?}");
 
         // Another client cannot subscribe (filtered).
@@ -691,17 +331,19 @@ mod test {
                 .unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
         );
-        check_redirector!(subscriptions.redirector, 80);
-        let sub = subscriptions.get(80).unwrap();
+        assert!(state.borrow().has_redirections([80]));
+        let sub = subscriptions.subscriptions.get(&80).unwrap();
         assert!(matches!(sub, PortSubscription::Unfiltered(0)), "{sub:?}");
 
         // Removing unfiltered subscription.
-        subscriptions.remove(0, 80).await.unwrap();
+        subscriptions.remove(0, 80);
 
         // Checking if all is cleaned up.
-        check_redirector!(subscriptions.redirector);
-        assert!(!subscriptions.redirector.dirty);
-        let sub = subscriptions.get(80);
+        state
+            .wait_for(|state| state.has_redirections([]))
+            .await
+            .unwrap();
+        let sub = subscriptions.subscriptions.get(&80);
         assert!(sub.is_none(), "{sub:?}");
 
         // Adding filtered subscription.
@@ -710,8 +352,8 @@ mod test {
             .await
             .unwrap()
             .unwrap();
-        check_redirector!(subscriptions.redirector, 80);
-        let sub = subscriptions.get(80).unwrap();
+        assert!(state.borrow().has_redirections([80]));
+        let sub = subscriptions.subscriptions.get(&80).unwrap();
         assert!(
             matches!(sub, PortSubscription::Filtered(filters) if filters.len() == 1),
             "{sub:?}"
@@ -722,8 +364,8 @@ mod test {
             subscriptions.add(0, 80, None, None).await.unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
         );
-        check_redirector!(subscriptions.redirector, 80);
-        let sub = subscriptions.get(80).unwrap();
+        assert!(state.borrow().has_redirections([80]));
+        let sub = subscriptions.subscriptions.get(&80).unwrap();
         assert!(
             matches!(sub, PortSubscription::Filtered(filters) if filters.len() == 1),
             "{sub:?}"
@@ -737,8 +379,8 @@ mod test {
                 .unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
         );
-        check_redirector!(subscriptions.redirector, 80);
-        let sub = subscriptions.get(80).unwrap();
+        assert!(state.borrow().has_redirections([80]));
+        let sub = subscriptions.subscriptions.get(&80).unwrap();
         assert!(
             matches!(sub, PortSubscription::Filtered(filters) if filters.len() == 1),
             "{sub:?}"
@@ -749,8 +391,8 @@ mod test {
             subscriptions.add(1, 80, None, None).await.unwrap(),
             Err(ResponseError::PortAlreadyStolen(80)),
         );
-        check_redirector!(subscriptions.redirector, 80);
-        let sub = subscriptions.get(80).unwrap();
+        assert!(state.borrow().has_redirections([80]));
+        let sub = subscriptions.subscriptions.get(&80).unwrap();
         assert!(
             matches!(sub, PortSubscription::Filtered(filters) if filters.len() == 1),
             "{sub:?}"
@@ -762,39 +404,41 @@ mod test {
             .await
             .unwrap()
             .unwrap();
-        check_redirector!(subscriptions.redirector, 80);
-        let sub = subscriptions.get(80).unwrap();
+        assert!(state.borrow().has_redirections([80]));
+        let sub = subscriptions.subscriptions.get(&80).unwrap();
         assert!(
             matches!(sub, PortSubscription::Filtered(filters) if filters.len() == 2),
             "{sub:?}"
         );
 
         // Removing first subscription.
-        subscriptions.remove(0, 80).await.unwrap();
+        subscriptions.remove(0, 80);
 
         // Checking if the second subscription still exists.
-        check_redirector!(subscriptions.redirector, 80);
-        let sub = subscriptions.get(80).unwrap();
+        let sub = subscriptions.subscriptions.get(&80).unwrap();
         assert!(
             matches!(sub, PortSubscription::Filtered(filters) if filters.len() == 1),
             "{sub:?}"
         );
 
         // Removing second subscription.
-        subscriptions.remove(1, 80).await.unwrap();
+        subscriptions.remove(1, 80);
 
         // Checking if all is cleaned up.
-        check_redirector!(subscriptions.redirector);
-        assert!(!subscriptions.redirector.dirty);
-        let sub = subscriptions.get(80);
+        state
+            .wait_for(|state| state.has_redirections([]))
+            .await
+            .unwrap();
+        let sub = subscriptions.subscriptions.get(&80);
         assert!(sub.is_none(), "{sub:?}");
     }
 
     #[tokio::test]
     async fn multiple_subscriptions_multiple_ports() {
-        let redirector = DummyRedirector::default();
-        let mut subscriptions = PortSubscriptions::new(redirector, 8);
-        check_redirector!(subscriptions.redirector);
+        let (redirector, mut state, _tx) = DummyRedirector::new();
+        let (redirector_task, steal_handle) = RedirectorTask::new(redirector);
+        tokio::spawn(redirector_task.run());
+        let mut subscriptions = PortSubscriptions::new(steal_handle, 8);
 
         // Adding unfiltered subscription for port 80.
         subscriptions.add(0, 80, None, None).await.unwrap().unwrap();
@@ -807,11 +451,11 @@ mod test {
             .unwrap();
 
         // Checking state.
-        check_redirector!(subscriptions.redirector, 80, 81);
-        let sub = subscriptions.get(80).unwrap();
+        assert!(state.borrow().has_redirections([80, 81]));
+        let sub = subscriptions.subscriptions.get(&80).unwrap();
         assert!(sub.has_client(0));
         assert!(matches!(sub, PortSubscription::Unfiltered(0)), "{sub:?}");
-        let sub = subscriptions.get(81).unwrap();
+        let sub = subscriptions.subscriptions.get(&81).unwrap();
         assert!(sub.has_client(1));
         assert!(
             matches!(sub, PortSubscription::Filtered(filters) if filters.len() == 1),
@@ -819,23 +463,27 @@ mod test {
         );
 
         // Removing subscriptions.
-        subscriptions.remove(0, 80).await.unwrap();
-        subscriptions.remove(1, 81).await.unwrap();
+        subscriptions.remove(0, 80);
+        subscriptions.remove(1, 81);
 
         // Checking if all is cleaned up.
-        check_redirector!(subscriptions.redirector);
-        assert!(!subscriptions.redirector.dirty);
-        let sub = subscriptions.get(80);
+        // check_redirector!(subscriptions.redirector);
+        state
+            .wait_for(|state| state.has_redirections([]))
+            .await
+            .unwrap();
+        let sub = subscriptions.subscriptions.get(&80);
         assert!(sub.is_none(), "{sub:?}");
-        let sub = subscriptions.get(81);
+        let sub = subscriptions.subscriptions.get(&81);
         assert!(sub.is_none(), "{sub:?}");
     }
 
     #[tokio::test]
     async fn remove_all_from_client() {
-        let redirector = DummyRedirector::default();
-        let mut subscriptions = PortSubscriptions::new(redirector, 8);
-        check_redirector!(subscriptions.redirector);
+        let (redirector, mut state, _tx) = DummyRedirector::new();
+        let (redirector_task, steal_handle) = RedirectorTask::new(redirector);
+        tokio::spawn(redirector_task.run());
+        let mut subscriptions = PortSubscriptions::new(steal_handle, 8);
 
         // Adding unfiltered subscription for port 80.
         subscriptions.add(0, 80, None, None).await.unwrap().unwrap();
@@ -848,11 +496,11 @@ mod test {
             .unwrap();
 
         // Checking state.
-        check_redirector!(subscriptions.redirector, 80, 81);
-        let sub = subscriptions.get(80).unwrap();
+        assert!(state.borrow().has_redirections([80, 81]));
+        let sub = subscriptions.subscriptions.get(&80).unwrap();
         assert!(sub.has_client(0));
         assert!(matches!(sub, PortSubscription::Unfiltered(0)), "{sub:?}");
-        let sub = subscriptions.get(81).unwrap();
+        let sub = subscriptions.subscriptions.get(&81).unwrap();
         assert!(sub.has_client(0));
         assert!(
             matches!(sub, PortSubscription::Filtered(filters) if filters.len() == 1),
@@ -860,14 +508,16 @@ mod test {
         );
 
         // Removing all subscriptions of a client.
-        subscriptions.remove_all(0).await.unwrap();
+        subscriptions.remove_all(0);
 
         // Checking if all is cleaned up.
-        check_redirector!(subscriptions.redirector);
-        assert!(!subscriptions.redirector.dirty);
-        let sub = subscriptions.get(80);
+        state
+            .wait_for(|state| state.has_redirections([]))
+            .await
+            .unwrap();
+        let sub = subscriptions.subscriptions.get(&80);
         assert!(sub.is_none(), "{sub:?}");
-        let sub = subscriptions.get(81);
+        let sub = subscriptions.subscriptions.get(&81);
         assert!(sub.is_none(), "{sub:?}");
     }
 }

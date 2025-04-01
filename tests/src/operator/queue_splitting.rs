@@ -69,20 +69,22 @@ async fn expect_messages_in_queue<const N: usize>(
     client: &aws_sdk_sqs::Client,
     echo_queue: &QueueInfo,
 ) {
-    tokio::time::timeout(Duration::from_secs(20), async {
+    tokio::time::timeout(Duration::from_secs(40), async {
         println!("Verifying correct messages in echo queue {} (verifying the deployed application got the messages it was supposed to)", echo_queue.name);
         let mut expected_messages = HashSet::from(messages);
         loop {
-            if let Ok(ReceiveMessageOutput {
-                          messages: Some(received_messages),
-                          ..
-                      }) = client
+            let receive_message_output = client
                 .receive_message()
                 .queue_url(&echo_queue.url)
                 .visibility_timeout(15)
                 .wait_time_seconds(20)
                 .send()
-                .await
+                .await;
+            println!("Receive message request output: {:?}", receive_message_output);
+            if let Ok(ReceiveMessageOutput {
+                          messages: Some(received_messages),
+                          ..
+                      }) = receive_message_output
             {
                 for Message {
                     receipt_handle, body, ..
