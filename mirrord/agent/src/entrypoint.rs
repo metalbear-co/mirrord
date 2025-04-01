@@ -839,7 +839,11 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
         .map_err(|error| AgentError::BackgroundTaskFailed {
             task: "IPTablesCleaner",
             error: Arc::new(error),
-        })??;
+        })?
+        .map_err(|error| AgentError::BackgroundTaskFailed {
+            task: "IPTablesCleaner",
+            error: Arc::new(error),
+        })?;
 
     result
 }

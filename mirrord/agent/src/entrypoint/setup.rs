@@ -18,7 +18,7 @@ pub(super) async fn start_traffic_redirector(runtime: &RemoteRuntime) -> AgentRe
         .spawn(async move {
             incoming::create_iptables_redirector(flush_connections, &pod_ips, support_ipv6)
                 .await
-                .map(|redirector| RedirectorTask::new(redirector))
+                .map(RedirectorTask::new)
         })
         .await
         .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
