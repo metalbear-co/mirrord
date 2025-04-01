@@ -15,19 +15,32 @@ use tokio::{
     time::{sleep, Duration},
 };
 use tokio_stream::StreamExt;
+use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// This test requires root or CAP_NET_RAW to setup TCP sniffing.
 #[tokio::test]
 async fn sanity() {
-    let mut bin = get_test_bin("mirrord-agent");
-    // we do wait, not sure what's happened
-    #[allow(clippy::zombie_processes)]
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_thread_ids(true)
+                .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+                .pretty()
+                .with_line_number(true),
+        )
+        .with(tracing_subscriber::EnvFilter::from_env(
+            "mirrord=trace,warn",
+        ))
+        .init();
+
+    let mut bin = tokio::process::Command::from(get_test_bin("mirrord-agent"));
     let child = bin
         .arg("-t")
         .arg("2")
         .arg("-i")
         .arg("lo")
         .arg("blackbox-test")
+        .kill_on_drop(true)
         .spawn()
         .expect("mirrord-agent failed to start");
     // Wait for agent to listen
@@ -142,7 +155,7 @@ async fn sanity() {
     drop(mutex);
 
     task.await.unwrap();
-    let result = child.wait_with_output().unwrap();
+    let result = child.wait_with_output().await.unwrap();
     assert!(result.status.success());
 
     let stderr = String::from_utf8_lossy(&result.stderr);

@@ -136,7 +136,6 @@ impl State {
         };
 
         let environ_path = PathBuf::from("/proc").join(pid).join("environ");
-
         match env::get_proc_environ(environ_path).await {
             Ok(environ) => env.extend(environ.into_iter()),
             Err(err) => {
@@ -553,13 +552,10 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         ipv4_listener_result
     }?;
 
-    match listener.local_addr() {
-        Ok(addr) => debug!(
-            client_listener_address = addr.to_string(),
-            "Created listener."
-        ),
-        Err(err) => error!(%err, "listener local address error"),
-    }
+    debug!(
+        client_listener_address = %listener.local_addr()?,
+        "Created the client listener.",
+    );
 
     let state = State::new(&args).await?;
 
