@@ -24,7 +24,7 @@ pub async fn copy_target_starts_a_working_copy(
     let service = service.await;
 
     // Create a temporary file for the config
-    let config_file = NamedTempFile::new().unwrap();
+    let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
 
     // Create the config JSON
     let config = serde_json::json!({
@@ -35,8 +35,7 @@ pub async fn copy_target_starts_a_working_copy(
         }
     });
     // Write the config to the temporary file
-    let config_path = config_file.path();
-    std::fs::write(&config_path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
+    serde_json::to_writer(config_file.as_file_mut(), &config).unwrap();
 
     let target = match target {
         "pod" => service.pod_container_target(),
