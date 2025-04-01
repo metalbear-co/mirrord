@@ -154,7 +154,9 @@ pub struct MirrordClusterPolicySpec {
     /// Optional.
     pub profile_allowlist: Option<Vec<String>>,
 
-    /// Determines if this policy should be applied to copied targets.
+    /// Whether this policy applies also to sessions using the copy target feature.
+    ///
+    /// By default, policies don't apply to copy target sessions.
     ///
     /// Defaults to `false`.
     #[serde(default)]
