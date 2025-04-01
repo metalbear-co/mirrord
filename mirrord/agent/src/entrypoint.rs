@@ -58,7 +58,8 @@ use crate::{
 
 mod setup;
 
-/// Size of [`mpsc`] channels connecting [`TcpStealerApi`] with the background task.
+/// Size of [`mpsc`](tokio::sync::mpsc) channels connecting [`TcpStealerApi`]s with the background
+/// task.
 const CHANNEL_SIZE: usize = 1024;
 
 /// Keeps track of next client id.

@@ -141,8 +141,7 @@ impl TcpOutgoingTask {
         }
     }
 
-    /// Runs this task as long as the channels connecting it with [`TcpOutgoingApi`] are open.
-    /// This routine never fails and returns [`Result`] only due to [`WatchedTask`] constraints.
+    /// Runs this task as long as the channels connecting it with the [`TcpOutgoingApi`] are open.
     #[tracing::instrument(level = Level::TRACE, skip(self))]
     async fn run(mut self) {
         loop {
