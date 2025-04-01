@@ -2,7 +2,6 @@ use core::fmt;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    thread,
 };
 
 use bytes::{Bytes, BytesMut};
@@ -27,8 +26,7 @@ use tracing::Level;
 use crate::{
     error::AgentResult,
     metrics::UDP_OUTGOING_CONNECTION,
-    util::run_thread_in_namespace,
-    watched_task::{TaskStatus, WatchedTask},
+    util::remote_runtime::{BgTaskStatus, IntoStatus, MaybeRemoteRuntime},
 };
 
 /// Task that handles [`LayerUdpOutgoing`] and [`DaemonUdpOutgoing`] messages.
@@ -91,7 +89,7 @@ impl UdpOutgoingTask {
     /// This routine never fails and returns [`AgentResult`] only due to [`WatchedTask`]
     /// constraints.
     #[tracing::instrument(level = Level::TRACE, skip(self))]
-    pub(super) async fn run(mut self) -> AgentResult<()> {
+    pub(super) async fn run(mut self) {
         loop {
             let channel_closed = select! {
                 biased;
@@ -113,7 +111,7 @@ impl UdpOutgoingTask {
 
             if channel_closed {
                 tracing::trace!("Client channel closed, exiting");
-                break Ok(());
+                break;
             }
         }
     }
@@ -276,12 +274,7 @@ impl UdpOutgoingTask {
 /// Handles (briefly) the `UdpOutgoingRequest` and `UdpOutgoingResponse` messages, mostly the
 /// passing of these messages to the `interceptor_task` thread.
 pub(crate) struct UdpOutgoingApi {
-    /// Holds the `interceptor_task`.
-    _task: thread::JoinHandle<()>,
-
-    /// Status of the `interceptor_task`.
-    task_status: TaskStatus,
-
+    task_status: BgTaskStatus,
     /// Sends the `Layer` message to the `interceptor_task`.
     layer_tx: Sender<LayerUdpOutgoing>,
 
@@ -312,27 +305,15 @@ async fn connect(remote_address: SocketAddress) -> Result<UdpSocket, ResponseErr
 }
 
 impl UdpOutgoingApi {
-    const TASK_NAME: &'static str = "UdpOutgoing";
-
-    pub(crate) fn new(pid: Option<u64>) -> Self {
+    pub(crate) fn new(runtime: &MaybeRemoteRuntime) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
-        let watched_task = WatchedTask::new(
-            Self::TASK_NAME,
-            UdpOutgoingTask::new(pid, layer_rx, daemon_tx).run(),
-        );
-
-        let task_status = watched_task.status();
-        let task = run_thread_in_namespace(
-            watched_task.start(),
-            Self::TASK_NAME.to_string(),
-            pid,
-            "net",
-        );
+        let task_status = runtime
+            .spawn(UdpOutgoingTask::new(runtime.target_pid(), layer_rx, daemon_tx).run())
+            .into_status("UdpOutgoingTask");
 
         Self {
-            _task: task,
             task_status,
             layer_tx,
             daemon_rx,
@@ -345,7 +326,7 @@ impl UdpOutgoingApi {
         if self.layer_tx.send(message).await.is_ok() {
             Ok(())
         } else {
-            Err(self.task_status.unwrap_err().await)
+            Err(self.task_status.wait_assert_running().await)
         }
     }
 
@@ -353,7 +334,7 @@ impl UdpOutgoingApi {
     pub(crate) async fn recv_from_task(&mut self) -> AgentResult<DaemonUdpOutgoing> {
         match self.daemon_rx.recv().await {
             Some(msg) => Ok(msg),
-            None => Err(self.task_status.unwrap_err().await),
+            None => Err(self.task_status.wait_assert_running().await),
         }
     }
 }

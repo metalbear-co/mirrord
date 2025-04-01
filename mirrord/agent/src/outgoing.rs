@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, thread, time::Duration};
+use std::{collections::HashMap, fmt, time::Duration};
 
 use bytes::Bytes;
 use mirrord_protocol::{
@@ -20,8 +20,7 @@ use tracing::Level;
 use crate::{
     error::AgentResult,
     metrics::TCP_OUTGOING_CONNECTION,
-    util::run_thread_in_namespace,
-    watched_task::{TaskStatus, WatchedTask},
+    util::remote_runtime::{BgTaskStatus, IntoStatus, MaybeRemoteRuntime},
 };
 
 mod socket_stream;
@@ -33,11 +32,7 @@ pub(crate) use udp::UdpOutgoingApi;
 /// Each agent client has their own independent instance (neither this wrapper nor the background
 /// task are shared).
 pub(crate) struct TcpOutgoingApi {
-    /// Holds the thread in which [`TcpOutgoingTask`] is running.
-    _task: thread::JoinHandle<()>,
-
-    /// Status of the [`TcpOutgoingTask`].
-    task_status: TaskStatus,
+    task_status: BgTaskStatus,
 
     /// Sends the layer messages to the [`TcpOutgoingTask`].
     layer_tx: Sender<LayerTcpOutgoing>,
@@ -47,33 +42,22 @@ pub(crate) struct TcpOutgoingApi {
 }
 
 impl TcpOutgoingApi {
-    const TASK_NAME: &'static str = "TcpOutgoing";
-
-    /// Spawns a new background task for handling `outgoing` feature and creates a new instance of
-    /// this struct to serve as an interface.
+    /// Spawns a new background task for handling the `outgoing` feature and creates a new instance
+    /// of this struct to serve as an interface.
     ///
     /// # Params
     ///
-    /// * `pid` - process id of the agent's target container
-    #[tracing::instrument(level = Level::TRACE)]
-    pub(crate) fn new(pid: Option<u64>) -> Self {
+    /// * `runtime` - tokio runtime to spawn the background task on.
+    pub(crate) fn new(runtime: &MaybeRemoteRuntime) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 
-        let watched_task = WatchedTask::new(
-            Self::TASK_NAME,
-            TcpOutgoingTask::new(pid, layer_rx, daemon_tx).run(),
-        );
-        let task_status = watched_task.status();
-        let task = run_thread_in_namespace(
-            watched_task.start(),
-            Self::TASK_NAME.to_string(),
-            pid,
-            "net",
-        );
+        let pid = runtime.target_pid();
+        let task_status = runtime
+            .spawn(TcpOutgoingTask::new(pid, layer_rx, daemon_tx).run())
+            .into_status("TcpOutgoingTask");
 
         Self {
-            _task: task,
             task_status,
             layer_tx,
             daemon_rx,
@@ -86,7 +70,7 @@ impl TcpOutgoingApi {
         if self.layer_tx.send(message).await.is_ok() {
             Ok(())
         } else {
-            Err(self.task_status.unwrap_err().await)
+            Err(self.task_status.wait_assert_running().await)
         }
     }
 
@@ -95,7 +79,7 @@ impl TcpOutgoingApi {
     pub(crate) async fn recv_from_task(&mut self) -> AgentResult<DaemonTcpOutgoing> {
         match self.daemon_rx.recv().await {
             Some(msg) => Ok(msg),
-            None => Err(self.task_status.unwrap_err().await),
+            None => Err(self.task_status.wait_assert_running().await),
         }
     }
 }
@@ -160,7 +144,7 @@ impl TcpOutgoingTask {
     /// Runs this task as long as the channels connecting it with [`TcpOutgoingApi`] are open.
     /// This routine never fails and returns [`Result`] only due to [`WatchedTask`] constraints.
     #[tracing::instrument(level = Level::TRACE, skip(self))]
-    async fn run(mut self) -> AgentResult<()> {
+    async fn run(mut self) {
         loop {
             let channel_closed = select! {
                 biased;
@@ -182,7 +166,7 @@ impl TcpOutgoingTask {
 
             if channel_closed {
                 tracing::trace!("Client channel closed, exiting");
-                break Ok(());
+                break;
             }
         }
     }

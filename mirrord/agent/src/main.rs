@@ -31,7 +31,6 @@ mod sniffer;
 mod steal;
 mod util;
 mod vpn;
-mod watched_task;
 
 #[cfg(target_os = "linux")]
 #[tokio::main(flavor = "current_thread")]

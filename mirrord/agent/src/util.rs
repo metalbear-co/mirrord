@@ -5,19 +5,13 @@ use std::{
     hash::Hash,
     pin::Pin,
     task::{Context, Poll},
-    thread::JoinHandle,
 };
 
 use futures::{future::BoxFuture, FutureExt};
 use tokio::sync::mpsc;
-use tracing::error;
-
-use crate::{
-    error::AgentResult,
-    namespace::{set_namespace, NamespaceType},
-};
 
 pub mod path_resolver;
+pub mod remote_runtime;
 
 /// Struct that helps you manage topic -> subscribers
 ///
@@ -96,71 +90,6 @@ where
     #[allow(dead_code)] // we might want it later on
     pub fn remove_topic(&mut self, topic: T) {
         self.inner.remove(&topic);
-    }
-}
-
-/// Helper that creates a new [`tokio::runtime::Runtime`], and immediately blocks on it.
-///
-/// Used to start new tasks that would be too heavy for just [`tokio::task::spawn()`] in the
-/// caller's runtime.
-///
-/// These tasks will execute `on_start_fn` to change namespace (see [`enter_namespace`] for more
-/// details).
-#[tracing::instrument(level = "trace", skip_all)]
-pub(crate) fn run_thread<F, StartFn>(
-    future: F,
-    thread_name: String,
-    on_start_fn: StartFn,
-) -> JoinHandle<F::Output>
-where
-    F: Future + Send + 'static,
-    F::Output: Send + 'static,
-    StartFn: Fn() + Send + Sync + 'static,
-{
-    std::thread::spawn(move || {
-        on_start_fn();
-
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .thread_name(thread_name)
-            .on_thread_start(on_start_fn)
-            .build()
-            .unwrap();
-        rt.block_on(future)
-    })
-}
-
-/// Calls [`run_thread`] with `on_start_fn` always being [`enter_namespace`].
-#[tracing::instrument(level = "trace", skip_all)]
-pub(crate) fn run_thread_in_namespace<F>(
-    future: F,
-    thread_name: String,
-    pid: Option<u64>,
-    namespace: &str,
-) -> JoinHandle<F::Output>
-where
-    F: Future + Send + 'static,
-    F::Output: Send + 'static,
-{
-    let namespace = namespace.to_string();
-
-    run_thread(future, thread_name, move || {
-        enter_namespace(pid, &namespace).expect("Failed setting namespace!")
-    })
-}
-
-/// Used to enter a different (so far only used for "net") namespace for a task.
-///
-/// Many of the agent's TCP/UDP connections require that they're made from the `pid`'s namespace to
-/// work.
-#[tracing::instrument(level = "trace")]
-pub(crate) fn enter_namespace(pid: Option<u64>, namespace: &str) -> AgentResult<()> {
-    if let Some(pid) = pid {
-        Ok(set_namespace(pid, NamespaceType::Net).inspect_err(|fail| {
-            error!("Failed setting pid {pid:#?} namespace {namespace:#?} with {fail:#?}")
-        })?)
-    } else {
-        Ok(())
     }
 }
 
