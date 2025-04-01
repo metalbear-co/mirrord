@@ -225,7 +225,7 @@ impl DnsWorker {
             tokio::select! {
                 _ = cancellation_token.cancelled() => break Ok(()),
 
-                _ = self.tasks.join_next() => {
+                Some(..) = self.tasks.join_next() => {
                     DNS_REQUEST_COUNT.fetch_sub(1, Ordering::Relaxed);
                 }
 

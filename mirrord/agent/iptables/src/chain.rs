@@ -36,9 +36,9 @@ where
         let existing_rules = inner.list_rules(&chain_name)?.len();
 
         if existing_rules == 0 {
-            return Err(IPTablesError::from(format!(
-                "Unable to load rules for chain {chain_name}"
-            )));
+            return Err(IPTablesError(
+                format!("Unable to load rules for chain {chain_name}").into(),
+            ));
         }
 
         // Start with 1 because the chain will allways have atleast `-A <chain name>` as a rule

@@ -90,7 +90,9 @@ pub struct RuntimeData {
     pub mesh: Option<MeshVendor>,
 
     pub share_process_namespace: bool,
-    // container probe ports
+
+    /// Ports where HTTP/gRPC probes are configured
+    /// in the target pod.
     pub containers_probe_ports: Vec<u16>,
 }
 
@@ -283,53 +285,58 @@ impl RuntimeData {
         }
     }
 
-    /// probe_ports returns list of ports that can interfere with the stealing
-    /// process.
-    /// - Ignoring startup probes: target needs to be ready to start a new session
-    /// - Ignoring tcp probes: the agent will accept the connection anyway
+    /// Returns a list of ports used by the container's readiness and liveness probes.
+    ///
+    /// * Startup probes are ignored: target needs to be ready to start a new session anyway
+    /// * TCP probes are ignored: the agent will accept the connection anyway
     fn probe_ports(container: &Container) -> Vec<u16> {
-        fn port_to_int(
-            port: &IntOrString,
-            container_ports: &Option<Vec<ContainerPort>>,
-        ) -> Option<u16> {
+        fn port_to_int(port: &IntOrString, container_ports: &[ContainerPort]) -> Option<u16> {
             match port {
                 IntOrString::Int(p) => Some(*p as u16),
-                IntOrString::String(port_name) => container_ports.as_ref().and_then(|ports| {
-                    ports
-                        .iter()
-                        .find(|p| p.name.as_ref() == Some(port_name))
-                        .map(|p| p.container_port as u16)
-                }),
+                IntOrString::String(port_name) => container_ports
+                    .iter()
+                    .find(|p| p.name.as_ref() == Some(port_name))
+                    .and_then(|p| p.container_port.try_into().ok()),
             }
         }
 
-        fn get_probe_ports(
-            probe: &Option<Probe>,
-            container_ports: &Option<Vec<ContainerPort>>,
-        ) -> Vec<u16> {
-            probe
+        fn get_probe_ports(probe: &Probe, container_ports: &[ContainerPort]) -> Vec<u16> {
+            let mut ports = Vec::new();
+
+            if let Some(port) = probe
+                .http_get
                 .as_ref()
-                .map(|p| {
-                    let mut ports = Vec::new();
-                    if let Some(http_get) = &p.http_get {
-                        if let Some(port) = port_to_int(&http_get.port, container_ports) {
-                            ports.push(port);
-                        }
-                    }
-                    if let Some(grpc) = &p.grpc {
-                        ports.push(grpc.port as u16);
-                    }
-                    ports
-                })
-                .unwrap_or_default()
+                .and_then(|get| port_to_int(&get.port, container_ports))
+            {
+                ports.push(port);
+            }
+
+            if let Some(port) = probe
+                .grpc
+                .as_ref()
+                .and_then(|grpc| grpc.port.try_into().ok())
+            {
+                ports.push(port);
+            }
+
+            ports
         }
 
         let mut ports = Vec::new();
-        ports.extend(get_probe_ports(&container.liveness_probe, &container.ports));
-        ports.extend(get_probe_ports(
-            &container.readiness_probe,
-            &container.ports,
-        ));
+
+        if let Some(liveness) = &container.liveness_probe {
+            ports.extend(get_probe_ports(
+                liveness,
+                container.ports.as_deref().unwrap_or_default(),
+            ));
+        }
+
+        if let Some(readiness) = &container.readiness_probe {
+            ports.extend(get_probe_ports(
+                readiness,
+                container.ports.as_deref().unwrap_or_default(),
+            ));
+        }
 
         ports
     }

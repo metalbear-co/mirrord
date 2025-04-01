@@ -858,6 +858,7 @@ pub enum Application {
     DynamicApp(String, Vec<String>),
     /// Go app that only checks whether Linux pidfd syscalls are supported.
     Go23Issue2988,
+    NodeMakeConnections,
 }
 
 impl Application {
@@ -914,9 +915,10 @@ impl Application {
                 )
             }
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
-            Application::NodeFileOps | Application::NodeSpawn | Application::NodeIssue2903 => {
-                String::from("node")
-            }
+            Application::NodeFileOps
+            | Application::NodeSpawn
+            | Application::NodeIssue2903
+            | Application::NodeMakeConnections => String::from("node"),
             Application::Go21Dir => String::from("tests/apps/dir_go/21.go_test_app"),
             Application::Go22Dir => String::from("tests/apps/dir_go/22.go_test_app"),
             Application::Go23Dir => String::from("tests/apps/dir_go/23.go_test_app"),
@@ -1099,6 +1101,10 @@ impl Application {
                 app_path.push("issue2807.mjs");
                 vec![app_path.to_string_lossy().to_string()]
             }
+            Application::NodeMakeConnections => {
+                app_path.push("make_connections.mjs");
+                vec![app_path.to_string_lossy().to_string()]
+            }
             Application::PythonSelfConnect => {
                 app_path.push("self_connect.py");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
@@ -1255,7 +1261,8 @@ impl Application {
             | Application::RustRebind0
             | Application::Go23Open { .. }
             | Application::DynamicApp(..)
-            | Application::Go23Issue2988 => unimplemented!("shouldn't get here"),
+            | Application::Go23Issue2988
+            | Application::NodeMakeConnections => unimplemented!("shouldn't get here"),
             Application::PythonSelfConnect => 1337,
             Application::RustIssue2058 => 1234,
         }

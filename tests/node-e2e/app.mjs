@@ -10,12 +10,6 @@ server.on('request', (request, response) => {
     'content-type': 'text/html; charset=utf-8',
   });
   response.end(request.method);
-
-  response.on('finish', () => {
-    if (request.method == 'DELETE') {
-      server.close();
-    }
-  });
 });
 
 server.on('error', (fail) => {
