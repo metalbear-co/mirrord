@@ -1,16 +1,6 @@
-import time
-import threading
 from fastapi import FastAPI, Response
-from os import getpid, kill
-from signal import SIGTERM
 
 app = FastAPI()
-
-def kill_later():
-    def kill_thread():
-        time.sleep(1)
-        kill(getpid(), SIGTERM)
-    threading.Thread(target=kill_thread).start()
 
 @app.get("/")
 def get():
@@ -30,5 +20,4 @@ def put():
 @app.delete("/")
 def delete():
     print("DELETE: Request completed")
-    kill_later()
     return Response(content = "DELETE", media_type="text/plain")

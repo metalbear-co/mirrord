@@ -8,6 +8,47 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.137.0](https://github.com/metalbear-co/mirrord/tree/3.137.0) - 2025-03-26
+
+
+### Added
+
+- mirrord prolicies now allow for enforcing usage of mirrord profiles.
+
+
+### Changed
+
+- Moved the `readonly_file_buffer` configuration option from experimental to
+  `config.feature.fs`.
+  [#2984](https://github.com/metalbear-co/mirrord/issues/2984)
+- Allow ping-pong an extra timeout period if intproxy recives other messages
+  from the agent in last period.
+
+
+### Fixed
+
+- Added a limit on the size of `config.feature.fs.readonly_file_buffer` to a maximum of 1 MB
+  to avoid EIO errors.
+  [#3206](https://github.com/metalbear-co/mirrord/issues/3206)
+- Fixed a bug related to stealing IPv6 traffic (resolving original destination
+  of a stolen connection).
+- Fixed an issue where mirrord was preventing the local application from making
+  gRPC connections to sidecar containers.
+  [#3212](https://github.com/metalbear-co/mirrord/issues/3212)
+
+
+### Internal
+
+- Added crate level docs to mirrord-macros.
+- Added crate level docs to mirrord-sip.
+- Added titles for schemars so the rename will not affect the title.
+- Added unit tests for recent SIP regressions.
+- Extracted agent's iptables logic to a separate crate.
+- Added crate level docs to mirrord-cli.
+  [#168](https://github.com/metalbear-co/mirrord/issues/168)
+- Changed the release workflow to use GHCR cache when building and pushing the
+  `mirrord-cli` image.
+
 ## [3.136.0](https://github.com/metalbear-co/mirrord/tree/3.136.0) - 2025-03-21
 
 
