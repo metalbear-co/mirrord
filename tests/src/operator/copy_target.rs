@@ -2,12 +2,9 @@
 #![cfg(feature = "operator")]
 //! Test the copy-target features with an operator.
 
-use std::time::Duration;
-
 use rstest::*;
-use tempfile::NamedTempFile;
 
-use crate::utils::{service, Application, EnvApp, KubeService};
+use crate::utils::{service, EnvApp, KubeService};
 
 /// Starts mirrord with the `copy-target` feature just to validate that it can create a
 /// working copy-pod. Should work as a sanity check that the targets (see `target` parameter)
@@ -25,8 +22,8 @@ pub async fn copy_target_starts_a_working_copy(
         EnvApp::NodeInclude,
         EnvApp::NodeExclude
     )]
-    #[values("pod", "deployment")]
-    target: &str,
+    application: EnvApp,
+    #[values("pod", "deployment")] target: &str,
 ) {
     use crate::utils::run_exec_with_target;
 
