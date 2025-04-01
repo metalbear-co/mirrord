@@ -15,24 +15,10 @@ use tokio::{
     time::{sleep, Duration},
 };
 use tokio_stream::StreamExt;
-use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// This test requires root or CAP_NET_RAW to setup TCP sniffing.
 #[tokio::test]
 async fn sanity() {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_thread_ids(true)
-                .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-                .pretty()
-                .with_line_number(true),
-        )
-        .with(tracing_subscriber::EnvFilter::from_env(
-            "mirrord=trace,warn",
-        ))
-        .init();
-
     let mut bin = tokio::process::Command::from(get_test_bin("mirrord-agent"));
     let child = bin
         .arg("-t")
@@ -40,6 +26,7 @@ async fn sanity() {
         .arg("-i")
         .arg("lo")
         .arg("blackbox-test")
+        .env("RUST_LOG", "mirrord=trace,warn")
         .kill_on_drop(true)
         .spawn()
         .expect("mirrord-agent failed to start");

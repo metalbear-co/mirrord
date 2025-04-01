@@ -92,7 +92,7 @@ impl State {
 
         let mut env: HashMap<String, String> = HashMap::new();
 
-        let (ephemeral, container, pid) = match &args.mode {
+        let (ephemeral, container) = match &args.mode {
             cli::Mode::Targeted {
                 container_id,
                 container_runtime,
@@ -101,11 +101,10 @@ impl State {
                 let container = get_container(container_id.clone(), container_runtime).await?;
 
                 let container_handle = ContainerHandle::new(container).await?;
-                let pid = container_handle.pid().to_string();
 
                 env.extend(container_handle.raw_env().clone());
 
-                (false, Some(container_handle), pid)
+                (false, Some(container_handle))
             }
             cli::Mode::Ephemeral { .. } => {
                 let container_handle = ContainerHandle::new(runtime::Container::Ephemeral(
@@ -119,13 +118,12 @@ impl State {
                 ))
                 .await?;
 
-                let pid = container_handle.pid().to_string();
                 env.extend(container_handle.raw_env().clone());
 
                 // If we are in an ephemeral container, we use pid 1.
-                (true, Some(container_handle), pid)
+                (true, Some(container_handle))
             }
-            cli::Mode::Targetless | cli::Mode::BlackboxTest => (false, None, "self".to_string()),
+            cli::Mode::Targetless | cli::Mode::BlackboxTest => (false, None),
         };
 
         let network_runtime = match container.as_ref().map(ContainerHandle::pid) {
@@ -135,7 +133,11 @@ impl State {
             None | Some(..) => MaybeRemoteRuntime::Local,
         };
 
-        let environ_path = PathBuf::from("/proc").join(pid).join("environ");
+        let env_pid = match container.as_ref().map(ContainerHandle::pid) {
+            Some(pid) => pid.to_string(),
+            None => "self".to_string(),
+        };
+        let environ_path = PathBuf::from("/proc").join(env_pid).join("environ");
         match env::get_proc_environ(environ_path).await {
             Ok(environ) => env.extend(environ.into_iter()),
             Err(err) => {
