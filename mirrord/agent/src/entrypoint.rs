@@ -529,7 +529,10 @@ impl ClientConnectionHandler {
     }
 }
 
-/// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.
+/// Real mirrord-agent routine.
+///
+/// Obtains the PID of the target container (if there is any),
+/// starts background tasks and listens for client connections.
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent(args: Args) -> AgentResult<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
@@ -720,6 +723,10 @@ async fn clear_iptable_chain() -> Result<(), IPTablesError> {
     Ok(())
 }
 
+/// Runs the current binary as a child process,
+/// using the exact same command line.
+///
+/// When this future is aborted before completion, the child process is automatically killed.
 async fn run_child_agent() -> AgentResult<()> {
     let command_args = std::env::args().collect::<Vec<_>>();
     let (command, args) = command_args
@@ -739,10 +746,12 @@ async fn run_child_agent() -> AgentResult<()> {
     }
 }
 
-/// Sets iptable chains' names in env (e.g. [`IPTABLE_PREROUTING_ENV`]) and spawns the main agent
+/// Targeted agent's parent process.
+///
+/// Sets iptable chains' names in env (e.g. [`IPTABLE_PREROUTING_ENV`]) and spawns the real agent
 /// routine in the child process. When the child process exits, cleans the iptables.
 ///
-/// Captures SIGTERM signals sent by Kubernetes when the pod is gracefully deleted.
+/// Captures SIGTERM signals sent by Kubernetes when the pod is being gracefully deleted.
 /// When a signal is captured, the child process is killed and the iptables are cleaned.
 async fn start_iptable_guard(args: Args) -> AgentResult<()> {
     debug!("start_iptable_guard -> Initializing iptable-guard.");
@@ -789,17 +798,32 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
     result
 }
 
-/// The agent is somewhat started twice, first with [`start_iptable_guard`], and then the
-/// proper agent with [`start_agent`].
+/// mirrord-agent entrypoint.
 ///
-/// ## Things to keep in mind due to the double initialization
+/// Installs a default [`CryptoProvider`](rustls::crypto::CryptoProvider) and initializes tracing.
 ///
-/// Since the _second_ agent gets spawned as a child of the _first_, they share resources,
-/// like the `namespace`, which means:
+/// # Flow
 ///
-/// 1. If you try to `bind` a socket to some address before [`start_agent`], it'll actually be bound
-///    **twice**, which incurs an error (address already in use). You could get around this by
-///    `bind`ing on `0.0.0.0:0`, but this is most likely **not** what you want.
+/// If the agent is targetless, it goes straight to spawning background tasks and listening for
+/// client connections.
+///
+/// If the agent has a target, the flow is a bit different.
+/// This is because we might need to redirect incoming traffic.
+///
+/// First, the agent generates randomized names for our iptables chains
+/// and puts them into some environment variables (e.g [`IPTABLE_PREROUTING_ENV`]).
+/// Then, it spawns a child process with the exact same command line,
+/// and waits for a SIGTERM signal. When the signal is received or the child process fails,
+/// the agent cleans the iptables (based on the previously set environment variables) before
+/// exiting.
+///
+/// The child process is the real agent, which spawns background tasks and listens for client
+/// connections. The child process knowns is the real agent, because it has the environment
+/// variables set.
+///
+/// This weird flow is a safety measure - should the real agent OOM (which means instant process
+/// termination) or be killed with a signal, the parent will a chance to clean iptables. If we leave
+/// the iptables dirty, the whole target pod is broken, probably forever.
 pub async fn main() -> AgentResult<()> {
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
