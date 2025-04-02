@@ -19,7 +19,7 @@ pub enum RemoteRuntimeError {
 
 /// An error that occurs when polling a future spawned with
 /// [`RemoteRuntime::spawn`](super::remote_runtime::RemoteRuntime::spawn) or
-/// [`MaybeRemoteRuntime::spawn`](super::remote_runtime::MaybeRemoteRuntime::spawn).
+/// [`BgTaskRuntime::spawn`](super::remote_runtime::BgTaskRuntime::spawn).
 ///
 /// This error indicated that the future has panicked.
 #[derive(Debug, Error)]

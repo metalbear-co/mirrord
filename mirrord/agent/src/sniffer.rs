@@ -416,7 +416,7 @@ mod test {
     use tokio::sync::mpsc;
 
     use super::*;
-    use crate::util::remote_runtime::{BgTaskStatus, IntoStatus, MaybeRemoteRuntime};
+    use crate::util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus};
 
     struct TestSnifferSetup {
         command_tx: Sender<SnifferCommand>,
@@ -457,7 +457,7 @@ mod test {
                 clients_closed: Default::default(),
             };
 
-            let task_status = MaybeRemoteRuntime::Local
+            let task_status = BgTaskRuntime::Local
                 .spawn(sniffer.start(CancellationToken::new()))
                 .into_status("TcpSnifferTask");
 

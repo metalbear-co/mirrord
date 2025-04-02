@@ -20,7 +20,7 @@ use tracing::Level;
 use crate::{
     error::AgentResult,
     metrics::TCP_OUTGOING_CONNECTION,
-    util::remote_runtime::{BgTaskStatus, IntoStatus, MaybeRemoteRuntime},
+    util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus},
 };
 
 mod socket_stream;
@@ -48,7 +48,7 @@ impl TcpOutgoingApi {
     /// # Params
     ///
     /// * `runtime` - tokio runtime to spawn the background task on.
-    pub(crate) fn new(runtime: &MaybeRemoteRuntime) -> Self {
+    pub(crate) fn new(runtime: &BgTaskRuntime) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 

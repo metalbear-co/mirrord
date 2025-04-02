@@ -13,16 +13,14 @@ use crate::{
     steal::{StealTlsHandlerStore, StealerCommand, TcpConnectionStealer},
     util::{
         path_resolver::InTargetPathResolver,
-        remote_runtime::{IntoStatus, MaybeRemoteRuntime},
+        remote_runtime::{BgTaskRuntime, IntoStatus},
     },
 };
 
 /// Starts a [`RedirectorTask`] on the given `runtime`.
 ///
 /// Returns the [`StealHandle`] that can be used to steal incoming traffic.
-pub(super) async fn start_traffic_redirector(
-    runtime: &MaybeRemoteRuntime,
-) -> AgentResult<StealHandle> {
+pub(super) async fn start_traffic_redirector(runtime: &BgTaskRuntime) -> AgentResult<StealHandle> {
     let flush_connections = envs::STEALER_FLUSH_CONNECTIONS.from_env_or_default();
     let pod_ips = envs::POD_IPS.from_env_or_default();
     let support_ipv6 = envs::IPV6_SUPPORT.from_env_or_default();
@@ -44,7 +42,7 @@ pub(super) async fn start_traffic_redirector(
 
 pub(super) async fn start_sniffer(
     args: &super::Args,
-    runtime: &MaybeRemoteRuntime,
+    runtime: &BgTaskRuntime,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<SnifferCommand> {
     let (command_tx, command_rx) = mpsc::channel::<SnifferCommand>(1000);
@@ -77,7 +75,7 @@ pub(super) async fn start_sniffer(
 }
 
 pub(super) fn start_stealer(
-    runtime: &MaybeRemoteRuntime,
+    runtime: &BgTaskRuntime,
     target_pid: u64,
     steal_handle: StealHandle,
     cancellation_token: CancellationToken,
@@ -100,7 +98,7 @@ pub(super) fn start_stealer(
 
 pub(super) fn start_dns(
     args: &super::Args,
-    runtime: &MaybeRemoteRuntime,
+    runtime: &BgTaskRuntime,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<DnsCommand> {
     let (command_tx, command_rx) = mpsc::channel::<DnsCommand>(1000);

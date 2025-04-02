@@ -51,7 +51,7 @@ use crate::{
     sniffer::{api::TcpSnifferApi, messages::SnifferCommand},
     steal::{self, StealerCommand, TcpStealerApi},
     util::{
-        remote_runtime::{BgTaskStatus, MaybeRemoteRuntime, RemoteRuntime},
+        remote_runtime::{BgTaskRuntime, BgTaskStatus, RemoteRuntime},
         ClientId,
     },
 };
@@ -78,7 +78,7 @@ struct State {
     /// When present, it is used to secure incoming TCP connections.
     tls_connector: Option<AgentTlsConnector>,
     /// [`tokio::runtime`] that should be used for network operations.
-    network_runtime: MaybeRemoteRuntime,
+    network_runtime: BgTaskRuntime,
 }
 
 impl State {
@@ -127,10 +127,10 @@ impl State {
         };
 
         let network_runtime = match container.as_ref().map(ContainerHandle::pid) {
-            Some(pid) if ephemeral.not() => MaybeRemoteRuntime::Remote(
+            Some(pid) if ephemeral.not() => BgTaskRuntime::Remote(
                 RemoteRuntime::new_in_namespace(pid, NamespaceType::Net).await?,
             ),
-            None | Some(..) => MaybeRemoteRuntime::Local,
+            None | Some(..) => BgTaskRuntime::Local,
         };
 
         let env_pid = match container.as_ref().map(ContainerHandle::pid) {

@@ -26,12 +26,12 @@ use tracing::Level;
 use crate::{
     error::AgentResult,
     metrics::UDP_OUTGOING_CONNECTION,
-    util::remote_runtime::{BgTaskStatus, IntoStatus, MaybeRemoteRuntime},
+    util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus},
 };
 
 /// Task that handles [`LayerUdpOutgoing`] and [`DaemonUdpOutgoing`] messages.
 ///
-/// We start these tasks from the [`UdpOutgoingApi`] on a [`MaybeRemoteRuntime`].
+/// We start these tasks from the [`UdpOutgoingApi`] on a [`BgTaskRuntime`].
 struct UdpOutgoingTask {
     next_connection_id: ConnectionId,
     /// Writing halves of peer connections made on layer's requests.
@@ -303,7 +303,7 @@ async fn connect(remote_address: SocketAddress) -> Result<UdpSocket, ResponseErr
 }
 
 impl UdpOutgoingApi {
-    pub(crate) fn new(runtime: &MaybeRemoteRuntime) -> Self {
+    pub(crate) fn new(runtime: &BgTaskRuntime) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
 

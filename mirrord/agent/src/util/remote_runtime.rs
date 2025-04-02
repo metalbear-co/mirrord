@@ -5,8 +5,8 @@
 //!
 //! Provides:
 //! 1. A [`RemoteRuntime`] struct, that can be used to run tasks in the target's namespace.
-//! 2. A [`MaybeRemoteRuntime`] enum, that don't necessarily require a target (DNS and outgoing
-//!    traffic), but should be run in the target's namespace if available.
+//! 2. A [`BgTaskRuntime`] enum, that don't necessarily require a target (DNS and outgoing traffic),
+//!    but should be run in the target's namespace if available.
 //! 3. A [`BgTaskStatus`] struct, that can be used to poll for a spawned task's status.
 
 use std::{
@@ -139,7 +139,7 @@ impl fmt::Debug for RemoteRuntime {
 }
 
 /// A future spawned with [`RemoteRuntime::spawn`] or
-/// [`MaybeRemoteRuntime::spawn`]
+/// [`BgTaskRuntime::spawn`]
 pub struct BgTask<T> {
     future_result: oneshot::Receiver<T>,
 }
@@ -156,7 +156,7 @@ impl<T> Future for BgTask<T> {
 }
 
 /// A cloneable status of a future spawned with [`RemoteRuntime::spawn`] or
-/// [`MaybeRemoteRuntime::spawn`].
+/// [`BgTaskRuntime::spawn`].
 #[derive(Clone)]
 pub struct BgTaskStatus {
     task_name: &'static str,
@@ -266,17 +266,17 @@ impl IntoStatus for BgTask<()> {
 ///
 /// This can be used to spawn tasks that can either run in the target's namespace or the agent's.
 ///
-/// If the agent has a target, you should use [`MaybeRemoteRuntime::Remote`].
-/// If the agent does not have a target, you should fallback to [`MaybeRemoteRuntime::Local`].
+/// If the agent has a target, you should use [`BgTaskRuntime::Remote`].
+/// If the agent does not have a target, you should fallback to [`BgTaskRuntime::Local`].
 #[derive(Clone)]
-pub enum MaybeRemoteRuntime {
+pub enum BgTaskRuntime {
     /// Remote runtime, which runs in the target's namespace.
     Remote(RemoteRuntime),
     /// Local runtime ([`tokio::runtime::Handle::current`]).
     Local,
 }
 
-impl MaybeRemoteRuntime {
+impl BgTaskRuntime {
     /// Spawns the given future on this runtime.
     pub fn spawn<F>(&self, future: F) -> BgTask<F::Output>
     where

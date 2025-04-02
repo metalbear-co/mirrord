@@ -818,7 +818,7 @@ mod test {
             connection::{Client, MatchedHttpRequest},
             TcpConnectionStealer, TcpStealerApi,
         },
-        util::remote_runtime::{IntoStatus, MaybeRemoteRuntime},
+        util::remote_runtime::{BgTaskRuntime, IntoStatus},
     };
 
     async fn prepare_dummy_service() -> (
@@ -1023,7 +1023,7 @@ mod test {
         let (task, handle) = RedirectorTask::new(redirector);
         tokio::spawn(task.run());
 
-        let task_status = MaybeRemoteRuntime::Local
+        let task_status = BgTaskRuntime::Local
             .spawn(
                 TcpConnectionStealer::new(command_rx, handle, None).start(CancellationToken::new()),
             )
