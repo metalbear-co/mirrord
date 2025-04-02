@@ -483,23 +483,48 @@ mod steal_tests {
             .wait_for_line(Duration::from_secs(40), "daemon subscribed")
             .await;
 
-        let headers = HeaderMap::default();
-        // Send a GET that should go through to remote
-        let req_client = reqwest::Client::new();
-        let req_builder = req_client.get(&url);
-        send_request(
-            req_builder,
-            Some("OK - GET: Request completed\n"),
-            headers.clone(),
-        )
-        .await;
+        // Send a GET that should go through to remote.
+        // We retry when we get 502, because the remote app has no readiness probe configured.
+        // 502 from a port with an active filtered subscription means that the agent failed to
+        // pass the request further.
+        let req_client = reqwest::ClientBuilder::new()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
+        loop {
+            println!("Sending a request, should not be matched");
+            let response = req_client.get(&url).send().await.unwrap();
+            let status = response.status();
+            let body =
+                String::from_utf8_lossy(response.bytes().await.unwrap().as_ref()).into_owned();
+
+            if status == StatusCode::BAD_GATEWAY {
+                println!("Got a BAD_GATEWAY response, body: {body}");
+                sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+
+            assert_eq!(
+                status,
+                StatusCode::OK,
+                "unexpected status, response body: {body}"
+            );
+            assert_eq!(body, "OK - GET: Request completed\n");
+
+            println!("Got the response");
+
+            break;
+        }
 
         // Send a DELETE that should match and cause the local app to return specific response.
-        let req_client = reqwest::Client::new();
         let mut match_url = Url::parse(&url).unwrap();
         match_url.set_path("/api/v1");
-        let req_builder = req_client.delete(match_url);
-        send_request(req_builder, Some("DELETE"), headers.clone()).await;
+        send_request(
+            req_client.delete(match_url),
+            Some("DELETE"),
+            Default::default(),
+        )
+        .await;
 
         application.assert(&client).await;
     }
