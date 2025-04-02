@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     client_connection::TlsSetupError, incoming::RedirectorTaskError, namespace::NamespaceError,
-    runtime, util::remote_runtime::RemoteRuntimeError,
+    runtime, util::error::RemoteRuntimeError,
 };
 
 #[derive(Debug, Error)]

@@ -10,6 +10,7 @@ use std::{
 use futures::{future::BoxFuture, FutureExt};
 use tokio::sync::mpsc;
 
+pub mod error;
 pub mod path_resolver;
 pub mod remote_runtime;
 

@@ -1,9 +1,9 @@
-//! This module contains utilities for running async code in the agent target's namespace.
+//! Utilities for running async code in the agent target's namespace.
 //!
-//! This is useful for running tasks that require access to the target's network namespace,
+//! Useful for running tasks that require access to the target's network namespace,
 //! such as traffic stealing, traffic mirroring, DNS resolution, outgoing traffic.
 //!
-//! This module provides:
+//! Provides:
 //! 1. A [`RemoteRuntime`] struct, that can be used to run tasks in the target's namespace.
 //! 2. A [`MaybeRemoteRuntime`] enum, that don't necessarily require a target (DNS and outgoing
 //!    traffic), but should be run in the target's namespace if available.
@@ -13,7 +13,6 @@ use std::{
     error::Error,
     fmt,
     future::Future,
-    io,
     ops::Not,
     pin::Pin,
     sync::Arc,
@@ -25,26 +24,13 @@ use futures::{
     future::{BoxFuture, Shared},
     FutureExt,
 };
-use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
+use super::error::{BgTaskPanicked, RemoteRuntimeError};
 use crate::{
     error::AgentError,
-    namespace::{self, NamespaceError, NamespaceType},
+    namespace::{self, NamespaceType},
 };
-
-/// Errors that can occur when creating a [`RemoteRuntime`].
-#[derive(Error, Debug)]
-pub enum RemoteRuntimeError {
-    #[error("failed to spawn runtime thread: {0}")]
-    ThreadSpawnError(#[source] io::Error),
-    #[error(transparent)]
-    NamespaceError(#[from] NamespaceError),
-    #[error("failed to build tokio runtime: {0}")]
-    TokioRuntimeError(#[source] io::Error),
-    #[error("runtime thread panicked")]
-    Panicked,
-}
 
 /// A cloneable handle to a remote [`tokio::runtime::Runtime`] that runs in its own thread.
 ///
@@ -67,7 +53,7 @@ impl RemoteRuntime {
     ) -> Result<Self, RemoteRuntimeError> {
         let (future_tx, mut future_rx) = mpsc::channel(16);
         let (result_tx, result_rx) = oneshot::channel();
-        let thread_name = format!("remote-{namespace_type}-runtime-thread");
+        let thread_name = format!("remote-{target_pid}-{namespace_type}-runtime-thread");
         let thread_logic = move || {
             if let Err(error) = namespace::set_namespace(target_pid, namespace_type) {
                 let _ = result_tx.send(Err(error.into()));
@@ -76,7 +62,9 @@ impl RemoteRuntime {
 
             let rt_result = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
-                .thread_name(format!("remote-{namespace_type}-runtime-worker"))
+                .thread_name(format!(
+                    "remote-{target_pid}-{namespace_type}-runtime-worker"
+                ))
                 .build();
             let rt = match rt_result {
                 Ok(rt) => rt,
@@ -149,14 +137,6 @@ impl fmt::Debug for RemoteRuntime {
             .finish()
     }
 }
-
-/// An error that occurs when polling a future spawned with [`RemoteRuntime::spawn`] or
-/// [`MaybeRemoteRuntime::spawn`].
-///
-/// This error indicated that the future has panicked.
-#[derive(Debug, Error)]
-#[error("task panicked")]
-pub struct BgTaskPanicked;
 
 /// A future spawned with [`RemoteRuntime::spawn`] or
 /// [`MaybeRemoteRuntime::spawn`]
