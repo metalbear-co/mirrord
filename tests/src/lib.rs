@@ -11,6 +11,7 @@ mod issue1317;
 #[cfg(any(feature = "cli", feature = "operator"))]
 mod ls;
 mod operator;
+mod rollout_regression;
 mod targetless;
 mod traffic;
 
