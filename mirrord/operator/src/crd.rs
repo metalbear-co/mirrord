@@ -276,6 +276,7 @@ pub enum NewOperatorFeature {
     SqsQueueSplitting,
     KafkaQueueSplitting,
     LayerReconnect,
+    KafkaQueueSplittingNoCopy,
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -292,6 +293,9 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SqsQueueSplitting => "SQS queue splitting",
             NewOperatorFeature::KafkaQueueSplitting => "Kafka queue splitting",
             NewOperatorFeature::LayerReconnect => "layer reconnect",
+            NewOperatorFeature::KafkaQueueSplittingNoCopy => {
+                "Kafka queue splitting without copy target"
+            }
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
