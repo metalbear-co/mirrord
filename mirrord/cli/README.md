@@ -25,6 +25,9 @@ Please let us know if you encountered a use case where it doesn't work for you, 
 
 ### `mirrord exec`
 
+
+![mirrod exec diagram](./images/mirrord_exec_diagram.png)
+
 ```mermaid
 flowchart LR
     %% Nodes
