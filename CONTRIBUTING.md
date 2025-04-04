@@ -682,7 +682,7 @@ graph TB
 What a user executing their app with mirrord looks like.
 
 ```mermaid
-flowchart LR
+flowchart TB
     Start([User starts mirrord]) --> CLI[CLI parses config & args]
     CLI --> Deploy[Deploy mirrord Agent]
     Deploy --> WaitAgent[Wait for Agent to be ready]
