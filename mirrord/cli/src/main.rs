@@ -461,8 +461,8 @@ fn print_config<P>(
     progress.info(&format!("fs: file operations will default to {}", fs_info));
 
     let incoming_info = match config.feature.network.incoming.mode {
-        IncomingMode::Mirror => "be mirrored",
-        IncomingMode::Steal => "be stolen",
+        IncomingMode::Mirror => "mirrored",
+        IncomingMode::Steal => "stolen",
         IncomingMode::Off => "ignored",
     };
     progress.info(&format!(
