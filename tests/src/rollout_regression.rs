@@ -5,9 +5,39 @@ use rstest::*;
 
 use crate::utils::{rollout_service, EnvApp, KubeService};
 
-/// Starts mirrord with the `copy-target` feature just to validate that it can create a
-/// working copy-pod. Should work as a sanity check that the targets (see `target` parameter)
-/// don't create failed copy-pods due to some incorrect pod spec.
+/// Starts mirrord targeting a [rollout](https://argoproj.github.io/argo-rollouts/features/specification/).
+///
+/// The goal here is to just validate that the session is started correctly.
+#[rstest]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+pub async fn rollout_regression(
+    #[future]
+    #[notrace]
+    rollout_service: KubeService,
+    #[values(EnvApp::NodeInclude)] application: EnvApp,
+) {
+    use crate::utils::run_exec_with_target;
+
+    let service = rollout_service.await;
+    let target = service.rollout_target();
+
+    let mut process = run_exec_with_target(
+        application.command(),
+        &target,
+        None,
+        application.mirrord_args(),
+        None,
+    )
+    .await;
+    let res = process.wait().await;
+    assert!(res.success());
+}
+
+/// Starts mirrord with the `copy-target` feature targeting a
+/// [rollout](https://argoproj.github.io/argo-rollouts/features/specification/).
+///
+/// The goal here is to just validate that the session is started correctly.
+#[cfg(feature = "operator")]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub async fn rollout_regression_copy_target(
