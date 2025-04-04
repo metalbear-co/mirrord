@@ -1789,10 +1789,12 @@ pub async fn rollout_service(
     let (rollout_guard, rollout) =
         ResourceGuard::create(rollout_api.clone(), &rollout, delete_after_fail)
             .await
-            .expect(&format!(
-                "Failed to create rollout guard! \n{}",
-                serde_json::to_string_pretty(&rollout).unwrap(),
-            ));
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Failed to create rollout guard! \n{}",
+                    serde_json::to_string_pretty(&rollout).unwrap()
+                )
+            });
     println!("Created rollout\n{rollout:#?}");
 
     println!(
