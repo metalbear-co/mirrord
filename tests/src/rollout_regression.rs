@@ -1,15 +1,9 @@
 #![cfg(test)]
 //! Tests for rollout target regression cases to ensure continued support for Argo Rollouts.
 
-use std::time::Duration;
-
 use rstest::*;
-use tempfile::NamedTempFile;
-use tokio::{fs::File, io::AsyncWriteExt};
 
-use crate::utils::{
-    rollout_service, run_exec_with_target, service, Application, EnvApp, KubeService, TestProcess,
-};
+use crate::utils::{rollout_service, EnvApp, KubeService};
 
 /// Starts mirrord with the `copy-target` feature just to validate that it can create a
 /// working copy-pod. Should work as a sanity check that the targets (see `target` parameter)
