@@ -14,7 +14,9 @@ use serde::{de, Deserialize, Serialize};
 use super::get_k8s_resource_api;
 use crate::error::KubeApiError;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+pub mod serialization;
+
+#[derive(Clone, Debug)]
 pub struct Rollout {
     pub metadata: ObjectMeta,
     pub spec: Option<RolloutSpec>,

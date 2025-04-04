@@ -7097,6 +7097,7 @@ dependencies = [
  "kube",
  "mirrord",
  "mirrord-agent-env",
+ "mirrord-kube",
  "mirrord-operator",
  "mirrord-tls-util",
  "pem",
