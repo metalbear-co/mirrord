@@ -1,4 +1,6 @@
-use std::{future, io, path::PathBuf, sync::atomic::Ordering, time::Duration};
+use std::{
+    collections::HashMap, future, io, path::PathBuf, sync::atomic::Ordering, time::Duration,
+};
 
 use futures::{stream::FuturesOrdered, StreamExt};
 use hickory_resolver::{
@@ -24,16 +26,12 @@ use tokio::{
         mpsc::{Receiver, Sender},
         oneshot,
     },
-    task::JoinSet,
+    task::{Id, JoinSet},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{warn, Level};
 
-use crate::{
-    error::{AgentError, AgentResult},
-    metrics::DNS_REQUEST_COUNT,
-    watched_task::TaskStatus,
-};
+use crate::{error::AgentResult, metrics::DNS_REQUEST_COUNT, util::remote_runtime::BgTaskStatus};
 
 #[derive(Debug)]
 pub(crate) enum ClientGetAddrInfoRequest {
@@ -54,7 +52,7 @@ impl ClientGetAddrInfoRequest {
 #[derive(Debug)]
 pub(crate) struct DnsCommand {
     request: ClientGetAddrInfoRequest,
-    response_tx: oneshot::Sender<Result<DnsLookup, InternalLookupError>>,
+    response_tx: oneshot::Sender<Result<DnsLookup, ResolveErrorKindInternal>>,
 }
 
 /// Background task for resolving hostnames to IP addresses.
@@ -80,12 +78,11 @@ pub(crate) struct DnsWorker {
     /// Background tasks that handle the DNS requests.
     ///
     /// Each of these builds a new [`TokioAsyncResolver`] and performs one lookup.
-    tasks: JoinSet<()>,
+    tasks: JoinSet<Result<DnsLookup, InternalLookupError>>,
+    response_txs: HashMap<Id, oneshot::Sender<Result<DnsLookup, ResolveErrorKindInternal>>>,
 }
 
 impl DnsWorker {
-    pub const TASK_NAME: &'static str = "DNS worker";
-
     /// Creates a new instance of this worker.
     /// To run this worker, call [`Self::run`].
     ///
@@ -124,6 +121,7 @@ impl DnsWorker {
             attempts,
             support_ipv6,
             tasks: Default::default(),
+            response_txs: Default::default(),
         }
     }
 
@@ -203,34 +201,51 @@ impl DnsWorker {
         let attempts = self.attempts;
         let support_ipv6 = self.support_ipv6;
 
-        let lookup_future = async move {
-            let result = Self::do_lookup(
-                etc_path,
-                message.request.into_v2(),
-                attempts,
-                timeout,
-                support_ipv6,
-            )
-            .await;
-
-            let _ = message.response_tx.send(result);
-        };
+        let handle = self.tasks.spawn(Self::do_lookup(
+            etc_path,
+            message.request.into_v2(),
+            attempts,
+            timeout,
+            support_ipv6,
+        ));
+        self.response_txs.insert(handle.id(), message.response_tx);
 
         DNS_REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
-        self.tasks.spawn(lookup_future);
     }
 
-    pub(crate) async fn run(mut self, cancellation_token: CancellationToken) -> AgentResult<()> {
+    pub(crate) async fn run(mut self, cancellation_token: CancellationToken) {
         loop {
             tokio::select! {
-                _ = cancellation_token.cancelled() => break Ok(()),
+                _ = cancellation_token.cancelled() => break,
 
-                Some(..) = self.tasks.join_next() => {
+                Some(result) = self.tasks.join_next_with_id() => {
                     DNS_REQUEST_COUNT.fetch_sub(1, Ordering::Relaxed);
+                    let (id, result) = match result {
+                        Ok((id, result)) => (
+                            id,
+                            result.map_err(Into::into),
+                        ),
+                        Err(error) => {
+                            (
+                                error.id(),
+                                Err(ResolveErrorKindInternal::Message("DNS task panicked".into()))
+                            )
+                        }
+                    };
+
+                    let response_tx = self.response_txs.remove(&id);
+                    match response_tx {
+                        Some(response_tx) => {
+                            let _ = response_tx.send(result);
+                        }
+                        None => {
+                            warn!(?id, "Received a DNS result with no matching response channel");
+                        }
+                    }
                 }
 
                 message = self.request_rx.recv() => match message {
-                    None => break Ok(()),
+                    None => break,
                     Some(message) => self.handle_message(message),
                 },
             }
@@ -246,15 +261,15 @@ impl Drop for DnsWorker {
 }
 
 pub(crate) struct DnsApi {
-    task_status: TaskStatus,
+    task_status: BgTaskStatus,
     request_tx: Sender<DnsCommand>,
     /// [`DnsWorker`] processes all requests concurrently, so we use a combination of [`oneshot`]
     /// channels and [`FuturesOrdered`] to preserve order of responses.
-    responses: FuturesOrdered<oneshot::Receiver<Result<DnsLookup, InternalLookupError>>>,
+    responses: FuturesOrdered<oneshot::Receiver<Result<DnsLookup, ResolveErrorKindInternal>>>,
 }
 
 impl DnsApi {
-    pub(crate) fn new(task_status: TaskStatus, task_sender: Sender<DnsCommand>) -> Self {
+    pub(crate) fn new(task_status: BgTaskStatus, task_sender: Sender<DnsCommand>) -> Self {
         Self {
             task_status,
             request_tx: task_sender,
@@ -276,7 +291,7 @@ impl DnsApi {
             response_tx,
         };
         if self.request_tx.send(command).await.is_err() {
-            return Err(self.task_status.unwrap_err().await);
+            return Err(self.task_status.wait_assert_running().await);
         }
 
         self.responses.push_back(response_rx);
@@ -294,11 +309,14 @@ impl DnsApi {
             return future::pending().await;
         };
 
-        let response = response
-            .map_err(|_| AgentError::DnsTaskPanic)?
-            .map_err(|error| ResponseError::DnsLookup(DnsLookupError { kind: error.into() }));
-
-        Ok(GetAddrInfoResponse(response))
+        match response {
+            Ok(response) => {
+                Ok(GetAddrInfoResponse(response.map_err(|kind| {
+                    ResponseError::DnsLookup(DnsLookupError { kind })
+                })))
+            }
+            Err(..) => Err(self.task_status.wait_assert_running().await),
+        }
     }
 }
 
