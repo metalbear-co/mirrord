@@ -26,7 +26,7 @@ Please let us know if you encountered a use case where it doesn't work for you, 
 ### `mirrord exec`
 
 ```mermaid
-flowchart LR
+flowchart TB
     %% Nodes
     Start((Start))
     CLI[mirrord CLI]
