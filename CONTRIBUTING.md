@@ -626,7 +626,7 @@ If you're making changes to the release and/or CI workflows for MacOS specifical
 A high level view of mirrord.
 
 ```mermaid
-%%{init: {'theme':'neutral'}}%%
+%%{init: {'theme':'neutral', 'themeVariable':{'lineColor': '#f00'}}}%%
 graph TB
     ExternalTraffic["External Traffic"]
 
@@ -683,7 +683,7 @@ graph TB
 What a user executing their app with mirrord looks like.
 
 ```mermaid
-%%{init: {'theme':'neutral'}}%%
+%%{init: {'theme':'neutral', 'themeVariable':{'lineColor': '#f00'}}}%%
 flowchart TB
     Start([User starts mirrord]) --> CLI[CLI parses config & args]
     CLI --> Deploy[Deploy mirrord Agent]
