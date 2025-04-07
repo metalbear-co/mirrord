@@ -187,8 +187,6 @@ impl<R> TcpConnectionSniffer<R>
 where
     R: TcpCapture,
 {
-    pub const TASK_NAME: &'static str = "Sniffer";
-
     /// Capacity of [`broadcast`] channels used to distribute incoming TCP packets between clients.
     const CONNECTION_DATA_CHANNEL_CAPACITY: usize = 512;
 
@@ -418,11 +416,11 @@ mod test {
     use tokio::sync::mpsc;
 
     use super::*;
-    use crate::watched_task::{TaskStatus, WatchedTask};
+    use crate::util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus};
 
     struct TestSnifferSetup {
         command_tx: Sender<SnifferCommand>,
-        task_status: TaskStatus,
+        task_status: BgTaskStatus,
         packet_tx: Sender<(TcpSessionDirectionId, TcpPacketData)>,
         times_filter_changed: Arc<AtomicUsize>,
         next_client_id: ClientId,
@@ -458,12 +456,10 @@ mod test {
                 client_txs: Default::default(),
                 clients_closed: Default::default(),
             };
-            let watched_task = WatchedTask::new(
-                TcpConnectionSniffer::<TcpPacketsChannel>::TASK_NAME,
-                sniffer.start(CancellationToken::new()),
-            );
-            let task_status = watched_task.status();
-            tokio::spawn(watched_task.start());
+
+            let task_status = BgTaskRuntime::Local
+                .spawn(sniffer.start(CancellationToken::new()))
+                .into_status("TcpSnifferTask");
 
             Self {
                 command_tx,

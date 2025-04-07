@@ -11,7 +11,7 @@ use std::{
 };
 
 use client_connection::AgentTlsConnector;
-use dns::{ClientGetAddrInfoRequest, DnsCommand, DnsWorker};
+use dns::{ClientGetAddrInfoRequest, DnsCommand};
 use futures::TryFutureExt;
 use metrics::{start_metrics, CLIENT_COUNT};
 use mirrord_agent_env::envs;
@@ -22,40 +22,44 @@ use mirrord_agent_iptables::{
     IPTABLE_STANDARD_ENV,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
-use sniffer::tcp_capture::RawSocketTcpCapture;
 use steal::StealerMessage;
 use tokio::{
     net::{TcpListener, TcpStream},
     process::Command,
     select,
     signal::unix::SignalKind,
-    sync::mpsc::{self, Sender},
+    sync::mpsc::Sender,
     task::JoinSet,
     time::{timeout, Duration},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace, warn, Level};
+use tracing::{debug, error, trace, warn, Level};
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 use crate::{
-    cli::Args,
-    client_connection::ClientConnection,
+    cli::{self, Args},
+    client_connection::{self, ClientConnection},
     container_handle::ContainerHandle,
-    dns::DnsApi,
+    dns::{self, DnsApi},
+    env,
     error::{AgentError, AgentResult},
     file::FileManager,
+    metrics,
+    namespace::NamespaceType,
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
-    runtime::get_container,
-    sniffer::{api::TcpSnifferApi, messages::SnifferCommand, TcpConnectionSniffer},
-    steal::{StealTlsHandlerStore, StealerCommand, TcpConnectionStealer, TcpStealerApi},
-    util::{path_resolver::InTargetPathResolver, run_thread_in_namespace, ClientId},
-    watched_task::{TaskStatus, WatchedTask},
-    *,
+    runtime::{self, get_container},
+    sniffer::{api::TcpSnifferApi, messages::SnifferCommand},
+    steal::{self, StealerCommand, TcpStealerApi},
+    util::{
+        remote_runtime::{BgTaskRuntime, BgTaskStatus, RemoteRuntime},
+        ClientId,
+    },
 };
 
 mod setup;
 
-/// Size of [`mpsc`] channels connecting [`TcpStealerApi`] with the background task.
+/// Size of [`mpsc`](tokio::sync::mpsc) channels connecting [`TcpStealerApi`]s with the background
+/// task.
 const CHANNEL_SIZE: usize = 1024;
 
 /// Keeps track of next client id.
@@ -73,6 +77,8 @@ struct State {
     ephemeral: bool,
     /// When present, it is used to secure incoming TCP connections.
     tls_connector: Option<AgentTlsConnector>,
+    /// [`tokio::runtime`] that should be used for network operations.
+    network_runtime: BgTaskRuntime,
 }
 
 impl State {
@@ -86,7 +92,7 @@ impl State {
 
         let mut env: HashMap<String, String> = HashMap::new();
 
-        let (ephemeral, container, pid) = match &args.mode {
+        let (ephemeral, container) = match &args.mode {
             cli::Mode::Targeted {
                 container_id,
                 container_runtime,
@@ -95,11 +101,10 @@ impl State {
                 let container = get_container(container_id.clone(), container_runtime).await?;
 
                 let container_handle = ContainerHandle::new(container).await?;
-                let pid = container_handle.pid().to_string();
 
                 env.extend(container_handle.raw_env().clone());
 
-                (false, Some(container_handle), pid)
+                (false, Some(container_handle))
             }
             cli::Mode::Ephemeral { .. } => {
                 let container_handle = ContainerHandle::new(runtime::Container::Ephemeral(
@@ -113,17 +118,26 @@ impl State {
                 ))
                 .await?;
 
-                let pid = container_handle.pid().to_string();
                 env.extend(container_handle.raw_env().clone());
 
                 // If we are in an ephemeral container, we use pid 1.
-                (true, Some(container_handle), pid)
+                (true, Some(container_handle))
             }
-            cli::Mode::Targetless | cli::Mode::BlackboxTest => (false, None, "self".to_string()),
+            cli::Mode::Targetless => (false, None),
         };
 
-        let environ_path = PathBuf::from("/proc").join(pid).join("environ");
+        let network_runtime = match container.as_ref().map(ContainerHandle::pid) {
+            Some(pid) if ephemeral.not() => BgTaskRuntime::Remote(
+                RemoteRuntime::new_in_namespace(pid, NamespaceType::Net).await?,
+            ),
+            None | Some(..) => BgTaskRuntime::Local,
+        };
 
+        let env_pid = match container.as_ref().map(ContainerHandle::pid) {
+            Some(pid) => pid.to_string(),
+            None => "self".to_string(),
+        };
+        let environ_path = PathBuf::from("/proc").join(env_pid).join("environ");
         match env::get_proc_environ(environ_path).await {
             Ok(environ) => env.extend(environ.into_iter()),
             Err(err) => {
@@ -137,6 +151,7 @@ impl State {
             env: Arc::new(env),
             ephemeral,
             tls_connector,
+            network_runtime,
         })
     }
 
@@ -178,7 +193,7 @@ impl State {
 }
 
 enum BackgroundTask<Command> {
-    Running(TaskStatus, Sender<Command>),
+    Running(BgTaskStatus, Sender<Command>),
     Disabled,
 }
 
@@ -206,7 +221,9 @@ struct ClientConnectionHandler {
     /// Handles mirrord's file operations, see [`FileManager`].
     file_manager: FileManager,
     connection: ClientConnection,
+    /// [`None`] when targetless.
     tcp_sniffer_api: Option<TcpSnifferApi>,
+    /// [`None`] when targetless.
     tcp_stealer_api: Option<TcpStealerApi>,
     tcp_outgoing_api: TcpOutgoingApi,
     udp_outgoing_api: UdpOutgoingApi,
@@ -240,8 +257,8 @@ impl ClientConnectionHandler {
             Self::create_stealer_api(id, bg_tasks.stealer, &mut connection).await?;
         let dns_api = Self::create_dns_api(bg_tasks.dns);
 
-        let tcp_outgoing_api = TcpOutgoingApi::new(pid);
-        let udp_outgoing_api = UdpOutgoingApi::new(pid);
+        let tcp_outgoing_api = TcpOutgoingApi::new(&state.network_runtime);
+        let udp_outgoing_api = UdpOutgoingApi::new(&state.network_runtime);
 
         let client_handler = Self {
             id,
@@ -460,16 +477,21 @@ impl ClientConnectionHandler {
                 if let Some(sniffer_api) = &mut self.tcp_sniffer_api {
                     sniffer_api.handle_client_message(message).await?
                 } else {
-                    warn!("received tcp sniffer request while not available");
-                    Err(AgentError::SnifferNotRunning)?
+                    self.respond(DaemonMessage::Close(
+                        "component responsible for mirroring incoming traffic is not running, \
+                        which might be due to Kubernetes node kernel version <4.20. \
+                        Check agent logs for errors and please report a bug if kernel version >=4.20".into(),
+                    )).await?;
                 }
             }
             ClientMessage::TcpSteal(message) => {
                 if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
                     tcp_stealer_api.handle_client_message(message).await?
                 } else {
-                    warn!("received tcp steal request while not available");
-                    Err(AgentError::StealerNotRunning)?
+                    self.respond(DaemonMessage::Close(
+                        "incoming traffic stealing is not available in the targetless mode".into(),
+                    ))
+                    .await?;
                 }
             }
             ClientMessage::Close => {
@@ -498,8 +520,8 @@ impl ClientConnectionHandler {
                 self.ready_for_logs = true;
             }
             ClientMessage::Vpn(_message) => {
-                unreachable!("VPN is not supported");
-                // self.vpn_api.layer_message(message).await?;
+                self.respond(DaemonMessage::Close("VPN is not supported".into()))
+                    .await?;
             }
         }
 
@@ -507,7 +529,10 @@ impl ClientConnectionHandler {
     }
 }
 
-/// Initializes the agent's [`State`], channels, threads, and runs [`ClientConnectionHandler`]s.
+/// Real mirrord-agent routine.
+///
+/// Obtains the PID of the target container (if there is any),
+/// starts background tasks and listens for client connections.
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent(args: Args) -> AgentResult<()> {
     trace!("start_agent -> Starting agent with args: {args:?}");
@@ -532,13 +557,10 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         ipv4_listener_result
     }?;
 
-    match listener.local_addr() {
-        Ok(addr) => debug!(
-            client_listener_address = addr.to_string(),
-            "Created listener."
-        ),
-        Err(err) => error!(%err, "listener local address error"),
-    }
+    debug!(
+        client_listener_address = %listener.local_addr()?,
+        "Created the client listener.",
+    );
 
     let state = State::new(&args).await?;
 
@@ -559,117 +581,28 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         });
     }
 
-    let (sniffer_command_tx, sniffer_command_rx) = mpsc::channel::<SnifferCommand>(1000);
-    let (stealer_command_tx, stealer_command_rx) = mpsc::channel::<StealerCommand>(1000);
-    let (dns_command_tx, dns_command_rx) = mpsc::channel::<DnsCommand>(1000);
-
-    let (sniffer_task, sniffer_status) = if args.mode.is_targetless() {
-        (None, None)
+    let sniffer = if state.container_pid().is_some() {
+        setup::start_sniffer(&args, &state.network_runtime, cancellation_token.clone()).await
     } else {
-        let cancellation_token = cancellation_token.clone();
-        let is_mesh = args.is_mesh();
-        // We're using this to avoid crashing on old kernels when initializing the
-        // `RawSocketTcpCapture`. failed task causes the agent to exit
-        // so we just check that initialization was successful
-        // then decide whether to store the task or drop it
-        // https://github.com/metalbear-co/mirrord/pull/2910
-        let (sniffer_init_tx, sniffer_init_rx) = tokio::sync::oneshot::channel::<bool>();
-        let watched_task = WatchedTask::new(
-            TcpConnectionSniffer::<RawSocketTcpCapture>::TASK_NAME,
-            async move {
-                if let Ok(sniffer) =
-                    TcpConnectionSniffer::new(sniffer_command_rx, args.network_interface, is_mesh)
-                        .await
-                {
-                    if let Err(error) = sniffer_init_tx.send(true) {
-                        tracing::error!(%error, "Failed to send sniffer init result");
-                    };
-                    // will block from this point on
-                    let res = sniffer.start(cancellation_token).await;
-                    if let Err(err) = res {
-                        error!(%err, "Sniffer failed");
-                    }
-                } else if let Err(error) = sniffer_init_tx.send(false) {
-                    tracing::error!(%error, "Failed to send sniffer init result");
-                }
-
-                Ok(())
-            },
-        );
-        let status = watched_task.status();
-        let task = run_thread_in_namespace(
-            watched_task.start(),
-            TcpConnectionSniffer::<RawSocketTcpCapture>::TASK_NAME.to_string(),
-            state.container_pid(),
-            "net",
-        );
-
-        match sniffer_init_rx.await {
-            Ok(true) => (Some(task), Some(status)),
-            Ok(false) => (None, None),
-            Err(error) => {
-                tracing::error!(%error, "unexpected error while waiting for sniffer init");
-                (None, None)
-            }
-        }
+        BackgroundTask::Disabled
     };
-
-    let (stealer_task, stealer_status) = match state.container_pid() {
-        None => (None, None),
+    let stealer = match state.container_pid() {
+        None => BackgroundTask::Disabled,
         Some(pid) => {
-            let steal_handle = setup::start_traffic_redirector(pid).await?;
-
-            let cancellation_token = cancellation_token.clone();
-            let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
-            let tls_handler_store = tls_steal_config.is_empty().not().then(|| {
-                StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(pid))
-            });
-            let watched_task = WatchedTask::new(TcpConnectionStealer::TASK_NAME, async move {
-                TcpConnectionStealer::new(stealer_command_rx, steal_handle, tls_handler_store)
-                    .start(cancellation_token)
-                    .await
-                    .inspect_err(|error| {
-                        error!(%error, "Stealer failed");
-                    })
-            });
-            let status = watched_task.status();
-            let task = run_thread_in_namespace(
-                watched_task.start(),
-                TcpConnectionStealer::TASK_NAME.to_string(),
-                state.container_pid(),
-                "net",
-            );
-
-            (Some(task), Some(status))
+            let steal_handle = setup::start_traffic_redirector(&state.network_runtime).await?;
+            setup::start_stealer(
+                &state.network_runtime,
+                pid,
+                steal_handle,
+                cancellation_token.clone(),
+            )
         }
     };
-
-    let (dns_task, dns_status) = {
-        let cancellation_token = cancellation_token.clone();
-        let watched_task = WatchedTask::new(
-            DnsWorker::TASK_NAME,
-            DnsWorker::new(state.container_pid(), dns_command_rx, args.ipv6)
-                .run(cancellation_token),
-        );
-        let status = watched_task.status();
-        let task = run_thread_in_namespace(
-            watched_task.start(),
-            DnsWorker::TASK_NAME.to_string(),
-            state.container_pid(),
-            "net",
-        );
-
-        (task, status)
-    };
-
+    let dns = setup::start_dns(&args, &state.network_runtime, cancellation_token.clone());
     let bg_tasks = BackgroundTasks {
-        sniffer: sniffer_status
-            .map(|status| BackgroundTask::Running(status, sniffer_command_tx))
-            .unwrap_or(BackgroundTask::Disabled),
-        stealer: stealer_status
-            .map(|status| BackgroundTask::Running(status, stealer_command_tx))
-            .unwrap_or(BackgroundTask::Disabled),
-        dns: BackgroundTask::Running(dns_status, dns_command_tx),
+        sniffer,
+        stealer,
+        dns,
     };
 
     // WARNING: `wait_for_agent_startup` in `mirrord/kube/src/api/container.rs` expects a line
@@ -732,7 +665,6 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 
                     Some(Err(error)) => {
                         error!(?error, "start_agent -> Failed to join client handler task");
-                        Err(error)?
                     }
 
                     None => {
@@ -753,30 +685,29 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         dns,
     } = bg_tasks;
 
-    if let (Some(sniffer_task), BackgroundTask::Running(mut sniffer_status, _)) =
-        (sniffer_task, sniffer)
-    {
-        sniffer_task.join().map_err(|_| AgentError::JoinTask)?;
-        if let Some(err) = sniffer_status.err().await {
-            error!("start_agent -> sniffer task failed with error: {}", err);
-        }
-    }
-
-    if let (Some(stealer_task), BackgroundTask::Running(mut stealer_status, _)) =
-        (stealer_task, stealer)
-    {
-        stealer_task.join().map_err(|_| AgentError::JoinTask)?;
-        if let Some(err) = stealer_status.err().await {
-            error!("start_agent -> stealer task failed with error: {}", err);
-        }
-    }
-
-    if let BackgroundTask::Running(mut dns_status, _) = dns {
-        dns_task.join().map_err(|_| AgentError::JoinTask)?;
-        if let Some(err) = dns_status.err().await {
-            error!("start_agent -> dns task failed with error: {}", err);
-        }
-    }
+    tokio::join!(
+        async move {
+            if let BackgroundTask::Running(status, _) = sniffer {
+                if let Err(error) = status.wait().await {
+                    error!("start_agent -> {error}");
+                }
+            }
+        },
+        async move {
+            if let BackgroundTask::Running(status, _) = stealer {
+                if let Err(error) = status.wait().await {
+                    error!("start_agent -> {error}");
+                }
+            }
+        },
+        async move {
+            if let BackgroundTask::Running(status, _) = dns {
+                if let Err(error) = status.wait().await {
+                    error!("start_agent -> {error}");
+                }
+            }
+        },
+    );
 
     trace!("start_agent -> Agent shutdown");
 
@@ -792,6 +723,10 @@ async fn clear_iptable_chain() -> Result<(), IPTablesError> {
     Ok(())
 }
 
+/// Runs the current binary as a child process,
+/// using the exact same command line.
+///
+/// When this future is aborted before completion, the child process is automatically killed.
 async fn run_child_agent() -> AgentResult<()> {
     let command_args = std::env::args().collect::<Vec<_>>();
     let (command, args) = command_args
@@ -811,10 +746,12 @@ async fn run_child_agent() -> AgentResult<()> {
     }
 }
 
-/// Sets iptable chains' names in env (e.g. [`IPTABLE_PREROUTING_ENV`]) and spawns the main agent
+/// Targeted agent's parent process.
+///
+/// Sets iptable chains' names in env (e.g. [`IPTABLE_PREROUTING_ENV`]) and spawns the real agent
 /// routine in the child process. When the child process exits, cleans the iptables.
 ///
-/// Captures SIGTERM signals sent by Kubernetes when the pod is gracefully deleted.
+/// Captures SIGTERM signals sent by Kubernetes when the pod is being gracefully deleted.
 /// When a signal is captured, the child process is killed and the iptables are cleaned.
 async fn start_iptable_guard(args: Args) -> AgentResult<()> {
     debug!("start_iptable_guard -> Initializing iptable-guard.");
@@ -841,29 +778,52 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
         result = run_child_agent() => result,
     };
 
-    let _ = run_thread_in_namespace(
-        clear_iptable_chain(),
-        "clear iptables".to_owned(),
-        pid,
-        "net",
-    )
-    .join()
-    .map_err(|_| AgentError::JoinTask)?;
+    let Some(pid) = pid else {
+        return result;
+    };
+
+    let runtime = RemoteRuntime::new_in_namespace(pid, NamespaceType::Net).await?;
+    runtime
+        .spawn(clear_iptable_chain())
+        .await
+        .map_err(|error| AgentError::BackgroundTaskFailed {
+            task: "IPTablesCleaner",
+            error: Arc::new(error),
+        })?
+        .map_err(|error| AgentError::BackgroundTaskFailed {
+            task: "IPTablesCleaner",
+            error: Arc::new(error),
+        })?;
 
     result
 }
 
-/// The agent is somewhat started twice, first with [`start_iptable_guard`], and then the
-/// proper agent with [`start_agent`].
+/// mirrord-agent entrypoint.
 ///
-/// ## Things to keep in mind due to the double initialization
+/// Installs a default [`CryptoProvider`](rustls::crypto::CryptoProvider) and initializes tracing.
 ///
-/// Since the _second_ agent gets spawned as a child of the _first_, they share resources,
-/// like the `namespace`, which means:
+/// # Flow
 ///
-/// 1. If you try to `bind` a socket to some address before [`start_agent`], it'll actually be bound
-///    **twice**, which incurs an error (address already in use). You could get around this by
-///    `bind`ing on `0.0.0.0:0`, but this is most likely **not** what you want.
+/// If the agent is targetless, it goes straight to spawning background tasks and listening for
+/// client connections.
+///
+/// If the agent has a target, the flow is a bit different.
+/// This is because we might need to redirect incoming traffic.
+///
+/// First, the agent generates randomized names for our iptables chains
+/// and puts them into some environment variables (e.g [`IPTABLE_PREROUTING_ENV`]).
+/// Then, it spawns a child process with the exact same command line,
+/// and waits for a SIGTERM signal. When the signal is received or the child process fails,
+/// the agent cleans the iptables (based on the previously set environment variables) before
+/// exiting.
+///
+/// The child process is the real agent, which spawns background tasks and listens for client
+/// connections. The child process knowns is the real agent, because it has the environment
+/// variables set.
+///
+/// This weird flow is a safety measure - should the real agent OOM (which means instant process
+/// termination) or be killed with a signal, the parent will a chance to clean iptables. If we leave
+/// the iptables dirty, the whole target pod is broken, probably forever.
 pub async fn main() -> AgentResult<()> {
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
@@ -898,7 +858,7 @@ pub async fn main() -> AgentResult<()> {
 
     let args = cli::parse_args();
 
-    let agent_result = if args.mode.is_targetless()
+    if args.mode.is_targetless()
         || (std::env::var(IPTABLE_PREROUTING_ENV).is_ok()
             && std::env::var(IPTABLE_MESH_ENV).is_ok()
             && std::env::var(IPTABLE_STANDARD_ENV).is_ok())
@@ -906,19 +866,5 @@ pub async fn main() -> AgentResult<()> {
         start_agent(args).await
     } else {
         start_iptable_guard(args).await
-    };
-
-    match agent_result {
-        Ok(_) => {
-            info!("main -> mirrord-agent `start` exiting successfully.")
-        }
-        Err(fail) => {
-            error!(
-                "main -> mirrord-agent `start` exiting with error {:#?}",
-                fail
-            )
-        }
     }
-
-    Ok(())
 }

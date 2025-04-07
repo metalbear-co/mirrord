@@ -392,8 +392,6 @@ pub(crate) struct TcpConnectionStealer {
 }
 
 impl TcpConnectionStealer {
-    pub const TASK_NAME: &'static str = "Stealer";
-
     /// Initializes a new [`TcpConnectionStealer`], but doesn't start the actual work.
     /// You need to call [`TcpConnectionStealer::start`] to do so.
     pub(crate) fn new(
@@ -807,7 +805,7 @@ mod test {
         net::{TcpListener, TcpStream},
         sync::{
             mpsc::{self, Receiver, Sender},
-            oneshot, watch,
+            oneshot,
         },
     };
     use tokio_stream::wrappers::ReceiverStream;
@@ -820,7 +818,7 @@ mod test {
             connection::{Client, MatchedHttpRequest},
             TcpConnectionStealer, TcpStealerApi,
         },
-        watched_task::TaskStatus,
+        util::remote_runtime::{BgTaskRuntime, IntoStatus},
     };
 
     async fn prepare_dummy_service() -> (
@@ -1025,11 +1023,11 @@ mod test {
         let (task, handle) = RedirectorTask::new(redirector);
         tokio::spawn(task.run());
 
-        let stealer = TcpConnectionStealer::new(command_rx, handle, None);
-        tokio::spawn(stealer.start(CancellationToken::new()));
-
-        let (_dummy_tx, dummy_rx) = watch::channel(None);
-        let task_status = TaskStatus::dummy(TcpConnectionStealer::TASK_NAME, dummy_rx);
+        let task_status = BgTaskRuntime::Local
+            .spawn(
+                TcpConnectionStealer::new(command_rx, handle, None).start(CancellationToken::new()),
+            )
+            .into_status("TcpStealerTask");
         let mut api = TcpStealerApi::new(0, command_tx.clone(), task_status, 8)
             .await
             .unwrap();

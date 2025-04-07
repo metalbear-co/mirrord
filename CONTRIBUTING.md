@@ -13,7 +13,7 @@ Make sure to take a look at the project's [style guide](STYLE.md).
 - [Getting Started](#getting-started)
 - [Debugging mirrord](#debugging-mirrord)
 - [New Hook Guidelines](#new-hook-guidelines)
-- [Compiling on MacOs](#compliling-on-macos)
+- [Compiling on MacOs](#compiling-on-macos)
 - [Adding new target types](#adding-new-target-types)
 - [Testing the release workflow](#testing-the-release-workflow)
 - [Architecture](#architecture)
@@ -27,7 +27,7 @@ The following guide details the steps to setup a local development environment f
 - [GCC](https://gcc.gnu.org/) - only on Linux, GCC is needed for Go dynamic linking
 - [Rust](https://www.rust-lang.org/)
 - [NodeJS](https://nodejs.org/en/), [ExpressJS](https://expressjs.com/)
-- [Python](https://www.python.org/), [Flask](https://flask.palletsprojects.com/en/2.1.x/), [FastAPI](https://fastapi.tiangolo.com/)
+- [Python](https://www.python.org/), [Flask](https://flask.palletsprojects.com/en/2.1.x/), [FastAPI](https://fastapi.tiangolo.com/), [Uvicorn](https://www.uvicorn.org/)
 - [Go](https://go.dev/)
 - Kubernetes Cluster (local/remote)
 
@@ -93,6 +93,12 @@ The E2E tests create Kubernetes resources in the cluster that kubectl is configu
 with the mirrord CLI. The mirrord CLI spawns an agent for the target on the cluster, and runs the test app, with the
 layer injected into it. Some test apps need to be compiled before they can be used in the tests
 ([this should be automated in the future](https://github.com/metalbear-co/mirrord/issues/982)).
+
+> **Note:** `//go:build linux` prevents certain Go test apps from being built on macOS. When using 
+> `scripts/build_go_apps.sh`, make the change below so the script continues building all other apps.
+> ```bash
+> go build -o "$1.go_test_app" || echo "Failed to build $directory/$1.go_test_app"
+> ```
 
 The basic command to run the E2E tests is:
 ```bash
@@ -407,11 +413,19 @@ RUST_LOG=debug target/debug/mirrord exec -i test -l debug -c --target pod/py-ser
 Server listening on port 80
 ```
 
-Send traffic to the Kubernetes Pod through the service
+Send traffic to the Kubernetes Pod through the service. On Linux, run the following command:
 
 ```bash
 curl $(minikube service py-serv --url)
 ```
+
+On macOS, run the command below and keep the terminal open.
+
+```bash
+minikube service py-serv --url
+```
+
+Open another terminal and send traffic with `curl` to the service URL displayed by `minikube`.
 
 Check the traffic was received by the local process
 
