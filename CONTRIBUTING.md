@@ -626,6 +626,8 @@ If you're making changes to the release and/or CI workflows for MacOS specifical
 A high level view of mirrord.
 
 ```mermaid
+%% Add a white background to the diagram
+style default fill:#ffffff,stroke:#333,stroke-width:2px
 graph TB
     ExternalTraffic["External Traffic"]
 
@@ -682,6 +684,8 @@ graph TB
 What a user executing their app with mirrord looks like.
 
 ```mermaid
+%% Add a white background to the diagram
+style default fill:#ffffff,stroke:#333,stroke-width:2px
 flowchart TB
     Start([User starts mirrord]) --> CLI[CLI parses config & args]
     CLI --> Deploy[Deploy mirrord Agent]
