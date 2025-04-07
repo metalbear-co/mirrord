@@ -88,6 +88,18 @@ pub struct UpgradedConnection {
     pub http_server_io: UpgradedServerSide,
 }
 
+/// Result of matching a [`Request`] against [`FilteredStealTask::filters`] and state of
+/// [`FilteredStealTask::subscribed`].
+#[derive(Debug)]
+struct RequestMatchResult {
+    /// The minimum protocol version request for handling the [`Request`].
+    protocol_version_req: semver::VersionReq,
+    /// Ids of matched clients.
+    clients_matched: Vec<u32>,
+    /// Ids of clients that do not meet the minimum protocol version requirement
+    clients_below_version_req: Vec<u32>,
+}
+
 /// Errors that can occur in the [`FilteringService`] when serving a stolen request.
 ///
 /// Has a nice [`fmt::Display`] implementation that shows all sources of [`hyper::Error`]s.
@@ -535,7 +547,7 @@ where
         )
         ret,
     )]
-    fn match_request<B>(&self, request: &mut Request<B>) -> Vec<ClientId> {
+    fn match_request<B>(&self, request: &mut Request<B>) -> RequestMatchResult {
         let protocol_version_req = self
             .original_destination
             .connector()
@@ -547,22 +559,37 @@ where
                     .contains_key(UPGRADE)
                     .then_some(&*HTTP_FILTERED_UPGRADE_VERSION)
             });
-
-        self.filters
+        let mut clients_below_version_req = Vec::new();
+        let clients_matched = self
+            .filters
             .iter()
+            // Check if the client's filter matches the request.
+            .filter(|entry| entry.value().0.matches(request))
+            // Check neither the client nor us has closed the subscription
+            .filter(|entry| self.subscribed.get(entry.key()).copied().unwrap_or(true))
             // Check if the client can handle the request.
             .filter(|entry| {
                 let Some(req) = &protocol_version_req else {
                     return true;
                 };
 
-                entry.value().1.as_ref().is_some_and(|v| req.matches(v))
+                entry.value().1.as_ref().is_some_and(|v| {
+                    if req.matches(v) {
+                        true
+                    } else {
+                        clients_below_version_req.push(*entry.key());
+                        false
+                    }
+                })
             })
-            // Check if the client's filter matches the request.
-            .filter(|entry| entry.value().0.matches(request))
             .map(|entry| *entry.key())
-            .filter(|client_id| self.subscribed.get(client_id).copied().unwrap_or(true))
-            .collect()
+            .collect();
+
+        RequestMatchResult {
+            protocol_version_req: protocol_version_req.cloned().unwrap_or_default(),
+            clients_matched,
+            clients_below_version_req,
+        }
     }
 
     /// Sends the given [`Response`] to the [`FilteringService`] via [`oneshot::Sender`] from
@@ -656,8 +683,12 @@ where
         mut request: ExtractedRequest,
         tx: &Sender<ConnectionMessageOut>,
     ) -> Result<(), ConnectionTaskError> {
-        let matching_client_ids = self.match_request(&mut request.request);
-        let Some((&client_id, other_client_ids)) = matching_client_ids.split_first() else {
+        let RequestMatchResult {
+            protocol_version_req,
+            clients_matched,
+            clients_below_version_req,
+        } = self.match_request(&mut request.request);
+        let Some((&client_id, other_client_ids)) = clients_matched.split_first() else {
             let _ = request.response_tx.send(RequestHandling::LetThrough {
                 unchanged: request.request,
             });
@@ -711,6 +742,17 @@ where
                 message: LogMessage::warn(format!(
                     "An HTTP request was stolen by another user. URI=({:?}), HEADERS=({:?})",
                     request_uri, request_headers,
+                )),
+            })
+            .await?;
+        }
+
+        for client_id in clients_below_version_req {
+            tx.send(ConnectionMessageOut::LogMessage {
+                client_id,
+                connection_id: self.connection_id,
+                message: LogMessage::warn(format!(
+                    "An HTTP request was not stolen due to mirrord-protocol version requirement: {protocol_version_req}",
                 )),
             })
             .await?;
@@ -962,6 +1004,14 @@ mod test {
         util::path_resolver::InTargetPathResolver,
     };
 
+    /// Stealer client info
+    struct ClientInfo<'a> {
+        /// Client id
+        id: ClientId,
+        /// Client version
+        version: Option<&'a str>,
+    }
+
     /// Full setup for [`FilteredStealTask`] tests.
     struct TestSetup {
         /// [`HttpFilter`]s mapping used by the task.
@@ -1187,20 +1237,38 @@ mod test {
         ///
         /// 1. `client_ids` - For each client_id, insert a header filter. The request will contain a
         ///    corresponding header such that the [`FilteredStealTask`] will steal it.
-        fn prepare_request_for_multiple(&self, client_ids: &[ClientId]) -> Request<DynamicBody> {
-            let filter = (
-                HttpFilter::Header("x-subscription: ABCD".parse().unwrap()),
-                Some("1.19.0".parse().unwrap()),
-            );
-
-            for client_id in client_ids {
-                self.filters.insert(*client_id, filter.clone());
+        /// 2. `is_upgrade` - If `false`, an ordinary `GET` request will be produced. If `true`, a
+        ///    [`Self::TEST_PROTO`] upgrade request will be produced.
+        fn prepare_request_for_multiple(
+            &self,
+            clients: &[ClientInfo],
+            is_upgrade: bool,
+        ) -> Request<DynamicBody> {
+            for client in clients {
+                let client_version = client.version.unwrap_or("1.19.0").parse().unwrap();
+                let filter = (
+                    HttpFilter::Header("x-subscription: ABCD".parse().unwrap()),
+                    Some(client_version),
+                );
+                self.filters.insert(client.id, filter);
             }
 
-            Request::builder()
+            let mut builder = Request::builder()
                 .method(Method::GET)
-                .uri("http://www.some-server.com")
-                .header("x-subscription", "ABCD".to_string())
+                .uri(if is_upgrade {
+                    "testproto://www.some-server.com"
+                } else {
+                    "http://www.some-server.com"
+                })
+                .header("x-subscription", "ABCD".to_string());
+
+            if is_upgrade {
+                builder = builder
+                    .header(UPGRADE, Self::TEST_PROTO)
+                    .header(CONNECTION, "upgrade");
+            }
+
+            builder
                 .body(Empty::new().map_err(|_| unreachable!()).boxed())
                 .unwrap()
         }
@@ -1312,12 +1380,29 @@ mod test {
     }
 
     /// Stolen connection receives a request that matches 3 filters. The first client receives the
-    /// request, the remanining two receive warnings.
+    /// request, the remaining two receive warnings.
     #[tokio::test]
     async fn multiple_clients_with_same_filter() {
         let mut setup = TestSetup::new().await;
 
-        let request = setup.prepare_request_for_multiple(&[0, 1, 2]);
+        let request = setup.prepare_request_for_multiple(
+            &[
+                ClientInfo {
+                    id: 0,
+                    version: None,
+                },
+                ClientInfo {
+                    id: 1,
+                    version: None,
+                },
+                ClientInfo {
+                    id: 2,
+                    version: None,
+                },
+            ],
+            false,
+        );
+
         tokio::join!(
             async {
                 let response = setup.request_sender.send_request(request).await.unwrap();
@@ -2087,5 +2172,114 @@ mod test {
         client_task.await.unwrap();
         // assert that the filtered steal task did not fail
         task_handle.await.unwrap();
+    }
+
+    /// Stolen connection receives an upgrade request. The first client that meets version
+    /// requirement receives the request, the remaining clients with unsupported version
+    /// receive a warning.
+    #[tokio::test]
+    async fn multiple_clients_with_unsupported_version() {
+        let mut setup = TestSetup::new().await;
+
+        let request = setup.prepare_request_for_multiple(
+            &[
+                ClientInfo {
+                    id: 0,
+                    version: Some("1.19.0"),
+                },
+                ClientInfo {
+                    id: 1,
+                    version: Some("1.4.0"),
+                },
+                ClientInfo {
+                    id: 2,
+                    version: Some("1.4.0"),
+                },
+            ],
+            true,
+        );
+
+        tokio::join!(
+            async {
+                let response = setup.request_sender.send_request(request).await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+            },
+            async {
+                // The first client receives the request
+                let subscribed_client_id = match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::SubscribedHttp {
+                        client_id: subscribed_client_id,
+                        connection_id: TestSetup::CONNECTION_ID,
+                    } => subscribed_client_id,
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+                assert_eq!(subscribed_client_id, 0);
+
+                let request_id = match setup.task_out_rx.recv().await.unwrap() {
+                    ConnectionMessageOut::Request {
+                        client_id: received_client_id,
+                        connection_id: TestSetup::CONNECTION_ID,
+                        id,
+                        metadata: HttpRequestMetadata::V1 { destination, .. },
+                        transport: HttpRequestTransportType::Tcp,
+                        ..
+                    } => {
+                        assert_eq!(received_client_id, 0);
+                        assert_eq!(destination, setup.original_address);
+                        id
+                    }
+                    other => unreachable!("unexpected message: {other:?}"),
+                };
+
+                // The remaining two clients receive the warning
+                for _ in 0..2 {
+                    match setup.task_out_rx.recv().await.unwrap() {
+                        ConnectionMessageOut::LogMessage {
+                            client_id: received_client_id,
+                            connection_id: TestSetup::CONNECTION_ID,
+                            message:
+                                LogMessage {
+                                    message: received_message,
+                                    level: LogLevel::Warn,
+                                },
+                        } => {
+                            assert_ne!(received_client_id, 0);
+                            assert_eq!(
+                                received_message,
+                                "An HTTP request was not stolen due to mirrord-protocol version requirement: >=1.5.0"
+                            );
+                        }
+                        other => unreachable!("unexpected message: {other:?}"),
+                    }
+                }
+
+                let response = Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Empty::new().map_err(|_| unreachable!()).boxed())
+                    .unwrap();
+
+                setup
+                    .task_in_tx
+                    .send(ConnectionMessageIn::Response {
+                        client_id: subscribed_client_id,
+                        request_id,
+                        response,
+                    })
+                    .await
+                    .unwrap();
+
+                setup
+                    .task_in_tx
+                    .send(ConnectionMessageIn::Unsubscribed {
+                        client_id: subscribed_client_id,
+                    })
+                    .await
+                    .unwrap();
+            }
+        );
+
+        let mut rx = setup.shutdown().await;
+        // The task should not produce the `Closed` message - the client has unsubscribed.
+        assert!(rx.recv().await.is_none());
     }
 }
