@@ -26,6 +26,7 @@ Please let us know if you encountered a use case where it doesn't work for you, 
 ### `mirrord exec`
 
 ```mermaid
+%%{init: {'theme':'neutral'}}%%
 flowchart TB
     %% Nodes
     Start((Start))
@@ -83,6 +84,7 @@ flowchart TB
 ### `mirrord exec` (Sequence Diagram)
 
 ```mermaid
+%%{init: {'theme':'neutral'}}%%
 sequenceDiagram
     participant CLI as mirrord CLI
     participant Config as Config Parser
