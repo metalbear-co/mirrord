@@ -19,7 +19,7 @@ pub struct ConnectParams<'a> {
     /// Selected mirrord profile.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile: Option<&'a str>,
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    #[serde(with = "kafka_splits_serde")]
     pub kafka_splits: HashMap<&'a str, &'a BTreeMap<String, String>>,
 }
 
@@ -34,9 +34,32 @@ impl<'a> ConnectParams<'a> {
     }
 }
 
+mod kafka_splits_serde {
+    use std::collections::{BTreeMap, HashMap};
+
+    use serde::Serializer;
+
+    pub fn serialize<S>(
+        kafka_splits: &HashMap<&str, &BTreeMap<String, String>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if kafka_splits.is_empty() {
+            return serializer.serialize_none();
+        }
+
+        let as_json =
+            serde_json::to_string(kafka_splits).expect("serialization to memory should not fail");
+        serializer.serialize_str(as_json.as_str())
+    }
+}
+
 impl fmt::Display for ConnectParams<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let as_string = serde_qs::to_string(self).expect("serialization to memory should not fail");
+        let as_string =
+            serde_urlencoded::to_string(self).expect("serialization to memory should not fail");
 
         f.write_str(&as_string)
     }

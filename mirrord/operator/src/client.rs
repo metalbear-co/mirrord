@@ -1058,7 +1058,7 @@ mod test {
             ]),
         )]),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
-        ?connect=true&on_concurrent_steal=abort&kafka_splits[topic-id][header-1]=filter-1&kafka_splits[topic-id][header-2]=filter-2",
+        ?connect=true&on_concurrent_steal=abort&kafka_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
     )]
     #[test]
     fn target_connect_url(
