@@ -63,6 +63,10 @@ pub struct Args {
     /// cluster.
     #[arg(long, default_value_t = false, env = envs::IPV6_SUPPORT.name)]
     pub ipv6: bool,
+
+    /// Internal flag to indicate this is the second process spawned by the guard
+    #[arg(long, default_value_t = false, hide = true)]
+    pub second_process: bool,
 }
 
 impl Args {

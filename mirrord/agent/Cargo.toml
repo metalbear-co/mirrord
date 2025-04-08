@@ -49,6 +49,7 @@ hickory-resolver.workspace = true
 bollard = "0.18"
 tokio-util.workspace = true
 streammap-ext.workspace = true
+sysinfo = "0.29"
 libc.workspace = true
 faccess = "0.2"
 bytes.workspace = true
