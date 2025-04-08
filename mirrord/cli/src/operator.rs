@@ -1,7 +1,7 @@
 use std::fs::File;
 
 use futures::TryFutureExt;
-use mirrord_operator::setup::{LicenseType, Operator, OperatorSetup, SetupOptions};
+use mirrord_operator::setup::{LicenseType, Operator, SetupOptions, SetupWriter as _};
 use serde::Deserialize;
 use status::StatusCommandHandler;
 use tokio::fs;
@@ -40,6 +40,7 @@ async fn operator_setup(
         accept_tos,
         license_key,
         license_path,
+        license_server,
         file,
         namespace,
         aws_role_arn,
@@ -87,6 +88,7 @@ async fn operator_setup(
 
         let operator = Operator::new(SetupOptions {
             license,
+            license_server,
             namespace,
             image,
             aws_role_arn,

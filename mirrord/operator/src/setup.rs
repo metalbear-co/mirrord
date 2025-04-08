@@ -13,7 +13,6 @@ use k8s_openapi::{
             ClusterRole, ClusterRoleBinding, PolicyRule, Role, RoleBinding, RoleRef, Subject,
         },
     },
-    apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition,
     apimachinery::pkg::{
         api::resource::Quantity,
         apis::meta::v1::{LabelSelector, ObjectMeta},
@@ -24,7 +23,6 @@ use k8s_openapi::{
     },
 };
 use kube::{CustomResourceExt, Resource};
-use thiserror::Error;
 
 use crate::crd::{
     kafka::{MirrordKafkaClientConfig, MirrordKafkaEphemeralTopic, MirrordKafkaTopicsConsumer},
@@ -33,6 +31,8 @@ use crate::crd::{
     steal_tls::{MirrordClusterTlsStealConfig, MirrordTlsStealConfig},
     MirrordOperatorUser, MirrordSqsSession, MirrordWorkloadQueueRegistry, TargetCrd,
 };
+
+mod writer;
 
 pub static OPERATOR_NAME: &str = "mirrord-operator";
 /// 443 is standard port for APIService, do not change this value
@@ -59,33 +59,7 @@ static RESOURCE_REQUESTS: LazyLock<BTreeMap<String, Quantity>> = LazyLock::new(|
     ])
 });
 
-macro_rules! writer_impl {
-    ($ident:ident) => {
-        impl OperatorSetup for $ident {
-            fn to_writer<W: Write>(&self, writer: W) -> Result<()> {
-                serde_yaml::to_writer(writer, &self.0).map_err(SetupWriteError::from)
-            }
-        }
-    };
-    ($($rest:ident),+) => {
-        $( writer_impl!($rest); )+
-    }
-}
-
-/// General Operator Error
-#[derive(Debug, Error)]
-pub enum SetupWriteError {
-    #[error(transparent)]
-    YamlSerialization(#[from] serde_yaml::Error),
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-}
-
-type Result<T, E = SetupWriteError> = std::result::Result<T, E>;
-
-pub trait OperatorSetup {
-    fn to_writer<W: Write>(&self, writer: W) -> Result<()>;
-}
+pub use writer::{SetupWriteError, SetupWriter};
 
 pub enum LicenseType {
     Online(String),
@@ -94,6 +68,7 @@ pub enum LicenseType {
 
 pub struct SetupOptions {
     pub license: LicenseType,
+    pub license_server: Option<String>,
     pub namespace: OperatorNamespace,
     pub image: String,
     pub aws_role_arn: Option<String>,
@@ -125,6 +100,7 @@ impl Operator {
     pub fn new(options: SetupOptions) -> Self {
         let SetupOptions {
             license,
+            license_server,
             namespace,
             image,
             aws_role_arn,
@@ -136,6 +112,13 @@ impl Operator {
         let (license_secret, license_key) = match license {
             LicenseType::Online(license_key) => (None, Some(license_key)),
             LicenseType::Offline(license) => {
+                if license_server.is_some() {
+                    tracing::warn!(
+                        ?license_server,
+                        "license-server was sepcified with an offline license and thus will be ignored"
+                    );
+                }
+
                 (Some(OperatorLicenseSecret::new(&license, &namespace)), None)
             }
         };
@@ -164,6 +147,7 @@ impl Operator {
             &service_account,
             license_secret.as_ref(),
             license_key,
+            license_server,
             image,
             sqs_splitting,
             kafka_splitting,
@@ -194,8 +178,8 @@ impl Operator {
     }
 }
 
-impl OperatorSetup for Operator {
-    fn to_writer<W: Write>(&self, mut writer: W) -> Result<()> {
+impl SetupWriter for Operator {
+    fn to_writer<W: Write>(&self, mut writer: W) -> Result<(), SetupWriteError> {
         self.namespace.to_writer(&mut writer)?;
 
         if let Some(secret) = self.license_secret.as_ref() {
@@ -278,8 +262,10 @@ impl OperatorSetup for Operator {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct OperatorNamespace(Namespace);
+writer::setup_writer! {
+    #[derive(Debug, Clone)]
+    pub struct OperatorNamespace(Namespace);
+}
 
 impl OperatorNamespace {
     pub fn name(&self) -> &str {
@@ -303,8 +289,10 @@ impl FromStr for OperatorNamespace {
     }
 }
 
-#[derive(Debug)]
-pub struct OperatorDeployment(Deployment);
+writer::setup_writer! {
+    #[derive(Debug)]
+    pub struct OperatorDeployment(Deployment);
+}
 
 impl OperatorDeployment {
     #[allow(clippy::too_many_arguments)]
@@ -313,6 +301,7 @@ impl OperatorDeployment {
         sa: &OperatorServiceAccount,
         license_secret: Option<&OperatorLicenseSecret>,
         license_key: Option<String>,
+        license_server: Option<String>,
         image: String,
         sqs_splitting: bool,
         kafka_splitting: bool,
@@ -384,6 +373,14 @@ impl OperatorDeployment {
             envs.push(EnvVar {
                 name: "OPERATOR_LICENSE_KEY".to_owned(),
                 value: Some(license_key),
+                value_from: None,
+            });
+        }
+
+        if let Some(license_server) = license_server {
+            envs.push(EnvVar {
+                name: "OPERATOR_LICENSE_SERVER".to_owned(),
+                value: Some(license_server),
                 value_from: None,
             });
         }
@@ -495,8 +492,10 @@ impl OperatorDeployment {
     }
 }
 
-#[derive(Debug)]
-pub struct OperatorServiceAccount(ServiceAccount);
+writer::setup_writer! {
+    #[derive(Debug)]
+    pub struct OperatorServiceAccount(ServiceAccount);
+}
 
 impl OperatorServiceAccount {
     pub fn new(namespace: &OperatorNamespace, aws_role_arn: Option<String>) -> Self {
@@ -529,8 +528,10 @@ impl OperatorServiceAccount {
     }
 }
 
-#[derive(Debug)]
-pub struct OperatorClusterRole(ClusterRole);
+writer::setup_writer! {
+    #[derive(Debug)]
+    pub struct OperatorClusterRole(ClusterRole);
+}
 
 impl OperatorClusterRole {
     pub fn new(sqs_splitting: bool, kafka_splitting: bool, application_auto_pause: bool) -> Self {
@@ -755,8 +756,10 @@ impl Default for OperatorClusterRole {
     }
 }
 
-#[derive(Debug)]
-pub struct OperatorClusterRoleBinding(ClusterRoleBinding);
+writer::setup_writer! {
+    #[derive(Debug)]
+    pub struct OperatorClusterRoleBinding(ClusterRoleBinding);
+}
 
 impl OperatorClusterRoleBinding {
     pub fn new(role: &OperatorClusterRole, sa: &OperatorServiceAccount) -> Self {
@@ -773,8 +776,10 @@ impl OperatorClusterRoleBinding {
     }
 }
 
-#[derive(Debug)]
-pub struct OperatorRole(Role);
+writer::setup_writer! {
+    #[derive(Debug)]
+    pub struct OperatorRole(Role);
+}
 
 impl OperatorRole {
     pub fn new(namespace: &OperatorNamespace) -> Self {
@@ -812,8 +817,10 @@ impl OperatorRole {
     }
 }
 
-#[derive(Debug)]
-pub struct OperatorRoleBinding(RoleBinding);
+writer::setup_writer! {
+    #[derive(Debug)]
+    pub struct OperatorRoleBinding(RoleBinding);
+}
 
 impl OperatorRoleBinding {
     pub fn new(
@@ -835,8 +842,10 @@ impl OperatorRoleBinding {
     }
 }
 
-#[derive(Debug)]
-pub struct OperatorLicenseSecret(Secret);
+writer::setup_writer! {
+    #[derive(Debug)]
+    pub struct OperatorLicenseSecret(Secret);
+}
 
 impl OperatorLicenseSecret {
     pub fn new(license: &str, namespace: &OperatorNamespace) -> Self {
@@ -861,8 +870,10 @@ impl OperatorLicenseSecret {
     }
 }
 
-#[derive(Debug)]
-pub struct OperatorService(Service);
+writer::setup_writer! {
+    #[derive(Debug)]
+    pub struct OperatorService(Service);
+}
 
 impl OperatorService {
     pub fn new(namespace: &OperatorNamespace) -> Self {
@@ -899,8 +910,10 @@ impl OperatorService {
     }
 }
 
-#[derive(Debug)]
-pub struct OperatorApiService(APIService);
+writer::setup_writer! {
+    #[derive(Debug)]
+    pub struct OperatorApiService(APIService);
+}
 
 impl OperatorApiService {
     pub fn new(service: &OperatorService) -> Self {
@@ -928,8 +941,10 @@ impl OperatorApiService {
     }
 }
 
-#[derive(Debug)]
-pub struct OperatorClusterUserRole(ClusterRole);
+writer::setup_writer! {
+    #[derive(Debug)]
+    pub struct OperatorClusterUserRole(ClusterRole);
+}
 
 impl OperatorClusterUserRole {
     pub fn new() -> Self {
@@ -986,8 +1001,10 @@ impl Default for OperatorClusterUserRole {
     }
 }
 
-#[derive(Debug)]
-pub struct OperatorClientCaRole(Role);
+writer::setup_writer! {
+    #[derive(Debug)]
+    pub struct OperatorClientCaRole(Role);
+}
 
 impl OperatorClientCaRole {
     pub fn new() -> Self {
@@ -1024,8 +1041,10 @@ impl Default for OperatorClientCaRole {
     }
 }
 
-#[derive(Debug)]
-pub struct OperatorClientCaRoleBinding(RoleBinding);
+writer::setup_writer! {
+    #[derive(Debug)]
+    pub struct OperatorClientCaRoleBinding(RoleBinding);
+}
 
 impl OperatorClientCaRoleBinding {
     pub fn new(role: &OperatorClientCaRole, sa: &OperatorServiceAccount) -> Self {
@@ -1042,25 +1061,3 @@ impl OperatorClientCaRoleBinding {
         OperatorClientCaRoleBinding(role)
     }
 }
-
-impl OperatorSetup for CustomResourceDefinition {
-    fn to_writer<W: Write>(&self, writer: W) -> Result<()> {
-        serde_yaml::to_writer(writer, &self).map_err(SetupWriteError::from)
-    }
-}
-
-writer_impl![
-    OperatorNamespace,
-    OperatorDeployment,
-    OperatorServiceAccount,
-    OperatorClusterRole,
-    OperatorClusterRoleBinding,
-    OperatorLicenseSecret,
-    OperatorService,
-    OperatorApiService,
-    OperatorClusterUserRole,
-    OperatorClientCaRole,
-    OperatorClientCaRoleBinding,
-    OperatorRole,
-    OperatorRoleBinding
-];

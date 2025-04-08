@@ -688,6 +688,9 @@ pub(super) struct OperatorSetupParams {
     #[arg(long)]
     pub(super) license_path: Option<PathBuf>,
 
+    #[arg(long)]
+    pub(super) license_server: Option<String>,
+
     /// Output Kubernetes specs to file instead of stdout
     #[arg(short, long)]
     pub(super) file: Option<PathBuf>,
