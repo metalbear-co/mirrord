@@ -47,7 +47,6 @@ macro_rules! setup_writer_struct_impl {
         impl $crate::setup::writer::SetupWriter for $ident {
             fn to_writer<W: std::io::Write>(&self, mut writer: W) -> Result<(), $crate::setup::writer::SetupWriteError> {
                 $(
-                    writer.write_all(b"---\n")?;
                     $crate::setup::writer::SetupWriter::to_writer(&self.$field, &mut writer)?;
                 )*
 
@@ -80,7 +79,9 @@ impl<T> SetupWriter for T
 where
     T: Serialize,
 {
-    fn to_writer<W: Write>(&self, writer: W) -> Result<(), SetupWriteError> {
+    fn to_writer<W: Write>(&self, mut writer: W) -> Result<(), SetupWriteError> {
+        writer.write_all(b"---\n")?;
+
         serde_yaml::to_writer(writer, &self).map_err(SetupWriteError::from)
     }
 }

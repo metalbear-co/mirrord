@@ -183,77 +183,40 @@ impl SetupWriter for Operator {
         self.namespace.to_writer(&mut writer)?;
 
         if let Some(secret) = self.license_secret.as_ref() {
-            writer.write_all(b"---\n")?;
             secret.to_writer(&mut writer)?;
         }
 
-        writer.write_all(b"---\n")?;
         self.service_account.to_writer(&mut writer)?;
-
-        writer.write_all(b"---\n")?;
         self.cluster_role.to_writer(&mut writer)?;
-
-        writer.write_all(b"---\n")?;
         self.user_cluster_role.to_writer(&mut writer)?;
-
-        writer.write_all(b"---\n")?;
         self.client_ca_role.to_writer(&mut writer)?;
-
-        writer.write_all(b"---\n")?;
         self.cluster_role_binding.to_writer(&mut writer)?;
-
-        writer.write_all(b"---\n")?;
         self.client_ca_role_binding.to_writer(&mut writer)?;
-
-        writer.write_all(b"---\n")?;
         self.deployment.to_writer(&mut writer)?;
-
-        writer.write_all(b"---\n")?;
         self.service.to_writer(&mut writer)?;
-
-        writer.write_all(b"---\n")?;
         self.api_service.to_writer(&mut writer)?;
 
-        writer.write_all(b"---\n")?;
         MirrordPolicy::crd().to_writer(&mut writer)?;
-
-        writer.write_all(b"---\n")?;
         MirrordClusterPolicy::crd().to_writer(&mut writer)?;
-
-        writer.write_all(b"---\n")?;
         MirrordTlsStealConfig::crd().to_writer(&mut writer)?;
-
-        writer.write_all(b"---\n")?;
         MirrordClusterTlsStealConfig::crd().to_writer(&mut writer)?;
-
-        writer.write_all(b"---\n")?;
         MirrordProfile::crd().to_writer(&mut writer)?;
 
         if self.sqs_splitting {
-            writer.write_all(b"---\n")?;
             MirrordWorkloadQueueRegistry::crd().to_writer(&mut writer)?;
-
-            writer.write_all(b"---\n")?;
             MirrordSqsSession::crd().to_writer(&mut writer)?;
         }
 
         if self.kafka_splitting {
-            writer.write_all(b"---\n")?;
             MirrordKafkaClientConfig::crd().to_writer(&mut writer)?;
-
-            writer.write_all(b"---\n")?;
             MirrordKafkaEphemeralTopic::crd().to_writer(&mut writer)?;
-
-            writer.write_all(b"---\n")?;
             MirrordKafkaTopicsConsumer::crd().to_writer(&mut writer)?;
 
             if let Some(role) = self.role.as_ref() {
-                writer.write_all(b"---\n")?;
                 role.to_writer(&mut writer)?;
             }
 
             if let Some(role_binding) = self.role_binding.as_ref() {
-                writer.write_all(b"---\n")?;
                 role_binding.to_writer(&mut writer)?;
             }
         }
