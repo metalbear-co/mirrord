@@ -64,31 +64,26 @@ pub struct ContainerParams {
     pub support_ipv6: bool,
     /// Configuration for stealing TLS traffic.
     pub steal_tls_config: Vec<StealPortTlsConfig>,
+    /// Whether the agent should use iptables for mirroring traffic.
+    pub enable_passthrough_mirroring: bool,
 }
 
-impl From<ContainerConfig> for ContainerParams {
-    fn from(value: ContainerConfig) -> Self {
-        let port = value
-            .port
-            .unwrap_or_else(|| rand::random_range(30000..=65535));
-        let gid: u16 = rand::random_range(3000..u16::MAX);
+impl ContainerParams {
+    pub fn random_port() -> u16 {
+        rand::random_range(30000..=65535)
+    }
 
-        let name = format!(
+    pub fn random_gid() -> u16 {
+        rand::random_range(3000..u16::MAX)
+    }
+
+    pub fn random_name() -> String {
+        format!(
             "mirrord-agent-{}",
             Alphanumeric
                 .sample_string(&mut rand::rng(), 10)
                 .to_lowercase()
-        );
-
-        Self {
-            name,
-            gid,
-            port,
-            tls_cert: value.tls_cert,
-            pod_ips: value.pod_ips,
-            support_ipv6: value.support_ipv6,
-            steal_tls_config: value.steal_tls_config,
-        }
+        )
     }
 }
 

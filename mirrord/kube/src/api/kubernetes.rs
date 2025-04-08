@@ -168,14 +168,11 @@ impl KubernetesAPI {
     }
 
     /// Prepares params to create an agent.
-    ///
-    /// Unless targetless, fetches [`RuntimeData`] for the given target and fills
-    /// [`ContainerConfig::pod_ips`].
     #[tracing::instrument(level = Level::TRACE, skip(self), ret, err)]
     pub async fn create_agent_params(
         &self,
         target: &TargetConfig,
-        mut config: ContainerConfig,
+        config: ContainerConfig,
     ) -> Result<(ContainerParams, Option<RuntimeData>), KubeApiError> {
         let runtime_data = match target.path.as_ref().unwrap_or(&Target::Targetless) {
             Target::Targetless => None,
@@ -190,16 +187,22 @@ impl KubernetesAPI {
             .map(|runtime_data| runtime_data.pod_ips.clone())
             .filter(|pod_ips| !pod_ips.is_empty());
 
-        config.pod_ips = pod_ips;
+        let container_params = ContainerParams {
+            name: ContainerParams::random_name(),
+            gid: ContainerParams::random_gid(),
+            port: config.port.unwrap_or_else(ContainerParams::random_port),
+            tls_cert: config.tls_cert,
+            pod_ips,
+            support_ipv6: config.support_ipv6,
+            steal_tls_config: config.steal_tls_config,
+            enable_passthrough_mirroring: self.agent.passthrough_mirroring,
+        };
 
-        Ok((config.into(), runtime_data))
+        Ok((container_params, runtime_data))
     }
 
     /// Creates an agent.
-    ///
-    /// Unless targetless, fetches [`RuntimeData`] for the given target and fills
-    /// [`ContainerConfig::pod_ips`].
-    #[tracing::instrument(level = "trace", skip(self, progress))]
+    #[tracing::instrument(level = Level::TRACE, skip(self, progress))]
     pub async fn create_agent<P>(
         &self,
         progress: &mut P,

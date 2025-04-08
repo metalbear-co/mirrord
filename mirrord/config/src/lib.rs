@@ -391,6 +391,14 @@ impl LayerConfig {
             );
         }
 
+        if self.agent.passthrough_mirroring && self.agent.network_interface.is_some() {
+            context.add_warning(
+                "agent.network_interface setting is ignored \
+                when agent.passthrough_mirroring is enabled."
+                    .into(),
+            );
+        }
+
         if matches!(
             self.feature.network.outgoing.filter,
             Some(OutgoingFilterConfig::Remote(_))

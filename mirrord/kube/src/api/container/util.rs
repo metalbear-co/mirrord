@@ -23,7 +23,10 @@ pub(super) static DEFAULT_TOLERATIONS: LazyLock<Vec<Toleration>> = LazyLock::new
 
 /// Retrieve a list of Linux capabilities for the agent container.
 pub(super) fn get_capabilities(agent: &AgentConfig) -> Vec<LinuxCapability> {
-    let disabled = agent.disabled_capabilities.clone().unwrap_or_default();
+    let mut disabled = agent.disabled_capabilities.clone().unwrap_or_default();
+    if agent.passthrough_mirroring {
+        disabled.push(LinuxCapability::NetRaw);
+    }
 
     LinuxCapability::all()
         .iter()
@@ -68,6 +71,10 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
 
     if params.steal_tls_config.is_empty().not() {
         env.push(envs::STEAL_TLS_CONFIG.as_k8s_spec(&params.steal_tls_config));
+    }
+
+    if params.enable_passthrough_mirroring {
+        env.push(envs::PASSTHROUGH_MIRRORING.as_k8s_spec(&true));
     }
 
     env
