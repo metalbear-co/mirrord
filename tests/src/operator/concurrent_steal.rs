@@ -15,6 +15,7 @@ use crate::utils::{
 
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(120))]
 pub async fn two_clients_steal_same_target(
     #[future]
     #[notrace]
@@ -40,6 +41,7 @@ pub async fn two_clients_steal_same_target(
     client_a
         .wait_for_line(Duration::from_secs(40), "daemon subscribed")
         .await;
+    println!("Client A subscribed the port");
 
     let mut client_b = application
         .run(
@@ -50,6 +52,7 @@ pub async fn two_clients_steal_same_target(
         )
         .await;
 
+    println!("Waiting for client B to crash");
     let res = client_b.child.wait().await.unwrap();
     assert!(!res.success());
     assert!(!client_b.get_stderr().await.contains("daemon subscribed"));
@@ -67,6 +70,7 @@ pub async fn two_clients_steal_same_target(
 
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(120))]
 pub async fn two_clients_steal_same_target_pod_deployment(
     #[future]
     #[notrace]
@@ -92,6 +96,7 @@ pub async fn two_clients_steal_same_target_pod_deployment(
     client_a
         .wait_for_line(Duration::from_secs(40), "daemon subscribed")
         .await;
+    println!("Client A subscribed the port");
 
     let deployment_name = service.deployment.metadata.name.as_deref().unwrap();
 
@@ -104,6 +109,7 @@ pub async fn two_clients_steal_same_target_pod_deployment(
         )
         .await;
 
+    println!("Waiting for client B to crash");
     let res = client_b.child.wait().await.unwrap();
     assert!(!res.success());
     assert!(!client_b.get_stderr().await.contains("daemon subscribed"));
@@ -121,6 +127,7 @@ pub async fn two_clients_steal_same_target_pod_deployment(
 
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[timeout(Duration::from_secs(120))]
 pub async fn two_clients_steal_with_http_filter(
     config_dir: &std::path::Path,
     #[future] service: KubeService,
@@ -155,6 +162,7 @@ pub async fn two_clients_steal_with_http_filter(
     client_a
         .wait_for_line(Duration::from_secs(40), "daemon subscribed")
         .await;
+    println!("Client A subscribed the port");
 
     let mut config_path = config_dir.to_path_buf();
     config_path.push("http_filter_header_no.json");
@@ -171,6 +179,7 @@ pub async fn two_clients_steal_with_http_filter(
     client_b
         .wait_for_line(Duration::from_secs(40), "daemon subscribed")
         .await;
+    println!("Client B subscribed the port");
 
     let client = reqwest::Client::new();
     let req_builder = client.delete(&url);

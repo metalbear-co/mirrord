@@ -16,11 +16,7 @@ use mirrord_auth::{
     credential_store::{CredentialStoreSync, UserIdentity},
     credentials::LicenseValidity,
 };
-use mirrord_config::{
-    feature::{network::incoming::ConcurrentSteal, split_queues::SplitQueuesConfig},
-    target::Target,
-    LayerConfig,
-};
+use mirrord_config::{feature::split_queues::SplitQueuesConfig, target::Target, LayerConfig};
 use mirrord_kube::{
     api::{kubernetes::create_kube_config, runtime::RuntimeDataProvider},
     error::KubeApiError,
@@ -561,11 +557,16 @@ impl OperatorApi<PreparedClientCert> {
             .contains(&NewOperatorFeature::ProxyApi);
 
         let is_empty_deployment = target.empty_deployment();
-        let (connect_url, session_id) = if layer_config.feature.copy_target.enabled
-            // use copy_target for splitting queues
-            || layer_config.feature.split_queues.is_set()
+        let do_copy_target = layer_config.feature.copy_target.enabled
             || is_empty_deployment
-        {
+            || layer_config.feature.split_queues.sqs().next().is_some()
+            || (layer_config.feature.split_queues.kafka().next().is_some()
+                && self
+                    .operator()
+                    .spec
+                    .require_feature(NewOperatorFeature::KafkaQueueSplittingNoCopy)
+                    .is_err());
+        let (connect_url, session_id) = if do_copy_target {
             let mut copy_subtask = progress.subtask("copying target");
 
             if layer_config.feature.copy_target.enabled.not() {
@@ -665,15 +666,9 @@ impl OperatorApi<PreparedClientCert> {
                 .supported_features()
                 .contains(&NewOperatorFeature::ProxyApi);
 
-            (
-                Self::target_connect_url(
-                    use_proxy,
-                    &target,
-                    layer_config.feature.network.incoming.on_concurrent_steal,
-                    layer_config.profile.as_deref(),
-                ),
-                None,
-            )
+            let params = ConnectParams::new(layer_config);
+
+            (Self::target_connect_url(use_proxy, &target, &params), None)
         };
 
         tracing::debug!("connect_url {connect_url:?}");
@@ -714,8 +709,7 @@ impl OperatorApi<PreparedClientCert> {
     fn target_connect_url(
         use_proxy: bool,
         target: &ResolvedTarget<true>,
-        concurrent_steal: ConcurrentSteal,
-        profile: Option<&str>,
+        connect_params: &ConnectParams<'_>,
     ) -> String {
         let name = {
             let mut urlfied_name = target.type_().to_string();
@@ -731,12 +725,6 @@ impl OperatorApi<PreparedClientCert> {
         };
 
         let namespace = target.namespace().unwrap_or("default");
-
-        let connect_params = ConnectParams {
-            connect: true,
-            on_concurrent_steal: Some(concurrent_steal),
-            profile,
-        };
 
         if use_proxy {
             let api_version = TargetCrd::api_version(&());
@@ -774,6 +762,8 @@ impl OperatorApi<PreparedClientCert> {
             connect: true,
             on_concurrent_steal: None,
             profile,
+            // Kafka splits are passed in the request body.
+            kafka_splits: Default::default(),
         };
 
         if use_proxy {
@@ -915,6 +905,8 @@ impl OperatorApi<PreparedClientCert> {
 
 #[cfg(test)]
 mod test {
+    use std::collections::{BTreeMap, HashMap};
+
     use k8s_openapi::api::apps::v1::Deployment;
     use kube::api::ObjectMeta;
     use mirrord_config::feature::network::incoming::ConcurrentSteal;
@@ -922,6 +914,7 @@ mod test {
     use rstest::rstest;
 
     use super::OperatorApi;
+    use crate::client::connect_params::ConnectParams;
 
     /// Verifies that [`OperatorApi::target_connect_url`] produces expected URLs.
     ///
@@ -943,6 +936,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_no_container_proxy(
@@ -961,6 +955,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_container_no_proxy(
@@ -979,6 +974,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
         "/apis/operator.metalbear.co/v1/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_container_proxy(
@@ -997,6 +993,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         None,
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort"
     )]
     #[case::deployment_container_proxy_profile(
@@ -1015,6 +1012,7 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         Some("no-steal"),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=no-steal"
     )]
     #[case::deployment_container_proxy_profile_escape(
@@ -1033,7 +1031,34 @@ mod test {
         }),
         ConcurrentSteal::Abort,
         Some("/should?be&escaped"),
+        Default::default(),
         "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv?connect=true&on_concurrent_steal=abort&profile=%2Fshould%3Fbe%26escaped"
+    )]
+    #[case::deployment_container_proxy_kafka_splits(
+        true,
+        ResolvedTarget::Deployment(ResolvedResource {
+            resource: Deployment {
+                metadata: ObjectMeta {
+                    name: Some("py-serv-deployment".into()),
+                    namespace: Some("default".into()),
+                    ..Default::default()
+                },
+                spec: None,
+                status: None,
+            },
+            container: Some("py-serv".into()),
+        }),
+        ConcurrentSteal::Abort,
+        None,
+        HashMap::from([(
+            "topic-id",
+            BTreeMap::from([
+                ("header-1".to_string(), "filter-1".to_string()),
+                ("header-2".to_string(), "filter-2".to_string()),
+            ]),
+        )]),
+        "/apis/operator.metalbear.co/v1/proxy/namespaces/default/targets/deployment.py-serv-deployment.container.py-serv\
+        ?connect=true&on_concurrent_steal=abort&kafka_splits=%7B%22topic-id%22%3A%7B%22header-1%22%3A%22filter-1%22%2C%22header-2%22%3A%22filter-2%22%7D%7D",
     )]
     #[test]
     fn target_connect_url(
@@ -1041,10 +1066,22 @@ mod test {
         #[case] target: ResolvedTarget<true>,
         #[case] concurrent_steal: ConcurrentSteal,
         #[case] profile: Option<&str>,
+        #[case] kafka_splits: HashMap<&str, BTreeMap<String, String>>,
         #[case] expected: &str,
     ) {
-        let produced =
-            OperatorApi::target_connect_url(use_proxy, &target, concurrent_steal, profile);
+        let kafka_splits = kafka_splits
+            .iter()
+            .map(|(topic_id, filters)| (*topic_id, filters))
+            .collect();
+
+        let params = ConnectParams {
+            connect: true,
+            on_concurrent_steal: Some(concurrent_steal),
+            profile,
+            kafka_splits,
+        };
+
+        let produced = OperatorApi::target_connect_url(use_proxy, &target, &params);
         assert_eq!(produced, expected)
     }
 }
