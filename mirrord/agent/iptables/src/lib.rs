@@ -165,7 +165,7 @@ pub struct SafeIpTables<IPT: IPTables + Send + Sync> {
     redirect: Redirects<IPT>,
 }
 
-/// Wrapper for using iptables. This creates a a new chain on creation and deletes it on drop.
+/// Wrapper for using iptables. This creates a new chain on creation and deletes it on drop.
 /// The way it works is that it adds a chain, then adds a rule to the chain that returns to the
 /// original chain (fallback) and adds a rule in the "PREROUTING" table that jumps to the new chain.
 /// Connections will go then PREROUTING -> OUR_CHAIN -> IF MATCH REDIRECT -> IF NOT MATCH FALLBACK

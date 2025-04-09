@@ -836,9 +836,10 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
 /// If the agent has a target, the flow is a bit different.
 /// This is because we might need to redirect incoming traffic.
 ///
-/// First, the agent generates randomized names for our iptables chains
-/// and puts them into some environment variables (e.g [`IPTABLE_PREROUTING_ENV`]).
-/// Then, it spawns a child process with the exact same command line,
+/// Note that the agent uses static IP tables chain names, and running multiple agents at the same
+/// time will cause an error.
+///
+/// The agent spawns a child process with the exact same command line,
 /// and waits for a SIGTERM signal. When the signal is received or the child process fails,
 /// the agent cleans the iptables (based on the previously set environment variables) before
 /// exiting.
