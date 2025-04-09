@@ -1,4 +1,5 @@
 #![cfg(test)]
+#![cfg(feature = "job")]
 //! Tests for rollout target regression cases to ensure continued support for Argo Rollouts.
 
 use rstest::*;
@@ -38,7 +39,7 @@ pub async fn rollout_regression(
 /// [rollout](https://argoproj.github.io/argo-rollouts/features/specification/).
 ///
 /// The goal here is to just validate that the session is started correctly.
-// #[cfg(feature = "operator")]
+#[cfg(feature = "operator")]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub async fn rollout_regression_copy_target(
