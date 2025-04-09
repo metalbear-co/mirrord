@@ -15,7 +15,6 @@ use super::get_k8s_resource_api;
 use crate::error::KubeApiError;
 
 pub mod serialization;
-pub mod spec;
 
 #[derive(Clone, Debug)]
 pub struct Rollout {

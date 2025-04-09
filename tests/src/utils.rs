@@ -867,7 +867,7 @@ impl Drop for KubeService {
     }
 }
 
-fn deployment_from_json(name: &str, image: &str, env: Value, replicas: u32) -> Deployment {
+fn deployment_from_json(name: &str, image: &str, env: Value) -> Deployment {
     serde_json::from_value(json!({
         "apiVersion": "apps/v1",
         "kind": "Deployment",
@@ -880,7 +880,7 @@ fn deployment_from_json(name: &str, image: &str, env: Value, replicas: u32) -> D
             }
         },
         "spec": {
-            "replicas": replicas,
+            "replicas": 1,
             "selector": {
                 "matchLabels": {
                     "app": &name
@@ -1316,7 +1316,7 @@ async fn internal_service(
     .ok();
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image, env, 1);
+    let deployment = deployment_from_json(&name, image, env);
     let (deployment_guard, deployment) =
         ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
             .await
@@ -1416,7 +1416,7 @@ pub async fn service_for_mirrord_ls(
     .ok();
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image, default_env(), 1);
+    let deployment = deployment_from_json(&name, image, default_env());
     let (deployment_guard, deployment) =
         ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
             .await
@@ -1526,7 +1526,7 @@ pub async fn service_for_mirrord_ls(
     .ok();
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image, default_env(), 1);
+    let deployment = deployment_from_json(&name, image, default_env());
     let (deployment_guard, deployment) =
         ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
             .await
@@ -1755,7 +1755,7 @@ pub async fn rollout_service(
     .ok();
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image, default_env(), 1);
+    let deployment = deployment_from_json(&name, image, default_env());
     let (deployment_guard, deployment) =
         ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
             .await
