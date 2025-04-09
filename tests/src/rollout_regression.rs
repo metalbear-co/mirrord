@@ -1,10 +1,7 @@
 #![cfg(test)]
 //! Tests for rollout target regression cases to ensure continued support for Argo Rollouts.
 
-use core::time::Duration;
-
 use rstest::*;
-use tokio::time::sleep;
 
 use crate::utils::{rollout_service, EnvApp, KubeService};
 
@@ -41,7 +38,7 @@ pub async fn rollout_regression(
 /// [rollout](https://argoproj.github.io/argo-rollouts/features/specification/).
 ///
 /// The goal here is to just validate that the session is started correctly.
-#[cfg(feature = "operator")]
+// #[cfg(feature = "operator")]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub async fn rollout_regression_copy_target(
@@ -49,7 +46,7 @@ pub async fn rollout_regression_copy_target(
     #[notrace]
     rollout_service: KubeService,
     #[values(EnvApp::NodeInclude)] application: EnvApp,
-    #[values(false)] scale_down: bool,
+    #[values(false, true)] scale_down: bool,
 ) {
     use crate::utils::run_exec_with_target;
 

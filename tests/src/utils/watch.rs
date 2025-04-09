@@ -149,10 +149,7 @@ pub async fn wait_until_pods_ready(service: &Service, min: usize, client: Client
     watcher.resources.into_values().filter(is_ready).collect()
 }
 
-/// Waits until the given [`Rollout`] has at least `min` available replicas.
-///
-/// A replica is considered available when the rollout's status indicates that it has
-/// at least the specified number of available replicas.
+/// Waits until the given [`Rollout`] has at least `min_available` available replicas.
 pub async fn wait_until_rollout_available(
     rollout_name: &str,
     namespace: &str,
