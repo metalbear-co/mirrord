@@ -8,7 +8,7 @@ use crate::utils::{rollout_service, EnvApp, KubeService};
 /// Starts mirrord targeting a [rollout](https://argoproj.github.io/argo-rollouts/features/specification/).
 ///
 /// The goal here is to just validate that the session is started correctly.
-#[cfg_attr((feature = "targetless"), ignore)]
+// #[cfg_attr(feature = "targetless", ignore)]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub async fn rollout_regression(
@@ -21,6 +21,10 @@ pub async fn rollout_regression(
 
     let service = rollout_service.await;
     let target = service.rollout_target();
+    let roll = service.rollout_t();
+    println!("Rollout: {:#?}", roll);
+
+    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
 
     let mut process = run_exec_with_target(
         application.command(),

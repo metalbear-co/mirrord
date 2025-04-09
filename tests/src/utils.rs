@@ -827,6 +827,10 @@ impl KubeService {
         format!("rollout/{}", self.name)
     }
 
+    pub fn rollout_t(&self) -> Option<&Rollout> {
+        self.rollout.as_ref()
+    }
+
     pub fn pod_container_target(&self) -> String {
         format!("pod/{}/container/{CONTAINER_NAME}", self.pod_name)
     }
@@ -863,7 +867,7 @@ impl Drop for KubeService {
     }
 }
 
-fn deployment_from_json(name: &str, image: &str, env: Value) -> Deployment {
+fn deployment_from_json(name: &str, image: &str, env: Value, replicas: u32) -> Deployment {
     serde_json::from_value(json!({
         "apiVersion": "apps/v1",
         "kind": "Deployment",
@@ -876,7 +880,7 @@ fn deployment_from_json(name: &str, image: &str, env: Value) -> Deployment {
             }
         },
         "spec": {
-            "replicas": 1,
+            "replicas": replicas,
             "selector": {
                 "matchLabels": {
                     "app": &name
@@ -944,8 +948,6 @@ fn argo_rollout_from_json(name: &str, deployment: &Deployment) -> Rollout {
                     "steps": [
                         { "setWeight": 20 },
                         { "pause": { "duration": "30s" } },
-                        { "setWeight": 100 },
-                        { "pause": {} }
                     ]
                 }
             }
@@ -1317,7 +1319,7 @@ async fn internal_service(
     .ok();
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image, env);
+    let deployment = deployment_from_json(&name, image, env, 1);
     let (deployment_guard, deployment) =
         ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
             .await
@@ -1417,7 +1419,7 @@ pub async fn service_for_mirrord_ls(
     .ok();
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image, default_env());
+    let deployment = deployment_from_json(&name, image, default_env(), 1);
     let (deployment_guard, deployment) =
         ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
             .await
@@ -1527,7 +1529,7 @@ pub async fn service_for_mirrord_ls(
     .ok();
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image, default_env());
+    let deployment = deployment_from_json(&name, image, default_env(), 1);
     let (deployment_guard, deployment) =
         ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
             .await
@@ -1756,12 +1758,15 @@ pub async fn rollout_service(
     .ok();
 
     // `Deployment`
-    let deployment = deployment_from_json(&name, image, default_env());
+    let deployment = deployment_from_json(&name, image, default_env(), 1);
     let (deployment_guard, deployment) =
         ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
             .await
             .unwrap();
-    println!("Created deployment\n{deployment:#?}");
+    println!(
+        "Created deployment\n{deployment:#?} \n{}",
+        serde_json::to_string_pretty(&deployment).unwrap()
+    );
 
     // `Service`
     let service = service_from_json(&name, service_type);
@@ -1795,7 +1800,28 @@ pub async fn rollout_service(
                     serde_json::to_string_pretty(&rollout).unwrap()
                 )
             });
-    println!("Created rollout\n{rollout:#?}");
+    println!(
+        "Created rollout\n{rollout:#?} \n{}",
+        serde_json::to_string_pretty(&rollout).unwrap()
+    );
+
+    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+    // Patch the deployment to set replicas to 0 since the Rollout manages the replicas
+    use kube::api::PatchParams;
+    let patch = serde_json::json!({
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "spec": {
+            "replicas": 0
+        }
+    });
+    let patch_params = PatchParams::apply("mirrord-test").force();
+    let _patched = deployment_api
+        .patch(&name, &patch_params, &kube::api::Patch::Apply(patch))
+        .await
+        .unwrap_or_else(|e| {
+            panic!("Failed to patch deployment to set replicas to 0: {}", e);
+        });
 
     println!(
         "{:?} done creating service {name} in namespace {namespace}",

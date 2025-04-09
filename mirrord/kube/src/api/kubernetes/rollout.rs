@@ -15,6 +15,7 @@ use super::get_k8s_resource_api;
 use crate::error::KubeApiError;
 
 pub mod serialization;
+pub mod spec;
 
 #[derive(Clone, Debug)]
 pub struct Rollout {
@@ -30,6 +31,7 @@ pub struct RolloutStatus {
     /// Looks like this is a string for some reason:
     /// [rollouts/v1alpha1/types.go](https://github.com/argoproj/argo-rollouts/blob/4f1edbe9332b93d8aaf1d8f34239da6f952b8a93/pkg/apis/rollouts/v1alpha1/types.go#L922)
     pub observed_generation: Option<String>,
+    pub pause_conditions: Option<serde_json::Value>,
 }
 
 /// Argo [`Rollout`]s provide `Pod` template in one of two ways:
@@ -44,6 +46,15 @@ pub struct RolloutSpec {
     pub selector: Option<LabelSelector>,
     pub template: Option<RolloutSpecTemplate>,
     pub workload_ref: Option<WorkloadRef>,
+    pub strategy: Option<serde_json::Value>,
+    pub analysis: Option<serde_json::Value>,
+    pub min_ready_seconds: Option<i32>,
+    pub revision_history_limit: Option<i32>,
+    pub paused: Option<bool>,
+    pub progress_deadline_seconds: Option<i32>,
+    pub progress_deadline_abort: Option<bool>,
+    pub restart_at: Option<String>,
+    pub rollback_window: Option<serde_json::Value>,
 }
 
 /// A reference to some Kubernetes [workload](https://kubernetes.io/docs/concepts/workloads/) managed by an Argo [`Rollout`].
