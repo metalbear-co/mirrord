@@ -950,7 +950,7 @@ fn argo_rollout_from_json(name: &str, deployment: &Deployment, service: &Service
             }
         }
     }))
-    .expect("Failed creating `deployment` from json spec!")
+    .expect("Failed creating `rollout` from json spec!")
 }
 
 /// Change the `ipFamilies` and `ipFamilyPolicy` fields to make the service IPv6-only.
