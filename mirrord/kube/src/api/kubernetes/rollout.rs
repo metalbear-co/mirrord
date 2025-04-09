@@ -6,14 +6,15 @@ use k8s_openapi::{
     ListableResource, Metadata, NamespaceResourceScope, Resource,
 };
 use kube::Client;
-use serde::{de, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::error::KubeApiError;
 
 pub mod serialization;
+pub mod spec_template;
 pub mod workload_ref;
 
-use self::workload_ref::WorkloadRef;
+use self::{spec_template::RolloutSpecTemplate, workload_ref::WorkloadRef};
 
 #[derive(Clone, Debug)]
 pub struct Rollout {
@@ -185,53 +186,6 @@ impl Metadata for Rollout {
     fn metadata_mut(&mut self) -> &mut Self::Ty {
         &mut self.metadata
     }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, Default)]
-pub struct RolloutSpecTemplate(#[serde(deserialize_with = "rollout_pod_spec")] PodTemplateSpec);
-
-impl AsRef<PodTemplateSpec> for RolloutSpecTemplate {
-    fn as_ref(&self) -> &PodTemplateSpec {
-        &self.0
-    }
-}
-
-/// Custom deserializer for a rollout template field due to
-/// [#548](https://github.com/metalbear-co/operator/issues/548)
-/// First deserializes it as value, fixes possible issues and then deserializes it as
-/// PodTemplateSpec.
-#[tracing::instrument(level = "debug", skip(deserializer), ret, err)]
-fn rollout_pod_spec<'de, D>(deserializer: D) -> Result<PodTemplateSpec, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let mut value = serde_json::Value::deserialize(deserializer)?;
-
-    value
-        .get_mut("spec")
-        .and_then(|spec| spec.get_mut("containers")?.as_array_mut())
-        .into_iter()
-        .flatten()
-        .filter_map(|container| container.get_mut("resources"))
-        .for_each(|resources| {
-            for field in ["limits", "requests"] {
-                let Some(object) = resources.get_mut(field) else {
-                    continue;
-                };
-
-                for field in ["cpu", "memory"] {
-                    let Some(raw) = object.get_mut(field) else {
-                        continue;
-                    };
-
-                    if let Some(number) = raw.as_number() {
-                        *raw = number.to_string().into();
-                    }
-                }
-            }
-        });
-
-    serde_json::from_value(value).map_err(de::Error::custom)
 }
 
 #[cfg(test)]
