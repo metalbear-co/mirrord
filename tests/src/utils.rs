@@ -827,10 +827,6 @@ impl KubeService {
         format!("rollout/{}", self.name)
     }
 
-    pub fn rollout_t(&self) -> Option<&Rollout> {
-        self.rollout.as_ref()
-    }
-
     pub fn pod_container_target(&self) -> String {
         format!("pod/{}/container/{CONTAINER_NAME}", self.pod_name)
     }
