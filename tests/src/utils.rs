@@ -918,7 +918,7 @@ fn deployment_from_json(name: &str, image: &str, env: Value, replicas: u32) -> D
 ///
 /// This creates a Rollout resource following the Argo Rollouts specification:
 /// https://argoproj.github.io/argo-rollouts/features/specification/
-fn argo_rollout_from_json(name: &str, deployment: &Deployment) -> Rollout {
+fn argo_rollout_from_json(name: &str, deployment: &Deployment, service: &Service) -> Rollout {
     use k8s_openapi::Resource;
     serde_json::from_value(json!({
         "apiVersion": Rollout::API_VERSION,
@@ -944,11 +944,8 @@ fn argo_rollout_from_json(name: &str, deployment: &Deployment) -> Rollout {
                 "name": deployment.name().unwrap()
             },
             "strategy": {
-                "canary": {
-                    "steps": [
-                        { "setWeight": 20 },
-                        { "pause": { "duration": "30s" } },
-                    ]
+                "blueGreen": {
+                    "activeService": service.name().unwrap()
                 }
             }
         }
@@ -1790,7 +1787,7 @@ pub async fn rollout_service(
     println!("Created pod {pod_name:#?}");
 
     // `Rollout`
-    let rollout = argo_rollout_from_json(&name, &deployment);
+    let rollout = argo_rollout_from_json(&name, &deployment, &service);
     let (rollout_guard, rollout) =
         ResourceGuard::create(rollout_api.clone(), &rollout, delete_after_fail)
             .await
@@ -1805,23 +1802,23 @@ pub async fn rollout_service(
         serde_json::to_string_pretty(&rollout).unwrap()
     );
 
-    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
-    // Patch the deployment to set replicas to 0 since the Rollout manages the replicas
-    use kube::api::PatchParams;
-    let patch = serde_json::json!({
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "spec": {
-            "replicas": 0
-        }
-    });
-    let patch_params = PatchParams::apply("mirrord-test").force();
-    let _patched = deployment_api
-        .patch(&name, &patch_params, &kube::api::Patch::Apply(patch))
-        .await
-        .unwrap_or_else(|e| {
-            panic!("Failed to patch deployment to set replicas to 0: {}", e);
-        });
+    // tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+    // // Patch the deployment to set replicas to 0 since the Rollout manages the replicas
+    // use kube::api::PatchParams;
+    // let patch = serde_json::json!({
+    //     "apiVersion": "apps/v1",
+    //     "kind": "Deployment",
+    //     "spec": {
+    //         "replicas": 0
+    //     }
+    // });
+    // let patch_params = PatchParams::apply("mirrord-test").force();
+    // let _patched = deployment_api
+    //     .patch(&name, &patch_params, &kube::api::Patch::Apply(patch))
+    //     .await
+    //     .unwrap_or_else(|e| {
+    //         panic!("Failed to patch deployment to set replicas to 0: {}", e);
+    //     });
 
     println!(
         "{:?} done creating service {name} in namespace {namespace}",
