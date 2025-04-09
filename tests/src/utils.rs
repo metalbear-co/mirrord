@@ -1796,6 +1796,9 @@ pub async fn rollout_service(
         serde_json::to_string_pretty(&rollout).unwrap()
     );
 
+    // Wait for the rollout to have at least 1 available replica
+    watch::wait_until_rollout_available(&name, namespace, 1, kube_client.clone()).await;
+
     println!(
         "{:?} done creating service {name} in namespace {namespace}",
         Utc::now()

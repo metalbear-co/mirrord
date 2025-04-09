@@ -25,7 +25,6 @@ pub async fn rollout_regression(
     let service = rollout_service.await;
     let target = service.rollout_target();
 
-    sleep(Duration::from_secs(10)).await;
     let mut process = run_exec_with_target(
         application.command(),
         &target,
