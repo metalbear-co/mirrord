@@ -876,7 +876,7 @@ fn deployment_from_json(name: &str, image: &str, env: Value) -> Deployment {
             }
         },
         "spec": {
-            "replicas": 1,
+            "replicas": 4,
             "selector": {
                 "matchLabels": {
                     "app": &name
@@ -914,7 +914,7 @@ fn deployment_from_json(name: &str, image: &str, env: Value) -> Deployment {
 ///
 /// This creates a Rollout resource following the Argo Rollouts specification:
 /// https://argoproj.github.io/argo-rollouts/features/specification/
-fn argo_rollout_from_json(name: &str, deployment: &Deployment, service: &Service) -> Rollout {
+fn argo_rollout_from_json(name: &str, deployment: &Deployment) -> Rollout {
     use k8s_openapi::Resource;
     serde_json::from_value(json!({
         "apiVersion": Rollout::API_VERSION,
@@ -940,9 +940,7 @@ fn argo_rollout_from_json(name: &str, deployment: &Deployment, service: &Service
                 "name": deployment.name().unwrap()
             },
             "strategy": {
-                "blueGreen": {
-                    "activeService": service.name().unwrap()
-                }
+                "canary": {}
             }
         }
     }))
@@ -1783,7 +1781,7 @@ pub async fn rollout_service(
     println!("Created pod {pod_name:#?}");
 
     // `Rollout`
-    let rollout = argo_rollout_from_json(&name, &deployment, &service);
+    let rollout = argo_rollout_from_json(&name, &deployment);
     let (rollout_guard, rollout) =
         ResourceGuard::create(rollout_api.clone(), &rollout, delete_after_fail)
             .await

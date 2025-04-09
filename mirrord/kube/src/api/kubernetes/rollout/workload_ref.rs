@@ -45,7 +45,7 @@ impl WorkloadRef {
         namespace: Option<&str>,
     ) -> Result<Option<PodTemplateSpec>, KubeApiError> {
         match (self.api_version.as_str(), self.kind.as_str()) {
-            (Deployment::VERSION, Deployment::KIND) => {
+            (Deployment::API_VERSION, Deployment::KIND) => {
                 let mut deployment = get_k8s_resource_api::<Deployment>(client, namespace)
                     .get(&self.name)
                     .await?;
@@ -56,7 +56,7 @@ impl WorkloadRef {
                     .ok_or_else(|| KubeApiError::missing_field(&deployment, ".spec"))
                     .map(|spec| Some(spec.template))
             }
-            (ReplicaSet::VERSION, ReplicaSet::KIND) => {
+            (ReplicaSet::API_VERSION, ReplicaSet::KIND) => {
                 let mut replica_set = get_k8s_resource_api::<ReplicaSet>(client, namespace)
                     .get(&self.name)
                     .await?;
@@ -69,7 +69,7 @@ impl WorkloadRef {
                     .ok_or_else(|| KubeApiError::missing_field(&replica_set, ".spec.template"))
                     .map(Some)
             }
-            (PodTemplate::VERSION, PodTemplate::KIND) => {
+            (PodTemplate::API_VERSION, PodTemplate::KIND) => {
                 let mut pod_template = get_k8s_resource_api::<PodTemplate>(client, namespace)
                     .get(&self.name)
                     .await?;
@@ -80,7 +80,7 @@ impl WorkloadRef {
                     .ok_or_else(|| KubeApiError::missing_field(&pod_template, ".template"))
                     .map(Some)
             }
-            (StatefulSet::VERSION, StatefulSet::KIND) => {
+            (StatefulSet::API_VERSION, StatefulSet::KIND) => {
                 let mut stateful_set = get_k8s_resource_api::<StatefulSet>(client, namespace)
                     .get(&self.name)
                     .await?;
@@ -107,7 +107,7 @@ impl WorkloadRef {
         namespace: Option<&str>,
     ) -> Result<Option<LabelSelector>, KubeApiError> {
         match (self.api_version.as_str(), self.kind.as_str()) {
-            (Deployment::VERSION, Deployment::KIND) => {
+            (Deployment::API_VERSION, Deployment::KIND) => {
                 let mut deployment = get_k8s_resource_api::<Deployment>(client, namespace)
                     .get(&self.name)
                     .await?;
@@ -118,7 +118,7 @@ impl WorkloadRef {
                     .ok_or_else(|| KubeApiError::missing_field(&deployment, ".spec"))
                     .map(|spec| Some(spec.selector))
             }
-            (ReplicaSet::VERSION, ReplicaSet::KIND) => {
+            (ReplicaSet::API_VERSION, ReplicaSet::KIND) => {
                 let mut replica_set = get_k8s_resource_api::<ReplicaSet>(client, namespace)
                     .get(&self.name)
                     .await?;
@@ -129,7 +129,7 @@ impl WorkloadRef {
                     .ok_or_else(|| KubeApiError::missing_field(&replica_set, ".spec"))
                     .map(|spec| Some(spec.selector))
             }
-            (PodTemplate::VERSION, PodTemplate::KIND) => {
+            (PodTemplate::API_VERSION, PodTemplate::KIND) => {
                 let mut pod_template = get_k8s_resource_api::<PodTemplate>(client, namespace)
                     .get(&self.name)
                     .await?;
@@ -146,7 +146,7 @@ impl WorkloadRef {
                         })
                     })
             }
-            (StatefulSet::VERSION, StatefulSet::KIND) => {
+            (StatefulSet::API_VERSION, StatefulSet::KIND) => {
                 let mut stateful_set = get_k8s_resource_api::<StatefulSet>(client, namespace)
                     .get(&self.name)
                     .await?;
