@@ -1761,7 +1761,7 @@ pub async fn rollout_service(
             .await
             .unwrap();
     println!(
-        "Created deployment\n{deployment:#?} \n{}",
+        "Created deployment\n{}",
         serde_json::to_string_pretty(&deployment).unwrap()
     );
 
@@ -1772,7 +1772,7 @@ pub async fn rollout_service(
             .await
             .unwrap();
     println!(
-        "Created service\n{service:#?} \n{}",
+        "Created service\n{}",
         serde_json::to_string_pretty(&service).unwrap()
     );
 
@@ -1798,27 +1798,9 @@ pub async fn rollout_service(
                 )
             });
     println!(
-        "Created rollout\n{rollout:#?} \n{}",
+        "Created rollout\n{}",
         serde_json::to_string_pretty(&rollout).unwrap()
     );
-
-    // tokio::time::sleep(std::time::Duration::from_secs(15)).await;
-    // // Patch the deployment to set replicas to 0 since the Rollout manages the replicas
-    // use kube::api::PatchParams;
-    // let patch = serde_json::json!({
-    //     "apiVersion": "apps/v1",
-    //     "kind": "Deployment",
-    //     "spec": {
-    //         "replicas": 0
-    //     }
-    // });
-    // let patch_params = PatchParams::apply("mirrord-test").force();
-    // let _patched = deployment_api
-    //     .patch(&name, &patch_params, &kube::api::Patch::Apply(patch))
-    //     .await
-    //     .unwrap_or_else(|e| {
-    //         panic!("Failed to patch deployment to set replicas to 0: {}", e);
-    //     });
 
     println!(
         "{:?} done creating service {name} in namespace {namespace}",
