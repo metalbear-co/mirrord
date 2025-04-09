@@ -45,7 +45,10 @@ impl EnvFilter {
                 WildMatch::new("BUNDLE_GEM_PATH"),
                 WildMatch::new("BUNDLE_PATH"),
                 WildMatch::new("BUNDLE_WITHOUT"),
+                WildMatch::new("CATALINA_HOME"),
                 WildMatch::new("CLASSPATH"),
+                WildMatch::new("DOTNET_EnableDiagnostics"),
+                WildMatch::new("DOTNET_STARTUP_HOOKS"),
                 WildMatch::new("GEM_HOME"),
                 WildMatch::new("GEM_PATH"),
                 WildMatch::new("HOME"),
@@ -60,8 +63,6 @@ impl EnvFilter {
                 WildMatch::new("RUBYOPT"),
                 WildMatch::new("RUST_LOG"),
                 WildMatch::new("_JAVA_OPTIONS"),
-                WildMatch::new("DOTNET_EnableDiagnostics"),
-                WildMatch::new("CATALINA_HOME"),
             ];
 
             for selector in &filter_env_vars {
