@@ -33,7 +33,7 @@ pub const IPTABLE_STANDARD: &str = "MIRRORD_STANDARD";
 
 pub static IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL: LazyLock<String> = LazyLock::new(|| {
     std::fs::read_to_string("/proc/sys/net/ipv4/conf/all/route_localnet")
-            .unwrap_or_else(|_| "0".to_string())
+        .unwrap_or_else(|_| "0".to_string())
 });
 
 const IPTABLES_TABLE_NAME: &str = "nat";
@@ -208,6 +208,27 @@ where
         redirect.mount_entrypoint().await?;
 
         Ok(Self { redirect })
+    }
+
+    /// detect if the IP tables on the target are dirty: this is required since we use static
+    /// IP tables chain names, and they are in danger of conflicting with each-other
+    ///
+    /// returns `true` if iptables are clean and the agent can proceed, other returns `false`
+    pub async fn ensure_iptables_clean(ipt: &IPT) -> IPTablesResult<bool> {
+        let ipt = Arc::new(ipt);
+        tracing::trace!("checking for leftover or existing iptable chains...");
+        if !ipt
+            .list_rules(IPTABLES_TABLE_NAME)?
+            .iter()
+            .filter(|&str| {
+                str == IPTABLE_PREROUTING || str == IPTABLE_MESH || str == IPTABLE_STANDARD
+            })
+            .collect::<Vec<_>>()
+            .is_empty()
+        {
+            return Ok(false);
+        }
+        Ok(true)
     }
 
     pub async fn load(ipt: IPT, flush_connections: bool) -> IPTablesResult<Self> {

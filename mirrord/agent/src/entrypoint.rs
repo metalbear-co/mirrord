@@ -16,7 +16,7 @@ use futures::TryFutureExt;
 use metrics::{start_metrics, CLIENT_COUNT};
 use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{
-    error::IPTablesError, new_iptables, IPTablesWrapper, SafeIpTables,
+    error::IPTablesError, new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use steal::StealerMessage;
@@ -162,13 +162,14 @@ impl State {
         stream: TcpStream,
         tasks: BackgroundTasks,
         cancellation_token: CancellationToken,
+        clean_tables: bool,
     ) -> u32 {
         let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
 
         let result = ClientConnection::new(stream, client_id, self.tls_connector.clone())
             .map_err(AgentError::from)
             .and_then(|connection| ClientConnectionHandler::new(client_id, connection, tasks, self))
-            .and_then(|client| client.start(cancellation_token))
+            .and_then(|client| client.start(cancellation_token, clean_tables))
             .await;
 
         match result {
@@ -339,7 +340,22 @@ impl ClientConnectionHandler {
     ///
     /// Breaks upon receiver/sender drop.
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn start(mut self, cancellation_token: CancellationToken) -> AgentResult<()> {
+    async fn start(
+        mut self,
+        cancellation_token: CancellationToken,
+        clean_tables: bool,
+    ) -> AgentResult<()> {
+        if clean_tables.not() {
+            // Immediately sends [`DaemonMessage::Close`] to the client due to the presence of dirty
+            // IP tables
+            return self
+                .respond(DaemonMessage::Close(
+                    "Dirty IP table detected in target. Either another mirrord agent is already \
+            running, or a previous agent failed to properly clean up after itself."
+                        .to_string(),
+                ))
+                .await;
+        }
         let error = loop {
             select! {
                 message = self.connection.receive() => {
@@ -561,6 +577,24 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 
     let state = State::new(&args).await?;
 
+    // check that chain names won't conflict with another agent or failed cleanup
+    let clean_iptables = state
+        .network_runtime
+        .spawn(async move {
+            // call iptables ensure_iptables_clean method
+            let iptables = if args.ipv6 {
+                new_ip6tables()
+            } else {
+                new_iptables()
+            };
+            SafeIpTables::ensure_iptables_clean(&IPTablesWrapper::from(iptables))
+                .await
+                .map_err(|error| AgentError::IPTablesSetupError(error.into()))
+        })
+        .await
+        .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
+        .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
+
     let cancellation_token = CancellationToken::new();
 
     // To make sure that background tasks are cancelled when we exit early from this function.
@@ -622,6 +656,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
                 stream,
                 bg_tasks.clone(),
                 cancellation_token.clone(),
+                clean_iptables,
             ));
         }
 
@@ -649,7 +684,8 @@ async fn start_agent(args: Args) -> AgentResult<()> {
                     .serve_client_connection(
                         stream,
                         bg_tasks.clone(),
-                        cancellation_token.clone()
+                        cancellation_token.clone(),
+                        true
                     )
                 );
             },
