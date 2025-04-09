@@ -48,6 +48,7 @@ impl EnvFilter {
                 WildMatch::new("CATALINA_HOME"),
                 WildMatch::new("CLASSPATH"),
                 WildMatch::new("DOTNET_EnableDiagnostics"),
+                WildMatch::new("DOTNET_STARTUP_HOOKS"),
                 WildMatch::new("GEM_HOME"),
                 WildMatch::new("GEM_PATH"),
                 WildMatch::new("HOME"),
