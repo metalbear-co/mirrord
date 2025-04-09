@@ -300,7 +300,10 @@ where
 mod tests {
     use mockall::predicate::{eq, str};
 
-    use crate::{MockIPTables, SafeIpTables, IPTABLE_MESH, IPTABLE_PREROUTING, IPTABLE_STANDARD};
+    use crate::{
+        MockIPTables, SafeIpTables, IPTABLES_TABLE_NAME, IPTABLE_MESH, IPTABLE_PREROUTING,
+        IPTABLE_STANDARD,
+    };
 
     #[tokio::test]
     async fn default() {
@@ -535,5 +538,63 @@ mod tests {
         assert!(ipt.remove_redirect(69, 420).await.is_ok());
 
         assert!(ipt.cleanup().await.is_ok());
+    }
+
+    /// Check that dirty ip tables fail the ['SafeIpTables::ensure_iptables_clean'] check
+    /// If there are any chains in the IP table with names used by the agent, the check should fail.
+    /// A fresh IP table, or one with only non-agent names, should pass the check
+    #[tokio::test]
+    async fn fail_on_dirty() {
+        // CASE 1: check that a fresh IP table passes cleanliness check
+        let mut mock = MockIPTables::new();
+
+        mock.expect_list_table()
+            .with(eq(IPTABLES_TABLE_NAME))
+            .returning(|_| Ok(vec![]));
+
+        mock.expect_list_rules()
+            .with(eq("OUTPUT"))
+            .returning(|_| Ok(vec![]));
+
+        let expected_success = SafeIpTables::ensure_iptables_clean(mock).await;
+        assert!(
+            expected_success.is_ok(),
+            "Fresh IP table should pass cleanliness check"
+        );
+        println!("CASE 1 (expected clean table): pass");
+
+        // CASE 2: check that an IP table with one of mirrord's static chain names will fail the
+        // cleanliness check
+        let mut mock_unclean = MockIPTables::new();
+
+        mock_unclean
+            .expect_list_table()
+            .with(eq(IPTABLES_TABLE_NAME))
+            .returning(|_| Ok(vec![]));
+
+        mock_unclean
+            .expect_list_rules()
+            .with(eq("OUTPUT"))
+            .returning(|_| Ok(vec![]));
+
+        mock_unclean
+            .expect_create_chain()
+            .with(eq(IPTABLE_PREROUTING))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        mock_unclean
+            .expect_insert_rule()
+            .with(
+                eq(IPTABLE_PREROUTING),
+                eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
+                eq(1),
+            )
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        let expected_failure = SafeIpTables::ensure_iptables_clean(mock_unclean).await;
+        assert!(expected_failure.is_err(), "IP table that contains chain with name {IPTABLE_PREROUTING} should fail cleanliness check");
+        println!("CASE 2 (expected dirty table): pass");
     }
 }
