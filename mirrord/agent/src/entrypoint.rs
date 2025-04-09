@@ -17,8 +17,6 @@ use metrics::{start_metrics, CLIENT_COUNT};
 use mirrord_agent_env::envs;
 use mirrord_agent_iptables::{
     error::IPTablesError, new_iptables, IPTablesWrapper, SafeIpTables,
-    IPTABLE_IPV4_ROUTE_LOCALNET_ORIGINAL, IPTABLE_MESH,
-    IPTABLE_PREROUTING, IPTABLE_STANDARD,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use steal::StealerMessage;

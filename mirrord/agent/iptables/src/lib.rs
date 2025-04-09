@@ -5,7 +5,6 @@ use std::{
 
 use enum_dispatch::enum_dispatch;
 use mirrord_agent_env::{envs, mesh::MeshVendor};
-use rand::distr::{Alphanumeric, SampleString};
 use tracing::{warn, Level};
 
 use crate::{
