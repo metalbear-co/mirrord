@@ -688,7 +688,7 @@ pub(super) struct OperatorSetupParams {
     #[arg(long)]
     pub(super) license_path: Option<PathBuf>,
 
-    /// License server url if a standalone instance is available. (see https://mirrord.dev/docs/managing-mirrord/license-server/)
+    /// License server url if a standalone instance is available. (see <https://mirrord.dev/docs/managing-mirrord/license-server/>)
     #[arg(long)]
     pub(super) license_server: Option<String>,
 
