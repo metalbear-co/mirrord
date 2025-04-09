@@ -43,7 +43,6 @@ pub async fn rollout_regression(
 ///
 /// The goal here is to just validate that the session is started correctly.
 #[cfg(feature = "operator")]
-#[cfg_attr((feature = "targetless"), ignore)]
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub async fn rollout_regression_copy_target(
