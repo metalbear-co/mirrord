@@ -389,7 +389,10 @@ mod traffic_tests {
             node_command,
             &target_service.pod_container_target(),
             Some(&target_service.namespace),
-            Some(vec!["--config-file", config_file.path().to_str().unwrap()]),
+            Some(vec![
+                "--config-file",
+                remote_config_file.path().to_str().unwrap(),
+            ]),
             None,
         )
         .await;
