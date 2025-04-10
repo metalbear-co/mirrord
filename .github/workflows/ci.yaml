@@ -550,7 +550,7 @@ jobs:
       - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
       - name: Run all E2E tests
         run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features job -- --test-threads=3
+          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features job -- --test-threads=2
           cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features ephemeral -- --test-threads=3
       - name: Collect logs
         if: ${{ failure() }}
