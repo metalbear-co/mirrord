@@ -912,8 +912,8 @@ fn deployment_from_json(name: &str, image: &str, env: Value) -> Deployment {
 
 /// Creates an Argo Rollout resource with the given name, image, and env vars
 ///
-/// This creates a Rollout resource following the Argo Rollouts specification:
-/// https://argoproj.github.io/argo-rollouts/features/specification/
+/// Creates a [`Rollout`] resource following the Argo Rollouts
+/// [specification](https://argoproj.github.io/argo-rollouts/features/specification/)
 fn argo_rollout_from_json(name: &str, deployment: &Deployment) -> Rollout {
     use k8s_openapi::Resource;
     serde_json::from_value(json!({
