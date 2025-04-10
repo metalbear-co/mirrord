@@ -876,7 +876,7 @@ fn deployment_from_json(name: &str, image: &str, env: Value) -> Deployment {
             }
         },
         "spec": {
-            "replicas": 4,
+            "replicas": 1,
             "selector": {
                 "matchLabels": {
                     "app": &name
