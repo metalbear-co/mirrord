@@ -536,9 +536,6 @@ jobs:
           name: test
           path: /tmp
       - run: minikube image load /tmp/test.tar
-      # prepare argo rollouts
-      - run: kubectl create namespace argo-rollouts
-      - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
       # run the cli tests only once, i.e. docker runtime only
       - name: Run cli E2E tests
         if: ${{ matrix.container-runtime == 'docker' }}
@@ -548,10 +545,13 @@ jobs:
       - name: Run targetless E2E test
         run: |
           cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features targetless -- --test-threads=6 targetless
+      # prepare argo rollouts
+      - run: kubectl create namespace argo-rollouts
+      - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
       - name: Run all E2E tests
         run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features job -- --test-threads=6
-          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features ephemeral -- --test-threads=6
+          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features job -- --test-threads=3
+          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features ephemeral -- --test-threads=3
       - name: Collect logs
         if: ${{ failure() }}
         run: |
