@@ -544,7 +544,7 @@ jobs:
       # By running the test of the targetless agent first, we prove it works on an empty cluster without any pods.
       - name: Run targetless E2E test
         run: |
-          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features targetless -- --test-threads=6 targetless
+          cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features targetless -- --test-threads=3 targetless
       # prepare argo rollouts
       - run: kubectl create namespace argo-rollouts
       - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
