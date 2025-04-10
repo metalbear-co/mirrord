@@ -12,6 +12,7 @@ use kube::{
     },
     Api, Client, Resource,
 };
+use mirrord_kube::api::kubernetes::rollout::Rollout;
 use serde::de::DeserializeOwned;
 
 type WatchCondition<R> = Box<dyn FnMut(&HashMap<String, R>) -> bool + Send>;
@@ -156,8 +157,6 @@ pub async fn wait_until_rollout_available(
     min_available: usize,
     client: Client,
 ) {
-    use mirrord_kube::api::kubernetes::rollout::Rollout;
-
     let api = Api::<Rollout>::namespaced(client, namespace);
     let config = Config {
         field_selector: Some(format!("metadata.name={}", rollout_name)),
