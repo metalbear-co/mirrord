@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{api::kubernetes::get_k8s_resource_api, error::KubeApiError};
 
-/// A reference to some Kubernetes [workload](https://kubernetes.io/docs/concepts/workloads/) managed by an Argo [`Rollout`].
+/// A reference to some Kubernetes [workload](https://kubernetes.io/docs/concepts/workloads/) managed by an Argo [`super::Rollout`].
 ///
 /// The documentation of Argo do not mention any restrictions no the referenced resource type -
 /// "WorkloadRef holds a references to a workload that provides Pod template".
