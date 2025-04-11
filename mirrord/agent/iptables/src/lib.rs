@@ -221,7 +221,7 @@ where
     /// IP tables chain names, and they are in danger of conflicting with each-other
     ///
     /// returns `true` if iptables are clean and the agent can proceed, other returns `false`
-    #[tracing::instrument(level = Level::TRACE, ret, err)]
+    #[tracing::instrument(level = Level::TRACE, skip(ipt) ret, err)]
     pub async fn ensure_iptables_clean(ipt: IPT) -> IPTablesResult<bool> {
         let ipt = Arc::new(ipt);
         tracing::trace!("list rules in {IPTABLES_TABLE_NAME}: {:?}", ipt.list_table(IPTABLES_TABLE_NAME)?);
