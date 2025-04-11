@@ -1,8 +1,8 @@
 name: Operator E2E Test
 
 on:
-  pull_request:
-    types: [opened, synchronize]
+  pull_request_review:
+    types: [submitted]
   workflow_dispatch:
     inputs:
       mirrord_commit:
@@ -18,14 +18,10 @@ jobs:
   trigger-operator-e2e:
     runs-on: ubuntu-latest
     # Only run if:
-    # 1. PR is opened and not draft
-    # 2. PR has new code and not draft
-    # 3. Manually triggered
+    # 1. PR is approved
+    # 2. Manually triggered
     if: |
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.action == 'opened' && github.event.pull_request.draft == false) ||
-      (github.event.action == 'synchronize' && github.event.pull_request.draft == false)
-
+      github.event_name == 'workflow_dispatch' || github.event.review.state == 'approved'
     steps:
       - name: Trigger operator E2E workflow
         uses: metalbear-co/repository-dispatch@main
@@ -35,6 +31,6 @@ jobs:
           event-type: operator-e2e-test-from-mirrord
           client-payload: |
             {
-              "mirrord_commit": "${{ github.event_name == 'workflow_dispatch' && inputs.mirrord_commit || github.sha }}",
+              "mirrord_commit": "${{ github.event_name == 'workflow_dispatch' && inputs.mirrord_commit || github.event.pull_request.head.sha }}",
               "mirrord_branch": "${{ github.event_name == 'workflow_dispatch' && inputs.mirrord_branch || github.event.pull_request.head.ref }}"
             }
