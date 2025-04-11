@@ -224,7 +224,10 @@ where
     #[tracing::instrument(level = Level::TRACE, skip(ipt) ret, err)]
     pub async fn ensure_iptables_clean(ipt: IPT) -> IPTablesResult<bool> {
         let ipt = Arc::new(ipt);
-        tracing::trace!("list rules in {IPTABLES_TABLE_NAME}: {:?}", ipt.list_table(IPTABLES_TABLE_NAME)?);
+        tracing::trace!(
+            "list rules in {IPTABLES_TABLE_NAME}: {:?}",
+            ipt.list_table(IPTABLES_TABLE_NAME)?
+        );
         let rules = ipt.list_table(IPTABLES_TABLE_NAME)?;
         if rules.iter().any(|rule| {
             [IPTABLE_PREROUTING, IPTABLE_MESH, IPTABLE_STANDARD]

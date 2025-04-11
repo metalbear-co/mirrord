@@ -1,13 +1,3 @@
-use client_connection::AgentTlsConnector;
-use dns::{ClientGetAddrInfoRequest, DnsCommand};
-use futures::TryFutureExt;
-use metrics::{start_metrics, CLIENT_COUNT};
-use mirrord_agent_env::envs;
-use mirrord_agent_iptables::{
-    error::IPTablesError, new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables,
-};
-use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
-use std::process::ExitCode;
 use std::{
     collections::HashMap,
     mem,
@@ -19,6 +9,16 @@ use std::{
         Arc,
     },
 };
+
+use client_connection::AgentTlsConnector;
+use dns::{ClientGetAddrInfoRequest, DnsCommand};
+use futures::TryFutureExt;
+use metrics::{start_metrics, CLIENT_COUNT};
+use mirrord_agent_env::envs;
+use mirrord_agent_iptables::{
+    error::IPTablesError, new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables,
+};
+use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use steal::StealerMessage;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -113,7 +113,7 @@ impl State {
                             .unwrap_or_default(),
                     },
                 ))
-                    .await?;
+                .await?;
 
                 env.extend(container_handle.raw_env().clone());
 
@@ -162,23 +162,18 @@ impl State {
         stream: TcpStream,
         tasks: BackgroundTasks,
         cancellation_token: CancellationToken,
-        clean_tables: bool,
     ) -> u32 {
         let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
 
         let result = ClientConnection::new(stream, client_id, self.tls_connector.clone())
             .map_err(AgentError::from)
             .and_then(|connection| ClientConnectionHandler::new(client_id, connection, tasks, self))
-            .and_then(|client| client.start(cancellation_token, clean_tables))
+            .and_then(|client| client.start(cancellation_token))
             .await;
 
         match result {
             Ok(()) => {
                 trace!(client_id, "serve_client_connection -> Client disconnected");
-            }
-
-            Err(AgentError::IPTablesDirty) => {
-                trace!(client_id, "serve_client_connection -> Client disconnected (IPTables dirty)");
             }
 
             Err(error) => {
@@ -190,7 +185,7 @@ impl State {
             }
         }
 
-        Ok(client_id)
+        client_id
     }
 }
 enum BackgroundTask<Command> {
@@ -343,23 +338,7 @@ impl ClientConnectionHandler {
     ///
     /// Breaks upon receiver/sender drop.
     #[tracing::instrument(level = "trace", skip(self))]
-    async fn start(
-        mut self,
-        cancellation_token: CancellationToken,
-        clean_tables: bool,
-    ) -> AgentResult<()> {
-        if !clean_tables {
-            // Immediately sends [`DaemonMessage::Close`] to the client due to the presence of dirty
-            // IP tables
-            let _ = self
-                .respond(DaemonMessage::Close(
-                    "Dirty IP table detected in target. Either another mirrord agent is already \
-            running, or a previous agent failed to properly clean up after itself."
-                        .to_string(),
-                ))
-                .await;
-            return Err(AgentError::IPTablesDirty)
-        }
+    async fn start(mut self, cancellation_token: CancellationToken) -> AgentResult<()> {
         let error = loop {
             select! {
                 message = self.connection.receive() => {
@@ -546,6 +525,19 @@ impl ClientConnectionHandler {
     }
 }
 
+pub async fn dirty_tables_send_close(mut connection: ClientConnection) -> AgentResult<()> {
+    // Immediately sends [`DaemonMessage::Close`] to the client due to the presence of dirty
+    // IP tables
+    connection
+        .send(DaemonMessage::Close(
+            "Dirty IP table detected in target. Either another mirrord agent is already \
+            running, or a previous agent failed to properly clean up after itself."
+                .to_string(),
+        ))
+        .await?;
+    Ok(())
+}
+
 /// Real mirrord-agent routine.
 ///
 /// Obtains the PID of the target container (if there is any),
@@ -655,18 +647,34 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     .await;
 
     match first_connection {
+        any if !clean_iptables => {
+            match any {
+                Ok(Ok((stream, _addr))) => {
+                    // Exit after response to the first connection with DaemonMessage::Close
+                    let connection =
+                        ClientConnection::new(stream, 0, state.tls_connector.clone()).await?;
+                    error!("start_agent -> IPTables dirty, send Close message");
+                    let _ = dirty_tables_send_close(connection).await;
+                }
+
+                Ok(Err(error)) => {
+                    error!(?error, "start_agent -> Failed to accept first connection");
+                }
+
+                Err(..) => {
+                    error!("start_agent -> Failed to accept first connection: timeout");
+                }
+            }
+            return Err(AgentError::IPTablesDirty);
+        }
+
         Ok(Ok((stream, addr))) => {
             trace!(peer = %addr, "start_agent -> First connection accepted");
             clients.spawn(state.clone().serve_client_connection(
                 stream,
                 bg_tasks.clone(),
                 cancellation_token.clone(),
-                clean_iptables
             ));
-            if !clean_iptables {
-                // Exit after respond to the first connection with DaemonMessage::Close
-                return Err(AgentError::IPTablesDirty);
-            }
         }
 
         Ok(Err(error)) => {
@@ -693,8 +701,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
                     .serve_client_connection(
                         stream,
                         bg_tasks.clone(),
-                        cancellation_token.clone(),
-                        true
+                        cancellation_token.clone()
                     )
                 );
             },
@@ -813,6 +820,7 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
         result = run_child_agent() => match result {
             Err(AgentError::AgentFailed(status)) if status.code() == Some(99) => {
                 // Err status 99 means dirty IP tables detected, skip cleanup
+                tracing::warn!("dirty IP tables, cleanup skipped");
                 return result;
             }
             _ => result,
@@ -866,7 +874,7 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
 /// This weird flow is a safety measure - should the real agent OOM (which means instant process
 /// termination) or be killed with a signal, the parent will a chance to clean iptables. If we leave
 /// the iptables dirty, the whole target pod is broken, probably forever.
-pub async fn main() -> ExitCode {
+pub async fn main() -> AgentResult<()> {
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
 
@@ -900,14 +908,9 @@ pub async fn main() -> ExitCode {
 
     let args = cli::parse_args();
     
-    let result = if args.mode.is_targetless() || args.second_process {
+    if args.mode.is_targetless() || args.second_process {
         start_agent(args).await
     } else {
         start_iptable_guard(args).await
-    };
-    match result {
-        Ok(_) => { ExitCode::SUCCESS }
-        Err(AgentError::IPTablesDirty) => { ExitCode::from(99) }
-        Err(_) => { ExitCode::FAILURE }
     }
 }

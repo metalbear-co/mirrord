@@ -462,6 +462,7 @@ impl MirrordExecution {
 
     /// Construct filter and retrieve remote environment from the connected agent using
     /// `MirrordExecution::get_remote_env`.
+    #[tracing::instrument(level = Level::ERROR, skip_all)]
     async fn fetch_env_vars(
         config: &LayerConfig,
         connection: &mut AgentConnection,
