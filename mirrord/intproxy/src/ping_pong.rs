@@ -5,7 +5,7 @@
 //! Realized using the [`DaemonMessage::Pong`](mirrord_protocol::codec::DaemonMessage::Pong) and
 //! [`ClientMessage::Ping`] messages.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use mirrord_protocol::ClientMessage;
 use thiserror::Error;
@@ -33,6 +33,7 @@ pub enum PingPongError {
 /// from the agent.
 pub enum PingPongMessage {
     AgentSentPong,
+    AgentSentMessage,
     ConnectionRefresh(ConnectionRefresh),
 }
 
@@ -41,10 +42,12 @@ pub enum PingPongMessage {
 pub struct PingPong {
     /// How often the task should send pings.
     ticker: Interval,
-    /// Whether this struct awaits for a pong from the agent.
-    awaiting_pong: bool,
+    /// How many pong are expected from the agent.
+    awaiting_pongs: usize,
 
     reconnecting: bool,
+
+    last_agent_message: Option<Instant>,
 }
 
 impl PingPong {
@@ -59,8 +62,9 @@ impl PingPong {
 
         Self {
             ticker,
-            awaiting_pong: false,
+            awaiting_pongs: 0,
             reconnecting: false,
+            last_agent_message: None,
         }
     }
 }
@@ -79,25 +83,33 @@ impl BackgroundTask for PingPong {
         loop {
             tokio::select! {
                 _ = self.ticker.tick(), if !self.reconnecting => {
-                    if self.awaiting_pong {
+                    let other_messages_in_last_period = self.last_agent_message.map(|last_agent_message| {
+                        last_agent_message >= Instant::now() - self.ticker.period()
+                    }).unwrap_or_default();
+
+                    if self.awaiting_pongs > 0 && !other_messages_in_last_period {
                         break Err(PingPongError::PongTimeout);
                     } else {
                         tracing::debug!("Sending ping to the agent");
                         let _ = message_bus.send(ProxyMessage::ToAgent(ClientMessage::Ping)).await;
-                        self.awaiting_pong = true;
+                        self.awaiting_pongs += 1;
                     }
                 },
 
-                msg = message_bus.recv() => match (msg, self.awaiting_pong) {
+                msg = message_bus.recv() => match (msg, self.awaiting_pongs) {
                     (None, _) => {
                         tracing::debug!("Message bus closed, exiting");
                         break Ok(())
                     },
-                    (Some(PingPongMessage::AgentSentPong), true) => {
+                    (Some(PingPongMessage::AgentSentMessage), _) => {
+                        tracing::debug!("Agent is sending traffic");
+                        self.last_agent_message = Some(Instant::now());
+                    }
+                    (Some(PingPongMessage::AgentSentPong), 1..) => {
                         tracing::debug!("Agent responded to ping");
-                        self.awaiting_pong = false;
+                        self.awaiting_pongs = self.awaiting_pongs.saturating_sub(1);
                     },
-                    (Some(PingPongMessage::AgentSentPong), false) => {
+                    (Some(PingPongMessage::AgentSentPong), 0) => {
                         break Err(PingPongError::UnmatchedPong)
                     },
                     (Some(PingPongMessage::ConnectionRefresh(refresh)), _) => {

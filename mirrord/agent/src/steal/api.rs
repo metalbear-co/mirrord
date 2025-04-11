@@ -12,8 +12,9 @@ use tracing::Level;
 
 use super::{http::ReceiverStreamBody, *};
 use crate::{
-    error::AgentResult, metrics::HTTP_REQUEST_IN_PROGRESS_COUNT, util::ClientId,
-    watched_task::TaskStatus,
+    error::AgentResult,
+    metrics::HTTP_REQUEST_IN_PROGRESS_COUNT,
+    util::{remote_runtime::BgTaskStatus, ClientId},
 };
 
 type ResponseBodyTx = Sender<Result<Frame<Bytes>, Infallible>>;
@@ -43,7 +44,7 @@ pub(crate) struct TcpStealerApi {
     daemon_rx: Receiver<StealerMessage>,
 
     /// View on the stealer task's status.
-    task_status: TaskStatus,
+    task_status: BgTaskStatus,
 
     /// [`Sender`]s that allow us to provide body [`Frame`]s of responses to filtered HTTP
     /// requests.
@@ -63,17 +64,20 @@ impl TcpStealerApi {
     pub(crate) async fn new(
         client_id: ClientId,
         command_tx: Sender<StealerCommand>,
-        task_status: TaskStatus,
+        task_status: BgTaskStatus,
         channel_size: usize,
     ) -> AgentResult<Self> {
         let (daemon_tx, daemon_rx) = mpsc::channel(channel_size);
 
-        command_tx
+        let init_result = command_tx
             .send(StealerCommand {
                 client_id,
                 command: Command::NewClient(daemon_tx),
             })
-            .await?;
+            .await;
+        if init_result.is_err() {
+            return Err(task_status.wait_assert_running().await);
+        }
 
         Ok(Self {
             client_id,
@@ -94,7 +98,7 @@ impl TcpStealerApi {
         if self.command_tx.send(command).await.is_ok() {
             Ok(())
         } else {
-            Err(self.task_status.unwrap_err().await)
+            Err(self.task_status.wait_assert_running().await)
         }
     }
 
@@ -111,13 +115,13 @@ impl TcpStealerApi {
                     self.response_body_txs
                         .retain(|(key_id, _), _| *key_id != close.connection_id);
                     HTTP_REQUEST_IN_PROGRESS_COUNT.fetch_sub(
-                        (all_in_progress - self.response_body_txs.len()) as i64,
+                        all_in_progress - self.response_body_txs.len(),
                         std::sync::atomic::Ordering::Relaxed,
                     );
                 }
                 Ok(msg)
             }
-            None => Err(self.task_status.unwrap_err().await),
+            None => Err(self.task_status.wait_assert_running().await),
         }
     }
 
@@ -189,7 +193,7 @@ impl TcpStealerApi {
                 self.response_body_txs
                     .retain(|(key_id, _), _| *key_id != connection_id);
                 HTTP_REQUEST_IN_PROGRESS_COUNT.fetch_sub(
-                    (all_in_progress - self.response_body_txs.len()) as i64,
+                    all_in_progress - self.response_body_txs.len(),
                     Ordering::Relaxed,
                 );
 

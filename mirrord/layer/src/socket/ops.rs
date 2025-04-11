@@ -661,7 +661,13 @@ pub(super) fn connect(
             }
         }
 
-        if is_ignored_port(&ip_address) || crate::setup().is_debugger_port(&ip_address) {
+        if is_ignored_port(&ip_address) {
+            return Detour::Bypass(Bypass::Port(ip_address.port()));
+        }
+
+        // Ports 50000 and 50001 are commonly used to communicate with sidecar containers.
+        let bypass_debugger_check = ip_address.port() == 50000 || ip_address.port() == 50001;
+        if bypass_debugger_check.not() && crate::setup().is_debugger_port(&ip_address) {
             return Detour::Bypass(Bypass::Port(ip_address.port()));
         }
     } else if remote_address.is_unix() {

@@ -7,12 +7,6 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
-/// Silences `deny(unused_crate_dependencies)`.
-///
-/// This dependency is only used in integration tests.
-#[cfg(test)]
-use test_bin as _;
-
 mod cli;
 mod client_connection;
 mod container_handle;
@@ -22,6 +16,7 @@ mod env;
 mod error;
 mod file;
 mod http;
+mod incoming;
 mod metrics;
 mod namespace;
 mod outgoing;
@@ -30,7 +25,6 @@ mod sniffer;
 mod steal;
 mod util;
 mod vpn;
-mod watched_task;
 
 #[cfg(target_os = "linux")]
 #[tokio::main(flavor = "current_thread")]
