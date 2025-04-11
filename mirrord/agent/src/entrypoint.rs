@@ -587,7 +587,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             } else {
                 new_iptables()
             };
-            SafeIpTables::ensure_iptables_clean(&IPTablesWrapper::from(iptables))
+            SafeIpTables::ensure_iptables_clean(IPTablesWrapper::from(iptables))
                 .await
                 .map_err(|error| AgentError::IPTablesSetupError(error.into()))
         })
@@ -767,8 +767,8 @@ async fn run_child_agent() -> AgentResult<()> {
         .expect("cannot spawn child agent: command missing from program arguments");
 
     let mut child_agent = Command::new(command)
-        .args(args)
         .arg("--second-process")
+        .args(args)
         .kill_on_drop(true)
         .spawn()?;
 

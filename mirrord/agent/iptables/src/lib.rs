@@ -51,6 +51,8 @@ pub trait IPTables {
     fn add_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()>;
     fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> IPTablesResult<()>;
     fn list_rules(&self, chain: &str) -> IPTablesResult<Vec<String>>;
+
+    fn list_table(&self, table: &str) -> IPTablesResult<Vec<String>>;
     fn remove_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()>;
 }
 
@@ -144,6 +146,11 @@ impl IPTables for IPTablesWrapper {
     }
 
     #[tracing::instrument(level = Level::TRACE, ret, err)]
+    fn list_table(&self, table: &str) -> IPTablesResult<Vec<String>> {
+        self.tables.list_table(table).map_err(From::from)
+    }
+
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
     fn remove_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()> {
         self.tables
             .delete(self.table_name, chain, rule)
@@ -214,18 +221,16 @@ where
     /// IP tables chain names, and they are in danger of conflicting with each-other
     ///
     /// returns `true` if iptables are clean and the agent can proceed, other returns `false`
-    pub async fn ensure_iptables_clean(ipt: &IPT) -> IPTablesResult<bool> {
+    #[tracing::instrument(level = Level::TRACE, ret, err)]
+    pub async fn ensure_iptables_clean(ipt: IPT) -> IPTablesResult<bool> {
         let ipt = Arc::new(ipt);
-        tracing::trace!("checking for leftover or existing iptable chains...");
-        if !ipt
-            .list_rules(IPTABLES_TABLE_NAME)?
-            .iter()
-            .filter(|&str| {
-                str == IPTABLE_PREROUTING || str == IPTABLE_MESH || str == IPTABLE_STANDARD
-            })
-            .collect::<Vec<_>>()
-            .is_empty()
-        {
+        tracing::trace!("list rules in {IPTABLES_TABLE_NAME}: {:?}", ipt.list_table(IPTABLES_TABLE_NAME)?);
+        let rules = ipt.list_table(IPTABLES_TABLE_NAME)?;
+        if rules.iter().any(|rule| {
+            [IPTABLE_PREROUTING, IPTABLE_MESH, IPTABLE_STANDARD]
+                .iter()
+                .any(|&chain| rule.contains(&chain.to_string()))
+        }) {
             return Ok(false);
         }
         Ok(true)
