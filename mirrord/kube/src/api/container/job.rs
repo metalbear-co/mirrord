@@ -54,30 +54,16 @@ where
         .labels(&format!("job-name={}", params.name))
         .timeout(60);
 
-    pod_progress.success(Some("agent pod created"));
-
-    let mut pod_progress = progress.subtask("waiting for pod to be ready...");
-
     let pod_api: Api<Pod> = get_k8s_resource_api(client, agent.namespace.as_deref());
 
     let stream = watcher(pod_api.clone(), watcher_config).applied_objects();
     pin!(stream);
 
-    let mut agent_pod = None;
-    while let Some(Ok(pod)) = stream.next().await {
-        let Some(phase) = pod.status.as_ref().and_then(|status| status.phase.as_ref()) else {
-            continue;
-        };
-
-        debug!(?phase, "Agent pod changed");
-
-        if phase == "Running" {
-            agent_pod.replace(pod);
-            break;
-        }
-    }
-
-    let agent_pod = agent_pod.ok_or(KubeApiError::AgentPodNotRunning)?;
+    let agent_pod = stream
+        .next()
+        .await
+        .ok_or(KubeApiError::AgentPodNotRunning)?
+        .map_err(|_| KubeApiError::AgentPodNotRunning)?;
 
     let pod_name = agent_pod
         .metadata
@@ -89,8 +75,25 @@ where
         .metadata
         .namespace
         .as_ref()
-        .ok_or_else(|| KubeApiError::missing_field(&agent_pod, ".metadata.name"))?
+        .ok_or_else(|| KubeApiError::missing_field(&agent_pod, ".metadata.namespace"))?
         .clone();
+    pod_progress.success(Some(&format!(
+        "agent pod {pod_name}/{pod_namespace} created"
+    )));
+
+    let mut pod_progress = progress.subtask("waiting for pod to be ready...");
+
+    while let Some(Ok(pod)) = stream.next().await {
+        let Some(phase) = pod.status.as_ref().and_then(|status| status.phase.as_ref()) else {
+            continue;
+        };
+
+        debug!(?phase, "Agent pod changed");
+
+        if phase == "Running" {
+            break;
+        }
+    }
 
     let version = wait_for_agent_startup(&pod_api, &pod_name, "mirrord-agent".to_string()).await?;
     match version.as_ref() {
