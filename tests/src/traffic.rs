@@ -18,7 +18,8 @@ mod traffic_tests {
 
     use crate::utils::{
         application::Application, config_dir, hostname_service, ipv6::ipv6_service, kube_client,
-        run_exec_with_target, service, udp_logger_service, kube_service::KubeService, CONTAINER_NAME,
+        kube_service::KubeService, run_command::run_exec_with_target, service, udp_logger_service,
+        CONTAINER_NAME,
     };
 
     #[cfg_attr(not(feature = "job"), ignore)]

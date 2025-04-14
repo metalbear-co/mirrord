@@ -6,7 +6,7 @@ mod targetless_tests {
 
     use rstest::rstest;
 
-    use crate::utils::application::Application;
+    use crate::utils::{application::Application, run_command::run_exec_targetless};
 
     /// `mirrord exec` a program that connects to the kubernetes api service by its internal name
     /// from within the cluster, without specifying a target. The http request gets an 403 error
