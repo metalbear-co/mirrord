@@ -19,12 +19,12 @@ mod steal_tests {
     };
 
     use crate::utils::{
+        application::Application,
         config_dir, http2_service,
         ipv6::{ipv6_service, portforward_http_requests},
         kube_client,
         port_forwarder::PortForwarder,
-        send_request, send_requests, service, tcp_echo_service, websocket_service, Application,
-        KubeService,
+        send_request, send_requests, service, tcp_echo_service, websocket_service, KubeService,
     };
 
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]

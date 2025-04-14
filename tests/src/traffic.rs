@@ -17,8 +17,8 @@ mod traffic_tests {
     use tokio::{fs::File, io::AsyncWriteExt};
 
     use crate::utils::{
-        config_dir, hostname_service, ipv6::ipv6_service, kube_client, run_exec_with_target,
-        service, udp_logger_service, Application, KubeService, CONTAINER_NAME,
+        application::Application, config_dir, hostname_service, ipv6::ipv6_service, kube_client,
+        run_exec_with_target, service, udp_logger_service, KubeService, CONTAINER_NAME,
     };
 
     #[cfg_attr(not(feature = "job"), ignore)]

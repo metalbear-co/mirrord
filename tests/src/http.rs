@@ -7,8 +7,8 @@ mod http_tests {
     use rstest::*;
 
     use crate::utils::{
-        kube_client, port_forwarder::PortForwarder, send_requests, service, Application,
-        KubeService,
+        application::Application, kube_client, port_forwarder::PortForwarder, send_requests,
+        service, KubeService,
     };
 
     /// ## Warning
