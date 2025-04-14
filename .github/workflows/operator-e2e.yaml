@@ -1,6 +1,8 @@
 name: Operator E2E Test
 
 on:
+  pull_request:
+    types: [synchronize]
   pull_request_review:
     types: [submitted]
   workflow_dispatch:
@@ -31,6 +33,7 @@ jobs:
           event-type: operator-e2e-test-from-mirrord
           client-payload: |
             {
+              "branch": "meowchinist/mbe-710-trigger-e2e-with-the-operator-on-mirrord-release-branch"
               "mirrord_commit": "${{ github.event_name == 'workflow_dispatch' && inputs.mirrord_commit || github.event.pull_request.head.sha }}",
               "mirrord_branch": "${{ github.event_name == 'workflow_dispatch' && inputs.mirrord_branch || github.event.pull_request.head.ref }}"
             }
