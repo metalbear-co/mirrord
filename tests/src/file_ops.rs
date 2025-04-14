@@ -16,8 +16,11 @@ mod file_ops_tests {
     use tempfile::NamedTempFile;
 
     use crate::utils::{
-        application::file_ops::FileOps, go_statfs_service, kube_client, kube_service::KubeService,
-        run_command::run_exec_with_target, service,
+        application::file_ops::FileOps,
+        kube_client,
+        kube_service::KubeService,
+        run_command::run_exec_with_target,
+        services::{go_statfs_service, service},
     };
 
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
@@ -28,7 +31,7 @@ mod file_ops_tests {
     pub async fn file_ops(
         #[future]
         #[notrace]
-        service: KubeService,
+        services: KubeService,
         #[values(FileOps::Python, FileOps::Rust)] ops: FileOps,
     ) {
         let service = service.await;
@@ -61,7 +64,7 @@ mod file_ops_tests {
     pub async fn file_ops_ro(
         #[future]
         #[notrace]
-        service: KubeService,
+        services: KubeService,
     ) {
         let service = service.await;
         let python_command = vec![
@@ -94,7 +97,7 @@ mod file_ops_tests {
     pub async fn file_ops_unlink(
         #[future]
         #[notrace]
-        service: KubeService,
+        services: KubeService,
     ) {
         let service = service.await;
         let python_command = vec![
@@ -145,7 +148,7 @@ mod file_ops_tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn bash_file_exists(#[future] service: KubeService) {
+    pub async fn bash_file_exists(#[future] services: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "exists"];
         let mut process = run_exec_with_target(
@@ -169,7 +172,7 @@ mod file_ops_tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn bash_file_read(#[future] service: KubeService) {
+    pub async fn bash_file_read(#[future] services: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "read"];
         let mut process = run_exec_with_target(
@@ -190,7 +193,7 @@ mod file_ops_tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    pub async fn bash_file_write(#[future] service: KubeService) {
+    pub async fn bash_file_write(#[future] services: KubeService) {
         let service = service.await;
         let bash_command = vec!["bash", "bash-e2e/file.sh", "write"];
         let args = vec!["--rw"];
@@ -218,7 +221,7 @@ mod file_ops_tests {
     pub async fn go_dir(
         #[future]
         #[notrace]
-        service: KubeService,
+        services: KubeService,
         #[values(FileOps::GoDir21, FileOps::GoDir22, FileOps::GoDir23)] ops: FileOps,
     ) {
         let service = service.await;

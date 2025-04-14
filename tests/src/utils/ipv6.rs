@@ -9,7 +9,7 @@ use k8s_openapi::api::core::v1::Pod;
 use kube::{Api, Client};
 use rstest::fixture;
 
-use crate::utils::{internal_service, kube_client, KubeService};
+use crate::utils::{kube_client, services::internal_service, KubeService};
 
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.

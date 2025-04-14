@@ -16,7 +16,7 @@ mod issue1317_tests {
 
     use crate::utils::{
         kube_client, kube_service::KubeService, port_forwarder::PortForwarder,
-        run_command::run_exec_with_target, service,
+        run_command::run_exec_with_target, services::service,
     };
 
     /// Creates a [`TcpStream`] that sends a request to `service` before mirrord is started (no
@@ -37,7 +37,7 @@ mod issue1317_tests {
             "ghcr.io/metalbear-co/mirrord-http-keep-alive:latest",
             "http-keep-alive"
         )]
-        service: KubeService,
+        services: KubeService,
         #[future]
         #[notrace]
         kube_client: Client,

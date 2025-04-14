@@ -3,7 +3,7 @@
 use fancy_regex::Regex;
 use rstest::rstest;
 
-use crate::utils::{kube_client, run_command::run_ls, service_for_mirrord_ls};
+use crate::utils::{kube_client, run_command::run_ls, services::service_for_mirrord_ls};
 
 /// Test for the `mirrord ls` command.
 #[rstest]

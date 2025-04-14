@@ -20,11 +20,13 @@ mod steal_tests {
 
     use crate::utils::{
         application::Application,
-        config_dir, http2_service,
+        config_dir,
         ipv6::{ipv6_service, portforward_http_requests},
         kube_client,
+        kube_service::KubeService,
         port_forwarder::PortForwarder,
-        send_request, send_requests, service, tcp_echo_service, websocket_service, kube_service::KubeService,
+        send_request, send_requests,
+        services::{http2_service, service, tcp_echo_service, websocket_service},
     };
 
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
@@ -32,7 +34,7 @@ mod steal_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     async fn steal_http_traffic(
-        #[future] service: KubeService,
+        #[future] services: KubeService,
         #[future] kube_client: Client,
         #[values(
             Application::PythonFlaskHTTP,
@@ -121,7 +123,7 @@ mod steal_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     async fn steal_http_traffic_with_flush_connections(
-        #[future] service: KubeService,
+        #[future] services: KubeService,
         #[future] kube_client: Client,
         #[values(
             Application::PythonFlaskHTTP,
@@ -169,7 +171,7 @@ mod steal_tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
-    async fn close_socket(#[future] service: KubeService, #[future] kube_client: Client) {
+    async fn close_socket(#[future] services: KubeService, #[future] kube_client: Client) {
         let application = Application::PythonCloseSocket;
         // Start the test app with mirrord
         let service = service.await;
@@ -276,7 +278,7 @@ mod steal_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     async fn close_socket_keep_connection(
-        #[future] service: KubeService,
+        #[future] services: KubeService,
         #[future] kube_client: Client,
     ) {
         let application = Application::PythonCloseSocketKeepConnection;
@@ -361,7 +363,7 @@ mod steal_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_only_matching_requests(
-        #[future] service: KubeService,
+        #[future] services: KubeService,
         #[future] kube_client: Client,
         #[values(
             Application::PythonFlaskHTTP,
@@ -408,7 +410,7 @@ mod steal_tests {
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_only_matching_requests_new(
         config_dir: &Path,
-        #[future] service: KubeService,
+        #[future] services: KubeService,
         #[future] kube_client: Client,
         #[values(Application::NodeHTTP)] application: Application,
     ) {
@@ -452,7 +454,7 @@ mod steal_tests {
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_requests_by_path(
         config_dir: &Path,
-        #[future] service: KubeService,
+        #[future] services: KubeService,
         #[future] kube_client: Client,
         #[values(Application::NodeHTTP)] application: Application,
     ) {
@@ -606,7 +608,7 @@ mod steal_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
     async fn filter_with_single_client_and_some_matching_requests(
-        #[future] service: KubeService,
+        #[future] services: KubeService,
         #[future] kube_client: Client,
         #[values(
             Application::PythonFlaskHTTP,
