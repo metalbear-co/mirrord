@@ -5,7 +5,9 @@ mod env_tests {
 
     use rstest::*;
 
-    use crate::utils::{application::env::EnvApp, run_exec_with_target, service, KubeService};
+    use crate::utils::{
+        application::env::EnvApp, kube_service::KubeService, run_exec_with_target, service,
+    };
 
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]

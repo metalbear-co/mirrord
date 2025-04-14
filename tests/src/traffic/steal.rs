@@ -24,7 +24,7 @@ mod steal_tests {
         ipv6::{ipv6_service, portforward_http_requests},
         kube_client,
         port_forwarder::PortForwarder,
-        send_request, send_requests, service, tcp_echo_service, websocket_service, KubeService,
+        send_request, send_requests, service, tcp_echo_service, websocket_service, kube_service::KubeService,
     };
 
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]

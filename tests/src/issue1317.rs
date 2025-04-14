@@ -15,7 +15,7 @@ mod issue1317_tests {
     use tokio::net::TcpStream;
 
     use crate::utils::{
-        kube_client, port_forwarder::PortForwarder, run_exec_with_target, service, KubeService,
+        kube_client, port_forwarder::PortForwarder, run_exec_with_target, service, kube_service::KubeService,
     };
 
     /// Creates a [`TcpStream`] that sends a request to `service` before mirrord is started (no

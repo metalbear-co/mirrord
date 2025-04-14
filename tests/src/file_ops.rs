@@ -17,7 +17,7 @@ mod file_ops_tests {
 
     use crate::utils::{
         application::file_ops::FileOps, go_statfs_service, kube_client, run_exec_with_target,
-        service, KubeService,
+        service, kube_service::KubeService,
     };
 
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
