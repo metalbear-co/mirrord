@@ -1,3 +1,13 @@
+use client_connection::AgentTlsConnector;
+use dns::{ClientGetAddrInfoRequest, DnsCommand};
+use futures::TryFutureExt;
+use metrics::{start_metrics, CLIENT_COUNT};
+use mirrord_agent_env::envs;
+use mirrord_agent_iptables::{
+    error::IPTablesError, new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables,
+};
+use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
+use std::process::ExitCode;
 use std::{
     collections::HashMap,
     mem,
@@ -9,16 +19,6 @@ use std::{
         Arc,
     },
 };
-
-use client_connection::AgentTlsConnector;
-use dns::{ClientGetAddrInfoRequest, DnsCommand};
-use futures::TryFutureExt;
-use metrics::{start_metrics, CLIENT_COUNT};
-use mirrord_agent_env::envs;
-use mirrord_agent_iptables::{
-    error::IPTablesError, new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables,
-};
-use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use steal::StealerMessage;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -58,6 +58,11 @@ mod setup;
 /// Size of [`mpsc`](tokio::sync::mpsc) channels connecting [`TcpStealerApi`]s with the background
 /// task.
 const CHANNEL_SIZE: usize = 1024;
+
+/// [`ExitCode`](std::process::ExitCode) returned from the child agent process
+/// when dirty iptables are detected.
+const IPTABLES_DIRTY_EXIT_CODE: i32 = 99;
+const SECOND_PROCESS_ENV: &str = "MIRRORD_AGENT_SECOND_PROCESS";
 
 /// Keeps track of next client id.
 /// Stores common data used when serving client connections.
@@ -525,16 +530,56 @@ impl ClientConnectionHandler {
     }
 }
 
-pub async fn dirty_tables_send_close(mut connection: ClientConnection) -> AgentResult<()> {
-    // Immediately sends [`DaemonMessage::Close`] to the client due to the presence of dirty
-    // IP tables
-    connection
-        .send(DaemonMessage::Close(
-            "Dirty IP table detected in target. Either another mirrord agent is already \
-            running, or a previous agent failed to properly clean up after itself."
-                .to_string(),
-        ))
-        .await?;
+/// Upon first client connection, immediately sends [`DaemonMessage::Close`] to the client due to
+/// the presence of dirty IP tables.
+pub async fn notify_client_about_dirty_iptables(
+    listener: TcpListener,
+    communication_timeout: u16,
+    tls_connector: Option<AgentTlsConnector>,
+) -> AgentResult<()> {
+    // WARNING: `wait_for_agent_startup` in `mirrord/kube/src/api/container.rs` expects a line
+    // containing "agent_ready" to be printed. If you change this then mirrord fails to
+    // initialize.
+    println!("agent ready - version {}", env!("CARGO_PKG_VERSION"));
+
+    // We wait for the first client until `communication_timeout` elapses.
+    let first_connection = timeout(
+        Duration::from_secs(communication_timeout.into()),
+        listener.accept(),
+    )
+    .await;
+
+    // Attempt to send [`DaemonMessage::Close`]. Otherwise, the agent will still fail (but
+    // ungracefully).
+    match first_connection {
+        Ok(Ok((stream, ..))) => {
+            let mut connection = ClientConnection::new(stream, 0, tls_connector).await?;
+            connection
+                .send(DaemonMessage::Close(
+                    "Detected dirty iptables. Either some other mirrord agent is running \
+            or the previous agent failed to clean up before exit. \
+            If no other mirrord agent is targeting this pod, please delete the pod."
+                        .to_string(),
+                ))
+                .await?;
+        }
+
+        Ok(Err(error)) => {
+            tracing::warn!(
+                ?error,
+                "notify_client_about_dirty_iptables -> Failed to accept first connection"
+            );
+            Err(error)?
+        }
+
+        Err(..) => {
+            tracing::warn!(
+                "notify_client_about_dirty_iptables -> Failed to accept first connection: timeout"
+            );
+            Err(AgentError::FirstConnectionTimeout)?
+        }
+    }
+
     Ok(())
 }
 
@@ -574,22 +619,37 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     let state = State::new(&args).await?;
 
     // check that chain names won't conflict with another agent or failed cleanup
-    let clean_iptables = state
+    let leftover_rules = state
         .network_runtime
         .spawn(async move {
-            // call iptables ensure_iptables_clean method
-            let iptables = if args.ipv6 {
+            let ipt = if args.ipv6 {
                 new_ip6tables()
             } else {
                 new_iptables()
             };
-            SafeIpTables::ensure_iptables_clean(IPTablesWrapper::from(iptables))
+            SafeIpTables::list_mirrord_rules(IPTablesWrapper::from(ipt))
                 .await
                 .map_err(|error| AgentError::IPTablesSetupError(error.into()))
         })
         .await
         .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
         .map_err(|error| AgentError::IPTablesSetupError(error.into()))?;
+
+    if !leftover_rules.is_empty() {
+        tracing::error!(
+            leftover_rules = ?leftover_rules,
+            "Detected dirty iptables. Either some other mirrord agent is running \
+            or the previous agent failed to clean up before exit. \
+            If no other mirrord agent is targeting this pod, please delete the pod."
+        );
+        let _ = notify_client_about_dirty_iptables(
+            listener,
+            args.communication_timeout,
+            state.tls_connector.clone(),
+        )
+        .await;
+        return Err(AgentError::IPTablesDirty);
+    }
 
     let cancellation_token = CancellationToken::new();
 
@@ -647,27 +707,6 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     .await;
 
     match first_connection {
-        any if !clean_iptables => {
-            match any {
-                Ok(Ok((stream, _addr))) => {
-                    // Exit after response to the first connection with DaemonMessage::Close
-                    let connection =
-                        ClientConnection::new(stream, 0, state.tls_connector.clone()).await?;
-                    error!("start_agent -> IPTables dirty, send Close message");
-                    let _ = dirty_tables_send_close(connection).await;
-                }
-
-                Ok(Err(error)) => {
-                    error!(?error, "start_agent -> Failed to accept first connection");
-                }
-
-                Err(..) => {
-                    error!("start_agent -> Failed to accept first connection: timeout");
-                }
-            }
-            return Err(AgentError::IPTablesDirty);
-        }
-
         Ok(Ok((stream, addr))) => {
             trace!(peer = %addr, "start_agent -> First connection accepted");
             clients.spawn(state.clone().serve_client_connection(
@@ -783,7 +822,7 @@ async fn run_child_agent() -> AgentResult<()> {
         .expect("cannot spawn child agent: command missing from program arguments");
 
     let mut child_agent = Command::new(command)
-        .arg("--second-process")
+        .env(SECOND_PROCESS_ENV, "true")
         .args(args)
         .kill_on_drop(true)
         .spawn()?;
@@ -818,8 +857,8 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
         }
 
         result = run_child_agent() => match result {
-            Err(AgentError::AgentFailed(status)) if status.code() == Some(99) => {
-                // Err status 99 means dirty IP tables detected, skip cleanup
+            Err(AgentError::AgentFailed(status)) if status.code() == Some(IPTABLES_DIRTY_EXIT_CODE) => {
+                // Err status `IPTABLES_DIRTY_EXIT_CODE` means dirty IP tables detected, skip cleanup
                 tracing::warn!("dirty IP tables, cleanup skipped");
                 return result;
             }
@@ -907,9 +946,10 @@ pub async fn main() -> AgentResult<()> {
     );
 
     let args = cli::parse_args();
-    
-    if args.mode.is_targetless() || args.second_process {
-        start_agent(args).await
+    let second_process = matches!(std::env::var(SECOND_PROCESS_ENV), Ok(value) if value == "true");
+
+    if args.mode.is_targetless() || second_process {
+    start_agent(args).await
     } else {
         start_iptable_guard(args).await
     }

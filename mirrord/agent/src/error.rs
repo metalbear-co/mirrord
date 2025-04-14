@@ -54,7 +54,7 @@ pub(crate) enum AgentError {
     #[error("IP tables setup failed: {0}")]
     IPTablesSetupError(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
 
-    #[error("IP tables unclean")]
+    #[error("IP tables dirty")]
     IPTablesDirty,
 
     #[error("Failed to start a tokio runtime in the target's namespace: {0}")]

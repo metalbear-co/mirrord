@@ -52,7 +52,7 @@ pub trait IPTables {
     fn insert_rule(&self, chain: &str, rule: &str, index: i32) -> IPTablesResult<()>;
     fn list_rules(&self, chain: &str) -> IPTablesResult<Vec<String>>;
 
-    fn list_table(&self, table: &str) -> IPTablesResult<Vec<String>>;
+    fn list_table(&self) -> IPTablesResult<Vec<String>>;
     fn remove_rule(&self, chain: &str, rule: &str) -> IPTablesResult<()>;
 }
 
@@ -146,8 +146,8 @@ impl IPTables for IPTablesWrapper {
     }
 
     #[tracing::instrument(level = Level::TRACE, ret, err)]
-    fn list_table(&self, table: &str) -> IPTablesResult<Vec<String>> {
-        self.tables.list_table(table).map_err(From::from)
+    fn list_table(&self) -> IPTablesResult<Vec<String>> {
+        self.tables.list_table(self.table_name).map_err(From::from)
     }
 
     #[tracing::instrument(level = Level::TRACE, ret, err)]
@@ -217,26 +217,21 @@ where
         Ok(Self { redirect })
     }
 
-    /// detect if the IP tables on the target are dirty: this is required since we use static
-    /// IP tables chain names, and they are in danger of conflicting with each-other
-    ///
-    /// returns `true` if iptables are clean and the agent can proceed, other returns `false`
+    /// List rules from other/ previous mirrord agents that exist on the IP table
     #[tracing::instrument(level = Level::TRACE, skip(ipt) ret, err)]
-    pub async fn ensure_iptables_clean(ipt: IPT) -> IPTablesResult<bool> {
+    pub async fn list_mirrord_rules(ipt: IPT) -> IPTablesResult<Vec<String>> {
         let ipt = Arc::new(ipt);
-        tracing::trace!(
-            "list rules in {IPTABLES_TABLE_NAME}: {:?}",
-            ipt.list_table(IPTABLES_TABLE_NAME)?
-        );
-        let rules = ipt.list_table(IPTABLES_TABLE_NAME)?;
-        if rules.iter().any(|rule| {
-            [IPTABLE_PREROUTING, IPTABLE_MESH, IPTABLE_STANDARD]
-                .iter()
-                .any(|&chain| rule.contains(&chain.to_string()))
-        }) {
-            return Ok(false);
-        }
-        Ok(true)
+        let rules = ipt.list_table()?;
+
+        Ok(rules
+            .iter()
+            .filter(|rule| {
+                [IPTABLE_PREROUTING, IPTABLE_MESH, IPTABLE_STANDARD]
+                    .iter()
+                    .any(|chain| rule.contains(*chain))
+            })
+            .map(|s| s.as_str().to_string())
+            .collect())
     }
 
     pub async fn load(ipt: IPT, flush_connections: bool) -> IPTablesResult<Self> {
@@ -300,10 +295,7 @@ where
 mod tests {
     use mockall::predicate::{eq, str};
 
-    use crate::{
-        MockIPTables, SafeIpTables, IPTABLES_TABLE_NAME, IPTABLE_MESH, IPTABLE_PREROUTING,
-        IPTABLE_STANDARD,
-    };
+    use crate::{MockIPTables, SafeIpTables, IPTABLE_MESH, IPTABLE_PREROUTING, IPTABLE_STANDARD};
 
     #[tokio::test]
     async fn default() {
@@ -548,53 +540,43 @@ mod tests {
         // CASE 1: check that a fresh IP table passes cleanliness check
         let mut mock = MockIPTables::new();
 
-        mock.expect_list_table()
-            .with(eq(IPTABLES_TABLE_NAME))
-            .returning(|_| Ok(vec![]));
+        // clean table returns non-mirrord rules only
+        mock.expect_list_table().with().times(1).returning(|| {
+            Ok(vec![
+                "-P PREROUTING ACCEPT".to_owned(),
+                "-P INPUT ACCEPT".to_owned(),
+                "-P OUTPUT ACCEPT".to_owned(),
+                "-P POSTROUTING ACCEPT".to_owned(),
+            ])
+        });
 
-        mock.expect_list_rules()
-            .with(eq("OUTPUT"))
-            .returning(|_| Ok(vec![]));
-
-        let expected_success = SafeIpTables::ensure_iptables_clean(mock).await;
-        assert!(
-            expected_success.is_ok(),
-            "Fresh IP table should pass cleanliness check"
+        let leftover_rules_res = SafeIpTables::list_mirrord_rules(mock).await;
+        assert_eq!(
+            leftover_rules_res.unwrap().len(), 0,
+            "Fresh IP table should successfully list table rules and list no existing mirrord rules"
         );
         println!("CASE 1 (expected clean table): pass");
 
         // CASE 2: check that an IP table with one of mirrord's static chain names will fail the
         // cleanliness check
-        let mut mock_unclean = MockIPTables::new();
+        let mut mock = MockIPTables::new();
 
-        mock_unclean
-            .expect_list_table()
-            .with(eq(IPTABLES_TABLE_NAME))
-            .returning(|_| Ok(vec![]));
+        // dirty table returns non-mirrord rules, plus a leftover mirrord rule
+        mock.expect_list_table().with().times(1).returning(|| {
+            Ok(vec![
+                "-P PREROUTING ACCEPT".to_owned(),
+                "-P INPUT ACCEPT".to_owned(),
+                "-P OUTPUT ACCEPT".to_owned(),
+                "-P POSTROUTING ACCEPT".to_owned(),
+                format!("-N {IPTABLE_PREROUTING}"),
+            ])
+        });
 
-        mock_unclean
-            .expect_list_rules()
-            .with(eq("OUTPUT"))
-            .returning(|_| Ok(vec![]));
-
-        mock_unclean
-            .expect_create_chain()
-            .with(eq(IPTABLE_PREROUTING))
-            .times(1)
-            .returning(|_| Ok(()));
-
-        mock_unclean
-            .expect_insert_rule()
-            .with(
-                eq(IPTABLE_PREROUTING),
-                eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
-                eq(1),
-            )
-            .times(1)
-            .returning(|_, _, _| Ok(()));
-
-        let expected_failure = SafeIpTables::ensure_iptables_clean(mock_unclean).await;
-        assert!(expected_failure.is_err(), "IP table that contains chain with name {IPTABLE_PREROUTING} should fail cleanliness check");
+        let leftover_rules_res = SafeIpTables::list_mirrord_rules(mock).await;
+        assert_eq!(
+            leftover_rules_res.unwrap().len(), 1,
+            "Fresh IP table should successfully list table rules and list one existing mirrord rule"
+        );
         println!("CASE 2 (expected dirty table): pass");
     }
 }
