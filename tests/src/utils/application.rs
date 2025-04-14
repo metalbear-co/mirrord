@@ -1,7 +1,7 @@
 use super::{run_exec_targetless, run_exec_with_target, TestProcess};
 
-// pub(crate) mod env;
-// pub(crate) mod file_ops;
+pub(crate) mod env;
+pub(crate) mod file_ops;
 
 #[derive(Debug)]
 #[allow(dead_code)]

@@ -16,7 +16,8 @@ mod file_ops_tests {
     use tempfile::NamedTempFile;
 
     use crate::utils::{
-        go_statfs_service, kube_client, run_exec_with_target, service, FileOps, KubeService,
+        application::file_ops::FileOps, go_statfs_service, kube_client, run_exec_with_target,
+        service, KubeService,
     };
 
     #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
