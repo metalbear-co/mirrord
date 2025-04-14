@@ -22,8 +22,8 @@ jobs:
     # Only run if:
     # 1. PR is approved
     # 2. Manually triggered
-    if: |
-      github.event_name == 'workflow_dispatch' || github.event.review.state == 'approved'
+    # if: |
+    #   github.event_name == 'workflow_dispatch' || github.event.review.state == 'approved'
     steps:
       - name: Trigger operator E2E workflow
         uses: metalbear-co/repository-dispatch@main
