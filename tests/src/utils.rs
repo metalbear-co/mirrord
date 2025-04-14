@@ -13,6 +13,9 @@ use std::{
 };
 
 use chrono::{Timelike, Utc};
+#[cfg(feature = "operator")]
+use cluster_resource::operator::*;
+use cluster_resource::*;
 use fancy_regex::Regex;
 use futures::FutureExt;
 use futures_util::future::BoxFuture;
@@ -41,6 +44,7 @@ use tokio::{
 };
 
 pub(crate) mod application;
+pub(crate) mod cluster_resource;
 pub(crate) mod ipv6;
 pub(crate) mod kube_service;
 pub(crate) mod port_forwarder;
@@ -89,53 +93,6 @@ pub async fn kube_client() -> Client {
     Client::try_from(config).unwrap()
 }
 
-fn deployment_from_json(name: &str, image: &str, env: Value) -> Deployment {
-    serde_json::from_value(json!({
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {
-            "name": name,
-            "labels": {
-                "app": name,
-                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-                "test-label-for-deployments": format!("deployment-{name}")
-            }
-        },
-        "spec": {
-            "replicas": 1,
-            "selector": {
-                "matchLabels": {
-                    "app": &name
-                }
-            },
-            "template": {
-                "metadata": {
-                    "labels": {
-                        "app": &name,
-                        "test-label-for-pods": format!("pod-{name}"),
-                        format!("test-label-for-pods-{name}"): &name
-                    }
-                },
-                "spec": {
-                    "containers": [
-                        {
-                            "name": &CONTAINER_NAME,
-                            "image": image,
-                            "ports": [
-                                {
-                                    "containerPort": 80
-                                }
-                            ],
-                            "env": env,
-                        }
-                    ]
-                }
-            }
-        }
-    }))
-    .expect("Failed creating `deployment` from json spec!")
-}
-
 /// Change the `ipFamilies` and `ipFamilyPolicy` fields to make the service IPv6-only.
 ///
 /// # Panics
@@ -145,214 +102,6 @@ fn set_ipv6_only(service: &mut Service) {
     let spec = service.spec.as_mut().unwrap();
     spec.ip_families = Some(vec!["IPv6".to_string()]);
     spec.ip_family_policy = Some("SingleStack".to_string());
-}
-
-fn service_from_json(name: &str, service_type: &str) -> Service {
-    serde_json::from_value(json!({
-        "apiVersion": "v1",
-        "kind": "Service",
-        "metadata": {
-            "name": name,
-            "labels": {
-                "app": name,
-                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-            }
-        },
-        "spec": {
-            "type": service_type,
-            "selector": {
-                "app": name
-            },
-            "sessionAffinity": "None",
-            "ports": [
-                {
-                    "name": "http",
-                    "protocol": "TCP",
-                    "port": 80,
-                    "targetPort": 80,
-                },
-                {
-                    "name": "udp",
-                    "protocol": "UDP",
-                    "port": 31415,
-                },
-            ]
-        }
-    }))
-    .expect("Failed creating `service` from json spec!")
-}
-
-#[cfg(feature = "operator")]
-fn stateful_set_from_json(name: &str, image: &str) -> k8s_openapi::api::apps::v1::StatefulSet {
-    serde_json::from_value(json!({
-        "apiVersion": "apps/v1",
-        "kind": "StatefulSet",
-        "metadata": {
-            "name": name,
-            "labels": {
-                "app": name,
-                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-                "test-label-for-statefulsets": format!("statefulset-{name}")
-            }
-        },
-        "spec": {
-            "replicas": 1,
-            "selector": {
-                "matchLabels": {
-                    "app": &name
-                }
-            },
-            "template": {
-                "metadata": {
-                    "labels": {
-                        "app": &name,
-                        "test-label-for-pods": format!("pod-{name}"),
-                        format!("test-label-for-pods-{name}"): &name
-                    }
-                },
-                "spec": {
-                    "containers": [
-                        {
-                            "name": &CONTAINER_NAME,
-                            "image": image,
-                            "ports": [
-                                {
-                                    "containerPort": 80
-                                }
-                            ],
-                            "env": [
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_FIRST",
-                                  "value": "mirrord.is.running"
-                                },
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_SECOND",
-                                  "value": "7777"
-                                },
-                                {
-                                    "name": "MIRRORD_FAKE_VAR_THIRD",
-                                    "value": "foo=bar"
-                                }
-                            ],
-                        }
-                    ]
-                }
-            }
-        }
-    }))
-    .expect("Failed creating `statefulset` from json spec!")
-}
-
-#[cfg(feature = "operator")]
-fn cron_job_from_json(name: &str, image: &str) -> k8s_openapi::api::batch::v1::CronJob {
-    serde_json::from_value(json!({
-        "apiVersion": "batch/v1",
-        "kind": "CronJob",
-        "metadata": {
-            "name": name,
-            "labels": {
-                "app": name,
-                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-                "test-label-for-cronjobs": format!("cronjob-{name}")
-            }
-        },
-        "spec": {
-            "schedule": "* * * * *",
-            "concurrencyPolicy": "Forbid",
-            "jobTemplate": {
-                "metadata": {
-                    "labels": {
-                        "app": &name,
-                        "test-label-for-pods": format!("pod-{name}"),
-                        format!("test-label-for-pods-{name}"): &name
-                    }
-                },
-                "spec": {
-                    "template": {
-                        "spec": {
-                            "restartPolicy": "OnFailure",
-                            "containers": [
-                                {
-                                    "name": &CONTAINER_NAME,
-                                    "image": image,
-                                    "ports": [{ "containerPort": 80 }],
-                                    "env": [
-                                        {
-                                          "name": "MIRRORD_FAKE_VAR_FIRST",
-                                          "value": "mirrord.is.running"
-                                        },
-                                        {
-                                          "name": "MIRRORD_FAKE_VAR_SECOND",
-                                          "value": "7777"
-                                        },
-                                        {
-                                            "name": "MIRRORD_FAKE_VAR_THIRD",
-                                            "value": "foo=bar"
-                                        }
-                                    ]
-                                }
-                            ]
-                        }
-                    }
-                }
-            }
-        }
-    }))
-    .expect("Failed creating `cronjob` from json spec!")
-}
-
-#[cfg(feature = "operator")]
-fn job_from_json(name: &str, image: &str) -> k8s_openapi::api::batch::v1::Job {
-    serde_json::from_value(json!({
-        "apiVersion": "batch/v1",
-        "kind": "Job",
-        "metadata": {
-            "name": name,
-            "labels": {
-                "app": name,
-                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-                "test-label-for-jobs": format!("job-{name}")
-            }
-        },
-        "spec": {
-            "ttlSecondsAfterFinished": 10,
-            "backoffLimit": 1,
-            "template": {
-                "metadata": {
-                    "labels": {
-                        "app": &name,
-                        "test-label-for-pods": format!("pod-{name}"),
-                        format!("test-label-for-pods-{name}"): &name
-                    }
-                },
-                "spec": {
-                    "restartPolicy": "OnFailure",
-                    "containers": [
-                        {
-                            "name": &CONTAINER_NAME,
-                            "image": image,
-                            "ports": [{ "containerPort": 80 }],
-                            "env": [
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_FIRST",
-                                  "value": "mirrord.is.running"
-                                },
-                                {
-                                  "name": "MIRRORD_FAKE_VAR_SECOND",
-                                  "value": "7777"
-                                },
-                                {
-                                    "name": "MIRRORD_FAKE_VAR_THIRD",
-                                    "value": "foo=bar"
-                                }
-                            ],
-                        }
-                    ]
-                }
-            },
-        }
-    }))
-    .expect("Failed creating `job` from json spec!")
 }
 
 fn default_env() -> Value {
