@@ -10,7 +10,7 @@ use rstest::*;
 
 use crate::utils::{
     application::Application, config_dir, kube_client, kube_service::KubeService,
-    port_forwarder::PortForwarder, send_request, services::service,
+    port_forwarder::PortForwarder, send_request, services::basic_service,
 };
 
 #[rstest]

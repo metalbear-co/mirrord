@@ -5,7 +5,9 @@ use rstest::{fixture, rstest};
 
 use crate::{
     operator::policies::PolicyGuard,
-    utils::{application::Application, kube_client, kube_service::KubeService, services::service},
+    utils::{
+        application::Application, kube_client, kube_service::KubeService, services::basic_service,
+    },
 };
 
 #[fixture]

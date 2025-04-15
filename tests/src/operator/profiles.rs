@@ -11,7 +11,7 @@ use tempfile::NamedTempFile;
 
 use crate::utils::{
     application::Application, kube_client, kube_service::KubeService,
-    port_forwarder::PortForwarder, resource_guard::ResourceGuard, services::service,
+    port_forwarder::PortForwarder, resource_guard::ResourceGuard, services::basic_service,
 };
 
 #[rstest]

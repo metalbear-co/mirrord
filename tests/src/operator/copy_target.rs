@@ -6,7 +6,7 @@ use rstest::*;
 
 use crate::utils::{
     application::env::EnvApp, kube_service::KubeService, run_command::run_exec_with_target,
-    services::service,
+    services::basic_service,
 };
 
 /// Starts mirrord with the `copy-target` feature just to validate that it can create a

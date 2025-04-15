@@ -16,7 +16,7 @@ use rstest::{fixture, rstest};
 
 use crate::utils::{
     application::Application, config_dir, kube_client, kube_service::KubeService,
-    resource_guard::ResourceGuard, services::service, TestProcess,
+    resource_guard::ResourceGuard, services::basic_service, TestProcess,
 };
 
 mod fs;
