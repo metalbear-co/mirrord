@@ -1,4 +1,4 @@
-use chrono::Utc;
+#![cfg(feature = "operator")]
 use cluster_resource::{operator::*, *};
 use k8s_openapi::api::{
     apps::v1::Deployment,
@@ -8,12 +8,12 @@ use kube::{api::DeleteParams, Api, Client};
 use kube_service::KubeService;
 use resource_guard::ResourceGuard;
 use rstest::*;
-use serde_json::{json, Value};
+use serde_json::json;
 
 use super::{cluster_resource, kube_service, resource_guard};
 use crate::utils::{
-    default_env, format_time, kube_client, random_string, set_ipv6_only, watch,
-    PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
+    default_env, format_time, kube_client, random_string, watch, PRESERVE_FAILED_ENV_NAME,
+    TEST_RESOURCE_LABEL,
 };
 
 #[fixture]
@@ -130,7 +130,7 @@ pub async fn service_for_mirrord_ls(
 
     println!(
         "{:?} done creating service {name} in namespace {namespace}",
-        Utc::now()
+        chrono::Utc::now()
     );
 
     KubeService {

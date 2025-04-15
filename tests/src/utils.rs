@@ -4,8 +4,6 @@
 use std::{path::PathBuf, sync::Once};
 
 use chrono::{Timelike, Utc};
-#[cfg(feature = "operator")]
-use cluster_resource::operator::*;
 use k8s_openapi::api::core::v1::Service;
 use kube::{Client, Config};
 pub use process::TestProcess;

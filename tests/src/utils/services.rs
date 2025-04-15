@@ -1,7 +1,4 @@
 #![allow(dead_code)]
-use chrono::Utc;
-#[cfg(feature = "operator")]
-use cluster_resource::operator::*;
 use cluster_resource::*;
 use k8s_openapi::api::{
     apps::v1::Deployment,
@@ -19,7 +16,6 @@ use crate::utils::{
     PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
 };
 
-#[cfg(feature = "operator")]
 pub(crate) mod operator;
 
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
@@ -270,7 +266,7 @@ pub async fn service_for_mirrord_ls(
 
     println!(
         "{:?} done creating service {name:?} in namespace {namespace:?}",
-        Utc::now()
+        chrono::Utc::now()
     );
 
     KubeService {
