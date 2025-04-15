@@ -23,7 +23,7 @@ pub(crate) mod operator;
 /// This behavior can be changed, see [`PRESERVE_FAILED_ENV_NAME`].
 /// * `randomize_name` - whether a random suffix should be added to the end of the resource names
 #[fixture]
-pub async fn service(
+pub async fn basic_service(
     #[default("default")] namespace: &str,
     #[default("NodePort")] service_type: &str,
     #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
@@ -285,7 +285,7 @@ pub async fn service_for_mirrord_ls(
 /// must have been intercepted and forwarded via the agent to be sent from the impersonated pod.
 #[fixture]
 pub async fn udp_logger_service(#[future] kube_client: Client) -> KubeService {
-    service(
+    basic_service(
         "default",
         "ClusterIP",
         "ghcr.io/metalbear-co/mirrord-node-udp-logger:latest",
@@ -300,7 +300,7 @@ pub async fn udp_logger_service(#[future] kube_client: Client) -> KubeService {
 /// over TCP, not HTTP.
 #[fixture]
 pub async fn tcp_echo_service(#[future] kube_client: Client) -> KubeService {
-    service(
+    basic_service(
         "default",
         "NodePort",
         "ghcr.io/metalbear-co/mirrord-tcp-echo:latest",
@@ -316,7 +316,7 @@ pub async fn tcp_echo_service(#[future] kube_client: Client) -> KubeService {
 /// connection, allowing us to test HTTP upgrade requests.
 #[fixture]
 pub async fn websocket_service(#[future] kube_client: Client) -> KubeService {
-    service(
+    basic_service(
         "default",
         "NodePort",
         "ghcr.io/metalbear-co/mirrord-websocket:latest",
@@ -329,7 +329,7 @@ pub async fn websocket_service(#[future] kube_client: Client) -> KubeService {
 
 #[fixture]
 pub async fn http2_service(#[future] kube_client: Client) -> KubeService {
-    service(
+    basic_service(
         "default",
         "NodePort",
         "ghcr.io/metalbear-co/mirrord-pytest:latest",
@@ -344,7 +344,7 @@ pub async fn http2_service(#[future] kube_client: Client) -> KubeService {
 /// over TCP, not HTTP.
 #[fixture]
 pub async fn hostname_service(#[future] kube_client: Client) -> KubeService {
-    service(
+    basic_service(
         "default",
         "NodePort",
         "ghcr.io/metalbear-co/mirrord-pytest:latest",
@@ -358,7 +358,7 @@ pub async fn hostname_service(#[future] kube_client: Client) -> KubeService {
 #[fixture]
 pub async fn random_namespace_self_deleting_service(#[future] kube_client: Client) -> KubeService {
     let namespace = format!("random-namespace-{}", random_string());
-    service(
+    basic_service(
         &namespace,
         "NodePort",
         "ghcr.io/metalbear-co/mirrord-pytest:latest",
@@ -371,7 +371,7 @@ pub async fn random_namespace_self_deleting_service(#[future] kube_client: Clien
 
 #[fixture]
 pub async fn go_statfs_service(#[future] kube_client: Client) -> KubeService {
-    service(
+    basic_service(
         "default",
         "ClusterIP",
         "ghcr.io/metalbear-co/mirrord-go-statfs:latest",

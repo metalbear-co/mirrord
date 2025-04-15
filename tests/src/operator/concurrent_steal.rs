@@ -19,13 +19,13 @@ use crate::utils::{
 pub async fn two_clients_steal_same_target(
     #[future]
     #[notrace]
-    service: KubeService,
+    basic_service: KubeService,
     #[future]
     #[notrace]
     kube_client: Client,
     #[values(crate::utils::application::Application::PythonFlaskHTTP)] application: Application,
 ) {
-    let (service, client) = tokio::join!(service, kube_client);
+    let (service, client) = tokio::join!(basic_service, kube_client);
 
     let flags = vec!["--steal", "--fs-mode=local"];
 
@@ -74,13 +74,13 @@ pub async fn two_clients_steal_same_target(
 pub async fn two_clients_steal_same_target_pod_deployment(
     #[future]
     #[notrace]
-    service: KubeService,
+    basic_service: KubeService,
     #[future]
     #[notrace]
     kube_client: Client,
     #[values(Application::PythonFlaskHTTP)] application: Application,
 ) {
-    let (service, client) = tokio::join!(service, kube_client);
+    let (service, client) = tokio::join!(basic_service, kube_client);
 
     let flags = vec!["--steal", "--fs-mode=local"];
 
@@ -130,11 +130,11 @@ pub async fn two_clients_steal_same_target_pod_deployment(
 #[timeout(Duration::from_secs(120))]
 pub async fn two_clients_steal_with_http_filter(
     config_dir: &std::path::Path,
-    #[future] service: KubeService,
+    #[future] basic_service: KubeService,
     #[future] kube_client: Client,
     #[values(Application::NodeHTTP)] application: Application,
 ) {
-    let service = service.await;
+    let service = basic_service.await;
     let kube_client = kube_client.await;
     let portforwarder = PortForwarder::new(
         kube_client.clone(),

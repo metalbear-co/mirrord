@@ -17,11 +17,11 @@ use crate::utils::{
 pub async fn copy_target_starts_a_working_copy(
     #[future]
     #[notrace]
-    service: KubeService,
+    basic_service: KubeService,
     #[values(EnvApp::NodeInclude)] application: EnvApp,
     #[values("pod", "deployment")] target: &str,
 ) {
-    let service = service.await;
+    let service = basic_service.await;
 
     let mut config_file = tempfile::Builder::new()
         .prefix("copy_target_starts_a_working_copy")

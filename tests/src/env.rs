@@ -7,7 +7,7 @@ mod env_tests {
 
     use crate::utils::{
         application::env::EnvApp, kube_service::KubeService, run_command::run_exec_with_target,
-        services::service,
+        services::basic_service,
     };
 
     #[cfg_attr(not(feature = "job"), ignore)]
@@ -15,10 +15,10 @@ mod env_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn bash_remote_env_vars(
-        #[future] service: KubeService,
+        #[future] basic_service: KubeService,
         #[values(EnvApp::BashInclude, EnvApp::BashExclude, EnvApp::Bash)] application: EnvApp,
     ) {
-        remote_env_vars_works(service, application).await;
+        remote_env_vars_works(basic_service, application).await;
     }
 
     #[cfg_attr(not(feature = "job"), ignore)]
@@ -26,7 +26,7 @@ mod env_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
     pub async fn remote_env_vars_works(
-        #[future] service: KubeService,
+        #[future] basic_service: KubeService,
         #[values(
             EnvApp::Go21,
             EnvApp::Go22,
@@ -36,7 +36,7 @@ mod env_tests {
         )]
         application: EnvApp,
     ) {
-        let service = service.await;
+        let service = basic_service.await;
         let mut process = run_exec_with_target(
             application.command(),
             &service.pod_container_target(),
