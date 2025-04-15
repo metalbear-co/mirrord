@@ -36,7 +36,10 @@ use mirrord_operator::{
 use rstest::fixture;
 
 use super::{port_forwarder::PortForwarder, watch::Watcher};
-use crate::utils::{kube_client, service_with_env, KubeService, ResourceGuard};
+use crate::utils::{
+    kube_client, kube_service::KubeService, resource_guard::ResourceGuard,
+    services::service_with_env,
+};
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.
 const QUEUE_NAME_ENV_VAR1: &str = "SQS_TEST_Q_NAME1";

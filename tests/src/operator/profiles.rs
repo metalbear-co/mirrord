@@ -10,7 +10,8 @@ use rstest::rstest;
 use tempfile::NamedTempFile;
 
 use crate::utils::{
-    kube_client, port_forwarder::PortForwarder, service, Application, KubeService, ResourceGuard,
+    application::Application, kube_client, kube_service::KubeService,
+    port_forwarder::PortForwarder, resource_guard::ResourceGuard, services::service,
 };
 
 #[rstest]

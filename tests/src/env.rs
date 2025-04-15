@@ -15,7 +15,7 @@ mod env_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn bash_remote_env_vars(
-        #[future] services: KubeService,
+        #[future] service: KubeService,
         #[values(EnvApp::BashInclude, EnvApp::BashExclude, EnvApp::Bash)] application: EnvApp,
     ) {
         remote_env_vars_works(service, application).await;
@@ -26,7 +26,7 @@ mod env_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(120))]
     pub async fn remote_env_vars_works(
-        #[future] services: KubeService,
+        #[future] service: KubeService,
         #[values(
             EnvApp::Go21,
             EnvApp::Go22,
