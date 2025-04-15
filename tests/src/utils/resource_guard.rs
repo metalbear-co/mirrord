@@ -13,9 +13,9 @@ use serde::{de::DeserializeOwned, Serialize};
 /// This guard can be configured not to delete the resource if dropped during a panic.
 pub(crate) struct ResourceGuard {
     /// Whether the resource should be deleted if the test has panicked.
-    delete_on_fail: bool,
+    pub(crate) delete_on_fail: bool,
     /// This future will delete the resource once awaited.
-    deleter: Option<BoxFuture<'static, ()>>,
+    pub(crate) deleter: Option<BoxFuture<'static, ()>>,
 }
 
 impl ResourceGuard {
