@@ -15,10 +15,10 @@ pub async fn rollout_regression(
     #[future]
     #[notrace]
     rollout_service: KubeService,
-    #[values(EnvApp::NodeInclude)] application: EnvApp,
 ) {
     use crate::utils::run_exec_with_target;
 
+    let application = EnvApp::NodeInclude;
     let service = rollout_service.await;
     let target = service.rollout_target();
 
@@ -45,11 +45,11 @@ pub async fn rollout_regression_copy_target(
     #[future]
     #[notrace]
     rollout_service: KubeService,
-    #[values(EnvApp::NodeInclude)] application: EnvApp,
     #[values(false, true)] scale_down: bool,
 ) {
     use crate::utils::run_exec_with_target;
 
+    let application = EnvApp::NodeInclude;
     let service = rollout_service.await;
 
     let mut config_file = tempfile::Builder::new()
