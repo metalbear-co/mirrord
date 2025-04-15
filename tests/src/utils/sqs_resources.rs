@@ -38,7 +38,7 @@ use rstest::fixture;
 use super::{port_forwarder::PortForwarder, watch::Watcher};
 use crate::utils::{
     kube_client, kube_service::KubeService, resource_guard::ResourceGuard,
-    services::basic_service_with_env,
+    services::service_with_env,
 };
 
 /// Name of the environment variable that holds the name of the first SQS queue to read from.

@@ -381,3 +381,18 @@ pub async fn go_statfs_service(#[future] kube_client: Client) -> KubeService {
     )
     .await
 }
+
+#[fixture]
+pub async fn fs_service(#[future] kube_client: kube::Client) -> KubeService {
+    let namespace = format!("e2e-tests-fs-policies-{}", crate::utils::random_string());
+
+    basic_service(
+        &namespace,
+        "NodePort",
+        "ghcr.io/metalbear-co/mirrord-pytest:latest",
+        "fs-policy-e2e-test-service",
+        false,
+        kube_client,
+    )
+    .await
+}

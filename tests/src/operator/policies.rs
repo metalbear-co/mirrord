@@ -92,7 +92,7 @@ pub async fn services(
 ) -> (KubeService, KubeService) {
     let namespace = format!("e2e-tests-policies-{}", crate::utils::random_string());
     (
-        service(
+        basic_service(
             &namespace,
             "NodePort",
             "ghcr.io/metalbear-co/mirrord-pytest:latest",
@@ -101,7 +101,7 @@ pub async fn services(
             kube_client,
         )
         .await,
-        service(
+        basic_service(
             &namespace,
             "NodePort",
             "ghcr.io/metalbear-co/mirrord-pytest:latest",

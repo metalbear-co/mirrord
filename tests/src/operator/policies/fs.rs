@@ -1,29 +1,14 @@
 use std::{collections::HashSet, time::Duration};
 
 use mirrord_operator::crd::policy::{FsPolicy, MirrordPolicy, MirrordPolicySpec};
-use rstest::{fixture, rstest};
+use rstest::rstest;
 
 use crate::{
     operator::policies::PolicyGuard,
     utils::{
-        application::Application, kube_client, kube_service::KubeService, services::basic_service,
+        application::Application, kube_client, kube_service::KubeService, services::fs_service,
     },
 };
-
-#[fixture]
-async fn fs_service(#[future] kube_client: kube::Client) -> KubeService {
-    let namespace = format!("e2e-tests-fs-policies-{}", crate::utils::random_string());
-
-    service(
-        &namespace,
-        "NodePort",
-        "ghcr.io/metalbear-co/mirrord-pytest:latest",
-        "fs-policy-e2e-test-service",
-        false,
-        kube_client,
-    )
-    .await
-}
 
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
