@@ -1,3 +1,10 @@
+//! Manual implementation of serialization and deserialization of the [`Rollout`].
+//!
+//! Some fields of the [`Rollout`] are actually associated fields of [`Resource`], so they're simply
+//! not serialized if we just use `#[derive(Serialize, Deserialize)]`.
+//!
+//! The implementation here is largely _inspired_ by how `Deployment` is (de)serialized in
+//! [`k8s_openapi`].
 use std::fmt;
 
 use k8s_openapi::Resource;
