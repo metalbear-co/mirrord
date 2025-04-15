@@ -1,47 +1,18 @@
 #![allow(clippy::unused_io_amount)]
 #![allow(clippy::indexing_slicing)]
 
-use std::{
-    collections::HashMap,
-    fmt::Debug,
-    ops::Not,
-    os::unix::process::ExitStatusExt,
-    path::PathBuf,
-    process::{ExitStatus, Stdio},
-    sync::{Arc, Once},
-    time::Duration,
-};
+use std::{path::PathBuf, sync::Once};
 
 use chrono::{Timelike, Utc};
 #[cfg(feature = "operator")]
 use cluster_resource::operator::*;
-use cluster_resource::*;
-use fancy_regex::Regex;
-use futures::FutureExt;
-use futures_util::future::BoxFuture;
-use k8s_openapi::api::{
-    apps::v1::Deployment,
-    core::v1::{Namespace, Service},
-};
-use kube::{
-    api::{DeleteParams, PostParams},
-    Api, Client, Config, Error, Resource,
-};
-use kube_service::KubeService;
+use k8s_openapi::api::core::v1::Service;
+use kube::{Client, Config};
 pub use process::TestProcess;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest::{RequestBuilder, StatusCode};
-use resource_guard::ResourceGuard;
 use rstest::*;
-use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
-use tempfile::{tempdir, TempDir};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, BufReader},
-    process::{Child, Command},
-    sync::RwLock,
-    task::JoinHandle,
-};
 
 pub(crate) mod application;
 pub(crate) mod cluster_resource;
