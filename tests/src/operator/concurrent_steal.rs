@@ -9,8 +9,8 @@ use reqwest::header::HeaderMap;
 use rstest::*;
 
 use crate::utils::{
-    config_dir, kube_client, port_forwarder::PortForwarder, send_request, service, Application,
-    KubeService,
+    application::Application, config_dir, kube_client, kube_service::KubeService,
+    port_forwarder::PortForwarder, send_request, services::service,
 };
 
 #[rstest]
@@ -23,7 +23,7 @@ pub async fn two_clients_steal_same_target(
     #[future]
     #[notrace]
     kube_client: Client,
-    #[values(Application::PythonFlaskHTTP)] application: Application,
+    #[values(crate::utils::application::Application::PythonFlaskHTTP)] application: Application,
 ) {
     let (service, client) = tokio::join!(service, kube_client);
 

@@ -15,7 +15,8 @@ use mirrord_operator::crd::{
 use rstest::{fixture, rstest};
 
 use crate::utils::{
-    config_dir, kube_client, service, Application, KubeService, ResourceGuard, TestProcess,
+    application::Application, config_dir, kube_client, kube_service::KubeService,
+    resource_guard::ResourceGuard, services::service, TestProcess,
 };
 
 mod fs;

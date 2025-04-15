@@ -9,12 +9,13 @@ use aws_sdk_sqs::{operation::receive_message::ReceiveMessageOutput, types::Messa
 use rstest::*;
 
 use crate::utils::{
+    application::Application,
     config_dir,
+    process::TestProcess,
     sqs_resources::{
         await_registry_status, sqs_test_resources, watch_sqs_sessions, write_sqs_messages,
         QueueInfo, SqsTestResources,
     },
-    Application, TestProcess,
 };
 
 /// Verify that the test process printed all the expected messages, and none other.

@@ -21,7 +21,7 @@ mod http_tests {
     async fn mirror_http_traffic(
         #[future]
         #[notrace]
-        services: KubeService,
+        service: KubeService,
         #[future]
         #[notrace]
         kube_client: Client,

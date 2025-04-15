@@ -37,7 +37,7 @@ mod issue1317_tests {
             "ghcr.io/metalbear-co/mirrord-http-keep-alive:latest",
             "http-keep-alive"
         )]
-        services: KubeService,
+        service: KubeService,
         #[future]
         #[notrace]
         kube_client: Client,
