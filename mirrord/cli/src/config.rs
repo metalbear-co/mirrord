@@ -670,8 +670,14 @@ pub(super) enum OperatorCommand {
     /// Operator session management commands.
     ///
     /// Allows the user to forcefully kill living sessions.
-    #[command(subcommand)]
-    Session(SessionCommand),
+    Session {
+        #[command(subcommand)]
+        command: SessionCommand,
+        /// Load config from config file.
+        /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json"
+        #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+        config_file: Option<PathBuf>,
+    },
 }
 
 #[derive(Args, Debug)]
