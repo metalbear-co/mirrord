@@ -14,7 +14,7 @@ use crate::utils::{rollout_service, run_exec_with_target, EnvApp, KubeService};
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[timeout(Duration::from_secs(240))]
-pub async fn rollout_regression(
+pub async fn target_rollout(
     #[future]
     #[notrace]
     rollout_service: KubeService,
