@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use k8s_openapi::api::{apps::v1::Deployment, core::v1::Service};
 
 use super::resource_guard::ResourceGuard;

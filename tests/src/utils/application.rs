@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use super::TestProcess;
 use crate::utils::run_command::{run_exec_targetless, run_exec_with_target};
 
@@ -5,7 +6,6 @@ pub(crate) mod env;
 pub(crate) mod file_ops;
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum Application {
     PythonFlaskHTTP,
     PythonFastApiHTTP,

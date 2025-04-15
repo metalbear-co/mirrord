@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::{collections::HashMap, process::Stdio};
 
 use tempfile::tempdir;

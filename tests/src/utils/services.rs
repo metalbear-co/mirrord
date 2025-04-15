@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use chrono::Utc;
 #[cfg(feature = "operator")]
 use cluster_resource::operator::*;

@@ -1,3 +1,5 @@
+#![cfg(feature = "operator")]
+
 use k8s_openapi::api::{
     apps::v1::StatefulSet,
     batch::v1::{CronJob, Job},
