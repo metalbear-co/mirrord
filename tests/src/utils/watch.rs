@@ -12,6 +12,7 @@ use kube::{
     },
     Api, Client, Resource,
 };
+use mirrord_kube::api::kubernetes::rollout::Rollout;
 use serde::de::DeserializeOwned;
 
 type WatchCondition<R> = Box<dyn FnMut(&HashMap<String, R>) -> bool + Send>;
@@ -147,4 +148,45 @@ pub async fn wait_until_pods_ready(service: &Service, min: usize, client: Client
     watcher.run().await;
 
     watcher.resources.into_values().filter(is_ready).collect()
+}
+
+/// Waits until the given [`Rollout`] has at least `min_available` available replicas.
+pub async fn wait_until_rollout_available(
+    rollout_name: &str,
+    namespace: &str,
+    min_available: usize,
+    client: Client,
+) {
+    let api = Api::<Rollout>::namespaced(client, namespace);
+    let config = Config {
+        field_selector: Some(format!("metadata.name={}", rollout_name)),
+        ..Default::default()
+    };
+
+    fn has_available_replicas(rollout: &Rollout, min: usize) -> bool {
+        let status = match &rollout.status {
+            Some(status) => status,
+            None => return false,
+        };
+
+        match status.available_replicas {
+            Some(available) => available >= min as i32,
+            None => false,
+        }
+    }
+
+    let mut watcher = Watcher::new(api, config, move |map| {
+        map.values()
+            .any(|r| has_available_replicas(r, min_available))
+    });
+
+    println!(
+        "Waiting for rollout '{}' to have at least {} available replica(s)...",
+        rollout_name, min_available
+    );
+    watcher.run().await;
+    println!(
+        "Rollout '{}' now has at least {} available replica(s)",
+        rollout_name, min_available
+    );
 }

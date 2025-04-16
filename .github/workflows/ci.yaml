@@ -545,6 +545,9 @@ jobs:
       - name: Run targetless E2E test
         run: |
           cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features targetless -- --test-threads=6 targetless
+      # prepare argo rollouts
+      - run: kubectl create namespace argo-rollouts
+      - run: kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
       - name: Run all E2E tests
         run: |
           cargo test --target=x86_64-unknown-linux-gnu -p tests --no-default-features --features job -- --test-threads=6

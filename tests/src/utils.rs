@@ -22,8 +22,10 @@ use k8s_openapi::api::{
 };
 use kube::{
     api::{DeleteParams, PostParams},
+    runtime::reflector::Lookup,
     Api, Client, Config, Error, Resource,
 };
+use mirrord_kube::api::kubernetes::rollout::Rollout;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest::{RequestBuilder, StatusCode};
 use rstest::*;
@@ -806,6 +808,7 @@ pub struct KubeService {
     pub namespace: String,
     pub service: Service,
     pub deployment: Deployment,
+    pub rollout: Option<Rollout>,
     guards: Vec<ResourceGuard>,
     namespace_guard: Option<ResourceGuard>,
     pub pod_name: String,
@@ -814,6 +817,14 @@ pub struct KubeService {
 impl KubeService {
     pub fn deployment_target(&self) -> String {
         format!("deployment/{}", self.name)
+    }
+
+    pub fn rollout_target(&self) -> String {
+        if self.rollout.is_none() {
+            panic!("Rollout is not enabled for this service! Don't you mean to use a deployment?");
+        }
+
+        format!("rollout/{}", self.name)
     }
 
     pub fn pod_container_target(&self) -> String {
@@ -897,6 +908,43 @@ fn deployment_from_json(name: &str, image: &str, env: Value) -> Deployment {
         }
     }))
     .expect("Failed creating `deployment` from json spec!")
+}
+
+/// Creates an Argo Rollout resource with the given name, image, and env vars
+///
+/// Creates a [`Rollout`] resource following the Argo Rollouts
+/// [specification](https://argoproj.github.io/argo-rollouts/features/specification/)
+fn argo_rollout_from_json(name: &str, deployment: &Deployment) -> Rollout {
+    use k8s_openapi::Resource;
+    serde_json::from_value(json!({
+        "apiVersion": Rollout::API_VERSION,
+        "kind": Rollout::KIND,
+        "metadata": {
+            "name": name,
+            "labels": {
+                "app": name,
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                "test-label-for-rollouts": format!("rollout-{name}")
+            }
+        },
+        "spec": {
+            "replicas": 1,
+            "selector": {
+                "matchLabels": {
+                    "app": name
+                }
+            },
+            "workloadRef": {
+                "apiVersion": Deployment::API_VERSION,
+                "kind": Deployment::KIND,
+                "name": deployment.name().unwrap()
+            },
+            "strategy": {
+                "canary": {}
+            }
+        }
+    }))
+    .expect("Failed creating `rollout` from json spec!")
 }
 
 /// Change the `ipFamilies` and `ipFamilyPolicy` fields to make the service IPv6-only.
@@ -1295,6 +1343,7 @@ async fn internal_service(
         namespace: namespace.to_string(),
         service,
         deployment,
+        rollout: None,
         pod_name,
         guards: vec![deployment_guard, service_guard],
         namespace_guard: namespace_guard.map(|(guard, _)| guard),
@@ -1393,6 +1442,7 @@ pub async fn service_for_mirrord_ls(
         namespace: namespace.to_string(),
         service,
         deployment,
+        rollout: None,
         pod_name,
         guards: vec![deployment_guard, service_guard],
         namespace_guard: namespace_guard.map(|(guard, _)| guard),
@@ -1522,6 +1572,8 @@ pub async fn service_for_mirrord_ls(
         namespace: namespace.to_string(),
         service,
         deployment,
+        rollout: None,
+        pod_name,
         guards: vec![
             deployment_guard,
             service_guard,
@@ -1530,7 +1582,6 @@ pub async fn service_for_mirrord_ls(
             job_guard,
         ],
         namespace_guard: namespace_guard.map(|(guard, _)| guard),
-        pod_name,
     }
 }
 
@@ -1634,6 +1685,134 @@ pub async fn go_statfs_service(#[future] kube_client: Client) -> KubeService {
         kube_client,
     )
     .await
+}
+
+#[fixture]
+pub async fn rollout_service(
+    #[default("default")] namespace: &str,
+    #[default("NodePort")] service_type: &str,
+    #[default("ghcr.io/metalbear-co/mirrord-pytest:latest")] image: &str,
+    #[default("http-echo")] service_name: &str,
+    #[default(true)] randomize_name: bool,
+    #[future] kube_client: Client,
+) -> KubeService {
+    let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
+
+    let kube_client = kube_client.await;
+    let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
+    let deployment_api: Api<Deployment> = Api::namespaced(kube_client.clone(), namespace);
+    let service_api: Api<Service> = Api::namespaced(kube_client.clone(), namespace);
+    let rollout_api: Api<Rollout> = Api::namespaced(kube_client.clone(), namespace);
+
+    let name = if randomize_name {
+        format!("{}-{}", service_name, random_string())
+    } else {
+        // If using a non-random name, delete existing resources first.
+        // Just continue if they don't exist.
+        // Force delete
+        let delete_params = DeleteParams {
+            grace_period_seconds: Some(0),
+            ..Default::default()
+        };
+
+        let _ = service_api.delete(service_name, &delete_params).await;
+        let _ = deployment_api.delete(service_name, &delete_params).await;
+        let _ = rollout_api.delete(service_name, &delete_params).await;
+
+        service_name.to_string()
+    };
+
+    println!(
+        "{} creating service {name:?} in namespace {namespace:?}",
+        format_time()
+    );
+
+    let namespace_resource: Namespace = serde_json::from_value(json!({
+        "apiVersion": "v1",
+        "kind": "Namespace",
+        "metadata": {
+            "name": namespace,
+            "labels": {
+                TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+            }
+        },
+    }))
+    .unwrap();
+    // Create namespace and wrap it in ResourceGuard if it does not yet exist.
+    let namespace_guard = ResourceGuard::create(
+        namespace_api.clone(),
+        &namespace_resource,
+        delete_after_fail,
+    )
+    .await
+    .ok();
+
+    // `Deployment`
+    let deployment = deployment_from_json(&name, image, default_env());
+    let (deployment_guard, deployment) =
+        ResourceGuard::create(deployment_api.clone(), &deployment, delete_after_fail)
+            .await
+            .unwrap();
+    println!(
+        "Created deployment\n{}",
+        serde_json::to_string_pretty(&deployment).unwrap()
+    );
+
+    // `Service`
+    let service = service_from_json(&name, service_type);
+    let (service_guard, service) =
+        ResourceGuard::create(service_api.clone(), &service, delete_after_fail)
+            .await
+            .unwrap();
+    println!(
+        "Created service\n{}",
+        serde_json::to_string_pretty(&service).unwrap()
+    );
+
+    let pod_name = watch::wait_until_pods_ready(&service, 1, kube_client.clone())
+        .await
+        .into_iter()
+        .next()
+        .unwrap()
+        .metadata
+        .name
+        .unwrap();
+    println!("Created pod {pod_name:#?}");
+
+    // `Rollout`
+    let rollout = argo_rollout_from_json(&name, &deployment);
+    let (rollout_guard, rollout) =
+        ResourceGuard::create(rollout_api.clone(), &rollout, delete_after_fail)
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Failed to create rollout guard! \n{}",
+                    serde_json::to_string_pretty(&rollout).unwrap()
+                )
+            });
+    println!(
+        "Created rollout\n{}",
+        serde_json::to_string_pretty(&rollout).unwrap()
+    );
+
+    // Wait for the rollout to have at least 1 available replica
+    watch::wait_until_rollout_available(&name, namespace, 1, kube_client.clone()).await;
+
+    println!(
+        "{:?} done creating service {name} in namespace {namespace}",
+        Utc::now()
+    );
+
+    KubeService {
+        name,
+        namespace: namespace.to_string(),
+        service,
+        deployment,
+        rollout: Some(rollout),
+        pod_name,
+        guards: vec![deployment_guard, service_guard, rollout_guard],
+        namespace_guard: namespace_guard.map(|(guard, _)| guard),
+    }
 }
 
 /// Take a request builder of any method, add headers, send the request, verify success, and

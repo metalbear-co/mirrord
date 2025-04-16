@@ -2,6 +2,7 @@
 #![feature(ip)]
 #![warn(clippy::indexing_slicing)]
 
+mod argo_rollout;
 #[cfg(feature = "cli")]
 mod cli;
 mod env;
