@@ -1687,7 +1687,6 @@ pub async fn go_statfs_service(#[future] kube_client: Client) -> KubeService {
     .await
 }
 
-// #[cfg(feature = "operator")]
 #[fixture]
 pub async fn rollout_service(
     #[default("default")] namespace: &str,
