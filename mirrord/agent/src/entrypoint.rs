@@ -61,8 +61,12 @@ const CHANNEL_SIZE: usize = 1024;
 
 /// [`ExitCode`](std::process::ExitCode) returned from the child agent process
 /// when dirty iptables are detected.
-const IPTABLES_DIRTY_EXIT_CODE: i32 = 99;
-const SECOND_PROCESS_ENV: &str = "MIRRORD_AGENT_SECOND_PROCESS";
+pub(crate) const IPTABLES_DIRTY_EXIT_CODE: u8 = 99;
+
+/// Env var that gets checked when a new agent is started.
+/// If var is false or not set, the agent starts as an IP table guard which itself starts another
+/// agent. The child agent performs normal agent behaviour.
+const CHILD_PROCESS_ENV: &str = "MIRRORD_AGENT_CHILD_PROCESS";
 
 /// Keeps track of next client id.
 /// Stores common data used when serving client connections.
@@ -627,9 +631,7 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             } else {
                 new_iptables()
             };
-            SafeIpTables::list_mirrord_rules(IPTablesWrapper::from(ipt))
-                .await
-                .map_err(|error| AgentError::IPTablesSetupError(error.into()))
+            SafeIpTables::list_mirrord_rules(IPTablesWrapper::from(ipt)).await
         })
         .await
         .map_err(|error| AgentError::IPTablesSetupError(error.into()))?
@@ -822,7 +824,7 @@ async fn run_child_agent() -> AgentResult<()> {
         .expect("cannot spawn child agent: command missing from program arguments");
 
     let mut child_agent = Command::new(command)
-        .env(SECOND_PROCESS_ENV, "true")
+        .env(CHILD_PROCESS_ENV, "true")
         .args(args)
         .kill_on_drop(true)
         .spawn()?;
@@ -857,7 +859,7 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
         }
 
         result = run_child_agent() => match result {
-            Err(AgentError::AgentFailed(status)) if status.code() == Some(IPTABLES_DIRTY_EXIT_CODE) => {
+            Err(AgentError::AgentFailed(status)) if status.code() == Some(IPTABLES_DIRTY_EXIT_CODE as i32) => {
                 // Err status `IPTABLES_DIRTY_EXIT_CODE` means dirty IP tables detected, skip cleanup
                 tracing::warn!("dirty IP tables, cleanup skipped");
                 return result;
@@ -946,7 +948,7 @@ pub async fn main() -> AgentResult<()> {
     );
 
     let args = cli::parse_args();
-    let second_process = matches!(std::env::var(SECOND_PROCESS_ENV), Ok(value) if value == "true");
+    let second_process = std::env::var(CHILD_PROCESS_ENV).is_ok();
 
     if args.mode.is_targetless() || second_process {
     start_agent(args).await

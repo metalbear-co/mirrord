@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use k8s_openapi::api::core::v1::{Namespace, Pod};
-use kube::{Api, Client};
+use kube::{api::PostParams, Api, Client};
 use rstest::*;
 use serde_json::json;
 
@@ -29,7 +29,7 @@ use crate::utils::{
 /// `IPTABLES_TABLE_NAME`
 #[rstest]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[timeout(Duration::from_secs(240))]
+#[timeout(Duration::from_secs(120))]
 pub async fn agent_exits_on_dirty_tables(
     #[values(EnvApp::NodeInclude)] application: EnvApp,
     #[future] kube_client: Client,
@@ -45,7 +45,7 @@ pub async fn agent_exits_on_dirty_tables(
     // Create a namespace and a pod to target and check for pre-existing mirrord chain names
     // Create the namespace and wrap it in ResourceGuard
     let namespace_api: Api<Namespace> = Api::all(kube_client.clone());
-    let namespace_guard = ResourceGuard::create::<Namespace>(
+    let _namespace_guard = ResourceGuard::create::<Namespace>(
         namespace_api.clone(),
         &serde_json::from_value(json!({
             "apiVersion": "v1",
@@ -65,52 +65,56 @@ pub async fn agent_exits_on_dirty_tables(
 
     // Create a single pod as the target and wrap it in ResourceGuard
     let pod_api: Api<Pod> = Api::namespaced(kube_client.clone(), &namespace);
-    let pod_guard = ResourceGuard::create::<Pod>(
-        pod_api.clone(),
-        &serde_json::from_value(json!({
-            "apiVersion": "v1",
-            "kind": "Pod",
-            "metadata": {
-                "name": pod_name,
-                "namespace": &namespace,
-                "labels": {
-                    TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
-                }
-            },
-            "spec": {
-                "initContainers": [
-                    {
-                        "name": "init-bad-cleanup",
-                        "image": init_image,
-                        "imagePullPolicy": "Never",
-                        "command": ["sh", "-c", "iptables -t nat -N MIRRORD_INPUT"],
-                        "securityContext": {
-                            "capabilities": {
-                                "add": ["CAP_NET_ADMIN"]
-                            },
-                            "privileged": true,
+    let _pod = pod_api
+        .create(
+            &PostParams::default(),
+            &serde_json::from_value(json!({
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "metadata": {
+                    "name": pod_name,
+                    "namespace": &namespace,
+                    "labels": {
+                        TEST_RESOURCE_LABEL.0: TEST_RESOURCE_LABEL.1,
+                    }
+                },
+                "spec": {
+                    "initContainers": [
+                        {
+                            "name": "init-bad-cleanup",
+                            "image": init_image,
+                            "imagePullPolicy": "Never",
+                            "command": ["sh", "-c", "iptables -t nat -N MIRRORD_INPUT"],
+                            "securityContext": {
+                                "capabilities": {
+                                    "add": ["CAP_NET_ADMIN"]
+                                },
+                                "privileged": true,
+                            }
                         }
-                    }
-                ],
-                "containers": [
-                    {
-                        "name": "py-serv",
-                        "image": "ghcr.io/metalbear-co/mirrord-pytest:latest",
-                        "ports": [ { "containerPort": 80 } ]
-                    }
-                ]
-            }
-        }))
-        .unwrap(),
-        delete_after_fail,
-    )
-    .await
-    .expect(format!("Should be able to create pod {pod_name} in namespace {namespace}").as_str());
+                    ],
+                    "containers": [
+                        {
+                            "name": "py-serv",
+                            "image": "ghcr.io/metalbear-co/mirrord-pytest:latest",
+                            "ports": [ { "containerPort": 80 } ]
+                        }
+                    ]
+                }
+            }))
+            .unwrap(),
+        )
+        .await
+        .expect(
+            format!("Should be able to create pod {pod_name} in namespace {namespace}").as_str(),
+        );
+    println!("Created pod `{pod_name}`");
 
     // Use the pod as a target, which has an init container that inserts a mirrord chain name
     let target = format!("pod/{}", pod_name);
 
     // Wait for the target pod to be ready
+    println!("Waiting for target `{target}` in namespace `{namespace}` to be ready...");
     watch::wait_until_pod_ready(&pod_name, &namespace, kube_client).await;
 
     let mirrord_args = Some(application.mirrord_args().unwrap_or_default());
@@ -144,7 +148,4 @@ pub async fn agent_exits_on_dirty_tables(
     process
         .assert_stderr_contains("Detected dirty iptables.")
         .await;
-
-    drop(namespace_guard);
-    drop(pod_guard);
 }

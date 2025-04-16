@@ -9,7 +9,7 @@
 
 use std::process::ExitCode;
 
-use crate::error::AgentError;
+use crate::{entrypoint::IPTABLES_DIRTY_EXIT_CODE, error::AgentError};
 
 mod cli;
 mod client_connection;
@@ -35,7 +35,7 @@ mod vpn;
 async fn main() -> ExitCode {
     match crate::entrypoint::main().await {
         Ok(_) => ExitCode::SUCCESS,
-        Err(AgentError::IPTablesDirty) => ExitCode::from(99),
+        Err(AgentError::IPTablesDirty) => ExitCode::from(IPTABLES_DIRTY_EXIT_CODE),
         _ => ExitCode::FAILURE,
     }
 }

@@ -532,12 +532,10 @@ mod tests {
         assert!(ipt.cleanup().await.is_ok());
     }
 
-    /// Check that dirty ip tables fail the ['SafeIpTables::ensure_iptables_clean'] check
-    /// If there are any chains in the IP table with names used by the agent, the check should fail.
-    /// A fresh IP table, or one with only non-agent names, should pass the check
+    /// Ensure that clean ip tables pass the ['SafeIpTables::ensure_iptables_clean'] check.
+    /// A fresh IP table, or one with only non-agent names, should pass.
     #[tokio::test]
-    async fn fail_on_dirty() {
-        // CASE 1: check that a fresh IP table passes cleanliness check
+    async fn pass_on_clean() {
         let mut mock = MockIPTables::new();
 
         // clean table returns non-mirrord rules only
@@ -555,10 +553,12 @@ mod tests {
             leftover_rules_res.unwrap().len(), 0,
             "Fresh IP table should successfully list table rules and list no existing mirrord rules"
         );
-        println!("CASE 1 (expected clean table): pass");
+    }
 
-        // CASE 2: check that an IP table with one of mirrord's static chain names will fail the
-        // cleanliness check
+    /// Ensure that dirty ip tables fail the ['SafeIpTables::ensure_iptables_clean'] check.
+    /// If there are any chains in the IP table with names used by the agent, the check should fail.
+    #[tokio::test]
+    async fn fail_on_dirty() {
         let mut mock = MockIPTables::new();
 
         // dirty table returns non-mirrord rules, plus a leftover mirrord rule
@@ -577,6 +577,5 @@ mod tests {
             leftover_rules_res.unwrap().len(), 1,
             "Fresh IP table should successfully list table rules and list one existing mirrord rule"
         );
-        println!("CASE 2 (expected dirty table): pass");
     }
 }

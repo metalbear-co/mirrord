@@ -102,6 +102,10 @@ where
 /// Waits until the given [`Service`] has at least `min` ready [`Pod`].
 ///
 /// Returns ready pods.
+///
+/// A [`Pod`] is considered to be ready when:
+/// 1. It's in the `Running` phase
+/// 2. All of its containers are ready
 pub async fn wait_until_pods_ready(service: &Service, min: usize, client: Client) -> Vec<Pod> {
     let api = Api::<Pod>::namespaced(client, service.metadata.namespace.as_deref().unwrap());
 
@@ -135,12 +139,19 @@ pub async fn wait_until_pods_ready(service: &Service, min: usize, client: Client
 }
 
 /// Waits until the given [`Pod`] is ready.
+///
+/// A [`Pod`] is considered to be ready when:
+/// 1. It's in the `Running` phase
+/// 2. All of its containers are ready
 #[cfg(test)]
 #[cfg(all(not(feature = "operator"), feature = "job"))]
 pub async fn wait_until_pod_ready(pod_name: &str, namespace: &str, client: Client) {
     let api = Api::<Pod>::namespaced(client, namespace);
 
-    let config = Config::default();
+    let config = Config {
+        field_selector: Some(format!("metadata.name={pod_name}")),
+        ..Default::default()
+    };
 
     let pod_name = pod_name.to_string();
     let mut watcher = Watcher::new(api, config, move |map| {
