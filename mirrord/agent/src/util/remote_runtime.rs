@@ -30,6 +30,7 @@ use super::error::{BgTaskPanicked, RemoteRuntimeError};
 use crate::{
     error::AgentError,
     namespace::{self, NamespaceType},
+    TOKIO_WORKER_THREADS,
 };
 
 /// A cloneable handle to a remote [`tokio::runtime::Runtime`] that runs in its own thread.
@@ -60,8 +61,9 @@ impl RemoteRuntime {
                 return;
             }
 
-            let rt_result = tokio::runtime::Builder::new_current_thread()
+            let rt_result = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
+                .worker_threads(TOKIO_WORKER_THREADS)
                 .thread_name(format!(
                     "remote-{target_pid}-{namespace_type}-runtime-worker"
                 ))
