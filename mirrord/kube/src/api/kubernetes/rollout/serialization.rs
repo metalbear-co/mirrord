@@ -43,13 +43,12 @@ impl<'de> Deserialize<'de> for Rollout {
     where
         D: serde::Deserializer<'de>,
     {
-        #[allow(non_camel_case_types)]
         enum Field {
-            Key_api_version,
-            Key_kind,
-            Key_metadata,
-            Key_spec,
-            Key_status,
+            ApiVersion,
+            Kind,
+            Metadata,
+            Spec,
+            Status,
             Other,
         }
 
@@ -60,7 +59,7 @@ impl<'de> Deserialize<'de> for Rollout {
             {
                 struct FieldVisitor;
 
-                impl Visitor<'_> for FieldVisitor {
+                impl<'de> Visitor<'de> for FieldVisitor {
                     type Value = Field;
 
                     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -72,11 +71,11 @@ impl<'de> Deserialize<'de> for Rollout {
                         E: de::Error,
                     {
                         Ok(match value {
-                            "apiVersion" => Field::Key_api_version,
-                            "kind" => Field::Key_kind,
-                            "metadata" => Field::Key_metadata,
-                            "spec" => Field::Key_spec,
-                            "status" => Field::Key_status,
+                            "apiVersion" => Field::ApiVersion,
+                            "kind" => Field::Kind,
+                            "metadata" => Field::Metadata,
+                            "spec" => Field::Spec,
+                            "status" => Field::Status,
                             _ => Field::Other,
                         })
                     }
@@ -105,7 +104,7 @@ impl<'de> Deserialize<'de> for Rollout {
 
                 while let Some(key) = map.next_key()? {
                     match key {
-                        Field::Key_api_version => {
+                        Field::ApiVersion => {
                             let api_version: String = map.next_value()?;
                             if api_version != Rollout::API_VERSION {
                                 return Err(de::Error::invalid_value(
@@ -114,7 +113,7 @@ impl<'de> Deserialize<'de> for Rollout {
                                 ));
                             }
                         }
-                        Field::Key_kind => {
+                        Field::Kind => {
                             let kind: String = map.next_value()?;
                             if kind != Rollout::KIND {
                                 return Err(de::Error::invalid_value(
@@ -123,13 +122,13 @@ impl<'de> Deserialize<'de> for Rollout {
                                 ));
                             }
                         }
-                        Field::Key_metadata => {
+                        Field::Metadata => {
                             metadata = Some(map.next_value()?);
                         }
-                        Field::Key_spec => {
+                        Field::Spec => {
                             spec = Some(map.next_value()?);
                         }
-                        Field::Key_status => {
+                        Field::Status => {
                             status = Some(map.next_value()?);
                         }
                         Field::Other => {
