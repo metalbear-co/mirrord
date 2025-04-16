@@ -8,6 +8,57 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.138.0](https://github.com/metalbear-co/mirrord/tree/3.138.0) - 2025-04-15
+
+
+### Added
+
+- Added `applies_to_copy_targets` to the mirrord Policy specs, so we can enable
+  policies when using copied targets.
+  [#797](https://github.com/metalbear-co/mirrord/issues/797)
+- Added a sanity e2e test for the copy target feature.
+  [#799](https://github.com/metalbear-co/mirrord/issues/799)
+- Added CLI support for Kafka splitting without copying the target.
+- The agent now issues warnings to clients that do not meet minimum
+  protocol version requirement for stealing an HTTP request.
+  [#3119](https://github.com/metalbear-co/mirrord/issues/3119)
+
+
+### Changed
+
+- Improved mermaid diagrams readability (changed colors and lines).
+  [#819](https://github.com/metalbear-co/mirrord/issues/819)
+- Improved mirrord progress message from spawning the agent without an
+  operator.
+  [#3167](https://github.com/metalbear-co/mirrord/issues/3167)
+- By default, the `DOTNET_STARTUP_HOOKS` env var will not be fetched from the
+  target.
+- Updated contributing guidance.
+- Updated dev container base image and JSON configuration file.
+
+
+### Fixed
+
+- mirrord now correctly detects whether the configuration allows for stealing
+  health checks from the targeted pod.
+  [#3188](https://github.com/metalbear-co/mirrord/issues/3188)
+- Fixed `mirrord_agent_dns_request_count` Prometheus metric.
+
+
+### Internal
+
+- Reworked agent's threading model to avoid spawning excessive threads.
+  [#agent-threading](https://github.com/metalbear-co/mirrord/issues/agent-threading)
+- Added some documentation to the `mirrord-protocol` crate.
+  [#3182](https://github.com/metalbear-co/mirrord/issues/3182)
+- Added some documentation in the `mirrord-agent` crate.
+- Added timeouts to concurrent steal E2E tests.
+- Extracted incoming traffic redirection logic to a separate task running in
+  the target's network namespace.
+- Fixed 3 test HTTP servers used in E2E tests.
+- Fixed one of the E2E tests.
+- Test specifying a queue by URL instead of by name in SQS splitting.
+
 ## [3.137.0](https://github.com/metalbear-co/mirrord/tree/3.137.0) - 2025-03-26
 
 
