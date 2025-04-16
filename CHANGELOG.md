@@ -8,6 +8,19 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.139.0](https://github.com/metalbear-co/mirrord/tree/3.139.0) - 2025-04-16
+
+
+### Added
+
+- Added config file option for `mirrord operator session` commands (`-f`).
+  [#3178](https://github.com/metalbear-co/mirrord/issues/3178)
+
+
+### Changed
+
+- Increased number of OS threads used by the mirrord agent.
+
 ## [3.138.0](https://github.com/metalbear-co/mirrord/tree/3.138.0) - 2025-04-15
 
 
