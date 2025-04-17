@@ -138,6 +138,8 @@ pub async fn service_for_mirrord_ls(
         namespace: namespace.to_string(),
         service,
         deployment,
+        rollout: None,
+        pod_name,
         guards: vec![
             deployment_guard,
             service_guard,
@@ -146,6 +148,5 @@ pub async fn service_for_mirrord_ls(
             job_guard,
         ],
         namespace_guard: namespace_guard.map(|(guard, _)| guard),
-        pod_name,
     }
 }
