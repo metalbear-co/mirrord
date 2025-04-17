@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.139.1](https://github.com/metalbear-co/mirrord/tree/3.139.1) - 2025-04-17
+
+
+### Fixed
+
+- Fixed an issue where mirrord-agent was being OOM killed due to a traffic
+  redirection loop.
+
+
+### Internal
+
+- Added verification of tmp queues deletion in the SQS E2E test.
+- Added E2E tests for rollout targets.
+  [#781](https://github.com/metalbear-co/mirrord/issues/781)
+
 ## [3.139.0](https://github.com/metalbear-co/mirrord/tree/3.139.0) - 2025-04-16
 
 
