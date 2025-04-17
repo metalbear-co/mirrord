@@ -1,7 +1,12 @@
 //! Home for [`StolenConnections`] - manager for connections that were stolen based on active port
 //! subscriptions.
 
-use std::{collections::HashMap, fmt, io, time::Duration};
+use std::{
+    collections::HashMap,
+    fmt, io,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    time::Duration,
+};
 
 use hyper::{body::Incoming, Request, Response};
 use mirrord_protocol::{
@@ -467,7 +472,16 @@ impl ConnectionTask {
             port_subscription,
         } = self.connection;
 
-        let destination = connection.destination();
+        let mut destination = connection.destination();
+        let localhost = if destination.is_ipv6() {
+            IpAddr::V6(Ipv6Addr::LOCALHOST)
+        } else {
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
+        };
+        // If we use the original IP we would go through prerouting and hit a loop.
+        // localhost should always work.
+        destination.set_ip(localhost);
+
         let source = connection.source();
 
         let filters = match port_subscription {
