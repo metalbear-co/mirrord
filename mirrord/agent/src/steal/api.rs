@@ -12,9 +12,8 @@ use tracing::Level;
 
 use super::{http::ReceiverStreamBody, *};
 use crate::{
-    error::AgentResult,
-    metrics::HTTP_REQUEST_IN_PROGRESS_COUNT,
-    util::{remote_runtime::BgTaskStatus, ClientId},
+    error::AgentResult, metrics::HTTP_REQUEST_IN_PROGRESS_COUNT, util::ClientId,
+    watched_task::TaskStatus,
 };
 
 type ResponseBodyTx = Sender<Result<Frame<Bytes>, Infallible>>;
@@ -44,7 +43,7 @@ pub(crate) struct TcpStealerApi {
     daemon_rx: Receiver<StealerMessage>,
 
     /// View on the stealer task's status.
-    task_status: BgTaskStatus,
+    task_status: TaskStatus,
 
     /// [`Sender`]s that allow us to provide body [`Frame`]s of responses to filtered HTTP
     /// requests.
@@ -64,20 +63,17 @@ impl TcpStealerApi {
     pub(crate) async fn new(
         client_id: ClientId,
         command_tx: Sender<StealerCommand>,
-        task_status: BgTaskStatus,
+        task_status: TaskStatus,
         channel_size: usize,
     ) -> AgentResult<Self> {
         let (daemon_tx, daemon_rx) = mpsc::channel(channel_size);
 
-        let init_result = command_tx
+        command_tx
             .send(StealerCommand {
                 client_id,
                 command: Command::NewClient(daemon_tx),
             })
-            .await;
-        if init_result.is_err() {
-            return Err(task_status.wait_assert_running().await);
-        }
+            .await?;
 
         Ok(Self {
             client_id,
@@ -98,7 +94,7 @@ impl TcpStealerApi {
         if self.command_tx.send(command).await.is_ok() {
             Ok(())
         } else {
-            Err(self.task_status.wait_assert_running().await)
+            Err(self.task_status.unwrap_err().await)
         }
     }
 
@@ -121,7 +117,7 @@ impl TcpStealerApi {
                 }
                 Ok(msg)
             }
-            None => Err(self.task_status.wait_assert_running().await),
+            None => Err(self.task_status.unwrap_err().await),
         }
     }
 

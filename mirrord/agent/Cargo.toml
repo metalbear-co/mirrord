@@ -82,3 +82,4 @@ rcgen.workspace = true
 reqwest.workspace = true
 rstest.workspace = true
 tempfile.workspace = true
+test_bin = "0.4"

@@ -7,6 +7,12 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
+/// Silences `deny(unused_crate_dependencies)`.
+///
+/// This dependency is only used in integration tests.
+#[cfg(test)]
+use test_bin as _;
+
 mod cli;
 mod client_connection;
 mod container_handle;
@@ -25,6 +31,7 @@ mod sniffer;
 mod steal;
 mod util;
 mod vpn;
+mod watched_task;
 
 /// Number of worker threads we use per [`tokio::runtime`].
 const TOKIO_WORKER_THREADS: usize = 8;
