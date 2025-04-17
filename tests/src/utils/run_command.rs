@@ -6,16 +6,6 @@ use tokio::process::Command;
 
 use super::process::TestProcess;
 
-/// Run `mirrord exec` without specifying a target, to run in targetless mode.
-pub async fn run_exec_targetless(
-    process_cmd: Vec<&str>,
-    namespace: Option<&str>,
-    args: Option<Vec<&str>>,
-    env: Option<Vec<(&str, &str)>>,
-) -> TestProcess {
-    run_exec(process_cmd, None, namespace, args, env).await
-}
-
 /// See [`run_exec`].
 pub async fn run_exec_with_target(
     process_cmd: Vec<&str>,
@@ -27,28 +17,14 @@ pub async fn run_exec_with_target(
     run_exec(process_cmd, Some(target), namespace, args, env).await
 }
 
-pub async fn run_mirrord(args: Vec<&str>, env: HashMap<&str, &str>) -> TestProcess {
-    let path = match option_env!("MIRRORD_TESTS_USE_BINARY") {
-        None => env!("CARGO_BIN_FILE_MIRRORD"),
-        Some(binary_path) => binary_path,
-    };
-    let temp_dir = tempdir().unwrap();
-
-    let server = Command::new(path)
-        .args(&args)
-        .envs(env)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .unwrap();
-    println!(
-        "executed mirrord with args {args:?} pid {}",
-        server.id().unwrap()
-    );
-    // We need to hold temp dir until the process is finished
-    TestProcess::from_child(server, Some(temp_dir))
+/// Run `mirrord exec` without specifying a target, to run in targetless mode.
+pub async fn run_exec_targetless(
+    process_cmd: Vec<&str>,
+    namespace: Option<&str>,
+    args: Option<Vec<&str>>,
+    env: Option<Vec<(&str, &str)>>,
+) -> TestProcess {
+    run_exec(process_cmd, None, namespace, args, env).await
 }
 
 /// Run `mirrord exec` with the given cmd, optional target (`None` for targetless), namespace,
@@ -130,4 +106,28 @@ pub async fn run_verify_config(args: Option<Vec<&str>>) -> TestProcess {
     }
 
     run_mirrord(mirrord_args, Default::default()).await
+}
+
+pub async fn run_mirrord(args: Vec<&str>, env: HashMap<&str, &str>) -> TestProcess {
+    let path = match option_env!("MIRRORD_TESTS_USE_BINARY") {
+        None => env!("CARGO_BIN_FILE_MIRRORD"),
+        Some(binary_path) => binary_path,
+    };
+    let temp_dir = tempdir().unwrap();
+
+    let server = Command::new(path)
+        .args(&args)
+        .envs(env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    println!(
+        "executed mirrord with args {args:?} pid {}",
+        server.id().unwrap()
+    );
+    // We need to hold temp dir until the process is finished
+    TestProcess::from_child(server, Some(temp_dir))
 }
