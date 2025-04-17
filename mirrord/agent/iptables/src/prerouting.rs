@@ -95,13 +95,13 @@ mod tests {
         let mut mock = MockIPTables::new();
 
         mock.expect_create_chain()
-            .with(eq(IPTABLE_PREROUTING.as_str()))
+            .with(eq(IPTABLE_PREROUTING))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_PREROUTING.as_str()),
+                eq(IPTABLE_PREROUTING),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(1),
             )
@@ -109,7 +109,7 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(IPTABLE_PREROUTING.as_str()))
+            .with(eq(IPTABLE_PREROUTING))
             .times(1)
             .returning(|_| Ok(()));
 
@@ -123,13 +123,13 @@ mod tests {
         let mut mock = MockIPTables::new();
 
         mock.expect_create_chain()
-            .with(eq(IPTABLE_PREROUTING.as_str()))
+            .with(eq(IPTABLE_PREROUTING))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_PREROUTING.as_str()),
+                eq(IPTABLE_PREROUTING),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
                 eq(1),
             )
@@ -138,7 +138,7 @@ mod tests {
 
         mock.expect_insert_rule()
             .with(
-                eq(IPTABLE_PREROUTING.as_str()),
+                eq(IPTABLE_PREROUTING),
                 eq("-m tcp -p tcp --dport 169 -j REDIRECT --to-ports 1420"),
                 eq(2),
             )
@@ -146,7 +146,7 @@ mod tests {
             .returning(|_, _, _| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(IPTABLE_PREROUTING.as_str()))
+            .with(eq(IPTABLE_PREROUTING))
             .times(1)
             .returning(|_| Ok(()));
 
@@ -161,20 +161,20 @@ mod tests {
         let mut mock = MockIPTables::new();
 
         mock.expect_create_chain()
-            .with(eq(IPTABLE_PREROUTING.as_str()))
+            .with(eq(IPTABLE_PREROUTING))
             .times(1)
             .returning(|_| Ok(()));
 
         mock.expect_remove_rule()
             .with(
-                eq(IPTABLE_PREROUTING.as_str()),
+                eq(IPTABLE_PREROUTING),
                 eq("-m tcp -p tcp --dport 69 -j REDIRECT --to-ports 420"),
             )
             .times(1)
             .returning(|_, _| Ok(()));
 
         mock.expect_remove_chain()
-            .with(eq(IPTABLE_PREROUTING.as_str()))
+            .with(eq(IPTABLE_PREROUTING))
             .times(1)
             .returning(|_| Ok(()));
 
