@@ -7,8 +7,8 @@ mod http_tests {
     use rstest::*;
 
     use crate::utils::{
-        kube_client, port_forwarder::PortForwarder, send_requests, service, Application,
-        KubeService,
+        application::Application, kube_client, kube_service::KubeService,
+        port_forwarder::PortForwarder, send_requests, services::basic_service,
     };
 
     /// ## Warning
@@ -21,7 +21,7 @@ mod http_tests {
     async fn mirror_http_traffic(
         #[future]
         #[notrace]
-        service: KubeService,
+        basic_service: KubeService,
         #[future]
         #[notrace]
         kube_client: Client,
@@ -35,7 +35,7 @@ mod http_tests {
         )]
         application: Application,
     ) {
-        let service = service.await;
+        let service = basic_service.await;
         let kube_client = kube_client.await;
         let portforwarder = PortForwarder::new(
             kube_client.clone(),

@@ -12,7 +12,7 @@ mod cli {
 
     use rstest::rstest;
 
-    use crate::utils::{config_dir, run_verify_config};
+    use crate::utils::{config_dir, run_command::run_verify_config};
 
     /// Tests `verify-config` with `path` and `--ide` args, which should be:
     ///
