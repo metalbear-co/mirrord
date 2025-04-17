@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-};
+use std::collections::{HashMap, HashSet};
 
 use fancy_regex::Regex;
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -459,16 +456,6 @@ impl TcpConnectionStealer {
         connection: RedirectedConnection,
         port_subscription: PortSubscription,
     ) -> AgentResult<()> {
-        let mut real_address = connection.destination();
-        let localhost = if real_address.is_ipv6() {
-            IpAddr::V6(Ipv6Addr::LOCALHOST)
-        } else {
-            IpAddr::V4(Ipv4Addr::LOCALHOST)
-        };
-        // If we use the original IP we would go through prerouting and hit a loop.
-        // localhost should always work.
-        real_address.set_ip(localhost);
-
         let stolen_connection = StolenConnection {
             connection,
             port_subscription,
