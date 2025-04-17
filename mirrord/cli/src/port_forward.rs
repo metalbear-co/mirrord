@@ -46,7 +46,7 @@ use tracing::Level;
 
 use crate::{connection::AgentConnection, AddrPortMapping, LocalPort, RemoteAddr, RemotePort};
 
-type LocalSocketPair = (SocketAddr, SocketAddr);
+type ConnectionSocketPair = (SocketAddr, SocketAddr);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedPortMapping {
@@ -64,14 +64,14 @@ pub struct PortForwarder {
     /// accepts connections from the user app in the form of a stream
     listeners: StreamMap<SocketAddr, TcpListenerStream>,
     /// oneshot channels for sending connection IDs to tasks and the associated local address
-    id_oneshots: VecDeque<(LocalSocketPair, oneshot::Sender<ConnectionId>)>,
+    id_oneshots: VecDeque<(ConnectionSocketPair, oneshot::Sender<ConnectionId>)>,
     /// oneshot channels for sending resolved hostnames to tasks and the associated local address
-    dns_oneshots: VecDeque<(LocalSocketPair, oneshot::Sender<IpAddr>)>,
+    dns_oneshots: VecDeque<(ConnectionSocketPair, oneshot::Sender<IpAddr>)>,
     /// identifies a pair of mapped socket addresses by their corresponding connection ID
     sockets: HashMap<ConnectionId, ResolvedPortMapping>,
     /// identifies task senders by their corresponding local socket address
     /// for sending data from the remote socket to the local address
-    task_txs: HashMap<LocalSocketPair, Sender<Vec<u8>>>,
+    task_txs: HashMap<ConnectionSocketPair, Sender<Vec<u8>>>,
 
     /// transmit internal messages from tasks to [`PortForwarder`]'s main loop.
     internal_msg_tx: Sender<PortForwardMessage>,
@@ -641,7 +641,7 @@ enum PortForwardMessage {
     /// A request to perform lookup on the given hostname at the remote peer.
     /// Sent by the task only after receiving first batch of data from the user.
     /// The task waits for [`SocketAddr`] on the other end of the [`oneshot`] channel.
-    Lookup((SocketAddr, SocketAddr), String, oneshot::Sender<IpAddr>),
+    Lookup(ConnectionSocketPair, String, oneshot::Sender<IpAddr>),
 
     /// A request to make outgoing connection to the remote peer.
     /// Sent by the task only after receiving first batch of data from the user and after hostname
@@ -654,7 +654,7 @@ enum PortForwardMessage {
 
     /// A request to close the remote connection with the given id, if it exists, and the local
     /// socket.
-    Close((SocketAddr, SocketAddr), Option<ConnectionId>),
+    Close(ConnectionSocketPair, Option<ConnectionId>),
 }
 
 struct LocalConnectionTask {

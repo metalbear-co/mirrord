@@ -4626,10 +4626,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mirrord-mcp"
-version = "3.139.0"
-
-[[package]]
 name = "mirrord-operator"
 version = "3.139.0"
 dependencies = [
