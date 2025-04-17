@@ -1,13 +1,3 @@
-use client_connection::AgentTlsConnector;
-use dns::{ClientGetAddrInfoRequest, DnsCommand};
-use futures::TryFutureExt;
-use metrics::{start_metrics, CLIENT_COUNT};
-use mirrord_agent_env::envs;
-use mirrord_agent_iptables::{
-    error::IPTablesError, new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables,
-};
-use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
-use std::process::ExitCode;
 use std::{
     collections::HashMap,
     mem,
@@ -19,6 +9,16 @@ use std::{
         Arc,
     },
 };
+
+use client_connection::AgentTlsConnector;
+use dns::{ClientGetAddrInfoRequest, DnsCommand};
+use futures::TryFutureExt;
+use metrics::{start_metrics, CLIENT_COUNT};
+use mirrord_agent_env::envs;
+use mirrord_agent_iptables::{
+    error::IPTablesError, new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables,
+};
+use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
 use steal::StealerMessage;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -951,7 +951,7 @@ pub async fn main() -> AgentResult<()> {
     let second_process = std::env::var(CHILD_PROCESS_ENV).is_ok();
 
     if args.mode.is_targetless() || second_process {
-    start_agent(args).await
+        start_agent(args).await
     } else {
         start_iptable_guard(args).await
     }

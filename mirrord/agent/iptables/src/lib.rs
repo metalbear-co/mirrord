@@ -224,13 +224,12 @@ where
         let rules = ipt.list_table()?;
 
         Ok(rules
-            .iter()
+            .into_iter()
             .filter(|rule| {
                 [IPTABLE_PREROUTING, IPTABLE_MESH, IPTABLE_STANDARD]
                     .iter()
                     .any(|chain| rule.contains(*chain))
             })
-            .map(|s| s.as_str().to_string())
             .collect())
     }
 
