@@ -658,6 +658,7 @@ enum PortForwardMessage {
 }
 
 struct LocalConnectionTask {
+    /// peer address from [`TcpStream`] connected to the local port
     peer_socket: SocketAddr,
     /// read half of the TcpStream connected to the local port, wrapped in a stream
     read_stream: ReaderStream<OwnedReadHalf>,
