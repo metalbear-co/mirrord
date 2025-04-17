@@ -33,9 +33,8 @@ mod util;
 mod vpn;
 mod watched_task;
 
-/// Number of worker threads we use per [`tokio::runtime`].
-const TOKIO_WORKER_THREADS: usize = 8;
-
-fn main() -> crate::error::AgentResult<()> {
-    crate::entrypoint::main()
+#[cfg(target_os = "linux")]
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> crate::error::AgentResult<()> {
+    crate::entrypoint::main().await
 }

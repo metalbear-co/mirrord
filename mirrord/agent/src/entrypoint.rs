@@ -888,7 +888,7 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
 /// This weird flow is a safety measure - should the real agent OOM (which means instant process
 /// termination) or be killed with a signal, the parent will a chance to clean iptables. If we leave
 /// the iptables dirty, the whole target pod is broken, probably forever.
-pub fn main() -> AgentResult<()> {
+pub async fn main() -> AgentResult<()> {
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");
 
@@ -927,11 +927,7 @@ pub fn main() -> AgentResult<()> {
             && std::env::var(IPTABLE_MESH_ENV).is_ok()
             && std::env::var(IPTABLE_STANDARD_ENV).is_ok())
     {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .worker_threads(TOKIO_WORKER_THREADS)
-            .build()?
-            .block_on(start_agent(args))
+        start_agent(args).await
     } else {
         start_iptable_guard(args).await
     };
