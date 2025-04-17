@@ -1,20 +1,22 @@
 use std::borrow::Cow;
 
 use k8s_openapi::{
-    api::{
-        apps::v1::{Deployment, ReplicaSet, StatefulSet},
-        core::v1::{PodTemplate, PodTemplateSpec},
-    },
+    api::core::v1::PodTemplateSpec,
     apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta},
     ListableResource, Metadata, NamespaceResourceScope, Resource,
 };
 use kube::Client;
-use serde::{de, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
-use super::get_k8s_resource_api;
 use crate::error::KubeApiError;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+pub mod serialization;
+pub mod spec_template;
+pub mod workload_ref;
+
+use self::{spec_template::RolloutSpecTemplate, workload_ref::WorkloadRef};
+
+#[derive(Clone, Debug)]
 pub struct Rollout {
     pub metadata: ObjectMeta,
     pub spec: Option<RolloutSpec>,
@@ -28,6 +30,7 @@ pub struct RolloutStatus {
     /// Looks like this is a string for some reason:
     /// [rollouts/v1alpha1/types.go](https://github.com/argoproj/argo-rollouts/blob/4f1edbe9332b93d8aaf1d8f34239da6f952b8a93/pkg/apis/rollouts/v1alpha1/types.go#L922)
     pub observed_generation: Option<String>,
+    pub pause_conditions: Option<serde_json::Value>,
 }
 
 /// Argo [`Rollout`]s provide `Pod` template in one of two ways:
@@ -42,26 +45,15 @@ pub struct RolloutSpec {
     pub selector: Option<LabelSelector>,
     pub template: Option<RolloutSpecTemplate>,
     pub workload_ref: Option<WorkloadRef>,
-}
-
-/// A reference to some Kubernetes [workload](https://kubernetes.io/docs/concepts/workloads/) managed by an Argo [`Rollout`].
-///
-/// The documentation of Argo do not mention any restrictions no the referenced resource type -
-/// "WorkloadRef holds a references to a workload that provides Pod template".
-///
-/// # Note
-///
-/// Information contained in this struct is not enough to fetch a dynamic resource (see
-/// [`ApiResource`](kube::discovery::ApiResource)). What's more, there would be no way of knowing
-/// how to extract the required [`PodTemplateSpec`] from the fetched resource.
-///
-/// Luckily, [source code](https://github.com/argoproj/argo-rollouts/blob/master/rollout/templateref.go#L41) provides constraints on the resource type.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkloadRef {
-    pub api_version: String,
-    pub kind: String,
-    pub name: String,
+    pub strategy: Option<serde_json::Value>,
+    pub analysis: Option<serde_json::Value>,
+    pub min_ready_seconds: Option<i32>,
+    pub revision_history_limit: Option<i32>,
+    pub paused: Option<bool>,
+    pub progress_deadline_seconds: Option<i32>,
+    pub progress_deadline_abort: Option<bool>,
+    pub restart_at: Option<String>,
+    pub rollback_window: Option<serde_json::Value>,
 }
 
 impl Rollout {
@@ -171,136 +163,6 @@ impl Rollout {
     }
 }
 
-impl WorkloadRef {
-    /// Fetched the referenced resource and extracts [`PodTemplateSpec`].
-    /// Supports references to:
-    /// 1. [`Deployment`]s
-    /// 2. [`ReplicaSet`]s
-    /// 3. [`PodTemplate`]s (uses `.metadata.labels`)
-    /// 4. [`StatefulSet`]s
-    pub async fn get_pod_template(
-        &self,
-        client: &Client,
-        namespace: Option<&str>,
-    ) -> Result<Option<PodTemplateSpec>, KubeApiError> {
-        match (self.api_version.as_str(), self.kind.as_str()) {
-            (Deployment::API_VERSION, Deployment::KIND) => {
-                let mut deployment = get_k8s_resource_api::<Deployment>(client, namespace)
-                    .get(&self.name)
-                    .await?;
-
-                deployment
-                    .spec
-                    .take()
-                    .ok_or_else(|| KubeApiError::missing_field(&deployment, ".spec"))
-                    .map(|spec| Some(spec.template))
-            }
-            (ReplicaSet::API_VERSION, ReplicaSet::KIND) => {
-                let mut replica_set = get_k8s_resource_api::<ReplicaSet>(client, namespace)
-                    .get(&self.name)
-                    .await?;
-
-                replica_set
-                    .spec
-                    .take()
-                    .ok_or_else(|| KubeApiError::missing_field(&replica_set, ".spec"))?
-                    .template
-                    .ok_or_else(|| KubeApiError::missing_field(&replica_set, ".spec.template"))
-                    .map(Some)
-            }
-            (PodTemplate::API_VERSION, PodTemplate::KIND) => {
-                let mut pod_template = get_k8s_resource_api::<PodTemplate>(client, namespace)
-                    .get(&self.name)
-                    .await?;
-
-                pod_template
-                    .template
-                    .take()
-                    .ok_or_else(|| KubeApiError::missing_field(&pod_template, ".template"))
-                    .map(Some)
-            }
-            (StatefulSet::API_VERSION, StatefulSet::KIND) => {
-                let mut stateful_set = get_k8s_resource_api::<StatefulSet>(client, namespace)
-                    .get(&self.name)
-                    .await?;
-
-                stateful_set
-                    .spec
-                    .take()
-                    .ok_or_else(|| KubeApiError::missing_field(&stateful_set, ".spec"))
-                    .map(|spec| Some(spec.template))
-            }
-            _ => Ok(None),
-        }
-    }
-
-    /// Fetched the referenced resource and extracts [`LabelSelector`].
-    /// Supports references to:
-    /// 1. [`Deployment`]s
-    /// 2. [`ReplicaSet`]s
-    /// 3. [`PodTemplate`]s
-    /// 4. [`StatefulSet`]s
-    pub async fn get_match_labels(
-        &self,
-        client: &Client,
-        namespace: Option<&str>,
-    ) -> Result<Option<LabelSelector>, KubeApiError> {
-        match (self.api_version.as_str(), self.kind.as_str()) {
-            (Deployment::API_VERSION, Deployment::KIND) => {
-                let mut deployment = get_k8s_resource_api::<Deployment>(client, namespace)
-                    .get(&self.name)
-                    .await?;
-
-                deployment
-                    .spec
-                    .take()
-                    .ok_or_else(|| KubeApiError::missing_field(&deployment, ".spec"))
-                    .map(|spec| Some(spec.selector))
-            }
-            (ReplicaSet::API_VERSION, ReplicaSet::KIND) => {
-                let mut replica_set = get_k8s_resource_api::<ReplicaSet>(client, namespace)
-                    .get(&self.name)
-                    .await?;
-
-                replica_set
-                    .spec
-                    .take()
-                    .ok_or_else(|| KubeApiError::missing_field(&replica_set, ".spec"))
-                    .map(|spec| Some(spec.selector))
-            }
-            (PodTemplate::API_VERSION, PodTemplate::KIND) => {
-                let mut pod_template = get_k8s_resource_api::<PodTemplate>(client, namespace)
-                    .get(&self.name)
-                    .await?;
-
-                pod_template
-                    .metadata
-                    .labels
-                    .take()
-                    .ok_or_else(|| KubeApiError::missing_field(&pod_template, ".metadata.labels"))
-                    .map(|match_labels| {
-                        Some(LabelSelector {
-                            match_labels: Some(match_labels),
-                            ..Default::default()
-                        })
-                    })
-            }
-            (StatefulSet::API_VERSION, StatefulSet::KIND) => {
-                let mut stateful_set = get_k8s_resource_api::<StatefulSet>(client, namespace)
-                    .get(&self.name)
-                    .await?;
-
-                stateful_set
-                    .spec
-                    .take()
-                    .ok_or_else(|| KubeApiError::missing_field(&stateful_set, ".spec"))
-                    .map(|spec| Some(spec.selector))
-            }
-            _ => Ok(None),
-        }
-    }
-}
-
 impl Resource for Rollout {
     const API_VERSION: &'static str = "argoproj.io/v1alpha1";
     const GROUP: &'static str = "argoproj.io";
@@ -324,53 +186,6 @@ impl Metadata for Rollout {
     fn metadata_mut(&mut self) -> &mut Self::Ty {
         &mut self.metadata
     }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, Default)]
-pub struct RolloutSpecTemplate(#[serde(deserialize_with = "rollout_pod_spec")] PodTemplateSpec);
-
-impl AsRef<PodTemplateSpec> for RolloutSpecTemplate {
-    fn as_ref(&self) -> &PodTemplateSpec {
-        &self.0
-    }
-}
-
-/// Custom deserializer for a rollout template field due to
-/// [#548](https://github.com/metalbear-co/operator/issues/548)
-/// First deserializes it as value, fixes possible issues and then deserializes it as
-/// PodTemplateSpec.
-#[tracing::instrument(level = "debug", skip(deserializer), ret, err)]
-fn rollout_pod_spec<'de, D>(deserializer: D) -> Result<PodTemplateSpec, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let mut value = serde_json::Value::deserialize(deserializer)?;
-
-    value
-        .get_mut("spec")
-        .and_then(|spec| spec.get_mut("containers")?.as_array_mut())
-        .into_iter()
-        .flatten()
-        .filter_map(|container| container.get_mut("resources"))
-        .for_each(|resources| {
-            for field in ["limits", "requests"] {
-                let Some(object) = resources.get_mut(field) else {
-                    continue;
-                };
-
-                for field in ["cpu", "memory"] {
-                    let Some(raw) = object.get_mut(field) else {
-                        continue;
-                    };
-
-                    if let Some(number) = raw.as_number() {
-                        *raw = number.to_string().into();
-                    }
-                }
-            }
-        });
-
-    serde_json::from_value(value).map_err(de::Error::custom)
 }
 
 #[cfg(test)]

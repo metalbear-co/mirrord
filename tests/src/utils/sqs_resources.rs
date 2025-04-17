@@ -92,6 +92,37 @@ impl SqsTestResources {
     pub fn deployment_target(&self) -> String {
         self.k8s_service.deployment_target()
     }
+
+    /// Count the temp queues created by the SQS-operator for this test instance.
+    pub async fn count_temp_queues(&self) -> usize {
+        self.sqs_client
+            .list_queues()
+            .queue_name_prefix("mirrord-")
+            .send()
+            .await
+            .unwrap()
+            .queue_urls
+            .unwrap_or_default()
+            .iter()
+            .filter(|q_url| q_url.contains(&self.queue1.name) || q_url.contains(&self.queue2.name))
+            .count()
+    }
+
+    /// Wait for all the temp queues created by the SQS operator for queues from this test instance
+    /// to be deleted.
+    /// Waiting for `secs` seconds.
+    pub async fn wait_for_temp_queue_deletion(&self, secs: u64) {
+        tokio::time::timeout(Duration::from_secs(secs), async {
+            loop {
+                if self.count_temp_queues().await == 0 {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        })
+        .await
+        .expect("temp SQS queues were not deleted in time after clients exited.");
+    }
 }
 
 /// A credential provider that makes the SQS SDK use localstack.
@@ -134,7 +165,7 @@ async fn random_name_sqs_queue_with_echo_queue(
     guards: &mut Vec<ResourceGuard>,
 ) -> (QueueInfo, QueueInfo) {
     let q_name = format!(
-        "MirrordE2ESplitterTests-{}{}",
+        "E2ETest-{}{}",
         crate::utils::random_string(),
         if fifo { ".fifo" } else { "" }
     );

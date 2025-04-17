@@ -2,23 +2,16 @@ mod steal;
 
 #[cfg(test)]
 mod traffic_tests {
-    use std::{
-        net::UdpSocket,
-        ops::Not,
-        path::{Path, PathBuf},
-        time::Duration,
-    };
+    use std::{net::UdpSocket, ops::Not, path::PathBuf, time::Duration};
 
     use futures::{stream, Future, StreamExt};
     use futures_util::{stream::TryStreamExt, AsyncBufReadExt};
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api, Client};
     use rstest::*;
-    use tokio::{fs::File, io::AsyncWriteExt};
 
     use crate::utils::{
         application::Application,
-        config_dir,
         ipv6::ipv6_service,
         kube_client,
         kube_service::KubeService,
@@ -314,7 +307,6 @@ mod traffic_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[timeout(Duration::from_secs(240))]
     pub async fn outgoing_traffic_filter_udp_with_connect(
-        config_dir: &Path,
         #[future] udp_logger_service: KubeService,
         #[future] basic_service: KubeService,
         #[future] kube_client: Client,
@@ -344,8 +336,23 @@ mod traffic_tests {
         ];
 
         // Make connections on port `31415` go through local.
-        let mut config_path = config_dir.to_path_buf();
-        config_path.push("outgoing_filter_local.json");
+        let mut config_file = tempfile::Builder::new()
+            .prefix("outgoing_traffic_filter_udp_with_connect_local")
+            .suffix(".json")
+            .tempfile()
+            .unwrap();
+        let config = serde_json::json!({
+            "feature": {
+                "network": {
+                    "outgoing": {
+                        "filter": {
+                            "local": [":31415"]
+                        }
+                    }
+                }
+            }
+        });
+        serde_json::to_writer(config_file.as_file_mut(), &config).unwrap();
 
         // Meta-test: verify that the application cannot reach the internal service without
         // mirrord forwarding outgoing UDP traffic via the target pod.
@@ -354,8 +361,8 @@ mod traffic_tests {
             node_command.clone(),
             &target_service.pod_container_target(),
             Some(&target_service.namespace),
+            Some(vec!["--config-file", config_file.path().to_str().unwrap()]),
             None,
-            Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
         )
         .await;
         let res = process.wait().await;
@@ -364,41 +371,34 @@ mod traffic_tests {
         assert_eq!(logs.unwrap(), "");
 
         // Create remote filter file with service name so we can test DNS outgoing filter.
-        let service_name = internal_service.name.clone();
-        let mut filter_config_path = config_dir.to_path_buf();
-        let remote_config_filter = format!("outgoing_filter_remote_{service_name}.json");
-        filter_config_path.push(remote_config_filter);
-        let config_path = filter_config_path.clone();
-
-        let mut remote_config_file = File::create(filter_config_path).await.unwrap();
-
-        let remote_filter = format!(
-            r#"
-{{
-    "feature": {{
-        "network": {{
-            "outgoing": {{
-                "filter": {{
-                    "remote": ["{service_name}"]
-                }}
-            }}
-        }}
-    }}
-}}       "#
-        );
-
-        remote_config_file
-            .write_all(remote_filter.as_bytes())
-            .await
+        let mut remote_config_file = tempfile::Builder::new()
+            .prefix("outgoing_traffic_filter_udp_with_connect_remote")
+            .suffix(".json")
+            .tempfile()
             .unwrap();
+        let config = serde_json::json!({
+            "feature": {
+                "network": {
+                    "outgoing": {
+                        "filter": {
+                            "remote": [internal_service.name]
+                        }
+                    }
+                }
+            }
+        });
+        serde_json::to_writer(remote_config_file.as_file_mut(), &config).unwrap();
 
         // Run mirrord with outgoing enabled.
         let mut process = run_exec_with_target(
             node_command,
             &target_service.pod_container_target(),
             Some(&target_service.namespace),
+            Some(vec![
+                "--config-file",
+                remote_config_file.path().to_str().unwrap(),
+            ]),
             None,
-            Some(vec![("MIRRORD_CONFIG_FILE", config_path.to_str().unwrap())]),
         )
         .await;
         let res = process.wait().await;

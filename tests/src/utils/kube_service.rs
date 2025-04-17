@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 use k8s_openapi::api::{apps::v1::Deployment, core::v1::Service};
+use mirrord_kube::api::kubernetes::rollout::Rollout;
 
 use super::resource_guard::ResourceGuard;
 use crate::utils::CONTAINER_NAME;
@@ -13,8 +14,9 @@ pub struct KubeService {
     pub namespace: String,
     pub service: Service,
     pub deployment: Deployment,
-    pub(crate) guards: Vec<ResourceGuard>,
-    pub(crate) namespace_guard: Option<ResourceGuard>,
+    pub rollout: Option<Rollout>,
+    pub guards: Vec<ResourceGuard>,
+    pub namespace_guard: Option<ResourceGuard>,
     pub pod_name: String,
 }
 
@@ -25,6 +27,14 @@ impl KubeService {
 
     pub fn pod_container_target(&self) -> String {
         format!("pod/{}/container/{CONTAINER_NAME}", self.pod_name)
+    }
+
+    pub fn rollout_target(&self) -> String {
+        if self.rollout.is_none() {
+            panic!("Rollout is not enabled for this service! Don't you mean to use a deployment?");
+        }
+
+        format!("rollout/{}", self.name)
     }
 }
 
