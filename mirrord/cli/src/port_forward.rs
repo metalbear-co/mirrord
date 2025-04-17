@@ -49,10 +49,10 @@ use crate::{connection::AgentConnection, AddrPortMapping, LocalPort, RemoteAddr,
 type ConnectionSocketPair = (SocketAddr, SocketAddr);
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ResolvedPortMapping {
-    pub local: SocketAddr,
-    pub peer: SocketAddr,
-    pub remote: SocketAddr,
+struct ConnectionPortMapping {
+    local: SocketAddr,
+    peer: SocketAddr,
+    remote: SocketAddr,
 }
 
 pub struct PortForwarder {
@@ -68,7 +68,7 @@ pub struct PortForwarder {
     /// oneshot channels for sending resolved hostnames to tasks and the associated local address
     dns_oneshots: VecDeque<(ConnectionSocketPair, oneshot::Sender<IpAddr>)>,
     /// identifies a pair of mapped socket addresses by their corresponding connection ID
-    sockets: HashMap<ConnectionId, ResolvedPortMapping>,
+    sockets: HashMap<ConnectionId, ConnectionPortMapping>,
     /// identifies task senders by their corresponding local socket address
     /// for sending data from the remote socket to the local address
     task_txs: HashMap<ConnectionSocketPair, Sender<Vec<u8>>>,
@@ -192,7 +192,7 @@ impl PortForwarder {
                                 connection_id,
                             ));
                         };
-                        let port_map = ResolvedPortMapping {
+                        let port_map = ConnectionPortMapping {
                             local: local_socket,
                             peer: peer_socket,
                             remote: remote_socket,
@@ -222,7 +222,7 @@ impl PortForwarder {
                 },
                 DaemonTcpOutgoing::Read(res) => match res {
                     Ok(res) => {
-                        let Some(&ResolvedPortMapping {
+                        let Some(&ConnectionPortMapping {
                             local: local_socket,
                             peer: peer_socket,
                             remote: _,
@@ -260,7 +260,7 @@ impl PortForwarder {
                     }
                 },
                 DaemonTcpOutgoing::Close(connection_id) => {
-                    let Some(ResolvedPortMapping {
+                    let Some(ConnectionPortMapping {
                         local: local_socket,
                         peer: peer_socket,
                         remote: remote_socket,
@@ -647,7 +647,7 @@ enum PortForwardMessage {
     /// Sent by the task only after receiving first batch of data from the user and after hostname
     /// resolution (if applicable). The task waits for [`ConnectionId`] on the other end of the
     /// [`oneshot`] channel.
-    Connect(ResolvedPortMapping, oneshot::Sender<ConnectionId>),
+    Connect(ConnectionPortMapping, oneshot::Sender<ConnectionId>),
 
     /// Data received from the user in the connection with the given id.
     Send(ConnectionId, Vec<u8>),
@@ -756,7 +756,7 @@ impl LocalConnectionTask {
             }
         };
         let resolved_remote = SocketAddr::new(resolved_ip, port);
-        let resolved_mapping = ResolvedPortMapping {
+        let resolved_mapping = ConnectionPortMapping {
             local: self.port_mapping.local,
             peer: self.peer_socket,
             remote: resolved_remote,
