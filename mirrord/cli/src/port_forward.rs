@@ -46,6 +46,7 @@ use tracing::Level;
 
 use crate::{connection::AgentConnection, AddrPortMapping, LocalPort, RemoteAddr, RemotePort};
 
+/// Connection address pair (local, peer)
 type ConnectionSocketPair = (SocketAddr, SocketAddr);
 
 #[derive(Clone, Debug, PartialEq)]
@@ -63,14 +64,14 @@ pub struct PortForwarder {
     raw_mappings: HashMap<SocketAddr, (RemoteAddr, u16)>,
     /// accepts connections from the user app in the form of a stream
     listeners: StreamMap<SocketAddr, TcpListenerStream>,
-    /// oneshot channels for sending connection IDs to tasks and the associated local address
+    /// oneshot channels for sending connection IDs to tasks and the associated address pair
     id_oneshots: VecDeque<(ConnectionSocketPair, oneshot::Sender<ConnectionId>)>,
-    /// oneshot channels for sending resolved hostnames to tasks and the associated local address
+    /// oneshot channels for sending resolved hostnames to tasks and the associated address pair
     dns_oneshots: VecDeque<(ConnectionSocketPair, oneshot::Sender<IpAddr>)>,
     /// identifies a pair of mapped socket addresses by their corresponding connection ID
     sockets: HashMap<ConnectionId, ConnectionPortMapping>,
-    /// identifies task senders by their corresponding local socket address
-    /// for sending data from the remote socket to the local address
+    /// identifies task senders by their corresponding address pairs for sending data from the
+    /// remote socket to the local address
     task_txs: HashMap<ConnectionSocketPair, Sender<Vec<u8>>>,
 
     /// transmit internal messages from tasks to [`PortForwarder`]'s main loop.
