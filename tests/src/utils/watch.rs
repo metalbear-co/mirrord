@@ -125,29 +125,61 @@ pub async fn wait_until_pods_ready(service: &Service, min: usize, client: Client
         ..Default::default()
     };
 
-    fn is_ready(pod: &Pod) -> bool {
-        let Some(status) = pod.status.as_ref() else {
-            return false;
-        };
-
-        if status.phase.as_deref() != Some("Running") {
-            return false;
-        }
-
-        let Some(containers) = status.container_statuses.as_ref() else {
-            return false;
-        };
-
-        containers.iter().all(|status| status.ready)
-    }
-
     let mut watcher = Watcher::new(api, config, move |map| {
-        map.values().filter(|p| is_ready(p)).count() >= min
+        map.values().filter(|p| pod_is_ready(p)).count() >= min
     });
 
     watcher.run().await;
 
-    watcher.resources.into_values().filter(is_ready).collect()
+    watcher
+        .resources
+        .into_values()
+        .filter(pod_is_ready)
+        .collect()
+}
+
+/// Waits until the given [`Pod`] is ready.
+///
+/// A [`Pod`] is considered to be ready when:
+/// 1. It's in the `Running` phase
+/// 2. All of its containers are ready
+#[cfg(test)]
+#[cfg(all(not(feature = "operator"), feature = "job"))]
+pub async fn wait_until_pod_ready(pod_name: &str, namespace: &str, client: Client) {
+    let api = Api::<Pod>::namespaced(client, namespace);
+
+    let config = Config {
+        field_selector: Some(format!("metadata.name={pod_name}")),
+        ..Default::default()
+    };
+
+    let pod_name = pod_name.to_string();
+    let mut watcher = Watcher::new(api, config, move |map| {
+        map.get(&pod_name).map(pod_is_ready).unwrap_or_default()
+    });
+
+    watcher.run().await;
+}
+
+/// Determines if the given [`Pod`] is ready.
+///
+/// A [`Pod`] is considered to be ready when:
+/// 1. It's in the `Running` phase
+/// 2. All of its containers are ready
+fn pod_is_ready(pod: &Pod) -> bool {
+    let Some(status) = pod.status.as_ref() else {
+        return false;
+    };
+
+    if status.phase.as_deref() != Some("Running") {
+        return false;
+    }
+
+    let Some(containers) = status.container_statuses.as_ref() else {
+        return false;
+    };
+
+    containers.iter().all(|status| status.ready)
 }
 
 /// Waits until the given [`Rollout`] has at least `min_available` available replicas.
