@@ -253,8 +253,19 @@ pub async fn two_users(#[future] sqs_test_resources: SqsTestResources, config_di
     .await;
     println!("Queue 2 was split correctly!");
 
+    let num_temp_queues = sqs_test_resources.count_temp_queues().await;
+
+    assert_eq!(
+        num_temp_queues, 6,
+        "For each test queue, there should be one main temporary queue that is for the deployed \
+        app, and two temporary queues for the clients. If we could not identify them all, the test \
+        is invalid, and `count_temp_queues` might need to be updated."
+    );
+
     // TODO: verify queue tags.
 
     client_a.child.kill().await.unwrap();
     client_b.child.kill().await.unwrap();
+
+    sqs_test_resources.wait_for_temp_queue_deletion(30).await;
 }
