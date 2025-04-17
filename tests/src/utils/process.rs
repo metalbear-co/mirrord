@@ -18,15 +18,28 @@ use tokio::{
 
 use crate::utils::format_time;
 
+/// Wraps a bunch of things of a [`Child`] process, so we can check its output for errors/specific
+/// messages.
+///
+/// It's mostly created by one of the [`super::run_command`] functions, such as
+/// [`super::run_command::run_exec_with_target`], where we start a child test process running
+/// `mirrord`, wait for it to finish and look into its `stdout/stderr`.
 pub struct TestProcess {
+    /// The [`Child`] process started, running `mirrord`.
     pub child: Child,
+    /// `stderr` we use to check for `ERROR` logs/messages from the test app.
     stderr_data: Arc<RwLock<String>>,
+    /// `stdout` we use to check for logs/messages from the test app.
     stdout_data: Arc<RwLock<String>>,
+    /// Task that reads `stderr`.
     stderr_task: Option<JoinHandle<()>>,
+    /// Task that reads `stdout`.
     stdout_task: Option<JoinHandle<()>>,
+    /// `^.*ERROR[^\w_-]` [`Regex`] to look for our errors in test apps.
     error_capture: Regex,
+    /// `WARN` [`Regex`] to look for our warnings in test apps.
     warn_capture: Regex,
-    // Keeps tempdir existing while process is running.
+    /// Keeps the temporary directory alive for the process's lifetime.
     _tempdir: Option<TempDir>,
 }
 
