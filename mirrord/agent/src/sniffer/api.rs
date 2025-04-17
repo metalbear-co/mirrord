@@ -18,10 +18,7 @@ use super::{
     messages::{SniffedConnection, SnifferCommand, SnifferCommandInner},
     AgentResult,
 };
-use crate::{
-    error::AgentError,
-    util::{remote_runtime::BgTaskStatus, ClientId},
-};
+use crate::{error::AgentError, util::ClientId, watched_task::TaskStatus};
 
 /// Interface used by clients to interact with the
 /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer). Multiple instances of this struct operate
@@ -37,7 +34,7 @@ pub(crate) struct TcpSnifferApi {
     /// [`TcpConnectionSniffer`](super::TcpConnectionSniffer).
     receiver: Receiver<SniffedConnection>,
     /// View on the sniffer task's status.
-    task_status: BgTaskStatus,
+    task_status: TaskStatus,
     /// Currently sniffed connections.
     connections: StreamMap<ConnectionId, StreamNotifyClose<BroadcastStream<Vec<u8>>>>,
     /// Ids for sniffed connections.
@@ -62,7 +59,7 @@ impl TcpSnifferApi {
     pub async fn new(
         client_id: ClientId,
         sniffer_sender: Sender<SnifferCommand>,
-        task_status: BgTaskStatus,
+        mut task_status: TaskStatus,
     ) -> AgentResult<Self> {
         let (sender, receiver) = mpsc::channel(Self::CONNECTION_CHANNEL_SIZE);
 
@@ -71,7 +68,7 @@ impl TcpSnifferApi {
             command: SnifferCommandInner::NewClient(sender),
         };
         if sniffer_sender.send(command).await.is_err() {
-            return Err(task_status.wait_assert_running().await);
+            return Err(task_status.unwrap_err().await);
         }
 
         Ok(Self {
@@ -96,7 +93,7 @@ impl TcpSnifferApi {
         if self.sender.send(command).await.is_ok() {
             Ok(())
         } else {
-            Err(self.task_status.wait_assert_running().await)
+            Err(self.task_status.unwrap_err().await)
         }
     }
 
@@ -123,7 +120,7 @@ impl TcpSnifferApi {
                 },
 
                 None => {
-                    Err(self.task_status.wait_assert_running().await)
+                    Err(self.task_status.unwrap_err().await)
                 },
             },
 
@@ -160,7 +157,7 @@ impl TcpSnifferApi {
             Some(result) = self.subscriptions_in_progress.next() => match result {
                 Ok(port) => Ok((DaemonTcp::SubscribeResult(Ok(port)), None)),
                 Err(..) => {
-                    Err(self.task_status.wait_assert_running().await)
+                    Err(self.task_status.unwrap_err().await)
                 }
             }
         }

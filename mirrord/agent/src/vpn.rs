@@ -1,10 +1,9 @@
-//! This code is not used anywhere.
-
 #![allow(dead_code)]
 use std::{
     fmt,
-    io::{self, Read},
+    io::Read,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    thread,
 };
 
 use mirrord_protocol::vpn::{ClientVpn, NetworkConfiguration, ServerVpn};
@@ -18,15 +17,21 @@ use tokio::{
 };
 
 use crate::{
-    error::AgentResult,
-    util::remote_runtime::{BgTaskRuntime, BgTaskStatus, IntoStatus},
+    error::{AgentError, AgentResult},
+    util::run_thread_in_namespace,
+    watched_task::{TaskStatus, WatchedTask},
 };
 
 /// An interface for a background task handling [`ClientVpn`] messages.
 /// Each agent client has their own independent instance (neither this wrapper nor the background
 /// task are shared).
 pub(crate) struct VpnApi {
-    task_status: BgTaskStatus,
+    /// Holds the thread in which [`VpnTask`] is running.
+    _task: thread::JoinHandle<()>,
+
+    /// Status of the [`VpnTask`].
+    task_status: TaskStatus,
+
     /// Sends the layer messages to the [`VpnTask`].
     layer_tx: Sender<ClientVpn>,
 
@@ -35,22 +40,33 @@ pub(crate) struct VpnApi {
 }
 
 impl VpnApi {
-    /// Spawns a new background task for handling the `vpn` feature and creates a new instance of
+    const TASK_NAME: &'static str = "Vpn";
+
+    /// Spawns a new background task for handling `outgoing` feature and creates a new instance of
     /// this struct to serve as an interface.
     ///
     /// # Params
     ///
-    /// * `runtime` - tokio runtime to spawn the task on.
-    pub(crate) fn new(runtime: &BgTaskRuntime) -> Self {
+    /// * `pid` - process id of the agent's target container
+    #[tracing::instrument(level = "trace")]
+    pub(crate) fn new(pid: Option<u64>) -> Self {
         let (layer_tx, layer_rx) = mpsc::channel(1000);
         let (daemon_tx, daemon_rx) = mpsc::channel(1000);
-        let pid = runtime.target_pid();
 
-        let task_status = runtime
-            .spawn(VpnTask::new(pid, layer_rx, daemon_tx).run())
-            .into_status("VpnTask");
+        let watched_task = WatchedTask::new(
+            Self::TASK_NAME,
+            VpnTask::new(pid, layer_rx, daemon_tx).run(),
+        );
+        let task_status = watched_task.status();
+        let task = run_thread_in_namespace(
+            watched_task.start(),
+            Self::TASK_NAME.to_string(),
+            pid,
+            "net",
+        );
 
         Self {
+            _task: task,
             task_status,
             layer_tx,
             daemon_rx,
@@ -58,11 +74,12 @@ impl VpnApi {
     }
 
     /// Sends the [`ClientVpn`] message to the background task.
+    #[tracing::instrument(level = "trace", skip(self))]
     pub(crate) async fn layer_message(&mut self, message: ClientVpn) -> AgentResult<()> {
         if self.layer_tx.send(message).await.is_ok() {
             Ok(())
         } else {
-            Err(self.task_status.wait_assert_running().await)
+            Err(self.task_status.unwrap_err().await)
         }
     }
 
@@ -70,7 +87,7 @@ impl VpnApi {
     pub(crate) async fn daemon_message(&mut self) -> AgentResult<ServerVpn> {
         match self.daemon_rx.recv().await {
             Some(msg) => Ok(msg),
-            None => Err(self.task_status.wait_assert_running().await),
+            None => Err(self.task_status.unwrap_err().await),
         }
     }
 }
@@ -104,27 +121,25 @@ impl AsyncRawSocket {
     }
 }
 
-async fn create_raw_socket() -> io::Result<AsyncRawSocket> {
-    let index = nix::net::if_::if_nametoindex("eth0")?;
+async fn create_raw_socket() -> AgentResult<AsyncRawSocket> {
+    let index = nix::net::if_::if_nametoindex("eth0")
+        .map_err(|err| AgentError::VpnError(err.to_string()))?;
 
     let socket = Socket::new(
         Domain::PACKET,
         Type::DGRAM,
         Some(Protocol::from(libc::ETH_P_IP.to_be())),
     )?;
-    let sock_addr = interface_index_to_sock_addr(i32::try_from(index).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("invalid interface index {index}"),
-        )
-    })?)?;
+    let sock_addr = interface_index_to_sock_addr(
+        i32::try_from(index).map_err(|err| AgentError::VpnError(err.to_string()))?,
+    )?;
     socket.bind(&sock_addr)?;
     socket.set_nonblocking(true)?;
-    AsyncRawSocket::new(socket, sock_addr)
+    AsyncRawSocket::new(socket, sock_addr).map_err(From::from)
 }
 
 #[tracing::instrument(level = "debug", ret)]
-async fn resolve_interface() -> io::Result<(IpAddr, IpAddr, IpAddr)> {
+async fn resolve_interface() -> AgentResult<(IpAddr, IpAddr, IpAddr)> {
     // Connect to a remote address so we can later get the default network interface.
     let temporary_socket = UdpSocket::bind("0.0.0.0:0").await?;
     temporary_socket.connect("8.8.8.8:53").await?;
@@ -137,50 +152,36 @@ async fn resolve_interface() -> io::Result<(IpAddr, IpAddr, IpAddr)> {
     let raw_local_address = SockaddrStorage::from(local_address);
 
     // Try to find an interface that matches the local ip we have.
-    let usable_interface = nix::ifaddrs::getifaddrs()?
+    let usable_interface = nix::ifaddrs::getifaddrs()
+        .map_err(|err| AgentError::VpnError(err.to_string()))?
         .find(|iface| {
             iface
                 .address
                 .map(|addr| addr == raw_local_address)
                 .unwrap_or(false)
         })
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "no usable interface"))?;
+        .ok_or_else(|| AgentError::VpnError("usable_interface".to_owned()))?;
 
     let ip = usable_interface
         .address
-        .as_ref()
-        .and_then(SockaddrStorage::as_sockaddr_in)
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                "usable_interface.address.as_sockaddr_in",
-            )
-        })?
+        .ok_or_else(|| AgentError::VpnError("usable_interface.address".to_owned()))?
+        .as_sockaddr_in()
+        .ok_or_else(|| AgentError::VpnError("usable_interface.address.as_sockaddr_in".to_owned()))?
         .ip()
         .into();
     let net_mask = usable_interface
         .netmask
-        .as_ref()
-        .and_then(SockaddrStorage::as_sockaddr_in)
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                "usable_interface.netmask.as_sockaddr_in",
-            )
-        })?
+        .ok_or_else(|| AgentError::VpnError("usable_interface.netmask".to_owned()))?
+        .as_sockaddr_in()
+        .ok_or_else(|| AgentError::VpnError("usable_interface.netmask.as_sockaddr_in".to_owned()))?
         .ip()
         .into();
     // extracting gateway is more difficult, ugly patch for now.
     let temp_gateway = usable_interface
         .address
-        .as_ref()
-        .and_then(SockaddrStorage::as_sockaddr_in)
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                "usable_interface.address.as_sockaddr_in",
-            )
-        })?
+        .ok_or_else(|| AgentError::VpnError("usable_interface.address".to_owned()))?
+        .as_sockaddr_in()
+        .ok_or_else(|| AgentError::VpnError("usable_interface.address.as_sockaddr_in".to_owned()))?
         .ip()
         .octets();
 
@@ -208,16 +209,16 @@ impl fmt::Debug for VpnTask {
     }
 }
 
-fn interface_index_to_sock_addr(index: i32) -> io::Result<SockAddr> {
+fn interface_index_to_sock_addr(index: i32) -> AgentResult<SockAddr> {
     let mut addr_storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
     let len = std::mem::size_of::<libc::sockaddr_ll>() as libc::socklen_t;
-    let macs = procfs::net::arp().map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
+    let macs = procfs::net::arp().map_err(|err| AgentError::VpnError(err.to_string()))?;
     tracing::debug!(?macs, "arp entries");
 
     let hw_addr = macs
         .into_iter()
         .find_map(|entry| entry.hw_address)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "no entry with hw address"))?;
+        .ok_or_else(|| AgentError::VpnError("no entry with hw_address".to_owned()))?;
 
     unsafe {
         let sock_addr = std::ptr::addr_of_mut!(addr_storage) as *mut libc::sockaddr_ll;
@@ -244,7 +245,7 @@ impl VpnTask {
     }
 
     #[allow(clippy::indexing_slicing)]
-    async fn run(mut self) -> io::Result<()> {
+    async fn run(mut self) -> AgentResult<()> {
         // so host won't respond with RST to our packets.
         // TODO: need to do it for UDP as well to avoid ICMP unreachable.
         let output = std::process::Command::new("iptables")
@@ -259,7 +260,8 @@ impl VpnTask {
                 "-j",
                 "DROP",
             ])
-            .output()?;
+            .output()
+            .map_err(|err| AgentError::VpnError(err.to_string()))?;
 
         tracing::debug!(?output, "iptables output");
         let (ip, net_mask, gateway) = resolve_interface().await?;
@@ -296,7 +298,7 @@ impl VpnTask {
                                 self.daemon_tx
                                     .send(ServerVpn::Packet(packet))
                                     .await
-                                    .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+                                    .map_err(|err| AgentError::VpnError(err.to_string()))?;
 
                                 buffer[..len].fill(0);
                             }
@@ -316,7 +318,7 @@ impl VpnTask {
         &mut self,
         message: ClientVpn,
         network_configuration: &NetworkConfiguration,
-    ) -> io::Result<()> {
+    ) -> AgentResult<()> {
         match message {
             // We make connection to the requested address, split the stream into halves with
             // `io::split`, and put them into respective maps.
@@ -326,17 +328,24 @@ impl VpnTask {
                         network_configuration.clone(),
                     ))
                     .await
-                    .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+                    .map_err(|err| AgentError::VpnError(err.to_string()))?;
             }
             ClientVpn::Packet(packet) => {
                 if let Some(socket) = self.socket.as_mut() {
-                    socket.write(&packet).await?;
+                    socket
+                        .write(&packet)
+                        .await
+                        .map_err(|err| AgentError::VpnError(err.to_string()))?;
                 } else {
                     tracing::error!(?packet, "unable to send packet");
                 }
             }
             ClientVpn::OpenSocket => {
-                self.socket.replace(create_raw_socket().await?);
+                self.socket.replace(
+                    create_raw_socket()
+                        .await
+                        .map_err(|err| AgentError::VpnError(err.to_string()))?,
+                );
             }
         }
 
