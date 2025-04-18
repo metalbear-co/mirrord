@@ -78,7 +78,7 @@ where
         .ok_or_else(|| KubeApiError::missing_field(&agent_pod, ".metadata.namespace"))?
         .clone();
     pod_progress.success(Some(&format!(
-        "agent pod {pod_name}/{pod_namespace} created"
+        "agent pod {pod_namespace}/{pod_name} created"
     )));
 
     let mut pod_progress = progress.subtask("waiting for pod to be ready...");
