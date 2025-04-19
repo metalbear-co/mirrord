@@ -40,5 +40,7 @@ async fn skip_sip(dylib_path: &Path, config_dir: &Path) {
 
     assert_eq!(intproxy.try_recv().await, None);
     test_process.wait().await;
-    test_process.assert_stderr_doesnt_contain("DYLD_PRINT_ENV").await;
+    test_process
+        .assert_stderr_doesnt_contain("DYLD_PRINT_ENV")
+        .await;
 }
