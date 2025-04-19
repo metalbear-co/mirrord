@@ -197,6 +197,13 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         .map(|x| x.to_vec())
         .unwrap_or_default();
 
+    #[cfg(target_os = "macos")]
+    let skip_patch_binaries = config
+        .skip_sip
+        .clone()
+        .map(|x| x.to_vec())
+        .unwrap_or_default();
+
     // SIP Patch the process' binary then re-execute it. Needed
     // for https://github.com/metalbear-co/mirrord/issues/1529
     #[cfg(target_os = "macos")]
@@ -204,7 +211,9 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         let path = EXECUTABLE_PATH
             .get()
             .expect("EXECUTABLE_PATH needs to be set!");
-        if let Ok(Some(binary)) = mirrord_sip::sip_patch(path, &patch_binaries) {
+        if let Ok(Some(binary)) =
+            mirrord_sip::sip_patch(path, &patch_binaries, &skip_patch_binaries)
+        {
             let err = exec::execvp(
                 binary,
                 EXECUTABLE_ARGS
@@ -221,7 +230,7 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
     match given_process.load_type(&config) {
         LoadType::Full => layer_start(config),
         #[cfg(target_os = "macos")]
-        LoadType::SIPOnly => sip_only_layer_start(config, patch_binaries),
+        LoadType::SIPOnly => sip_only_layer_start(config, patch_binaries, skip_patch_binaries),
         LoadType::Skip => load_only_layer_start(&config),
     }
 
@@ -488,14 +497,20 @@ fn fetch_env_vars() -> HashMap<String, String> {
 /// We need to hook execve syscall to allow mirrord-layer to be loaded with sip patch when loading
 /// mirrord-layer on a process where specified to skip with MIRRORD_SKIP_PROCESSES
 #[cfg(target_os = "macos")]
-fn sip_only_layer_start(mut config: LayerConfig, patch_binaries: Vec<String>) {
+fn sip_only_layer_start(
+    mut config: LayerConfig,
+    patch_binaries: Vec<String>,
+    skip_patch_binaries: Vec<String>,
+) {
     use mirrord_config::feature::fs::READONLY_FILE_BUFFER_DEFAULT;
 
     load_only_layer_start(&config);
 
     let mut hook_manager = HookManager::default();
 
-    unsafe { exec_utils::enable_macos_hooks(&mut hook_manager, patch_binaries) };
+    unsafe {
+        exec_utils::enable_macos_hooks(&mut hook_manager, patch_binaries, skip_patch_binaries)
+    };
     unsafe { exec_hooks::hooks::enable_exec_hooks(&mut hook_manager) };
     // we need to hook file access to patch path to our temp bin.
     config.feature.fs = FsConfig {
@@ -591,7 +606,8 @@ fn enable_hooks(state: &LayerSetup) {
         use crate::exec_utils::enable_macos_hooks;
 
         let patch_binaries = state.sip_binaries();
-        unsafe { enable_macos_hooks(&mut hook_manager, patch_binaries) };
+        let skip_patch_binaries = state.skip_patch_binaries();
+        unsafe { enable_macos_hooks(&mut hook_manager, patch_binaries, skip_patch_binaries) };
 
         if state.experimental().trust_any_certificate {
             unsafe { tls::enable_tls_hooks(&mut hook_manager) };

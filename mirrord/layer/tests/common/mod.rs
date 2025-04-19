@@ -843,6 +843,7 @@ pub enum Application {
     NodeIssue2283,
     RustIssue2204,
     RustIssue2438,
+    RustIssue3248,
     NodeIssue2807,
     RustRebind0,
     /// Go application that simply opens a file.
@@ -1009,6 +1010,13 @@ impl Application {
                     "../../target/debug/issue2001"
                 )
             }
+            Application::RustIssue3248 => {
+                format!(
+                    "{}/{}",
+                    env!("CARGO_MANIFEST_DIR"),
+                    "../../target/debug/issue3248"
+                )
+            }
             Application::RustRebind0 => {
                 format!(
                     "{}/{}",
@@ -1165,6 +1173,7 @@ impl Application {
             | Application::RustIssue2204
             | Application::RustRebind0
             | Application::RustIssue2438
+            | Application::RustIssue3248
             | Application::Go23Issue2988 => vec![],
             Application::RustOutgoingUdp => ["--udp", RUST_OUTGOING_LOCAL, RUST_OUTGOING_PEERS]
                 .into_iter()
@@ -1257,6 +1266,7 @@ impl Application {
             | Application::NodeIssue2283
             | Application::RustIssue2204
             | Application::RustIssue2438
+            | Application::RustIssue3248
             | Application::NodeIssue2807
             | Application::RustRebind0
             | Application::Go23Open { .. }
@@ -1272,7 +1282,7 @@ impl Application {
     pub async fn get_test_process(&self, env: HashMap<String, String>) -> TestProcess {
         let executable = self.get_executable().await;
         #[cfg(target_os = "macos")]
-        let executable = sip_patch(&executable, &Vec::new())
+        let executable = sip_patch(&executable, &Vec::new(), &Vec::new())
             .unwrap()
             .unwrap_or(executable);
         println!("Using executable: {}", &executable);
