@@ -33,13 +33,19 @@ const MAX_ARGC: usize = 256;
 
 pub(crate) static PATCH_BINARIES: OnceLock<Vec<String>> = OnceLock::new();
 
+pub(crate) static SKIP_PATCH_BINARIES: OnceLock<Vec<String>> = OnceLock::new();
+
 pub(crate) unsafe fn enable_macos_hooks(
     hook_manager: &mut HookManager,
     patch_binaries: Vec<String>,
+    skip_binaries: Vec<String>,
 ) {
     PATCH_BINARIES
         .set(patch_binaries)
         .expect("couldn't set patch_binaries");
+    SKIP_PATCH_BINARIES
+        .set(skip_binaries)
+        .expect("couldn't set skip_binaries");
     replace!(
         hook_manager,
         "posix_spawn",
@@ -61,7 +67,10 @@ pub(crate) unsafe fn enable_macos_hooks(
 #[mirrord_layer_macro::instrument(level = "trace")]
 pub(super) fn patch_if_sip(path: &str) -> Detour<String> {
     let patch_binaries = PATCH_BINARIES.get().expect("patch binaries not set");
-    match sip_patch(path, patch_binaries) {
+    let skip_patch_binaries = SKIP_PATCH_BINARIES
+        .get()
+        .expect("skip patch binaries not set");
+    match sip_patch(path, patch_binaries, skip_patch_binaries) {
         Ok(None) => Bypass(NoSipDetected(path.to_string())),
         Ok(Some(new_path)) => Success(new_path),
         Err(SipError::FileNotFound(non_existing_bin)) => {

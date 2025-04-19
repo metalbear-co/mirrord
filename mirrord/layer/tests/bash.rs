@@ -37,7 +37,9 @@ async fn bash_script(dylib_path: &Path, config_dir: &Path) {
     println!("Listening for messages from the layer on {addr}");
     let env = get_env(dylib_path, addr, vec![], Some(&config_path));
     #[cfg(target_os = "macos")]
-    let executable = sip_patch(&executable, &Vec::new()).unwrap().unwrap();
+    let executable = sip_patch(&executable, &Vec::new(), &Vec::new())
+        .unwrap()
+        .unwrap();
     let test_process = TestProcess::start_process(executable, application.get_args(), env).await;
 
     let mut intproxy = TestIntProxy::new(listener).await;
