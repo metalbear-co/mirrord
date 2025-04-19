@@ -313,6 +313,11 @@ impl MirrordExecution {
                         .clone()
                         .map(|x| x.to_vec())
                         .unwrap_or_default(),
+                    &config
+                        .skip_sip
+                        .clone()
+                        .map(|x| x.to_vec())
+                        .unwrap_or_default(),
                 )
                 .transpose() // We transpose twice to propagate a possible error out of this
                              // closure.

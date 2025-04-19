@@ -487,7 +487,17 @@ mod main {
     }
 
     /// SIP check for binaries.
-    fn is_binary_sip(path: &Path, data: &[u8], patch_binaries: &[String]) -> Result<bool> {
+    fn is_binary_sip(
+        path: &Path,
+        data: &[u8],
+        patch_binaries: &[String],
+        skip_binaries: &[String],
+    ) -> Result<bool> {
+        // Skip patching binary if it is in the list of binaries to skip.
+        if skip_binaries.iter().any(|x| path.ends_with(x)) {
+            trace!("Skipping SIP patch for {:?}", path);
+            return Ok(false);
+        }
         // Patch binary if it is in the list of binaries to patch.
         // See `ends_with` docs for understanding better when it returns true.
         Ok(patch_binaries.iter().any(|x| path.ends_with(x))
@@ -517,7 +527,11 @@ mod main {
     /// suggest)
     /// If file is a script with shebang, the SipStatus is derived from the the SipStatus of the
     /// file the shebang points to.
-    fn get_sip_status(path: &str, patch_binaries: &[String]) -> Result<SipStatus> {
+    fn get_sip_status(
+        path: &str,
+        patch_binaries: &[String],
+        skip_binaries: &[String],
+    ) -> Result<SipStatus> {
         let complete_path = get_complete_path(path)?;
         // If the binary is in our temp bin dir, it's not SIP protected.
         if is_in_mirrord_tmp_dir(&complete_path)? {
@@ -528,7 +542,7 @@ mod main {
         let data = std::fs::read(&complete_path)?;
         if MachFile::parse(data.as_ref()).is_ok() {
             // file is an object file
-            is_binary_sip(&complete_path, &data, patch_binaries).map(|is_sip| {
+            is_binary_sip(&complete_path, &data, patch_binaries, skip_binaries).map(|is_sip| {
                 if is_sip {
                     SipBinary(complete_path)
                 } else {
@@ -551,7 +565,13 @@ mod main {
                 return Ok(NoSip);
             }
             let data = std::fs::read(&interpreter_complete_path)?;
-            is_binary_sip(&interpreter_complete_path, &data, patch_binaries).map(|is_sip| {
+            is_binary_sip(
+                &interpreter_complete_path,
+                &data,
+                patch_binaries,
+                skip_binaries,
+            )
+            .map(|is_sip| {
                 if is_sip {
                     SipScript {
                         path: complete_path,
@@ -621,8 +641,12 @@ mod main {
     /// If it is, create a non-protected version of the file and return `Ok(Some(patched_path)`.
     /// If it is not, `Ok(None)`.
     /// Propagate errors.
-    pub fn sip_patch(binary_path: &str, patch_binaries: &[String]) -> Result<Option<String>> {
-        match get_sip_status(binary_path, patch_binaries) {
+    pub fn sip_patch(
+        binary_path: &str,
+        patch_binaries: &[String],
+        skip_binaries: &[String],
+    ) -> Result<Option<String>> {
+        match get_sip_status(binary_path, patch_binaries, skip_binaries) {
             Ok(SipScript { path, shebang }) => {
                 let patched_interpreter = patch_binary(&shebang.interpreter_path)?;
                 let patched_script = patch_script(
@@ -664,7 +688,10 @@ mod main {
 
         #[test]
         fn is_sip_true() {
-            assert!(matches!(get_sip_status("/bin/ls", &[]), Ok(SipBinary(_))));
+            assert!(matches!(
+                get_sip_status("/bin/ls", &[], &[]),
+                Ok(SipBinary(_))
+            ));
         }
 
         #[test]
@@ -674,7 +701,7 @@ mod main {
             f.write_all(&data).unwrap();
             f.flush().unwrap();
             assert!(matches!(
-                get_sip_status(f.path().to_str().unwrap(), &[]).unwrap(),
+                get_sip_status(f.path().to_str().unwrap(), &[], &[]).unwrap(),
                 NoSip
             ));
         }
@@ -682,7 +709,7 @@ mod main {
         #[test]
         fn is_sip_notfound() {
             let err =
-                get_sip_status("/donald/duck/was/a/duck/not/a/quack/a/duck", &[]).unwrap_err();
+                get_sip_status("/donald/duck/was/a/duck/not/a/quack/a/duck", &[], &[]).unwrap_err();
             assert!(err.to_string().contains("executable file not found"));
         }
 
@@ -705,7 +732,7 @@ mod main {
         fn patch_binary_and_verify_dyld_print(bin_path: &str) {
             let patched_bin_path = patch_binary(bin_path.as_ref()).unwrap();
             assert!(matches!(
-                get_sip_status(patched_bin_path.to_str().unwrap(), &[]).unwrap(),
+                get_sip_status(patched_bin_path.to_str().unwrap(), &[], &[]).unwrap(),
                 NoSip
             ));
             // Check DYLD_* features work on patched binary:
@@ -716,9 +743,9 @@ mod main {
         /// binary is no longer protected, and DYLD_PRINT_LIBRARIES is respected when running with
         /// it.
         fn patch_sip_and_verify_dyld_print(executable_path: &str) {
-            let patched_bin_path = sip_patch(executable_path, &[]).unwrap().unwrap();
+            let patched_bin_path = sip_patch(executable_path, &[], &[]).unwrap().unwrap();
             assert!(matches!(
-                get_sip_status(&patched_bin_path, &[]).unwrap(),
+                get_sip_status(&patched_bin_path, &[], &[]).unwrap(),
                 NoSip
             ));
             // Check DYLD_* features work on patched binary:
@@ -779,7 +806,7 @@ mod main {
             let patched_path_buf = patch_binary(path.as_ref()).unwrap();
             let patched_path = patched_path_buf.to_str().unwrap();
             assert!(matches!(
-                get_sip_status(patched_path, &[]).unwrap(),
+                get_sip_status(patched_path, &[], &[]).unwrap(),
                 SipStatus::NoSip
             ));
             // Check DYLD_* features work on it:
@@ -807,9 +834,13 @@ mod main {
             original_file.flush().unwrap();
             let permissions = std::fs::Permissions::from_mode(0o700);
             std::fs::set_permissions(&original_file, permissions).unwrap();
-            let patched_path = sip_patch(original_file.path().to_str().unwrap(), &Vec::new())
-                .unwrap()
-                .unwrap();
+            let patched_path = sip_patch(
+                original_file.path().to_str().unwrap(),
+                &Vec::new(),
+                &Vec::new(),
+            )
+            .unwrap()
+            .unwrap();
             // Check DYLD_* features work on it:
             let output = std::process::Command::new(patched_path)
                 .env("DYLD_PRINT_LIBRARIES", "1")
@@ -882,9 +913,10 @@ mod main {
             let script_contents = "#!/usr/bin/env bash\nexit\n";
             script.write_all(script_contents.as_ref()).unwrap();
             script.flush().unwrap();
-            let changed_script_path = sip_patch(script.path().to_str().unwrap(), &Vec::new())
-                .unwrap()
-                .unwrap();
+            let changed_script_path =
+                sip_patch(script.path().to_str().unwrap(), &Vec::new(), &Vec::new())
+                    .unwrap()
+                    .unwrap();
             let new_shebang = read_shebang_from_file(changed_script_path)
                 .unwrap()
                 .unwrap();
@@ -914,8 +946,12 @@ mod main {
             std::fs::set_permissions(path, permissions).unwrap();
 
             let path_str = path.to_str().unwrap();
-            let _ = sip_patch(path_str, &Vec::new()).unwrap().unwrap();
-            let _ = sip_patch(path_str, &Vec::new()).unwrap().unwrap();
+            let _ = sip_patch(path_str, &Vec::new(), &Vec::new())
+                .unwrap()
+                .unwrap();
+            let _ = sip_patch(path_str, &Vec::new(), &Vec::new())
+                .unwrap()
+                .unwrap();
         }
 
         /// Run `sip_patch` on a file that has a shebang that points to itself and verify that we
@@ -926,7 +962,7 @@ mod main {
             let contents = "#!".to_string() + script.path().to_str().unwrap();
             script.write_all(contents.as_bytes()).unwrap();
             script.flush().unwrap();
-            let res = sip_patch(script.path().to_str().unwrap(), &Vec::new());
+            let res = sip_patch(script.path().to_str().unwrap(), &Vec::new(), &Vec::new());
             assert!(matches!(res, Ok(None)));
         }
 
