@@ -144,7 +144,7 @@
     },
     "skip_sip": {
       "title": "skip_sip {#root-skip_sip}",
-      "description": "Allows mirrord to skip patching (macOS SIP) unwanted processes.\n\nWhen patching is skipped, mirrord will no longer be able to load into the specified process and its child processes.",
+      "description": "Allows mirrord to skip patching (macOS SIP) unwanted processes.\n\nWhen patching is skipped, mirrord will no longer be able to load into the process and its child processes.",
       "anyOf": [
         {
           "$ref": "#/definitions/VecOrSingle_for_String"
