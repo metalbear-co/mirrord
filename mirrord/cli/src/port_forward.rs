@@ -46,10 +46,12 @@ use tracing::Level;
 
 use crate::{connection::AgentConnection, AddrPortMapping, LocalPort, RemoteAddr, RemotePort};
 
-/// Connection address pair (local, peer)
+/// Connection address pair
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct ConnectionSocketPair {
+    /// Local addr for connection
     local: SocketAddr,
+    /// Peer addr from connection to local addr
     peer: SocketAddr,
 }
 
