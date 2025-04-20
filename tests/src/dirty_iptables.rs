@@ -10,8 +10,8 @@ use rstest::*;
 use serde_json::json;
 
 use crate::utils::{
-    kube_client, random_string, watch, EnvApp, ResourceGuard, PRESERVE_FAILED_ENV_NAME,
-    TEST_RESOURCE_LABEL,
+    application::env::EnvApp, kube_client, random_string, resource_guard::ResourceGuard,
+    run_command::run_exec_with_target, watch, PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
 };
 
 /// Starts mirrord with a target that has an existing mirrord IP table chain from another agent or a
@@ -34,8 +34,6 @@ pub async fn agent_exits_on_dirty_tables(
     #[values(EnvApp::NodeInclude)] application: EnvApp,
     #[future] kube_client: Client,
 ) {
-    use crate::utils::run_exec_with_target;
-
     let kube_client = kube_client.await;
     let namespace = format!("dirty-iptables-{}", random_string());
     let pod_name = format!("{namespace}-pod");

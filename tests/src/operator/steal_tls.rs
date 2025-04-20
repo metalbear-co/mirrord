@@ -29,8 +29,8 @@ use rcgen::CertifiedKey;
 use rstest::rstest;
 
 use crate::utils::{
-    kube_client, port_forwarder::PortForwarder, watch, Application, ResourceGuard,
-    PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
+    application::Application, kube_client, port_forwarder::PortForwarder,
+    resource_guard::ResourceGuard, watch, PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
 };
 
 /// Test service deployed to the cluster.

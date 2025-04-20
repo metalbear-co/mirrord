@@ -6,7 +6,7 @@ mod targetless_tests {
 
     use rstest::rstest;
 
-    use crate::utils::Application;
+    use crate::utils::application::Application;
 
     /// `mirrord exec` a program that connects to the kubernetes api service by its internal name
     /// from within the cluster, without specifying a target. The http request gets an 403 error
@@ -15,7 +15,7 @@ mod targetless_tests {
     /// cluster).
     ///
     /// Running this test on a cluster that does not have any pods, also proves that we don't use
-    /// any existing pod and the agent pod is completely independent.    
+    /// any existing pod and the agent pod is completely independent.
     #[cfg_attr(not(feature = "targetless"), ignore)]
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
