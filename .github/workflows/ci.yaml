@@ -367,6 +367,9 @@ jobs:
           cd mirrord/layer/tests/apps/issue2438
           cargo build
       - run: |
+          cd mirrord/layer/tests/apps/issue3248
+          cargo build
+      - run: |
           cd mirrord/layer/tests/apps/rebind0
           cargo build
       - run: ./scripts/build_c_apps.sh
