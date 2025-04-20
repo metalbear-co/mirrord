@@ -18,7 +18,11 @@ async fn skip_sip(dylib_path: &Path, config_dir: &Path) {
     let application = Application::RustIssue3248;
     let config_path = config_dir.join("skip_sip.json");
     let (mut test_process, mut intproxy) = application
-        .start_process_with_layer(dylib_path, vec![], Some(&config_path))
+        .start_process_with_layer(
+            dylib_path,
+            vec![("RUST_LOG", "mirrord=trace")],
+            Some(&config_path),
+        )
         .await;
 
     intproxy
