@@ -87,6 +87,7 @@ kube = { version = "0.99", default-features = false, features = [
     "client",
     "ws",
     "rustls-tls",
+    "aws-lc-rs",
     "oidc",
     "socks5",
     "http-proxy",
