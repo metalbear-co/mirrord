@@ -4,6 +4,7 @@
 
 use std::{io::Write, os::unix::fs::PermissionsExt, path::Path, time::Duration};
 
+use mirrord_sip::MIRRORD_TEMP_BIN_DIR_PATH_BUF;
 use rstest::rstest;
 
 mod common;
@@ -41,6 +42,9 @@ async fn skip_sip(dylib_path: &Path) {
         .await;
 
     test_process.wait_assert_success().await;
+
+    assert_not_patched(signed_ls.path());
+    assert_not_patched(signed_bash.path());
 }
 
 fn sign_binary(path: &str) -> tempfile::NamedTempFile {
@@ -73,4 +77,9 @@ fn create_empty_script(interpreter: &str) -> tempfile::NamedTempFile {
     let permissions = std::fs::Permissions::from_mode(0o700);
     std::fs::set_permissions(&script, permissions).unwrap();
     script
+}
+
+fn assert_not_patched(path: &Path) {
+    let patched = MIRRORD_TEMP_BIN_DIR_PATH_BUF.join(path.strip_prefix("/").unwrap_or(path));
+    assert!(!patched.exists());
 }
