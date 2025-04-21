@@ -180,6 +180,14 @@ jobs:
         run: |
           echo ${{ steps.release-branch.outputs.branch }}
 
+  cargo-deny:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: metalbear-co/cargo-deny-action@34899fc7ba81ca6268d5947a7a16b4649013fea1
+        with:
+          rust-version: nightly-2025-01-22
+
   check-rust-docs:
     runs-on: ubuntu-24.04
     needs: changed_files
