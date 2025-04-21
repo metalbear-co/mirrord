@@ -72,6 +72,18 @@ where
             warn!("`conntrack` output is {conntrack:#?}");
         }
 
+        // ss is available from kernel 5.1 and should work way better than conntrack
+        let formatted_port = format!(":{}", redirected_port);
+
+        let ss = Command::new("ss")
+            .args(["-K", "sport", "=", &formatted_port])
+            .output()
+            .await?;
+
+        if !ss.status.success() {
+            warn!("`ss` output is {ss:#?}");
+        }
+
         Ok(())
     }
 

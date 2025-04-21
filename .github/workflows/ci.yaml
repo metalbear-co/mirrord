@@ -555,6 +555,7 @@ jobs:
       - name: Collect logs
         if: ${{ failure() }}
         run: |
+          find /tmp -type f -name 'mirrord-intproxy-*' -print -exec cat {} \;
           kubectl get all
           kubectl describe pods
           docker exec minikube find /var/log/pods -print -exec cat {} \;
