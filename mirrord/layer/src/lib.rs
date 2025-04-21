@@ -107,6 +107,8 @@ use crate::{
 #[cfg(test)]
 mod integration_tests_deps {
     use actix_codec as _;
+    #[cfg(target_os = "macos")]
+    use apple_codesign as _;
     use futures as _;
     use mirrord_intproxy as _;
     use serde_json as _;

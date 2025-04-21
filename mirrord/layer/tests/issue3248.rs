@@ -9,7 +9,6 @@ use rstest::rstest;
 mod common;
 
 pub use common::*;
-use tempfile::NamedTempFile;
 
 #[rstest]
 #[tokio::test]
@@ -21,7 +20,7 @@ async fn skip_sip(dylib_path: &Path) {
     let signed_bash = sign_binary("/bin/bash");
     let signed_bash_path = signed_bash.path().to_str().unwrap();
 
-    let script = create_empty_script(&signed_bash_path);
+    let script = create_empty_script(signed_bash_path);
     let script_path = script.path().to_str().unwrap();
 
     let application = Application::RustIssue3248;
@@ -44,7 +43,7 @@ async fn skip_sip(dylib_path: &Path) {
     test_process.wait_assert_success().await;
 }
 
-fn sign_binary(path: &str) -> NamedTempFile {
+fn sign_binary(path: &str) -> tempfile::NamedTempFile {
     let signed_temp_file = tempfile::NamedTempFile::new().unwrap();
 
     let mut settings = apple_codesign::SigningSettings::default();
@@ -66,7 +65,7 @@ fn sign_binary(path: &str) -> NamedTempFile {
     signed_temp_file
 }
 
-fn create_empty_script(interpreter: &str) -> NamedTempFile {
+fn create_empty_script(interpreter: &str) -> tempfile::NamedTempFile {
     let mut script = tempfile::NamedTempFile::new().unwrap();
     script
         .write_all(format!("#!{}\n", interpreter).as_bytes())
