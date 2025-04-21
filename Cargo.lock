@@ -4536,6 +4536,7 @@ name = "mirrord-layer"
 version = "3.140.0"
 dependencies = [
  "actix-codec",
+ "apple-codesign",
  "base64 0.22.1",
  "bincode",
  "ctor",

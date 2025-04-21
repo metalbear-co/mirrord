@@ -65,5 +65,8 @@ tests = { path = "../../tests" }
 test-cdylib = "1"
 tokio = { workspace = true, features = ["rt", "net", "macros", "fs"] }
 
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+apple-codesign = { version = "0.29", default-features = false }
+
 [lib]
 crate-type = ["cdylib"]

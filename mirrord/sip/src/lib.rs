@@ -989,6 +989,44 @@ mod main {
                 .split(':')
                 .any(is_frameworks_path));
         }
+
+        #[test]
+        fn skip_patch() {
+            let signed_temp_file = tempfile::NamedTempFile::new().unwrap();
+            let signed_temp_file_path = signed_temp_file.path().to_str().unwrap();
+
+            let mut settings = apple_codesign::SigningSettings::default();
+
+            settings.set_code_signature_flags(
+                apple_codesign::SettingsScope::Main,
+                CodeSignatureFlags::ADHOC | CodeSignatureFlags::RESTRICT,
+            );
+            settings.set_binary_identifier(
+                apple_codesign::SettingsScope::Main,
+                signed_temp_file
+                    .path()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy(),
+            );
+            let signer = apple_codesign::UnifiedSigner::new(settings);
+            signer
+                .sign_path("/bin/ls", signed_temp_file.path())
+                .unwrap();
+            assert!(matches!(
+                get_sip_status(signed_temp_file_path, &[], &[]).unwrap(),
+                SipStatus::SipBinary(_),
+            ));
+            assert!(matches!(
+                get_sip_status(
+                    signed_temp_file_path,
+                    &[],
+                    &[signed_temp_file_path.to_string()]
+                )
+                .unwrap(),
+                SipStatus::NoSip,
+            ));
+        }
     }
 }
 

@@ -1,9 +1,10 @@
-/// Runs a bash script and then the `ls` command both with DYLD_PRINT_ENV set.
-/// With `skip_sip` set to `bash;ls`, both processes stderr should not contain DYLD_PRINT_ENV
+/// Runs a script and then a binary both with DYLD_PRINT_ENV set.
+/// With `skip_sip` set, both processes stderr should not contain DYLD_PRINT_ENV
 /// or any other DYLD_* environment variables.
 fn main() {
-    let path = format!("{}/{}", env!("CARGO_MANIFEST_DIR"), "../nothing.sh");
-    let output = std::process::Command::new(path)
+    let script_path = std::env::var("TEST_SCRIPT_PATH").unwrap();
+    let binary_path = std::env::var("TEST_BINARY_PATH").unwrap();
+    let output = std::process::Command::new(script_path)
         .env("DYLD_PRINT_ENV", "1")
         .output()
         .unwrap();
@@ -12,7 +13,7 @@ fn main() {
         panic!("stderr shouldn't contain `DYLD_PRINT_ENV`. stderr:\n{stderr}");
     }
 
-    let output = std::process::Command::new("ls")
+    let output = std::process::Command::new(binary_path)
         .env("DYLD_PRINT_ENV", "1")
         .output()
         .unwrap();
