@@ -96,11 +96,14 @@ pub async fn proxy(config: LayerConfig, listen_port: u16, watch: drain::Watch) -
         None => None,
     };
 
-    let listener = create_listen_socket(SocketAddr::new(
-        local_ip().unwrap_or_else(|_| Ipv4Addr::UNSPECIFIED.into()),
-        listen_port,
-    ))
-    .map_err(ExternalProxyError::ListenerSetup)?;
+    let ip_addr = config
+        .external_proxy
+        .host_ip
+        .or_else(|| local_ip().ok())
+        .unwrap_or_else(|| Ipv4Addr::UNSPECIFIED.into());
+
+    let listener = create_listen_socket(SocketAddr::new(ip_addr, listen_port))
+        .map_err(ExternalProxyError::ListenerSetup)?;
     print_addr(&listener).map_err(ExternalProxyError::ListenerSetup)?;
 
     if let Err(error) = unsafe { detach_io() }.map_err(ExternalProxyError::SetSid) {
