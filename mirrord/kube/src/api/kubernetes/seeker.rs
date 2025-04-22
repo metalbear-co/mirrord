@@ -10,6 +10,7 @@ use k8s_openapi::{
     ClusterResourceScope, Metadata, NamespaceResourceScope,
 };
 use kube::{api::ListParams, Api, Resource};
+use mirrord_config::target::TargetType;
 use serde::de::{self, DeserializeOwned};
 
 use crate::{
@@ -70,6 +71,39 @@ impl KubeResourceSeeker<'_> {
             .chain(replicasets)
             .chain(pods)
             .collect())
+    }
+
+    /// Returns a specified resource type, as long as either:
+    /// 1. The resource type doesn't require the operator
+    /// 2. The operator is being used
+    pub async fn filtered(
+        &self,
+        resource_type: TargetType,
+        operator_active: bool,
+    ) -> Result<Vec<String>> {
+        match resource_type {
+            TargetType::Deployment if operator_active => self.simple_list_resource::<Deployment>("deployment").await,
+            TargetType::Deployment => self.deployments().await,
+            TargetType::Pod => self.pods().await,
+            TargetType::Rollout => self.simple_list_resource::<Rollout>("rollout").await,
+            TargetType::Job if operator_active => self.simple_list_resource::<Job>("job").await,
+            TargetType::CronJob if operator_active => self.simple_list_resource::<CronJob>("cronjob").await,
+            TargetType::StatefulSet if operator_active => self.simple_list_resource::<StatefulSet>("statefulset").await,
+            TargetType::Service if operator_active => self.simple_list_resource::<Service>("service").await,
+            TargetType::ReplicaSet if operator_active => self.simple_list_resource::<ReplicaSet>("replicaset").await,
+            TargetType::Targetless => {
+                tracing::warn!("Cannot list targets with resource type 'targetless'");
+                Ok(vec![])
+            }
+            resource_type if !operator_active => {
+                tracing::warn!("Cannot list targets with resource type '{resource_type}' unless the operator is enabled.");
+                Ok(vec![])
+            }
+            resource_type => {
+                tracing::error!("Cannot list targets with resource type '{resource_type}' due to a missing implementation. This is a bug.");
+                Ok(vec![])
+            }
+        }
     }
 
     /// Returns a list of (pod name, [container names]) pairs, filtering out mesh side cars

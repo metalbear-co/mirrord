@@ -18,6 +18,8 @@ use crate::{
     },
     util::string_or_struct_option,
 };
+use strum_macros::Display;
+use strum_macros::{EnumDiscriminants, EnumString};
 
 pub mod cron_job;
 pub mod deployment;
@@ -269,8 +271,10 @@ mirrord-layer failed to parse the provided target!
 /// - `service/{service-name}[/container/{container-name}]`;
 /// - `replicaset/{replicaset-name}[/container/{container-name}]`;
 #[warn(clippy::wildcard_enum_match_arm)]
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema, EnumDiscriminants)]
 #[serde(untagged, deny_unknown_fields)]
+#[strum_discriminants(derive(EnumString, Display))]
+#[strum_discriminants(name(TargetType))]
 pub enum Target {
     /// <!--${internal}-->
     /// [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/).
