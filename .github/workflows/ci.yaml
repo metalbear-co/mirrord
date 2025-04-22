@@ -181,6 +181,8 @@ jobs:
           echo ${{ steps.release-branch.outputs.branch }}
 
   cargo-deny:
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
