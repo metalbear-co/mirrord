@@ -1,40 +1,53 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     error::Error,
-    fmt,
     ops::Not,
     sync::Arc,
 };
 
-use futures::{
-    future::{BoxFuture, Shared},
-    stream::FuturesUnordered,
-    FutureExt, StreamExt,
-};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use super::{
-    connection::RedirectedConnection, error::RedirectorTaskError, steal_handle::StealHandle,
+    connection::{
+        http::{
+            service::{self, ExtractedRequest},
+            RedirectedHttp,
+        },
+        tcp::RedirectedTcp,
+        ConnectionInfo, MaybeHttp,
+    },
+    error::RedirectorTaskError,
+    steal_handle::{StealHandle, StealRequest, StolenTraffic},
     PortRedirector, Redirected,
+};
+use crate::{
+    steal::StealTlsHandlerStore,
+    util::status::{self, StatusSender},
 };
 
 /// A task responsible for redirecting incoming connections.
 ///
-/// Has to run in the target's network namespace.
-/// Only one instance of this task should run in the agent.
+/// # Important
+/// 1. Has to run in the target's network namespace.
+/// 2. Only one instance of this task should run in the agent.
 pub struct RedirectorTask<R> {
     /// Implements traffic interception.
     redirector: R,
+    /// For accepting TLS connections and extracting HTTP requests
+    /// from redirected connections.
+    tls_handlers: StealTlsHandlerStore,
     /// Provides the [`StealHandle`] with this task's failure reason.
-    error_tx: oneshot::Sender<RedirectorTaskError>,
-    /// Allows for receiving steal requests from the [`StealHandle`].
-    message_rx: mpsc::Receiver<StealRequest>,
-    /// Allows for detecting dead steal requests.
-    dead_channels: FuturesUnordered<DeadChannelFut>,
-    /// Active steal requests.
     ///
-    /// Maps the port number to the [`StealHandle`]'s exclusive channel.
-    steals: HashMap<u16, mpsc::Sender<RedirectedConnection>>,
+    /// Dropping this sender will be seen as a panic in this task.
+    status_tx: StatusSender<RedirectorTaskError>,
+    /// Allows for receiving steal requests from the [`StealHandle`].
+    external_rx: mpsc::Receiver<StealRequest>,
+
+    internal_tx: mpsc::Sender<InternalMessage>,
+    internal_rx: mpsc::Receiver<InternalMessage>,
+
+    ports: HashMap<u16, PortState>,
 }
 
 impl<R> RedirectorTask<R>
@@ -42,23 +55,28 @@ where
     R: 'static + PortRedirector,
     R::Error: Into<Arc<dyn Error + Send + Sync + 'static>>,
 {
+    const INTERNAL_CHANNEL_CAPACITY: usize = 16;
+    const EXTERNAL_CHANNEL_CAPACITY: usize = 8;
+
     /// Creates a new instance of this task.
     ///
     /// The task has to be run with [`Self::run`] to start redirecting connections.
-    pub fn new(redirector: R) -> (Self, StealHandle) {
-        let (error_tx, error_rx) = oneshot::channel();
-        let (message_tx, message_rx) = mpsc::channel(16);
+    pub fn new(redirector: R, tls_handlers: StealTlsHandlerStore) -> (Self, StealHandle) {
+        let (status_tx, status_rx) = status::channel();
+        let (external_tx, external_rx) = mpsc::channel(Self::EXTERNAL_CHANNEL_CAPACITY);
+        let (internal_tx, internal_rx) = mpsc::channel(Self::INTERNAL_CHANNEL_CAPACITY);
 
         let task = Self {
             redirector,
-            error_tx,
-            message_rx,
-            dead_channels: Default::default(),
-            steals: Default::default(),
+            tls_handlers,
+            status_tx,
+            external_rx,
+            internal_tx,
+            internal_rx,
+            ports: Default::default(),
         };
 
-        let task_error = TaskError(error_rx.shared());
-        let steal_handle = StealHandle::new(message_tx.clone(), task_error.clone());
+        let steal_handle = StealHandle::new(external_tx, status_rx);
 
         (task, steal_handle)
     }
@@ -68,10 +86,10 @@ where
             tokio::select! {
                 next_conn = self.redirector.next_connection() => {
                     let conn = next_conn?;
-                    self.handle_connection(conn).await;
+                    self.handle_connection(conn);
                 },
 
-                next_message = self.message_rx.recv() => {
+                next_message = self.external_rx.recv() => {
                     let Some(message) = next_message else {
                         // All handles dropped, we can exit.
                         self.cleanup().await?;
@@ -81,9 +99,22 @@ where
                     self.handle_message(message).await?;
                 },
 
-                Some(dead) = self.dead_channels.next() => {
-                    self.handle_dead_channel(dead).await?;
-                }
+                next_message = self.internal_rx.recv() => {
+                    let message = next_message.expect("this channel is never closed");
+                    match message {
+                        InternalMessage::DeadChannel { port, channel } => {
+                            self.handle_dead_channel(port, channel).await?;
+                        }
+
+                        InternalMessage::ConnInitialized(conn) => {
+                            self.handle_connection_initialized(conn).await;
+                        }
+
+                        InternalMessage::Request(request, conn_info) => {
+                            self.handle_request(request, conn_info).await;
+                        }
+                    }
+                },
             }
         }
     }
@@ -99,44 +130,96 @@ where
     /// It happens when our port redirector returns a connection
     /// to a port that is no longer stolen.
     /// We consider this to be an unlikely race condition.
-    async fn handle_connection(&mut self, conn: Redirected) {
-        let redirected = RedirectedConnection {
-            source: conn.source,
-            destination: conn.destination,
-            stream: conn.stream,
-        };
+    fn handle_connection(&mut self, conn: Redirected) {
+        if self.ports.contains_key(&conn.destination.port()).not() {
+            return;
+        }
 
-        let Some(steal) = self.steals.get(&redirected.destination.port()) else {
+        let tls_handlers = self.tls_handlers.clone();
+        let internal_tx = self.internal_tx.clone();
+
+        tokio::spawn(async move {
+            let source = conn.source;
+            let destination = conn.destination;
+
+            match MaybeHttp::initialize(conn, &tls_handlers).await {
+                Ok(conn) => {
+                    let _ = internal_tx
+                        .send(InternalMessage::ConnInitialized(conn))
+                        .await;
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        %source,
+                        %destination,
+                        "Failed to determine whether a redirected connection is HTTP",
+                    )
+                }
+            }
+        });
+    }
+
+    async fn handle_connection_initialized(&mut self, conn: MaybeHttp) {
+        let Some(state) = self.ports.get(&conn.info.original_destination.port()) else {
             return;
         };
 
-        let _ = steal.send(redirected).await;
+        let Some(http_version) = conn.http_version else {
+            let redirected = RedirectedTcp::new(conn.stream, conn.info);
+            let _ = state.steal.send(StolenTraffic::Tcp(redirected)).await;
+            return;
+        };
+
+        let shutdown = state.http_shutdown.clone().cancelled_owned();
+
+        tokio::spawn(service::extract_requests(
+            conn.info,
+            self.internal_tx.clone(),
+            conn.stream,
+            http_version,
+            shutdown,
+        ));
+    }
+
+    async fn handle_request(&mut self, request: ExtractedRequest, conn_info: ConnectionInfo) {
+        let Some(state) = self.ports.get(&conn_info.original_destination.port()) else {
+            return;
+        };
+
+        let redirected = RedirectedHttp::new(conn_info, request);
+        let _ = state.steal.send(StolenTraffic::Http(redirected)).await;
     }
 
     /// Handles a [`StealRequest`] coming from this task's [`StealHandle`].
     async fn handle_message(&mut self, message: StealRequest) -> Result<(), R::Error> {
         let StealRequest { port, receiver_tx } = message;
 
-        let entry = self.steals.entry(port);
-
-        if matches!(&entry, Entry::Occupied(e) if e.get().is_closed().not()) {
-            panic!("detected duplicate steal port subscription for port {port}, StealHandle should not allow this")
-        }
-
         let (conn_tx, conn_rx) = mpsc::channel(32);
 
-        if matches!(entry, Entry::Vacant(..)) {
-            self.redirector.add_redirection(port).await?;
+        match self.ports.entry(port) {
+            Entry::Vacant(e) => {
+                self.redirector.add_redirection(port).await?;
+                e.insert(PortState {
+                    steal: conn_tx.clone(),
+                    http_shutdown: CancellationToken::new(),
+                });
+            }
+            Entry::Occupied(mut e) => {
+                e.get_mut().steal = conn_tx.clone();
+            }
         }
 
-        entry.insert_entry(conn_tx.clone());
-        self.dead_channels.push(
-            async move {
-                conn_tx.closed().await;
-                port
-            }
-            .boxed(),
-        );
+        let internal_tx = self.internal_tx.clone();
+        tokio::spawn(async move {
+            conn_tx.closed().await;
+            let _ = internal_tx
+                .send(InternalMessage::DeadChannel {
+                    port,
+                    channel: conn_tx,
+                })
+                .await;
+        });
 
         let _ = receiver_tx.send(conn_rx);
 
@@ -144,12 +227,16 @@ where
     }
 
     /// Called when this task's [`StealHandle`] drops its [`StolenConnectionsRx`].
-    async fn handle_dead_channel(&mut self, port: u16) -> Result<(), R::Error> {
-        let Entry::Occupied(e) = self.steals.entry(port) else {
+    async fn handle_dead_channel(
+        &mut self,
+        port: u16,
+        channel: mpsc::Sender<StolenTraffic>,
+    ) -> Result<(), R::Error> {
+        let Entry::Occupied(e) = self.ports.entry(port) else {
             panic!("the stolen connections sender is only removed here");
         };
 
-        if e.get().is_closed().not() {
+        if e.get().steal.same_channel(&channel).not() {
             // The handle started a new steal and this is a different channel.
             // `DeadChannelFut` for this one was spawned in `handle_message`.
             return Ok(());
@@ -158,7 +245,7 @@ where
         e.remove();
 
         self.redirector.remove_redirection(port).await?;
-        if self.steals.is_empty() {
+        if self.ports.is_empty() {
             self.redirector.cleanup().await?;
         }
 
@@ -169,7 +256,7 @@ where
     ///
     /// Cleans the redirections in [`Self::redirector`].
     async fn cleanup(&mut self) -> Result<(), R::Error> {
-        for port in std::mem::take(&mut self.steals).into_keys() {
+        for port in std::mem::take(&mut self.ports).into_keys() {
             self.redirector.remove_redirection(port).await?;
         }
 
@@ -188,49 +275,30 @@ where
             .map_err(|error| RedirectorTaskError::RedirectorError(error.into()));
 
         if let Err(e) = result.clone() {
-            let _ = self.error_tx.send(e);
+            self.status_tx.send(e);
         }
 
         result
     }
 }
 
-/// Channel that represents a port steal made with a [`StealHandle`].
-///
-/// The handle uses it to receive stolen connections.
-pub(super) type StolenConnectionsRx = mpsc::Receiver<RedirectedConnection>;
-
-/// A request to start stealing connections from some port.
-///
-/// Sent from a [`StealHandle`] to its task.
-pub(super) struct StealRequest {
-    /// Port to steal.
-    pub(super) port: u16,
-    /// Will be used to send the [`StolenConnectionsRx`] to the [`StealHandle`],
-    /// once the [`RedirectorTask`] completes the port steal.
-    pub(super) receiver_tx: oneshot::Sender<StolenConnectionsRx>,
+pub(super) enum InternalMessage {
+    DeadChannel {
+        port: u16,
+        channel: mpsc::Sender<StolenTraffic>,
+    },
+    ConnInitialized(MaybeHttp),
+    Request(ExtractedRequest, ConnectionInfo),
 }
 
-/// Type of [`Future`](std::future::Future) used in [`RedirectorTask::dead_channels`].
-type DeadChannelFut = BoxFuture<'static, u16>;
-
-/// Can be used to retrieve an error that occurred in the [`RedirectorTask`].
-#[derive(Clone)]
-pub(super) struct TaskError(Shared<oneshot::Receiver<RedirectorTaskError>>);
-
-impl TaskError {
-    /// Resolves when an error occurs in the [`RedirectorTask`].
-    pub(super) async fn get(&self) -> RedirectorTaskError {
-        self.0
-            .clone()
-            .await
-            .unwrap_or(RedirectorTaskError::Panicked)
-    }
+struct PortState {
+    steal: mpsc::Sender<StolenTraffic>,
+    http_shutdown: CancellationToken,
 }
 
-impl fmt::Debug for TaskError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.get().now_or_never().fmt(f)
+impl Drop for PortState {
+    fn drop(&mut self) {
+        self.http_shutdown.cancel();
     }
 }
 
@@ -240,14 +308,24 @@ mod test {
 
     use rstest::rstest;
 
-    use crate::incoming::{test::DummyRedirector, RedirectorTask};
+    use crate::{
+        incoming::{test::DummyRedirector, RedirectorTask},
+        steal::StealTlsHandlerStore,
+        util::path_resolver::InTargetPathResolver,
+    };
 
     #[rstest]
     #[timeout(Duration::from_secs(5))]
     #[tokio::test]
     async fn cleanup_on_dead_channel() {
         let (redirector, mut state, _tx) = DummyRedirector::new();
-        let (task, mut handle) = RedirectorTask::new(redirector);
+        let (task, mut handle) = RedirectorTask::new(
+            redirector,
+            StealTlsHandlerStore::new(
+                Default::default(),
+                InTargetPathResolver::with_root_path("/".into()),
+            ),
+        );
         tokio::spawn(task.run());
 
         handle.steal(80).await.unwrap();

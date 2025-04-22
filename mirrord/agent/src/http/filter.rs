@@ -1,5 +1,5 @@
 use fancy_regex::Regex;
-use hyper::Request;
+use http::request::Parts;
 use tracing::Level;
 
 /// Currently supported filtering criterias.
@@ -43,16 +43,16 @@ impl TryFrom<&mirrord_protocol::tcp::HttpFilter> for HttpFilter {
 }
 
 impl HttpFilter {
-    /// Checks whether the given [`Request`] matches this filter.
-    #[tracing::instrument(level = Level::TRACE, skip(request), ret(level = "DEBUG"))]
-    pub fn matches<T>(&self, request: &mut Request<T>) -> bool {
+    /// Checks whether the given request [`Parts`] match this filter.
+    #[tracing::instrument(level = Level::TRACE, skip(parts), ret)]
+    pub fn matches(&self, parts: &mut Parts) -> bool {
         match self {
             Self::Header(filter) => {
-                let headers = match request.extensions().get::<NormalizedHeaders>() {
+                let headers = match parts.extensions.get::<NormalizedHeaders>() {
                     Some(cached) => cached,
                     None => {
-                        let normalized = request
-                            .headers()
+                        let normalized = parts
+                            .headers
                             .iter()
                             .filter_map(|(header_name, header_value)| {
                                 header_value
@@ -62,25 +62,17 @@ impl HttpFilter {
                             })
                             .collect::<Vec<_>>();
 
-                        request
-                            .extensions_mut()
-                            .insert(NormalizedHeaders(normalized));
-                        request
-                            .extensions()
-                            .get()
-                            .expect("extension was just inserted")
+                        parts.extensions.insert(NormalizedHeaders(normalized));
+                        parts.extensions.get().expect("extension was just inserted")
                     }
                 };
 
                 headers.has_match(filter)
             }
 
-            Self::Path(filter) => request
-                .uri()
-                .clone()
-                .into_parts()
-                .path_and_query
-                .as_ref()
+            Self::Path(filter) => parts
+                .uri
+                .path_and_query()
                 .map(|path_and_query| {
                     // For backward compatability, we first match path then we match path and query
                     // together and return true if any of them matches
@@ -105,11 +97,11 @@ impl HttpFilter {
                 })
                 .unwrap_or(false),
 
-            Self::Composite { all: true, filters } => filters.iter().all(|f| f.matches(request)),
+            Self::Composite { all: true, filters } => filters.iter().all(|f| f.matches(parts)),
             Self::Composite {
                 all: false,
                 filters,
-            } => filters.iter().any(|f| f.matches(request)),
+            } => filters.iter().any(|f| f.matches(parts)),
         }
     }
 }
@@ -140,7 +132,7 @@ mod test {
     use hyper::Request;
     use mirrord_protocol::tcp::{self, Filter};
 
-    use crate::steal::http::HttpFilter;
+    use super::HttpFilter;
 
     #[test]
     fn matching_all_filter() {
@@ -153,21 +145,21 @@ mod test {
         };
 
         // should match
-        let mut input = Request::builder()
+        let input = Request::builder()
             .uri("https://www.balconia.gov/api/path/to/v1")
             .header("brass-key", "a-bazillion")
             .body(())
             .unwrap();
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
-        assert!(filter.matches(&mut input));
+        assert!(filter.matches(&mut input.into_parts().0));
 
         // should fail
-        let mut input = Request::builder()
+        let input = Request::builder()
             .uri("https://www.balconia.gov/api/path/to/v1")
             .header("brass-key", "nothin")
             .body(())
             .unwrap();
-        assert!(!filter.matches(&mut input));
+        assert!(!filter.matches(&mut input.into_parts().0));
     }
 
     #[test]
@@ -183,21 +175,21 @@ mod test {
         };
 
         // should match
-        let mut input = Request::builder()
+        let input = Request::builder()
             .uri("https://www.balconia.gov/api/path/to/v1")
             .header("brass-key", "nothin")
             .body(())
             .unwrap();
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
-        assert!(filter.matches(&mut input));
+        assert!(filter.matches(&mut input.into_parts().0));
 
         // should fail
-        let mut input = Request::builder()
+        let input = Request::builder()
             .uri("https://www.balconia.gov/api/path/to/v3")
             .header("brass-key", "nothin")
             .body(())
             .unwrap();
         let filter: HttpFilter = TryFrom::try_from(&tcp_filter).unwrap();
-        assert!(!filter.matches(&mut input));
+        assert!(!filter.matches(&mut input.into_parts().0));
     }
 }

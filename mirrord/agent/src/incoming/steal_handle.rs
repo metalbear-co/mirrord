@@ -5,14 +5,14 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::ReceiverStream, StreamMap, StreamNotifyClose};
 
 use super::{
-    connection::RedirectedConnection,
+    connection::{http::RedirectedHttp, tcp::RedirectedTcp},
     error::RedirectorTaskError,
-    task::{StealRequest, TaskError},
 };
+use crate::util::status::StatusReceiver;
 
 /// Handle to a running [`RedirectorTask`](super::task::RedirectorTask).
 ///
-/// Allows for stealing incoming TCP connections.
+/// Allows for stealing incoming traffic.
 pub struct StealHandle {
     /// For sending steal requests to the task.
     message_tx: mpsc::Sender<StealRequest>,
@@ -22,16 +22,19 @@ pub struct StealHandle {
     /// Also, it never removes any port steal on its own.
     /// Therefore, if one of our [`mpsc::channel`]s fails, we assume that the task has failed
     /// and we use this [`TaskError`] to retrieve the task's error.
-    task_error: TaskError,
-    /// For receiving stolen connections.
-    stolen_ports: StreamMap<u16, StreamNotifyClose<ReceiverStream<RedirectedConnection>>>,
+    task_status: StatusReceiver<RedirectorTaskError>,
+    /// For receiving stolen traffic.
+    stolen_ports: StreamMap<u16, StreamNotifyClose<ReceiverStream<StolenTraffic>>>,
 }
 
 impl StealHandle {
-    pub(super) fn new(message_tx: mpsc::Sender<StealRequest>, task_error: TaskError) -> Self {
+    pub(super) fn new(
+        message_tx: mpsc::Sender<StealRequest>,
+        task_status: StatusReceiver<RedirectorTaskError>,
+    ) -> Self {
         Self {
             message_tx,
-            task_error,
+            task_status,
             stolen_ports: Default::default(),
         }
     }
@@ -55,11 +58,11 @@ impl StealHandle {
             .await
             .is_err()
         {
-            return Err(self.task_error.get().await);
+            return Err(self.task_status.clone().await);
         }
 
         let Ok(rx) = receiver_rx.await else {
-            return Err(self.task_error.get().await);
+            return Err(self.task_status.clone().await);
         };
 
         self.stolen_ports
@@ -71,28 +74,51 @@ impl StealHandle {
     /// Stops stealing the given port.
     ///
     /// If this port is not stolen, does nothing.
-    ///
-    /// After this is called, [`Self::next`] might still return some connections redirected from the
-    /// given port.
     pub fn stop_steal(&mut self, port: u16) {
         self.stolen_ports.remove(&port);
     }
 
-    /// Returns the next redirected connection.
+    /// Returns stolen traffic.
     ///
     /// Returns nothing if no port is stolen.
-    pub async fn next(&mut self) -> Option<Result<RedirectedConnection, RedirectorTaskError>> {
+    pub async fn next(&mut self) -> Option<Result<StolenTraffic, RedirectorTaskError>> {
         match self.stolen_ports.next().await? {
             (.., Some(conn)) => Some(Ok(conn)),
-            (.., None) => Some(Err(self.task_error.get().await)),
+            (.., None) => Some(Err(self.task_status.clone().await)),
         }
     }
+}
+
+pub enum StolenTraffic {
+    Tcp(RedirectedTcp),
+    Http(RedirectedHttp),
+}
+
+impl StolenTraffic {
+    pub fn destination_port(&self) -> u16 {
+        match self {
+            Self::Tcp(tcp) => tcp.info().original_destination.port(),
+            Self::Http(http) => http.info().original_destination.port(),
+        }
+    }
+}
+
+/// A request for the [`RedirectorTask`](super::task::RedirectorTask) to start stealing connections
+/// from some port.
+///
+/// Sent from a [`StealHandle`] to its task.
+pub(super) struct StealRequest {
+    /// Port to steal.
+    pub(super) port: u16,
+    /// Will be used to send the [`StolenConnectionsRx`] to the [`StealHandle`],
+    /// once the [`RedirectorTask`] completes the port steal.
+    pub(super) receiver_tx: oneshot::Sender<mpsc::Receiver<StolenTraffic>>,
 }
 
 impl fmt::Debug for StealHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StealHandle")
-            .field("task_error", &self.task_error)
+            .field("task_status", &self.task_status)
             .field("channel_closed", &self.message_tx.is_closed())
             .field(
                 "queued_messages",

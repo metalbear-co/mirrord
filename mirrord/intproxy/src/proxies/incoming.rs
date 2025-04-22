@@ -557,6 +557,8 @@ impl IncomingProxy {
                     .await?;
             }
 
+            DaemonTcp::NewConnectionV2(..) => todo!(),
+
             DaemonTcp::SubscribeResult(result) => {
                 let msgs = self.subscriptions.agent_responded(result)?;
 

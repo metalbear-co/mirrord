@@ -406,7 +406,6 @@ pub struct StolenConnection {
 impl fmt::Debug for StolenConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StolenConnection")
-            .field("connection", &self.connection)
             .field(
                 "filtered",
                 &matches!(self.port_subscription, PortSubscription::Filtered(..)),
@@ -472,7 +471,7 @@ impl ConnectionTask {
             port_subscription,
         } = self.connection;
 
-        let mut destination = connection.destination();
+        let mut destination = connection.info.original_destination;
         let localhost = if destination.is_ipv6() {
             IpAddr::V6(Ipv6Addr::LOCALHOST)
         } else {
@@ -482,7 +481,7 @@ impl ConnectionTask {
         // localhost should always work.
         destination.set_ip(localhost);
 
-        let source = connection.source();
+        let source = connection.info.peer_addr;
 
         let filters = match port_subscription {
             PortSubscription::Unfiltered(client_id) => {
@@ -494,12 +493,12 @@ impl ConnectionTask {
                             remote_address: source.ip(),
                             source_port: source.port(),
                             destination_port: destination.port(),
-                            local_address: connection.local_addr()?.ip(),
+                            local_address: connection.info.local_addr.ip(),
                         },
                     })
                     .await?;
 
-                return UnfilteredStealTask::new(self.connection_id, client_id, connection)
+                return UnfilteredStealTask::new(self.connection_id, client_id, connection.stream)
                     .run(self.tx, &mut self.rx)
                     .await;
             }

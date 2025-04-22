@@ -31,6 +31,12 @@ pub struct NewTcpConnection {
     pub local_address: IpAddr,
 }
 
+#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+pub struct NewTcpConnectionV2 {
+    pub connection: NewTcpConnection,
+    pub transport: HttpRequestTransportType,
+}
+
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
 pub struct TcpData {
     pub connection_id: ConnectionId,
@@ -88,6 +94,7 @@ pub enum DaemonTcp {
     HttpRequest(HttpRequest<Vec<u8>>),
     HttpRequestFramed(HttpRequest<InternalHttpBody>),
     HttpRequestChunked(ChunkedRequest),
+    NewConnectionV2(NewTcpConnectionV2),
 }
 
 /// Contents of a chunked message from server.
@@ -423,6 +430,10 @@ pub static HTTP_FILTERED_UPGRADE_VERSION: LazyLock<VersionReq> =
 pub static HTTP_COMPOSITE_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.11.0".parse().expect("Bad Identifier"));
 
+/// Minimal mirrord-protocol version that allows [`DaemonTcp::NewConnectionV2`].
+pub static NEW_CONNECTION_V2_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.19.4".parse().expect("Bad Identifier"));
+
 /// Protocol break - on version 2, please add source port, dest/src IP to the message
 /// so we can avoid losing this information.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
@@ -575,6 +586,16 @@ impl From<Frame<Bytes>> for InternalHttpBodyFrame {
             .into_data()
             .map(|bytes| Self::Data(bytes.into()))
             .or_else(|frame| frame.into_trailers().map(Self::Trailers))
+            .expect("malformed frame type")
+    }
+}
+
+impl From<&Frame<Bytes>> for InternalHttpBodyFrame {
+    fn from(frame: &Frame<Bytes>) -> Self {
+        frame
+            .data_ref()
+            .map(|bytes| Self::Data(bytes.clone().into()))
+            .or_else(|| frame.trailers_ref().cloned().map(Self::Trailers))
             .expect("malformed frame type")
     }
 }

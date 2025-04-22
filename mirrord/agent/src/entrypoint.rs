@@ -19,7 +19,6 @@ use mirrord_agent_iptables::{
     error::IPTablesError, new_ip6tables, new_iptables, IPTablesWrapper, SafeIpTables,
 };
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest, LogMessage};
-use steal::StealerMessage;
 use tokio::{
     net::{TcpListener, TcpStream},
     process::Command,
@@ -46,7 +45,7 @@ use crate::{
     outgoing::{TcpOutgoingApi, UdpOutgoingApi},
     runtime::{self, get_container},
     sniffer::{api::TcpSnifferApi, messages::SnifferCommand},
-    steal::{self, StealerCommand, TcpStealerApi},
+    steal::{StealerCommand, TcpStealerApi},
     util::{
         remote_runtime::{BgTaskRuntime, BgTaskStatus, RemoteRuntime},
         ClientId,
@@ -391,8 +390,11 @@ impl ClientConnectionHandler {
                         unreachable!()
                     }
                 }, if self.tcp_stealer_api.is_some() => match message {
-                    Ok(StealerMessage::TcpSteal(message)) => self.respond(DaemonMessage::TcpSteal(message)).await?,
-                    Ok(StealerMessage::LogMessage(log)) => self.respond(DaemonMessage::LogMessage(log)).await?,
+                    Ok(messages) => {
+                        for message in messages {
+                            self.respond(message).await?;
+                        }
+                    }
                     Err(e) => break e,
                 },
                 message = self.tcp_outgoing_api.recv_from_task() => match message {
@@ -491,7 +493,12 @@ impl ClientConnectionHandler {
             }
             ClientMessage::TcpSteal(message) => {
                 if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
-                    tcp_stealer_api.handle_client_message(message).await?
+                    if let Err(error) = tcp_stealer_api.handle_client_message(message).await {
+                        self.respond(DaemonMessage::Close(format!(
+                            "invalid HTTP filter: {error}"
+                        )))
+                        .await?;
+                    }
                 } else {
                     self.respond(DaemonMessage::Close(
                         "incoming traffic stealing is not available in the targetless mode".into(),
@@ -513,7 +520,7 @@ impl ClientConnectionHandler {
                 if let Some(tcp_stealer_api) = self.tcp_stealer_api.as_mut() {
                     tcp_stealer_api
                         .switch_protocol_version(settled_version.clone())
-                        .await?;
+                        .await;
                 }
 
                 self.respond(DaemonMessage::SwitchProtocolVersionResponse(
@@ -678,13 +685,8 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     let stealer = match state.container_pid() {
         None => BackgroundTask::Disabled,
         Some(pid) => {
-            let steal_handle = setup::start_traffic_redirector(&state.network_runtime).await?;
-            setup::start_stealer(
-                &state.network_runtime,
-                pid,
-                steal_handle,
-                cancellation_token.clone(),
-            )
+            let steal_handle = setup::start_traffic_redirector(&state.network_runtime, pid).await?;
+            setup::start_stealer(&state.network_runtime, steal_handle)
         }
     };
     let dns = setup::start_dns(&args, &state.network_runtime, cancellation_token.clone());

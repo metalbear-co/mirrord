@@ -450,7 +450,7 @@ impl TcpConnectionStealer {
     }
 
     /// Handles a new remote connection that was stolen by [`Self::port_subscriptions`].
-    #[tracing::instrument(level = Level::TRACE, skip(self))]
+    #[tracing::instrument(level = Level::TRACE, skip(self, connection))]
     async fn incoming_connection(
         &mut self,
         connection: RedirectedConnection,
