@@ -36,6 +36,7 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 
 ### Internal
+
 - Add cargo-deny action to check for any advisory or license issues.
 
   *Small updates to dependencies is also inculded*
