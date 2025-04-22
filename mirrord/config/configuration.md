@@ -508,13 +508,8 @@ DEPRECATED, WILL BE REMOVED
 
 ### _experimental_ readonly_file_buffer {#experimental-readonly_file_buffer}
 
-Sets buffer size for readonly remote files (in bytes, for example 4096).
-If set, such files will be read in chunks and buffered locally.
-This improves performace when the user application reads data in small portions.
-
-Setting to 0 disables file buffering.
-
-<https://github.com/metalbear-co/mirrord/issues/2069>
+DEPRECATED, WILL BE REMOVED: moved to `feature.fs.readonly_file_buffer` as part of
+stabilisation. See <https://github.com/metalbear-co/mirrord/issues/2069>.
 
 ### _experimental_ tcp_ping4_mock {#experimental-tcp_ping4_mock}
 
@@ -544,6 +539,13 @@ If you get `ConnectionRefused` errors, increasing the timeouts a bit might solve
   }
 }
 ```
+
+### external_proxy.host_ip {#external_proxy-host_ip}
+
+Specify a custom host ip addr to listen on.
+
+This address must be accessible from within the container.
+If not specified, mirrord will try and resolve a local address to use.
 
 ### external_proxy.idle_timeout {#external_proxy-idle_timeout}
 
@@ -923,6 +925,15 @@ if file matching the pattern is opened for writing or read/write it will be open
 ### feature.fs.read_write {#feature-fs-read_write}
 
 Specify file path patterns that if matched will be read and written to the remote.
+
+### feature.fs.readonly_file_buffer {#feature-fs-readonly_file_buffer}
+
+Sets buffer size for read-only remote files in bytes. By default, the value is
+128000 bytes, or 128 kB.
+
+Setting the value to 0 disables file buffering.
+Otherwise, read-only remote files will be read in chunks and buffered locally.
+This improves performance when the user application reads data in small portions.
 
 ## feature.hostname {#feature-hostname}
 
