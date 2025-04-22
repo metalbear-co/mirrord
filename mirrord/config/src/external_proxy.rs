@@ -102,6 +102,7 @@ pub struct ExternalProxyConfig {
     ///
     /// Specify a custom host ip addr to listen on.
     ///
-    /// Will try and resolve local addr if not specified.
+    /// This address must be accessible from within the container.
+    /// If not specified, mirrord will try and resolve a local address to use.
     pub host_ip: Option<IpAddr>,
 }
