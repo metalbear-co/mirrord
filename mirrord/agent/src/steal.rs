@@ -25,7 +25,7 @@ mod api;
 mod subscriptions;
 pub(crate) mod tls;
 
-pub(crate) use api::TcpStealerApi;
+pub(crate) use api::TcpStealApi;
 
 enum StealerMessage {
     Log(LogMessage),

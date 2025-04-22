@@ -1,7 +1,7 @@
 use axum::async_trait;
 use mirrord_protocol::{tcp::LayerTcp, DaemonMessage};
 
-use super::MirrorApi;
+use super::TcpMirrorApi;
 use crate::{sniffer::api::TcpSnifferApi, AgentError};
 
 pub struct SnifferApiWrapper {
@@ -19,7 +19,7 @@ impl SnifferApiWrapper {
 }
 
 #[async_trait]
-impl MirrorApi for SnifferApiWrapper {
+impl TcpMirrorApi for SnifferApiWrapper {
     async fn recv(&mut self) -> Option<Result<DaemonMessage, AgentError>> {
         if let Some(message) = self.ready_message.take() {
             return Some(Ok(message));

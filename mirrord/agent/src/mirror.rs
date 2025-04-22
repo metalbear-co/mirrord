@@ -10,7 +10,7 @@ pub use handle_wrapper::MirrorHandleWrapper;
 pub use sniffer_wrapper::SnifferApiWrapper;
 
 #[async_trait]
-pub(crate) trait MirrorApi {
+pub(crate) trait TcpMirrorApi: 'static + Send + Sync {
     async fn recv(&mut self) -> Option<Result<DaemonMessage, AgentError>>;
 
     async fn handle_client_message(&mut self, message: LayerTcp) -> Result<(), AgentError>;

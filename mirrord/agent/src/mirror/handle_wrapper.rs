@@ -13,7 +13,7 @@ use mirrord_protocol::{
 };
 use tokio_stream::StreamMap;
 
-use super::MirrorApi;
+use super::TcpMirrorApi;
 use crate::{
     incoming::{
         IncomingStream, IncomingStreamItem, MirrorHandle, MirroredHttp, MirroredTcp,
@@ -178,7 +178,7 @@ impl MirrorHandleWrapper {
 }
 
 #[async_trait]
-impl MirrorApi for MirrorHandleWrapper {
+impl TcpMirrorApi for MirrorHandleWrapper {
     async fn recv(&mut self) -> Option<Result<DaemonMessage, AgentError>> {
         if let Some(message) = self.queued_messages.pop_front() {
             return Some(Ok(message));
