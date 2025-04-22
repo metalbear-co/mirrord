@@ -34,6 +34,14 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
   [#3158](https://github.com/metalbear-co/mirrord/issues/3158)
 - Use ss for killing existing connections to allow stealing to begin
 
+
+### Internal
+- Add cargo-deny action to check for any advisory or license issues.
+
+  *Small updates to dependencies is also inculded*
+  [#3250](https://github.com/metalbear-co/mirrord/issues/3250)
+- Refactors the e2e tests utils.rs into multiple files/modules.
+
 ## [3.139.1](https://github.com/metalbear-co/mirrord/tree/3.139.1) - 2025-04-17
 
 
