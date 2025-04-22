@@ -1,9 +1,11 @@
 use std::{sync::LazyLock, time::Instant};
 
+use crate::{util, CliError, CliResult, Format, ListTargetArgs};
 use futures::TryStreamExt;
 use k8s_openapi::api::core::v1::Namespace;
 use kube::Client;
 use mirrord_analytics::NullReporter;
+use mirrord_config::target::Target;
 use mirrord_config::{config::ConfigContext, LayerConfig};
 use mirrord_kube::{
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
@@ -13,8 +15,6 @@ use mirrord_operator::client::OperatorApi;
 use semver::VersionReq;
 use serde::{ser::SerializeSeq, Serialize, Serializer};
 use tracing::Level;
-
-use crate::{util, CliError, CliResult, Format, ListTargetArgs};
 
 /// A mirrord target found in the cluster.
 #[derive(Serialize)]
@@ -66,7 +66,7 @@ impl FoundTargets {
     /// 1. returned [`FoundTargets`] will contain info about namespaces available in the cluster;
     /// 2. only deployment, rollout, and pod targets will be fetched.
     #[tracing::instrument(level = Level::DEBUG, skip(config), name = "resolve_targets", err)]
-    async fn resolve(config: LayerConfig, rich_output: bool) -> CliResult<Self> {
+    async fn resolve(config: LayerConfig, rich_output: bool, target_type: Option<Target>) -> CliResult<Self> {
         let client = create_kube_config(
             config.accept_invalid_certificates,
             config.kubeconfig.clone(),
@@ -219,7 +219,7 @@ pub(super) async fn print_targets(args: ListTargetArgs, rich_output: bool) -> Cl
         util::remove_proxy_env();
     }
 
-    let targets = FoundTargets::resolve(layer_config, rich_output).await?;
+    let targets = FoundTargets::resolve(layer_config, rich_output, args.target_type).await?;
 
     match args.output {
         Format::Json => {
