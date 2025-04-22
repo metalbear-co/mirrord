@@ -2,11 +2,13 @@
 //! [`VerifyConfig`](crate::Commands::VerifyConfig) enum after checking the config file passed in
 //! `path`. It's used by the IDE plugins to display errors/warnings quickly, without having to start
 //! mirrord-layer.
+use crate::{config::VerifyConfigArgs, error, CliError};
 use error::CliResult;
 use futures::TryFutureExt;
+use mirrord_config::target::TargetType;
 use mirrord_config::{
-    config::ConfigContext,
-    feature::FeatureConfig,
+    config::ConfigContext
+    ,
     target::{
         cron_job::CronJobTarget, deployment::DeploymentTarget, job::JobTarget, pod::PodTarget,
         replica_set::ReplicaSetTarget, rollout::RolloutTarget, service::ServiceTarget,
@@ -16,8 +18,6 @@ use mirrord_config::{
 };
 use mirrord_progress::NullProgress;
 use serde::Serialize;
-
-use crate::{config::VerifyConfigArgs, error, CliError};
 
 /// Practically the same as [`Target`], but differs in the way the `targetless` option is
 /// serialized. [`Target::Targetless`] serializes as `null`, [`VerifiedTarget::Targetless`]
@@ -98,66 +98,6 @@ impl From<TargetConfig> for VerifiedTargetConfig {
         Self {
             path: value.path.map(Into::into),
             namespace: value.namespace,
-        }
-    }
-}
-
-/// Corresponds to variants of [`Target`].
-#[derive(Serialize, PartialEq, Eq, Clone, Copy)]
-#[serde(rename_all = "lowercase")]
-enum TargetType {
-    Targetless,
-    Pod,
-    Deployment,
-    Rollout,
-    Job,
-    CronJob,
-    StatefulSet,
-    Service,
-    ReplicaSet,
-}
-
-impl core::fmt::Display for TargetType {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let stringifed = match self {
-            TargetType::Targetless => "targetless",
-            TargetType::Pod => "pod",
-            TargetType::Deployment => "deployment",
-            TargetType::Rollout => "rollout",
-            TargetType::Job => "job",
-            TargetType::CronJob => "cronjob",
-            TargetType::StatefulSet => "statefulset",
-            TargetType::Service => "service",
-            TargetType::ReplicaSet => "replicaset",
-        };
-
-        f.write_str(stringifed)
-    }
-}
-
-impl TargetType {
-    fn all() -> impl Iterator<Item = Self> {
-        [
-            Self::Targetless,
-            Self::Pod,
-            Self::Deployment,
-            Self::Rollout,
-            Self::Job,
-            Self::CronJob,
-            Self::StatefulSet,
-            Self::Service,
-            Self::ReplicaSet,
-        ]
-        .into_iter()
-    }
-
-    fn compatible_with(&self, config: &FeatureConfig) -> bool {
-        match self {
-            Self::Targetless | Self::Rollout => !config.copy_target.enabled,
-            Self::Pod => !(config.copy_target.enabled && config.copy_target.scale_down),
-            Self::Job | Self::CronJob => config.copy_target.enabled,
-            Self::Service => !config.copy_target.enabled,
-            Self::Deployment | Self::StatefulSet | Self::ReplicaSet => true,
         }
     }
 }
