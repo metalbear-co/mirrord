@@ -180,6 +180,16 @@ jobs:
         run: |
           echo ${{ steps.release-branch.outputs.branch }}
 
+  cargo-deny:
+    needs: changed_files
+    if: ${{needs.changed_files.outputs.rs_changed == 'true' || needs.changed_files.outputs.ci_changed == 'true'}}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: metalbear-co/cargo-deny-action@34899fc7ba81ca6268d5947a7a16b4649013fea1
+        with:
+          rust-version: nightly-2025-01-22
+
   check-rust-docs:
     runs-on: ubuntu-24.04
     needs: changed_files
@@ -632,6 +642,7 @@ jobs:
         lint,
         lint_markdown,
         check-rust-docs,
+        cargo-deny,
       ]
     runs-on: ubuntu-24.04
     steps:
@@ -651,5 +662,6 @@ jobs:
             (needs.lint_markdown.result == 'success' || needs.lint_markdown.result == 'skipped') &&
             (needs.intellij_e2e_on_release_branch.result == 'success' || needs.intellij_e2e_on_release_branch.result == 'skipped') &&
             (needs.vscode_e2e_on_release_branch.result == 'success' || needs.vscode_e2e_on_release_branch.result == 'skipped') &&
-            (needs.check-rust-docs.result == 'success' || needs.check-rust-docs.result == 'skipped') }}
+            (needs.check-rust-docs.result == 'success' || needs.check-rust-docs.result == 'skipped') &&
+            (needs.cargo-deny.result == 'success' || needs.cargo-deny.result == 'skipped') }}
         run: echo $CI_SUCCESS && if [ "$CI_SUCCESS" == "true" ]; then echo "SUCCESS" && exit 0; else echo "Failure" && exit 1; fi

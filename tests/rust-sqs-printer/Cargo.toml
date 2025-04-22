@@ -2,6 +2,7 @@
 name = "rust-sqs-printer"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
 
 [dependencies]
 aws-config = { version = "1.5", features = ["behavior-version-latest"] }
