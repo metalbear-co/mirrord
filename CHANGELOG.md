@@ -13,10 +13,6 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 ### Added
 
-- Add cargo-deny action to check for any advisory or license issues.
-
-  *Small updates to dependencies is also inculded*
-  [#3250](https://github.com/metalbear-co/mirrord/issues/3250)
 - New config value to allow override of listen ip for external proxy
   (`external_proxy.host_ip`).
   [#3274](https://github.com/metalbear-co/mirrord/issues/3274)
@@ -29,7 +25,6 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
   running or if a previous cleanup failed.
   [#3159](https://github.com/metalbear-co/mirrord/issues/3159)
 - Corrected agent pod creation progress message.
-- Refactors the e2e tests utils.rs into multiple files/modules.
 
 
 ### Fixed
