@@ -685,7 +685,8 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     let stealer = match state.container_pid() {
         None => BackgroundTask::Disabled,
         Some(pid) => {
-            let steal_handle = setup::start_traffic_redirector(&state.network_runtime, pid).await?;
+            let (steal_handle, _) =
+                setup::start_traffic_redirector(&state.network_runtime, pid).await?;
             setup::start_stealer(&state.network_runtime, steal_handle)
         }
     };

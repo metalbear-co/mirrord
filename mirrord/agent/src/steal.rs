@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{hash_map::Entry, HashMap},
     ops::Not,
 };
@@ -11,22 +12,22 @@ use mirrord_protocol::{
     },
     LogMessage,
 };
-use semver::VersionReq;
+use subscriptions::{PortSubscription, PortSubscriptions};
 use tokio::sync::mpsc;
 
 use crate::{
     http::HttpFilter,
     incoming::{RedirectorTaskError, StealHandle, StolenHttp, StolenTcp, StolenTraffic},
-    util::{ChannelClosedFuture, ClientId},
+    util::{protocol_version::SharedProtocolVersion, ChannelClosedFuture, ClientId},
 };
 
 mod api;
+mod subscriptions;
 pub(crate) mod tls;
 
 pub(crate) use api::TcpStealerApi;
-pub(crate) use tls::StealTlsHandlerStore;
 
-pub enum StealerMessage {
+enum StealerMessage {
     Log(LogMessage),
     PortSubscribed(u16),
     StolenTcp(StolenTcp),
@@ -35,13 +36,15 @@ pub enum StealerMessage {
 
 #[derive(Debug)]
 enum Command {
-    NewClient(mpsc::Sender<StealerMessage>),
+    NewClient {
+        message_tx: mpsc::Sender<StealerMessage>,
+        protocol_version: SharedProtocolVersion,
+    },
     PortSubscribe {
         port: u16,
         filter: Option<HttpFilter>,
     },
     PortUnsubscribe(u16),
-    SwitchProtocolVersion(semver::Version),
 }
 
 #[derive(Debug)]
@@ -51,21 +54,19 @@ pub struct StealerCommand {
 }
 
 pub struct TcpStealerTask {
-    handle: StealHandle,
+    subscriptions: PortSubscriptions,
     command_rx: mpsc::Receiver<StealerCommand>,
     clients: HashMap<ClientId, Client>,
     disconnected_clients: FuturesUnordered<ChannelClosedFuture>,
-    subscriptions: HashMap<u16, PortSubscription>,
 }
 
 impl TcpStealerTask {
     pub fn new(handle: StealHandle, command_rx: mpsc::Receiver<StealerCommand>) -> Self {
         Self {
-            handle,
+            subscriptions: PortSubscriptions::new(handle),
             command_rx,
             clients: Default::default(),
             disconnected_clients: Default::default(),
-            subscriptions: Default::default(),
         }
     }
 
@@ -79,9 +80,9 @@ impl TcpStealerTask {
                     self.handle_command(command).await?;
                 }
 
-                Some(result) = self.handle.next() => {
-                    let traffic = result?;
-                    self.handle_stolen_traffic(traffic).await;
+                Some(result) = self.subscriptions.next() => {
+                    let (traffic, subscription) = result?;
+                    Self::handle_stolen_traffic(&self.clients, traffic, subscription).await;
                 }
 
                 Some(client_id) = self.disconnected_clients.next() => {
@@ -93,13 +94,16 @@ impl TcpStealerTask {
         Ok(())
     }
 
-    fn protocol_version_req(traffic: &StolenTraffic) -> Option<&'static VersionReq> {
+    fn protocol_version_req(traffic: &StolenTraffic) -> Cow<'static, semver::VersionReq> {
         match traffic {
             StolenTraffic::Tcp(tcp) => tcp
                 .info()
                 .tls_connector
                 .is_some()
-                .then_some(&*NEW_CONNECTION_V2_VERSION),
+                .then_some(&*NEW_CONNECTION_V2_VERSION)
+                .map(Cow::Borrowed)
+                .unwrap_or(Cow::Owned(semver::VersionReq::STAR)),
+
             StolenTraffic::Http(http) => http
                 .info()
                 .tls_connector
@@ -110,34 +114,28 @@ impl TcpStealerTask {
                         .headers
                         .contains_key(UPGRADE)
                         .then_some(&*HTTP_FILTERED_UPGRADE_VERSION)
-                }),
+                })
+                .map(Cow::Borrowed)
+                .unwrap_or(Cow::Owned(semver::VersionReq::STAR)),
         }
     }
 
-    async fn handle_stolen_traffic(&mut self, traffic: StolenTraffic) {
-        let subscription = self
-            .subscriptions
-            .get(&traffic.destination_port())
-            .expect("subscription not found");
-
+    async fn handle_stolen_traffic(
+        clients: &HashMap<ClientId, Client>,
+        traffic: StolenTraffic,
+        subscription: &PortSubscription,
+    ) {
         let protocol_version_req = Self::protocol_version_req(&traffic);
 
-        let (clients, mut http) = match (subscription, traffic) {
+        let (filters, mut http) = match (subscription, traffic) {
             (PortSubscription::Unfiltered(client_id), StolenTraffic::Tcp(tcp)) => {
-                let client = self.clients.get(client_id).expect("client not found");
+                let client = clients.get(client_id).expect("client not found");
 
-                let blocked = protocol_version_req.is_some_and(|req| {
-                    client
-                        .protocol_version
-                        .as_ref()
-                        .is_none_or(|version| req.matches(version).not())
-                });
-
-                let message = if blocked {
+                let message = if client.protocol_version.matches(&protocol_version_req).not() {
                     tcp.pass_through();
                     StealerMessage::Log(LogMessage::warn(format!(
                         "A TCP connection was not stolen due to mirrord-protocol version requirement: {}",
-                        protocol_version_req.unwrap_or(&VersionReq::STAR),
+                        protocol_version_req,
                     )))
                 } else {
                     StealerMessage::StolenTcp(tcp.steal())
@@ -149,20 +147,13 @@ impl TcpStealerTask {
             }
 
             (PortSubscription::Unfiltered(client_id), StolenTraffic::Http(http)) => {
-                let client = self.clients.get(client_id).expect("client not found");
+                let client = clients.get(client_id).expect("client not found");
 
-                let blocked = protocol_version_req.is_some_and(|req| {
-                    client
-                        .protocol_version
-                        .as_ref()
-                        .is_none_or(|version| req.matches(version).not())
-                });
-
-                let message = if blocked {
+                let message = if client.protocol_version.matches(&protocol_version_req).not() {
                     http.pass_through();
                     StealerMessage::Log(LogMessage::warn(format!(
                         "A TCP connection was not stolen due to mirrord-protocol version requirement: {}",
-                        protocol_version_req.unwrap_or(&VersionReq::STAR),
+                        protocol_version_req,
                     )))
                 } else {
                     StealerMessage::StolenHttp(http.steal())
@@ -178,24 +169,18 @@ impl TcpStealerTask {
                 return;
             }
 
-            (PortSubscription::Filtered(clients), StolenTraffic::Http(http)) => (clients, http),
+            (PortSubscription::Filtered(filters), StolenTraffic::Http(http)) => (filters, http),
         };
 
         let mut send_to = None;
         let mut preempted = vec![];
         let mut blocked_on_protocol = vec![];
-        clients
+        filters
             .iter()
             .filter(|(_, filter)| filter.matches(http.parts_mut()))
-            .map(|(client_id, _)| self.clients.get(client_id).expect("client not found"))
+            .map(|(client_id, _)| clients.get(client_id).expect("client not found"))
             .for_each(|client| {
-                let blocked = protocol_version_req.is_some_and(|req| {
-                    client
-                        .protocol_version
-                        .as_ref()
-                        .is_none_or(|version| req.matches(version).not())
-                });
-                if blocked {
+                if client.protocol_version.matches(&protocol_version_req).not() {
                     blocked_on_protocol.push(client);
                 } else if send_to.is_none() {
                     send_to = Some(client);
@@ -219,7 +204,7 @@ impl TcpStealerTask {
             let _ = client.message_tx.send(StealerMessage::Log(LogMessage::warn(format!(
                     "An HTTP request was not stolen due to mirrord-protocol version requirement: {}. \
                     URI=({}), HEADERS=({:?}) PORT=({})",
-                    protocol_version_req.unwrap_or(&VersionReq::STAR),
+                    protocol_version_req,
                     http.parts().uri,
                     http.parts().headers,
                     http.info().original_destination.port(),
@@ -238,7 +223,10 @@ impl TcpStealerTask {
 
     async fn handle_command(&mut self, command: StealerCommand) -> Result<(), RedirectorTaskError> {
         match command.command {
-            Command::NewClient(message_tx) => {
+            Command::NewClient {
+                message_tx,
+                protocol_version,
+            } => {
                 let Entry::Vacant(e) = self.clients.entry(command.client_id) else {
                     unreachable!("client id already exists");
                 };
@@ -250,28 +238,14 @@ impl TcpStealerTask {
 
                 e.insert(Client {
                     message_tx,
-                    protocol_version: None,
+                    protocol_version,
                 });
             }
 
             Command::PortSubscribe { port, filter } => {
-                match self.subscriptions.entry(port) {
-                    Entry::Occupied(mut e) => {
-                        e.get_mut().extend_or_replace(command.client_id, filter);
-                    }
-                    Entry::Vacant(e) => {
-                        self.handle.steal(port).await?;
-                        let subscription = match filter {
-                            Some(filter) => PortSubscription::Filtered(HashMap::from([(
-                                command.client_id,
-                                filter,
-                            )])),
-                            None => PortSubscription::Unfiltered(command.client_id),
-                        };
-                        e.insert(subscription);
-                    }
-                }
-
+                self.subscriptions
+                    .subscribe(port, command.client_id, filter)
+                    .await?;
                 let _ = self
                     .clients
                     .get(&command.client_id)
@@ -282,22 +256,7 @@ impl TcpStealerTask {
             }
 
             Command::PortUnsubscribe(port) => {
-                let Entry::Occupied(mut e) = self.subscriptions.entry(port) else {
-                    return Ok(());
-                };
-
-                if e.get_mut().remove_if_exists(command.client_id).not() {
-                    self.handle.stop_steal(port);
-                    e.remove();
-                }
-            }
-
-            Command::SwitchProtocolVersion(version) => {
-                self.clients
-                    .get_mut(&command.client_id)
-                    .expect("client not found")
-                    .protocol_version
-                    .replace(version);
+                self.subscriptions.unsubscribe(port, command.client_id);
             }
         }
 
@@ -306,48 +265,11 @@ impl TcpStealerTask {
 
     fn handle_client_disconnected(&mut self, client_id: ClientId) {
         self.clients.remove(&client_id);
-        self.subscriptions.retain(|port, subscription| {
-            let retain = subscription.remove_if_exists(client_id);
-            if retain.not() {
-                self.handle.stop_steal(*port);
-            }
-            retain
-        });
+        self.subscriptions.unsubscribe_all(client_id);
     }
 }
 
 struct Client {
     message_tx: mpsc::Sender<StealerMessage>,
-    protocol_version: Option<semver::Version>,
-}
-
-enum PortSubscription {
-    Unfiltered(ClientId),
-    Filtered(HashMap<ClientId, HttpFilter>),
-}
-
-impl PortSubscription {
-    fn remove_if_exists(&mut self, client_id: ClientId) -> bool {
-        match self {
-            Self::Unfiltered(client) => *client != client_id,
-            Self::Filtered(clients) => {
-                clients.remove(&client_id);
-                clients.is_empty().not()
-            }
-        }
-    }
-
-    fn extend_or_replace(&mut self, client_id: ClientId, filter: Option<HttpFilter>) {
-        match (self, filter) {
-            (this, None) => *this = Self::Unfiltered(client_id),
-
-            (this @ Self::Unfiltered(..), Some(filter)) => {
-                *this = Self::Filtered(HashMap::from([(client_id, filter)]));
-            }
-
-            (Self::Filtered(clients), Some(filter)) => {
-                clients.insert(client_id, filter);
-            }
-        }
-    }
+    protocol_version: SharedProtocolVersion,
 }

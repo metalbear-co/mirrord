@@ -7,6 +7,7 @@ use tokio_stream::{wrappers::ReceiverStream, StreamMap, StreamNotifyClose};
 use super::{
     connection::{http::RedirectedHttp, tcp::RedirectedTcp},
     error::RedirectorTaskError,
+    task::RedirectionRequest,
 };
 use crate::util::status::StatusReceiver;
 
@@ -15,13 +16,13 @@ use crate::util::status::StatusReceiver;
 /// Allows for stealing incoming traffic.
 pub struct StealHandle {
     /// For sending steal requests to the task.
-    message_tx: mpsc::Sender<StealRequest>,
+    message_tx: mpsc::Sender<RedirectionRequest>,
     /// For fetching the task error.
     ///
     /// [`RedirectorTask`](super::RedirectorTask) never exits before this handle is dropped.
     /// Also, it never removes any port steal on its own.
     /// Therefore, if one of our [`mpsc::channel`]s fails, we assume that the task has failed
-    /// and we use this [`TaskError`] to retrieve the task's error.
+    /// and we use this channel to retrieve the task's error.
     task_status: StatusReceiver<RedirectorTaskError>,
     /// For receiving stolen traffic.
     stolen_ports: StreamMap<u16, StreamNotifyClose<ReceiverStream<StolenTraffic>>>,
@@ -29,7 +30,7 @@ pub struct StealHandle {
 
 impl StealHandle {
     pub(super) fn new(
-        message_tx: mpsc::Sender<StealRequest>,
+        message_tx: mpsc::Sender<RedirectionRequest>,
         task_status: StatusReceiver<RedirectorTaskError>,
     ) -> Self {
         Self {
@@ -54,7 +55,7 @@ impl StealHandle {
         let (receiver_tx, receiver_rx) = oneshot::channel();
         if self
             .message_tx
-            .send(StealRequest { port, receiver_tx })
+            .send(RedirectionRequest::Steal { port, receiver_tx })
             .await
             .is_err()
         {
@@ -101,18 +102,6 @@ impl StolenTraffic {
             Self::Http(http) => http.info().original_destination.port(),
         }
     }
-}
-
-/// A request for the [`RedirectorTask`](super::task::RedirectorTask) to start stealing connections
-/// from some port.
-///
-/// Sent from a [`StealHandle`] to its task.
-pub(super) struct StealRequest {
-    /// Port to steal.
-    pub(super) port: u16,
-    /// Will be used to send the [`StolenConnectionsRx`] to the [`StealHandle`],
-    /// once the [`RedirectorTask`] completes the port steal.
-    pub(super) receiver_tx: oneshot::Sender<mpsc::Receiver<StolenTraffic>>,
 }
 
 impl fmt::Debug for StealHandle {

@@ -35,15 +35,21 @@ use crate::{
     incoming::{
         BoxBody, IncomingStream, IncomingStreamItem, ResponseProvider, StolenHttp, StolenTcp,
     },
-    util::{remote_runtime::BgTaskStatus, ClientId},
+    util::{
+        protocol_version::SharedProtocolVersion,
+        remote_runtime::BgTaskStatus,
+        ClientId,
+    },
 };
+
+mod request_state;
 
 /// Bridges the communication between the agent and the [`TcpConnectionStealer`] task.
 /// There is an API instance for each connected layer ("client"). All API instances send commands
 /// On the same stealer command channel, where the layer-independent stealer listens to them.
 pub struct TcpStealerApi {
     client_id: ClientId,
-    protocol_version: Option<semver::Version>,
+    protocol_version: SharedProtocolVersion,
     command_tx: mpsc::Sender<StealerCommand>,
     message_rx: mpsc::Receiver<StealerMessage>,
     task_status: BgTaskStatus,
@@ -58,6 +64,7 @@ impl TcpStealerApi {
     pub async fn new(
         client_id: ClientId,
         command_tx: mpsc::Sender<StealerCommand>,
+        protocol_version: SharedProtocolVersion,
         task_status: BgTaskStatus,
         channel_size: usize,
     ) -> AgentResult<Self> {
@@ -66,7 +73,10 @@ impl TcpStealerApi {
         let init_result = command_tx
             .send(StealerCommand {
                 client_id,
-                command: Command::NewClient(message_tx),
+                command: Command::NewClient {
+                    message_tx,
+                    protocol_version: protocol_version.clone(),
+                },
             })
             .await;
         if init_result.is_err() {
@@ -75,7 +85,7 @@ impl TcpStealerApi {
 
         Ok(Self {
             client_id,
-            protocol_version: None,
+            protocol_version,
             command_tx,
             message_rx,
             task_status,
@@ -154,8 +164,7 @@ impl TcpStealerApi {
 
         if self
             .protocol_version
-            .as_ref()
-            .is_some_and(|version| HTTP_CHUNKED_REQUEST_V2_VERSION.matches(version))
+            .matches(&*HTTP_CHUNKED_REQUEST_V2_VERSION)
         {
             let message = DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(
                 ChunkedRequest::StartV2(ChunkedRequestStartV2 {
@@ -189,10 +198,7 @@ impl TcpStealerApi {
             // Request body has finished, so we can send just one message with framed/legacy.
             // Chunked v1 requires at least two messages to send the request.
 
-            let framed = self
-                .protocol_version
-                .as_ref()
-                .is_some_and(|version| HTTP_FRAMED_VERSION.matches(version));
+            let framed = self.protocol_version.matches(&*HTTP_FRAMED_VERSION);
 
             let message = if framed {
                 DaemonMessage::Tcp(DaemonTcp::HttpRequestFramed(HttpRequest {
@@ -235,8 +241,7 @@ impl TcpStealerApi {
             vec![message]
         } else if self
             .protocol_version
-            .as_ref()
-            .is_some_and(|version| HTTP_CHUNKED_REQUEST_VERSION.matches(version))
+            .matches(&*HTTP_CHUNKED_REQUEST_VERSION)
         {
             // The client supports chunked, so we can send the request head instantly.
 
@@ -407,11 +412,7 @@ impl TcpStealerApi {
                 None
             }
 
-            None if self
-                .protocol_version
-                .as_ref()
-                .is_some_and(|version| HTTP_FRAMED_VERSION.matches(version)) =>
-            {
+            None if self.protocol_version.matches(&*HTTP_FRAMED_VERSION) => {
                 Some(DaemonTcp::HttpRequestFramed(request))
             }
 
@@ -433,12 +434,6 @@ impl TcpStealerApi {
                 Some(DaemonTcp::HttpRequest(request))
             }
         }
-    }
-
-    pub async fn switch_protocol_version(&mut self, version: semver::Version) {
-        self.protocol_version.replace(version.clone());
-        self.send_command(Command::SwitchProtocolVersion(version))
-            .await
     }
 
     fn send_response(

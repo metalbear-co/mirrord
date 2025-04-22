@@ -22,6 +22,7 @@ mod file;
 mod http;
 mod incoming;
 mod metrics;
+mod mirror;
 mod namespace;
 mod outgoing;
 mod runtime;

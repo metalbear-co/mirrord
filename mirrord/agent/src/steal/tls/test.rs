@@ -19,7 +19,7 @@ use tokio::{
 };
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
-use crate::{steal::StealTlsHandlerStore, util::path_resolver::InTargetPathResolver};
+use crate::{steal::tls::StealTlsHandlerStore, util::path_resolver::InTargetPathResolver};
 
 pub struct CertChainWithKey {
     pub key: PrivateKeyDer<'static>,

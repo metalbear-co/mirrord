@@ -6,9 +6,9 @@ use super::BackgroundTask;
 use crate::{
     dns::{DnsCommand, DnsWorker},
     error::{AgentError, AgentResult},
-    incoming::{self, RedirectorTask, StealHandle},
+    incoming::{self, MirrorHandle, RedirectorTask, StealHandle},
     sniffer::{messages::SnifferCommand, TcpConnectionSniffer},
-    steal::{StealTlsHandlerStore, StealerCommand, TcpStealerTask},
+    steal::{tls::StealTlsHandlerStore, StealerCommand, TcpStealerTask},
     util::{
         path_resolver::InTargetPathResolver,
         remote_runtime::{BgTaskRuntime, IntoStatus},
@@ -21,7 +21,7 @@ use crate::{
 pub(super) async fn start_traffic_redirector(
     runtime: &BgTaskRuntime,
     target_pid: u64,
-) -> AgentResult<StealHandle> {
+) -> AgentResult<(StealHandle, MirrorHandle)> {
     let flush_connections = envs::STEALER_FLUSH_CONNECTIONS.from_env_or_default();
     let pod_ips = envs::POD_IPS.from_env_or_default();
     let support_ipv6 = envs::IPV6_SUPPORT.from_env_or_default();
@@ -30,7 +30,7 @@ pub(super) async fn start_traffic_redirector(
     let tls_handlers =
         StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(target_pid));
 
-    let (task, handle) = runtime
+    let (task, steal_handle, mirror_handle) = runtime
         .spawn(async move {
             incoming::create_iptables_redirector(flush_connections, &pod_ips, support_ipv6)
                 .await
@@ -42,7 +42,7 @@ pub(super) async fn start_traffic_redirector(
 
     runtime.spawn(task.run());
 
-    Ok(handle)
+    Ok((steal_handle, mirror_handle))
 }
 
 pub(super) async fn start_sniffer(

@@ -18,10 +18,7 @@ use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
 use super::{error::HttpDetectError, ConnError, Redirected};
 use crate::{
     http::HttpVersion,
-    steal::{
-        tls::{self, handler::PassThroughTlsConnector},
-        StealTlsHandlerStore,
-    },
+    steal::tls::{self, handler::PassThroughTlsConnector, StealTlsHandlerStore},
     util::status::Panicked,
 };
 
