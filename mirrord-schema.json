@@ -894,7 +894,7 @@
       "properties": {
         "host_ip": {
           "title": "external_proxy.host_ip {#external_proxy-host_ip}",
-          "description": "Specify a custom host ip addr to listen on.\n\nWill try and resolve local addr if not specified.",
+          "description": "Specify a custom host ip addr to listen on.\n\nThis address must be accessible from within the container. If not specified, mirrord will try and resolve a local address to use.",
           "type": [
             "string",
             "null"
