@@ -8,6 +8,41 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.140.0](https://github.com/metalbear-co/mirrord/tree/3.140.0) - 2025-04-22
+
+
+### Added
+
+- New config value to allow override of listen ip for external proxy
+  (`external_proxy.host_ip`).
+  [#3274](https://github.com/metalbear-co/mirrord/issues/3274)
+
+
+### Changed
+
+- The IP table chain names used by the agent are no longer randomized. The
+  agent detects if another agent is already
+  running or if a previous cleanup failed.
+  [#3159](https://github.com/metalbear-co/mirrord/issues/3159)
+- Corrected agent pod creation progress message.
+
+
+### Fixed
+
+- Fix issue with port-forward feature that prevented more than one open
+  connection per socket addr.
+  [#3158](https://github.com/metalbear-co/mirrord/issues/3158)
+- Use ss for killing existing connections to allow stealing to begin
+
+
+### Internal
+
+- Add cargo-deny action to check for any advisory or license issues.
+
+  *Small updates to dependencies is also inculded*
+  [#3250](https://github.com/metalbear-co/mirrord/issues/3250)
+- Refactors the e2e tests utils.rs into multiple files/modules.
+
 ## [3.139.1](https://github.com/metalbear-co/mirrord/tree/3.139.1) - 2025-04-17
 
 
