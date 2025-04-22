@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{net::IpAddr, path::PathBuf};
 
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
@@ -97,4 +97,12 @@ pub struct ExternalProxyConfig {
     /// Defaults to true.
     #[config(default = true)]
     pub json_log: bool,
+
+    /// ### external_proxy.host_ip {#external_proxy-host_ip}
+    ///
+    /// Specify a custom host ip addr to listen on.
+    ///
+    /// This address must be accessible from within the container.
+    /// If not specified, mirrord will try and resolve a local address to use.
+    pub host_ip: Option<IpAddr>,
 }
