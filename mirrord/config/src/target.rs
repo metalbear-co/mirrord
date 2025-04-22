@@ -10,6 +10,7 @@ use self::{
     deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, rollout::RolloutTarget,
     service::ServiceTarget, stateful_set::StatefulSetTarget,
 };
+use crate::feature::FeatureConfig;
 use crate::{
     config::{
         from_env::{FromEnv, FromEnvWithError},
@@ -18,7 +19,6 @@ use crate::{
     },
     util::string_or_struct_option,
 };
-use strum_macros::Display;
 use strum_macros::{EnumDiscriminants, EnumString};
 
 pub mod cron_job;
@@ -270,10 +270,12 @@ mirrord-layer failed to parse the provided target!
 /// - `statefulset/{statefulset-name}[/container/{container-name}]`;
 /// - `service/{service-name}[/container/{container-name}]`;
 /// - `replicaset/{replicaset-name}[/container/{container-name}]`;
+///
+/// Used to derive `TargetType` via the strum crate
 #[warn(clippy::wildcard_enum_match_arm)]
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema, EnumDiscriminants)]
 #[serde(untagged, deny_unknown_fields)]
-#[strum_discriminants(derive(EnumString, Display))]
+#[strum_discriminants(derive(EnumString, Serialize))]
 #[strum_discriminants(name(TargetType))]
 pub enum Target {
     /// <!--${internal}-->
@@ -360,6 +362,51 @@ impl Target {
                 | Target::Service(_)
                 | Target::ReplicaSet(_)
         )
+    }
+}
+
+impl fmt::Display for TargetType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let stringifed = match self {
+            TargetType::Targetless => "targetless",
+            TargetType::Pod => "pod",
+            TargetType::Deployment => "deployment",
+            TargetType::Rollout => "rollout",
+            TargetType::Job => "job",
+            TargetType::CronJob => "cronjob",
+            TargetType::StatefulSet => "statefulset",
+            TargetType::Service => "service",
+            TargetType::ReplicaSet => "replicaset",
+        };
+
+        f.write_str(stringifed)
+    }
+}
+
+impl TargetType {
+    pub fn all() -> impl Iterator<Item = Self> {
+        [
+            Self::Targetless,
+            Self::Pod,
+            Self::Deployment,
+            Self::Rollout,
+            Self::Job,
+            Self::CronJob,
+            Self::StatefulSet,
+            Self::Service,
+            Self::ReplicaSet,
+        ]
+            .into_iter()
+    }
+
+    pub fn compatible_with(&self, config: &FeatureConfig) -> bool {
+        match self {
+            Self::Targetless | Self::Rollout => !config.copy_target.enabled,
+            Self::Pod => !(config.copy_target.enabled && config.copy_target.scale_down),
+            Self::Job | Self::CronJob => config.copy_target.enabled,
+            Self::Service => !config.copy_target.enabled,
+            Self::Deployment | Self::StatefulSet | Self::ReplicaSet => true,
+        }
     }
 }
 
