@@ -6,10 +6,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use error::{StealTlsSetupError, StealTlsSetupErrorInner};
-use handler::StealTlsHandler;
+use error::{IncomingTlsSetupError, IncomingTlsSetupErrorInner};
+use handler::IncomingTlsHandler;
 use mirrord_agent_env::steal_tls::{
-    AgentClientConfig, AgentServerConfig, StealPortTlsConfig, TlsAuthentication,
+    AgentClientConfig, AgentServerConfig, IncomingPortTlsConfig, TlsAuthentication,
     TlsClientVerification, TlsServerVerification,
 };
 use mirrord_tls_util::{
@@ -39,8 +39,8 @@ pub const HTTP_1_0_ALPN_NAME: &[u8] = b"http/1.0";
 /// An already built [`StealTlsHandler`] or a configuration to build one.
 #[derive(Debug)]
 enum MaybeBuilt {
-    Config(StealPortTlsConfig),
-    Handler(StealTlsHandler),
+    Config(IncomingPortTlsConfig),
+    Handler(IncomingTlsHandler),
 }
 
 /// Inner state of [`StealTlsHandlerStore`].
@@ -51,13 +51,13 @@ struct State {
     path_resolver: InTargetPathResolver,
 }
 
-/// Holds [`StealPortTlsConfig`]s for all relevant ports and caches built [`StealTlsHandler`]s.
+/// Holds [`IncomingPortTlsConfig`]s for all relevant ports and caches built [`StealTlsHandler`]s.
 #[derive(Clone)]
-pub struct StealTlsHandlerStore(Arc<State>);
+pub struct IncomingTlsHandlerStore(Arc<State>);
 
-impl StealTlsHandlerStore {
+impl IncomingTlsHandlerStore {
     #[tracing::instrument(level = Level::DEBUG, ret)]
-    pub fn new(configs: Vec<StealPortTlsConfig>, path_resolver: InTargetPathResolver) -> Self {
+    pub fn new(configs: Vec<IncomingPortTlsConfig>, path_resolver: InTargetPathResolver) -> Self {
         let by_port = configs
             .into_iter()
             .map(|config| (config.port, MaybeBuilt::Config(config)))
@@ -73,7 +73,10 @@ impl StealTlsHandlerStore {
     ///
     /// Returns [`None`] if this port is not covered by the TLS steal config.
     #[tracing::instrument(level = Level::DEBUG, ret, err)]
-    pub async fn get(&self, port: u16) -> Result<Option<StealTlsHandler>, StealTlsSetupError> {
+    pub async fn get(
+        &self,
+        port: u16,
+    ) -> Result<Option<IncomingTlsHandler>, IncomingTlsSetupError> {
         let config = match self.0.by_port.lock()?.get(&port) {
             None => return Ok(None),
             Some(MaybeBuilt::Handler(handler)) => return Ok(Some(handler.clone())),
@@ -84,16 +87,16 @@ impl StealTlsHandlerStore {
             async {
                 self.build_server_config(config.agent_as_server)
                     .await
-                    .map_err(StealTlsSetupError::ServerSetupError)
+                    .map_err(IncomingTlsSetupError::ServerSetupError)
             },
             async {
                 self.build_client_config(config.agent_as_client)
                     .await
-                    .map_err(StealTlsSetupError::ClientSetupError)
+                    .map_err(IncomingTlsSetupError::ClientSetupError)
             },
         )?;
 
-        let handler = StealTlsHandler {
+        let handler = IncomingTlsHandler {
             server_config,
             client_config,
         };
@@ -109,11 +112,11 @@ impl StealTlsHandlerStore {
 
     /// Resolves the given path in the target container filesystem.
     #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))] // errors are already logged on `ERROR` level in `get`
-    fn resolve_path(&self, path: PathBuf) -> Result<PathBuf, StealTlsSetupErrorInner> {
+    fn resolve_path(&self, path: PathBuf) -> Result<PathBuf, IncomingTlsSetupErrorInner> {
         self.0
             .path_resolver
             .resolve(&path)
-            .map_err(|error| StealTlsSetupErrorInner::PathResolutionError { error, path })
+            .map_err(|error| IncomingTlsSetupErrorInner::PathResolutionError { error, path })
     }
 
     /// Builds [`ServerConfig`] for the mirrord-agent's TLS acceptor.
@@ -121,7 +124,7 @@ impl StealTlsHandlerStore {
     async fn build_server_config(
         &self,
         config: AgentServerConfig,
-    ) -> Result<Arc<ServerConfig>, StealTlsSetupErrorInner> {
+    ) -> Result<Arc<ServerConfig>, IncomingTlsSetupErrorInner> {
         let verifier: Arc<dyn ClientCertVerifier> = match config.verification {
             Some(TlsClientVerification {
                 allow_anonymous,
@@ -141,7 +144,7 @@ impl StealTlsHandlerStore {
                         // we insert a self-signed dummy certificate.
                         Self::add_dummy(&mut root_store)?;
                     } else {
-                        return Err(StealTlsSetupErrorInner::NoGoodRoot);
+                        return Err(IncomingTlsSetupErrorInner::NoGoodRoot);
                     }
                 }
 
@@ -155,7 +158,7 @@ impl StealTlsHandlerStore {
                     if allow_anonymous {
                         builder = builder.allow_unauthenticated();
                     }
-                    builder.build().map_err(StealTlsSetupErrorInner::from)?
+                    builder.build().map_err(IncomingTlsSetupErrorInner::from)?
                 }
             }
             None => Arc::new(NoClientAuth),
@@ -174,7 +177,7 @@ impl StealTlsHandlerStore {
         let mut server_config = ServerConfig::builder()
             .with_client_cert_verifier(verifier)
             .with_single_cert(cert_chain, key_der)
-            .map_err(StealTlsSetupErrorInner::CertChainInvalid)?;
+            .map_err(IncomingTlsSetupErrorInner::CertChainInvalid)?;
 
         server_config.alpn_protocols = config
             .alpn_protocols
@@ -190,7 +193,7 @@ impl StealTlsHandlerStore {
     async fn build_client_config(
         &self,
         config: AgentClientConfig,
-    ) -> Result<Arc<ClientConfig>, StealTlsSetupErrorInner> {
+    ) -> Result<Arc<ClientConfig>, IncomingTlsSetupErrorInner> {
         let TlsServerVerification {
             accept_any_cert,
             trust_roots,
@@ -208,7 +211,7 @@ impl StealTlsHandlerStore {
             let root_store = best_effort_root_store(trust_roots).await?;
 
             if root_store.is_empty() {
-                return Err(StealTlsSetupErrorInner::NoGoodRoot);
+                return Err(IncomingTlsSetupErrorInner::NoGoodRoot);
             }
 
             ClientConfig::builder().with_root_certificates(root_store)
@@ -227,7 +230,7 @@ impl StealTlsHandlerStore {
 
                 builder
                     .with_client_auth_cert(cert_chain, key_der)
-                    .map_err(StealTlsSetupErrorInner::CertChainInvalid)?
+                    .map_err(IncomingTlsSetupErrorInner::CertChainInvalid)?
             }
             None => builder.with_no_client_auth(),
         };
@@ -239,22 +242,32 @@ impl StealTlsHandlerStore {
     ///
     /// Sometimes required in [`Self::build_server_config`].
     #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))] // errors are already logged on `ERROR` level in `get`
-    fn add_dummy(root_store: &mut RootCertStore) -> Result<(), StealTlsSetupErrorInner> {
+    fn add_dummy(root_store: &mut RootCertStore) -> Result<(), IncomingTlsSetupErrorInner> {
         let dummy = rcgen::generate_simple_self_signed(vec!["dummy".to_string()])?;
         let der = CertificateDer::from(dummy.cert);
         root_store
             .add(der)
-            .map_err(StealTlsSetupErrorInner::GeneratedInvalidDummy)?;
+            .map_err(IncomingTlsSetupErrorInner::GeneratedInvalidDummy)?;
 
         Ok(())
     }
 }
 
-impl fmt::Debug for StealTlsHandlerStore {
+impl fmt::Debug for IncomingTlsHandlerStore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StealTlsHandlerStore")
             .field("path_resolver", &self.0.path_resolver)
             .field("by_port", &self.0.by_port.lock())
             .finish()
+    }
+}
+
+#[cfg(test)]
+impl IncomingTlsHandlerStore {
+    pub fn dummy() -> Self {
+        Self::new(
+            Default::default(),
+            InTargetPathResolver::with_root_path("/".into()),
+        )
     }
 }

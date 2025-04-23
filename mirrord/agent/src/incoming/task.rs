@@ -23,9 +23,9 @@ use super::{
     error::RedirectorTaskError,
     mirror_handle::{MirrorHandle, MirroredTraffic},
     steal_handle::{StealHandle, StolenTraffic},
+    tls::IncomingTlsHandlerStore,
     PortRedirector, Redirected,
 };
-use crate::steal::tls::StealTlsHandlerStore;
 
 /// A task responsible for redirecting incoming connections.
 ///
@@ -62,7 +62,7 @@ pub struct RedirectorTask<R> {
     ///
     /// We need to decode TLS in order to detect HTTP connections
     /// and split the connections into requests.
-    tls_handlers: StealTlsHandlerStore,
+    tls_handlers: IncomingTlsHandlerStore,
     /// Provides the handles with this task's failure reason.
     ///
     /// Dropping this sender will be seen as a panic in this task.
@@ -100,7 +100,7 @@ where
     /// The task has to be run with [`Self::run`] to start redirecting connections.
     pub fn new(
         redirector: R,
-        tls_handlers: StealTlsHandlerStore,
+        tls_handlers: IncomingTlsHandlerStore,
     ) -> (Self, StealHandle, MirrorHandle) {
         let (error_tx, error_rx) = oneshot::channel();
         let (external_tx, external_rx) = mpsc::channel(Self::EXTERNAL_CHANNEL_CAPACITY);

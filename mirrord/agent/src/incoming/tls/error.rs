@@ -8,16 +8,16 @@ use tokio::task::JoinError;
 /// Errors that can occur when building a [`StealTlsHandler`](super::handler::StealTlsHandler)
 /// with [`StealTlsHandlerStore`](super::StealTlsHandlerStore).
 #[derive(Error, Debug)]
-pub enum StealTlsSetupError {
+pub enum IncomingTlsSetupError {
     #[error("TLS handlers store mutex is poisoned")]
     MutexPoisoned,
     #[error("failed to build mirrord-agent's TLS server: {0}")]
-    ServerSetupError(#[source] StealTlsSetupErrorInner),
+    ServerSetupError(#[source] IncomingTlsSetupErrorInner),
     #[error("failed to build mirrord-agent's TLS client: {0}")]
-    ClientSetupError(#[source] StealTlsSetupErrorInner),
+    ClientSetupError(#[source] IncomingTlsSetupErrorInner),
 }
 
-impl<T> From<PoisonError<T>> for StealTlsSetupError {
+impl<T> From<PoisonError<T>> for IncomingTlsSetupError {
     fn from(_: PoisonError<T>) -> Self {
         Self::MutexPoisoned
     }
@@ -25,7 +25,7 @@ impl<T> From<PoisonError<T>> for StealTlsSetupError {
 
 /// Errors that can occure when building mirrord-agent's TLS server or client.
 #[derive(Error, Debug)]
-pub enum StealTlsSetupErrorInner {
+pub enum IncomingTlsSetupErrorInner {
     #[error("failed to resolve path `{path}` in the target container filesystem: {error}")]
     PathResolutionError {
         #[source]
@@ -48,7 +48,7 @@ pub enum StealTlsSetupErrorInner {
     FromPemError(#[from] FromPemError),
 }
 
-impl From<JoinError> for StealTlsSetupErrorInner {
+impl From<JoinError> for IncomingTlsSetupErrorInner {
     fn from(_: JoinError) -> Self {
         Self::BackgroundTaskPanicked
     }

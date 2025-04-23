@@ -1,7 +1,7 @@
 use std::{collections::HashSet, net::IpAddr, sync::LazyLock};
 
 use k8s_openapi::api::core::v1::{ContainerStatus, Pod};
-use mirrord_agent_env::{mesh::MeshVendor, steal_tls::StealPortTlsConfig};
+use mirrord_agent_env::{mesh::MeshVendor, steal_tls::IncomingPortTlsConfig};
 use mirrord_config::agent::AgentConfig;
 use mirrord_progress::Progress;
 use rand::distr::{Alphanumeric, SampleString};
@@ -44,7 +44,7 @@ pub struct ContainerConfig {
     /// Whether to support IPv6-only clusters.
     pub support_ipv6: bool,
     /// Configuration for stealing TLS traffic.
-    pub steal_tls_config: Vec<StealPortTlsConfig>,
+    pub steal_tls_config: Vec<IncomingPortTlsConfig>,
 }
 
 #[derive(Clone, Debug)]
@@ -63,7 +63,7 @@ pub struct ContainerParams {
     /// Whether to support IPv6-only clusters.
     pub support_ipv6: bool,
     /// Configuration for stealing TLS traffic.
-    pub steal_tls_config: Vec<StealPortTlsConfig>,
+    pub steal_tls_config: Vec<IncomingPortTlsConfig>,
     /// Whether the agent should use iptables for mirroring traffic.
     pub enable_passthrough_mirroring: bool,
 }

@@ -6,9 +6,9 @@ use super::BackgroundTask;
 use crate::{
     dns::{DnsCommand, DnsWorker},
     error::{AgentError, AgentResult},
-    incoming::{self, MirrorHandle, RedirectorTask, StealHandle},
+    incoming::{self, IncomingTlsHandlerStore, MirrorHandle, RedirectorTask, StealHandle},
     sniffer::{messages::SnifferCommand, TcpConnectionSniffer},
-    steal::{tls::StealTlsHandlerStore, StealerCommand, TcpStealerTask},
+    steal::{StealerCommand, TcpStealerTask},
     util::{
         path_resolver::InTargetPathResolver,
         remote_runtime::{BgTaskRuntime, IntoStatus},
@@ -28,7 +28,7 @@ pub(super) async fn start_traffic_redirector(
     let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
 
     let tls_handlers =
-        StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(target_pid));
+        IncomingTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::new(target_pid));
 
     let (task, steal_handle, mirror_handle) = runtime
         .spawn(async move {

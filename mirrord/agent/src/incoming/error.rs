@@ -2,7 +2,7 @@ use std::{error::Error, io, sync::Arc};
 
 use thiserror::Error;
 
-use crate::steal::tls::error::StealTlsSetupError;
+use super::tls::error::IncomingTlsSetupError;
 
 #[derive(Error, Debug, Clone, Copy)]
 #[error("stealing client dropped the connection/request")]
@@ -26,7 +26,7 @@ pub enum RedirectorTaskError {
 #[derive(Error, Debug)]
 pub enum HttpDetectError {
     #[error(transparent)]
-    TlsSetup(#[from] StealTlsSetupError),
+    TlsSetup(#[from] IncomingTlsSetupError),
     #[error("failed to get local address of the connection: {0}")]
     LocalAddr(#[source] io::Error),
     #[error("connection failed during HTTP detection: {0}")]

@@ -1,7 +1,7 @@
 use std::{fs, path::Path, sync::Arc};
 
 use mirrord_agent_env::steal_tls::{
-    AgentClientConfig, AgentServerConfig, StealPortTlsConfig, TlsAuthentication,
+    AgentClientConfig, AgentServerConfig, IncomingPortTlsConfig, TlsAuthentication,
     TlsClientVerification, TlsServerVerification,
 };
 use mirrord_tls_util::generate_cert;
@@ -19,7 +19,7 @@ use tokio::{
 };
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
-use crate::{steal::tls::StealTlsHandlerStore, util::path_resolver::InTargetPathResolver};
+use crate::{incoming::tls::IncomingTlsHandlerStore, util::path_resolver::InTargetPathResolver};
 
 pub struct CertChainWithKey {
     pub key: PrivateKeyDer<'static>,
@@ -120,8 +120,8 @@ async fn server_authentication(
     let chain = CertChainWithKey::new("mirrord-agent", None);
     chain.to_file(&server_pem);
 
-    let store = StealTlsHandlerStore::new(
-        vec![StealPortTlsConfig {
+    let store = IncomingTlsHandlerStore::new(
+        vec![IncomingPortTlsConfig {
             port: 443,
             agent_as_server: AgentServerConfig {
                 authentication: TlsAuthentication {
@@ -193,8 +193,8 @@ async fn client_verification(
     let root_pem = root_dir.path().join("root.pem");
     fs::write(&root_pem, trusted_root.cert.pem()).unwrap();
 
-    let store = StealTlsHandlerStore::new(
-        vec![StealPortTlsConfig {
+    let store = IncomingTlsHandlerStore::new(
+        vec![IncomingPortTlsConfig {
             port: 443,
             agent_as_server: AgentServerConfig {
                 authentication: TlsAuthentication {
@@ -265,8 +265,8 @@ async fn client_authentication(
     let auth_pem = root_dir.path().join("auth.pem");
     agent_chain.to_file(&auth_pem);
 
-    let store = StealTlsHandlerStore::new(
-        vec![StealPortTlsConfig {
+    let store = IncomingTlsHandlerStore::new(
+        vec![IncomingPortTlsConfig {
             port: 443,
             agent_as_server: AgentServerConfig {
                 authentication: TlsAuthentication {
@@ -347,8 +347,8 @@ async fn server_verification(
     let root_pem = root_dir.path().join("root.pem");
     fs::write(root_pem, trusted_root.cert.pem()).unwrap();
 
-    let store = StealTlsHandlerStore::new(
-        vec![StealPortTlsConfig {
+    let store = IncomingTlsHandlerStore::new(
+        vec![IncomingPortTlsConfig {
             port: 443,
             agent_as_server: AgentServerConfig {
                 authentication: TlsAuthentication {
@@ -414,8 +414,8 @@ async fn agent_connects_with_original_params() {
     let auth_pem = root_dir.path().join("auth.pem");
     agent_chain.to_file(&auth_pem);
 
-    let store = StealTlsHandlerStore::new(
-        vec![StealPortTlsConfig {
+    let store = IncomingTlsHandlerStore::new(
+        vec![IncomingPortTlsConfig {
             port: 443,
             agent_as_server: AgentServerConfig {
                 authentication: TlsAuthentication {

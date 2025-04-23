@@ -8,13 +8,9 @@ use std::{
 use rstest::rstest;
 use tokio::io::{AsyncWriteExt, Interest};
 
-use crate::{
-    incoming::{
-        test::dummy_redirector::DummyRedirector, MirroredTraffic, Redirected, RedirectorTask,
-        StolenTraffic,
-    },
-    steal::tls::StealTlsHandlerStore,
-    util::path_resolver::InTargetPathResolver,
+use crate::incoming::{
+    test::dummy_redirector::DummyRedirector, tls::IncomingTlsHandlerStore, MirroredTraffic,
+    Redirected, RedirectorTask, StolenTraffic,
 };
 
 /// Verifies that the [`RedirectorTask`] cleans up its state when handle's traffic channels (port
@@ -24,13 +20,8 @@ use crate::{
 #[tokio::test]
 async fn cleanup_on_dead_channel() {
     let (redirector, mut state, _tx) = DummyRedirector::new();
-    let (task, mut steal_handle, mut mirror_handle) = RedirectorTask::new(
-        redirector,
-        StealTlsHandlerStore::new(
-            Default::default(),
-            InTargetPathResolver::with_root_path("/".into()),
-        ),
-    );
+    let (task, mut steal_handle, mut mirror_handle) =
+        RedirectorTask::new(redirector, IncomingTlsHandlerStore::dummy());
     tokio::spawn(task.run());
 
     steal_handle.steal(80).await.unwrap();
@@ -71,13 +62,8 @@ async fn concurrent_mirror_and_steal_tcp() {
     let destination = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 80);
 
     let (redirector, mut state, tx) = DummyRedirector::new();
-    let (task, mut steal_handle, mut mirror_handle) = RedirectorTask::new(
-        redirector,
-        StealTlsHandlerStore::new(
-            Default::default(),
-            InTargetPathResolver::with_root_path("/".into()),
-        ),
-    );
+    let (task, mut steal_handle, mut mirror_handle) =
+        RedirectorTask::new(redirector, IncomingTlsHandlerStore::dummy());
     tokio::spawn(task.run());
 
     // Both handles should receive traffic.

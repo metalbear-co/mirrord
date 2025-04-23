@@ -16,11 +16,12 @@ use tokio::{
 };
 use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
 
-use super::{error::HttpDetectError, ConnError, Redirected};
-use crate::{
-    http::HttpVersion,
-    steal::tls::{self, handler::PassThroughTlsConnector, StealTlsHandlerStore},
+use super::{
+    error::HttpDetectError,
+    tls::{self, handler::PassThroughTlsConnector, IncomingTlsHandlerStore},
+    ConnError, Redirected,
 };
+use crate::http::HttpVersion;
 
 pub mod http;
 pub mod tcp;
@@ -54,7 +55,7 @@ impl MaybeHttp {
     /// assume no HTTP.
     pub async fn detect(
         redirected: Redirected,
-        tls_handlers: &StealTlsHandlerStore,
+        tls_handlers: &IncomingTlsHandlerStore,
     ) -> Result<Self, HttpDetectError> {
         let original_destination = redirected.destination;
         let peer_addr = redirected.source;

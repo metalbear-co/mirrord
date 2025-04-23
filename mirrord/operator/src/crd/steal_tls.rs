@@ -1,5 +1,5 @@
 use kube::CustomResource;
-use mirrord_agent_env::steal_tls::StealPortTlsConfig;
+use mirrord_agent_env::steal_tls::IncomingPortTlsConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +30,7 @@ pub struct MirrordTlsStealConfigSpec {
     /// that match all of the selector's rules.
     pub selector: Option<LabelSelector>,
     /// Configuration for stealing TLS traffic, separate for each port.
-    pub ports: Vec<StealPortTlsConfig>,
+    pub ports: Vec<IncomingPortTlsConfig>,
 }
 
 /// Custom resource for configuring how the mirrord-agent handles stealing TLS traffic from selected
@@ -57,7 +57,7 @@ pub struct MirrordClusterTlsStealConfigSpec {
     /// that match all of the selector's rules.
     pub selector: Option<LabelSelector>,
     /// Configuration for stealing TLS traffic, separate for each port.
-    pub ports: Vec<StealPortTlsConfig>,
+    pub ports: Vec<IncomingPortTlsConfig>,
 }
 
 #[cfg(test)]

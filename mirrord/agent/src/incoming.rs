@@ -9,6 +9,7 @@ mod steal_handle;
 mod task;
 #[cfg(test)]
 mod test;
+mod tls;
 
 use std::{
     future::Future,
@@ -27,6 +28,7 @@ use iptables::IpTablesRedirector;
 pub use mirror_handle::{MirrorHandle, MirroredTraffic};
 pub use steal_handle::{StealHandle, StolenTraffic};
 pub use task::RedirectorTask;
+pub use tls::IncomingTlsHandlerStore;
 use tokio::net::TcpStream;
 
 /// A component that implements redirecting incoming TCP connections.
