@@ -4,10 +4,10 @@ use futures::StreamExt;
 
 use super::{IncomingStream, IncomingStreamItem};
 
-mod dummy_redirector;
-mod http;
+pub mod dummy_redirector;
+pub mod http;
 mod task_basic;
-mod tcp;
+pub mod tcp;
 
 impl IncomingStream {
     pub async fn assert_data(&mut self, data: &[u8]) {
@@ -24,7 +24,10 @@ impl IncomingStream {
                         panic!("unexpected data {buffer:?}, expected {data:?}");
                     }
                 }
-                other => panic!("unexpected message: {other:?}"),
+                other => panic!(
+                    "unexpected message: {other:?}, data so far: `{}`",
+                    String::from_utf8_lossy(&buffer)
+                ),
             }
         }
     }

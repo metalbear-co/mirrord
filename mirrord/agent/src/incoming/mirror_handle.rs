@@ -108,12 +108,20 @@ pub enum MirroredTraffic {
     Http(MirroredHttp),
 }
 
-#[cfg(test)]
 impl MirroredTraffic {
+    #[cfg(test)]
     pub fn unwrap_tcp(self) -> MirroredTcp {
         match self {
             MirroredTraffic::Tcp(tcp) => tcp,
             MirroredTraffic::Http(..) => panic!("expected TCP, got HTTP"),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn unwrap_http(self) -> MirroredHttp {
+        match self {
+            MirroredTraffic::Http(http) => http,
+            MirroredTraffic::Tcp(..) => panic!("expected HTTP, got TCP"),
         }
     }
 }

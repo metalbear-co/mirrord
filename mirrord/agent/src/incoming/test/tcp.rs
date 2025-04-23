@@ -17,7 +17,7 @@ use tokio::{
 use super::dummy_redirector::DummyRedirector;
 use crate::incoming::{IncomingStreamItem, IncomingTlsHandlerStore, RedirectorTask};
 
-async fn echo_tcp_server(listener: TcpListener) {
+pub async fn echo_tcp_server(listener: TcpListener) {
     let mut conn = listener.accept().await.unwrap().0;
     let mut buffer = [0_u8; 64];
 
@@ -31,7 +31,7 @@ async fn echo_tcp_server(listener: TcpListener) {
     }
 }
 
-async fn echo_tcp_client(mut stream: TcpStream, message: &[u8], times: usize) {
+pub async fn echo_tcp_client(mut stream: TcpStream, message: &[u8], times: usize) {
     let mut buffer = vec![0_u8; message.len()];
 
     for _ in 0..times {
@@ -46,7 +46,9 @@ async fn echo_tcp_client(mut stream: TcpStream, message: &[u8], times: usize) {
     assert_eq!(bytes, 0);
 }
 
-/// Verifies full TCP flow on a single TCP connection and various subscription options.
+/// Verifies full TCP flow on a single TCP connection and various subscription combinations.
+///
+/// The connection should be processed by all clients.
 #[rstest]
 #[case::steal_and_mirror(true, true)]
 #[case::steal(true, false)]
