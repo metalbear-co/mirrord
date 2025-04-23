@@ -38,6 +38,7 @@ pub mod replica_set;
 pub mod rollout;
 pub mod service;
 pub mod stateful_set;
+pub mod workflow;
 
 #[derive(Debug)]
 pub enum ContainerRuntime {
@@ -460,6 +461,7 @@ impl RuntimeDataProvider for Target {
             Target::StatefulSet(target) => target.runtime_data(client, namespace).await,
             Target::Service(target) => target.runtime_data(client, namespace).await,
             Target::ReplicaSet(target) => target.runtime_data(client, namespace).await,
+            Target::Workflow(target) => target.runtime_data(client, namespace).await,
             Target::Targetless => Err(KubeApiError::MissingRuntimeData),
         }
     }
@@ -476,6 +478,7 @@ impl RuntimeDataProvider for ResolvedTarget<true> {
             Self::StatefulSet(target) => target.runtime_data(client, namespace).await,
             Self::Service(target) => target.runtime_data(client, namespace).await,
             Self::ReplicaSet(target) => target.runtime_data(client, namespace).await,
+            Self::Workflow(target) => target.runtime_data(client, namespace).await,
             Self::Targetless(_) => Err(KubeApiError::MissingRuntimeData),
         }
     }

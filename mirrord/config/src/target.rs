@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use self::{
     deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, rollout::RolloutTarget,
-    service::ServiceTarget, stateful_set::StatefulSetTarget,
+    service::ServiceTarget, stateful_set::StatefulSetTarget, workflow::WorkflowTarget,
 };
 use crate::{
     config::{
@@ -27,6 +27,7 @@ pub mod replica_set;
 pub mod rollout;
 pub mod service;
 pub mod stateful_set;
+pub mod workflow;
 
 #[derive(Deserialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
@@ -309,6 +310,10 @@ pub enum Target {
     ReplicaSet(replica_set::ReplicaSetTarget),
 
     /// <!--${internal}-->
+    /// [Argo Workflow](https://argo-workflows.readthedocs.io/en/latest/).
+    Workflow(workflow::WorkflowTarget),
+
+    /// <!--${internal}-->
     /// Spawn a new pod.
     #[schemars(skip)]
     Targetless,
@@ -416,6 +421,7 @@ impl_target_display!(CronJobTarget, cron_job, "cronjob");
 impl_target_display!(StatefulSetTarget, stateful_set, "statefulset");
 impl_target_display!(ServiceTarget, service, "service");
 impl_target_display!(ReplicaSetTarget, replica_set, "replicaset");
+impl_target_display!(WorkflowTarget, workflow, "workflow");
 
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -429,6 +435,7 @@ impl fmt::Display for Target {
             Target::StatefulSet(target) => target.fmt(f),
             Target::Service(target) => target.fmt(f),
             Target::ReplicaSet(target) => target.fmt(f),
+            Target::Workflow(target) => target.fmt(f),
         }
     }
 }
@@ -445,6 +452,7 @@ impl TargetDisplay for Target {
             Target::StatefulSet(target) => target.type_(),
             Target::Service(target) => target.type_(),
             Target::ReplicaSet(target) => target.type_(),
+            Target::Workflow(target) => target.type_(),
         }
     }
 
@@ -459,6 +467,7 @@ impl TargetDisplay for Target {
             Target::StatefulSet(target) => target.name(),
             Target::Service(target) => target.name(),
             Target::ReplicaSet(target) => target.name(),
+            Target::Workflow(target) => target.name(),
         }
     }
 
@@ -473,6 +482,7 @@ impl TargetDisplay for Target {
             Target::StatefulSet(target) => target.container(),
             Target::Service(target) => target.container(),
             Target::ReplicaSet(target) => target.container(),
+            Target::Workflow(target) => target.container(),
         }
     }
 }
@@ -491,6 +501,7 @@ bitflags::bitflags! {
         const STATEFUL_SET = 128;
         const SERVICE = 256;
         const REPLICA_SET = 512;
+        const WORKFLOW = 1024;
     }
 }
 
@@ -546,6 +557,12 @@ impl CollectAnalytics for &TargetConfig {
                 }
                 Target::ReplicaSet(target) => {
                     flags |= TargetAnalyticFlags::REPLICA_SET;
+                    if target.container.is_some() {
+                        flags |= TargetAnalyticFlags::CONTAINER;
+                    }
+                }
+                Target::Workflow(target) => {
+                    flags |= TargetAnalyticFlags::WORKFLOW;
                     if target.container.is_some() {
                         flags |= TargetAnalyticFlags::CONTAINER;
                     }
