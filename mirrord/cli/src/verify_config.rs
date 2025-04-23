@@ -2,22 +2,21 @@
 //! [`VerifyConfig`](crate::Commands::VerifyConfig) enum after checking the config file passed in
 //! `path`. It's used by the IDE plugins to display errors/warnings quickly, without having to start
 //! mirrord-layer.
-use crate::{config::VerifyConfigArgs, error, CliError};
 use error::CliResult;
 use futures::TryFutureExt;
-use mirrord_config::target::TargetType;
 use mirrord_config::{
-    config::ConfigContext
-    ,
+    config::ConfigContext,
     target::{
         cron_job::CronJobTarget, deployment::DeploymentTarget, job::JobTarget, pod::PodTarget,
         replica_set::ReplicaSetTarget, rollout::RolloutTarget, service::ServiceTarget,
-        stateful_set::StatefulSetTarget, Target, TargetConfig,
+        stateful_set::StatefulSetTarget, Target, TargetConfig, TargetType,
     },
     LayerConfig,
 };
 use mirrord_progress::NullProgress;
 use serde::Serialize;
+
+use crate::{config::VerifyConfigArgs, error, CliError};
 
 /// Practically the same as [`Target`], but differs in the way the `targetless` option is
 /// serialized. [`Target::Targetless`] serializes as `null`, [`VerifiedTarget::Targetless`]

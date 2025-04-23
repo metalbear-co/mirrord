@@ -5,21 +5,21 @@ use mirrord_analytics::CollectAnalytics;
 use replica_set::ReplicaSetTarget;
 use schemars::{gen::SchemaGenerator, schema::SchemaObject, JsonSchema};
 use serde::{Deserialize, Serialize};
+use strum_macros::{EnumDiscriminants, EnumString};
 
 use self::{
     deployment::DeploymentTarget, job::JobTarget, pod::PodTarget, rollout::RolloutTarget,
     service::ServiceTarget, stateful_set::StatefulSetTarget,
 };
-use crate::feature::FeatureConfig;
 use crate::{
     config::{
         from_env::{FromEnv, FromEnvWithError},
         source::MirrordConfigSource,
         ConfigContext, ConfigError, FromMirrordConfig, MirrordConfig, Result,
     },
+    feature::FeatureConfig,
     util::string_or_struct_option,
 };
-use strum_macros::{EnumDiscriminants, EnumString};
 
 pub mod cron_job;
 pub mod deployment;
@@ -273,7 +273,9 @@ mirrord-layer failed to parse the provided target!
 ///
 /// Used to derive `TargetType` via the strum crate
 #[warn(clippy::wildcard_enum_match_arm)]
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema, EnumDiscriminants)]
+#[derive(
+    Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema, EnumDiscriminants,
+)]
 #[serde(untagged, deny_unknown_fields)]
 #[strum_discriminants(derive(EnumString, Serialize))]
 #[strum_discriminants(name(TargetType))]
@@ -396,7 +398,7 @@ impl TargetType {
             Self::Service,
             Self::ReplicaSet,
         ]
-            .into_iter()
+        .into_iter()
     }
 
     pub fn compatible_with(&self, config: &FeatureConfig) -> bool {

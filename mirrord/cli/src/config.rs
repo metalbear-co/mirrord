@@ -12,12 +12,12 @@ use std::{
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
-use mirrord_config::target::TargetType;
 use mirrord_config::{
     feature::env::{
         MIRRORD_OVERRIDE_ENV_FILE_ENV, MIRRORD_OVERRIDE_ENV_VARS_EXCLUDE_ENV,
         MIRRORD_OVERRIDE_ENV_VARS_INCLUDE_ENV,
     },
+    target::TargetType,
     LayerConfig,
 };
 use mirrord_operator::setup::OperatorNamespace;
@@ -802,7 +802,7 @@ pub(super) struct ListTargetArgs {
 
     /// Specify the type of target to be retrieved. If `None`, all types are retrieved.
     #[arg(short = 't', long)]
-    pub target_type: Option<TargetType>
+    pub target_type: Option<TargetType>,
 }
 
 impl ListTargetArgs {
