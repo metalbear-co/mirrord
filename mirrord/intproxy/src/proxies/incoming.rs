@@ -6,7 +6,7 @@
 //!    until connection becomes readable (is TCP) or receives an http request.
 //! 2. HttpSender -
 
-use std::{collections::HashMap, io, net::SocketAddr, time::Duration};
+use std::{collections::HashMap, io, net::SocketAddr, sync::Arc, time::Duration};
 
 use bound_socket::BoundTcpSocket;
 use http::{ClientStore, ResponseMode, StreamingBody};
@@ -29,6 +29,7 @@ use mirrord_protocol::{
 use tasks::{HttpGatewayId, HttpOut, InProxyTask, InProxyTaskError, InProxyTaskMessage};
 use tcp_proxy::{LocalTcpConnection, TcpProxyTask};
 use thiserror::Error;
+use tls::LocalTlsSetup;
 use tokio::sync::mpsc;
 use tracing::Level;
 
@@ -49,6 +50,7 @@ mod port_subscription_ext;
 mod subscriptions;
 mod tasks;
 mod tcp_proxy;
+mod tls;
 
 /// Errors that can occur when handling the `incoming` feature.
 #[derive(Error, Debug)]
@@ -138,6 +140,8 @@ pub struct IncomingProxy {
     metadata_store: MetadataStore,
     /// What HTTP response flavor we produce.
     response_mode: ResponseMode,
+    /// For making TLS connections to the user application.
+    tls_setup: Option<Arc<LocalTlsSetup>>,
     /// Cache for [`LocalHttpClient`](http::LocalHttpClient)s.
     client_store: ClientStore,
     /// Each mirrored remote connection is mapped to a [`TcpProxyTask`] in mirror mode.
@@ -165,13 +169,16 @@ impl IncomingProxy {
         idle_local_http_connection_timeout: Duration,
         https_delivery: LocalHttpsDelivery,
     ) -> Self {
+        let tls_setup = LocalTlsSetup::from_config(https_delivery).map(Arc::new);
+
         Self {
             subscriptions: Default::default(),
             metadata_store: Default::default(),
             response_mode: Default::default(),
+            tls_setup: tls_setup.clone(),
             client_store: ClientStore::new_with_timeout(
                 idle_local_http_connection_timeout,
-                https_delivery,
+                tls_setup,
             ),
             mirror_tcp_proxies: Default::default(),
             steal_tcp_proxies: Default::default(),
@@ -278,6 +285,7 @@ impl IncomingProxy {
     async fn handle_new_connection(
         &mut self,
         connection: NewTcpConnection,
+        transport: HttpRequestTransportType,
         is_steal: bool,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), IncomingProxyError> {
@@ -342,6 +350,8 @@ impl IncomingProxy {
                 LocalTcpConnection::FromTheStart {
                     socket,
                     peer: subscription.listening_on,
+                    tls_setup: self.tls_setup.clone(),
+                    transport,
                 },
                 !is_steal,
             ),
@@ -553,11 +563,24 @@ impl IncomingProxy {
             }
 
             DaemonTcp::NewConnection(connection) => {
-                self.handle_new_connection(connection, is_steal, message_bus)
-                    .await?;
+                self.handle_new_connection(
+                    connection,
+                    HttpRequestTransportType::Tcp,
+                    is_steal,
+                    message_bus,
+                )
+                .await?;
             }
 
-            DaemonTcp::NewConnectionV2(..) => todo!(),
+            DaemonTcp::NewConnectionV2(connection) => {
+                self.handle_new_connection(
+                    connection.connection,
+                    connection.transport,
+                    is_steal,
+                    message_bus,
+                )
+                .await?;
+            }
 
             DaemonTcp::SubscribeResult(result) => {
                 let msgs = self.subscriptions.agent_responded(result)?;
@@ -731,9 +754,9 @@ impl IncomingProxy {
 
                 match result {
                     Ok(()) => {}
-                    Err(TaskError::Error(
-                        InProxyTaskError::IoError(..) | InProxyTaskError::UpgradeError(..),
-                    )) => unreachable!("HttpGatewayTask does not return any errors"),
+                    Err(TaskError::Error(..)) => {
+                        unreachable!("HttpGatewayTask does not return any errors")
+                    }
                     Err(TaskError::Panic) => {
                         tracing::error!(
                             connection_id = id.connection_id,

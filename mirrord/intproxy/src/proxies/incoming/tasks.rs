@@ -7,6 +7,8 @@ use mirrord_protocol::{
 };
 use thiserror::Error;
 
+use super::tls::LocalTlsSetupError;
+
 /// Messages produced by the [`BackgroundTask`](crate::background_tasks::BackgroundTask)s used in
 /// the [`IncomingProxy`](super::IncomingProxy).
 pub enum InProxyTaskMessage {
@@ -76,6 +78,8 @@ pub enum InProxyTaskError {
     IoError(#[from] io::Error),
     #[error("local HTTP upgrade failed: {0}")]
     UpgradeError(#[source] hyper::Error),
+    #[error("failed to prepare TLS client configuration: {0}")]
+    TlsError(#[from] LocalTlsSetupError),
 }
 
 impl From<Infallible> for InProxyTaskError {

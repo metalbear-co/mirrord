@@ -694,7 +694,9 @@ async fn start_agent(args: Args) -> AgentResult<()> {
             let (sniffer, mirror_handle) = if envs::PASSTHROUGH_MIRRORING.from_env_or_default() {
                 (BackgroundTask::Disabled, Some(mirror_handle))
             } else {
-                let sniffer = setup::start_sniffer(&args, &state.network_runtime, cancellation_token.clone()).await;
+                let sniffer =
+                    setup::start_sniffer(&args, &state.network_runtime, cancellation_token.clone())
+                        .await;
                 (sniffer, None)
             };
 
