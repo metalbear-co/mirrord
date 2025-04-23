@@ -624,11 +624,11 @@ impl LayerConfig {
                 .into(),
             });
         } else if self.feature.fs.readonly_file_buffer > READONLY_FILE_BUFFER_WARN_LIMIT {
-            context
-                .add_warning(format!(
-                     "The value of feature.fs.readonly_file_buffer is more than {READONLY_FILE_BUFFER_WARN_LIMIT}. \
-                     Large values may increase the risk of timeouts."
-                ));
+            context.add_warning(format!(
+                "The value of feature.fs.readonly_file_buffer is more than {} Megabyte. \
+                     Large values may increase the risk of timeouts.",
+                READONLY_FILE_BUFFER_WARN_LIMIT / 1024 / 1024,
+            ));
         }
 
         if let (Some(profile), true) = (&self.profile, context.has_warnings()) {
