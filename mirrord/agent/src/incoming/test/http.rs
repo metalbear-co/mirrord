@@ -136,16 +136,14 @@ impl Service<Request<Incoming>> for ReadBodyReturnOk {
     }
 }
 
-/// Verifies full HTTP flow on multiple HTTP request and various subscription combinations.
-///
-/// All requests should be processed by all clients.
+/// Verifies that multiple redirected HTTP requests are sent to all clients.
 #[rstest]
 #[case::steal_and_mirror(true, true)]
 #[case::steal(true, false)]
 #[case::mirror(false, true)]
 #[timeout(Duration::from_secs(5))]
 #[tokio::test]
-async fn http_full_flow(
+async fn http_requests_sent_to_all_clients(
     #[case] steal: bool,
     #[case] mirror: bool,
     #[values(HttpVersion::V1, HttpVersion::V2)] http_version: HttpVersion,

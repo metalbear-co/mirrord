@@ -46,16 +46,14 @@ pub async fn echo_tcp_client(mut stream: TcpStream, message: &[u8], times: usize
     assert_eq!(bytes, 0);
 }
 
-/// Verifies full TCP flow on a single TCP connection and various subscription combinations.
-///
-/// The connection should be processed by all clients.
+/// Verifies that a single redireceted TCP connection is sent to all clients.
 #[rstest]
 #[case::steal_and_mirror(true, true)]
 #[case::steal(true, false)]
 #[case::mirror(false, true)]
 #[timeout(Duration::from_secs(5))]
 #[tokio::test]
-async fn tcp_full_flow(#[case] steal: bool, #[case] mirror: bool) {
+async fn tcp_connection_sent_to_all_clients(#[case] steal: bool, #[case] mirror: bool) {
     assert!(steal || mirror, "this test cannot handle no subscription");
 
     let listener = TcpListener::bind(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
