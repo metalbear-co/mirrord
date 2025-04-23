@@ -18,7 +18,7 @@ pub struct MirrordErrorResponse {
 
 impl MirrordErrorResponse {
     pub fn new<B: fmt::Display>(version: Version, body: B) -> Self {
-        let body = format!("mirrord-agent: {body}").into();
+        let body = format!("mirrord-agent: {body}\n").into();
 
         Self { version, body }
     }

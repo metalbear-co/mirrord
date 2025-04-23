@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     convert::Infallible,
+    error::Report,
     fmt,
     net::SocketAddr,
     ops::ControlFlow,
@@ -341,7 +342,7 @@ impl BackgroundTask for HttpGatewayTask {
                         tracing::warn!(
                             gateway = ?self,
                             failed_attempts = attempt,
-                            %error,
+                            error = %Report::new(&error),
                             "Failed to send an HTTP request",
                         );
 
@@ -351,7 +352,7 @@ impl BackgroundTask for HttpGatewayTask {
                     tracing::trace!(
                         backoff_ms = backoff.as_millis(),
                         failed_attempts = attempt,
-                        %error,
+                        error = %Report::new(error),
                         "Trying again after backoff",
                     );
 
@@ -363,7 +364,7 @@ impl BackgroundTask for HttpGatewayTask {
         };
 
         let response = mirrord_error_response(
-            error,
+            Report::new(error).pretty(true),
             self.request.version(),
             self.request.connection_id,
             self.request.request_id,

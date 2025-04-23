@@ -4,6 +4,7 @@
 #![feature(iterator_try_collect)]
 #![feature(try_blocks)]
 #![feature(tcp_quickack)]
+#![feature(error_reporter)]
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 

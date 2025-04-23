@@ -1,4 +1,5 @@
 use std::{
+    error::Report,
     pin::Pin,
     task::{self, Context, Poll},
     vec,
@@ -50,9 +51,9 @@ impl PassThroughTask {
         let mut sender = match self.make_connection(&extracted.parts).await {
             Ok(sender) => sender,
             Err(error) => {
-                let _ = extracted
-                    .response_tx
-                    .send(MirrordErrorResponse::new(version, &error).into());
+                let _ = extracted.response_tx.send(
+                    MirrordErrorResponse::new(version, Report::new(&error).pretty(true)).into(),
+                );
                 return Err(error);
             }
         };
@@ -68,9 +69,9 @@ impl PassThroughTask {
             Ok(response) => response,
             Err(error) => {
                 let error = ConnError::PassthroughHttpError(error.into());
-                let _ = extracted
-                    .response_tx
-                    .send(MirrordErrorResponse::new(version, &error).into());
+                let _ = extracted.response_tx.send(
+                    MirrordErrorResponse::new(version, Report::new(&error).pretty(true)).into(),
+                );
                 return Err(error);
             }
         };

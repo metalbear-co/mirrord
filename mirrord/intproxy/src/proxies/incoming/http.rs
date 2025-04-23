@@ -1,10 +1,4 @@
-use std::{
-    error::Error,
-    fmt::{self, Write},
-    io,
-    net::SocketAddr,
-    ops::Not,
-};
+use std::{fmt, io, net::SocketAddr, ops::Not};
 
 use hyper::{
     body::Incoming,
@@ -86,13 +80,13 @@ impl fmt::Debug for LocalHttpClient {
 #[derive(Error, Debug)]
 pub enum LocalHttpError {
     #[error("failed to make an HTTP handshake with the local application's HTTP server: {0}")]
-    HandshakeFailed(#[source] HyperErrorWithSources),
+    HandshakeFailed(#[source] hyper::Error),
 
     #[error("{0:?} is not supported in the local HTTP proxy")]
     UnsupportedHttpVersion(Version),
 
     #[error("failed to send the request to the local application's HTTP server: {0}")]
-    SendFailed(#[source] HyperErrorWithSources),
+    SendFailed(#[source] hyper::Error),
 
     #[error("failed to prepare a local TCP socket: {0}")]
     SocketSetupFailed(#[source] io::Error),
@@ -104,7 +98,7 @@ pub enum LocalHttpError {
     ConnectTlsFailed(#[source] io::Error),
 
     #[error("failed to read the body of the local application's HTTP server response: {0}")]
-    ReadBodyFailed(#[source] HyperErrorWithSources),
+    ReadBodyFailed(#[source] hyper::Error),
 
     #[error("failed to prepare TLS client configuration: {0}")]
     TlsSetupError(#[from] LocalTlsSetupError),
@@ -119,50 +113,13 @@ impl LocalHttpError {
             | Self::UnsupportedHttpVersion(..)
             | Self::TlsSetupError(..) => false,
             Self::ConnectTcpFailed(..) | Self::ConnectTlsFailed(..) => true,
-            Self::HandshakeFailed(err) | Self::SendFailed(err) | Self::ReadBodyFailed(err) => {
-                (err.0.is_parse()
-                    || err.0.is_parse_status()
-                    || err.0.is_parse_too_large()
-                    || err.0.is_user())
-                .not()
-            }
+            Self::HandshakeFailed(err) | Self::SendFailed(err) | Self::ReadBodyFailed(err) => (err
+                .is_parse()
+                || err.is_parse_status()
+                || err.is_parse_too_large()
+                || err.is_user())
+            .not(),
         }
-    }
-}
-
-#[derive(Error)]
-pub struct HyperErrorWithSources(pub hyper::Error);
-
-impl From<hyper::Error> for HyperErrorWithSources {
-    fn from(value: hyper::Error) -> Self {
-        Self(value)
-    }
-}
-
-impl fmt::Display for HyperErrorWithSources {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "`{}`, sources=[", self.0)?;
-
-        let mut error = self.0.source();
-        let mut first = true;
-        while let Some(source) = error {
-            if first {
-                first = false;
-                write!(f, "{source}")?;
-            } else {
-                write!(f, ", {source}")?;
-            }
-
-            error = source.source();
-        }
-
-        f.write_char(']')
-    }
-}
-
-impl fmt::Debug for HyperErrorWithSources {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
     }
 }
 
@@ -182,7 +139,7 @@ pub fn mirrord_error_response<M: fmt::Display>(
             status: StatusCode::BAD_GATEWAY,
             version,
             headers: Default::default(),
-            body: format!("mirrord: {message}\n").into_bytes(),
+            body: format!("mirrord-intproxy: {message}\n").into_bytes(),
         },
     }
 }
