@@ -96,8 +96,10 @@ pub enum InProxyTask {
     MirrorTcpProxy(ConnectionId),
     /// [`TcpProxyTask`](super::tcp_proxy::TcpProxyTask) handling a stolen connection.
     StealTcpProxy(ConnectionId),
+    /// [`HttpGatewayTask`](super::http_gateway::HttpGatewayTask) handling a mirrored HTTP request.
+    MirrorHttpGateway(HttpGatewayId),
     /// [`HttpGatewayTask`](super::http_gateway::HttpGatewayTask) handling a stolen HTTP request.
-    HttpGateway(HttpGatewayId),
+    StealHttpGateway(HttpGatewayId),
 }
 
 /// Identifies a [`HttpGatewayTask`](super::http_gateway::HttpGatewayTask).

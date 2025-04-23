@@ -120,10 +120,12 @@ pub struct TcpProxyTask {
     _connection_id: ConnectionId,
     /// The local connection between this task and the user application.
     connection: Option<LocalTcpConnection>,
-    /// Whether this task should silently discard data coming from the user application.
+    /// Whether this task should wait before exiting after the [`MessageBus`] is closed.
     ///
-    /// The data is discarded only when the remote connection is mirrored.
-    discard_data: bool,
+    /// This allows for reading all data from the user application before exiting,
+    /// if this task receives only a copy of the original data (remote peer talks with someone
+    /// else).
+    linger_on_remote_close: bool,
 }
 
 impl TcpProxyTask {
@@ -139,12 +141,12 @@ impl TcpProxyTask {
     pub fn new(
         connection_id: ConnectionId,
         connection: LocalTcpConnection,
-        discard_data: bool,
+        linger_on_remote_close: bool,
     ) -> Self {
         Self {
             _connection_id: connection_id,
             connection: Some(connection),
-            discard_data,
+            linger_on_remote_close,
         }
     }
 }
@@ -175,7 +177,7 @@ impl BackgroundTask for TcpProxyTask {
 
         let (mut stream, first_data) = result?;
 
-        if !self.discard_data && first_data.is_empty().not() {
+        if first_data.is_empty().not() {
             // We don't send empty data,
             // because the agent recognizes it as a shutdown from the user application.
             message_bus.send(first_data).await;
@@ -211,16 +213,13 @@ impl BackgroundTask for TcpProxyTask {
                             );
                         }
 
-                        if !self.discard_data {
-                            message_bus.send(buf.to_vec()).await;
-                        }
-
+                        message_bus.send(buf.to_vec()).await;
                         buf.clear();
                     }
                 },
 
                 msg = message_bus.recv(), if !is_lingering => match msg {
-                    None if self.discard_data => {
+                    None if self.linger_on_remote_close => {
                         tracing::trace!(
                             peer_addr = %peer_addr,
                             self_addr = %self_addr,
