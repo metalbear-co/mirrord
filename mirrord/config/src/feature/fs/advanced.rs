@@ -14,6 +14,10 @@ use crate::{
 /// The default size in bytes used for buffering read-only remote files.
 /// See [`FsConfig::readonly_file_buffer`].
 pub const READONLY_FILE_BUFFER_DEFAULT: u64 = 128000;
+/// Warn users if using a value of [`FsConfig::readonly_file_buffer`] larger than 1mb
+pub const READONLY_FILE_BUFFER_WARN_LIMIT: u64 = 1024 * 1024;
+/// Do not allow users to set a value of [`FsConfig::readonly_file_buffer`] larger than 15mb
+pub const READONLY_FILE_BUFFER_HARD_LIMIT: u64 = 15 * 1024 * 1024;
 
 // TODO(alex): We could turn this derive macro (`MirrordConfig`) into an attribute version, which
 // would allow us to "capture" the `derive` statement, making it possible to implement the same for

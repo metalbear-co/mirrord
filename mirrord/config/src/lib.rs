@@ -40,9 +40,17 @@ use tera::Tera;
 use tracing::warn;
 
 use crate::{
-    agent::AgentConfig, config::source::MirrordConfigSource, container::ContainerConfig,
-    external_proxy::ExternalProxyConfig, feature::FeatureConfig,
-    internal_proxy::InternalProxyConfig, target::TargetConfig, util::VecOrSingle,
+    agent::AgentConfig,
+    config::source::MirrordConfigSource,
+    container::ContainerConfig,
+    external_proxy::ExternalProxyConfig,
+    feature::{
+        fs::{READONLY_FILE_BUFFER_HARD_LIMIT, READONLY_FILE_BUFFER_WARN_LIMIT},
+        FeatureConfig,
+    },
+    internal_proxy::InternalProxyConfig,
+    target::TargetConfig,
+    util::VecOrSingle,
 };
 
 /// Environment variable we use to pass the internal proxy address to the layer.
@@ -605,13 +613,19 @@ impl LayerConfig {
             ));
         }
 
-        if self.feature.fs.readonly_file_buffer > 1024 * 1024 {
+        if self.feature.fs.readonly_file_buffer > READONLY_FILE_BUFFER_HARD_LIMIT {
             return Err(ConfigError::InvalidValue {
                 name: "feature.fs.readonly_file_buffer",
                 provided: self.feature.fs.readonly_file_buffer.to_string(),
-                error: "the value of feature.fs.readonly_file_buffer must be 1 Megabyte or less."
-                    .into(),
+                error: format!(
+                    "the value of feature.fs.readonly_file_buffer must be {} Megabytes or less.",
+                    READONLY_FILE_BUFFER_HARD_LIMIT / 1024 / 1024
+                )
+                .into(),
             });
+        } else if self.feature.fs.readonly_file_buffer > READONLY_FILE_BUFFER_WARN_LIMIT {
+            context
+                .add_warning("The value of feature.fs.readonly_file_buffer is quite high.".into());
         }
 
         if let (Some(profile), true) = (&self.profile, context.has_warnings()) {
@@ -676,7 +690,6 @@ fn default_proxy_logfile_path(prefix: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-
     use std::{
         fs::{File, OpenOptions},
         io::{Read, Write},
