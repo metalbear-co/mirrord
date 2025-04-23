@@ -279,6 +279,7 @@ mirrord-layer failed to parse the provided target!
 #[serde(untagged, deny_unknown_fields)]
 #[strum_discriminants(derive(EnumString, Serialize))]
 #[strum_discriminants(name(TargetType))]
+#[strum_discriminants(strum(serialize_all = "lowercase"))]
 pub enum Target {
     /// <!--${internal}-->
     /// [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/).

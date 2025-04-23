@@ -111,10 +111,10 @@ impl FoundTargets {
 
         let (targets, namespaces) = tokio::try_join!(
             async {
-                let paths = match operator_api {
-                    None if config.operator == Some(true) => Err(CliError::OperatorNotInstalled),
+                let paths = match (operator_api, target_type) {
+                    (None, _) if config.operator == Some(true) => Err(CliError::OperatorNotInstalled),
 
-                    Some(api)
+                    (Some(api), None)
                         if !rich_output
                             && ALL_TARGETS_SUPPORTED_OPERATOR_VERSION
                                 .matches(&api.operator().spec.operator_version) =>
@@ -123,6 +123,20 @@ impl FoundTargets {
                             CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
                         })
                     }
+
+                    (Some(api), Some(target_type))
+                        if !rich_output
+                            && ALL_TARGETS_SUPPORTED_OPERATOR_VERSION
+                                .matches(&api.operator().spec.operator_version) =>
+                    {
+                        seeker.filtered(target_type, true).await.map_err(|error| {
+                            CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
+                        })
+                    }
+
+                    (None, Some(target_type)) => seeker.filtered(target_type, false).await.map_err(|error| {
+                        CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
+                    }),
 
                     _ => seeker.all_open_source().await.map_err(|error| {
                         CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
