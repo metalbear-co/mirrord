@@ -1,0 +1,1 @@
+Increase the maximum allowed size of `config.feature.fs.readonly_file_buffer` to 15 MB, and warn users using values over 1 MB that the value is high.
