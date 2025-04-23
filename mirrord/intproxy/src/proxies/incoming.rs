@@ -15,14 +15,14 @@ use metadata_store::MetadataStore;
 use mirrord_config::feature::network::incoming::https_delivery::LocalHttpsDelivery;
 use mirrord_intproxy_protocol::{
     ConnMetadataRequest, ConnMetadataResponse, IncomingRequest, IncomingResponse, LayerId,
-    MessageId, PortSubscription, ProxyToLayerMessage,
+    MessageId, ProxyToLayerMessage,
 };
 use mirrord_protocol::{
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestErrorV2,
         ChunkedResponse, DaemonTcp, HttpRequest, HttpRequestMetadata, HttpRequestTransportType,
         InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnection,
-        StealType, TcpData,
+        TcpData,
     },
     ClientMessage, ConnectionId, RequestId, ResponseError,
 };
@@ -235,7 +235,11 @@ impl IncomingProxy {
             "Received an HTTP request from the agent",
         );
 
-        let Some(subscription) = self.subscriptions.get(request.port) else {
+        let subscription = self
+            .subscriptions
+            .get(request.port)
+            .filter(|subscription| subscription.subscription.is_steal() == is_steal);
+        let Some(subscription) = subscription else {
             tracing::debug!(
                 "Received a new HTTP request within a stale port subscription, \
                 sending an unsubscribe request or an error response."
@@ -329,11 +333,7 @@ impl IncomingProxy {
         let subscription = self
             .subscriptions
             .get(destination_port)
-            .filter(|subscription| match &subscription.subscription {
-                PortSubscription::Mirror(..) if !is_steal => true,
-                PortSubscription::Steal(StealType::All(..)) if is_steal => true,
-                _ => false,
-            });
+            .filter(|subscription| subscription.subscription.is_steal() == is_steal);
         let Some(subscription) = subscription else {
             tracing::debug!(
                 port = destination_port,
