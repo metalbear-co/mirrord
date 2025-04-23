@@ -1,6 +1,7 @@
 use std::fmt;
 
 use kube::Resource;
+use mirrord_config::target::TargetType;
 use thiserror::Error;
 
 pub type Result<T, E = KubeApiError> = std::result::Result<T, E>;
@@ -57,6 +58,11 @@ pub enum KubeApiError {
         /// Should be plural name of the resource
         String,
     ),
+
+    /// Attempted to list a specific resource type with `mirrord ls` but was unable to because
+    /// either the operator required but is not enabled, or the type was invalid.
+    #[error("The requested resource type `{0}` could not be listed: {1}")]
+    InvalidListTargetType(TargetType, String),
 }
 
 impl KubeApiError {
