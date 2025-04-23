@@ -38,6 +38,10 @@ impl HttpVersion {
     ///
     /// The given `buffer` must contain at least [`Self::MINIMAL_HEADER_SIZE`] bytes, otherwise this
     /// function always returns [`None`].
+    ///
+    /// # TODO
+    ///
+    /// Fix detection of HTTP/1 requests. Currently `hello ther` passes as HTTP/1.
     #[tracing::instrument(level = Level::TRACE, ret)]
     pub fn new(buffer: &[u8]) -> Option<Self> {
         let mut empty_headers = [httparse::EMPTY_HEADER; 0];
