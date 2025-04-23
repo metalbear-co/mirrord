@@ -54,7 +54,7 @@ impl MirrorHandleWrapper {
         let blocked = tcp.info.tls_connector.is_some()
             && self
                 .protocol_version
-                .matches(&*NEW_CONNECTION_V2_VERSION)
+                .matches(&NEW_CONNECTION_V2_VERSION)
                 .not();
         if blocked {
             return DaemonMessage::LogMessage(LogMessage::warn(format!(
@@ -90,7 +90,7 @@ impl MirrorHandleWrapper {
     fn handle_http(&mut self, http: MirroredHttp) -> DaemonMessage {
         let blocked = self
             .protocol_version
-            .matches(&*NEW_CONNECTION_V2_VERSION)
+            .matches(&NEW_CONNECTION_V2_VERSION)
             .not();
         if blocked {
             return DaemonMessage::LogMessage(LogMessage::warn(format!(

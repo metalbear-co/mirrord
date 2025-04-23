@@ -15,6 +15,6 @@ impl SharedProtocolVersion {
     }
 
     pub fn matches(&self, version_req: &semver::VersionReq) -> bool {
-        version_req.matches(&*self.0.lock().unwrap())
+        version_req.matches(&self.0.lock().unwrap())
     }
 }

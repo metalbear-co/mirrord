@@ -167,7 +167,7 @@ impl TcpStealApi {
 
         if self
             .protocol_version
-            .matches(&*HTTP_CHUNKED_REQUEST_V2_VERSION)
+            .matches(&HTTP_CHUNKED_REQUEST_V2_VERSION)
         {
             let message = DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(
                 ChunkedRequest::StartV2(ChunkedRequestStartV2 {
@@ -198,10 +198,7 @@ impl TcpStealApi {
             ));
 
             self.queued_messages.push_back(message);
-        } else if self
-            .protocol_version
-            .matches(&*HTTP_CHUNKED_REQUEST_VERSION)
-        {
+        } else if self.protocol_version.matches(&HTTP_CHUNKED_REQUEST_VERSION) {
             self.queued_messages
                 .push_back(DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(
                     ChunkedRequest::StartV1(HttpRequest {
@@ -248,7 +245,7 @@ impl TcpStealApi {
                     request_id: Self::REQUEST_ID,
                     port: info.original_destination.port(),
                 });
-        } else if self.protocol_version.matches(&*HTTP_FRAMED_VERSION) {
+        } else if self.protocol_version.matches(&HTTP_FRAMED_VERSION) {
             self.queued_messages
                 .push_back(DaemonMessage::Tcp(DaemonTcp::HttpRequestFramed(
                     HttpRequest {
@@ -308,7 +305,7 @@ impl TcpStealApi {
             local_address: info.local_addr.ip(),
         };
 
-        if self.protocol_version.matches(&*NEW_CONNECTION_V2_VERSION) {
+        if self.protocol_version.matches(&NEW_CONNECTION_V2_VERSION) {
             DaemonTcp::NewConnectionV2(NewTcpConnectionV2 {
                 connection: new_connection,
                 transport: match info.tls_connector {
@@ -398,7 +395,7 @@ impl TcpStealApi {
                 connection.request_in_progress.replace(request);
             }
 
-            None if self.protocol_version.matches(&*HTTP_FRAMED_VERSION) => {
+            None if self.protocol_version.matches(&HTTP_FRAMED_VERSION) => {
                 self.queued_messages
                     .push_back(DaemonMessage::Tcp(DaemonTcp::HttpRequestFramed(request)));
             }

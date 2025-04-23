@@ -75,11 +75,11 @@ impl From<HttpOut> for InProxyTaskMessage {
 #[derive(Error, Debug)]
 pub enum InProxyTaskError {
     #[error("io failed: {0}")]
-    IoError(#[from] io::Error),
+    Io(#[from] io::Error),
     #[error("local HTTP upgrade failed: {0}")]
-    UpgradeError(#[source] hyper::Error),
+    Upgrade(#[source] hyper::Error),
     #[error("failed to prepare TLS client configuration: {0}")]
-    TlsError(#[from] LocalTlsSetupError),
+    Tls(#[from] LocalTlsSetupError),
 }
 
 impl From<Infallible> for InProxyTaskError {

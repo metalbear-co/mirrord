@@ -70,7 +70,7 @@ impl LocalTcpConnection {
             }
 
             Self::AfterUpgrade(on_upgrade) => {
-                let upgraded = on_upgrade.await.map_err(InProxyTaskError::UpgradeError)?;
+                let upgraded = on_upgrade.await.map_err(InProxyTaskError::Upgrade)?;
                 let parts = upgraded
                     .downcast::<TokioIo<MaybeTls>>()
                     .expect("IO type is known");
