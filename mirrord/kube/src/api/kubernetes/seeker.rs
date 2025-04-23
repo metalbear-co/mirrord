@@ -103,16 +103,16 @@ impl KubeResourceSeeker<'_> {
                 self.simple_list_resource::<ReplicaSet>("replicaset").await
             }
             TargetType::Targetless => {
-                tracing::warn!("Cannot list targets with resource type 'targetless'");
-                Ok(vec![])
+                tracing::error!("Cannot list targets with resource type 'targetless'");
+                Err(KubeApiError::InvalidListTargetType(resource_type, "cannot list targets with resource type 'targetless'.".to_string()))
             }
             resource_type if !operator_active => {
                 tracing::warn!("Cannot list targets with resource type '{resource_type}' unless the operator is enabled.");
-                Ok(vec![])
+                Err(KubeApiError::InvalidListTargetType(resource_type, "this type requires the operator to be enabled.".to_string()))
             }
             resource_type => {
                 tracing::error!("Cannot list targets with resource type '{resource_type}' due to a missing implementation. This is a bug.");
-                Ok(vec![])
+                Err(KubeApiError::InvalidListTargetType(resource_type, "this type cannot be listed. This is a bug.".to_string()))
             }
         }
     }
