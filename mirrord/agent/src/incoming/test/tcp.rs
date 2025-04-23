@@ -27,7 +27,7 @@ pub async fn echo_tcp_server(listener: TcpListener) {
             conn.shutdown().await.unwrap();
             break;
         }
-        conn.write_all(&buffer[..bytes]).await.unwrap();
+        conn.write_all(buffer.get(..bytes).unwrap()).await.unwrap();
     }
 }
 

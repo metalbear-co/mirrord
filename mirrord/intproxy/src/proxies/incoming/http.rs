@@ -161,7 +161,6 @@ impl HttpSender {
                 let (sender, connection) =
                     http2::handshake(TokioExecutor::default(), TokioIo::new(target_stream))
                         .await
-                        .map_err(From::from)
                         .map_err(LocalHttpError::HandshakeFailed)?;
 
                 tokio::spawn(async move {
@@ -183,7 +182,6 @@ impl HttpSender {
             _http_v1 => {
                 let (sender, connection) = http1::handshake(TokioIo::new(target_stream))
                     .await
-                    .map_err(From::from)
                     .map_err(LocalHttpError::HandshakeFailed)?;
 
                 tokio::spawn(async move {
@@ -211,16 +209,11 @@ impl HttpSender {
             Self::V1(sender) => {
                 // Solves a "connection was not ready" client error.
                 // https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/barbara_tries_unix_socket.html#the-single-magical-line
-                sender
-                    .ready()
-                    .await
-                    .map_err(From::from)
-                    .map_err(LocalHttpError::SendFailed)?;
+                sender.ready().await.map_err(LocalHttpError::SendFailed)?;
 
                 sender
                     .send_request(request.internal_request.into())
                     .await
-                    .map_err(From::from)
                     .map_err(LocalHttpError::SendFailed)
             }
             Self::V2(sender) => {
@@ -242,16 +235,11 @@ impl HttpSender {
 
                 // Solves a "connection was not ready" client error.
                 // https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/barbara_tries_unix_socket.html#the-single-magical-line
-                sender
-                    .ready()
-                    .await
-                    .map_err(From::from)
-                    .map_err(LocalHttpError::SendFailed)?;
+                sender.ready().await.map_err(LocalHttpError::SendFailed)?;
 
                 sender
                     .send_request(hyper_request)
                     .await
-                    .map_err(From::from)
                     .map_err(LocalHttpError::SendFailed)
             }
         }

@@ -92,7 +92,6 @@ impl HttpGatewayTask {
     ) -> Result<ControlFlow<()>, LocalHttpError> {
         let frames = body
             .ready_frames()
-            .map_err(From::from)
             .map_err(LocalHttpError::ReadBodyFailed)?;
 
         if frames.is_last {
@@ -237,7 +236,6 @@ impl HttpGatewayTask {
                 let body: Vec<u8> = body
                     .collect()
                     .await
-                    .map_err(From::from)
                     .map_err(LocalHttpError::ReadBodyFailed)?
                     .to_bytes()
                     .into();
@@ -266,7 +264,6 @@ impl HttpGatewayTask {
                 let start = Instant::now();
                 let body = InternalHttpBody::from_body(body)
                     .await
-                    .map_err(From::from)
                     .map_err(LocalHttpError::ReadBodyFailed)?;
                 tracing::debug!(
                     ?body,

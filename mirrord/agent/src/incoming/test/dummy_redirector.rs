@@ -114,9 +114,9 @@ impl PortRedirector for DummyRedirector {
         let conn = self.conn_rx.recv().await;
 
         if let Some(conn) = conn {
-            return Ok(conn);
+            Ok(conn)
         } else {
-            return std::future::pending().await;
+            std::future::pending().await
         }
     }
 }
