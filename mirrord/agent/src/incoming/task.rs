@@ -1,10 +1,12 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     error::Error,
+    fmt,
     ops::Not,
     sync::Arc,
 };
 
+use futures::{future::Shared, FutureExt};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -22,10 +24,7 @@ use super::{
     steal_handle::{StealHandle, StolenTraffic},
     PortRedirector, Redirected,
 };
-use crate::{
-    steal::tls::StealTlsHandlerStore,
-    util::status::{self, StatusSender},
-};
+use crate::steal::tls::StealTlsHandlerStore;
 
 /// A task responsible for redirecting incoming connections.
 ///
@@ -41,7 +40,7 @@ pub struct RedirectorTask<R> {
     /// Provides the handles with this task's failure reason.
     ///
     /// Dropping this sender will be seen as a panic in this task.
-    status_tx: StatusSender<RedirectorTaskError>,
+    error_tx: oneshot::Sender<RedirectorTaskError>,
     /// Allows for receiving steal requests from the handles.
     external_rx: mpsc::Receiver<RedirectionRequest>,
 
@@ -66,22 +65,24 @@ where
         redirector: R,
         tls_handlers: StealTlsHandlerStore,
     ) -> (Self, StealHandle, MirrorHandle) {
-        let (status_tx, status_rx) = status::channel();
+        let (error_tx, error_rx) = oneshot::channel();
         let (external_tx, external_rx) = mpsc::channel(Self::EXTERNAL_CHANNEL_CAPACITY);
         let (internal_tx, internal_rx) = mpsc::channel(Self::INTERNAL_CHANNEL_CAPACITY);
 
         let task = Self {
             redirector,
             tls_handlers,
-            status_tx,
+            error_tx,
             external_rx,
             internal_tx,
             internal_rx,
             ports: Default::default(),
         };
 
-        let steal_handle = StealHandle::new(external_tx.clone(), status_rx.clone());
-        let mirror_handle = MirrorHandle::new(external_tx.clone(), status_rx.clone());
+        let task_error = TaskError(error_rx.shared());
+
+        let steal_handle = StealHandle::new(external_tx.clone(), task_error.clone());
+        let mirror_handle = MirrorHandle::new(external_tx.clone(), task_error);
 
         (task, steal_handle, mirror_handle)
     }
@@ -384,7 +385,7 @@ where
             .map_err(|error| RedirectorTaskError::RedirectorError(error.into()));
 
         if let Err(e) = result.clone() {
-            self.status_tx.send(e);
+            let _ = self.error_tx.send(e);
         }
 
         result
@@ -436,6 +437,26 @@ pub(super) enum RedirectionRequest {
         /// once the [`RedirectorTask`] completes the port mirror.
         receiver_tx: oneshot::Sender<mpsc::Receiver<MirroredTraffic>>,
     },
+}
+
+/// Can be used to retrieve an error that occurred in the [`RedirectorTask`].
+#[derive(Clone)]
+pub(super) struct TaskError(Shared<oneshot::Receiver<RedirectorTaskError>>);
+
+impl TaskError {
+    /// Resolves when an error occurs in the [`RedirectorTask`].
+    pub(super) async fn get(&self) -> RedirectorTaskError {
+        self.0
+            .clone()
+            .await
+            .unwrap_or(RedirectorTaskError::Panicked)
+    }
+}
+
+impl fmt::Debug for TaskError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.get().now_or_never().fmt(f)
+    }
 }
 
 #[cfg(test)]

@@ -1,36 +1,34 @@
+use std::fmt;
+
 use futures::StreamExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::ReceiverStream, StreamMap, StreamNotifyClose};
 
 use super::{
     connection::{http::MirroredHttp, tcp::MirroredTcp},
-    task::RedirectionRequest,
+    task::{RedirectionRequest, TaskError},
     RedirectorTaskError,
 };
-use crate::util::status::StatusReceiver;
 
 pub struct MirrorHandle {
     /// For sending mirror requests to the task.
     message_tx: mpsc::Sender<RedirectionRequest>,
     /// For fetching the task error.
     ///
-    /// [`RedirectorTask`](super::RedirectorTask) never exits before this handle is dropped.
+    /// [`RedirectorTask`](super::RedirectorTask) never exits before all handles is dropped.
     /// Also, it never removes any port mirror on its own.
     /// Therefore, if one of our [`mpsc::channel`]s fails, we assume that the task has failed
     /// and we use this channel to retrieve the task's error.
-    task_status: StatusReceiver<RedirectorTaskError>,
+    task_error: TaskError,
     /// For receiving mirrored traffic.
     mirrored_ports: StreamMap<u16, StreamNotifyClose<ReceiverStream<MirroredTraffic>>>,
 }
 
 impl MirrorHandle {
-    pub(super) fn new(
-        message_tx: mpsc::Sender<RedirectionRequest>,
-        task_status: StatusReceiver<RedirectorTaskError>,
-    ) -> Self {
+    pub(super) fn new(message_tx: mpsc::Sender<RedirectionRequest>, task_error: TaskError) -> Self {
         Self {
             message_tx,
-            task_status,
+            task_error,
             mirrored_ports: Default::default(),
         }
     }
@@ -54,11 +52,11 @@ impl MirrorHandle {
             .await
             .is_err()
         {
-            return Err(self.task_status.clone().await);
+            return Err(self.task_error.get().await);
         }
 
         let Ok(rx) = receiver_rx.await else {
-            return Err(self.task_status.clone().await);
+            return Err(self.task_error.get().await);
         };
 
         self.mirrored_ports
@@ -80,7 +78,7 @@ impl MirrorHandle {
     pub async fn next(&mut self) -> Option<Result<MirroredTraffic, RedirectorTaskError>> {
         match self.mirrored_ports.next().await? {
             (.., Some(conn)) => Some(Ok(conn)),
-            (.., None) => Some(Err(self.task_status.clone().await)),
+            (.., None) => Some(Err(self.task_error.get().await)),
         }
     }
 }
@@ -89,7 +87,7 @@ impl Clone for MirrorHandle {
     fn clone(&self) -> Self {
         Self {
             message_tx: self.message_tx.clone(),
-            task_status: self.task_status.clone(),
+            task_error: self.task_error.clone(),
             mirrored_ports: Default::default(),
         }
     }
@@ -98,4 +96,18 @@ impl Clone for MirrorHandle {
 pub enum MirroredTraffic {
     Tcp(MirroredTcp),
     Http(MirroredHttp),
+}
+
+impl fmt::Debug for MirrorHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MirrorHandle")
+            .field("task_error", &self.task_error)
+            .field("channel_closed", &self.message_tx.is_closed())
+            .field(
+                "queued_messages",
+                &(self.message_tx.max_capacity() - self.message_tx.capacity()),
+            )
+            .field("mirrored_ports", &self.mirrored_ports.len())
+            .finish()
+    }
 }

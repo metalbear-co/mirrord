@@ -35,13 +35,7 @@ pub struct PassThroughTask {
 
 impl PassThroughTask {
     pub async fn run(mut self, request: ExtractedRequest) {
-        let conn_status = request.status.clone();
-
-        let result = tokio::select! {
-            result = self.run_inner(request) => result,
-            result = conn_status => result,
-        };
-
+        let result = self.run_inner(request).await;
         self.copy_tx.send(IncomingStreamItem::Finished(result));
     }
 
@@ -79,13 +73,7 @@ impl PassThroughTask {
         let outgoing_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS)
             .then(|| hyper::upgrade::on(&mut response));
 
-        if extracted
-            .response_tx
-            .send(response.map(BoxBody::new))
-            .is_err()
-        {
-            return extracted.status.clone().await;
-        }
+        let _ = extracted.response_tx.send(response.map(BoxBody::new));
 
         let Some(outgoing_upgrade) = outgoing_upgrade else {
             return Ok(());

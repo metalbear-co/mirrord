@@ -4,8 +4,13 @@ use mirrord_protocol::{tcp::LayerTcp, DaemonMessage};
 use super::TcpMirrorApi;
 use crate::{sniffer::api::TcpSnifferApi, AgentError};
 
+/// Wrapper over [`TcpSnifferApi`], implementing [`TcpMirrorApi`].
 pub struct SnifferApiWrapper {
     api: TcpSnifferApi,
+    /// Implementation of [`TcpMirrorApi::recv`] can return two messages.
+    ///
+    /// We use this buffer to save the extra message and return it later from the next
+    /// [`TcpMirrorApi::recv`] call.
     ready_message: Option<DaemonMessage>,
 }
 

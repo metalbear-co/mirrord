@@ -23,15 +23,25 @@ use crate::{
     AgentError,
 };
 
+/// Wrapper over [`MirrorHandle`], implementing [`TcpMirrorApi`].
 pub struct MirrorHandleWrapper {
     handle: MirrorHandle,
     protocol_version: SharedProtocolVersion,
+    /// Implementations of [`TcpMirrorApi`] methods can produce more that one message.
+    ///
+    /// We use this buffer to save them and return later from the next [`TcpMirrorApi::recv`] call.
     queued_messages: VecDeque<DaemonMessage>,
     incoming_streams: StreamMap<ConnectionId, IncomingStream>,
     next_connection_id: ConnectionId,
 }
 
 impl MirrorHandleWrapper {
+    /// Constant [`RequestId`] for mirrored HTTP requests returned from this struct.
+    ///
+    /// Each mirrored HTTP request is sent to the client with a distinct [`ConnectionId`]
+    /// and constant [`RequestId`]. This makes the code simpler.
+    ///
+    /// Since `mirrord-intproxy` processes requests independently, it's fine.
     const REQUEST_ID: RequestId = 0;
 
     pub fn new(handle: MirrorHandle) -> Self {

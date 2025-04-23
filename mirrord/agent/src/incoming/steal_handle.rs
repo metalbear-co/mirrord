@@ -7,9 +7,8 @@ use tokio_stream::{wrappers::ReceiverStream, StreamMap, StreamNotifyClose};
 use super::{
     connection::{http::RedirectedHttp, tcp::RedirectedTcp},
     error::RedirectorTaskError,
-    task::RedirectionRequest,
+    task::{RedirectionRequest, TaskError},
 };
-use crate::util::status::StatusReceiver;
 
 /// Handle to a running [`RedirectorTask`](super::task::RedirectorTask).
 ///
@@ -19,23 +18,20 @@ pub struct StealHandle {
     message_tx: mpsc::Sender<RedirectionRequest>,
     /// For fetching the task error.
     ///
-    /// [`RedirectorTask`](super::RedirectorTask) never exits before this handle is dropped.
-    /// Also, it never removes any port steal on its own.
+    /// [`RedirectorTask`](super::RedirectorTask) never exits successfully before all handles are
+    /// dropped. Also, it never removes any port steal on its own.
     /// Therefore, if one of our [`mpsc::channel`]s fails, we assume that the task has failed
     /// and we use this channel to retrieve the task's error.
-    task_status: StatusReceiver<RedirectorTaskError>,
+    task_error: TaskError,
     /// For receiving stolen traffic.
     stolen_ports: StreamMap<u16, StreamNotifyClose<ReceiverStream<StolenTraffic>>>,
 }
 
 impl StealHandle {
-    pub(super) fn new(
-        message_tx: mpsc::Sender<RedirectionRequest>,
-        task_status: StatusReceiver<RedirectorTaskError>,
-    ) -> Self {
+    pub(super) fn new(message_tx: mpsc::Sender<RedirectionRequest>, task_error: TaskError) -> Self {
         Self {
             message_tx,
-            task_status,
+            task_error,
             stolen_ports: Default::default(),
         }
     }
@@ -59,11 +55,11 @@ impl StealHandle {
             .await
             .is_err()
         {
-            return Err(self.task_status.clone().await);
+            return Err(self.task_error.get().await);
         }
 
         let Ok(rx) = receiver_rx.await else {
-            return Err(self.task_status.clone().await);
+            return Err(self.task_error.get().await);
         };
 
         self.stolen_ports
@@ -85,7 +81,7 @@ impl StealHandle {
     pub async fn next(&mut self) -> Option<Result<StolenTraffic, RedirectorTaskError>> {
         match self.stolen_ports.next().await? {
             (.., Some(conn)) => Some(Ok(conn)),
-            (.., None) => Some(Err(self.task_status.clone().await)),
+            (.., None) => Some(Err(self.task_error.get().await)),
         }
     }
 }
@@ -107,7 +103,7 @@ impl StolenTraffic {
 impl fmt::Debug for StealHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StealHandle")
-            .field("task_status", &self.task_status)
+            .field("task_error", &self.task_error)
             .field("channel_closed", &self.message_tx.is_closed())
             .field(
                 "queued_messages",

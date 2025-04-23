@@ -19,7 +19,6 @@ use super::{error::HttpDetectError, ConnError, Redirected};
 use crate::{
     http::HttpVersion,
     steal::tls::{self, handler::PassThroughTlsConnector, StealTlsHandlerStore},
-    util::status::Panicked,
 };
 
 pub mod http;
@@ -104,7 +103,7 @@ impl MaybeHttp {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ConnectionInfo {
     pub original_destination: SocketAddr,
     pub local_addr: SocketAddr,
@@ -137,15 +136,14 @@ impl Stream for IncomingStream {
         let this = self.get_mut();
 
         let item = match this {
-            Self::Mpsc(rx) => std::task::ready!(rx.poll_recv(cx)).unwrap_or(
-                IncomingStreamItem::Finished(Err(ConnError::Panicked(Panicked))),
-            ),
+            Self::Mpsc(rx) => std::task::ready!(rx.poll_recv(cx))
+                .unwrap_or(IncomingStreamItem::Finished(Err(ConnError::Panicked))),
             Self::Broadcast(rx) => match std::task::ready!(rx.poll_next_unpin(cx)) {
                 Some(Ok(item)) => item,
                 Some(Err(BroadcastStreamRecvError::Lagged(..))) => {
                     IncomingStreamItem::Finished(Err(ConnError::Lagged))
                 }
-                None => IncomingStreamItem::Finished(Err(ConnError::Panicked(Panicked))),
+                None => IncomingStreamItem::Finished(Err(ConnError::Panicked)),
             },
             Self::Exhausted => return Poll::Ready(None),
         };

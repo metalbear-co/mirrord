@@ -1,5 +1,14 @@
 use std::sync::{Arc, Mutex};
 
+/// Shared and cloneable [`mirrord_protocol`] version of an agent's client.
+///
+/// Client's [`mirrord_protocol`] is used in multiple places.
+/// Storing it in behind a shared wrapper allows us to simplify the code
+/// and avoid passing it around in messages.
+///
+/// Its [`Default`] implementation sets the version to `0.1.0`.
+/// This is a dummy value that should not match any [`semver::VersionReq`] used in
+/// [`mirrord_protocol`], but still matches [`semver::VersionReq::STAR`].
 #[derive(Clone, Debug)]
 pub struct SharedProtocolVersion(Arc<Mutex<semver::Version>>);
 

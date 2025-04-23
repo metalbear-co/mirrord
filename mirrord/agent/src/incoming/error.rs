@@ -2,10 +2,7 @@ use std::{error::Error, io, sync::Arc};
 
 use thiserror::Error;
 
-use crate::{
-    steal::tls::error::StealTlsSetupError,
-    util::status::{Panicked, StatusTxDropped},
-};
+use crate::steal::tls::error::StealTlsSetupError;
 
 #[derive(Error, Debug, Clone, Copy)]
 #[error("stealing client dropped the connection/request")]
@@ -21,10 +18,8 @@ pub enum RedirectorTaskError {
     /// so we're not really interested in the concrete type.
     #[error("port redirector failed: {0}")]
     RedirectorError(Arc<dyn Error + Send + Sync + 'static>),
-    #[error(transparent)]
-    Panicked(#[from] Panicked),
-    #[error(transparent)]
-    StatusTxDropped(#[from] StatusTxDropped),
+    #[error("redirector task panicked")]
+    Panicked,
 }
 
 #[derive(Error, Debug)]
@@ -61,10 +56,8 @@ pub enum ConnError {
     Lagged,
     #[error(transparent)]
     StealerDropped(#[from] StealerDropped),
-    #[error(transparent)]
-    Panicked(#[from] Panicked),
-    #[error(transparent)]
-    StatusTxDropped(#[from] StatusTxDropped),
+    #[error("connection task panicked")]
+    Panicked,
 }
 
 pub trait ResultExt {

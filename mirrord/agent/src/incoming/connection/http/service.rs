@@ -20,10 +20,8 @@ use crate::{
     http::HttpVersion,
     incoming::{
         connection::{ConnectionInfo, IncomingIO},
-        error::{ConnError, ResultExt},
         task::InternalMessage,
     },
-    util::status::{self, StatusReceiver},
 };
 
 pub struct ExtractedRequest {
@@ -32,13 +30,11 @@ pub struct ExtractedRequest {
     pub body_tail: Option<Incoming>,
     pub on_upgrade: OnUpgrade,
     pub response_tx: oneshot::Sender<BoxResponse>,
-    pub status: StatusReceiver<Result<(), ConnError>>,
 }
 
 #[derive(Clone)]
 struct RequestExtractor {
     connection_info: ConnectionInfo,
-    status: StatusReceiver<Result<(), ConnError>>,
     request_tx: mpsc::Sender<InternalMessage>,
 }
 
@@ -66,7 +62,6 @@ impl Service<Request<Incoming>> for RequestExtractor {
                     body_tail,
                     on_upgrade,
                     response_tx,
-                    status: this.status,
                 },
                 this.connection_info,
             );
@@ -93,11 +88,8 @@ pub async fn extract_requests(
     version: HttpVersion,
     shutdown: WaitForCancellationFutureOwned,
 ) {
-    let (status_tx, status) = status::channel();
-
     let extractor = RequestExtractor {
-        connection_info,
-        status,
+        connection_info: connection_info.clone(),
         request_tx,
     };
 
@@ -133,6 +125,11 @@ pub async fn extract_requests(
         }
     };
 
-    let result = result.map_err_into(ConnError::IncomingHttpError);
-    status_tx.send(result);
+    if let Err(error) = result {
+        tracing::warn!(
+            %error,
+            ?connection_info,
+            "Incoming TCP connection failed",
+        )
+    }
 }
