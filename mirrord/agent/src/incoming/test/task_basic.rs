@@ -9,8 +9,7 @@ use rstest::rstest;
 use tokio::io::{AsyncWriteExt, Interest};
 
 use crate::incoming::{
-    test::dummy_redirector::DummyRedirector, tls::IncomingTlsHandlerStore, MirroredTraffic,
-    Redirected, RedirectorTask, StolenTraffic,
+    test::dummy_redirector::DummyRedirector, tls::IncomingTlsHandlerStore, RedirectorTask,
 };
 
 /// Verifies that the [`RedirectorTask`] cleans up its state when handle's traffic channels (port
@@ -61,7 +60,7 @@ async fn cleanup_on_dead_channel() {
 async fn concurrent_mirror_and_steal_tcp() {
     let destination = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 80);
 
-    let (redirector, mut state, tx) = DummyRedirector::new();
+    let (redirector, mut state, connections) = DummyRedirector::new();
     let (task, mut steal_handle, mut mirror_handle) =
         RedirectorTask::new(redirector, IncomingTlsHandlerStore::dummy());
     tokio::spawn(task.run());
@@ -69,97 +68,47 @@ async fn concurrent_mirror_and_steal_tcp() {
     // Both handles should receive traffic.
     steal_handle.steal(destination.port()).await.unwrap();
     mirror_handle.mirror(destination.port()).await.unwrap();
-    let mut redirected = Redirected::dummy(destination).await;
-    let peer_addr = redirected.1.local_addr().unwrap();
-    tx.send(redirected.0).await.unwrap();
-    redirected
-        .1
-        .write_all(b"hello, this is not tcp")
-        .await
-        .unwrap();
-    match steal_handle.next().await.unwrap().unwrap() {
-        StolenTraffic::Tcp(redirected) => {
-            assert_eq!(redirected.info().original_destination, destination);
-            assert_eq!(redirected.info().peer_addr, peer_addr);
-            assert!(redirected.info().tls_connector.is_none());
-            redirected.steal()
-        }
-        StolenTraffic::Http(..) => panic!("Expected TCP traffic"),
-    };
-    match mirror_handle.next().await.unwrap().unwrap() {
-        MirroredTraffic::Tcp(mirrored) => {
-            assert_eq!(mirrored.info.original_destination, destination);
-            assert!(mirrored.info.tls_connector.is_none());
-            mirrored
-        }
-        MirroredTraffic::Http(..) => panic!("Expected TCP traffic"),
-    };
+    let mut conn = connections.new_tcp(destination).await;
+    let peer_addr = conn.local_addr().unwrap();
+    conn.write_all(b"hello, this is not tcp").await.unwrap();
+    let redirected = steal_handle.next().await.unwrap().unwrap().unwrap_tcp();
+    assert_eq!(redirected.info().original_destination, destination);
+    assert_eq!(redirected.info().peer_addr, peer_addr);
+    assert!(redirected.info().tls_connector.is_none());
+    let mirrored = mirror_handle.next().await.unwrap().unwrap().unwrap_tcp();
+    assert_eq!(mirrored.info.original_destination, destination);
+    assert!(mirrored.info.tls_connector.is_none());
 
     // New mirror handle should not inherit parent's subscriptions,
     // and should not receive traffic.
     let mut mirror_handle_2 = mirror_handle.clone();
-    let mut redirected = Redirected::dummy(destination).await;
-    let peer_addr = redirected.1.local_addr().unwrap();
-    tx.send(redirected.0).await.unwrap();
-    redirected
-        .1
-        .write_all(b"hello, this is not tcp")
-        .await
-        .unwrap();
-    match steal_handle.next().await.unwrap().unwrap() {
-        StolenTraffic::Tcp(redirected) => {
-            assert_eq!(redirected.info().original_destination, destination);
-            assert_eq!(redirected.info().peer_addr, peer_addr);
-            assert!(redirected.info().tls_connector.is_none());
-            redirected.steal()
-        }
-        StolenTraffic::Http(..) => panic!("Expected TCP traffic"),
-    };
-    match mirror_handle.next().await.unwrap().unwrap() {
-        MirroredTraffic::Tcp(mirrored) => {
-            assert_eq!(mirrored.info.original_destination, destination);
-            assert!(mirrored.info.tls_connector.is_none());
-            mirrored
-        }
-        MirroredTraffic::Http(..) => panic!("Expected TCP traffic"),
-    };
+    let mut conn = connections.new_tcp(destination).await;
+    let peer_addr = conn.local_addr().unwrap();
+    conn.write_all(b"hello, this is not tcp").await.unwrap();
+    let redirected = steal_handle.next().await.unwrap().unwrap().unwrap_tcp();
+    assert_eq!(redirected.info().original_destination, destination);
+    assert_eq!(redirected.info().peer_addr, peer_addr);
+    assert!(redirected.info().tls_connector.is_none());
+    let mirrored = mirror_handle.next().await.unwrap().unwrap().unwrap_tcp();
+    assert_eq!(mirrored.info.original_destination, destination);
+    assert!(mirrored.info.tls_connector.is_none());
     assert!(mirror_handle_2.next().await.is_none());
 
     // New mirror handle should receive traffic after making the subscription.
     mirror_handle_2.mirror(destination.port()).await.unwrap();
-    let mut redirected = Redirected::dummy(destination).await;
-    let peer_addr = redirected.1.local_addr().unwrap();
-    tx.send(redirected.0).await.unwrap();
-    redirected
-        .1
-        .write_all(b"hello, this is not tcp")
-        .await
-        .unwrap();
-    match steal_handle.next().await.unwrap().unwrap() {
-        StolenTraffic::Tcp(redirected) => {
-            assert_eq!(redirected.info().original_destination, destination);
-            assert_eq!(redirected.info().peer_addr, peer_addr);
-            assert!(redirected.info().tls_connector.is_none());
-            redirected.steal()
-        }
-        StolenTraffic::Http(..) => panic!("Expected TCP traffic"),
-    };
-    match mirror_handle.next().await.unwrap().unwrap() {
-        MirroredTraffic::Tcp(mirrored) => {
-            assert_eq!(mirrored.info.original_destination, destination);
-            assert!(mirrored.info.tls_connector.is_none());
-            mirrored
-        }
-        MirroredTraffic::Http(..) => panic!("Expected TCP traffic"),
-    };
-    match mirror_handle_2.next().await.unwrap().unwrap() {
-        MirroredTraffic::Tcp(mirrored) => {
-            assert_eq!(mirrored.info.original_destination, destination);
-            assert!(mirrored.info.tls_connector.is_none());
-            mirrored
-        }
-        MirroredTraffic::Http(..) => panic!("Expected TCP traffic"),
-    };
+    let mut conn = connections.new_tcp(destination).await;
+    let peer_addr = conn.local_addr().unwrap();
+    conn.write_all(b"hello, this is not tcp").await.unwrap();
+    let redirected = steal_handle.next().await.unwrap().unwrap().unwrap_tcp();
+    assert_eq!(redirected.info().original_destination, destination);
+    assert_eq!(redirected.info().peer_addr, peer_addr);
+    assert!(redirected.info().tls_connector.is_none());
+    let mirrored = mirror_handle.next().await.unwrap().unwrap().unwrap_tcp();
+    assert_eq!(mirrored.info.original_destination, destination);
+    assert!(mirrored.info.tls_connector.is_none());
+    let mirrored = mirror_handle_2.next().await.unwrap().unwrap().unwrap_tcp();
+    assert_eq!(mirrored.info.original_destination, destination);
+    assert!(mirrored.info.tls_connector.is_none());
 
     // Redirected connection should be dropped when all subscriptions are dropped.
     steal_handle.stop_steal(destination.port());
@@ -169,8 +118,7 @@ async fn concurrent_mirror_and_steal_tcp() {
         .wait_for(|state| state.has_redirections([]))
         .await
         .unwrap();
-    let redirected = Redirected::dummy(destination).await;
-    tx.send(redirected.0).await.unwrap();
-    let ready = redirected.1.ready(Interest::READABLE).await.unwrap();
+    let conn = connections.new_tcp(destination).await;
+    let ready = conn.ready(Interest::READABLE).await.unwrap();
     assert!(ready.is_read_closed());
 }

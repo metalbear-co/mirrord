@@ -108,6 +108,16 @@ pub enum MirroredTraffic {
     Http(MirroredHttp),
 }
 
+#[cfg(test)]
+impl MirroredTraffic {
+    pub fn unwrap_tcp(self) -> MirroredTcp {
+        match self {
+            MirroredTraffic::Tcp(tcp) => tcp,
+            MirroredTraffic::Http(..) => panic!("expected TCP, got HTTP"),
+        }
+    }
+}
+
 impl fmt::Debug for MirrorHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MirrorHandle")

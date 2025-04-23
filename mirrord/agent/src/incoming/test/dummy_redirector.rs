@@ -5,12 +5,13 @@ use std::{
     ops::Not,
 };
 
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, watch},
 };
 
-use crate::incoming::{PortRedirector, Redirected};
+use crate::incoming::{BoxBody, PortRedirector, Redirected};
 
 /// Implementation of [`PortRedirector`] that can be used in unit tests.
 pub struct DummyRedirector {
@@ -42,12 +43,12 @@ impl DummyRedirector {
     /// Returns:
     /// 1. the redirector,
     /// 2. a [`watch::Receiver`] that can be used to inspect the redirector's state,
-    /// 3. an [`mpsc::Sender`] that can be used to send mocked [`Redirected`] connections through
-    ///    the redirector.
+    /// 3. a [`DummyConnections`] struct that can be used to send mocked [`Redirected`] connections
+    ///    through the redirector.
     pub fn new() -> (
         Self,
         watch::Receiver<DummyRedirectorState>,
-        mpsc::Sender<Redirected>,
+        DummyConnections,
     ) {
         let (conn_tx, conn_rx) = mpsc::channel(8);
         let (state_tx, state_rx) = watch::channel(DummyRedirectorState::default());
@@ -58,7 +59,7 @@ impl DummyRedirector {
                 conn_rx,
             },
             state_rx,
-            conn_tx,
+            DummyConnections { tx: conn_tx },
         )
     }
 }
@@ -107,15 +108,18 @@ impl PortRedirector for DummyRedirector {
     }
 
     async fn next_connection(&mut self) -> Result<Redirected, Self::Error> {
-        self.conn_rx
-            .recv()
-            .await
-            .ok_or_else(|| "channel closed".into())
+        let conn = self.conn_rx.recv().await;
+
+        if let Some(conn) = conn {
+            return Ok(conn);
+        } else {
+            return std::future::pending().await;
+        }
     }
 }
 
 impl Redirected {
-    pub async fn dummy(destination: SocketAddr) -> (Self, TcpStream) {
+    async fn dummy(destination: SocketAddr) -> (Self, TcpStream) {
         let listen_addr = if destination.is_ipv4() {
             SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0)
         } else {
@@ -136,5 +140,47 @@ impl Redirected {
             },
             client_stream.await.unwrap().unwrap(),
         )
+    }
+}
+
+pub struct DummyConnections {
+    tx: mpsc::Sender<Redirected>,
+}
+
+impl DummyConnections {
+    pub async fn new_tcp(&self, destination: SocketAddr) -> TcpStream {
+        let (redirected, client_side) = Redirected::dummy(destination).await;
+        self.tx.send(redirected).await.unwrap();
+        client_side
+    }
+
+    pub async fn new_http_v1(
+        &self,
+        destination: SocketAddr,
+    ) -> hyper::client::conn::http1::SendRequest<BoxBody> {
+        let (redirected, client_side) = Redirected::dummy(destination).await;
+        self.tx.send(redirected).await.unwrap();
+        let (sender, conn) =
+            hyper::client::conn::http1::handshake::<_, BoxBody>(TokioIo::new(client_side))
+                .await
+                .unwrap();
+        tokio::spawn(conn.with_upgrades());
+        sender
+    }
+
+    pub async fn new_http_v2(
+        &self,
+        destination: SocketAddr,
+    ) -> hyper::client::conn::http2::SendRequest<BoxBody> {
+        let (redirected, client_side) = Redirected::dummy(destination).await;
+        self.tx.send(redirected).await.unwrap();
+        let (sender, conn) = hyper::client::conn::http2::handshake::<_, _, BoxBody>(
+            TokioExecutor::new(),
+            TokioIo::new(client_side),
+        )
+        .await
+        .unwrap();
+        tokio::spawn(conn);
+        sender
     }
 }

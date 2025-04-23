@@ -8,7 +8,7 @@ mod mirror_handle;
 mod steal_handle;
 mod task;
 #[cfg(test)]
-mod test;
+pub mod test;
 mod tls;
 
 use std::{

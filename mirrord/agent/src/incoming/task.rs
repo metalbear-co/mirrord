@@ -6,7 +6,10 @@ use std::{
     sync::Arc,
 };
 
-use futures::{future::Shared, FutureExt};
+use futures::{
+    future::{OptionFuture, Shared},
+    FutureExt,
+};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -228,12 +231,15 @@ where
                 }
             }
 
-            if let Some(steal) = &state.steal {
-                if let Ok(permit) = steal.reserve().await {
-                    permit.send(StolenTraffic::Tcp(redirected));
-                } else {
-                    redirected.pass_through();
-                }
+            let steal_permit = OptionFuture::from(state.steal.as_ref().map(mpsc::Sender::reserve))
+                .await
+                .transpose()
+                .ok()
+                .flatten();
+            if let Some(permit) = steal_permit {
+                permit.send(StolenTraffic::Tcp(redirected));
+            } else {
+                redirected.pass_through();
             }
 
             return;
@@ -281,12 +287,15 @@ where
             };
         }
 
-        if let Some(steal) = &state.steal {
-            if let Ok(permit) = steal.reserve().await {
-                permit.send(StolenTraffic::Http(redirected));
-            } else {
-                redirected.pass_through();
-            }
+        let steal_permit = OptionFuture::from(state.steal.as_ref().map(mpsc::Sender::reserve))
+            .await
+            .transpose()
+            .ok()
+            .flatten();
+        if let Some(permit) = steal_permit {
+            permit.send(StolenTraffic::Http(redirected));
+        } else {
+            redirected.pass_through();
         }
     }
 
