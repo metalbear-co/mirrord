@@ -6,8 +6,10 @@ use tracing::Level;
 
 mod filter;
 mod reversible_stream;
+mod sender;
 
 pub use filter::HttpFilter;
+pub use sender::HttpSender;
 
 /// Helper enum for representing HTTP/1.x and HTTP/2, which are handled very differently in some
 /// parts of the code.

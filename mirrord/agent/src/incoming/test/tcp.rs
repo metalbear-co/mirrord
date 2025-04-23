@@ -54,6 +54,8 @@ async fn echo_tcp_client(mut stream: TcpStream, message: &[u8], times: usize) {
 #[timeout(Duration::from_secs(5))]
 #[tokio::test]
 async fn tcp_full_flow(#[case] steal: bool, #[case] mirror: bool) {
+    assert!(steal || mirror, "this test cannot handle no subscription");
+
     let listener = TcpListener::bind(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
         .await
         .unwrap();

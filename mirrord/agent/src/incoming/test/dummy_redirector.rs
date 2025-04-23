@@ -11,7 +11,10 @@ use tokio::{
     sync::{mpsc, watch},
 };
 
-use crate::incoming::{BoxBody, PortRedirector, Redirected};
+use crate::{
+    http::{HttpSender, HttpVersion},
+    incoming::{BoxBody, PortRedirector, Redirected},
+};
 
 /// Implementation of [`PortRedirector`] that can be used in unit tests.
 pub struct DummyRedirector {
@@ -154,33 +157,33 @@ impl DummyConnections {
         client_side
     }
 
-    pub async fn new_http_v1(
+    pub async fn new_http(
         &self,
         destination: SocketAddr,
-    ) -> hyper::client::conn::http1::SendRequest<BoxBody> {
+        version: HttpVersion,
+    ) -> HttpSender<BoxBody> {
         let (redirected, client_side) = Redirected::dummy(destination).await;
         self.tx.send(redirected).await.unwrap();
-        let (sender, conn) =
-            hyper::client::conn::http1::handshake::<_, BoxBody>(TokioIo::new(client_side))
+
+        match version {
+            HttpVersion::V1 => {
+                let (sender, conn) =
+                    hyper::client::conn::http1::handshake::<_, BoxBody>(TokioIo::new(client_side))
+                        .await
+                        .unwrap();
+                tokio::spawn(conn.with_upgrades());
+                HttpSender::V1(sender)
+            }
+            HttpVersion::V2 => {
+                let (sender, conn) = hyper::client::conn::http2::handshake::<_, _, BoxBody>(
+                    TokioExecutor::new(),
+                    TokioIo::new(client_side),
+                )
                 .await
                 .unwrap();
-        tokio::spawn(conn.with_upgrades());
-        sender
-    }
-
-    pub async fn new_http_v2(
-        &self,
-        destination: SocketAddr,
-    ) -> hyper::client::conn::http2::SendRequest<BoxBody> {
-        let (redirected, client_side) = Redirected::dummy(destination).await;
-        self.tx.send(redirected).await.unwrap();
-        let (sender, conn) = hyper::client::conn::http2::handshake::<_, _, BoxBody>(
-            TokioExecutor::new(),
-            TokioIo::new(client_side),
-        )
-        .await
-        .unwrap();
-        tokio::spawn(conn);
-        sender
+                tokio::spawn(conn);
+                HttpSender::V2(sender)
+            }
+        }
     }
 }

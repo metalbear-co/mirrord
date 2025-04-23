@@ -12,7 +12,7 @@ use hyper::{
     client::conn::{http1, http2},
     http::{request, StatusCode, Version},
     upgrade::Upgraded,
-    Request, Response,
+    Request,
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use mirrord_tls_util::MaybeTls;
@@ -22,10 +22,13 @@ use tokio::{
 };
 
 use super::{error_response::MirrordErrorResponse, service::ExtractedRequest, BoxBody};
-use crate::incoming::{
-    connection::{util::AutoDropBroadcast, ConnectionInfo, IncomingIO},
-    error::{ConnError, ResultExt},
-    IncomingStreamItem,
+use crate::{
+    http::HttpSender,
+    incoming::{
+        connection::{util::AutoDropBroadcast, ConnectionInfo, IncomingIO},
+        error::{ConnError, ResultExt},
+        IncomingStreamItem,
+    },
 };
 
 /// Background task responsible for handling IO on redirected HTTP request,
@@ -180,7 +183,10 @@ impl PassThroughTask {
     }
 
     /// Makes an HTTP connection to the original destination.
-    async fn make_connection(&self, extracted: &request::Parts) -> Result<Sender, ConnError> {
+    async fn make_connection(
+        &self,
+        extracted: &request::Parts,
+    ) -> Result<HttpSender<PassThroughBody>, ConnError> {
         let stream = TcpStream::connect(self.info.pass_through_address())
             .await
             .map_err_into(ConnError::TcpConnectError)?;
@@ -210,7 +216,7 @@ impl PassThroughTask {
                 .map_err_into(ConnError::PassthroughHttpError)?;
 
                 tokio::spawn(conn);
-                Ok(Sender::Http2(sender))
+                Ok(HttpSender::V2(sender))
             }
             _ => {
                 let (sender, conn) = http1::handshake::<_, PassThroughBody>(TokioIo::new(stream))
@@ -218,28 +224,8 @@ impl PassThroughTask {
                     .map_err_into(ConnError::PassthroughHttpError)?;
 
                 tokio::spawn(conn.with_upgrades());
-                Ok(Sender::Http1(sender))
+                Ok(HttpSender::V1(sender))
             }
-        }
-    }
-}
-
-/// [`hyper`] uses different types for HTTP/1 and HTTP/2 request senders.
-///
-/// This struct is just a simple `Either` type.
-enum Sender {
-    Http1(http1::SendRequest<PassThroughBody>),
-    Http2(http2::SendRequest<PassThroughBody>),
-}
-
-impl Sender {
-    async fn send(
-        &mut self,
-        request: Request<PassThroughBody>,
-    ) -> hyper::Result<Response<Incoming>> {
-        match self {
-            Self::Http1(sender) => sender.send_request(request).await,
-            Self::Http2(sender) => sender.send_request(request).await,
         }
     }
 }
