@@ -82,15 +82,26 @@ impl KubeResourceSeeker<'_> {
         operator_active: bool,
     ) -> Result<Vec<String>> {
         match resource_type {
-            TargetType::Deployment if operator_active => self.simple_list_resource::<Deployment>("deployment").await,
+            TargetType::Deployment if operator_active => {
+                self.simple_list_resource::<Deployment>("deployment").await
+            }
             TargetType::Deployment => self.deployments().await,
             TargetType::Pod => self.pods().await,
             TargetType::Rollout => self.simple_list_resource::<Rollout>("rollout").await,
             TargetType::Job if operator_active => self.simple_list_resource::<Job>("job").await,
-            TargetType::CronJob if operator_active => self.simple_list_resource::<CronJob>("cronjob").await,
-            TargetType::StatefulSet if operator_active => self.simple_list_resource::<StatefulSet>("statefulset").await,
-            TargetType::Service if operator_active => self.simple_list_resource::<Service>("service").await,
-            TargetType::ReplicaSet if operator_active => self.simple_list_resource::<ReplicaSet>("replicaset").await,
+            TargetType::CronJob if operator_active => {
+                self.simple_list_resource::<CronJob>("cronjob").await
+            }
+            TargetType::StatefulSet if operator_active => {
+                self.simple_list_resource::<StatefulSet>("statefulset")
+                    .await
+            }
+            TargetType::Service if operator_active => {
+                self.simple_list_resource::<Service>("service").await
+            }
+            TargetType::ReplicaSet if operator_active => {
+                self.simple_list_resource::<ReplicaSet>("replicaset").await
+            }
             TargetType::Targetless => {
                 tracing::warn!("Cannot list targets with resource type 'targetless'");
                 Ok(vec![])
