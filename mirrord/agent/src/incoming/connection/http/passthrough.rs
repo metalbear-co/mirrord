@@ -1,6 +1,5 @@
 use std::{
     pin::Pin,
-    sync::Arc,
     task::{self, Context, Poll},
     vec,
 };
@@ -28,12 +27,18 @@ use crate::incoming::{
     IncomingStreamItem,
 };
 
+/// Background task responsible for handling IO on redirected HTTP request,
+/// that is not stolen.
 pub struct PassThroughTask {
     pub info: ConnectionInfo,
     pub copy_tx: AutoDropBroadcast<IncomingStreamItem>,
 }
 
 impl PassThroughTask {
+    /// Runs this task until the request is finished.
+    ///
+    /// This method must ensure that the final [`IncomingStreamItem::Finished`] is always sent to
+    /// the clients.
     pub async fn run(mut self, request: ExtractedRequest) {
         let result = self.run_inner(request).await;
         self.copy_tx.send(IncomingStreamItem::Finished(result));
@@ -90,6 +95,7 @@ impl PassThroughTask {
         Ok(())
     }
 
+    /// Handles bidirectional data transfer after an HTTP upgrade.
     async fn proxy_upgraded_data(
         &mut self,
         upgraded_outgoing: Upgraded,
@@ -172,6 +178,7 @@ impl PassThroughTask {
         Ok(())
     }
 
+    /// Makes an HTTP connection to the original destination.
     async fn make_connection(&self, extracted: &request::Parts) -> Result<Sender, ConnError> {
         let stream = TcpStream::connect(self.info.pass_through_address())
             .await
@@ -216,6 +223,9 @@ impl PassThroughTask {
     }
 }
 
+/// [`hyper`] uses different types for HTTP/1 and HTTP/2 request senders.
+///
+/// This struct is just a simple `Either` type.
 enum Sender {
     Http1(http1::SendRequest<PassThroughBody>),
     Http2(http2::SendRequest<PassThroughBody>),
@@ -233,6 +243,9 @@ impl Sender {
     }
 }
 
+/// [`Body`] type used when passing the redirected [`Request`] to its original destination.
+///
+/// [`Body::poll_frame`] automatically sends the frames to the mirroring clients.
 struct PassThroughBody {
     head: vec::IntoIter<Frame<Bytes>>,
     tail: Option<Incoming>,
@@ -241,7 +254,7 @@ struct PassThroughBody {
 
 impl Body for PassThroughBody {
     type Data = Bytes;
-    type Error = Arc<hyper::Error>;
+    type Error = hyper::Error;
 
     fn poll_frame(
         self: Pin<&mut Self>,
@@ -263,11 +276,9 @@ impl Body for PassThroughBody {
                 Poll::Ready(Some(Ok(frame)))
             }
             Some(Err(error)) => {
+                // We don't send the error through the broadcast channel,
+                // because `PassThroughTask::run` will do it.
                 this.tail = None;
-                let error = Arc::new(error);
-                this.copy_tx.send(IncomingStreamItem::Finished(Err(
-                    ConnError::IncomingHttpError(error.clone()),
-                )));
                 Poll::Ready(Some(Err(error)))
             }
             None => {

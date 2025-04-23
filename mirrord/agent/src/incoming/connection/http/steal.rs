@@ -20,6 +20,7 @@ use crate::incoming::{
 
 pub type UpgradeDataRx = mpsc::Receiver<Vec<u8>>;
 
+/// Background task responsible for handling IO on stolen HTTP request.
 pub struct StealTask {
     pub body_tail: Option<Incoming>,
     pub on_upgrade: OnUpgrade,
@@ -29,6 +30,10 @@ pub struct StealTask {
 }
 
 impl StealTask {
+    /// Runs this task until the request is finished.
+    ///
+    /// This method must ensure that the final [`IncomingStreamItem::Finished`] is always sent to
+    /// the clients.
     pub async fn run(mut self) {
         let result: Result<(), ConnError> = try {
             self.handle_frames().await?;
@@ -43,6 +48,7 @@ impl StealTask {
             .send(IncomingStreamItem::Finished(result.clone()));
     }
 
+    /// Handles reading request body frames.
     async fn handle_frames(&mut self) -> Result<(), ConnError> {
         let Some(mut body) = self.body_tail.take() else {
             return Ok(());
@@ -63,6 +69,7 @@ impl StealTask {
         Ok(())
     }
 
+    /// Handles bidirectional data transfer after an HTTP upgrade.
     async fn handle_upgrade(&mut self) -> Result<(), ConnError> {
         let mut data_rx = match (&mut self.upgrade_rx).await {
             Ok(Some(data_rx)) => data_rx,
