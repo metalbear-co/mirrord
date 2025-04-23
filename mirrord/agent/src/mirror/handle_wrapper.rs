@@ -130,13 +130,11 @@ impl MirrorHandleWrapper {
                     source: http.info.peer_addr,
                     destination: http.info.original_destination,
                 },
-                transport: match http.info.tls_connector {
-                    Some(tls) => HttpRequestTransportType::Tls {
-                        alpn_protocol: tls.alpn_protocol().map(From::from),
-                        server_name: tls.server_name().map(|name| name.to_str().into()),
-                    },
-                    None => HttpRequestTransportType::Tcp,
-                },
+                transport: http
+                    .info
+                    .tls_connector
+                    .map(From::from)
+                    .unwrap_or(HttpRequestTransportType::Tcp),
             },
         )))
     }

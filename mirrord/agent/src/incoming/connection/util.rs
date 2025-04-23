@@ -2,6 +2,10 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::incoming::error::StealerDropped;
 
+/// Wrapper over an optional [`broadcast::Sender`].
+///
+/// The inner sender is dropped as soon as we detect that the channel is closed.
+/// This is to eagerly free the resources allocated for the channel.
 #[derive(Clone)]
 pub struct AutoDropBroadcast<T>(Option<broadcast::Sender<T>>);
 
@@ -30,6 +34,9 @@ impl<T> From<Option<broadcast::Sender<T>>> for AutoDropBroadcast<T> {
     }
 }
 
+/// Wrapper over an [`mpsc::Sender`].
+///
+/// [`StealerSender::send`] returns a meaningful error that implements [`Into<ConnError>`].
 #[derive(Clone)]
 pub struct StealerSender<T>(mpsc::Sender<T>);
 

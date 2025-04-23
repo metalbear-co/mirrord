@@ -24,14 +24,25 @@ use crate::{
     },
 };
 
+/// An HTTP request extracted from a redirected incoming connection.
 pub struct ExtractedRequest {
     pub parts: Parts,
     pub body_head: Vec<Frame<Bytes>>,
     pub body_tail: Option<Incoming>,
     pub on_upgrade: OnUpgrade,
+    /// Can be used send the response back to the remote HTTP client.
+    ///
+    /// Try not to drop it without providing a meaningful error response
+    /// ([`super::error_response::MirrordErrorResponse`]). Providing meaningful error responses
+    /// helps when debugging user issues.
     pub response_tx: oneshot::Sender<BoxResponse>,
 }
 
+/// Implementation of [`Service`] that sends [`Request`]s through the inner [`mpsc::Sender`]
+/// and returns responses produced somewhere else.
+///
+/// The responses are received from [`oneshot::Receiver`] send with the [`Request`] in an
+/// [`InternalMessage`].
 #[derive(Clone)]
 struct RequestExtractor {
     connection_info: ConnectionInfo,
@@ -67,7 +78,11 @@ impl Service<Request<Incoming>> for RequestExtractor {
             );
 
             if this.request_tx.send(message).await.is_err() {
-                return Ok(MirrordErrorResponse::new(version, "request dropped").into());
+                return Ok(MirrordErrorResponse::new(
+                    version,
+                    "redirector task is exiting, request dropped",
+                )
+                .into());
             }
 
             let response = match response_rx.await {
@@ -81,6 +96,15 @@ impl Service<Request<Incoming>> for RequestExtractor {
     }
 }
 
+/// Background task for a redirected HTTP connection.
+///
+/// Used by [`RedirectorTask`](crate::incoming::RedirectorTask) to:
+/// 1. Handle IO.
+/// 2. Extract HTTP requests.
+///
+/// The requests are sent through the given [`mpsc::Sender`].
+///
+/// The given `shutdown` can be used to gracefully shutdown the HTTP server.
 pub async fn extract_requests(
     connection_info: ConnectionInfo,
     request_tx: mpsc::Sender<InternalMessage>,

@@ -17,6 +17,7 @@ use crate::incoming::{
     IncomingStreamItem,
 };
 
+/// Background task responsible for handling IO on redirected TCP connections.
 pub struct TcpTask {
     pub incoming_io: Box<dyn IncomingIO>,
     pub destination: Destination,
@@ -24,6 +25,10 @@ pub struct TcpTask {
 }
 
 impl TcpTask {
+    /// Runs this task until the connection is closed.
+    ///
+    /// This method must ensure that the final [`IncomingStreamItem::Finished`] is always sent to
+    /// the clients.
     pub async fn run(mut self) {
         let result = self.run_inner().await;
         if let Destination::StealingClient { data_tx, .. } = &self.destination {
@@ -87,6 +92,8 @@ impl TcpTask {
     }
 }
 
+/// Destination of a redirected TCP connection,
+/// used in the [`TcpTask`].
 pub enum Destination {
     PassThrough {
         stream: MaybeTls,

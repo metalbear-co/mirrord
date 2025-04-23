@@ -7,6 +7,10 @@ use hyper::http::{StatusCode, Version};
 
 use super::BoxResponse;
 
+/// HTTP response produced by the agent when it fails to serve a redirected request.
+///
+/// 1. Always uses [`StatusCode::BAD_GATEWAY`].
+/// 2. Body always starts with `mirrord-agent: `.
 pub struct MirrordErrorResponse {
     version: Version,
     body: Bytes,
@@ -14,7 +18,7 @@ pub struct MirrordErrorResponse {
 
 impl MirrordErrorResponse {
     pub fn new<B: fmt::Display>(version: Version, body: B) -> Self {
-        let body = format!("mirrord: {body}").into();
+        let body = format!("mirrord-agent: {body}").into();
 
         Self { version, body }
     }

@@ -187,13 +187,10 @@ impl TcpStealApi {
                         source: info.peer_addr,
                         destination: info.original_destination,
                     },
-                    transport: match info.tls_connector {
-                        Some(tls) => HttpRequestTransportType::Tls {
-                            alpn_protocol: tls.alpn_protocol().map(From::from),
-                            server_name: tls.server_name().map(|name| name.to_str().into()),
-                        },
-                        None => HttpRequestTransportType::Tcp,
-                    },
+                    transport: info
+                        .tls_connector
+                        .map(From::from)
+                        .unwrap_or(HttpRequestTransportType::Tcp),
                 }),
             ));
 
@@ -308,13 +305,10 @@ impl TcpStealApi {
         if self.protocol_version.matches(&NEW_CONNECTION_V2_VERSION) {
             DaemonTcp::NewConnectionV2(NewTcpConnectionV2 {
                 connection: new_connection,
-                transport: match info.tls_connector {
-                    Some(tls) => HttpRequestTransportType::Tls {
-                        alpn_protocol: tls.alpn_protocol().map(From::from),
-                        server_name: tls.server_name().map(|name| name.to_str().into()),
-                    },
-                    None => HttpRequestTransportType::Tcp,
-                },
+                transport: info
+                    .tls_connector
+                    .map(From::from)
+                    .unwrap_or(HttpRequestTransportType::Tcp),
             })
         } else {
             DaemonTcp::NewConnection(new_connection)
