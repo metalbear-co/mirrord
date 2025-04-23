@@ -1,4 +1,5 @@
 use std::{
+    fmt,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     pin::Pin,
     task::{Context, Poll},
@@ -39,7 +40,7 @@ impl MaybeHttp {
     /// Timeout for detemining if the redirected connection is HTTP.
     const HTTP_DETECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
-    pub async fn initialize(
+    pub async fn detect(
         redirected: Redirected,
         tls_handlers: &StealTlsHandlerStore,
     ) -> Result<Self, HttpDetectError> {
@@ -103,6 +104,15 @@ impl MaybeHttp {
     }
 }
 
+impl fmt::Debug for MaybeHttp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MaybeHttp")
+            .field("info", &self.info)
+            .field("http_version", &self.http_version)
+            .finish()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ConnectionInfo {
     pub original_destination: SocketAddr,
@@ -156,7 +166,7 @@ impl Stream for IncomingStream {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum IncomingStreamItem {
     Frame(InternalHttpBodyFrame),
     NoMoreFrames,

@@ -14,7 +14,7 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use super::{ConnectionInfo, IncomingStream, IncomingStreamItem};
 
-mod error_response;
+pub mod error_response;
 mod passthrough;
 pub mod service;
 mod steal;

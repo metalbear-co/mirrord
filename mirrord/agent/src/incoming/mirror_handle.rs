@@ -10,6 +10,15 @@ use super::{
     RedirectorTaskError,
 };
 
+/// Handle to a running [`RedirectorTask`](super::task::RedirectorTask).
+///
+/// Allows for mirroring incoming traffic.
+///
+/// # Clone implementation
+///
+/// This handle can be cloned and used by multiple agent clients.
+/// A new handle acquired with [`Clone::clone`] is independent and does not inherit port
+/// subscriptions of its parent.
 pub struct MirrorHandle {
     /// For sending mirror requests to the task.
     message_tx: mpsc::Sender<RedirectionRequest>,
@@ -93,6 +102,7 @@ impl Clone for MirrorHandle {
     }
 }
 
+/// Incoming traffic mirrored with a [`MirrorHandle`].
 pub enum MirroredTraffic {
     Tcp(MirroredTcp),
     Http(MirroredHttp),

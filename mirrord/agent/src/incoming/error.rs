@@ -22,6 +22,7 @@ pub enum RedirectorTaskError {
     Panicked,
 }
 
+/// Errors that can occur when detecting HTTP protocol in a redirected connection.
 #[derive(Error, Debug)]
 pub enum HttpDetectError {
     #[error(transparent)]
@@ -34,6 +35,10 @@ pub enum HttpDetectError {
     TlsAccept(#[source] io::Error),
 }
 
+/// Errors that can occur when handling a redirected incoming connection.
+///
+/// Most inner errors are wrapped in [`Arc`], as this type must implement [`Clone`] - errors are
+/// broadcasted to all interested clients.
 #[derive(Error, Debug, Clone)]
 pub enum ConnError {
     #[error("failed to make a passthrough TCP connection: {0}")]
@@ -60,6 +65,16 @@ pub enum ConnError {
     Panicked,
 }
 
+/// Convenience trait for converting results to [`Result<T, ConnError>`].
+///
+/// As most inner errors in [`ConnError`] are wrapped in [`Arc`],
+/// single [`ResultExt::map_err_into`] call can be used instead of a chain like:
+///
+/// ```rust,no-run
+/// result
+///     .map_err(Arc::new)
+///     .map_err(ConnError::TcpConnectError)
+/// ```
 pub trait ResultExt {
     type Ok;
     type Err;

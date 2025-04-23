@@ -86,12 +86,14 @@ impl StealHandle {
     }
 }
 
+/// Infoming traffic stolen with a [`StealHandle`].
 pub enum StolenTraffic {
     Tcp(RedirectedTcp),
     Http(RedirectedHttp),
 }
 
 impl StolenTraffic {
+    /// Original destination port of the stolen connection/request.
     pub fn destination_port(&self) -> u16 {
         match self {
             Self::Tcp(tcp) => tcp.info().original_destination.port(),

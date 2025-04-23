@@ -62,6 +62,7 @@ pub trait PortRedirector {
 /// A redirected TCP connection.
 ///
 /// Returned from [`PortRedirector::next_connection`].
+#[derive(Debug)]
 pub struct Redirected {
     /// IO stream.
     stream: TcpStream,
@@ -126,9 +127,17 @@ pub async fn create_iptables_redirector(
 
 #[cfg(test)]
 pub mod test {
-    use std::{collections::HashSet, error::Error, ops::Not};
+    use std::{
+        collections::HashSet,
+        error::Error,
+        net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+        ops::Not,
+    };
 
-    use tokio::sync::{mpsc, watch};
+    use tokio::{
+        net::{TcpListener, TcpStream},
+        sync::{mpsc, watch},
+    };
 
     use super::{PortRedirector, Redirected};
 
@@ -231,6 +240,31 @@ pub mod test {
                 .recv()
                 .await
                 .ok_or_else(|| "channel closed".into())
+        }
+    }
+
+    impl Redirected {
+        pub async fn dummy(destination: SocketAddr) -> (Self, TcpStream) {
+            let listen_addr = if destination.is_ipv4() {
+                SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0)
+            } else {
+                SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0)
+            };
+            let listener = TcpListener::bind(listen_addr).await.unwrap();
+            let listen_addr = listener.local_addr().unwrap();
+
+            let client_stream = tokio::spawn(TcpStream::connect(listen_addr));
+
+            let (server_stream, source) = listener.accept().await.unwrap();
+
+            (
+                Self {
+                    stream: server_stream,
+                    source,
+                    destination,
+                },
+                client_stream.await.unwrap().unwrap(),
+            )
         }
     }
 }

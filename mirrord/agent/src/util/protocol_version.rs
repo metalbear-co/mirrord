@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-/// Shared and cloneable [`mirrord_protocol`] version of an agent's client.
+/// Shared and cloneable [`mirrord_protocol`] version of an agent client.
 ///
 /// Client's [`mirrord_protocol`] is used in multiple places.
 /// Storing it in behind a shared wrapper allows us to simplify the code
