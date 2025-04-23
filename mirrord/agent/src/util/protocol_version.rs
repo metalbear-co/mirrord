@@ -9,6 +9,11 @@ use std::sync::{Arc, Mutex};
 /// Its [`Default`] implementation sets the version to `0.1.0`.
 /// This is a dummy value that should not match any [`semver::VersionReq`] used in
 /// [`mirrord_protocol`], but still matches [`semver::VersionReq::STAR`].
+///
+/// # Note
+///
+/// Could be implemeted nicely with [arc-swap](https://docs.rs/arc-swap/latest/arc_swap/),
+/// but this struct alone it is not worth the extra dependency.
 #[derive(Clone, Debug)]
 pub struct SharedProtocolVersion(Arc<Mutex<semver::Version>>);
 
