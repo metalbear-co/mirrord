@@ -531,7 +531,7 @@ impl IncomingConfig {
     /// avoid overriding their config. We also take care to not create conflicts with other
     /// port configs that we have, such as [`IncomingConfig::ignore_ports`]`, and
     /// [`IncomingConfig::ports`].
-    pub fn add_probe_ports_to_filter_ports(&mut self, probes_ports: &[u16]) {
+    pub fn add_probe_ports_to_http_filter_ports(&mut self, probes_ports: &[u16]) {
         if self.is_steal() && self.http_filter.ports.is_none() {
             let filtered_ports = probes_ports
                 .iter()
@@ -887,7 +887,7 @@ mod test {
         #[case] port: u16,
         #[case] expected: IncomingConfig,
     ) {
-        config.add_probe_ports_to_filter_ports(&vec![port]);
+        config.add_probe_ports_to_http_filter_ports(&vec![port]);
         assert_eq!(config, expected);
     }
 }

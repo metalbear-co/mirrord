@@ -227,7 +227,7 @@ impl KubernetesAPI {
 
             if let Some(n) = network_config {
                 n.incoming
-                    .add_probe_ports_to_filter_ports(containers_probe_ports);
+                    .add_probe_ports_to_http_filter_ports(containers_probe_ports);
 
                 // TODO(alex) [1]: Change layer network config here.
 
