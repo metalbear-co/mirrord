@@ -1,11 +1,11 @@
 use std::{collections::HashSet, fmt, ops::Not, str::FromStr};
 
 use bimap::BiMap;
-use https_delivery::LocalHttpsDelivery;
 use mirrord_analytics::{AnalyticValue, Analytics, CollectAnalytics};
 use schemars::JsonSchema;
 use serde::{de, ser, ser::SerializeSeq as _, Deserialize, Serialize};
 use thiserror::Error;
+use tls_delivery::LocalTlsDelivery;
 
 use crate::{
     config::{
@@ -16,7 +16,7 @@ use crate::{
 };
 
 pub mod http_filter;
-pub mod https_delivery;
+pub mod tls_delivery;
 
 use http_filter::*;
 
@@ -135,6 +135,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .unwrap_or_default(),
                 ports: advanced.ports.map(|ports| ports.into_iter().collect()),
                 https_delivery: advanced.https_delivery,
+                tls_delivery: advanced.tls_delivery,
             },
         };
 
@@ -310,10 +311,18 @@ pub struct IncomingAdvancedFileConfig {
 
     /// ### https_delivery
     ///
-    /// (Operator Only): configures how mirrord delivers stolen HTTPS requests
+    /// (Operator Only): configures how mirrord delivers stolen TLS traffic
     /// to the local application.
-    #[serde(default)]
-    pub https_delivery: LocalHttpsDelivery,
+    ///
+    /// This field is deprecated and will be removed in the future.
+    /// Use `tls_delivery` instead.
+    pub https_delivery: Option<LocalTlsDelivery>,
+
+    /// ### tls_delivery
+    ///
+    /// (Operator Only): configures how mirrord delivers stolen TLS traffic
+    /// to the local application.
+    pub tls_delivery: Option<LocalTlsDelivery>,
 }
 
 fn serialize_bi_map<S>(map: &BiMap<u16, u16>, serializer: S) -> Result<S::Ok, S::Error>
@@ -479,12 +488,20 @@ pub struct IncomingConfig {
     /// [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
     pub ports: Option<HashSet<u16>>,
 
-    /// #### feature.network.incoming.https_delivery {#feature-network-incoming-https_delivery}
+    /// ### feature.network.https_delivery
     ///
-    /// (Operator Only): configures how mirrord delivers stolen HTTPS requests
+    /// (Operator Only): configures how mirrord delivers stolen TLS traffic
     /// to the local application.
-    #[serde(default)]
-    pub https_delivery: LocalHttpsDelivery,
+    ///
+    /// This field is deprecated and will be removed in the future.
+    /// Use `tls_delivery` instead.
+    pub https_delivery: Option<LocalTlsDelivery>,
+
+    /// ### feature.network.tls_delivery
+    ///
+    /// (Operator Only): configures how mirrord delivers stolen TLS traffic
+    /// to the local application.
+    pub tls_delivery: Option<LocalTlsDelivery>,
 }
 
 impl IncomingConfig {

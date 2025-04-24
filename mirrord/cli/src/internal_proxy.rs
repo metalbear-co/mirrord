@@ -115,7 +115,13 @@ pub(crate) async fn proxy(
         listener,
         config.feature.fs.readonly_file_buffer,
         Duration::from_millis(config.experimental.idle_local_http_connection_timeout),
-        config.feature.network.incoming.https_delivery,
+        config
+            .feature
+            .network
+            .incoming
+            .tls_delivery
+            .or(config.feature.network.incoming.https_delivery)
+            .unwrap_or_default(),
     )
     .run(first_connection_timeout, consecutive_connection_timeout)
     .await

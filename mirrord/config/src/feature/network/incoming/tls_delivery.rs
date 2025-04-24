@@ -6,10 +6,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{ConfigContext, ConfigError};
 
-/// Stolen HTTPS requests can be delivered to the local application either as HTTPS or as plain HTTP
-/// requests. Note that stealing HTTPS requests requires mirrord Operator support.
+/// Stolen TLS traffic (including HTTPS requests) can be delivered to the local application either
+/// as TLS or as plain TLS (HTTPS/HTTP).
 ///
-/// To have the stolen HTTPS requests delivered with plain HTTP, use:
+/// Note that this feature requires mirrord Operator support,
+/// and is crucial when stealing HTTPS requests with an HTTP filter.
+///
+/// To have the stolen TLS traffic delivered with plain TCP, use:
 ///
 /// ```json
 /// {
@@ -17,7 +20,7 @@ use crate::config::{ConfigContext, ConfigError};
 /// }
 /// ```
 ///
-/// To have the requests delivered with HTTPS, use:
+/// To have the requests delivered with TLS, use:
 /// ```json
 /// {
 ///   "protocol": "tls"
@@ -25,7 +28,7 @@ use crate::config::{ConfigContext, ConfigError};
 /// ```
 ///
 /// By default, the local mirrord TLS client will trust any certificate presented by the local
-/// application's HTTP server. To override this behavior, you can either:
+/// application's TLS server. To override this behavior, you can either:
 ///
 /// 1. Specify a list of paths to trust roots. These paths can lead either to PEM files or PEM file
 ///    directories. Each found certificate will be used as a trust anchor.
@@ -47,7 +50,7 @@ use crate::config::{ConfigContext, ConfigError};
 /// }
 /// ```
 ///
-/// To make a TLS connection to the local application's HTTPS server,
+/// To make a TLS connection to the local application's TLS server,
 /// mirrord's TLS client needs a server name. You can supply it manually like this:
 /// ```json
 /// {
@@ -66,13 +69,13 @@ use crate::config::{ConfigContext, ConfigError};
 ///    used;
 /// 4. Otherwise, `localhost` will be used.
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema, PartialEq, Eq, Default)]
-pub struct LocalHttpsDelivery {
-    /// ##### feature.network.incoming.https_delivery.protocol {#feature-network-incoming-https_delivery-protocol}
+pub struct LocalTlsDelivery {
+    /// ##### feature.network.incoming.tls_delivery.protocol {#feature-network-incoming-tls_delivery-protocol}
     ///
-    /// Protocol to use when delivering the HTTPS requests locally.
-    pub protocol: HttpsDeliveryProtocol,
+    /// Protocol to use when delivering the TLS traffic locally.
+    pub protocol: TlsDeliveryProtocol,
 
-    /// ##### feature.network.incoming.https_delivery.trust_roots {#feature-network-incoming-https_delivery-trust_roots}
+    /// ##### feature.network.incoming.tls_delivery.trust_roots {#feature-network-incoming-tls_delivery-trust_roots}
     ///
     /// Paths to PEM files and directories with PEM files containing allowed root certificates.
     ///
@@ -82,17 +85,17 @@ pub struct LocalHttpsDelivery {
     /// The files can contain entries of other types, e.g private keys, which are ignored.
     pub trust_roots: Option<Vec<PathBuf>>,
 
-    /// ##### feature.network.incoming.https_delivery.server_name {#feature-network-incoming-https_delivery-server_name}
+    /// ##### feature.network.incoming.tls_delivery.server_name {#feature-network-incoming-tls_delivery-server_name}
     ///
     /// Server name to use when making a connection.
     ///
     /// Must be a valid DNS name or an IP address.
     pub server_name: Option<String>,
 
-    //// ##### feature.network.incoming.https_delivery.server_cert
-    //// {#feature-network-incoming-https_delivery-server_cert}
+    //// ##### feature.network.incoming.tls_delivery.server_cert
+    //// {#feature-network-incoming-tls_delivery-server_cert}
     ///
-    /// Path to a PEM file containing the certificate chain used by the local application's HTTPS
+    /// Path to a PEM file containing the certificate chain used by the local application's TLS
     /// server.
     ///
     /// This file must contain at least one certificate.
@@ -100,21 +103,33 @@ pub struct LocalHttpsDelivery {
     pub server_cert: Option<PathBuf>,
 }
 
-impl LocalHttpsDelivery {
+impl LocalTlsDelivery {
     pub fn verify(&self, _: &mut ConfigContext) -> Result<(), ConfigError> {
         match self {
-            Self { protocol: HttpsDeliveryProtocol::Tcp, .. } => {
+            Self {
+                protocol: TlsDeliveryProtocol::Tcp,
+                ..
+            } => {
                 // other settings are ignored
-            },
-            Self { trust_roots: Some(..), server_cert: Some(..), .. } => {
+            }
+            Self {
+                trust_roots: Some(..),
+                server_cert: Some(..),
+                ..
+            } => {
                 return Err(ConfigError::Conflict(
-                    ".feature.network.incoming.https_delivery.trust_roots and \
-                    .feature.network.incoming.https_delivery.server_cert cannot be specified together".into()
+                    ".feature.network.incoming.<tls|https>_delivery.trust_roots and \
+                    .feature.network.incoming.<tls|https>_delivery.server_cert \
+                    cannot be specified together"
+                        .into(),
                 ))
             }
-            Self { trust_roots: Some(roots), .. } if roots.is_empty() => {
+            Self {
+                trust_roots: Some(roots),
+                ..
+            } if roots.is_empty() => {
                 return Err(ConfigError::InvalidValue {
-                    name: ".feature.network.incoming.https_delivery.trust_roots",
+                    name: ".feature.network.incoming.<tls|https>_delivery.trust_roots",
                     provided: "[]".into(),
                     error: "cannot be an empty list".into(),
                 })
@@ -125,7 +140,7 @@ impl LocalHttpsDelivery {
         if let Some(server_name) = self.server_name.as_deref() {
             if ServerName::try_from(server_name).is_err() {
                 return Err(ConfigError::InvalidValue {
-                    name: ".feature.network.incoming.https_delivery.server_name",
+                    name: ".feature.network.incoming.<tls|https>_delivery.server_name",
                     provided: server_name.into(),
                     error: "must be a valid DNS name or an IP address".into(),
                 });
@@ -138,10 +153,10 @@ impl LocalHttpsDelivery {
 
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum HttpsDeliveryProtocol {
-    /// HTTPS requests will be delivered over TCP, as plain HTTP.
+pub enum TlsDeliveryProtocol {
+    /// TLS traffic will be delivered over plain TCP.
     Tcp,
-    /// HTTPS requests will be delivered over TLS, as HTTPS.
+    /// TLS traffic will be delivered over TLS.
     #[default]
     Tls,
 }

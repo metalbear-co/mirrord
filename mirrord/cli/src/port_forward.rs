@@ -442,12 +442,17 @@ impl ReversePortForwarder {
         network_config: IncomingConfig,
         idle_local_http_connection_timeout: Duration,
     ) -> Result<Self, PortForwardError> {
+        let incoming_mode = IncomingMode::new(&network_config);
+
         let mut background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError> =
             Default::default();
         let incoming = background_tasks.register(
             IncomingProxy::new(
                 idle_local_http_connection_timeout,
-                network_config.https_delivery.clone(),
+                network_config
+                    .tls_delivery
+                    .or(network_config.https_delivery)
+                    .unwrap_or_default(),
             ),
             (),
             512,
@@ -475,7 +480,6 @@ impl ReversePortForwarder {
             .send(IncomingProxyMessage::AgentProtocolVersion(protocol_version))
             .await;
 
-        let incoming_mode = IncomingMode::new(&network_config);
         for (i, (&remote, &local)) in mappings.iter().enumerate() {
             let subscription = incoming_mode.subscription(remote);
             let message_id = i as u64;
