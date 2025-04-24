@@ -810,6 +810,7 @@ mod test {
     }
 
     #[rstest]
+    // Base case, no conflicts.
     #[case(
         IncomingConfig {
             mode: IncomingMode::Steal,
@@ -820,8 +821,65 @@ mod test {
         IncomingConfig {
             mode: IncomingMode::Steal,
             ports: Some([80].into()),
+            http_filter: HttpFilterConfig {
+                ports: Some(vec![81].into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    )]
+    // User sets `HttpFilter::ports`, we don't change it.
+    #[case(
+        IncomingConfig {
+            mode: IncomingMode::Steal,
+            ports: Some([80].into()),
+            http_filter: HttpFilterConfig {
+                ports: Some(vec![82].into()),
+                ..Default::default()
+            },
             ..Default::default()
         },
+        81,
+        IncomingConfig {
+            mode: IncomingMode::Steal,
+            ports: Some([80].into()),
+            http_filter: HttpFilterConfig {
+                ports: Some(vec![82].into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    )]
+    // Conflicts between `IncomingConfig::ports` and `HttpFilterConfig::ports`, we don't change the
+    // later.
+    #[case(
+        IncomingConfig {
+            mode: IncomingMode::Steal,
+            ports: Some([81].into()),
+            ..Default::default()
+        },
+        81,
+        IncomingConfig {
+            mode: IncomingMode::Steal,
+            ports: Some([81].into()),
+            ..Default::default()
+        }
+    )]
+    // Conflicts between `IncomingConfig::ignore_ports` and `HttpFilterConfig::ports` we don't
+    // change the later.
+    #[case(
+        IncomingConfig {
+            mode: IncomingMode::Steal,
+            ports: Some([80].into()),
+            ignore_ports: [81].into(),
+            ..Default::default()
+        },
+        81,
+        IncomingConfig {
+            mode: IncomingMode::Steal,
+            ports: Some([81].into()),
+            ..Default::default()
+        }
     )]
     #[test]
     fn automatically_add_probes_to_http_filter_ports(
