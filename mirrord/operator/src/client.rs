@@ -564,7 +564,7 @@ impl OperatorApi<PreparedClientCert> {
                 && self
                     .operator()
                     .spec
-                    .require_feature(NewOperatorFeature::KafkaQueueSplittingNoCopy)
+                    .require_feature(NewOperatorFeature::KafkaQueueSplittingDirect)
                     .is_err());
         let (connect_url, session_id) = if do_copy_target {
             let mut copy_subtask = progress.subtask("copying target");
