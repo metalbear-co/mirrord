@@ -25,7 +25,7 @@ use mirrord_protocol::{
     ClientMessage, DaemonCodec, DaemonMessage, FileRequest, FileResponse,
 };
 #[cfg(target_os = "macos")]
-use mirrord_sip::sip_patch;
+use mirrord_sip::{sip_patch, SipPatchOptions};
 use rstest::fixture;
 pub use tests::utils::process::TestProcess;
 use tokio::{
@@ -1282,7 +1282,7 @@ impl Application {
     pub async fn get_test_process(&self, env: HashMap<String, String>) -> TestProcess {
         let executable = self.get_executable().await;
         #[cfg(target_os = "macos")]
-        let executable = sip_patch(&executable, &Vec::new(), &Vec::new())
+        let executable = sip_patch(&executable, SipPatchOptions::default())
             .unwrap()
             .unwrap_or(executable);
         println!("Using executable: {}", &executable);

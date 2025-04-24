@@ -213,9 +213,13 @@ fn layer_pre_initialization() -> Result<(), LayerError> {
         let path = EXECUTABLE_PATH
             .get()
             .expect("EXECUTABLE_PATH needs to be set!");
-        if let Ok(Some(binary)) =
-            mirrord_sip::sip_patch(path, &patch_binaries, &skip_patch_binaries)
-        {
+        if let Ok(Some(binary)) = mirrord_sip::sip_patch(
+            path,
+            mirrord_sip::SipPatchOptions {
+                patch: &patch_binaries,
+                skip: &skip_patch_binaries,
+            },
+        ) {
             let err = exec::execvp(
                 binary,
                 EXECUTABLE_ARGS

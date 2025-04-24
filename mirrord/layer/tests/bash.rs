@@ -9,7 +9,7 @@ use mirrord_protocol::{
     ClientMessage, DaemonMessage, FileRequest, FileResponse,
 };
 #[cfg(target_os = "macos")]
-use mirrord_sip::sip_patch;
+use mirrord_sip::{sip_patch, SipPatchOptions};
 use rstest::rstest;
 use tokio::net::TcpListener;
 
@@ -37,7 +37,7 @@ async fn bash_script(dylib_path: &Path, config_dir: &Path) {
     println!("Listening for messages from the layer on {addr}");
     let env = get_env(dylib_path, addr, vec![], Some(&config_path));
     #[cfg(target_os = "macos")]
-    let executable = sip_patch(&executable, &Vec::new(), &Vec::new())
+    let executable = sip_patch(&executable, SipPatchOptions::default())
         .unwrap()
         .unwrap();
     let test_process = TestProcess::start_process(executable, application.get_args(), env).await;

@@ -17,7 +17,7 @@ use mirrord_protocol::{
     LogLevel,
 };
 #[cfg(target_os = "macos")]
-use mirrord_sip::sip_patch;
+use mirrord_sip::{sip_patch, SipPatchOptions};
 use mirrord_tls_util::SecureChannelSetup;
 use semver::Version;
 use serde::Serialize;
@@ -308,16 +308,18 @@ impl MirrordExecution {
             .and_then(|exe| {
                 sip_patch(
                     exe,
-                    &config
-                        .sip_binaries
-                        .clone()
-                        .map(|x| x.to_vec())
-                        .unwrap_or_default(),
-                    &config
-                        .skip_sip
-                        .clone()
-                        .map(|x| x.to_vec())
-                        .unwrap_or_default(),
+                    SipPatchOptions {
+                        patch: &config
+                            .sip_binaries
+                            .clone()
+                            .map(|x| x.to_vec())
+                            .unwrap_or_default(),
+                        skip: &config
+                            .skip_sip
+                            .clone()
+                            .map(|x| x.to_vec())
+                            .unwrap_or_default(),
+                    },
                 )
                 .transpose() // We transpose twice to propagate a possible error out of this
                              // closure.
