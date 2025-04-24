@@ -532,7 +532,7 @@ impl IncomingConfig {
     /// port configs that we have, such as [`IncomingConfig::ignore_ports`]`, and
     /// [`IncomingConfig::ports`].
     pub fn add_probe_ports_to_filter_ports(&mut self, probes_ports: &[u16]) {
-        if self.http_filter.ports.is_none() {
+        if self.is_steal() && self.http_filter.ports.is_none() {
             let filtered_ports = probes_ports
                 .into_iter()
                 // Avoid conflicts with `incoming.ignore_ports`.
@@ -807,5 +807,29 @@ mod test {
     ) {
         let result = config.steals_port_without_filter(port);
         assert_eq!(result, expected);
+    }
+
+    #[rstest]
+    #[case(
+        IncomingConfig {
+            mode: IncomingMode::Steal,
+            ports: Some([80].into()),
+            ..Default::default()
+        },
+        81,
+        IncomingConfig {
+            mode: IncomingMode::Steal,
+            ports: Some([80].into()),
+            ..Default::default()
+        },
+    )]
+    #[test]
+    fn automatically_add_probes_to_http_filter_ports(
+        #[case] mut config: IncomingConfig,
+        #[case] port: u16,
+        #[case] expected: IncomingConfig,
+    ) {
+        config.add_probe_ports_to_filter_ports(&vec![port]);
+        assert_eq!(config, expected);
     }
 }

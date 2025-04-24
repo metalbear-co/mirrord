@@ -81,8 +81,6 @@ impl LayerSetup {
             .filter(|(k, _)| k.starts_with("MIRRORD_") || k == "DYLD_INSERT_LIBRARIES")
             .collect();
 
-        tracing::info!(?config, "the updated config!");
-
         Self {
             config,
             file_filter,
