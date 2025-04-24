@@ -877,7 +877,8 @@ mod test {
         81,
         IncomingConfig {
             mode: IncomingMode::Steal,
-            ports: Some([81].into()),
+            ports: Some([80].into()),
+            ignore_ports: [81].into(),
             ..Default::default()
         }
     )]
