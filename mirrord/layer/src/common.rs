@@ -93,7 +93,7 @@ pub fn strip_mirrord_path(path_str: &str) -> Option<&str> {
     // so it must be valid
     #[allow(clippy::indexing_slicing)]
     path_str
-        .find(MIRRORD_PATCH_DIR)
+        .find(&*MIRRORD_PATCH_DIR)
         .map(|index| &path_str[(MIRRORD_PATCH_DIR.len() + index)..])
 }
 

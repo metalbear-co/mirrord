@@ -70,19 +70,26 @@ mod main {
         SipError::{FileNotFound, UnlikelyError},
     };
 
+    const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
     /// Where patched files are stored, relative to the temp dir (`/tmp/mirrord-bin/...`).
     ///
-    /// We added some random characaters to the end so we'll be able to identify dir better
-    /// in situations where $TMPDIR changes between exec's, leading to strip not working
+    /// We added some random characters to the end so we'll be able to identify dir better
+    /// in situations where $TMPDIR changes between execs, leading to strip not working
     /// <https://github.com/metalbear-co/mirrord/issues/2500#issuecomment-2160026642>
-    pub const MIRRORD_PATCH_DIR: &str = "mirrord-bin-ghu3278mz";
+    ///
+    /// The version of mirrord is also added to the dir name, to force mirrord to re-patch files
+    /// when there is a version change. This is to prevent badly patched files being re-used
+    /// <https://github.com/metalbear-co/mirrord/issues/3245>
+    pub static MIRRORD_PATCH_DIR: Lazy<String> =
+        Lazy::new(|| format!("mirrord-bin-ghu3278mz-{CURRENT_VERSION}"));
 
     pub const FRAMEWORKS_ENV_VAR_NAME: &str = "DYLD_FALLBACK_FRAMEWORK_PATH";
 
     /// The path of mirrord's internal temp binary dir, where we put SIP-patched binaries and
     /// scripts.
     pub static MIRRORD_TEMP_BIN_DIR_PATH_BUF: Lazy<PathBuf> =
-        Lazy::new(|| env::temp_dir().join(MIRRORD_PATCH_DIR));
+        Lazy::new(|| env::temp_dir().join(&*MIRRORD_PATCH_DIR));
 
     /// Get the `PathBuf` of the `mirrord-bin` dir, and return a `String` prefix to remove, without
     /// a trailing `/`, so that the stripped path starts with a `/`
@@ -657,7 +664,6 @@ mod main {
 
     #[cfg(test)]
     mod tests {
-
         use std::io::Write;
 
         use super::*;
