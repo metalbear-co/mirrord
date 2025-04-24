@@ -438,8 +438,9 @@ impl fmt::Display for WorkflowTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "workflow/{}{}{}",
-            self.workflow,
+            "{}/{}{}{}",
+            self.type_(),
+            self.name(),
             self.template
                 .as_ref()
                 .map(|name| format!("/template/{name}"))
