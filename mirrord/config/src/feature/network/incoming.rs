@@ -522,11 +522,6 @@ impl IncomingConfig {
         }
     }
 
-    /// Adds probe ports to the HTTP filter's ports list as a hint for which ports are HTTP ports.
-    /// Only adds ports if:
-    /// 1. The user has not already set `http_filter.ports` themselves
-    /// 2. The port is not in `ignore_ports`
-    /// 3. The port is in `ports` (if `ports` is set)
     /// Update the [`HttpFilterConfig::ports`] with the health probes ports from the target.
     ///
     /// Usually the user app will be listening on HTTP on the same ports as these probes, so
