@@ -439,7 +439,11 @@ where
         }
 
         pods.iter()
-            .filter_map(|pod| RuntimeData::from_pod(pod, self.container()).ok())
+            .filter_map(|pod| {
+                RuntimeData::from_pod(pod, self.container())
+                    .inspect_err(|error| tracing::warn!(?error, "runtime data from pod info"))
+                    .ok()
+            })
             .next()
             .ok_or_else(|| {
                 KubeApiError::invalid_state(

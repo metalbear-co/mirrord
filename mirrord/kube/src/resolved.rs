@@ -72,6 +72,8 @@ where
     R: Resource,
 {
     pub resource: R,
+    /// This is only relevant for workflow target
+    pub template: Option<String>,
     pub container: Option<String>,
 }
 
@@ -241,6 +243,7 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::Deployment(ResolvedResource {
                         resource,
                         container: target.container.clone(),
+                        template: None,
                     })
                 }),
             Target::Rollout(target) => get_k8s_resource_api::<Rollout>(client, namespace)
@@ -250,6 +253,7 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::Rollout(ResolvedResource {
                         resource,
                         container: target.container.clone(),
+                        template: None,
                     })
                 }),
             Target::Job(target) => get_k8s_resource_api::<Job>(client, namespace)
@@ -259,6 +263,7 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::Job(ResolvedResource {
                         resource,
                         container: target.container.clone(),
+                        template: None,
                     })
                 }),
             Target::CronJob(target) => get_k8s_resource_api::<CronJob>(client, namespace)
@@ -268,6 +273,7 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::CronJob(ResolvedResource {
                         resource,
                         container: target.container.clone(),
+                        template: None,
                     })
                 }),
             Target::StatefulSet(target) => get_k8s_resource_api::<StatefulSet>(client, namespace)
@@ -277,6 +283,7 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::StatefulSet(ResolvedResource {
                         resource,
                         container: target.container.clone(),
+                        template: None,
                     })
                 }),
             Target::Pod(target) => get_k8s_resource_api::<Pod>(client, namespace)
@@ -286,6 +293,7 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::Pod(ResolvedResource {
                         resource,
                         container: target.container.clone(),
+                        template: None,
                     })
                 }),
             Target::Service(target) => get_k8s_resource_api::<Service>(client, namespace)
@@ -295,6 +303,7 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::Service(ResolvedResource {
                         resource,
                         container: target.container.clone(),
+                        template: None,
                     })
                 }),
             Target::ReplicaSet(target) => get_k8s_resource_api::<ReplicaSet>(client, namespace)
@@ -304,6 +313,7 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::ReplicaSet(ResolvedResource {
                         resource,
                         container: target.container.clone(),
+                        template: None,
                     })
                 }),
             Target::Workflow(target) => get_k8s_resource_api::<Workflow>(client, namespace)
@@ -313,6 +323,7 @@ impl ResolvedTarget<false> {
                     ResolvedTarget::Workflow(ResolvedResource {
                         resource,
                         container: target.container.clone(),
+                        template: target.template.clone(),
                     })
                 }),
             Target::Targetless => Ok(ResolvedTarget::Targetless(
@@ -346,6 +357,7 @@ impl ResolvedTarget<false> {
             ResolvedTarget::Deployment(ResolvedResource {
                 resource,
                 container,
+                template,
             }) => {
                 let available = resource
                     .status
@@ -380,23 +392,27 @@ impl ResolvedTarget<false> {
                 Ok(ResolvedTarget::Deployment(ResolvedResource {
                     resource,
                     container,
+                    template,
                 }))
             }
 
             ResolvedTarget::Pod(ResolvedResource {
                 resource,
                 container,
+                template,
             }) => {
                 let _ = RuntimeData::from_pod(&resource, container.as_deref())?;
                 Ok(ResolvedTarget::Pod(ResolvedResource {
                     resource,
                     container,
+                    template,
                 }))
             }
 
             ResolvedTarget::Rollout(ResolvedResource {
                 resource,
                 container,
+                template,
             }) => {
                 let available = resource
                     .status
@@ -426,6 +442,7 @@ impl ResolvedTarget<false> {
                 Ok(ResolvedTarget::Rollout(ResolvedResource {
                     resource,
                     container,
+                    template,
                 }))
             }
 
@@ -440,6 +457,7 @@ impl ResolvedTarget<false> {
             ResolvedTarget::StatefulSet(ResolvedResource {
                 resource,
                 container,
+                template,
             }) => {
                 let available = resource
                     .status
@@ -474,12 +492,14 @@ impl ResolvedTarget<false> {
                 Ok(ResolvedTarget::StatefulSet(ResolvedResource {
                     resource,
                     container,
+                    template,
                 }))
             }
 
             ResolvedTarget::Service(ResolvedResource {
                 resource,
                 container,
+                template,
             }) => {
                 let pods = ResolvedResource::<Service>::get_pods(&resource, client).await?;
 
@@ -507,12 +527,14 @@ impl ResolvedTarget<false> {
                 Ok(ResolvedTarget::Service(ResolvedResource {
                     resource,
                     container,
+                    template,
                 }))
             }
 
             ResolvedTarget::ReplicaSet(ResolvedResource {
                 resource,
                 container,
+                template,
             }) => {
                 let available = resource
                     .status
@@ -544,43 +566,21 @@ impl ResolvedTarget<false> {
                 Ok(ResolvedTarget::ReplicaSet(ResolvedResource {
                     resource,
                     container,
+                    template,
                 }))
             }
 
             ResolvedTarget::Workflow(ResolvedResource {
                 resource,
                 container,
+                template,
             }) => {
-                // let available = resource
-                //     .status
-                //     .as_ref()
-                //     .ok_or_else(|| KubeApiError::missing_field(&resource, ".status"))?
-                //     .available_replicas
-                //     .unwrap_or_default(); // Field can be missing when there are no replicas
-
-                // if available <= 0 {
-                //     return Err(KubeApiError::invalid_state(
-                //         &resource,
-                //         "no available replicas",
-                //     ));
-                // }
-
-                // let pod_template = resource.get_pod_template(client).await?;
-
-                // if let Some(container) = &container {
-                //     // verify that the container exists
-                //     pod_template.spec.as_ref().ok_or_else(||
-                // KubeApiError::invalid_state(&resource, "specified pod template is missing field
-                // `.spec`"))?     .containers
-                //     .iter()
-                //     .find(|c| c.name == *container)
-                //     .ok_or_else(|| KubeApiError::invalid_state(&resource, format_args!("specified
-                // pod template does not contain target container `{container}`")))?;
-                // }
+                // TODO: this
 
                 Ok(ResolvedTarget::Workflow(ResolvedResource {
                     resource,
                     container,
+                    template,
                 }))
             }
 
