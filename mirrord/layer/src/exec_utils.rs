@@ -111,7 +111,7 @@ fn intercept_tmp_dir(argv_arr: &Nul<*const c_char>) -> Detour<Argv> {
         // so it must be valid
         #[allow(clippy::indexing_slicing)]
         let stripped = arg_str
-            .find(&*MIRRORD_PATCH_DIR)
+            .find(MIRRORD_PATCH_DIR)
             .map(|index| &arg_str[(MIRRORD_PATCH_DIR.len() + index)..])
             .inspect(|original_path| {
                 trace!(
