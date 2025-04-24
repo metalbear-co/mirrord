@@ -100,22 +100,6 @@ impl StolenTraffic {
             Self::Http(http) => http.info().original_destination.port(),
         }
     }
-
-    #[cfg(test)]
-    pub fn unwrap_tcp(self) -> RedirectedTcp {
-        match self {
-            Self::Tcp(tcp) => tcp,
-            Self::Http(..) => panic!("expected TCP, got HTTP"),
-        }
-    }
-
-    #[cfg(test)]
-    pub fn unwrap_http(self) -> RedirectedHttp {
-        match self {
-            Self::Http(http) => http,
-            Self::Tcp(..) => panic!("expected HTTP, got TCP"),
-        }
-    }
 }
 
 impl fmt::Debug for StealHandle {

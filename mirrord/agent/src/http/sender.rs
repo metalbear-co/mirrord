@@ -15,8 +15,14 @@ pub enum HttpSender<B> {
 impl<B: 'static + Body> HttpSender<B> {
     pub async fn send(&mut self, request: Request<B>) -> hyper::Result<Response<Incoming>> {
         match self {
-            Self::V1(sender) => sender.send_request(request).await,
-            Self::V2(sender) => sender.send_request(request).await,
+            Self::V1(sender) => {
+                sender.ready().await?;
+                sender.send_request(request).await
+            }
+            Self::V2(sender) => {
+                sender.ready().await?;
+                sender.send_request(request).await
+            }
         }
     }
 }

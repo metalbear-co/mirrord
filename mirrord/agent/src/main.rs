@@ -29,6 +29,7 @@ mod outgoing;
 mod runtime;
 mod sniffer;
 mod steal;
+mod test;
 mod util;
 mod vpn;
 

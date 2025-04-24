@@ -13,31 +13,16 @@ use tokio::{
 
 use crate::{
     http::{HttpSender, HttpVersion},
-    incoming::{BoxBody, PortRedirector, Redirected},
+    incoming::{
+        BoxBody, IncomingTlsHandlerStore, MirrorHandle, PortRedirector, Redirected, RedirectorTask,
+        StealHandle,
+    },
 };
 
 /// Implementation of [`PortRedirector`] that can be used in unit tests.
 pub struct DummyRedirector {
     state: watch::Sender<DummyRedirectorState>,
     conn_rx: mpsc::Receiver<Redirected>,
-}
-
-/// State of [`DummyRedirector`].
-#[derive(Default)]
-pub struct DummyRedirectorState {
-    pub dirty: bool,
-    pub redirections: HashSet<u16>,
-}
-
-impl DummyRedirectorState {
-    pub fn has_redirections<I>(&self, redirections: I) -> bool
-    where
-        I: IntoIterator<Item = u16>,
-    {
-        let expected = redirections.into_iter().collect::<HashSet<_>>();
-
-        self.redirections == expected && expected.is_empty() != self.dirty
-    }
 }
 
 impl DummyRedirector {
@@ -48,10 +33,10 @@ impl DummyRedirector {
     /// 2. a [`watch::Receiver`] that can be used to inspect the redirector's state,
     /// 3. a [`DummyConnections`] struct that can be used to send mocked [`Redirected`] connections
     ///    through the redirector.
-    pub fn new() -> (
+    fn new() -> (
         Self,
         watch::Receiver<DummyRedirectorState>,
-        DummyConnections,
+        mpsc::Sender<Redirected>,
     ) {
         let (conn_tx, conn_rx) = mpsc::channel(8);
         let (state_tx, state_rx) = watch::channel(DummyRedirectorState::default());
@@ -62,7 +47,7 @@ impl DummyRedirector {
                 conn_rx,
             },
             state_rx,
-            DummyConnections { tx: conn_tx },
+            conn_tx,
         )
     }
 }
@@ -121,54 +106,97 @@ impl PortRedirector for DummyRedirector {
     }
 }
 
-impl Redirected {
-    async fn dummy(destination: SocketAddr) -> (Self, TcpStream) {
-        let listen_addr = if destination.is_ipv4() {
-            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0)
-        } else {
-            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0)
-        };
-        let listener = TcpListener::bind(listen_addr).await.unwrap();
-        let listen_addr = listener.local_addr().unwrap();
+/// State of [`DummyRedirector`].
+#[derive(Default)]
+pub struct DummyRedirectorState {
+    pub dirty: bool,
+    pub redirections: HashSet<u16>,
+}
 
-        let client_stream = tokio::spawn(TcpStream::connect(listen_addr));
+impl DummyRedirectorState {
+    /// Checks whether this state contains exactly the given redirections.
+    ///
+    /// If `redirections` is empty, checks if the state is clean.
+    pub fn has_redirections<I>(&self, redirections: I) -> bool
+    where
+        I: IntoIterator<Item = u16>,
+    {
+        let expected = redirections.into_iter().collect::<HashSet<_>>();
 
-        let (server_stream, source) = listener.accept().await.unwrap();
-
-        (
-            Self {
-                stream: server_stream,
-                source,
-                destination,
-            },
-            client_stream.await.unwrap().unwrap(),
-        )
+        self.redirections == expected && expected.is_empty() != self.dirty
     }
 }
 
+/// Can be used in unit tests to feed the associated [`RedirectorTask`] with connections.
 pub struct DummyConnections {
     tx: mpsc::Sender<Redirected>,
+    ipv4_listener: Option<TcpListener>,
+    ipv6_listener: Option<TcpListener>,
+    redirector_state: watch::Receiver<DummyRedirectorState>,
 }
 
 impl DummyConnections {
-    pub async fn new_tcp(&self, destination: SocketAddr) -> TcpStream {
-        let (redirected, client_side) = Redirected::dummy(destination).await;
+    /// Creates a new TCP connection and sends it to the redirector.
+    ///
+    /// `destination` is the mocked original destination of the connection.
+    ///
+    /// Returns the client stream.
+    pub async fn new_tcp(&mut self, destination: SocketAddr) -> TcpStream {
+        let listener = if destination.is_ipv4() {
+            match self.ipv4_listener.as_ref() {
+                Some(listener) => listener,
+                None => {
+                    let listener =
+                        TcpListener::bind(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0))
+                            .await
+                            .unwrap();
+                    self.ipv4_listener.insert(listener)
+                }
+            }
+        } else {
+            match self.ipv6_listener.as_ref() {
+                Some(listener) => listener,
+                None => {
+                    let listener =
+                        TcpListener::bind(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0))
+                            .await
+                            .unwrap();
+                    self.ipv6_listener.insert(listener)
+                }
+            }
+        };
+
+        let addr = listener.local_addr().unwrap();
+        let ((server_stream, source), client_stream) =
+            tokio::try_join!(listener.accept(), TcpStream::connect(addr)).unwrap();
+
+        let redirected = Redirected {
+            stream: server_stream,
+            source,
+            destination,
+        };
+
         self.tx.send(redirected).await.unwrap();
-        client_side
+
+        client_stream
     }
 
+    /// Creates a new HTTP connection and sends it to the redirector.
+    ///
+    /// `destination` is the mocked original destination of the connection.
+    ///
+    /// Returns the request sender.
     pub async fn new_http(
-        &self,
+        &mut self,
         destination: SocketAddr,
         version: HttpVersion,
     ) -> HttpSender<BoxBody> {
-        let (redirected, client_side) = Redirected::dummy(destination).await;
-        self.tx.send(redirected).await.unwrap();
+        let stream = self.new_tcp(destination).await;
 
         match version {
             HttpVersion::V1 => {
                 let (sender, conn) =
-                    hyper::client::conn::http1::handshake::<_, BoxBody>(TokioIo::new(client_side))
+                    hyper::client::conn::http1::handshake::<_, BoxBody>(TokioIo::new(stream))
                         .await
                         .unwrap();
                 tokio::spawn(conn.with_upgrades());
@@ -177,7 +205,7 @@ impl DummyConnections {
             HttpVersion::V2 => {
                 let (sender, conn) = hyper::client::conn::http2::handshake::<_, _, BoxBody>(
                     TokioExecutor::new(),
-                    TokioIo::new(client_side),
+                    TokioIo::new(stream),
                 )
                 .await
                 .unwrap();
@@ -186,4 +214,32 @@ impl DummyConnections {
             }
         }
     }
+
+    /// Returns a view into the mocked [`PortRedirector`] state.
+    pub fn redirector_state(&mut self) -> &mut watch::Receiver<DummyRedirectorState> {
+        &mut self.redirector_state
+    }
+}
+
+/// Spawns a [`RedirectorTask`] that uses a mocked [`PortRedirector`] implementation.
+///
+/// Returned [`DummyConnections`] can be used to inspect [`PortRedirector`] state
+/// and send mocked connections to the [`RedirectorTask`].
+pub async fn start_redirector_task(
+    tls_handlers: IncomingTlsHandlerStore,
+) -> (DummyConnections, StealHandle, MirrorHandle) {
+    let (redirector, redirector_state, conn_tx) = DummyRedirector::new();
+    let (task, steal_handle, mirror_handle) = RedirectorTask::new(redirector, tls_handlers);
+    tokio::spawn(task.run());
+
+    (
+        DummyConnections {
+            tx: conn_tx,
+            ipv4_listener: None,
+            ipv6_listener: None,
+            redirector_state,
+        },
+        steal_handle,
+        mirror_handle,
+    )
 }

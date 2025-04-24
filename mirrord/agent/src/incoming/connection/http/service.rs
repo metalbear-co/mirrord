@@ -1,16 +1,14 @@
 use std::{future::Future, ops::Not, pin::Pin};
 
 use bytes::Bytes;
-use futures::{future::Either, FutureExt};
+use futures::FutureExt;
 use http::request::Parts;
 use hyper::{
     body::{Frame, Incoming},
-    server::conn::{http1, http2},
     service::Service,
     upgrade::OnUpgrade,
     Error, Request,
 };
-use hyper_util::rt::{TokioExecutor, TokioIo};
 use mirrord_protocol::batched_body::{BatchedBody, Frames};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::WaitForCancellationFutureOwned;
@@ -117,38 +115,7 @@ pub async fn extract_requests(
         request_tx,
     };
 
-    let mut connection = match version {
-        HttpVersion::V1 => {
-            let conn = http1::Builder::new()
-                .preserve_header_case(true)
-                .serve_connection(TokioIo::new(stream), extractor)
-                .with_upgrades();
-            Either::Left(conn)
-        }
-
-        HttpVersion::V2 => {
-            let conn = http2::Builder::new(TokioExecutor::default())
-                .serve_connection(TokioIo::new(stream), extractor);
-            Either::Right(conn)
-        }
-    };
-
-    let result = tokio::select! {
-        result = &mut connection => result,
-        _ = shutdown => {
-            match &mut connection {
-                Either::Left(conn) => {
-                    Pin::new(conn).graceful_shutdown();
-                }
-                Either::Right(conn) => {
-                    Pin::new(conn).graceful_shutdown();
-                }
-            }
-
-            connection.await
-        }
-    };
-
+    let result = crate::http::run_http_server(stream, extractor, version, shutdown).await;
     if let Err(error) = result {
         tracing::warn!(
             %error,

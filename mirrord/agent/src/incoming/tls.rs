@@ -262,12 +262,8 @@ impl fmt::Debug for IncomingTlsHandlerStore {
     }
 }
 
-#[cfg(test)]
-impl IncomingTlsHandlerStore {
-    pub fn dummy() -> Self {
-        Self::new(
-            Default::default(),
-            InTargetPathResolver::with_root_path("/".into()),
-        )
+impl Default for IncomingTlsHandlerStore {
+    fn default() -> Self {
+        Self::new(Default::default(), InTargetPathResolver::new(0))
     }
 }
