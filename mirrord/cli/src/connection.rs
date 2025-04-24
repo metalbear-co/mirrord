@@ -32,7 +32,7 @@ pub(crate) struct AgentConnection {
 /// 3. Otherwise, attempts to use the mirrord-operator and returns [`None`] in case mirrord-operator
 ///    is not found or its license is invalid.
 async fn try_connect_using_operator<P, R>(
-    config: &LayerConfig,
+    config: &mut LayerConfig,
     progress: &P,
     analytics: &mut R,
 ) -> CliResult<Option<OperatorSessionConnection>>
@@ -111,7 +111,7 @@ where
 /// Here is where we start interactions with the kubernetes API.
 #[tracing::instrument(level = Level::TRACE, skip_all, err)]
 pub(crate) async fn create_and_connect<P, R: Reporter>(
-    config: &LayerConfig,
+    config: &mut LayerConfig,
     progress: &mut P,
     analytics: &mut R,
 ) -> CliResult<(AgentConnectInfo, AgentConnection)>
@@ -180,7 +180,7 @@ where
         k8s_api.create_agent(
             progress,
             &config.target,
-            Some(&config.feature.network),
+            Some(&mut config.feature.network),
             agent_container_config,
         ),
     )

@@ -179,7 +179,7 @@ impl MirrordExecution {
     /// might need, including [`INJECTION_ENV_VAR`] and [`LayerConfig::RESOLVED_CONFIG_ENV`].
     #[tracing::instrument(level = Level::DEBUG, skip_all, ret, err(level = Level::DEBUG))]
     pub(crate) async fn start_internal<P>(
-        config: &LayerConfig,
+        config: &mut LayerConfig,
         // We only need the executable on macos, for SIP handling.
         #[cfg(target_os = "macos")] executable: Option<&str>,
         progress: &mut P,
@@ -372,7 +372,7 @@ impl MirrordExecution {
     /// Returned [`MirrordExecution::environment`] contains *only* remote environment.
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     pub(crate) async fn start_external<P>(
-        config: &LayerConfig,
+        config: &mut LayerConfig,
         progress: &mut P,
         analytics: &mut AnalyticsReporter,
         tls: Option<&SecureChannelSetup>,

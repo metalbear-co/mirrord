@@ -156,7 +156,7 @@ pub struct HttpFilterConfig {
     ///
     /// Set to [80, 8080] by default.
     #[config(env = "MIRRORD_HTTP_FILTER_PORTS", default)]
-    pub ports: PortList,
+    pub ports: Option<PortList>,
 }
 
 impl HttpFilterConfig {
@@ -172,7 +172,13 @@ impl HttpFilterConfig {
     }
 
     pub fn get_filtered_ports(&self) -> Option<&[u16]> {
-        self.is_filter_set().then(|| &*self.ports.0)
+        if let Some(ports) = self.ports.as_ref()
+            && self.is_filter_set()
+        {
+            Some(&*ports.0)
+        } else {
+            None
+        }
     }
 }
 
@@ -224,10 +230,7 @@ impl MirrordToggleableConfig for HttpFilterFileConfig {
         let all_of = None;
         let any_of = None;
 
-        let ports = FromEnv::new("MIRRORD_HTTP_FILTER_PORTS")
-            .source_value(context)
-            .transpose()?
-            .unwrap_or_default();
+        let ports = None;
 
         Ok(Self::Generated {
             header_filter,
@@ -267,6 +270,12 @@ impl From<PortList> for Vec<u16> {
     }
 }
 
+impl From<Vec<u16>> for PortList {
+    fn from(value: Vec<u16>) -> Self {
+        PortList(VecOrSingle::Multiple(value))
+    }
+}
+
 impl From<PortList> for HashSet<u16> {
     fn from(value: PortList) -> Self {
         value.0.into()
@@ -277,6 +286,11 @@ impl CollectAnalytics for &HttpFilterConfig {
     fn collect_analytics(&self, analytics: &mut mirrord_analytics::Analytics) {
         analytics.add("header_filter", self.header_filter.is_some());
         analytics.add("path_filter", self.path_filter.is_some());
-        analytics.add("ports", self.ports.len());
+        analytics.add(
+            "ports",
+            self.get_filtered_ports()
+                .map(|p| p.len())
+                .unwrap_or_default(),
+        );
     }
 }

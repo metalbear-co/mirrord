@@ -898,7 +898,15 @@ impl IncomingMode {
 
         let http_filter_config = &config.http_filter;
 
-        let ports = { http_filter_config.ports.iter().copied().collect() };
+        let ports = {
+            http_filter_config
+                .ports
+                .clone()
+                .unwrap_or_default()
+                .iter()
+                .copied()
+                .collect()
+        };
 
         // Matching all fields to make this check future-proof.
         let filter = match http_filter_config {

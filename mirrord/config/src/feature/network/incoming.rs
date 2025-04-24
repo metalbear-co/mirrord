@@ -506,7 +506,9 @@ impl IncomingConfig {
         }
 
         if self.http_filter.is_filter_set() {
-            if self.http_filter.ports.contains(&port) {
+            if let Some(filter_ports) = self.http_filter.ports.as_ref()
+                && filter_ports.contains(&port)
+            {
                 false
             } else {
                 self.ports.as_ref().is_some_and(|set| set.contains(&port))
@@ -517,6 +519,46 @@ impl IncomingConfig {
             ports.contains(&port)
         } else {
             true
+        }
+    }
+
+    /// Adds probe ports to the HTTP filter's ports list as a hint for which ports are HTTP ports.
+    /// Only adds ports if:
+    /// 1. The user has not already set `http_filter.ports` themselves
+    /// 2. The port is not in `ignore_ports`
+    /// 3. The port is in `ports` (if `ports` is set)
+    /// Update the [`HttpFilterConfig::ports`] with the health probes ports from the target.
+    ///
+    /// Usually the user app will be listening on HTTP on the same ports as these probes, so
+    /// we can insert them in the user config.
+    ///
+    /// If the user has set anything in [`HttpFilterConfig::ports`], then we do nothing, to
+    /// avoid overriding their config. We also take care to not create conflicts with other
+    /// port configs that we have, such as [`IncomingConfig::ignore_ports`]`, and
+    /// [`IncomingConfig::ports`].
+    pub fn add_probe_ports_to_filter_ports(&mut self, probes_ports: &[u16]) {
+        // Don't modify if user has already set HTTP filter ports - respect user configuration
+        if self.http_filter.ports.is_none() {
+            let filtered_ports = probes_ports
+                .into_iter()
+                .filter(|port| self.ignore_ports.contains(port).not())
+                .filter(|port| {
+                    // If ports list is set, only include ports that are in that list
+                    if let Some(ports) = &self.ports {
+                        ports.contains(port).not()
+                    } else {
+                        // If no ports list is set, include all ports
+                        true
+                    }
+                })
+                .copied()
+                .collect::<Vec<_>>();
+
+            // Only add something if we have a port to add, otherwise leave it as `None` so
+            // we can use the `PortList::default` when initializing things.
+            if filtered_ports.is_empty().not() {
+                self.http_filter.ports = Some(filtered_ports.into())
+            }
         }
     }
 }

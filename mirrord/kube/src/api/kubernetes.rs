@@ -204,7 +204,7 @@ impl KubernetesAPI {
         &self,
         progress: &mut P,
         target_config: &TargetConfig,
-        network_config: Option<&NetworkConfig>,
+        network_config: Option<&mut NetworkConfig>,
         container_config: ContainerConfig,
     ) -> Result<AgentKubernetesConnectInfo, KubeApiError>
     where
@@ -225,24 +225,28 @@ impl KubernetesAPI {
                 progress.warning(format!("Target has multiple containers, mirrord picked \"{container_name}\". To target a different one, include it in the target path.").as_str());
             }
 
-            let stolen_probes = network_config
-                .into_iter()
-                .flat_map(|config| {
-                    containers_probe_ports
-                        .iter()
-                        .copied()
-                        .filter(|port| config.incoming.steals_port_without_filter(*port))
-                })
-                .map(|p| p.to_string())
-                .collect::<Vec<_>>();
+            if let Some(n) = network_config {
+                n.incoming
+                    .add_probe_ports_to_filter_ports(containers_probe_ports);
 
-            if stolen_probes.is_empty().not() {
-                progress.warning(&format!(
+                // TODO(alex) [1]: Change layer network config here.
+
+                let stolen_probes = containers_probe_ports
+                    .iter()
+                    .copied()
+                    .filter(|port| n.incoming.steals_port_without_filter(*port))
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                if stolen_probes.is_empty().not() {
+                    progress.warning(&format!(
                     "Your mirrord config may steal HTTP/gRPC health checks configured on ports [{}], \
                     causing Kubernetes to terminate containers on the targeted pod. \
                     Use an HTTP filter to prevent this.",
-                    stolen_probes.join(", "),
+                    stolen_probes,
                 ));
+                }
             }
         }
 

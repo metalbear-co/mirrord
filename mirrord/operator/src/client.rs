@@ -542,7 +542,7 @@ impl OperatorApi<PreparedClientCert> {
     pub async fn connect_in_new_session<P>(
         &self,
         target: ResolvedTarget<false>,
-        layer_config: &LayerConfig,
+        layer_config: &mut LayerConfig,
         progress: &P,
     ) -> OperatorApiResult<OperatorSessionConnection>
     where
@@ -635,7 +635,13 @@ impl OperatorApi<PreparedClientCert> {
                         .as_str(),
                     );
                 }
+                layer_config
+                    .feature
+                    .network
+                    .incoming
+                    .add_probe_ports_to_filter_ports(&runtime_data.containers_probe_ports);
 
+                // TODO(alex) [1]: Change layer network config here.
                 let stolen_probes = runtime_data
                     .containers_probe_ports
                     .iter()

@@ -51,7 +51,7 @@ async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
     let mut progress = ProgressTracker::from_env("mirrord network diagnosis");
 
     let mut cfg_context = ConfigContext::default();
-    let config = if let Some(path) = config {
+    let mut config = if let Some(path) = config {
         LayerFileConfig::from_path(path)?.generate_config(&mut cfg_context)
     } else {
         LayerFileConfig::default().generate_config(&mut cfg_context)
@@ -62,7 +62,7 @@ async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
     }
 
     let mut analytics = NullReporter::default();
-    let (_, mut connection) = create_and_connect(&config, &mut progress, &mut analytics).await?;
+    let (_, mut connection) = create_and_connect(&mut config, &mut progress, &mut analytics).await?;
 
     let mut statistics: Vec<Duration> = Vec::new();
 
