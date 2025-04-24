@@ -1,6 +1,8 @@
+use std::collections::BTreeMap;
+
 use k8s_openapi::{
-    apimachinery::pkg::apis::meta::v1::ObjectMeta, ListableResource, Metadata,
-    NamespaceResourceScope, Resource,
+    api::core::v1::Container, apimachinery::pkg::apis::meta::v1::ObjectMeta, ListableResource,
+    Metadata, NamespaceResourceScope, Resource,
 };
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +43,21 @@ impl Metadata for Workflow {
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowSpec {
+    pub entrypoint: Option<String>,
+
+    pub templates: Vec<WorkflowTemplate>,
+
+    #[serde(flatten)]
+    _rest: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowTemplate {
+    pub name: Option<String>,
+
+    pub container: Option<Container>,
+
     #[serde(flatten)]
     _rest: serde_json::Value,
 }
@@ -48,6 +65,28 @@ pub struct WorkflowSpec {
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowStatus {
+    pub phase: Option<String>,
+
+    #[serde(default)]
+    pub nodes: BTreeMap<String, WorkflowNodeStatus>,
+
+    #[serde(flatten)]
+    _rest: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowNodeStatus {
+    pub id: Option<String>,
+
+    pub name: Option<String>,
+
+    pub r#type: Option<String>,
+
+    pub phase: Option<String>,
+
+    pub template_name: Option<String>,
+
     #[serde(flatten)]
     _rest: serde_json::Value,
 }

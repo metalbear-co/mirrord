@@ -243,6 +243,7 @@ mirrord-layer failed to parse the provided target!
     >> `statefulset/{statefulset-name}[/container/{container-name}]`;
     >> `service/{service-name}[/container/{container-name}]`;
     >> `replicaset/{replicaset-name}[/container/{container-name}]`;
+    >> `workflow/{workflow-name}[/container/{container-name}]`;
 
 - Note:
     >> specifying container name is optional, defaults to a container chosen by mirrord
@@ -269,6 +270,7 @@ mirrord-layer failed to parse the provided target!
 /// - `statefulset/{statefulset-name}[/container/{container-name}]`;
 /// - `service/{service-name}[/container/{container-name}]`;
 /// - `replicaset/{replicaset-name}[/container/{container-name}]`;
+/// - `workflow/{workflow-name}[/container/{container-name}]`;
 #[warn(clippy::wildcard_enum_match_arm)]
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
@@ -338,6 +340,7 @@ impl FromStr for Target {
             Some("statefulset") => stateful_set::StatefulSetTarget::from_split(&mut split).map(Target::StatefulSet),
             Some("service") => service::ServiceTarget::from_split(&mut split).map(Target::Service),
             Some("replicaset") => replica_set::ReplicaSetTarget::from_split(&mut split).map(Target::ReplicaSet),
+            Some("workflow") => workflow::WorkflowTarget::from_split(&mut split).map(Target::Workflow),
             _ => Err(ConfigError::InvalidTarget(format!(
                 "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{FAIL_PARSE_DEPLOYMENT_OR_POD}",
             ))),
