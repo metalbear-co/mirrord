@@ -243,7 +243,7 @@ mirrord-layer failed to parse the provided target!
     >> `statefulset/{statefulset-name}[/container/{container-name}]`;
     >> `service/{service-name}[/container/{container-name}]`;
     >> `replicaset/{replicaset-name}[/container/{container-name}]`;
-    >> `workflow/{workflow-name}[/container/{container-name}]`;
+    >> `workflow/{workflow-name}[/template/{template-name}][/container/{container-name}]`;
 
 - Note:
     >> specifying container name is optional, defaults to a container chosen by mirrord
@@ -270,7 +270,7 @@ mirrord-layer failed to parse the provided target!
 /// - `statefulset/{statefulset-name}[/container/{container-name}]`;
 /// - `service/{service-name}[/container/{container-name}]`;
 /// - `replicaset/{replicaset-name}[/container/{container-name}]`;
-/// - `workflow/{workflow-name}[/container/{container-name}]`;
+/// - `workflow/{workflow-name}[/template/{template-name}][/container/{container-name}]`;
 #[warn(clippy::wildcard_enum_match_arm)]
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
