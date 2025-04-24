@@ -72,10 +72,15 @@ mod main {
 
     /// Where patched files are stored, relative to the temp dir (`/tmp/mirrord-bin/...`).
     ///
-    /// We added some random characaters to the end so we'll be able to identify dir better
-    /// in situations where $TMPDIR changes between exec's, leading to strip not working
+    /// We added some random characters to the end so we'll be able to identify dir better
+    /// in situations where $TMPDIR changes between execs, leading to strip not working
     /// <https://github.com/metalbear-co/mirrord/issues/2500#issuecomment-2160026642>
-    pub const MIRRORD_PATCH_DIR: &str = "mirrord-bin-ghu3278mz";
+    ///
+    /// The version of mirrord is also added to the dir name, to force mirrord to re-patch files
+    /// when there is a version change. This is to prevent badly patched files being re-used
+    /// <https://github.com/metalbear-co/mirrord/issues/3245>
+    pub static MIRRORD_PATCH_DIR: &str =
+        concat!("mirrord-bin-ghu3278mz-", env!("CARGO_PKG_VERSION"));
 
     pub const FRAMEWORKS_ENV_VAR_NAME: &str = "DYLD_FALLBACK_FRAMEWORK_PATH";
 
@@ -657,7 +662,6 @@ mod main {
 
     #[cfg(test)]
     mod tests {
-
         use std::io::Write;
 
         use super::*;
