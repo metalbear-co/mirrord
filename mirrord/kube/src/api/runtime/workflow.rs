@@ -20,7 +20,7 @@ pub(crate) struct WorkflowRuntimeProvider<'a> {
 impl WorkflowRuntimeProvider<'_> {
     pub async fn try_into_runtime_data(self) -> Result<RuntimeData> {
         let entrypoint = match self.template.as_ref() {
-            Some(template) => template.as_ref(),
+            Some(template) => template,
             None => self
                 .resource
                 .spec

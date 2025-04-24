@@ -1831,7 +1831,7 @@
       "additionalProperties": false
     },
     "Target": {
-      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `targetless` - `pod/{pod-name}[/container/{container-name}]`; - `deployment/{deployment-name}[/container/{container-name}]`; - `rollout/{rollout-name}[/container/{container-name}]`; - `job/{job-name}[/container/{container-name}]`; - `cronjob/{cronjob-name}[/container/{container-name}]`; - `statefulset/{statefulset-name}[/container/{container-name}]`; - `service/{service-name}[/container/{container-name}]`; - `replicaset/{replicaset-name}[/container/{container-name}]`;",
+      "description": "<!--${internal}--> ## path\n\nSpecifies the running pod (or deployment) to mirror.\n\nSupports: - `targetless` - `pod/{pod-name}[/container/{container-name}]`; - `deployment/{deployment-name}[/container/{container-name}]`; - `rollout/{rollout-name}[/container/{container-name}]`; - `job/{job-name}[/container/{container-name}]`; - `cronjob/{cronjob-name}[/container/{container-name}]`; - `statefulset/{statefulset-name}[/container/{container-name}]`; - `service/{service-name}[/container/{container-name}]`; - `replicaset/{replicaset-name}[/container/{container-name}]`; - `workflow/{workflow-name}[/template/{template-name}][/container/{container-name}]`;",
       "anyOf": [
         {
           "description": "<!--${internal}--> [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/).",
@@ -1894,6 +1894,14 @@
           "allOf": [
             {
               "$ref": "#/definitions/ReplicaSetTarget"
+            }
+          ]
+        },
+        {
+          "description": "<!--${internal}--> [Argo Workflow](https://argo-workflows.readthedocs.io/en/latest/).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/WorkflowTarget"
             }
           ]
         }
@@ -2039,6 +2047,32 @@
           }
         }
       ]
+    },
+    "WorkflowTarget": {
+      "description": "<!--${internal}--> Mirror the workflow specified by [`WorkflowTarget::workflow`].",
+      "type": "object",
+      "required": [
+        "workflow"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "template": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workflow": {
+          "description": "<!--${internal}--> Workflow to mirror.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     },
     "io.k8s.api.core.v1.ResourceClaim": {
       "description": "ResourceClaim references one entry in PodSpec.ResourceClaims.",
