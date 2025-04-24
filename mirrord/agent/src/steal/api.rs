@@ -18,9 +18,9 @@ use hyper::{
 use mirrord_protocol::{
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, ChunkedResponse, DaemonTcp,
-        HttpRequest, HttpRequestMetadata, HttpRequestTransportType, HttpResponse, InternalHttpBody,
-        InternalHttpBodyFrame, InternalHttpBodyNew, InternalHttpRequest, LayerTcpSteal,
-        NewTcpConnection, NewTcpConnectionV2, StealType, TcpClose, TcpData,
+        HttpRequest, HttpRequestMetadata, HttpResponse, InternalHttpBody, InternalHttpBodyFrame,
+        InternalHttpBodyNew, InternalHttpRequest, LayerTcpSteal, NewTcpConnection,
+        NewTcpConnectionV2, StealType, TcpClose, TcpData, TrafficTransportType,
         HTTP_CHUNKED_REQUEST_V2_VERSION, HTTP_CHUNKED_REQUEST_VERSION, HTTP_FRAMED_VERSION,
         NEW_CONNECTION_V2_VERSION,
     },
@@ -190,7 +190,7 @@ impl TcpStealApi {
                     transport: info
                         .tls_connector
                         .map(From::from)
-                        .unwrap_or(HttpRequestTransportType::Tcp),
+                        .unwrap_or(TrafficTransportType::Tcp),
                 }),
             ));
 
@@ -308,7 +308,7 @@ impl TcpStealApi {
                 transport: info
                     .tls_connector
                     .map(From::from)
-                    .unwrap_or(HttpRequestTransportType::Tcp),
+                    .unwrap_or(TrafficTransportType::Tcp),
             })
         } else {
             DaemonTcp::NewConnection(new_connection)

@@ -3,7 +3,7 @@ use std::{fmt, io::ErrorKind, net::SocketAddr, ops::Not, sync::Arc, time::Durati
 use bytes::BytesMut;
 use hyper::upgrade::OnUpgrade;
 use hyper_util::rt::TokioIo;
-use mirrord_protocol::{tcp::HttpRequestTransportType, ConnectionId};
+use mirrord_protocol::{tcp::TrafficTransportType, ConnectionId};
 use mirrord_tls_util::MaybeTls;
 use rustls::pki_types::ServerName;
 use tokio::{
@@ -27,7 +27,7 @@ pub enum LocalTcpConnection {
         socket: BoundTcpSocket,
         peer: SocketAddr,
         tls_setup: Option<Arc<LocalTlsSetup>>,
-        transport: HttpRequestTransportType,
+        transport: TrafficTransportType,
     },
     /// Upgraded HTTP connection from a previously stolen HTTP request.
     AfterUpgrade(OnUpgrade),
@@ -48,7 +48,7 @@ impl LocalTcpConnection {
                     return Ok((MaybeTls::NoTls(stream), Default::default()));
                 };
 
-                let HttpRequestTransportType::Tls {
+                let TrafficTransportType::Tls {
                     alpn_protocol,
                     server_name,
                 } = transport

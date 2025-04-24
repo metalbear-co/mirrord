@@ -20,9 +20,9 @@ use mirrord_intproxy_protocol::{
 use mirrord_protocol::{
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestErrorV2,
-        ChunkedResponse, DaemonTcp, HttpRequest, HttpRequestMetadata, HttpRequestTransportType,
-        InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnection,
-        TcpData,
+        ChunkedResponse, DaemonTcp, HttpRequest, HttpRequestMetadata, InternalHttpBodyFrame,
+        InternalHttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnection, TcpData,
+        TrafficTransportType,
     },
     ClientMessage, ConnectionId, RequestId, ResponseError,
 };
@@ -223,7 +223,7 @@ impl IncomingProxy {
         &mut self,
         request: HttpRequest<StreamingBody>,
         body_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
-        transport: HttpRequestTransportType,
+        transport: TrafficTransportType,
         is_steal: bool,
         message_bus: &MessageBus<Self>,
     ) {
@@ -318,7 +318,7 @@ impl IncomingProxy {
     async fn handle_new_connection(
         &mut self,
         connection: NewTcpConnection,
-        transport: HttpRequestTransportType,
+        transport: TrafficTransportType,
         is_steal: bool,
         message_bus: &mut MessageBus<Self>,
     ) -> Result<(), IncomingProxyError> {
@@ -407,7 +407,7 @@ impl IncomingProxy {
                 self.start_http_gateway(
                     request,
                     Some(body_tx),
-                    HttpRequestTransportType::Tcp,
+                    TrafficTransportType::Tcp,
                     is_steal,
                     message_bus,
                 )
@@ -568,7 +568,7 @@ impl IncomingProxy {
                 self.start_http_gateway(
                     request.map_body(From::from),
                     None,
-                    HttpRequestTransportType::Tcp,
+                    TrafficTransportType::Tcp,
                     is_steal,
                     message_bus,
                 )
@@ -579,7 +579,7 @@ impl IncomingProxy {
                 self.start_http_gateway(
                     request.map_body(From::from),
                     None,
-                    HttpRequestTransportType::Tcp,
+                    TrafficTransportType::Tcp,
                     is_steal,
                     message_bus,
                 )
@@ -594,7 +594,7 @@ impl IncomingProxy {
             DaemonTcp::NewConnection(connection) => {
                 self.handle_new_connection(
                     connection,
-                    HttpRequestTransportType::Tcp,
+                    TrafficTransportType::Tcp,
                     is_steal,
                     message_bus,
                 )

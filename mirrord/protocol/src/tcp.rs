@@ -34,7 +34,7 @@ pub struct NewTcpConnection {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 pub struct NewTcpConnectionV2 {
     pub connection: NewTcpConnection,
-    pub transport: HttpRequestTransportType,
+    pub transport: TrafficTransportType,
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Clone)]
@@ -142,11 +142,11 @@ pub struct ChunkedRequestStartV2 {
     #[bincode(with_serde)]
     pub request: InternalHttpRequest<InternalHttpBodyNew>,
     pub metadata: HttpRequestMetadata,
-    pub transport: HttpRequestTransportType,
+    pub transport: TrafficTransportType,
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub enum HttpRequestTransportType {
+pub enum TrafficTransportType {
     Tcp,
     Tls {
         alpn_protocol: Option<Vec<u8>>,

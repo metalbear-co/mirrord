@@ -5,9 +5,8 @@ use futures::StreamExt;
 use mirrord_protocol::{
     tcp::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, DaemonTcp,
-        HttpRequestMetadata, HttpRequestTransportType, InternalHttpBodyNew, InternalHttpRequest,
-        LayerTcp, NewTcpConnection, NewTcpConnectionV2, TcpClose, TcpData,
-        NEW_CONNECTION_V2_VERSION,
+        HttpRequestMetadata, InternalHttpBodyNew, InternalHttpRequest, LayerTcp, NewTcpConnection,
+        NewTcpConnectionV2, TcpClose, TcpData, TrafficTransportType, NEW_CONNECTION_V2_VERSION,
     },
     ConnectionId, DaemonMessage, LogMessage, RequestId,
 };
@@ -90,7 +89,7 @@ impl MirrorHandleWrapper {
 
         DaemonMessage::Tcp(DaemonTcp::NewConnectionV2(NewTcpConnectionV2 {
             connection: new_connection,
-            transport: HttpRequestTransportType::Tls {
+            transport: TrafficTransportType::Tls {
                 alpn_protocol: tls.alpn_protocol().map(From::from),
                 server_name: tls.server_name().map(|name| name.to_str().into()),
             },
@@ -134,7 +133,7 @@ impl MirrorHandleWrapper {
                     .info
                     .tls_connector
                     .map(From::from)
-                    .unwrap_or(HttpRequestTransportType::Tcp),
+                    .unwrap_or(TrafficTransportType::Tcp),
             },
         )))
     }
