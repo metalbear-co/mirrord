@@ -383,8 +383,8 @@ pub trait TargetDisplay {
     fn container(&self) -> Option<&String>;
 }
 
-/// Implements the [`TargetDisplay`] and [`fmt::Display`] traits for a target type.
-macro_rules! impl_target_display {
+/// Implements the [`TargetDisplay`] only.
+macro_rules! impl_target_display_trait {
     ($struct_name:ident, $target_type:ident, $target_type_display:literal) => {
         impl TargetDisplay for $struct_name {
             fn type_(&self) -> &str {
@@ -399,6 +399,13 @@ macro_rules! impl_target_display {
                 self.container.as_ref()
             }
         }
+    };
+}
+
+/// Implements the [`TargetDisplay`] and [`fmt::Display`] traits for a target type.
+macro_rules! impl_target_display {
+    ($struct_name:ident, $target_type:ident, $target_type_display:literal) => {
+        impl_target_display_trait!($struct_name, $target_type, $target_type_display);
 
         impl fmt::Display for $struct_name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -424,7 +431,26 @@ impl_target_display!(CronJobTarget, cron_job, "cronjob");
 impl_target_display!(StatefulSetTarget, stateful_set, "statefulset");
 impl_target_display!(ServiceTarget, service, "service");
 impl_target_display!(ReplicaSetTarget, replica_set, "replicaset");
-impl_target_display!(WorkflowTarget, workflow, "workflow");
+
+impl_target_display_trait!(WorkflowTarget, workflow, "workflow");
+
+impl fmt::Display for WorkflowTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "workflow/{}{}{}",
+            self.workflow,
+            self.template
+                .as_ref()
+                .map(|name| format!("/template/{name}"))
+                .unwrap_or_default(),
+            self.container
+                .as_ref()
+                .map(|name| format!("/container/{name}"))
+                .unwrap_or_default()
+        )
+    }
+}
 
 impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
