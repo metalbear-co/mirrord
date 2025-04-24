@@ -139,11 +139,13 @@ async fn prepare_proxies<P: Progress + Send + Sync>(
         pipe_intproxy_sidecar_logs(config, sidecar_intproxy_logs.into_merged_lines()).await?;
     tokio::spawn(intproxy_logs_pipe);
 
+    let intproxy_address_str = match config.container.override_host_ip {
+        Some(host_ip) => SocketAddr::new(host_ip, sidecar_intproxy_address.port()).to_string(),
+        None => sidecar_intproxy_address.to_string(),
+    };
+
     // Provide internal proxy address to the layer.
-    runtime_command.add_env(
-        MIRRORD_LAYER_INTPROXY_ADDR,
-        &sidecar_intproxy_address.to_string(),
-    );
+    runtime_command.add_env(MIRRORD_LAYER_INTPROXY_ADDR, &intproxy_address_str);
 
     Ok((runtime_command, execution_info, tls_setup))
 }

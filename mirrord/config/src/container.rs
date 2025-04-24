@@ -1,3 +1,5 @@
+use std::net::IpAddr;
+
 use mirrord_config_derive::MirrordConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -51,4 +53,21 @@ pub struct ContainerConfig {
     /// Defaults to `"/opt/mirrord/lib/libmirrord_layer.so"`.
     #[config(default = "/opt/mirrord/lib/libmirrord_layer.so")]
     pub cli_image_lib_path: String,
+
+    /// ### container.override_host_ip {#container-override_host_ip}
+    ///
+    /// Allow the setting of override ip addr for intproxy to use when using mirrord containers
+    /// feature
+    ///
+    /// ```json5
+    /// {
+    ///   "container": {
+    ///     "override_host_ip": "172.17.0.1" // usual resolution of value from `host.docker.internal`
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// This should be useful if your host machine is exposed via different ip addr than one bound
+    /// as host
+    pub override_host_ip: Option<IpAddr>,
 }

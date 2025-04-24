@@ -463,6 +463,22 @@ Defaults to `"/opt/mirrord/lib/libmirrord_layer.so"`.
 
 Don't add `--rm` to sidecar command to prevent cleanup.
 
+### container.override_host_ip {#container-override_host_ip}
+
+Allow the setting of override ip addr for intproxy to use when using mirrord containers
+feature
+
+```json5
+{
+  "container": {
+    "override_host_ip": "172.17.0.1" // usual resolution of value from `host.docker.internal`
+  }
+}
+```
+
+This should be useful if your host machine is exposed via different ip addr than one bound
+as host
+
 ## experimental {#root-experimental}
 
 mirrord Experimental features.
