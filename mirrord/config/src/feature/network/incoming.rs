@@ -532,17 +532,16 @@ impl IncomingConfig {
     /// port configs that we have, such as [`IncomingConfig::ignore_ports`]`, and
     /// [`IncomingConfig::ports`].
     pub fn add_probe_ports_to_filter_ports(&mut self, probes_ports: &[u16]) {
-        // Don't modify if user has already set HTTP filter ports - respect user configuration
         if self.http_filter.ports.is_none() {
             let filtered_ports = probes_ports
                 .into_iter()
+                // Avoid conflicts with `incoming.ignore_ports`.
                 .filter(|port| self.ignore_ports.contains(port).not())
                 .filter(|port| {
-                    // If ports list is set, only include ports that are in that list
+                    // Avoid conflicts with `incoming.ports`.
                     if let Some(ports) = &self.ports {
                         ports.contains(port).not()
                     } else {
-                        // If no ports list is set, include all ports
                         true
                     }
                 })
