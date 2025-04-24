@@ -534,7 +534,7 @@ impl IncomingConfig {
     pub fn add_probe_ports_to_filter_ports(&mut self, probes_ports: &[u16]) {
         if self.is_steal() && self.http_filter.ports.is_none() {
             let filtered_ports = probes_ports
-                .into_iter()
+                .iter()
                 // Avoid conflicts with `incoming.ignore_ports`.
                 .filter(|port| self.ignore_ports.contains(port).not())
                 .filter(|port| {
