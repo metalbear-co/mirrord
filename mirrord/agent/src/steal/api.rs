@@ -41,29 +41,53 @@ use crate::{
     AgentError,
 };
 
-/// Bridges the communication between the agent and the [`TcpConnectionStealer`] task.
-/// There is an API instance for each connected layer ("client"). All API instances send commands
-/// On the same stealer command channel, where the layer-independent stealer listens to them.
+/// Bridges the communication between the agent clients and the
+/// [`TcpStealerTask`](super::TcpStealerTask).
+///
+/// Each connected client should create their own instance of this API.
+/// All API instances send commands through the same [`StealerCommand`] channel.
 pub struct TcpStealApi {
     client_id: ClientId,
+    /// Shared with the stealer task.
+    ///
+    /// Determines which subset of the stolen traffic we can receive.
     protocol_version: SharedProtocolVersion,
+    /// For updating our port subscriptions in the stealer task.
     command_tx: mpsc::Sender<StealerCommand>,
+    /// For receiving traffic and logs from the stealer task.
+    ///
+    /// # Important
+    ///
+    /// The stealer task guarantees that we can handle all received traffic
+    /// (in terms of [`mirrord_protocol`] version).
     message_rx: mpsc::Receiver<StealerMessage>,
     task_status: BgTaskStatus,
+    /// Set of our active connections.
     connections: HashMap<ConnectionId, IncomingConnection>,
+    /// Streams of updates from our active connections.
     incoming_streams: StreamMap<ConnectionId, IncomingStream>,
+    /// For assigning ids to new connections.
     connection_ids_iter: RangeInclusive<ConnectionId>,
+    /// [`Self::recv`] and [`Self::handle_client_message`] can result in more than one message.
+    ///
+    /// We use this queue to store them and return from [`Self::recv`] one by one.
     queued_messages: VecDeque<DaemonMessage>,
 }
 
 impl TcpStealApi {
+    /// Constant [`RequestId`] for stolen HTTP requests returned from this struct.
+    ///
+    /// Each stolen HTTP request is sent to the client with a distinct [`ConnectionId`]
+    /// and constant [`RequestId`]. This makes the code simpler.
+    ///
+    /// Since `mirrord-intproxy` processes requests independently, this is fine.
     const REQUEST_ID: RequestId = 0;
 
     pub async fn new(
         client_id: ClientId,
         command_tx: mpsc::Sender<StealerCommand>,
         protocol_version: SharedProtocolVersion,
-        task_status: BgTaskStatus,
+        stealer_task_status: BgTaskStatus,
         channel_size: usize,
     ) -> AgentResult<Self> {
         let (message_tx, message_rx) = mpsc::channel(channel_size);
@@ -78,7 +102,7 @@ impl TcpStealApi {
             })
             .await;
         if init_result.is_err() {
-            return Err(task_status.wait_assert_running().await);
+            return Err(stealer_task_status.wait_assert_running().await);
         }
 
         Ok(Self {
@@ -86,7 +110,7 @@ impl TcpStealApi {
             protocol_version,
             command_tx,
             message_rx,
-            task_status,
+            task_status: stealer_task_status,
             connections: Default::default(),
             incoming_streams: Default::default(),
             connection_ids_iter: (0..=ConnectionId::MAX),
@@ -94,7 +118,7 @@ impl TcpStealApi {
         })
     }
 
-    /// Send `command` to stealer, with the client id of the client that is using this API instance.
+    /// Sends the given command to the stealer task.
     async fn send_command(&mut self, command: Command) {
         let command = StealerCommand {
             client_id: self.client_id,
@@ -104,10 +128,9 @@ impl TcpStealApi {
         let _ = self.command_tx.send(command).await;
     }
 
-    /// Helper function that passes the [`DaemonTcp`] messages we generated in the
-    /// [`TcpConnectionStealer`] task, back to the agent.
+    /// Receives the next message related to traffic stealing (mostly [`DaemonMessage::TcpSteal`]).
     ///
-    /// Called in the `ClientConnectionHandler`.
+    /// The message should be sent to the client.
     pub async fn recv(&mut self) -> AgentResult<DaemonMessage> {
         loop {
             if let Some(message) = self.queued_messages.pop_front() {
@@ -117,6 +140,8 @@ impl TcpStealApi {
             tokio::select! {
                 message = self.message_rx.recv() => {
                     let Some(message) = message else {
+                        // TcpStealerTask never removes clients on its own.
+                        // It must have errored out or panicked.
                         return Err(self.task_status.wait_assert_running().await);
                     };
 
@@ -441,6 +466,7 @@ impl TcpStealApi {
         connection.response_frame_tx = frame_tx;
     }
 
+    /// Returns an error only when it fails to parse the HTTP filter contained in the message.
     pub async fn handle_client_message(
         &mut self,
         message: LayerTcpSteal,
@@ -569,8 +595,12 @@ impl TcpStealApi {
     }
 }
 
+/// [`Body`] type we use when providing [`Response`]s to stolen requests.
 struct ResponseBody {
+    /// Frames from the initial HTTP response [`mirrord_protocol`] message.
     head: vec::IntoIter<InternalHttpBodyFrame>,
+    /// Receiver for the rest of the frames.
+    /// Closed when the client signalizes the end of the response body.
     rx: mpsc::Receiver<InternalHttpBodyFrame>,
 }
 
@@ -594,9 +624,25 @@ impl Body for ResponseBody {
     }
 }
 
+/// Represents an active stolen connection.
 struct IncomingConnection {
+    /// For sending data to the connection source.
+    ///
+    /// If this connection is an HTTP request, this is for sending data after the HTTP upgrade.
     data_tx: Option<mpsc::Sender<Vec<u8>>>,
+    /// If the client's [`mirrord_protocol`] version does not support
+    /// [`DaemonTcp::HttpRequestChunked`], we must gather the incoming body frames here.
+    ///
+    /// When we've read the full bobdy, we send the full request in one of the legacy types.
+    ///
+    /// (only for HTTP requests)
     request_in_progress: Option<HttpRequest<InternalHttpBody>>,
+    /// For sending the HTTP response.
+    ///
+    /// (only for HTTP requests)
     response_tx: Option<ResponseProvider>,
+    /// For sending the HTTP response body frames.
+    ///
+    /// (only for HTTP requests)
     response_frame_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
 }

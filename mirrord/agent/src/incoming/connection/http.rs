@@ -189,7 +189,7 @@ impl ResponseProvider {
         let _ = self.upgrade_tx.send(None);
     }
 
-    /// Sends the responsey, notifying the request task that there is an HTTP upgrade.
+    /// Sends the response, notifying the request task that it should expect an HTTP upgrade.
     ///
     /// Returns an [`mpsc::Sender`] that can be used to send raw data to the peer.
     /// Dropping this sender will be interpreted as a write shutdown,

@@ -6,6 +6,14 @@ use crate::{
     util::ClientId,
 };
 
+/// A set of steal subscriptions from agent clients.
+///
+/// Uses a [`StealHandle`] to create port redirections based on the subscriptions.
+///
+/// # Subscription clash rules
+///
+/// 1. One port may have only one unfiltered subscription.
+/// 2. One port may have only one filtered subscription per client.
 pub struct PortSubscriptions {
     steal_handle: StealHandle,
     subscriptions: HashMap<u16, PortSubscription>,
@@ -19,6 +27,8 @@ impl PortSubscriptions {
         }
     }
 
+    /// Returns the next stolen connection/request,
+    /// along with the [`PortSubscription`] that stole it.
     pub async fn next(
         &mut self,
     ) -> Option<Result<(StolenTraffic, &PortSubscription), RedirectorTaskError>> {
@@ -35,6 +45,9 @@ impl PortSubscriptions {
         Some(Ok((traffic, subscription)))
     }
 
+    /// Adds a new client's subscription to this set.
+    ///
+    /// Any previous conflicting subscriptions will be removed.
     pub async fn subscribe(
         &mut self,
         port: u16,
@@ -59,6 +72,7 @@ impl PortSubscriptions {
         Ok(())
     }
 
+    /// Removes the client's subscription from this set.
     pub fn unsubscribe(&mut self, port: u16, client_id: ClientId) {
         let Entry::Occupied(mut e) = self.subscriptions.entry(port) else {
             return;
@@ -81,6 +95,7 @@ impl PortSubscriptions {
         }
     }
 
+    /// Removes all client's subscriptions from this set.
     pub fn unsubscribe_all(&mut self, client_id: ClientId) {
         self.subscriptions
             .retain(|port, subscription| match subscription {

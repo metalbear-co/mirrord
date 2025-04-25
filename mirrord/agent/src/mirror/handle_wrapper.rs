@@ -45,7 +45,7 @@ impl MirrorHandleWrapper {
     /// Each mirrored HTTP request is sent to the client with a distinct [`ConnectionId`]
     /// and constant [`RequestId`]. This makes the code simpler.
     ///
-    /// Since `mirrord-intproxy` processes requests independently, it's fine.
+    /// Since `mirrord-intproxy` processes requests independently, this is fine.
     const REQUEST_ID: RequestId = 0;
 
     pub fn new(handle: MirrorHandle, protocol_version: SharedProtocolVersion) -> Self {

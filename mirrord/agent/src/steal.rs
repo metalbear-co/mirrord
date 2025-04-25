@@ -27,6 +27,7 @@ mod test;
 
 pub(crate) use api::TcpStealApi;
 
+/// Sent from the [`TcpStealerTask`] to the [`TcpStealApi`].
 enum StealerMessage {
     Log(LogMessage),
     PortSubscribed(u16),
@@ -36,8 +37,14 @@ enum StealerMessage {
 
 #[derive(Debug)]
 enum Command {
+    /// Sent when a new instance of [`TcpStealApi`] is created.
     NewClient {
+        /// [`TcpStealerTask`] will use this channel to asynchronously send messages to the
+        /// [`TcpStealApi`].
         message_tx: mpsc::Sender<StealerMessage>,
+        /// [`mirrord_protocol`] version of the client.
+        ///
+        /// [`TcpStealerTask`] will use this when distributing the stolen traffic.
         protocol_version: SharedProtocolVersion,
     },
     PortSubscribe {
@@ -47,16 +54,25 @@ enum Command {
     PortUnsubscribe(u16),
 }
 
+/// Command sent from the [`TcpStealApi`] to the [`TcpStealerTask`].
 #[derive(Debug)]
 pub struct StealerCommand {
     client_id: ClientId,
     command: Command,
 }
 
+/// Background task responsible for handling steal port subscriptions
+/// and distributing stolen traffic between the agent clients.
+///
+/// Uses a [`StealHandle`] internally - traffic stealing is based on port redirections.
 pub struct TcpStealerTask {
+    /// Set of clients' active subscriptions.
     subscriptions: PortSubscriptions,
+    /// Used to receive commands from the clients.
     command_rx: mpsc::Receiver<StealerCommand>,
+    /// Currently connected clients.
     clients: HashMap<ClientId, Client>,
+    /// Futures that resolve when clients disconnect (drop their [`StealerMessage`] receivers).
     disconnected_clients: FuturesUnordered<ChannelClosedFuture>,
 }
 
@@ -94,6 +110,11 @@ impl TcpStealerTask {
         Ok(())
     }
 
+    /// Returns a [`semver::VersionReq`] for the given subscription and stolen traffic.
+    ///
+    /// Client's [`mirrord_protocol`] version must match the requirement
+    /// for the client to receive this traffic. Otherwise, the client will not be able to handle
+    /// the traffic.
     fn protocol_version_req(
         subscription: &PortSubscription,
         traffic: &StolenTraffic,
@@ -176,9 +197,9 @@ impl TcpStealerTask {
             }
         };
 
-        let mut send_to = None;
-        let mut preempted = vec![];
-        let mut blocked_on_protocol = vec![];
+        let mut send_to = None; // the client that will receive the request
+        let mut preempted = vec![]; // other clients that could receive the request as well
+        let mut blocked_on_protocol = vec![]; // clients that cannot receive the request due to their protocol version
         filters
             .iter()
             .filter(|(_, filter)| filter.matches(http.parts_mut()))
@@ -194,21 +215,25 @@ impl TcpStealerTask {
             });
 
         for client in preempted {
-            let _ = client.message_tx.send(StealerMessage::Log(LogMessage::warn(format!(
-                    "An HTTP request was stolen by another user. URI=({}), HEADERS=({:?}) PORT=({})",
+            let _ = client
+                .message_tx
+                .send(StealerMessage::Log(LogMessage::warn(format!(
+                    "An HTTP request was stolen by another user. \
+                    METHOD=({}) URI=({}), HEADERS=({:?}) PORT=({})",
+                    http.parts().method,
                     http.parts().uri,
                     http.parts().headers,
                     http.info().original_destination.port(),
-                )),
-            ))
-            .await;
+                ))))
+                .await;
         }
 
         for client in blocked_on_protocol {
             let _ = client.message_tx.send(StealerMessage::Log(LogMessage::error(format!(
                     "An HTTP request was not stolen due to mirrord-protocol version requirement: {}. \
-                    URI=({}), HEADERS=({:?}) PORT=({})",
+                    METHOD=({}) URI=({}), HEADERS=({:?}) PORT=({})",
                     protocol_version_req,
+                    http.parts().method,
                     http.parts().uri,
                     http.parts().headers,
                     http.info().original_destination.port(),
@@ -247,13 +272,16 @@ impl TcpStealerTask {
             }
 
             Command::PortSubscribe { port, filter } => {
+                let Some(client) = self.clients.get(&command.client_id) else {
+                    // The client disconnected after sending the message.
+                    return Ok(());
+                };
+
                 self.subscriptions
                     .subscribe(port, command.client_id, filter)
                     .await?;
-                let _ = self
-                    .clients
-                    .get(&command.client_id)
-                    .expect("client not found")
+
+                let _ = client
                     .message_tx
                     .send(StealerMessage::PortSubscribed(port))
                     .await;
