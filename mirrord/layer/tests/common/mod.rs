@@ -1394,19 +1394,43 @@ pub fn get_env(
             intproxy_addr.to_string(),
         ),
         (
+            LayerConfig::RESOLVED_CONFIG_ENV.to_string(),
+            config.encode().unwrap(),
+        ),
+        #[cfg(target_os = "macos")]
+        (
             "DYLD_INSERT_LIBRARIES".to_string(),
             dylib_path.to_str().unwrap().to_string(),
         ),
+        #[cfg(target_os = "linux")]
         (
             "LD_PRELOAD".to_string(),
             dylib_path.to_str().unwrap().to_string(),
         ),
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         (
-            LayerConfig::RESOLVED_CONFIG_ENV.to_string(),
-            config.encode().unwrap(),
+            "MIRRORD_MACOS_ARM64_LIBRARY".to_string(),
+            arm64_dylib_path().to_str().unwrap().to_string(),
         ),
     ]
     .into_iter()
     .chain(extra_vars_owned)
     .collect()
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn arm64_dylib_path() -> PathBuf {
+    match std::env::var("MIRRORD_MACOS_ARM64_LIBRARY") {
+        Ok(path) => {
+            let dylib_path = PathBuf::from(path);
+            println!("Using existing macOS arm64 layer lib from: {dylib_path:?}");
+            assert!(dylib_path.exists());
+            dylib_path
+        }
+        Err(_) => {
+            let dylib_path = test_cdylib::build_current_project();
+            println!("Built macOS arm64 layer lib at {dylib_path:?}");
+            dylib_path
+        }
+    }
 }
