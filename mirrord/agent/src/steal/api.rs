@@ -125,11 +125,11 @@ impl TcpStealApi {
                             break Ok(DaemonMessage::LogMessage(log));
                         },
                         StealerMessage::PortSubscribed(port) => {
-                            break Ok(DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(port))));
+                            break Ok(DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(port))));
                         },
                         StealerMessage::StolenHttp(http) => self.handle_request(http)?,
                         StealerMessage::StolenTcp(tcp) => {
-                            break Ok(DaemonMessage::Tcp(self.handle_connection(tcp)?));
+                            break Ok(DaemonMessage::TcpSteal(self.handle_connection(tcp)?));
                         },
                     }
                 }
@@ -168,7 +168,7 @@ impl TcpStealApi {
             .protocol_version
             .matches(&HTTP_CHUNKED_REQUEST_V2_VERSION)
         {
-            let message = DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(
+            let message = DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
                 ChunkedRequest::StartV2(ChunkedRequestStartV2 {
                     connection_id,
                     request_id: Self::REQUEST_ID,
@@ -196,7 +196,7 @@ impl TcpStealApi {
             self.queued_messages.push_back(message);
         } else if self.protocol_version.matches(&HTTP_CHUNKED_REQUEST_VERSION) {
             self.queued_messages
-                .push_back(DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(
+                .push_back(DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
                     ChunkedRequest::StartV1(HttpRequest {
                         internal_request: InternalHttpRequest {
                             method: request_head.method,
@@ -212,15 +212,14 @@ impl TcpStealApi {
                 )));
 
             if request_head.has_more_frames.not() {
-                self.queued_messages
-                    .push_back(DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(
-                        ChunkedRequest::Body(ChunkedRequestBodyV1 {
-                            frames: Default::default(),
-                            is_last: true,
-                            connection_id,
-                            request_id: Self::REQUEST_ID,
-                        }),
-                    )));
+                self.queued_messages.push_back(DaemonMessage::TcpSteal(
+                    DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(ChunkedRequestBodyV1 {
+                        frames: Default::default(),
+                        is_last: true,
+                        connection_id,
+                        request_id: Self::REQUEST_ID,
+                    })),
+                ));
             }
         } else if request_head.has_more_frames {
             // Request body has not finished, and the client does not support chunked.
@@ -243,7 +242,7 @@ impl TcpStealApi {
                 });
         } else if self.protocol_version.matches(&HTTP_FRAMED_VERSION) {
             self.queued_messages
-                .push_back(DaemonMessage::Tcp(DaemonTcp::HttpRequestFramed(
+                .push_back(DaemonMessage::TcpSteal(DaemonTcp::HttpRequestFramed(
                     HttpRequest {
                         internal_request: InternalHttpRequest {
                             method: request_head.method,
@@ -259,18 +258,20 @@ impl TcpStealApi {
                 )));
         } else {
             self.queued_messages
-                .push_back(DaemonMessage::Tcp(DaemonTcp::HttpRequest(HttpRequest {
-                    internal_request: InternalHttpRequest {
-                        method: request_head.method,
-                        uri: request_head.uri,
-                        headers: request_head.headers,
-                        version: request_head.version,
-                        body: Self::frames_to_legacy(request_head.body),
+                .push_back(DaemonMessage::TcpSteal(DaemonTcp::HttpRequest(
+                    HttpRequest {
+                        internal_request: InternalHttpRequest {
+                            method: request_head.method,
+                            uri: request_head.uri,
+                            headers: request_head.headers,
+                            version: request_head.version,
+                            body: Self::frames_to_legacy(request_head.body),
+                        },
+                        connection_id,
+                        request_id: Self::REQUEST_ID,
+                        port: info.original_destination.port(),
                     },
-                    connection_id,
-                    request_id: Self::REQUEST_ID,
-                    port: info.original_destination.port(),
-                })));
+                )));
         }
 
         Ok(())
@@ -331,7 +332,7 @@ impl TcpStealApi {
 
             IncomingStreamItem::Data(bytes) => {
                 self.queued_messages
-                    .push_back(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
+                    .push_back(DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
                         connection_id,
                         bytes,
                     })));
@@ -339,7 +340,7 @@ impl TcpStealApi {
 
             IncomingStreamItem::NoMoreData => {
                 self.queued_messages
-                    .push_back(DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
+                    .push_back(DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
                         connection_id,
                         bytes: Default::default(),
                     })))
@@ -358,7 +359,7 @@ impl TcpStealApi {
                 }
 
                 self.queued_messages
-                    .push_back(DaemonMessage::Tcp(DaemonTcp::Close(TcpClose {
+                    .push_back(DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
                         connection_id,
                     })));
             }
@@ -378,7 +379,7 @@ impl TcpStealApi {
         let Some(mut request) = connection.request_in_progress.take() else {
             let is_last = frame.is_none();
             self.queued_messages
-                .push_back(DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(
+                .push_back(DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(
                     ChunkedRequest::Body(ChunkedRequestBodyV1 {
                         frames: frame.into_iter().collect(),
                         is_last,
@@ -397,14 +398,15 @@ impl TcpStealApi {
             }
 
             None if self.protocol_version.matches(&HTTP_FRAMED_VERSION) => {
-                self.queued_messages
-                    .push_back(DaemonMessage::Tcp(DaemonTcp::HttpRequestFramed(request)));
+                self.queued_messages.push_back(DaemonMessage::TcpSteal(
+                    DaemonTcp::HttpRequestFramed(request),
+                ));
             }
 
             None => {
                 let request = request.map_body(|body| Self::frames_to_legacy(body.0));
                 self.queued_messages
-                    .push_back(DaemonMessage::Tcp(DaemonTcp::HttpRequest(request)));
+                    .push_back(DaemonMessage::TcpSteal(DaemonTcp::HttpRequest(request)));
             }
         }
     }

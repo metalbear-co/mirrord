@@ -198,7 +198,7 @@ async fn filtered_stealing_with_mirroring(
     async fn stealing_client_logic(id: u8, mut api: TcpStealApi, http_version: HttpVersion) {
         // Handle first request, with no upgrade.
         let request = match api.recv().await.unwrap() {
-            DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(request))) => {
+            DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(request))) => {
                 request
             }
             other => panic!("unexpected message: {other:?}"),
@@ -246,7 +246,7 @@ async fn filtered_stealing_with_mirroring(
         .await
         .unwrap();
         match api.recv().await.unwrap() {
-            DaemonMessage::Tcp(DaemonTcp::Close(TcpClose { connection_id })) => {
+            DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose { connection_id })) => {
                 assert_eq!(connection_id, request.connection_id)
             }
             other => panic!("unexpected message: {other:?}"),
@@ -260,7 +260,7 @@ async fn filtered_stealing_with_mirroring(
 
         // Handle second request, with upgrade.
         let request = match api.recv().await.unwrap() {
-            DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(request))) => {
+            DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(request))) => {
                 request
             }
             other => panic!("unexpected message: {other:?}"),
@@ -330,7 +330,7 @@ async fn filtered_stealing_with_mirroring(
         .await
         .unwrap();
         match api.recv().await.unwrap() {
-            DaemonMessage::Tcp(DaemonTcp::Data(TcpData {
+            DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
                 connection_id,
                 bytes,
             })) => {
@@ -340,7 +340,7 @@ async fn filtered_stealing_with_mirroring(
             other => panic!("unexpected message: {other:?}"),
         };
         match api.recv().await.unwrap() {
-            DaemonMessage::Tcp(DaemonTcp::Close(TcpClose { connection_id })) => {
+            DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose { connection_id })) => {
                 assert_eq!(connection_id, request.connection_id)
             }
             other => panic!("unexpected message: {other:?}"),
@@ -586,7 +586,7 @@ async fn streaming_bodies(#[values(HttpVersion::V1, HttpVersion::V2)] http_versi
     let notify_cloned = notify.clone();
     tasks.spawn(async move {
         let request = match steal.recv().await.unwrap() {
-            DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(request))) => {
+            DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(request))) => {
                 request
             }
             other => panic!("unexpected message: {other:?}"),
@@ -604,7 +604,7 @@ async fn streaming_bodies(#[values(HttpVersion::V1, HttpVersion::V2)] http_versi
         notify_cloned.notify_one(); // Notify the client to send the first frame.
         assert_eq!(
             steal.recv().await.unwrap(),
-            DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
+            DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
                 ChunkedRequestBodyV1 {
                     frames: vec![InternalHttpBodyFrame::Data(b"hello ".into())],
                     is_last: false,
@@ -616,7 +616,7 @@ async fn streaming_bodies(#[values(HttpVersion::V1, HttpVersion::V2)] http_versi
         notify_cloned.notify_one(); // Notify the client to send the second frame.
         assert_eq!(
             steal.recv().await.unwrap(),
-            DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
+            DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
                 ChunkedRequestBodyV1 {
                     frames: vec![InternalHttpBodyFrame::Data(b"there".into())],
                     is_last: false,
@@ -629,7 +629,7 @@ async fn streaming_bodies(#[values(HttpVersion::V1, HttpVersion::V2)] http_versi
         if http_version == HttpVersion::V2 {
             assert_eq!(
                 steal.recv().await.unwrap(),
-                DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
+                DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
                     ChunkedRequestBodyV1 {
                         frames: vec![InternalHttpBodyFrame::Data(Default::default())],
                         is_last: false,
@@ -641,7 +641,7 @@ async fn streaming_bodies(#[values(HttpVersion::V1, HttpVersion::V2)] http_versi
         }
         assert_eq!(
             steal.recv().await.unwrap(),
-            DaemonMessage::Tcp(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
+            DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
                 ChunkedRequestBodyV1 {
                     frames: vec![],
                     is_last: true,
@@ -705,7 +705,7 @@ async fn streaming_bodies(#[values(HttpVersion::V1, HttpVersion::V2)] http_versi
             .unwrap();
         assert_eq!(
             steal.recv().await.unwrap(),
-            DaemonMessage::Tcp(DaemonTcp::Close(TcpClose {
+            DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
                 connection_id: request.connection_id,
             })),
         );

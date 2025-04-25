@@ -45,7 +45,7 @@ async fn get_steal_api_with_subscription(
     let message = api.recv().await.unwrap();
     assert_eq!(
         message,
-        DaemonMessage::Tcp(DaemonTcp::SubscribeResult(Ok(port)))
+        DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(port)))
     );
 
     (api, version)
