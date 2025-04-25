@@ -30,13 +30,16 @@ use crate::{
 /// Wrapper over [`MirrorHandle`], implementing [`TcpMirrorApi`].
 pub struct MirrorHandleWrapper {
     handle: MirrorHandle,
+    /// Determines which subset of the stolen traffic we can receive.
     protocol_version: SharedProtocolVersion,
     /// Implementations of [`TcpMirrorApi`] methods can produce more that one message.
     ///
     /// We use this buffer to save them and return later from the next [`TcpMirrorApi::recv`] call.
     queued_messages: VecDeque<DaemonMessage>,
+    /// Streams of updates from our active connections.
     incoming_streams: StreamMap<ConnectionId, IncomingStream>,
-    connection_idx_iter: RangeInclusive<ConnectionId>,
+    /// For assigning ids to new connections.
+    connection_ids_iter: RangeInclusive<ConnectionId>,
 }
 
 impl MirrorHandleWrapper {
@@ -54,7 +57,7 @@ impl MirrorHandleWrapper {
             protocol_version,
             queued_messages: Default::default(),
             incoming_streams: Default::default(),
-            connection_idx_iter: (0..=ConnectionId::MAX),
+            connection_ids_iter: (0..=ConnectionId::MAX),
         }
     }
 
@@ -72,7 +75,7 @@ impl MirrorHandleWrapper {
         }
 
         let id = self
-            .connection_idx_iter
+            .connection_ids_iter
             .next()
             .ok_or(AgentError::ExhaustedConnectionId)?;
         self.incoming_streams.insert(id, tcp.stream);
@@ -113,7 +116,7 @@ impl MirrorHandleWrapper {
         }
 
         let id = self
-            .connection_idx_iter
+            .connection_ids_iter
             .next()
             .ok_or(AgentError::ExhaustedConnectionId)?;
         self.incoming_streams.insert(id, http.stream);
