@@ -23,6 +23,7 @@ use crate::{
 
 mod api;
 mod subscriptions;
+mod test;
 
 pub(crate) use api::TcpStealApi;
 
@@ -93,7 +94,10 @@ impl TcpStealerTask {
         Ok(())
     }
 
-    fn protocol_version_req(traffic: &StolenTraffic) -> Cow<'static, semver::VersionReq> {
+    fn protocol_version_req(
+        subscription: &PortSubscription,
+        traffic: &StolenTraffic,
+    ) -> Cow<'static, semver::VersionReq> {
         match traffic {
             StolenTraffic::Tcp(tcp) => tcp
                 .info()
@@ -103,11 +107,14 @@ impl TcpStealerTask {
                 .map(Cow::Borrowed)
                 .unwrap_or(Cow::Owned(semver::VersionReq::STAR)),
 
-            StolenTraffic::Http(http) => http
-                .info()
-                .tls_connector
-                .is_some()
-                .then_some(&*HTTP_CHUNKED_REQUEST_V2_VERSION)
+            StolenTraffic::Http(http) => matches!(subscription, PortSubscription::Unfiltered(..))
+                .then_some(&*NEW_CONNECTION_V2_VERSION)
+                .or_else(|| {
+                    http.info()
+                        .tls_connector
+                        .is_some()
+                        .then_some(&*HTTP_CHUNKED_REQUEST_V2_VERSION)
+                })
                 .or_else(|| {
                     http.parts()
                         .headers
@@ -124,51 +131,49 @@ impl TcpStealerTask {
         traffic: StolenTraffic,
         subscription: &PortSubscription,
     ) {
-        let protocol_version_req = Self::protocol_version_req(&traffic);
+        let protocol_version_req = Self::protocol_version_req(subscription, &traffic);
 
         let (filters, mut http) = match (subscription, traffic) {
-            (PortSubscription::Unfiltered(client_id), StolenTraffic::Tcp(tcp)) => {
-                let client = clients.get(client_id).expect("client not found");
-
-                let message = if client.protocol_version.matches(&protocol_version_req).not() {
-                    tcp.pass_through();
-                    StealerMessage::Log(LogMessage::warn(format!(
-                        "A TCP connection was not stolen due to mirrord-protocol version requirement: {}",
-                        protocol_version_req,
-                    )))
-                } else {
-                    StealerMessage::StolenTcp(tcp.steal())
-                };
-
-                let _ = client.message_tx.send(message).await;
-
-                return;
-            }
-
-            (PortSubscription::Unfiltered(client_id), StolenTraffic::Http(http)) => {
-                let client = clients.get(client_id).expect("client not found");
-
-                let message = if client.protocol_version.matches(&protocol_version_req).not() {
-                    http.pass_through();
-                    StealerMessage::Log(LogMessage::warn(format!(
-                        "A TCP connection was not stolen due to mirrord-protocol version requirement: {}",
-                        protocol_version_req,
-                    )))
-                } else {
-                    StealerMessage::StolenHttp(http.steal())
-                };
-
-                let _ = client.message_tx.send(message).await;
-
-                return;
-            }
+            (PortSubscription::Filtered(filters), StolenTraffic::Http(http)) => (filters, http),
 
             (PortSubscription::Filtered(..), StolenTraffic::Tcp(tcp)) => {
                 tcp.pass_through();
                 return;
             }
 
-            (PortSubscription::Filtered(filters), StolenTraffic::Http(http)) => (filters, http),
+            (PortSubscription::Unfiltered(client_id), StolenTraffic::Tcp(tcp)) => {
+                let client = clients.get(client_id).expect("client not found");
+
+                let message = if client.protocol_version.matches(&protocol_version_req) {
+                    StealerMessage::StolenTcp(tcp.steal())
+                } else {
+                    tcp.pass_through();
+                    StealerMessage::Log(LogMessage::error(format!(
+                        "A TCP connection was not stolen due to mirrord-protocol version requirement: {}",
+                        protocol_version_req,
+                    )))
+                };
+
+                let _ = client.message_tx.send(message).await;
+                return;
+            }
+
+            (PortSubscription::Unfiltered(client_id), StolenTraffic::Http(http)) => {
+                let client = clients.get(client_id).expect("client not found");
+
+                let message = if client.protocol_version.matches(&protocol_version_req) {
+                    StealerMessage::StolenHttp(http.steal())
+                } else {
+                    http.pass_through();
+                    StealerMessage::Log(LogMessage::error(format!(
+                        "A TCP connection was not stolen due to mirrord-protocol version requirement: {}",
+                        protocol_version_req,
+                    )))
+                };
+
+                let _ = client.message_tx.send(message).await;
+                return;
+            }
         };
 
         let mut send_to = None;
@@ -200,7 +205,7 @@ impl TcpStealerTask {
         }
 
         for client in blocked_on_protocol {
-            let _ = client.message_tx.send(StealerMessage::Log(LogMessage::warn(format!(
+            let _ = client.message_tx.send(StealerMessage::Log(LogMessage::error(format!(
                     "An HTTP request was not stolen due to mirrord-protocol version requirement: {}. \
                     URI=({}), HEADERS=({:?}) PORT=({})",
                     protocol_version_req,
