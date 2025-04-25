@@ -913,7 +913,7 @@ mod test {
         #[case] port: u16,
         #[case] expected: IncomingConfig,
     ) {
-        config.add_probe_ports_to_http_filter_ports(&vec![port]);
+        config.add_probe_ports_to_http_filter_ports(&[port]);
         assert_eq!(config, expected);
     }
 }
