@@ -532,7 +532,7 @@ impl IncomingConfig {
     /// port configs that we have, such as [`IncomingConfig::ignore_ports`]`, and
     /// [`IncomingConfig::ports`].
     pub fn add_probe_ports_to_http_filter_ports(&mut self, probes_ports: &[u16]) {
-        if self.is_steal() && self.http_filter.ports.is_none() {
+        if self.is_steal() && self.http_filter.is_filter_set() && self.http_filter.ports.is_none() {
             let filtered_ports = probes_ports
                 .iter()
                 // Avoid conflicts with `incoming.ignore_ports`.
@@ -810,11 +810,15 @@ mod test {
     }
 
     #[rstest]
-    // Base case, no conflicts.
+    // case_1: Base case, no conflicts.
     #[case(
         IncomingConfig {
             mode: IncomingMode::Steal,
             ports: Some([80].into()),
+            http_filter: HttpFilterConfig {
+                header_filter: Some("meow".into()),
+                ..Default::default()
+            },
             ..Default::default()
         },
         81,
@@ -822,18 +826,20 @@ mod test {
             mode: IncomingMode::Steal,
             ports: Some([80].into()),
             http_filter: HttpFilterConfig {
+                header_filter: Some("meow".into()),
                 ports: Some(vec![81].into()),
                 ..Default::default()
             },
             ..Default::default()
         }
     )]
-    // User sets `HttpFilter::ports`, we don't change it.
+    // case_2: User sets `HttpFilter::ports`, we don't change it.
     #[case(
         IncomingConfig {
             mode: IncomingMode::Steal,
             ports: Some([80].into()),
             http_filter: HttpFilterConfig {
+                header_filter: Some("meow".into()),
                 ports: Some(vec![82].into()),
                 ..Default::default()
             },
@@ -844,34 +850,47 @@ mod test {
             mode: IncomingMode::Steal,
             ports: Some([80].into()),
             http_filter: HttpFilterConfig {
+                header_filter: Some("meow".into()),
                 ports: Some(vec![82].into()),
                 ..Default::default()
             },
             ..Default::default()
         }
     )]
-    // Conflicts between `IncomingConfig::ports` and `HttpFilterConfig::ports`, we don't change the
-    // later.
-    #[case(
-        IncomingConfig {
-            mode: IncomingMode::Steal,
-            ports: Some([81].into()),
-            ..Default::default()
-        },
-        81,
-        IncomingConfig {
-            mode: IncomingMode::Steal,
-            ports: Some([81].into()),
-            ..Default::default()
-        }
-    )]
-    // Conflicts between `IncomingConfig::ignore_ports` and `HttpFilterConfig::ports` we don't
+    // case_3: Conflicts between `IncomingConfig::ports` and `HttpFilterConfig::ports`, we don't
     // change the later.
     #[case(
         IncomingConfig {
             mode: IncomingMode::Steal,
+            ports: Some([81].into()),
+            http_filter: HttpFilterConfig {
+                header_filter: Some("meow".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        81,
+        IncomingConfig {
+            mode: IncomingMode::Steal,
+            ports: Some([81].into()),
+            http_filter: HttpFilterConfig {
+                header_filter: Some("meow".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    )]
+    // case_4: Conflicts between `IncomingConfig::ignore_ports` and `HttpFilterConfig::ports` we
+    // don't change the later.
+    #[case(
+        IncomingConfig {
+            mode: IncomingMode::Steal,
             ports: Some([80].into()),
             ignore_ports: [81].into(),
+            http_filter: HttpFilterConfig {
+                header_filter: Some("meow".into()),
+                ..Default::default()
+            },
             ..Default::default()
         },
         81,
@@ -879,10 +898,16 @@ mod test {
             mode: IncomingMode::Steal,
             ports: Some([80].into()),
             ignore_ports: [81].into(),
+            http_filter: HttpFilterConfig {
+                header_filter: Some("meow".into()),
+                ..Default::default()
+            },
             ..Default::default()
         }
     )]
     #[test]
+    /// Validates that we don't create conflicting configs between [`IncomingConfig`] _port_ related
+    /// configs and [`HttpFilterConfig::ports`].
     fn automatically_add_probes_to_http_filter_ports(
         #[case] mut config: IncomingConfig,
         #[case] port: u16,

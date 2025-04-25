@@ -154,6 +154,10 @@ pub struct HttpFilterConfig {
     /// Other ports will *not* be stolen, unless listed in
     /// [`feature.network.incoming.ports`](#feature-network-incoming-ports).
     ///
+    /// We check the pod's health probe ports and automatically add them here, as they're
+    /// usually the same ports your app might be listening on. If your app ports and the
+    /// health probe ports don't match, then setting this option will override this behavior.
+    ///
     /// Set to [80, 8080] by default.
     #[config(env = "MIRRORD_HTTP_FILTER_PORTS", default)]
     pub ports: Option<PortList>,

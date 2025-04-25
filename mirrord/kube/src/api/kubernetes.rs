@@ -225,16 +225,15 @@ impl KubernetesAPI {
                 progress.warning(format!("Target has multiple containers, mirrord picked \"{container_name}\". To target a different one, include it in the target path.").as_str());
             }
 
-            if let Some(n) = network_config {
-                n.incoming
+            if let Some(network_config) = network_config {
+                network_config
+                    .incoming
                     .add_probe_ports_to_http_filter_ports(containers_probe_ports);
-
-                // TODO(alex) [1]: Change layer network config here.
 
                 let stolen_probes = containers_probe_ports
                     .iter()
                     .copied()
-                    .filter(|port| n.incoming.steals_port_without_filter(*port))
+                    .filter(|port| network_config.incoming.steals_port_without_filter(*port))
                     .map(|p| p.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
