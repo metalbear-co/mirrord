@@ -816,7 +816,7 @@ mod test {
             mode: IncomingMode::Steal,
             ports: Some([80].into()),
             http_filter: HttpFilterConfig {
-                header_filter: Some("meow".into()),
+                header_filter: Some("siemowit".into()),
                 ..Default::default()
             },
             ..Default::default()
@@ -826,7 +826,7 @@ mod test {
             mode: IncomingMode::Steal,
             ports: Some([80].into()),
             http_filter: HttpFilterConfig {
-                header_filter: Some("meow".into()),
+                header_filter: Some("siemowit".into()),
                 ports: Some(vec![81].into()),
                 ..Default::default()
             },
@@ -839,7 +839,7 @@ mod test {
             mode: IncomingMode::Steal,
             ports: Some([80].into()),
             http_filter: HttpFilterConfig {
-                header_filter: Some("meow".into()),
+                header_filter: Some("lestek".into()),
                 ports: Some(vec![82].into()),
                 ..Default::default()
             },
@@ -850,7 +850,7 @@ mod test {
             mode: IncomingMode::Steal,
             ports: Some([80].into()),
             http_filter: HttpFilterConfig {
-                header_filter: Some("meow".into()),
+                header_filter: Some("lestek".into()),
                 ports: Some(vec![82].into()),
                 ..Default::default()
             },
@@ -864,7 +864,7 @@ mod test {
             mode: IncomingMode::Steal,
             ports: Some([81].into()),
             http_filter: HttpFilterConfig {
-                header_filter: Some("meow".into()),
+                header_filter: Some("siemomysł".into()),
                 ..Default::default()
             },
             ..Default::default()
@@ -874,7 +874,7 @@ mod test {
             mode: IncomingMode::Steal,
             ports: Some([81].into()),
             http_filter: HttpFilterConfig {
-                header_filter: Some("meow".into()),
+                header_filter: Some("siemomysł".into()),
                 ..Default::default()
             },
             ..Default::default()
@@ -888,7 +888,7 @@ mod test {
             ports: Some([80].into()),
             ignore_ports: [81].into(),
             http_filter: HttpFilterConfig {
-                header_filter: Some("meow".into()),
+                header_filter: Some("otto".into()),
                 ..Default::default()
             },
             ..Default::default()
@@ -899,7 +899,7 @@ mod test {
             ports: Some([80].into()),
             ignore_ports: [81].into(),
             http_filter: HttpFilterConfig {
-                header_filter: Some("meow".into()),
+                header_filter: Some("otto".into()),
                 ..Default::default()
             },
             ..Default::default()
