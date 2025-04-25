@@ -16,7 +16,7 @@ use crate::{
 mod steal_and_mirror;
 mod test_service;
 
-async fn get_steal_api_with_subscription(
+pub async fn get_steal_api_with_subscription(
     client_id: ClientId,
     stealer_tx: mpsc::Sender<StealerCommand>,
     stealer_status: BgTaskStatus,
@@ -51,7 +51,7 @@ async fn get_steal_api_with_subscription(
     (api, version)
 }
 
-async fn get_mirror_api_with_subscription(
+pub async fn get_mirror_api_with_subscription(
     mirror_handle: MirrorHandle,
     protocol_version: Option<&str>,
     port: Port,

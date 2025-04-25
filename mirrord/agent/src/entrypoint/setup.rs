@@ -6,7 +6,7 @@ use super::BackgroundTask;
 use crate::{
     dns::{DnsCommand, DnsWorker},
     error::{AgentError, AgentResult},
-    incoming::{self, IncomingTlsHandlerStore, MirrorHandle, RedirectorTask, StealHandle},
+    incoming::{self, tls::IncomingTlsHandlerStore, MirrorHandle, RedirectorTask, StealHandle},
     sniffer::{messages::SnifferCommand, TcpConnectionSniffer},
     steal::{StealerCommand, TcpStealerTask},
     util::{

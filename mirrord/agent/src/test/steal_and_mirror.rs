@@ -198,9 +198,9 @@ async fn filtered_stealing_with_mirroring(
     async fn stealing_client_logic(id: u8, mut api: TcpStealApi, http_version: HttpVersion) {
         // Handle first request, with no upgrade.
         let request = match api.recv().await.unwrap() {
-            DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(request))) => {
-                request
-            }
+            DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(
+                request,
+            ))) => request,
             other => panic!("unexpected message: {other:?}"),
         };
         println!("Stealing client {id}: received the first request {request:?}");
@@ -260,9 +260,9 @@ async fn filtered_stealing_with_mirroring(
 
         // Handle second request, with upgrade.
         let request = match api.recv().await.unwrap() {
-            DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(request))) => {
-                request
-            }
+            DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(
+                request,
+            ))) => request,
             other => panic!("unexpected message: {other:?}"),
         };
         println!("Stealing client {id}: received the second request {request:?}");
@@ -586,9 +586,9 @@ async fn streaming_bodies(#[values(HttpVersion::V1, HttpVersion::V2)] http_versi
     let notify_cloned = notify.clone();
     tasks.spawn(async move {
         let request = match steal.recv().await.unwrap() {
-            DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(request))) => {
-                request
-            }
+            DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(
+                request,
+            ))) => request,
             other => panic!("unexpected message: {other:?}"),
         };
         assert_eq!(request.request.headers.get("x-client").unwrap(), "1",);

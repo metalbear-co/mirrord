@@ -430,7 +430,9 @@ pub static HTTP_FILTERED_UPGRADE_VERSION: LazyLock<VersionReq> =
 pub static HTTP_COMPOSITE_FILTER_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.11.0".parse().expect("Bad Identifier"));
 
-/// Minimal mirrord-protocol version that allows [`DaemonTcp::NewConnectionV2`].
+/// Minimal mirrord-protocol version that allows for:
+/// 1. [`DaemonTcp::NewConnectionV2`]
+/// 2. Sending HTTP requests in [`DaemonMessage::Tcp`](crate::codec::DaemonMessage::Tcp).
 pub static NEW_CONNECTION_V2_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.19.4".parse().expect("Bad Identifier"));
 

@@ -14,8 +14,8 @@ use tokio::{
 use crate::{
     http::{HttpSender, HttpVersion},
     incoming::{
-        BoxBody, IncomingTlsHandlerStore, MirrorHandle, PortRedirector, Redirected, RedirectorTask,
-        StealHandle,
+        tls::IncomingTlsHandlerStore, BoxBody, MirrorHandle, PortRedirector, Redirected,
+        RedirectorTask, StealHandle,
     },
 };
 
